@@ -92,14 +92,14 @@ export class PublicController {
 
   // --- Teams (public) -----------------------------------------------------
 
-  @Get('teams/:accountCode/:teamSlug')
+  @Get('public/teams/:accountCode/:teamSlug')
   async teamProfile(@Param('accountCode') accountCode: string, @Param('teamSlug') teamSlug: string) {
     const p = await this.svc.teamProfile(accountCode, teamSlug);
     if (!p) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Team not found.' });
     return p;
   }
 
-  @Get('teams/:accountCode/:teamSlug/availability')
+  @Get('public/teams/:accountCode/:teamSlug/availability')
   async teamAvailability(
     @Param('accountCode') accountCode: string,
     @Param('teamSlug') teamSlug: string,
@@ -112,7 +112,7 @@ export class PublicController {
     return r;
   }
 
-  @Post('teams/:accountCode/:teamSlug/bookings')
+  @Post('public/teams/:accountCode/:teamSlug/bookings')
   @HttpCode(201)
   async teamBook(
     @Param('accountCode') accountCode: string,

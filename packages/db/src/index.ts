@@ -6,6 +6,7 @@
 export * from './client';
 export * from './repository';
 export * from './parity';
+export * from './crud';
 export { migrate } from './migrate';
 export { seed, type SeedResult } from './seed';
 export { sqliteSchema } from './schema.sqlite';

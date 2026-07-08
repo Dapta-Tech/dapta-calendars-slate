@@ -95,15 +95,19 @@ export async function seed(db: Db): Promise<SeedResult> {
 
   // Branding / studio persistence on the host's booking page.
   await db.run(
-    sql`UPDATE member SET brand_color = ${'#CBE84F'}, booking_page_style = ${j({
-      cardStyle: 'bordered',
-      cornerRadius: 'rounded',
-      buttonStyle: 'solid',
+    sql`UPDATE member SET brand_color = ${'#cbe84f'}, booking_page_style = ${j({
+      template: 'classic',
+      cardStyle: 'outline',
+      corners: 'soft',
+      buttons: 'rounded',
       density: 'comfortable',
       font: 'sans',
-      slotShape: 'rectangle',
-      themeMode: 'dark',
-      showCover: true,
+      slotLayout: 'grid',
+      dayGroup: 'flat',
+      slotSelect: 'soft',
+      landingEnabled: true,
+      defaultEventSlug: null,
+      bio: 'Book a time with me.',
     })} WHERE id = ${memberId}`,
   );
 

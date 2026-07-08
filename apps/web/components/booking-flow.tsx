@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from 'react';
 import { groupSlotsByDay, detectTimeZone, formatSlotDateTime, type Slot } from '@slate/shared';
+import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import type { BookResult } from '@/lib/api';
 
@@ -10,6 +11,7 @@ interface Props {
   handle: string;
   slug: string;
   slots: Slot[];
+  bookingFields: BookingField[];
   initialTimeZone: string;
 }
 
@@ -18,7 +20,7 @@ interface Props {
  * Slots are absolute UTC instants, so switching timezone regroups them with no
  * refetch. Submission goes through the bookAction Server Action.
  */
-export function BookingFlow({ accountCode, handle, slug, slots, initialTimeZone }: Props) {
+export function BookingFlow({ accountCode, handle, slug, slots, bookingFields, initialTimeZone }: Props) {
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(
@@ -130,6 +132,30 @@ export function BookingFlow({ accountCode, handle, slug, slots, initialTimeZone 
                 className="rounded-md border border-input bg-background px-3 py-2"
               />
             </label>
+            {bookingFields.map((f) => (
+              <label key={f.name} className="flex flex-col gap-1 text-sm">
+                {f.label}
+                {f.required ? <span className="text-destructive"> *</span> : null}
+                {f.type === 'textarea' ? (
+                  <textarea
+                    name={`answer_${f.name}`}
+                    required={f.required}
+                    rows={2}
+                    placeholder={f.placeholder}
+                    className="rounded-md border border-input bg-background px-3 py-2"
+                  />
+                ) : (
+                  <input
+                    name={`answer_${f.name}`}
+                    type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
+                    required={f.required}
+                    placeholder={f.placeholder}
+                    className="rounded-md border border-input bg-background px-3 py-2"
+                  />
+                )}
+              </label>
+            ))}
+
             <label className="flex flex-col gap-1 text-sm">
               Notes (optional)
               <textarea

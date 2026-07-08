@@ -5,4 +5,5 @@
 export * from './time';
 export * from './booking';
 export * from './handle';
+export * from './branding';
 export * from './i18n';

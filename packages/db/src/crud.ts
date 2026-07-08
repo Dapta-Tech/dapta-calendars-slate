@@ -1,0 +1,425 @@
+/**
+ * Admin CRUD repository — event-types, schedules (+ availability), teams
+ * (+ members), the write paths the dashboard needs. Same portable/Postgres-first
+ * shape as the rest of the repository. All ops are account-scoped by the caller.
+ */
+import { randomUUID } from 'node:crypto';
+import { sql, type Db } from './client';
+import { jsonParam, parseJsonColumn } from './repository';
+
+export type CrudResult<T> = { ok: true; value: T } | { ok: false; reason: 'NOT_FOUND' | 'SLUG_TAKEN' | 'CONFLICT'; message?: string };
+
+// --- Event types ----------------------------------------------------------
+
+export interface EventTypeView {
+  id: string;
+  memberId: string | null;
+  teamId: string | null;
+  slug: string;
+  title: string;
+  description: string | null;
+  lengthMinutes: number;
+  scheduleId: string | null;
+  hidden: boolean;
+  schedulingType: string | null;
+  minimumBookingNotice: number;
+  beforeEventBuffer: number;
+  afterEventBuffer: number;
+  slotInterval: number | null;
+  requiresConfirmation: boolean;
+  seatsPerTimeSlot: number | null;
+  bookingFields: unknown[];
+  hostMemberIds: string[];
+}
+
+interface EventTypeDbRow {
+  id: string;
+  member_id: string | null;
+  team_id: string | null;
+  slug: string;
+  title: string;
+  description: string | null;
+  length_minutes: number;
+  schedule_id: string | null;
+  hidden: number;
+  scheduling_type: string | null;
+  minimum_booking_notice: number;
+  before_event_buffer: number;
+  after_event_buffer: number;
+  slot_interval: number | null;
+  requires_confirmation: number;
+  seats_per_time_slot: number | null;
+  booking_fields: unknown;
+}
+
+const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, schedule_id,
+  hidden, scheduling_type, minimum_booking_notice, before_event_buffer, after_event_buffer,
+  slot_interval, requires_confirmation, seats_per_time_slot, booking_fields`;
+
+async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
+  const hosts = await db.all<{ member_id: string }>(
+    sql`SELECT member_id FROM event_type_host WHERE event_type_id = ${r.id}`,
+  );
+  return {
+    id: r.id,
+    memberId: r.member_id,
+    teamId: r.team_id,
+    slug: r.slug,
+    title: r.title,
+    description: r.description,
+    lengthMinutes: r.length_minutes,
+    scheduleId: r.schedule_id,
+    hidden: !!r.hidden,
+    schedulingType: r.scheduling_type,
+    minimumBookingNotice: r.minimum_booking_notice,
+    beforeEventBuffer: r.before_event_buffer,
+    afterEventBuffer: r.after_event_buffer,
+    slotInterval: r.slot_interval,
+    requiresConfirmation: !!r.requires_confirmation,
+    seatsPerTimeSlot: r.seats_per_time_slot,
+    bookingFields: parseJsonColumn<unknown[]>(r.booking_fields, []),
+    hostMemberIds: hosts.map((h) => h.member_id),
+  };
+}
+
+export async function listEventTypes(
+  db: Db,
+  accountId: string,
+  opts: { memberId?: string; teamId?: string } = {},
+): Promise<EventTypeView[]> {
+  const conds = [sql`account_id = ${accountId}`];
+  if (opts.memberId) conds.push(sql`member_id = ${opts.memberId}`);
+  if (opts.teamId) conds.push(sql`team_id = ${opts.teamId}`);
+  const where = conds.reduce((a, c, i) => (i === 0 ? c : sql`${a} AND ${c}`));
+  const rows = await db.all<EventTypeDbRow>(
+    sql`SELECT ${ET_COLS} FROM event_type WHERE ${where} ORDER BY created_at ASC`,
+  );
+  return Promise.all(rows.map((r) => toEventTypeView(db, r)));
+}
+
+export async function getEventTypeById(
+  db: Db,
+  accountId: string,
+  id: string,
+): Promise<EventTypeView | null> {
+  const r = await db.get<EventTypeDbRow>(
+    sql`SELECT ${ET_COLS} FROM event_type WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+  );
+  return r ? toEventTypeView(db, r) : null;
+}
+
+export interface EventTypeInputRepo {
+  slug: string;
+  title: string;
+  description?: string | null;
+  lengthMinutes: number;
+  scheduleId?: string | null;
+  hidden?: boolean;
+  schedulingType?: string | null;
+  minimumBookingNotice?: number;
+  beforeEventBuffer?: number;
+  afterEventBuffer?: number;
+  slotInterval?: number | null;
+  requiresConfirmation?: boolean;
+  seatsPerTimeSlot?: number | null;
+  bookingFields?: unknown[];
+  hostMemberIds?: string[];
+  teamId?: string | null;
+}
+
+export async function createEventType(
+  db: Db,
+  accountId: string,
+  memberId: string | null,
+  input: EventTypeInputRepo,
+): Promise<CrudResult<EventTypeView>> {
+  const ownerCond = input.teamId
+    ? sql`team_id = ${input.teamId}`
+    : sql`member_id = ${memberId}`;
+  const clash = await db.get<{ id: string }>(
+    sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND ${ownerCond} AND slug = ${input.slug} LIMIT 1`,
+  );
+  if (clash) return { ok: false, reason: 'SLUG_TAKEN', message: 'That slug is already in use.' };
+
+  const id = randomUUID();
+  const now = Date.now();
+  await db.run(
+    sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
+          length_minutes, schedule_id, hidden, scheduling_type, booking_fields,
+          minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
+          requires_confirmation, seats_per_time_slot, created_at)
+        VALUES (${id}, ${accountId}, ${input.teamId ? null : memberId}, ${input.teamId ?? null},
+          ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
+          ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0}, ${input.schedulingType ?? null},
+          ${jsonParam(db, input.bookingFields ?? null)}, ${input.minimumBookingNotice ?? 120},
+          ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
+          ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${now})`,
+  );
+  if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  const view = await getEventTypeById(db, accountId, id);
+  return { ok: true, value: view! };
+}
+
+export async function updateEventType(
+  db: Db,
+  accountId: string,
+  id: string,
+  input: Partial<EventTypeInputRepo>,
+): Promise<CrudResult<EventTypeView>> {
+  const existing = await getEventTypeById(db, accountId, id);
+  if (!existing) return { ok: false, reason: 'NOT_FOUND' };
+
+  const sets: ReturnType<typeof sql>[] = [];
+  const set = (col: string, val: ReturnType<typeof sql>) => sets.push(sql`${sql.raw(col)} = ${val}`);
+  if (input.slug !== undefined) set('slug', sql`${input.slug}`);
+  if (input.title !== undefined) set('title', sql`${input.title}`);
+  if (input.description !== undefined) set('description', sql`${input.description ?? null}`);
+  if (input.lengthMinutes !== undefined) set('length_minutes', sql`${input.lengthMinutes}`);
+  if (input.scheduleId !== undefined) set('schedule_id', sql`${input.scheduleId ?? null}`);
+  if (input.hidden !== undefined) set('hidden', sql`${input.hidden ? 1 : 0}`);
+  if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);
+  if (input.minimumBookingNotice !== undefined) set('minimum_booking_notice', sql`${input.minimumBookingNotice}`);
+  if (input.beforeEventBuffer !== undefined) set('before_event_buffer', sql`${input.beforeEventBuffer}`);
+  if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);
+  if (input.slotInterval !== undefined) set('slot_interval', sql`${input.slotInterval ?? null}`);
+  if (input.requiresConfirmation !== undefined) set('requires_confirmation', sql`${input.requiresConfirmation ? 1 : 0}`);
+  if (input.seatsPerTimeSlot !== undefined) set('seats_per_time_slot', sql`${input.seatsPerTimeSlot ?? null}`);
+  if (input.bookingFields !== undefined) set('booking_fields', jsonParam(db, input.bookingFields ?? null));
+
+  if (sets.length > 0) {
+    const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
+    await db.run(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
+  }
+  if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  const view = await getEventTypeById(db, accountId, id);
+  return { ok: true, value: view! };
+}
+
+export async function deleteEventType(db: Db, accountId: string, id: string): Promise<boolean> {
+  await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`);
+  await db.run(sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`);
+  return true;
+}
+
+/** Replace the round-robin host pool for an event type. */
+export async function setEventTypeHosts(
+  db: Db,
+  accountId: string,
+  eventTypeId: string,
+  memberIds: string[],
+): Promise<void> {
+  await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${eventTypeId}`);
+  const now = Date.now();
+  for (const m of memberIds) {
+    await db.run(
+      sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${eventTypeId}, ${m}, 0, ${null}, ${100}, ${null}, ${now})`,
+    );
+  }
+}
+
+// --- Schedules + availability ---------------------------------------------
+
+export interface ScheduleView {
+  id: string;
+  memberId: string;
+  name: string;
+  timeZone: string;
+  rules: Array<{ id: string; days: number[] | null; startTime: string; endTime: string; date: string | null }>;
+}
+
+export async function listSchedules(db: Db, memberId: string): Promise<{ id: string; name: string; timeZone: string }[]> {
+  return db.all<{ id: string; name: string; timeZone: string }>(
+    sql`SELECT id, name, time_zone AS "timeZone" FROM schedule WHERE member_id = ${memberId} ORDER BY created_at ASC`,
+  );
+}
+
+export async function getSchedule(db: Db, accountId: string, id: string): Promise<ScheduleView | null> {
+  const s = await db.get<{ id: string; member_id: string; name: string; time_zone: string }>(
+    sql`SELECT id, member_id, name, time_zone FROM schedule WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+  );
+  if (!s) return null;
+  const rules = await db.all<{ id: string; days: string | null; start_time: string; end_time: string; date: string | null }>(
+    sql`SELECT id, days, start_time, end_time, date FROM availability WHERE schedule_id = ${id}`,
+  );
+  return {
+    id: s.id,
+    memberId: s.member_id,
+    name: s.name,
+    timeZone: s.time_zone,
+    rules: rules.map((r) => ({
+      id: r.id,
+      days: r.days ? (JSON.parse(r.days) as number[]) : null,
+      startTime: r.start_time,
+      endTime: r.end_time,
+      date: r.date,
+    })),
+  };
+}
+
+export async function createSchedule(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  input: { name: string; timeZone: string; rules?: Array<{ days: number[] | null; startTime: string; endTime: string; date: string | null }> },
+): Promise<ScheduleView> {
+  const id = randomUUID();
+  await db.run(
+    sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+        VALUES (${id}, ${accountId}, ${memberId}, ${input.name}, ${input.timeZone}, ${Date.now()})`,
+  );
+  if (input.rules) await setScheduleRules(db, id, input.rules);
+  return (await getSchedule(db, accountId, id))!;
+}
+
+export async function updateSchedule(
+  db: Db,
+  accountId: string,
+  id: string,
+  input: { name?: string; timeZone?: string; rules?: Array<{ days: number[] | null; startTime: string; endTime: string; date: string | null }> },
+): Promise<CrudResult<ScheduleView>> {
+  const existing = await getSchedule(db, accountId, id);
+  if (!existing) return { ok: false, reason: 'NOT_FOUND' };
+  if (input.name !== undefined || input.timeZone !== undefined) {
+    await db.run(
+      sql`UPDATE schedule SET name = ${input.name ?? existing.name}, time_zone = ${input.timeZone ?? existing.timeZone}
+          WHERE id = ${id}`,
+    );
+  }
+  if (input.rules) await setScheduleRules(db, id, input.rules);
+  return { ok: true, value: (await getSchedule(db, accountId, id))! };
+}
+
+/** Replace ALL availability rows for a schedule (blocks + overrides). */
+export async function setScheduleRules(
+  db: Db,
+  scheduleId: string,
+  rules: Array<{ days: number[] | null; startTime: string; endTime: string; date: string | null }>,
+): Promise<void> {
+  await db.run(sql`DELETE FROM availability WHERE schedule_id = ${scheduleId}`);
+  for (const r of rules) {
+    await db.run(
+      sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+          VALUES (${randomUUID()}, ${scheduleId}, ${r.days ? JSON.stringify(r.days) : null},
+            ${r.startTime}, ${r.endTime}, ${r.date ?? null})`,
+    );
+  }
+}
+
+export async function deleteSchedule(db: Db, accountId: string, id: string): Promise<void> {
+  await db.run(sql`DELETE FROM availability WHERE schedule_id = ${id}`);
+  await db.run(sql`DELETE FROM schedule WHERE account_id = ${accountId} AND id = ${id}`);
+}
+
+// --- Teams ----------------------------------------------------------------
+
+export interface TeamView {
+  id: string;
+  name: string;
+  slug: string | null;
+  logoUrl: string | null;
+  timeZone: string;
+  hideBranding: boolean;
+}
+
+export async function listTeams(db: Db, accountId: string): Promise<TeamView[]> {
+  const rows = await db.all<{ id: string; name: string; slug: string | null; logo_url: string | null; time_zone: string; hide_branding: number }>(
+    sql`SELECT id, name, slug, logo_url, time_zone, hide_branding FROM team WHERE account_id = ${accountId} ORDER BY created_at ASC`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    logoUrl: r.logo_url,
+    timeZone: r.time_zone,
+    hideBranding: !!r.hide_branding,
+  }));
+}
+
+export async function getTeamById(db: Db, accountId: string, id: string): Promise<TeamView | null> {
+  const teams = await listTeams(db, accountId);
+  return teams.find((t) => t.id === id) ?? null;
+}
+
+export async function createTeam(
+  db: Db,
+  accountId: string,
+  input: { name: string; slug: string; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
+): Promise<CrudResult<TeamView>> {
+  const clash = await db.get<{ id: string }>(
+    sql`SELECT id FROM team WHERE account_id = ${accountId} AND slug = ${input.slug} LIMIT 1`,
+  );
+  if (clash) return { ok: false, reason: 'SLUG_TAKEN', message: 'That team slug is in use.' };
+  const id = randomUUID();
+  await db.run(
+    sql`INSERT INTO team (id, account_id, name, slug, logo_url, time_zone, hide_branding, created_at)
+        VALUES (${id}, ${accountId}, ${input.name}, ${input.slug}, ${input.logoUrl ?? null},
+          ${input.timeZone ?? 'UTC'}, ${input.hideBranding ? 1 : 0}, ${Date.now()})`,
+  );
+  return { ok: true, value: (await getTeamById(db, accountId, id))! };
+}
+
+export async function updateTeam(
+  db: Db,
+  accountId: string,
+  id: string,
+  input: { name?: string; slug?: string; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
+): Promise<CrudResult<TeamView>> {
+  const existing = await getTeamById(db, accountId, id);
+  if (!existing) return { ok: false, reason: 'NOT_FOUND' };
+  await db.run(
+    sql`UPDATE team SET name = ${input.name ?? existing.name}, slug = ${input.slug ?? existing.slug},
+        logo_url = ${input.logoUrl !== undefined ? input.logoUrl : existing.logoUrl},
+        time_zone = ${input.timeZone ?? existing.timeZone},
+        hide_branding = ${input.hideBranding !== undefined ? (input.hideBranding ? 1 : 0) : existing.hideBranding ? 1 : 0}
+        WHERE account_id = ${accountId} AND id = ${id}`,
+  );
+  return { ok: true, value: (await getTeamById(db, accountId, id))! };
+}
+
+export async function deleteTeam(db: Db, accountId: string, id: string): Promise<CrudResult<{ id: string }>> {
+  // Orphan guard: don't delete a team that still owns event types.
+  const et = await db.get<{ id: string }>(
+    sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND team_id = ${id} LIMIT 1`,
+  );
+  if (et) return { ok: false, reason: 'CONFLICT', message: 'Delete the team’s event types first.' };
+  await db.run(sql`DELETE FROM team_membership WHERE team_id = ${id}`);
+  await db.run(sql`DELETE FROM team WHERE account_id = ${accountId} AND id = ${id}`);
+  return { ok: true, value: { id } };
+}
+
+export async function listTeamMembers(db: Db, teamId: string) {
+  return db.all<{ member_id: string; role: string; accepted: number; display_name: string | null; email: string | null }>(
+    sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email
+        FROM team_membership tm JOIN member m ON m.id = tm.member_id
+        WHERE tm.team_id = ${teamId}`,
+  );
+}
+
+export async function addTeamMember(
+  db: Db,
+  accountId: string,
+  teamId: string,
+  memberId: string,
+  role = 'member',
+): Promise<void> {
+  const existing = await db.get<{ id: string }>(
+    sql`SELECT id FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId} LIMIT 1`,
+  );
+  if (existing) return;
+  await db.run(
+    sql`INSERT INTO team_membership (id, account_id, team_id, member_id, role, accepted, created_at)
+        VALUES (${randomUUID()}, ${accountId}, ${teamId}, ${memberId}, ${role}, 1, ${Date.now()})`,
+  );
+}
+
+export async function removeTeamMember(db: Db, teamId: string, memberId: string): Promise<void> {
+  await db.run(sql`DELETE FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}`);
+}
+
+/** List all members of an account (for team member pickers, host selection). */
+export async function listAccountMembers(db: Db, accountId: string) {
+  return db.all<{ id: string; handle: string | null; display_name: string | null; email: string | null }>(
+    sql`SELECT id, handle, display_name, email FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC`,
+  );
+}

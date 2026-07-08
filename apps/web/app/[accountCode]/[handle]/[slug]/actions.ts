@@ -8,6 +8,12 @@ import { postBooking, type BookResult } from '@/lib/api';
  * to the API. Returns a serializable result the client island renders.
  */
 export async function bookAction(_prev: BookResult | null, formData: FormData): Promise<BookResult> {
+  // Collect dynamic intake answers (fields are named `answer_<name>`).
+  const answers: Record<string, string> = {};
+  for (const [k, v] of formData.entries()) {
+    if (k.startsWith('answer_')) answers[k.slice('answer_'.length)] = String(v);
+  }
+
   const raw = {
     accountCode: String(formData.get('accountCode') ?? ''),
     handle: String(formData.get('handle') ?? ''),
@@ -19,6 +25,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
       timeZone: String(formData.get('timeZone') ?? 'UTC'),
       notes: formData.get('notes') ? String(formData.get('notes')) : undefined,
     },
+    answers: Object.keys(answers).length > 0 ? answers : undefined,
   };
 
   const parsed = createBookingSchema.safeParse(raw);

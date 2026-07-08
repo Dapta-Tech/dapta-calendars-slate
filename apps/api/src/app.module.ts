@@ -11,9 +11,16 @@ import { HealthController } from './controllers';
 import { PublicController } from './public.controller';
 import { HostController } from './host.controller';
 import { MachineController } from './machine.controller';
+import { AdminCrudController } from './admin-crud.controller';
 
 @Module({
-  controllers: [HealthController, PublicController, HostController, MachineController],
+  controllers: [
+    HealthController,
+    PublicController,
+    HostController,
+    MachineController,
+    AdminCrudController,
+  ],
   providers: [
     { provide: ENV, useFactory: () => loadServerEnv() },
     { provide: DB, useFactory: () => createDb() },

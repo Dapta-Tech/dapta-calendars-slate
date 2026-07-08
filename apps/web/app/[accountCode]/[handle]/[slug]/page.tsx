@@ -44,6 +44,7 @@ export default async function BookingPage({
         handle={handle}
         slug={slug}
         slots={availability.slots}
+        bookingFields={availability.eventType.bookingFields}
         initialTimeZone={availability.timeZone}
       />
     </main>

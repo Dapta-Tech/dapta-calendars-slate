@@ -126,16 +126,20 @@ export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 
 // --- Booking-page branding / studio ---------------------------------------
 
-/** The 8 widget/slot style axes of the booking-page studio. */
+/** The 9 style axes of the booking-page studio (exact values from the prior version). */
 export const bookingPageStyleSchema = z.object({
-  cardStyle: z.enum(['flat', 'raised', 'bordered']).default('bordered'),
-  cornerRadius: z.enum(['sharp', 'rounded', 'pill']).default('rounded'),
-  buttonStyle: z.enum(['solid', 'outline', 'soft']).default('solid'),
+  template: z.enum(['classic', 'split', 'banded']).default('classic'),
+  cardStyle: z.enum(['outline', 'elevated', 'filled']).default('outline'),
+  corners: z.enum(['sharp', 'soft', 'round']).default('soft'),
+  buttons: z.enum(['rounded', 'pill', 'square']).default('rounded'),
   density: z.enum(['comfortable', 'compact']).default('comfortable'),
-  font: z.enum(['sans', 'serif', 'mono']).default('sans'),
-  slotShape: z.enum(['rectangle', 'pill']).default('rectangle'),
-  themeMode: z.enum(['dark', 'light', 'system']).default('dark'),
-  showCover: z.boolean().default(true),
+  font: z.enum(['sans', 'rounded', 'serif']).default('sans'),
+  slotLayout: z.enum(['grid', 'list']).default('grid'),
+  dayGroup: z.enum(['flat', 'boxed']).default('flat'),
+  slotSelect: z.enum(['soft', 'solid']).default('soft'),
+  landingEnabled: z.boolean().default(true),
+  defaultEventSlug: z.string().nullable().optional(),
+  bio: z.string().max(2000).nullable().optional(),
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 
@@ -143,12 +147,12 @@ export const brandingSchema = z.object({
   displayName: z.string().max(200).nullable().optional(),
   avatarUrl: z.string().url().nullable().optional(),
   coverUrl: z.string().url().nullable().optional(),
+  /** The single accent color (AA-clamped on render). */
   brandColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
     .nullable()
     .optional(),
-  layout: z.enum(['month', 'column', 'list']).nullable().optional(),
   style: bookingPageStyleSchema.partial().optional(),
 });
 export type Branding = z.infer<typeof brandingSchema>;
@@ -259,6 +263,65 @@ export const meResponseSchema = z.object({
   email: z.string().nullable(),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
+
+// --- Event-type CRUD ------------------------------------------------------
+
+export const eventTypeInputSchema = z.object({
+  slug: z.string().min(1).max(80),
+  title: z.string().min(1).max(200),
+  description: z.string().max(2000).nullable().optional(),
+  lengthMinutes: z.number().int().positive().max(1440),
+  scheduleId: z.string().nullable().optional(),
+  hidden: z.boolean().optional(),
+  schedulingType: z.enum(schedulingType).nullable().optional(),
+  minimumBookingNotice: z.number().int().min(0).optional(),
+  beforeEventBuffer: z.number().int().min(0).optional(),
+  afterEventBuffer: z.number().int().min(0).optional(),
+  slotInterval: z.number().int().positive().nullable().optional(),
+  requiresConfirmation: z.boolean().optional(),
+  seatsPerTimeSlot: z.number().int().positive().nullable().optional(),
+  bookingFields: z.array(bookingFieldSchema).optional(),
+  /** For team events: the host member ids (round-robin pool). */
+  hostMemberIds: z.array(z.string()).optional(),
+  teamId: z.string().nullable().optional(),
+});
+export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
+
+// --- Schedule CRUD --------------------------------------------------------
+
+export const availabilityRuleInputSchema = z.object({
+  /** Weekday numbers (0=Sun..6=Sat) for a recurring rule; null for an override. */
+  days: z.array(z.number().int().min(0).max(6)).nullable(),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  /** "YYYY-MM-DD" for a date override; null for recurring. */
+  date: z.string().nullable(),
+});
+export type AvailabilityRuleInput = z.infer<typeof availabilityRuleInputSchema>;
+
+export const scheduleInputSchema = z.object({
+  name: z.string().min(1).max(200),
+  timeZone: timeZoneSchema,
+  rules: z.array(availabilityRuleInputSchema).optional(),
+});
+export type ScheduleInput = z.infer<typeof scheduleInputSchema>;
+
+// --- Team CRUD ------------------------------------------------------------
+
+export const teamInputSchema = z.object({
+  name: z.string().min(1).max(200),
+  slug: z.string().min(1).max(80),
+  logoUrl: z.string().url().nullable().optional(),
+  timeZone: timeZoneSchema.optional(),
+  hideBranding: z.boolean().optional(),
+});
+export type TeamInput = z.infer<typeof teamInputSchema>;
+
+export const teamMemberInputSchema = z.object({
+  memberId: z.string().min(1),
+  role: z.enum(membershipRole).optional(),
+});
+export type TeamMemberInput = z.infer<typeof teamMemberInputSchema>;
 
 /** Problem-details error body (RFC 7807-ish) the API returns. */
 export const apiErrorSchema = z.object({
