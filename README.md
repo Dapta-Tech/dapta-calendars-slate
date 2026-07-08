@@ -36,7 +36,7 @@ the demo data anytime with `pnpm db:reset`.
 
 `pnpm dev:pg` starts a Postgres container (`docker-compose.yml`), migrates,
 seeds, and runs both apps against it — the **same engine as CI and production
-(Aurora)**, so the GiST double-booking guarantee is exercised locally. Postgres
+(managed Postgres)**, so the GiST double-booking guarantee is exercised locally. Postgres
 is the source of truth; SQLite is a portable subset for convenience and **never
 limits the schema** — features that need Postgres use Postgres, and the
 SQLite-dev path documents where it degrades.

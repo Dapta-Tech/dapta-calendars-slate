@@ -1,6 +1,6 @@
 /**
  * Postgres schema — THE SOURCE OF TRUTH. Postgres is what we trust: CI runs the
- * Postgres path first-class and production is Aurora. Full power: jsonb for
+ * Postgres path first-class and production is managed Postgres. Full power: jsonb for
  * structured columns, the `booking_no_overlap` GiST EXCLUDE constraint (in the
  * migration). schema.sqlite.ts is a portable subset for zero-infra dev and never
  * limits this schema. Column names mirror it 1:1 so the repository is

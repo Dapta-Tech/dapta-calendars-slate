@@ -3,7 +3,7 @@
 #   docker compose up -d db     # or: pnpm dev:pg  (starts this, migrates, seeds, runs the apps)
 #
 # `pnpm dev` (no compose) uses SQLite for a 30-second zero-infra start. This
-# mode gives you the SAME database engine as CI and production (Aurora), so the
+# mode gives you the SAME database engine as CI and production (managed Postgres), so the
 # GiST EXCLUDE double-booking guarantee is exercised locally.
 services:
   db:
