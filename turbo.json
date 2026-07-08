@@ -3,6 +3,7 @@
   "ui": "stream",
   "globalEnv": [
     "NODE_ENV",
+    "AUTH_PROVIDER",
     "DATABASE_URL",
     "EMAIL_PROVIDER",
     "EMAIL_HTTP_ENDPOINT",
