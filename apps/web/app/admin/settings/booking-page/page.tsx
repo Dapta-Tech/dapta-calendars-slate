@@ -12,8 +12,8 @@ export default async function BookingPageSettings() {
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
   const accent = profile?.member.brandColor ?? '#cbe84f';
-  const def = defaultBranding(displayName);
   const style = (profile?.member.style ?? {}) as Record<string, string>;
+  const def = defaultBranding(displayName);
   const axes = {
     template: (style.template as never) ?? def.template,
     cardStyle: (style.cardStyle as never) ?? def.cardStyle,
@@ -27,12 +27,22 @@ export default async function BookingPageSettings() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-6xl px-8 py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">Booking Page</h1>
-      <p className="mb-8 text-muted-foreground">
+      <p className="mb-6 text-muted-foreground">
         Style your public page. Preview updates live — what you see is what visitors get.
       </p>
-      <Studio displayName={displayName} initialAccent={accent} initialAxes={axes} />
+      <Studio
+        accountCode={me?.accountCode ?? ''}
+        displayName={displayName}
+        handle={me?.handle ?? ''}
+        bio={(style.bio as string) ?? ''}
+        avatarUrl={profile?.member.avatarUrl ?? ''}
+        coverUrl={profile?.member.coverUrl ?? ''}
+        accent={accent}
+        axes={axes}
+        eventTypes={profile?.eventTypes ?? []}
+      />
     </div>
   );
 }
