@@ -1,0 +1,84 @@
+name: CI
+
+# Public, generic CI — nothing Dapta-internal. A contributor's fork runs this
+# green with zero secrets. Internal deployment lives in the private deploy/
+# overlay, never here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Lint · Typecheck · Test (SQLite) · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  postgres-parity:
+    name: Test (Postgres parity — EXCLUDE path)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: slate
+          POSTGRES_PASSWORD: slate
+          POSTGRES_DB: slate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U slate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://slate:slate@localhost:5432/slate
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - name: Migrate + seed on Postgres
+        run: pnpm db:migrate && pnpm db:seed
+      - name: Booking + double-booking on Postgres (EXCLUDE constraint)
+        run: pnpm --filter @slate/db test
+        env:
+          # The repository spec runs on in-memory SQLite; this job additionally
+          # proves the migrations + seed apply on real Postgres (incl. the
+          # booking_no_overlap EXCLUDE constraint).
+          DATABASE_URL: postgres://slate:slate@localhost:5432/slate
+
+  publish-gate:
+    name: Publish gate (secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install scanners
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin || true
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin || true
+      - name: Run publish gate
+        run: bash scripts/publish-gate.sh

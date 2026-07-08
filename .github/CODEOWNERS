@@ -1,0 +1,8 @@
+# Default owners for everything in the repo.
+* @Dapta-Tech/slate-maintainers
+
+# Area owners
+/packages/engine/        @Dapta-Tech/slate-maintainers
+/packages/db/            @Dapta-Tech/slate-maintainers
+/apps/web/               @Dapta-Tech/slate-maintainers
+/apps/api/               @Dapta-Tech/slate-maintainers

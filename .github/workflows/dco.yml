@@ -1,0 +1,27 @@
+name: DCO
+
+# Enforce a Developer Certificate of Origin sign-off on every PR commit.
+# Contributors sign with `git commit -s`.
+
+on:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Signed-off-by on PR commits
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          for sha in $(git rev-list "$base".."$head"); do
+            if ! git show -s --format=%B "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "::error::Commit $sha is missing a Signed-off-by line (use 'git commit -s')."
+              missing=1
+            fi
+          done
+          exit $missing
