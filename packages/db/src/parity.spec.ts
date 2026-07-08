@@ -7,6 +7,7 @@ import { createBooking, getAvailability } from './repository';
 import {
   cancelBooking,
   checkHandleAvailable,
+  confirmBooking,
   createApiKey,
   createTeamBooking,
   getTeamAvailability,
@@ -17,6 +18,7 @@ import {
   updateBranding,
   verifyApiKey,
 } from './parity';
+import { createEventType, createTeam, setEventTypeHosts } from './crud';
 
 async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
   const a = await getAvailability(db, {
@@ -228,5 +230,108 @@ describe('parity (SQLite in-memory)', () => {
     expect(principal?.accountId).toBe(accountId);
     expect(principal?.scopes).toContain('availability:read');
     expect(await verifyApiKey(db, 'wrong')).toBeNull();
+  });
+
+  it('H1 — a pending booking HOLDS the slot: a second booking at the same slot is rejected', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    await createEventType(db, accountId, memberId, {
+      slug: 'confirm-hold',
+      title: 'Confirm Hold',
+      lengthMinutes: 30,
+      requiresConfirmation: true,
+      scheduleId: null,
+    });
+    const av = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const startMs = new Date(av!.slots[0]!).getTime();
+    const first = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+    });
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.booking.status).toBe('pending');
+    // A second booking at the same instant must NOT be created — the pending
+    // booking holds the slot (this is what the PG EXCLUDE now enforces too).
+    const second = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      startMs,
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toBe('SLOT_TAKEN');
+  });
+
+  it('H2 — a team booking cannot overlap a host’s pending personal booking', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+
+    // A team whose ONLY host is alex-rivera.
+    const team = await createTeam(db, accountId, { name: 'Solo', slug: 'solo' });
+    expect(team.ok).toBe(true);
+    if (!team.ok) return;
+    const ev = await createEventType(db, accountId, null, {
+      slug: 'solo-demo',
+      title: 'Solo Demo',
+      lengthMinutes: 30,
+      schedulingType: 'round_robin',
+      scheduleId: null,
+      teamId: team.value.id,
+    });
+    expect(ev.ok).toBe(true);
+    if (!ev.ok) return;
+    await setEventTypeHosts(db, accountId, ev.value.id, [memberId]);
+
+    const avail = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'solo',
+      slug: 'solo-demo',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const slotX = new Date(avail!.slots[0]!).getTime();
+
+    // Give alex a PENDING personal booking at slotX.
+    await createEventType(db, accountId, memberId, {
+      slug: 'pers-confirm',
+      title: 'Personal Confirm',
+      lengthMinutes: 30,
+      requiresConfirmation: true,
+      scheduleId: null,
+    });
+    const pending = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pers-confirm',
+      startMs: slotX,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+    });
+    expect(pending.ok).toBe(true);
+    if (pending.ok) expect(pending.booking.status).toBe('pending');
+
+    // The team booking at slotX must fail — the only host is held by a pending.
+    const teamBooked = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'solo',
+      slug: 'solo-demo',
+      startMs: slotX,
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(teamBooked.ok).toBe(false);
+    if (!teamBooked.ok) expect(teamBooked.reason).toBe('SLOT_TAKEN');
+
+    // Sanity: confirming the pending keeps the invariant (no crash / still one).
+    if (pending.ok) {
+      const conf = await confirmBooking(db, pending.booking.uid, accountId);
+      expect(conf.ok).toBe(true);
+    }
   });
 });

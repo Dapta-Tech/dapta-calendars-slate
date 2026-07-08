@@ -414,8 +414,10 @@ export async function createTeamBooking(
   // Which hosts are actually free at this instant?
   const candidates: (HostCandidate & { row: EventHostRow })[] = [];
   for (const host of hosts) {
+    // A pending booking still holds the slot (parity with personal createBooking).
     const conflict = await db.get<{ id: string }>(
-      sql`SELECT id FROM booking WHERE host_member_id = ${host.member_id} AND status = 'accepted'
+      sql`SELECT id FROM booking WHERE host_member_id = ${host.member_id}
+          AND status IN ('accepted','pending')
           AND start_ms < ${endMs} AND end_ms > ${args.startMs} LIMIT 1`,
     );
     if (conflict) continue;
@@ -481,7 +483,7 @@ async function insertBookingGuarded(
   insertAttendee: ReturnType<typeof sql>,
 ): Promise<boolean> {
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId}
-    AND status = 'accepted' AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`;
+    AND status IN ('accepted','pending') AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`;
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
       if (db.sqlite!.drizzle.get(overlapSql)) return false;
