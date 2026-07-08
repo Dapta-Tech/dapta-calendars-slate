@@ -3,3 +3,4 @@ export const ENV = Symbol('ENV');
 export const DB = Symbol('DB');
 export const EMAIL = Symbol('EMAIL');
 export const NOTIFIER = Symbol('NOTIFIER');
+export const CALENDAR = Symbol('CALENDAR');

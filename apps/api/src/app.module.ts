@@ -1,24 +1,22 @@
 import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
+import { DisabledCalendarProvider } from '@slate/calendar';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { DB, EMAIL, ENV, NOTIFIER } from './tokens';
+import { CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
 import { BookingService } from './booking.service';
-import {
-  AvailabilityController,
-  BookingsController,
-  HealthController,
-  ProfilesController,
-} from './controllers';
+import { AdminService } from './admin.service';
+import { AuthService } from './auth.service';
+import { HealthController } from './controllers';
+import { PublicController } from './public.controller';
+import { HostController } from './host.controller';
+import { MachineController } from './machine.controller';
 
 @Module({
-  controllers: [HealthController, ProfilesController, AvailabilityController, BookingsController],
+  controllers: [HealthController, PublicController, HostController, MachineController],
   providers: [
     { provide: ENV, useFactory: () => loadServerEnv() },
-    {
-      provide: DB,
-      useFactory: () => createDb(),
-    },
+    { provide: DB, useFactory: () => createDb() },
     {
       provide: EMAIL,
       useFactory: (env: ServerEnv) =>
@@ -42,7 +40,12 @@ import {
       useFactory: (email: EmailProvider) => new BookingNotifier(email),
       inject: [EMAIL],
     },
+    // The OSS default CalendarProvider is disabled (no external calendar). A
+    // private overlay swaps this for a concrete adapter.
+    { provide: CALENDAR, useFactory: () => new DisabledCalendarProvider() },
     BookingService,
+    AdminService,
+    AuthService,
   ],
 })
 export class AppModule {}

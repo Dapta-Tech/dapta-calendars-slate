@@ -9,12 +9,10 @@ async function bootstrap() {
   // Public booking pages call this API from the web app / any origin.
   app.enableCors({ origin: true });
   await app.listen(env.API_PORT);
-  // eslint-disable-next-line no-console
   console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL})`);
 }
 
 bootstrap().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[api] failed to start:', err);
   process.exit(1);
 });

@@ -45,6 +45,30 @@ export interface BookResult {
   message?: string;
 }
 
+export function getManageView(uid: string, token: string): Promise<BookingView | null> {
+  return getJson<BookingView>(`/v1/bookings/${encodeURIComponent(uid)}?token=${encodeURIComponent(token)}`);
+}
+
+export async function postManage(
+  uid: string,
+  token: string,
+  action: 'cancel' | 'reschedule',
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(
+    `${API_URL}/v1/bookings/${encodeURIComponent(uid)}/${action}?token=${encodeURIComponent(token)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    },
+  );
+  if (res.ok) return { ok: true };
+  const j = (await res.json().catch(() => ({}))) as { message?: string };
+  return { ok: false, message: j.message ?? 'Something went wrong.' };
+}
+
 export async function postBooking(body: unknown): Promise<BookResult> {
   const res = await fetch(`${API_URL}/v1/bookings`, {
     method: 'POST',
