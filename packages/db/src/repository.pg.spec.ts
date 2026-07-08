@@ -81,4 +81,32 @@ describePg('repository (real Postgres — the tested truth)', () => {
     }
     expect(threw).toBe(true);
   });
+
+  it('the EXCLUDE constraint also blocks two overlapping PENDING bookings (H1)', async () => {
+    // 0001 widened the predicate to status IN ('accepted','pending'): a pending
+    // requiresConfirmation booking holds the slot at the DB level too, so a
+    // concurrent second pending for the same host/interval must be rejected.
+    const account = await getAccountByCode(db, 'acme');
+    const member = await getMember(db, account!.id, 'alex-rivera');
+    const start = Date.UTC(2031, 5, 1, 15, 0, 0); // far future, distinct window
+    const end = start + 30 * 60_000;
+    const now = Date.now();
+
+    const rawInsertPending = (id: string, uid: string, s: number, e: number) =>
+      db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms,
+        status, created_at, updated_at)
+        VALUES (${id}, ${account!.id}, ${uid}, ${member!.id}, ${'Direct'}, ${s}, ${e},
+        'pending', ${now}, ${now})`);
+
+    await rawInsertPending(randomUUID(), randomUUID(), start, end);
+
+    let threw = false;
+    try {
+      await rawInsertPending(randomUUID(), randomUUID(), start + 10 * 60_000, end + 10 * 60_000);
+    } catch (err) {
+      threw = true;
+      expect(isExclusionViolation(err)).toBe(true);
+    }
+    expect(threw).toBe(true);
+  });
 });

@@ -25,6 +25,7 @@ import {
   deleteTeam,
   getEventTypeById,
   getSchedule,
+  getTeamById,
   listAccountMembers,
   listEventTypes,
   listSchedules,
@@ -182,8 +183,10 @@ export class AdminCrudController {
 
   @Get('teams/:id/members')
   async teamMembers(@Req() req: ReqLike, @Param('id') id: string) {
-    await this.auth.resolveHost(req);
-    return listTeamMembers(this.db, id);
+    const p = await this.auth.resolveHost(req);
+    const team = await getTeamById(this.db, p.accountId, id);
+    if (!team) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    return listTeamMembers(this.db, p.accountId, id);
   }
 
   @Post('teams/:id/members')
@@ -191,15 +194,15 @@ export class AdminCrudController {
   async addMember(@Req() req: ReqLike, @Param('id') id: string, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     const input = parse(teamMemberInputSchema, body);
-    await addTeamMember(this.db, p.accountId, id, input.memberId, input.role);
+    unwrapCrud(await addTeamMember(this.db, p.accountId, id, input.memberId, input.role));
     return { ok: true };
   }
 
   @Delete('teams/:id/members/:memberId')
   @HttpCode(204)
   async removeMember(@Req() req: ReqLike, @Param('id') id: string, @Param('memberId') memberId: string) {
-    await this.auth.resolveHost(req);
-    await removeTeamMember(this.db, id, memberId);
+    const p = await this.auth.resolveHost(req);
+    await removeTeamMember(this.db, p.accountId, id, memberId);
   }
 
   @Get('teams/:id/event-types')

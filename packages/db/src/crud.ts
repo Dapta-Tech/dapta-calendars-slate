@@ -201,16 +201,25 @@ export async function deleteEventType(db: Db, accountId: string, id: string): Pr
   return true;
 }
 
-/** Replace the round-robin host pool for an event type. */
+/**
+ * Replace the round-robin host pool for an event type. Only members that belong
+ * to `accountId` are inserted — a foreign memberId (cross-tenant) is silently
+ * dropped, never added to the pool.
+ */
 export async function setEventTypeHosts(
   db: Db,
   accountId: string,
   eventTypeId: string,
   memberIds: string[],
 ): Promise<void> {
+  const owned = await db.all<{ id: string }>(
+    sql`SELECT id FROM member WHERE account_id = ${accountId}`,
+  );
+  const ownedIds = new Set(owned.map((o) => o.id));
   await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${eventTypeId}`);
   const now = Date.now();
   for (const m of memberIds) {
+    if (!ownedIds.has(m)) continue; // reject cross-account members
     await db.run(
       sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
           VALUES (${randomUUID()}, ${accountId}, ${eventTypeId}, ${m}, 0, ${null}, ${100}, ${null}, ${now})`,
@@ -388,33 +397,60 @@ export async function deleteTeam(db: Db, accountId: string, id: string): Promise
   return { ok: true, value: { id } };
 }
 
-export async function listTeamMembers(db: Db, teamId: string) {
+/** Team membership listing — scoped: only if the team belongs to `accountId`. */
+export async function listTeamMembers(db: Db, accountId: string, teamId: string) {
   return db.all<{ member_id: string; role: string; accepted: number; display_name: string | null; email: string | null }>(
     sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email
-        FROM team_membership tm JOIN member m ON m.id = tm.member_id
-        WHERE tm.team_id = ${teamId}`,
+        FROM team_membership tm
+        JOIN member m ON m.id = tm.member_id
+        JOIN team t ON t.id = tm.team_id
+        WHERE tm.team_id = ${teamId} AND t.account_id = ${accountId}`,
   );
 }
 
+/**
+ * Add a member to a team. Both the team and the member being added must belong
+ * to the caller's account — a foreign team or member is NOT_FOUND (no
+ * cross-tenant roster reads or writes).
+ */
 export async function addTeamMember(
   db: Db,
   accountId: string,
   teamId: string,
   memberId: string,
   role = 'member',
-): Promise<void> {
+): Promise<CrudResult<{ id: string }>> {
+  const team = await db.get<{ id: string }>(
+    sql`SELECT id FROM team WHERE id = ${teamId} AND account_id = ${accountId} LIMIT 1`,
+  );
+  if (!team) return { ok: false, reason: 'NOT_FOUND' };
+  const member = await db.get<{ id: string }>(
+    sql`SELECT id FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`,
+  );
+  if (!member) return { ok: false, reason: 'NOT_FOUND' };
   const existing = await db.get<{ id: string }>(
     sql`SELECT id FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId} LIMIT 1`,
   );
-  if (existing) return;
+  if (existing) return { ok: true, value: { id: existing.id } };
+  const id = randomUUID();
   await db.run(
     sql`INSERT INTO team_membership (id, account_id, team_id, member_id, role, accepted, created_at)
-        VALUES (${randomUUID()}, ${accountId}, ${teamId}, ${memberId}, ${role}, 1, ${Date.now()})`,
+        VALUES (${id}, ${accountId}, ${teamId}, ${memberId}, ${role}, 1, ${Date.now()})`,
   );
+  return { ok: true, value: { id } };
 }
 
-export async function removeTeamMember(db: Db, teamId: string, memberId: string): Promise<void> {
-  await db.run(sql`DELETE FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}`);
+/** Remove a member — scoped so only teams in `accountId` can be altered. */
+export async function removeTeamMember(
+  db: Db,
+  accountId: string,
+  teamId: string,
+  memberId: string,
+): Promise<void> {
+  await db.run(
+    sql`DELETE FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}
+        AND team_id IN (SELECT id FROM team WHERE account_id = ${accountId})`,
+  );
 }
 
 /** List all members of an account (for team member pickers, host selection). */

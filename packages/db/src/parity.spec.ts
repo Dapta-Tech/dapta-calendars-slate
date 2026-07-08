@@ -7,16 +7,21 @@ import { createBooking, getAvailability } from './repository';
 import {
   cancelBooking,
   checkHandleAvailable,
+  confirmBooking,
   createApiKey,
   createTeamBooking,
+  createWebhook,
+  dispatchWebhooks,
   getTeamAvailability,
   getTeamProfile,
+  listBookings,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
   updateBranding,
   verifyApiKey,
 } from './parity';
+import { createEventType, createTeam, setEventTypeHosts } from './crud';
 
 async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
   const a = await getAvailability(db, {
@@ -61,7 +66,8 @@ describe('parity (SQLite in-memory)', () => {
       slug: 'intro-call',
       startMs,
     });
-    expect(held).not.toBeNull();
+    expect(held.ok).toBe(true);
+    if (!held.ok) throw new Error('setup');
     // The held instant is no longer offered.
     const a = await getAvailability(db, {
       accountCode: 'acme',
@@ -79,7 +85,7 @@ describe('parity (SQLite in-memory)', () => {
       startMs,
       attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
       answers: { company: 'Acme' },
-      reservationUid: held!.uid,
+      reservationUid: held.uid,
     });
     expect(out.ok).toBe(true);
   });
@@ -101,6 +107,42 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe('RESERVATION_EXPIRED');
+  });
+
+  it('M5 — reserveSlot rejects an instant that is not a real bookable slot', async () => {
+    // 03:17 on the first offered day is never an offered slot (outside 9–17 and
+    // off the 30-min grid) → INVALID_SLOT, so holds can't blank out availability.
+    const startMs = await firstSlotMs(db);
+    const bogus = startMs + 137 * 60_000 + 999; // off-grid, unaligned
+    const out = await reserveSlot(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs: bogus,
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe('INVALID_SLOT');
+  });
+
+  it('M5 — reserveSlot caps concurrent holds per page (rate limit)', async () => {
+    const avail = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const slots = avail!.slots.map((s) => new Date(s).getTime());
+    let ok = 0;
+    let limited = 0;
+    // Try to hold more distinct real slots than the cap allows.
+    for (const s of slots.slice(0, 15)) {
+      const r = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs: s });
+      if (r.ok) ok++;
+      else if (r.reason === 'RATE_LIMITED') limited++;
+    }
+    expect(ok).toBeLessThanOrEqual(10); // MAX_ACTIVE_HOLDS_PER_MEMBER
+    expect(limited).toBeGreaterThan(0);
   });
 
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
@@ -219,7 +261,9 @@ describe('parity (SQLite in-memory)', () => {
     const { createWebhook, dispatchWebhooks } = await import('./parity');
     await createWebhook(db, {
       accountId,
-      subscriberUrl: 'https://example.com/hook',
+      // Public IP literal → the SSRF guard passes without a real DNS lookup,
+      // keeping this HMAC assertion deterministic and offline-safe.
+      subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
       secret: 's3cret',
     });
@@ -247,5 +291,175 @@ describe('parity (SQLite in-memory)', () => {
     expect(principal?.accountId).toBe(accountId);
     expect(principal?.scopes).toContain('availability:read');
     expect(await verifyApiKey(db, 'wrong')).toBeNull();
+  });
+
+  it('M4 — listBookings honors an event-type allowlist (machine scope-leak fix)', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+
+    // Book the seeded intro-call at a free slot.
+    const s1 = await firstSlotMs(db, 'intro-call');
+    const b1 = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs: s1,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(b1.ok).toBe(true);
+
+    // A second event type + a booking under it.
+    await createEventType(db, accountId, memberId, {
+      slug: 'second-evt',
+      title: 'Second',
+      lengthMinutes: 30,
+      scheduleId: null,
+    });
+    const av2 = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'second-evt',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const b2 = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'second-evt',
+      startMs: new Date(av2!.slots[0]!).getTime(),
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(b2.ok).toBe(true);
+
+    const introEtId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM event_type WHERE slug='intro-call' AND account_id=${accountId}`))!.id;
+
+    const all = await listBookings(db, { accountId });
+    const scoped = await listBookings(db, { accountId, eventTypeIds: [introEtId] });
+    const none = await listBookings(db, { accountId, eventTypeIds: [] });
+
+    expect(none.items.length).toBe(0); // empty allowlist → nothing
+    expect(scoped.items.length).toBeGreaterThan(0);
+    expect(scoped.items.length).toBeLessThan(all.items.length); // second-evt excluded
+  });
+
+  it('M4 — createWebhook auto-mints a signing secret; dispatch signs with it', async () => {
+    const wh = await createWebhook(db, {
+      accountId,
+      subscriberUrl: 'https://198.51.100.11/hook',
+      eventTriggers: ['booking.created'],
+    });
+    expect(wh.secret).toMatch(/^whsec_/);
+
+    const calls: Array<{ headers: Record<string, string> }> = [];
+    const fakeFetch = (async (_url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ headers: init.headers });
+      return { ok: true } as Response;
+    }) as unknown as typeof fetch;
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    expect(sent).toBe(1);
+    expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
+  });
+
+  it('H1 — a pending booking HOLDS the slot: a second booking at the same slot is rejected', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    await createEventType(db, accountId, memberId, {
+      slug: 'confirm-hold',
+      title: 'Confirm Hold',
+      lengthMinutes: 30,
+      requiresConfirmation: true,
+      scheduleId: null,
+    });
+    const av = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const startMs = new Date(av!.slots[0]!).getTime();
+    const first = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+    });
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.booking.status).toBe('pending');
+    // A second booking at the same instant must NOT be created — the pending
+    // booking holds the slot (this is what the PG EXCLUDE now enforces too).
+    const second = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-hold',
+      startMs,
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toBe('SLOT_TAKEN');
+  });
+
+  it('H2 — a team booking cannot overlap a host’s pending personal booking', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+
+    // A team whose ONLY host is alex-rivera.
+    const team = await createTeam(db, accountId, { name: 'Solo', slug: 'solo' });
+    expect(team.ok).toBe(true);
+    if (!team.ok) return;
+    const ev = await createEventType(db, accountId, null, {
+      slug: 'solo-demo',
+      title: 'Solo Demo',
+      lengthMinutes: 30,
+      schedulingType: 'round_robin',
+      scheduleId: null,
+      teamId: team.value.id,
+    });
+    expect(ev.ok).toBe(true);
+    if (!ev.ok) return;
+    await setEventTypeHosts(db, accountId, ev.value.id, [memberId]);
+
+    const avail = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'solo',
+      slug: 'solo-demo',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const slotX = new Date(avail!.slots[0]!).getTime();
+
+    // Give alex a PENDING personal booking at slotX.
+    await createEventType(db, accountId, memberId, {
+      slug: 'pers-confirm',
+      title: 'Personal Confirm',
+      lengthMinutes: 30,
+      requiresConfirmation: true,
+      scheduleId: null,
+    });
+    const pending = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pers-confirm',
+      startMs: slotX,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+    });
+    expect(pending.ok).toBe(true);
+    if (pending.ok) expect(pending.booking.status).toBe('pending');
+
+    // The team booking at slotX must fail — the only host is held by a pending.
+    const teamBooked = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'solo',
+      slug: 'solo-demo',
+      startMs: slotX,
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(teamBooked.ok).toBe(false);
+    if (!teamBooked.ok) expect(teamBooked.reason).toBe('SLOT_TAKEN');
+
+    // Sanity: confirming the pending keeps the invariant (no crash / still one).
+    if (pending.ok) {
+      const conf = await confirmBooking(db, pending.booking.uid, accountId);
+      expect(conf.ok).toBe(true);
+    }
   });
 });

@@ -1,13 +1,11 @@
 import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
-import { verifyApiKey, sql } from '@slate/db';
+import { verifyApiKey } from '@slate/db';
 import type { ApiScope } from '@slate/types';
-import { DB } from './tokens';
+import { AUTH_PROVIDER, DB } from './tokens';
+import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
 
-export interface HostPrincipal {
-  accountId: string;
-  memberId: string;
-}
+export type { HostPrincipal, ReqLike } from './auth.provider';
 
 export interface MachinePrincipal {
   accountId: string;
@@ -15,41 +13,22 @@ export interface MachinePrincipal {
   eventTypeIds: string[] | null;
 }
 
-export interface ReqLike {
-  headers: Record<string, string | string[] | undefined>;
-}
-
-function header(req: ReqLike, name: string): string | undefined {
-  const v = req.headers[name];
-  return Array.isArray(v) ? v[0] : v;
-}
-
 /**
- * The AuthProvider seam. The OSS default is a LOCAL dev stub: host identity is
- * read from `x-slate-account` / `x-slate-member` headers, falling back to the
- * single seeded account+member so a fork can call authed endpoints with no auth
- * server. A private overlay swaps this for WorkOS AuthKit (validated JWT).
- * Machine identity is always a real API key (hashed lookup) — that path is
- * production-grade in OSS too.
+ * Auth authority for the API. Host/dashboard identity is delegated to the
+ * pluggable `AuthProvider` port (local dev stub / WorkOS overlay) selected on
+ * `AUTH_PROVIDER`; machine identity is a hashed API key resolved here (that path
+ * is production-grade in OSS too).
  */
 @Injectable()
 export class AuthService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
+  ) {}
 
-  /** Resolve the authenticated host (dashboard). Throws 401 if unresolved. */
-  async resolveHost(req: ReqLike): Promise<HostPrincipal> {
-    const accountId = header(req, 'x-slate-account');
-    const memberId = header(req, 'x-slate-member');
-    if (accountId && memberId) return { accountId, memberId };
-
-    // Dev fallback: the first account + its first member (local stub only).
-    const row = await this.db.get<{ account_id: string; member_id: string }>(
-      sql`SELECT a.id AS account_id, m.id AS member_id
-          FROM account a JOIN member m ON m.account_id = a.id
-          ORDER BY a.created_at ASC, m.created_at ASC LIMIT 1`,
-    );
-    if (!row) throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
-    return { accountId: row.account_id, memberId: row.member_id };
+  /** Resolve the authenticated host via the configured provider. Throws 401. */
+  resolveHost(req: ReqLike): Promise<HostPrincipal> {
+    return this.provider.resolveHost(req);
   }
 
   /** Resolve a machine principal from an API key and enforce a required scope. */

@@ -19,6 +19,7 @@ import {
 import { sql, type Db } from './client';
 import {
   getAccountByCode,
+  getAvailability,
   getEventType,
   getMember,
   jsonParam,
@@ -29,10 +30,13 @@ import {
   resolveScheduleTimeZone,
   type BookingFieldDef,
 } from './repository';
+import { checkWebhookUrl } from './webhook-url';
 
 // --- Reservation holds ----------------------------------------------------
 
 const DEFAULT_HOLD_MS = 10 * 60_000;
+/** Cap on concurrent unexpired holds per booking page (per host member). */
+const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
 export async function releaseReservation(db: Db, uid: string): Promise<void> {
   await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${uid}`);
@@ -42,25 +46,52 @@ export async function sweepExpiredReservations(db: Db, now = Date.now()): Promis
   await db.run(sql`DELETE FROM slot_reservation WHERE release_at_ms <= ${now}`);
 }
 
-export interface ReserveResult {
-  uid: string;
-  releaseAtMs: number;
-}
+export type ReserveOutcome =
+  | { ok: true; uid: string; releaseAtMs: number }
+  | { ok: false; reason: 'NOT_FOUND' | 'INVALID_SLOT' | 'RATE_LIMITED' };
 
+/**
+ * Place a soft hold on a slot. Hardened (M5):
+ *  - opportunistically sweeps expired holds so rows can't accrete;
+ *  - validates the requested start is a REAL, currently-bookable slot (no
+ *    holding arbitrary/blocked instants to blank out a page's availability);
+ *  - caps concurrent unexpired holds per page to blunt hold-spam DoS.
+ */
 export async function reserveSlot(
   db: Db,
   args: { accountCode: string; handle: string; slug: string; startMs: number; holdMs?: number },
-): Promise<ReserveResult | null> {
+): Promise<ReserveOutcome> {
+  const now = Date.now();
+  await sweepExpiredReservations(db, now);
+
   const account = await getAccountByCode(db, args.accountCode);
-  if (!account) return null;
+  if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const member = await getMember(db, account.id, args.handle);
-  if (!member) return null;
+  if (!member) return { ok: false, reason: 'NOT_FOUND' };
   const eventType = await getEventType(db, account.id, member.id, args.slug);
-  if (!eventType) return null;
+  if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
+
+  // The requested start must currently be offered by the availability engine.
+  const avail = await getAvailability(db, {
+    accountCode: args.accountCode,
+    handle: args.handle,
+    slug: args.slug,
+    fromMs: args.startMs,
+    toMs: endMs,
+  });
+  const offered = avail?.slots.some((s) => new Date(s).getTime() === args.startMs) ?? false;
+  if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
+
+  // Per-page hold cap (rate limit).
+  const active = await db.get<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
+  );
+  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER)
+    return { ok: false, reason: 'RATE_LIMITED' };
+
   const uid = randomUUID();
-  const now = Date.now();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
   await db.run(
     sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
@@ -68,7 +99,7 @@ export async function reserveSlot(
         VALUES (${randomUUID()}, ${account.id}, ${eventType.id}, ${member.id}, ${args.startMs},
           ${endMs}, ${uid}, ${releaseAtMs}, 0, ${now})`,
   );
-  return { uid, releaseAtMs };
+  return { ok: true, uid, releaseAtMs };
 }
 
 // --- Identity / multi-tenant ----------------------------------------------
@@ -414,8 +445,10 @@ export async function createTeamBooking(
   // Which hosts are actually free at this instant?
   const candidates: (HostCandidate & { row: EventHostRow })[] = [];
   for (const host of hosts) {
+    // A pending booking still holds the slot (parity with personal createBooking).
     const conflict = await db.get<{ id: string }>(
-      sql`SELECT id FROM booking WHERE host_member_id = ${host.member_id} AND status = 'accepted'
+      sql`SELECT id FROM booking WHERE host_member_id = ${host.member_id}
+          AND status IN ('accepted','pending')
           AND start_ms < ${endMs} AND end_ms > ${args.startMs} LIMIT 1`,
     );
     if (conflict) continue;
@@ -481,7 +514,7 @@ async function insertBookingGuarded(
   insertAttendee: ReturnType<typeof sql>,
 ): Promise<boolean> {
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId}
-    AND status = 'accepted' AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`;
+    AND status IN ('accepted','pending') AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`;
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
       if (db.sqlite!.drizzle.get(overlapSql)) return false;
@@ -519,10 +552,21 @@ interface BookingRow {
   metadata: unknown;
 }
 
-export async function resolveBooking(db: Db, uid: string): Promise<BookingRow | undefined> {
+/**
+ * Resolve a booking by uid. When `accountId` is provided (every host/admin
+ * path), the lookup is tenant-scoped: a booking in another account resolves to
+ * `undefined` (→ NOT_FOUND), never leaking its existence or letting it be
+ * mutated. The public manage path (uid + manage token) passes no accountId.
+ */
+export async function resolveBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+): Promise<BookingRow | undefined> {
+  const scope = accountId != null ? sql` AND account_id = ${accountId}` : sql``;
   return db.get<BookingRow>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata
-        FROM booking WHERE uid = ${uid} LIMIT 1`,
+        FROM booking WHERE uid = ${uid}${scope} LIMIT 1`,
   );
 }
 
@@ -537,9 +581,9 @@ export type MutationOutcome =
 
 export async function rescheduleBooking(
   db: Db,
-  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean },
+  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string },
 ): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, args.uid);
+  const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
@@ -595,9 +639,9 @@ async function runGuardedUpdate(
 
 export async function cancelBooking(
   db: Db,
-  args: { uid: string; reason?: string; manageToken?: string; byHost?: boolean },
+  args: { uid: string; reason?: string; manageToken?: string; byHost?: boolean; accountId?: string },
 ): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, args.uid);
+  const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
@@ -616,8 +660,12 @@ export async function cancelBooking(
 }
 
 /** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(db: Db, uid: string): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, uid);
+export async function confirmBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
@@ -636,8 +684,13 @@ export async function confirmBooking(db: Db, uid: string): Promise<MutationOutco
 }
 
 /** Host declines a pending booking → rejected (releases the held slot). */
-export async function declineBooking(db: Db, uid: string, reason?: string): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, uid);
+export async function declineBooking(
+  db: Db,
+  uid: string,
+  reason?: string,
+  accountId?: string,
+): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
   await db.run(
@@ -672,6 +725,12 @@ export async function listBookings(
     to?: number;
     status?: string;
     limit?: number;
+    /**
+     * Machine resource allowlist: when non-null, restrict to these event types
+     * (an event-type-scoped API key must not read the whole account). An empty
+     * array allows nothing; null/undefined means no event-type restriction.
+     */
+    eventTypeIds?: string[] | null;
   },
 ): Promise<{ items: BookingListItem[] }> {
   const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
@@ -680,6 +739,15 @@ export async function listBookings(
   if (args.from != null) conds.push(sql`start_ms >= ${args.from}`);
   if (args.to != null) conds.push(sql`start_ms < ${args.to}`);
   if (args.status) conds.push(sql`status = ${args.status}`);
+  if (args.eventTypeIds != null) {
+    if (args.eventTypeIds.length === 0) {
+      conds.push(sql`1 = 0`); // scoped key with an empty allowlist → nothing
+    } else {
+      const idExprs = args.eventTypeIds.map((id) => sql`${id}`);
+      const inList = idExprs.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
+      conds.push(sql`event_type_id IN (${inList})`);
+    }
+  }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   const rows = await db.all<{
     uid: string;
@@ -867,16 +935,20 @@ export async function createWebhook(
     teamId?: string;
     eventTypeId?: string;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; secret: string }> {
   const id = randomUUID();
+  // Always store a signing secret so payloads are never unsigned. If the caller
+  // didn't supply one we mint it and return it once (subscribers verify the
+  // X-Slate-Signature HMAC with it — see dispatchWebhooks).
+  const secret = args.secret ?? `whsec_${randomBytes(24).toString('base64url')}`;
   await db.run(
     sql`INSERT INTO webhook (id, account_id, member_id, team_id, event_type_id, subscriber_url,
           secret, event_triggers, active, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId ?? null}, ${args.teamId ?? null},
-          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${args.secret ?? null},
+          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${secret},
           ${jsonParam(db, args.eventTriggers)}, 1, ${Date.now()})`,
   );
-  return { id };
+  return { id, secret };
 }
 
 export async function deleteWebhook(db: Db, accountId: string, id: string): Promise<void> {
@@ -913,6 +985,9 @@ export async function dispatchWebhooks(
     hooks.map(async (h) => {
       const triggers = parseJsonColumn<string[]>(h.event_triggers, []);
       if (!triggers.includes(event)) return;
+      // Re-validate at egress (defends against a URL that resolved public at
+      // creation but was later re-pointed at a private address — DNS rebinding).
+      if (!(await checkWebhookUrl(h.subscriber_url)).ok) return;
       const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': event };
       if (h.secret) {
         headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;

@@ -77,7 +77,13 @@ export class BookingService {
       slug: input.slug,
       startMs: new Date(input.startUtc).getTime(),
     });
-    if (!held) return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+    if (!held.ok) {
+      if (held.reason === 'NOT_FOUND')
+        return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+      if (held.reason === 'RATE_LIMITED')
+        return { error: 'RATE_LIMITED', message: 'Too many active holds. Try again shortly.', status: 429 };
+      return { error: 'INVALID_SLOT', message: 'That time is not available to hold.', status: 400 };
+    }
     return { reservationUid: held.uid, expiresAt: new Date(held.releaseAtMs).toISOString() };
   }
 

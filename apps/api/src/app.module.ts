@@ -3,10 +3,12 @@ import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
+import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
 import { AuthService } from './auth.service';
+import { createAuthProvider } from './auth.provider';
+import type { Db } from '@slate/db';
 import { HealthController } from './controllers';
 import { PublicController } from './public.controller';
 import { HostController } from './host.controller';
@@ -50,6 +52,12 @@ import { AdminCrudController } from './admin-crud.controller';
     // The OSS default CalendarProvider is disabled (no external calendar). A
     // private overlay swaps this for a concrete adapter.
     { provide: CALENDAR, useFactory: () => new DisabledCalendarProvider() },
+    // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
+    {
+      provide: AUTH_PROVIDER,
+      useFactory: (env: ServerEnv, db: Db) => createAuthProvider(env, db),
+      inject: [ENV, DB],
+    },
     BookingService,
     AdminService,
     AuthService,
