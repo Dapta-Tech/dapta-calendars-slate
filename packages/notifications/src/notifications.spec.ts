@@ -2,6 +2,38 @@ import { describe, it, expect, vi } from 'vitest';
 import { createEmailProvider } from './factory';
 import { LogOnlyEmailProvider } from './adapters/log-only';
 import { BookingNotifier } from './booking-notifier';
+import { buildIcs } from './ics';
+
+describe('buildIcs', () => {
+  const base = {
+    uid: 'booking-1',
+    startUtc: '2026-08-01T14:00:00.000Z',
+    endUtc: '2026-08-01T14:30:00.000Z',
+    title: 'Intro; Call',
+    attendees: [{ name: 'Sam', email: 'sam@example.com' }],
+    organizer: { name: 'Alex', email: 'alex@example.com' },
+    stamp: '2026-07-08T00:00:00.000Z',
+  };
+
+  it('emits REQUEST with SEQUENCE 0, CRLF, stable UID, escaped TEXT', () => {
+    const ics = buildIcs({ ...base, method: 'REQUEST', sequence: 0 });
+    expect(ics).toContain('METHOD:REQUEST');
+    expect(ics).toContain('UID:booking-1');
+    expect(ics).toContain('SEQUENCE:0');
+    expect(ics).toContain('DTSTART:20260801T140000Z');
+    expect(ics).toContain('SUMMARY:Intro\\; Call'); // escaped semicolon
+    expect(ics).toContain('STATUS:CONFIRMED');
+    expect(ics.includes('\r\n')).toBe(true);
+  });
+
+  it('emits CANCEL with SEQUENCE 2 and the SAME UID', () => {
+    const ics = buildIcs({ ...base, method: 'CANCEL', sequence: 2 });
+    expect(ics).toContain('METHOD:CANCEL');
+    expect(ics).toContain('UID:booking-1');
+    expect(ics).toContain('SEQUENCE:2');
+    expect(ics).toContain('STATUS:CANCELLED');
+  });
+});
 
 describe('createEmailProvider', () => {
   it('defaults to log-only and reports not-delivered', async () => {
