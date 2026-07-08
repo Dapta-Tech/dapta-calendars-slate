@@ -98,8 +98,9 @@ export function BookingFlow({
                       type="button"
                       onClick={() => setSelected(s.startUtc)}
                       aria-pressed={selected === s.startUtc}
+                      style={{ borderRadius: 'var(--bp-btn-radius, 0.5rem)' }}
                       className={
-                        'rounded-md border px-2 py-2 text-sm transition-transform active:scale-[0.97] ' +
+                        'border px-2 py-2 text-sm transition-transform active:scale-[0.97] ' +
                         (selected === s.startUtc
                           ? 'border-primary bg-primary text-primary-foreground'
                           : 'border-border bg-card hover:border-primary')
@@ -119,7 +120,8 @@ export function BookingFlow({
         {selected ? (
           <form
             action={formAction}
-            className="flex flex-col gap-3 rounded-md border border-border bg-card p-4"
+            style={{ borderRadius: 'var(--bp-radius, 0.5rem)' }}
+            className="flex flex-col gap-3 border border-border bg-card p-4"
           >
             <input type="hidden" name="accountCode" value={accountCode} />
             <input type="hidden" name="ownerSlug" value={ownerSlug} />
@@ -188,7 +190,8 @@ export function BookingFlow({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+              style={{ borderRadius: 'var(--bp-btn-radius, 0.5rem)' }}
+              className="bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
             >
               {pending ? 'Confirming…' : 'Confirm booking'}
             </button>
