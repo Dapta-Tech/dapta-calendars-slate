@@ -15,6 +15,8 @@ interface Props {
   bookingFields: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
+  /** Branding axes (slotLayout/dayGroup/slotSelect) — from the host's studio. */
+  style?: Record<string, string> | null;
 }
 
 /**
@@ -30,7 +32,10 @@ export function BookingFlow({
   bookingFields,
   initialTimeZone,
   mode = 'personal',
+  style,
 }: Props) {
+  const slotLayout = style?.slotLayout ?? 'grid';
+  const dayGroup = style?.dayGroup ?? 'flat';
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(
@@ -89,9 +94,17 @@ export function BookingFlow({
         ) : (
           <div className="flex max-h-[28rem] flex-col gap-6 overflow-y-auto pr-2">
             {days.map((day) => (
-              <div key={day.dayKey}>
+              <div
+                key={day.dayKey}
+                className={dayGroup === 'boxed' ? 'rounded-md border border-border p-3' : ''}
+                style={dayGroup === 'boxed' ? { borderRadius: 'var(--bp-radius, 0.5rem)' } : undefined}
+              >
                 <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{day.heading}</h3>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                <div
+                  className={
+                    slotLayout === 'list' ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-3 gap-2 sm:grid-cols-4'
+                  }
+                >
                   {day.slots.map((s) => (
                     <button
                       key={s.startUtc}

@@ -373,14 +373,12 @@ function ProfilePreview({
   return (
     <div>
       {coverUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={coverUrl} alt="" className="mb-3 h-24 w-full rounded-md object-cover" />
       ) : (
         <div className="mb-3 h-20 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
       )}
       <div className="mb-4 flex items-center gap-3">
         {avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={avatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
         ) : (
           <div
