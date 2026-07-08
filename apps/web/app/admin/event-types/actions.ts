@@ -5,51 +5,31 @@ import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
 
-function num(v: FormDataEntryValue | null, d: number): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
+export interface EventTypePayload {
+  id?: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  lengthMinutes: number;
+  minimumBookingNotice: number;
+  slotInterval: number | null;
+  beforeEventBuffer: number;
+  afterEventBuffer: number;
+  seatsPerTimeSlot: number | null;
+  requiresConfirmation: boolean;
+  hidden: boolean;
+  bookingFields: Array<{ name: string; label: string; type: string; required: boolean }>;
 }
 
-export async function createEventTypeAction(
-  _prev: ActionResult | null,
-  form: FormData,
-): Promise<ActionResult> {
+export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {
   try {
-    await adminApi.createEventType({
-      title: String(form.get('title') ?? ''),
-      slug: String(form.get('slug') ?? ''),
-      description: form.get('description') ? String(form.get('description')) : null,
-      lengthMinutes: num(form.get('lengthMinutes'), 30),
-      minimumBookingNotice: num(form.get('minimumBookingNotice'), 120),
-      slotInterval: form.get('slotInterval') ? num(form.get('slotInterval'), 30) : null,
-      requiresConfirmation: form.get('requiresConfirmation') === 'on',
-      hidden: form.get('hidden') === 'on',
-    });
+    if (p.id) {
+      await adminApi.updateEventType(p.id, p);
+    } else {
+      await adminApi.createEventType(p);
+    }
     revalidatePath('/admin/event-types');
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
-  }
-}
-
-export async function updateEventTypeAction(
-  _prev: ActionResult | null,
-  form: FormData,
-): Promise<ActionResult> {
-  try {
-    const id = String(form.get('id') ?? '');
-    await adminApi.updateEventType(id, {
-      title: String(form.get('title') ?? ''),
-      slug: String(form.get('slug') ?? ''),
-      description: form.get('description') ? String(form.get('description')) : null,
-      lengthMinutes: num(form.get('lengthMinutes'), 30),
-      minimumBookingNotice: num(form.get('minimumBookingNotice'), 120),
-      slotInterval: form.get('slotInterval') ? num(form.get('slotInterval'), 30) : null,
-      requiresConfirmation: form.get('requiresConfirmation') === 'on',
-      hidden: form.get('hidden') === 'on',
-    });
-    revalidatePath('/admin/event-types');
-    revalidatePath(`/admin/event-types/${id}`);
+    if (p.id) revalidatePath(`/admin/event-types/${p.id}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };

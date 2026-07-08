@@ -5,24 +5,26 @@ import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
 
-const DAYS = [0, 1, 2, 3, 4, 5, 6];
+export interface RuleInput {
+  days: number[] | null;
+  startTime: string;
+  endTime: string;
+  date: string | null;
+}
 
-export async function saveScheduleAction(
-  _prev: ActionResult | null,
-  form: FormData,
+export async function saveScheduleFullAction(
+  scheduleId: string,
+  timeZone: string,
+  rules: RuleInput[],
 ): Promise<ActionResult> {
-  try {
-    const id = String(form.get('scheduleId') ?? '');
-    const timeZone = String(form.get('timeZone') ?? 'UTC');
-    const rules: Array<{ days: number[]; startTime: string; endTime: string; date: null }> = [];
-    for (const d of DAYS) {
-      if (form.get(`enabled_${d}`) !== 'on') continue;
-      const startTime = String(form.get(`start_${d}`) ?? '09:00');
-      const endTime = String(form.get(`end_${d}`) ?? '17:00');
-      if (endTime <= startTime) return { ok: false, message: `Day ${d}: end must be after start.` };
-      rules.push({ days: [d], startTime, endTime, date: null });
+  // Validate end > start on every rule.
+  for (const r of rules) {
+    if (r.endTime <= r.startTime) {
+      return { ok: false, message: `A block ends before it starts (${r.startTime}–${r.endTime}).` };
     }
-    await adminApi.updateSchedule(id, { timeZone, rules });
+  }
+  try {
+    await adminApi.updateSchedule(scheduleId, { timeZone, rules });
     revalidatePath('/admin/availability');
     return { ok: true };
   } catch (e) {

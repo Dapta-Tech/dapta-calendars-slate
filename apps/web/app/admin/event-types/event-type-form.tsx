@@ -1,61 +1,166 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useState, useTransition } from 'react';
 import type { EventType } from '@/lib/admin-api';
-import { createEventTypeAction, updateEventTypeAction, type ActionResult } from './actions';
+import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
+
+const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox'];
+
+interface IntakeField {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+}
 
 export function EventTypeForm({ initial }: { initial?: EventType }) {
-  const action = initial ? updateEventTypeAction : createEventTypeAction;
-  const [res, formAction, pending] = useActionState<ActionResult | null, FormData>(action, null);
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [slug, setSlug] = useState(initial?.slug ?? '');
+  const [slugTouched, setSlugTouched] = useState(!!initial);
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
+  const [minNotice, setMinNotice] = useState(120);
+  const [slotInterval, setSlotInterval] = useState<number | ''>(initial?.lengthMinutes ?? 30);
+  const [beforeBuf, setBeforeBuf] = useState(0);
+  const [afterBuf, setAfterBuf] = useState(0);
+  const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
+  const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
+  const [hidden, setHidden] = useState(initial?.hidden ?? false);
+  const [fields, setFields] = useState<IntakeField[]>(
+    (initial?.bookingFields as IntakeField[] | undefined)?.map((f) => ({
+      name: f.name,
+      label: f.label,
+      type: f.type,
+      required: !!f.required,
+    })) ?? [],
+  );
+  const [res, setRes] = useState<ActionResult | null>(null);
+  const [pending, start] = useTransition();
+
+  const onTitle = (v: string) => {
+    setTitle(v);
+    if (!slugTouched) setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
+  };
+
+  const save = () =>
+    start(async () => {
+      const payload: EventTypePayload = {
+        id: initial?.id,
+        title,
+        slug,
+        description: description.trim() || null,
+        lengthMinutes: Number(lengthMinutes),
+        minimumBookingNotice: Number(minNotice),
+        slotInterval: slotInterval === '' ? null : Number(slotInterval),
+        beforeEventBuffer: Number(beforeBuf),
+        afterEventBuffer: Number(afterBuf),
+        seatsPerTimeSlot: seats === '' ? null : Number(seats),
+        requiresConfirmation,
+        hidden,
+        bookingFields: fields.filter((f) => f.name && f.label),
+      };
+      setRes(await saveEventTypeAction(payload));
+    });
 
   return (
-    <form
-      action={formAction}
-      className="flex flex-col gap-3 rounded-md border border-border bg-card p-5"
-    >
-      {initial ? <input type="hidden" name="id" value={initial.id} /> : null}
+    <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Title">
-          <input name="title" required defaultValue={initial?.title} className={inputCls} />
+          <input value={title} onChange={(e) => onTitle(e.target.value)} className={inputCls} />
         </Field>
         <Field label="Slug">
-          <input name="slug" required defaultValue={initial?.slug} className={inputCls} />
+          <input value={slug} onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }} className={inputCls} />
         </Field>
       </div>
       <Field label="Description">
-        <textarea name="description" rows={2} defaultValue={initial?.description ?? ''} className={inputCls} />
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
       </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Length (min)">
-          <input name="lengthMinutes" type="number" defaultValue={initial?.lengthMinutes ?? 30} className={inputCls} />
-        </Field>
-        <Field label="Min. notice (min)">
-          <input name="minimumBookingNotice" type="number" defaultValue={120} className={inputCls} />
+          <input type="number" value={lengthMinutes} onChange={(e) => setLength(Number(e.target.value))} className={inputCls} />
         </Field>
         <Field label="Slot interval (min)">
-          <input name="slotInterval" type="number" defaultValue={initial?.lengthMinutes ?? 30} className={inputCls} />
+          <input type="number" value={slotInterval} onChange={(e) => setSlotInterval(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
+        </Field>
+        <Field label="Min. notice (min)">
+          <input type="number" value={minNotice} onChange={(e) => setMinNotice(Number(e.target.value))} className={inputCls} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Buffer before (min)">
+          <input type="number" value={beforeBuf} onChange={(e) => setBeforeBuf(Number(e.target.value))} className={inputCls} />
+        </Field>
+        <Field label="Buffer after (min)">
+          <input type="number" value={afterBuf} onChange={(e) => setAfterBuf(Number(e.target.value))} className={inputCls} />
+        </Field>
+        <Field label="Seats / slot (group)">
+          <input type="number" min={1} placeholder="1" value={seats} onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
       <div className="flex gap-6">
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="requiresConfirmation" defaultChecked={initial?.requiresConfirmation} />
+          <input type="checkbox" checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
           Requires confirmation
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="hidden" defaultChecked={initial?.hidden} />
+          <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
           Hidden
         </label>
       </div>
+
+      {/* Intake questions */}
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-semibold text-muted-foreground">Intake questions</span>
+        {fields.map((f, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              placeholder="name"
+              value={f.name}
+              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
+              className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
+            />
+            <input
+              placeholder="Label"
+              value={f.label}
+              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+            />
+            <select
+              value={f.type}
+              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+            >
+              {FIELD_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1 text-sm">
+              <input type="checkbox" checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+              req
+            </label>
+            <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
+          className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary"
+        >
+          + Add question
+        </button>
+      </div>
+
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       {res?.ok ? <p className="text-sm text-primary">Saved.</p> : null}
       <button
-        type="submit"
-        disabled={pending}
+        type="button"
+        onClick={save}
+        disabled={pending || !title || !slug}
         className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
       >
         {pending ? 'Saving…' : initial ? 'Save changes' : 'Create event type'}
       </button>
-    </form>
+    </div>
   );
 }
 
