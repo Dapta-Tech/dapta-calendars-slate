@@ -1,6 +1,10 @@
 /**
- * SQLite schema (the dev / clone-and-run default). Mirrors schema.pg.ts 1:1 —
- * identical table + column names so the repository layer is dialect-agnostic.
+ * SQLite schema — a PORTABLE SUBSET of the Postgres source-of-truth
+ * (schema.pg.ts), for zero-infra local dev only. It mirrors Postgres 1:1 on
+ * table/column names (so the repository is dialect-agnostic) but expresses the
+ * portable common denominator: what Postgres does with jsonb / the GiST EXCLUDE
+ * constraint, SQLite approximates with text / an app-level check. SQLite never
+ * dictates the schema — Postgres does; this file only tracks it downward.
  *
  * Portable column choices (§ migration plan):
  *   - text UUID primary keys (app-generated via crypto.randomUUID())

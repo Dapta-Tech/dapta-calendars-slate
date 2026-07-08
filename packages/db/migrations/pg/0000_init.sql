@@ -1,9 +1,12 @@
--- Initial schema (Postgres). Mirrors migrations/sqlite/0000_init.sql
--- column-for-column, then adds the production-only anti-double-booking
--- guarantee SQLite cannot express: a btree_gist EXCLUDE constraint over the
--- [start_ms, end_ms) interval per host, gated on status='accepted'. Two
--- overlapping accepted bookings for the same host become physically impossible;
--- the app maps the resulting 23P01 exclusion_violation to 409 SLOT_TAKEN.
+-- Initial schema (Postgres) — THE SOURCE OF TRUTH. Postgres is designed to full
+-- power here (jsonb, the anti-double-booking EXCLUDE constraint, proper
+-- indexes); migrations/sqlite/0000_init.sql is a portable SUBSET for dev.
+--
+-- The production guarantee SQLite cannot express: a btree_gist EXCLUDE
+-- constraint over the [start_ms, end_ms) interval per host, gated on
+-- status='accepted'. Two overlapping accepted bookings for the same host become
+-- physically impossible; the app maps the resulting 23P01 exclusion_violation
+-- to 409 SLOT_TAKEN. CI exercises this on real Postgres on every PR.
 --
 -- Migration safety: btree_gist is created IF NOT EXISTS; all statements here are
 -- CREATE-only (SAFE — no locks on existing data, this is the initial baseline).
@@ -80,7 +83,7 @@ CREATE TABLE booking (
   status              TEXT NOT NULL DEFAULT 'accepted',
   location            TEXT,
   meeting_url         TEXT,
-  metadata            TEXT,
+  metadata            JSONB,
   cancellation_reason TEXT,
   idempotency_key     TEXT UNIQUE,
   created_at          BIGINT NOT NULL,

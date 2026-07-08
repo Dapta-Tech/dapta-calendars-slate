@@ -31,8 +31,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  postgres-parity:
-    name: Test (Postgres parity — EXCLUDE path)
+  postgres:
+    name: Test on Postgres (source of truth — EXCLUDE / double-booking)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -61,12 +61,13 @@ jobs:
       - run: pnpm build:packages
       - name: Migrate + seed on Postgres
         run: pnpm db:migrate && pnpm db:seed
-      - name: Booking + double-booking on Postgres (EXCLUDE constraint)
+      - name: Booking + double-booking on real Postgres (EXCLUDE constraint)
+        # repository.pg.spec.ts runs against DATABASE_URL: it books, rejects the
+        # double-book (app-level + EXCLUDE), and directly asserts the
+        # booking_no_overlap GiST constraint raises 23P01 on an overlap. This is
+        # the tested truth — Postgres is what we trust.
         run: pnpm --filter @slate/db test
         env:
-          # The repository spec runs on in-memory SQLite; this job additionally
-          # proves the migrations + seed apply on real Postgres (incl. the
-          # booking_no_overlap EXCLUDE constraint).
           DATABASE_URL: postgres://slate:slate@localhost:5432/slate
 
   publish-gate:

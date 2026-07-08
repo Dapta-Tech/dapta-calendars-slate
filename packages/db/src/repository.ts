@@ -275,11 +275,14 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   const metadata = JSON.stringify({ _manage: { tokenHash } });
   const title = eventType.title;
 
+  // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
+  // text param is cast on write. SQLite stores the same JSON as text.
+  const metaExpr = db.dialect === 'postgres' ? sql`${metadata}::jsonb` : sql`${metadata}`;
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title,
       start_ms, end_ms, status, metadata, idempotency_key, created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
-      ${startMs}, ${endMs}, 'accepted', ${metadata},
+      ${startMs}, ${endMs}, 'accepted', ${metaExpr},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, notes, created_at)

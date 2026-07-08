@@ -1,9 +1,10 @@
 # Slate
 
-**Open-source scheduling by Dapta.** Slate is a clone-and-run booking platform —
-availability, timezones, and double-booking-safe reservations — that runs on
-**SQLite with zero infrastructure** and deploys anywhere (any Node/Docker host or
-Vercel; Postgres in production).
+**Open-source scheduling by Dapta.** Slate is a booking platform — availability,
+timezones, and double-booking-safe reservations. **Postgres is the source of
+truth** (CI and production run Postgres); **SQLite is a zero-infra dev
+accelerator** so you can clone-and-run in 30 seconds. Deploys anywhere (any
+Node/Docker host or Vercel).
 
 > Slate is the friendly name for the **Calendars** product. This repository is
 > the open-source monorepo that merges the booking backend and the web frontend.
@@ -23,9 +24,22 @@ Then open:
 - **API** → http://localhost:4000/health
 
 No Docker, no Postgres, no VPN, no accounts. The database is a file at
-`.data/dev.db`; email is `log-only` (confirmations print to the API log).
+`.data/dev.db`; email is `log-only` (confirmations print to the API log). Reset
+the demo data anytime with `pnpm db:reset`.
 
-Reset the demo data anytime with `pnpm db:reset`.
+### Two dev modes
+
+| Mode | Command | Database | Use it for |
+|---|---|---|---|
+| **Fast** | `pnpm dev` | SQLite file (`.data/dev.db`) | 30-second onboarding, zero infra |
+| **Parity** | `pnpm dev:pg` | Postgres (Docker) | Full parity with CI + production |
+
+`pnpm dev:pg` starts a Postgres container (`docker-compose.yml`), migrates,
+seeds, and runs both apps against it — the **same engine as CI and production
+(Aurora)**, so the GiST double-booking guarantee is exercised locally. Postgres
+is the source of truth; SQLite is a portable subset for convenience and **never
+limits the schema** — features that need Postgres use Postgres, and the
+SQLite-dev path documents where it degrades.
 
 ## What you get
 
@@ -57,13 +71,19 @@ packages/
 The web app talks to the API over HTTP — it never imports the database or engine
 directly, so the two deploy independently.
 
-### Double-booking safety (one real caveat)
+### Double-booking safety (dual enforcement)
 
-Two overlapping accepted bookings for the same host are prevented by **dual
-enforcement**: an app-level overlap-check-in-a-transaction that runs on **both**
-databases, plus a Postgres `EXCLUDE` (btree_gist) constraint that makes it
-*physically impossible* in production. SQLite has the app-level guard only; that
-is the documented trade-off of the zero-infra dev database.
+Two overlapping accepted bookings for the same host are prevented by:
+
+1. an **app-level overlap-check-in-a-transaction** that runs on **both**
+   databases, and
+2. a Postgres **`EXCLUDE` (btree_gist)** constraint that makes an overlap
+   *physically impossible* — the hard guarantee, present in CI and production.
+
+SQLite (fast dev mode) has the app-level guard only; that is the one documented
+place the dev subset degrades. **CI runs the Postgres path on every PR** and
+directly asserts the `EXCLUDE` constraint rejects an overlap — Postgres is the
+tested truth.
 
 ## Configuration
 
@@ -81,7 +101,8 @@ Everything has a safe default (see [`.env.example`](.env.example)). Copy it to
 
 | Command | What |
 |---|---|
-| `pnpm dev` | build packages, migrate + seed SQLite, run web + api |
+| `pnpm dev` | build packages, migrate + seed **SQLite**, run web + api |
+| `pnpm dev:pg` | same, against **Postgres** in Docker (full parity) |
 | `pnpm build` | build everything |
 | `pnpm test` | run all unit tests |
 | `pnpm typecheck` / `pnpm lint` | type-check / lint the workspace |

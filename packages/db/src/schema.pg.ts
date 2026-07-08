@@ -1,13 +1,15 @@
 /**
- * Postgres schema — the 1:1 mirror of schema.sqlite.ts (identical table/column
- * names). The only production-specific guarantee lives in the migration, not
- * here: the `booking_no_overlap` EXCLUDE constraint (btree_gist over an
- * int8range of [start_ms, end_ms) gated on status='accepted') that makes two
- * overlapping accepted bookings for the same host physically impossible.
- * SQLite cannot express that, hence the dual enforcement (app-level check on
- * both; DB-level backstop on Postgres only). See migrations/pg.
+ * Postgres schema — THE SOURCE OF TRUTH. Postgres is what we trust: CI runs the
+ * Postgres path first-class and production is Aurora Postgres. This schema uses
+ * Postgres to its full power (jsonb, the `booking_no_overlap` GiST EXCLUDE
+ * constraint over int8range gated on status='accepted', proper indexes). SQLite
+ * (schema.sqlite.ts) is a PORTABLE SUBSET for zero-infra dev only and never
+ * limits what this schema may use — where a feature needs Postgres, we use it
+ * and the SQLite-dev path degrades (documented), prod is never constrained.
+ *
+ * Column names mirror schema.sqlite.ts so the repository is dialect-agnostic.
  */
-import { pgTable, text, bigint, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, bigint, integer, jsonb } from 'drizzle-orm/pg-core';
 
 export const account = pgTable('account', {
   id: text('id').primaryKey(),
@@ -75,7 +77,8 @@ export const booking = pgTable('booking', {
   status: text('status').notNull().default('accepted'),
   location: text('location'),
   meetingUrl: text('meeting_url'),
-  metadata: text('metadata'),
+  // Full Postgres power: jsonb (SQLite stores the same shape as text).
+  metadata: jsonb('metadata'),
   cancellationReason: text('cancellation_reason'),
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
