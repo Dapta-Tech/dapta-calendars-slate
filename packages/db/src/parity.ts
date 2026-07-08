@@ -519,10 +519,21 @@ interface BookingRow {
   metadata: unknown;
 }
 
-export async function resolveBooking(db: Db, uid: string): Promise<BookingRow | undefined> {
+/**
+ * Resolve a booking by uid. When `accountId` is provided (every host/admin
+ * path), the lookup is tenant-scoped: a booking in another account resolves to
+ * `undefined` (→ NOT_FOUND), never leaking its existence or letting it be
+ * mutated. The public manage path (uid + manage token) passes no accountId.
+ */
+export async function resolveBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+): Promise<BookingRow | undefined> {
+  const scope = accountId != null ? sql` AND account_id = ${accountId}` : sql``;
   return db.get<BookingRow>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata
-        FROM booking WHERE uid = ${uid} LIMIT 1`,
+        FROM booking WHERE uid = ${uid}${scope} LIMIT 1`,
   );
 }
 
@@ -537,9 +548,9 @@ export type MutationOutcome =
 
 export async function rescheduleBooking(
   db: Db,
-  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean },
+  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string },
 ): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, args.uid);
+  const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
@@ -595,9 +606,9 @@ async function runGuardedUpdate(
 
 export async function cancelBooking(
   db: Db,
-  args: { uid: string; reason?: string; manageToken?: string; byHost?: boolean },
+  args: { uid: string; reason?: string; manageToken?: string; byHost?: boolean; accountId?: string },
 ): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, args.uid);
+  const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
@@ -616,8 +627,12 @@ export async function cancelBooking(
 }
 
 /** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(db: Db, uid: string): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, uid);
+export async function confirmBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
@@ -636,8 +651,13 @@ export async function confirmBooking(db: Db, uid: string): Promise<MutationOutco
 }
 
 /** Host declines a pending booking → rejected (releases the held slot). */
-export async function declineBooking(db: Db, uid: string, reason?: string): Promise<MutationOutcome> {
-  const b = await resolveBooking(db, uid);
+export async function declineBooking(
+  db: Db,
+  uid: string,
+  reason?: string,
+  accountId?: string,
+): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
   await db.run(

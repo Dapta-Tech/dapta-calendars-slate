@@ -87,16 +87,16 @@ export class AdminService {
     });
   }
 
-  hostCancel(_p: HostPrincipal, uid: string, reason?: string) {
-    return cancelBooking(this.db, { uid, reason, byHost: true });
+  hostCancel(p: HostPrincipal, uid: string, reason?: string) {
+    return cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
   }
 
-  confirm(_p: HostPrincipal, uid: string) {
-    return confirmBooking(this.db, uid);
+  confirm(p: HostPrincipal, uid: string) {
+    return confirmBooking(this.db, uid, p.accountId);
   }
 
-  decline(_p: HostPrincipal, uid: string, reason?: string) {
-    return declineBooking(this.db, uid, reason);
+  decline(p: HostPrincipal, uid: string, reason?: string) {
+    return declineBooking(this.db, uid, reason, p.accountId);
   }
 
   // Connections (behind the CalendarProvider port — generic).
