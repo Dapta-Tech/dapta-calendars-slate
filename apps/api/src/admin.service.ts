@@ -15,6 +15,8 @@ import {
   listWebhooks,
   revokeApiKey,
   updateBranding,
+  updateHandle,
+  updateMemberSettings,
   cancelBooking,
 } from '@slate/db';
 import type { HostPrincipal } from './auth.service';
@@ -35,6 +37,18 @@ export class AdminService {
 
   updateBranding(p: HostPrincipal, patch: Parameters<typeof updateBranding>[2]) {
     return updateBranding(this.db, p.memberId, patch);
+  }
+
+  updateSettings(p: HostPrincipal, patch: Parameters<typeof updateMemberSettings>[2]) {
+    return updateMemberSettings(this.db, p.memberId, patch);
+  }
+
+  /** Rename the handle after confirming it's available (reserved/taken → error). */
+  async renameHandle(p: HostPrincipal, handle: string): Promise<{ ok: boolean; reason: string | null }> {
+    const check = await checkHandleAvailable(this.db, p.accountId, handle, p.memberId);
+    if (!check.available) return { ok: false, reason: check.reason };
+    await updateHandle(this.db, p.memberId, check.handle);
+    return { ok: true, reason: null };
   }
 
   // Host bookings (R29): the on-behalf path with the singular-attendee shape.

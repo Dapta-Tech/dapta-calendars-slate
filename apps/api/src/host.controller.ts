@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Body,
   Controller,
   Delete,
@@ -41,6 +42,26 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     if (!handle) throw new BadRequestException({ error: 'BAD_REQUEST', message: 'handle required' });
     return this.admin.handleAvailable(p, handle);
+  }
+
+  @Patch('me/settings')
+  async updateSettings(
+    @Req() req: ReqLike,
+    @Body() body: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
+  ) {
+    const p = await this.auth.resolveHost(req);
+    await this.admin.updateSettings(p, body);
+    return { ok: true };
+  }
+
+  @Patch('me/handle')
+  async renameHandle(@Req() req: ReqLike, @Body() body: { handle: string }) {
+    const p = await this.auth.resolveHost(req);
+    if (!body?.handle)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'handle required' });
+    const r = await this.admin.renameHandle(p, body.handle);
+    if (!r.ok) throw new ConflictException({ error: 'HANDLE_UNAVAILABLE', message: r.reason ?? 'taken' });
+    return { ok: true };
   }
 
   @Patch('booking-page')

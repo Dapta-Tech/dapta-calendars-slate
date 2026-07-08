@@ -19,6 +19,50 @@ export function getProfile(accountCode: string, handle: string): Promise<PublicP
   );
 }
 
+export interface TeamProfile {
+  account: { code: string; name: string };
+  team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
+  eventTypes: Array<{ slug: string; title: string; description: string | null; lengthMinutes: number }>;
+}
+
+export function getTeamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
+  return getJson<TeamProfile>(
+    `/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}`,
+  );
+}
+
+export function getTeamAvailability(params: {
+  accountCode: string;
+  teamSlug: string;
+  slug: string;
+  from: string;
+  to: string;
+}): Promise<AvailabilityResponse | null> {
+  const qs = new URLSearchParams({ slug: params.slug, from: params.from, to: params.to });
+  return getJson<AvailabilityResponse>(
+    `/v1/public/teams/${encodeURIComponent(params.accountCode)}/${encodeURIComponent(params.teamSlug)}/availability?${qs}`,
+  );
+}
+
+export async function postTeamBooking(
+  accountCode: string,
+  teamSlug: string,
+  body: unknown,
+): Promise<BookResult> {
+  const res = await fetch(
+    `${API_URL}/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}/bookings`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    },
+  );
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status === 201) return { ok: true, booking: json as unknown as BookingView };
+  return { ok: false, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
+}
+
 export function getAvailability(params: {
   accountCode: string;
   handle: string;

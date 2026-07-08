@@ -175,6 +175,27 @@ export async function updateBranding(
   return true;
 }
 
+/** Update a member's general settings (timezone, locale, week start). */
+export async function updateMemberSettings(
+  db: Db,
+  memberId: string,
+  patch: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
+): Promise<void> {
+  const sets: ReturnType<typeof sql>[] = [];
+  if (patch.timeZone !== undefined) sets.push(sql`time_zone = ${patch.timeZone}`);
+  if (patch.locale !== undefined) sets.push(sql`locale = ${patch.locale ?? null}`);
+  if (patch.weekStart !== undefined) sets.push(sql`week_start = ${patch.weekStart}`);
+  if (patch.displayName !== undefined) sets.push(sql`display_name = ${patch.displayName ?? null}`);
+  if (sets.length === 0) return;
+  const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
+  await db.run(sql`UPDATE member SET ${assign} WHERE id = ${memberId}`);
+}
+
+/** Rename a member's public handle (checked available first by the caller). */
+export async function updateHandle(db: Db, memberId: string, handle: string): Promise<void> {
+  await db.run(sql`UPDATE member SET handle = ${handle} WHERE id = ${memberId}`);
+}
+
 // --- Teams ----------------------------------------------------------------
 
 export interface TeamProfileView {

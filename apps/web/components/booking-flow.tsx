@@ -8,11 +8,13 @@ import type { BookResult } from '@/lib/api';
 
 interface Props {
   accountCode: string;
-  handle: string;
+  /** Member handle (personal) or team slug (team). */
+  ownerSlug: string;
   slug: string;
   slots: Slot[];
   bookingFields: BookingField[];
   initialTimeZone: string;
+  mode?: 'personal' | 'team';
 }
 
 /**
@@ -20,7 +22,15 @@ interface Props {
  * Slots are absolute UTC instants, so switching timezone regroups them with no
  * refetch. Submission goes through the bookAction Server Action.
  */
-export function BookingFlow({ accountCode, handle, slug, slots, bookingFields, initialTimeZone }: Props) {
+export function BookingFlow({
+  accountCode,
+  ownerSlug,
+  slug,
+  slots,
+  bookingFields,
+  initialTimeZone,
+  mode = 'personal',
+}: Props) {
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(
@@ -107,7 +117,8 @@ export function BookingFlow({ accountCode, handle, slug, slots, bookingFields, i
             className="flex flex-col gap-3 rounded-md border border-border bg-card p-4"
           >
             <input type="hidden" name="accountCode" value={accountCode} />
-            <input type="hidden" name="handle" value={handle} />
+            <input type="hidden" name="ownerSlug" value={ownerSlug} />
+            <input type="hidden" name="kind" value={mode} />
             <input type="hidden" name="slug" value={slug} />
             <input type="hidden" name="startUtc" value={selected} />
             <input type="hidden" name="timeZone" value={timeZone} />

@@ -9,6 +9,7 @@ const NAV = [
   { href: '/admin/bookings', label: 'Bookings', icon: '☑' },
   { href: '/admin/teams', label: 'Teams', icon: '👥' },
   { href: '/admin/connections', label: 'Connections', icon: '🔗' },
+  { href: '/admin/settings/general', label: 'General', icon: '⚙' },
   { href: '/admin/settings/booking-page', label: 'Booking Page', icon: '🎨' },
   { href: '/admin/settings/developer', label: 'Developer', icon: '⌨' },
 ];
