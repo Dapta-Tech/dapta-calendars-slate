@@ -10,8 +10,11 @@ import {
   confirmBooking,
   createApiKey,
   createTeamBooking,
+  createWebhook,
+  dispatchWebhooks,
   getTeamAvailability,
   getTeamProfile,
+  listBookings,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
@@ -232,6 +235,73 @@ describe('parity (SQLite in-memory)', () => {
     expect(principal?.accountId).toBe(accountId);
     expect(principal?.scopes).toContain('availability:read');
     expect(await verifyApiKey(db, 'wrong')).toBeNull();
+  });
+
+  it('M4 — listBookings honors an event-type allowlist (machine scope-leak fix)', async () => {
+    const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+
+    // Book the seeded intro-call at a free slot.
+    const s1 = await firstSlotMs(db, 'intro-call');
+    const b1 = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs: s1,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(b1.ok).toBe(true);
+
+    // A second event type + a booking under it.
+    await createEventType(db, accountId, memberId, {
+      slug: 'second-evt',
+      title: 'Second',
+      lengthMinutes: 30,
+      scheduleId: null,
+    });
+    const av2 = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'second-evt',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const b2 = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'second-evt',
+      startMs: new Date(av2!.slots[0]!).getTime(),
+      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+    });
+    expect(b2.ok).toBe(true);
+
+    const introEtId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM event_type WHERE slug='intro-call' AND account_id=${accountId}`))!.id;
+
+    const all = await listBookings(db, { accountId });
+    const scoped = await listBookings(db, { accountId, eventTypeIds: [introEtId] });
+    const none = await listBookings(db, { accountId, eventTypeIds: [] });
+
+    expect(none.items.length).toBe(0); // empty allowlist → nothing
+    expect(scoped.items.length).toBeGreaterThan(0);
+    expect(scoped.items.length).toBeLessThan(all.items.length); // second-evt excluded
+  });
+
+  it('M4 — createWebhook auto-mints a signing secret; dispatch signs with it', async () => {
+    const wh = await createWebhook(db, {
+      accountId,
+      subscriberUrl: 'https://198.51.100.11/hook',
+      eventTriggers: ['booking.created'],
+    });
+    expect(wh.secret).toMatch(/^whsec_/);
+
+    const calls: Array<{ headers: Record<string, string> }> = [];
+    const fakeFetch = (async (_url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ headers: init.headers });
+      return { ok: true } as Response;
+    }) as unknown as typeof fetch;
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    expect(sent).toBe(1);
+    expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
   });
 
   it('H1 — a pending booking HOLDS the slot: a second booking at the same slot is rejected', async () => {

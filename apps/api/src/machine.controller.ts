@@ -113,6 +113,9 @@ export class MachineController {
     const principal = await this.auth.resolveMachine(req, 'bookings:read');
     const res = await listBookings(this.db, {
       accountId: principal.accountId,
+      // Honor the key's resource allowlist: an event-type-scoped key must not
+      // read the whole account's bookings. null → unrestricted.
+      eventTypeIds: principal.eventTypeIds,
       from: q.from ? new Date(q.from).getTime() : undefined,
       to: q.to ? new Date(q.to).getTime() : undefined,
       status: q.status,

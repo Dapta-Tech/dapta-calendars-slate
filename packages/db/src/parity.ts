@@ -695,6 +695,12 @@ export async function listBookings(
     to?: number;
     status?: string;
     limit?: number;
+    /**
+     * Machine resource allowlist: when non-null, restrict to these event types
+     * (an event-type-scoped API key must not read the whole account). An empty
+     * array allows nothing; null/undefined means no event-type restriction.
+     */
+    eventTypeIds?: string[] | null;
   },
 ): Promise<{ items: BookingListItem[] }> {
   const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
@@ -703,6 +709,15 @@ export async function listBookings(
   if (args.from != null) conds.push(sql`start_ms >= ${args.from}`);
   if (args.to != null) conds.push(sql`start_ms < ${args.to}`);
   if (args.status) conds.push(sql`status = ${args.status}`);
+  if (args.eventTypeIds != null) {
+    if (args.eventTypeIds.length === 0) {
+      conds.push(sql`1 = 0`); // scoped key with an empty allowlist → nothing
+    } else {
+      const idExprs = args.eventTypeIds.map((id) => sql`${id}`);
+      const inList = idExprs.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
+      conds.push(sql`event_type_id IN (${inList})`);
+    }
+  }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   const rows = await db.all<{
     uid: string;
@@ -890,16 +905,20 @@ export async function createWebhook(
     teamId?: string;
     eventTypeId?: string;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; secret: string }> {
   const id = randomUUID();
+  // Always store a signing secret so payloads are never unsigned. If the caller
+  // didn't supply one we mint it and return it once (subscribers verify the
+  // X-Slate-Signature HMAC with it — see dispatchWebhooks).
+  const secret = args.secret ?? `whsec_${randomBytes(24).toString('base64url')}`;
   await db.run(
     sql`INSERT INTO webhook (id, account_id, member_id, team_id, event_type_id, subscriber_url,
           secret, event_triggers, active, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId ?? null}, ${args.teamId ?? null},
-          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${args.secret ?? null},
+          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${secret},
           ${jsonParam(db, args.eventTriggers)}, 1, ${Date.now()})`,
   );
-  return { id };
+  return { id, secret };
 }
 
 export async function deleteWebhook(db: Db, accountId: string, id: string): Promise<void> {
