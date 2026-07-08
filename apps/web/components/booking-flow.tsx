@@ -43,14 +43,19 @@ export function BookingFlow({
 
   if (result?.ok && result.booking) {
     const b = result.booking;
+    const pending = b.status === 'pending';
     return (
       <section className="rounded-md border border-border bg-card p-6 text-card-foreground">
-        <h2 className="mb-2 text-xl font-semibold">Booking confirmed</h2>
+        <h2 className="mb-2 text-xl font-semibold">
+          {pending ? 'Booking requested' : 'Booking confirmed'}
+        </h2>
         <p className="text-muted-foreground">
           {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          A confirmation was sent to {b.attendee.email}.
+          {pending
+            ? `Awaiting the host’s confirmation. We’ll email ${b.attendee.email} once it’s confirmed.`
+            : `A confirmation was sent to ${b.attendee.email}.`}
         </p>
       </section>
     );

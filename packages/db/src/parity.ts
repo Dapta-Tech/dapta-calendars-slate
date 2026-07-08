@@ -6,7 +6,7 @@
  * shape as repository.ts (raw portable SQL through the Db handle, JSON via the
  * parseJsonColumn/jsonParam helpers).
  */
-import { randomUUID, createHash, randomBytes } from 'node:crypto';
+import { randomUUID, createHash, randomBytes, createHmac } from 'node:crypto';
 import {
   computeSlots,
   generateManageToken,
@@ -615,6 +615,43 @@ export async function cancelBooking(
   };
 }
 
+/** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
+export async function confirmBooking(db: Db, uid: string): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid);
+  if (!b) return { ok: false, reason: 'NOT_FOUND' };
+  if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
+  const now = Date.now();
+  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
+    AND status = 'accepted' AND id <> ${b.id}
+    AND start_ms < ${b.end_ms} AND end_ms > ${b.start_ms} LIMIT 1`;
+  const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now} WHERE id = ${b.id}`;
+  const ok = await runGuardedUpdate(db, overlapSql, updateSql);
+  if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
+  return {
+    ok: true,
+    uid: b.uid,
+    startUtc: new Date(Number(b.start_ms)).toISOString(),
+    endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
+}
+
+/** Host declines a pending booking → rejected (releases the held slot). */
+export async function declineBooking(db: Db, uid: string, reason?: string): Promise<MutationOutcome> {
+  const b = await resolveBooking(db, uid);
+  if (!b) return { ok: false, reason: 'NOT_FOUND' };
+  if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
+  await db.run(
+    sql`UPDATE booking SET status = 'rejected', cancellation_reason = ${reason ?? null},
+        updated_at = ${Date.now()} WHERE id = ${b.id}`,
+  );
+  return {
+    ok: true,
+    uid: b.uid,
+    startUtc: new Date(Number(b.start_ms)).toISOString(),
+    endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
+}
+
 // --- Host bookings list ---------------------------------------------------
 
 export interface BookingListItem {
@@ -844,4 +881,49 @@ export async function createWebhook(
 
 export async function deleteWebhook(db: Db, accountId: string, id: string): Promise<void> {
   await db.run(sql`DELETE FROM webhook WHERE id = ${id} AND account_id = ${accountId}`);
+}
+
+/**
+ * Fire matching webhooks for a lifecycle event (best-effort, fire-and-forget).
+ * Each dispatch signs the JSON body with HMAC-SHA256 over the webhook's secret
+ * and sends it as `X-Slate-Signature: sha256=<hex>` (D17). One dispatch per
+ * subscription per event. Never throws — a failed webhook must not affect the
+ * booking. `fetchImpl` is injectable for tests.
+ */
+export async function dispatchWebhooks(
+  db: Db,
+  accountId: string,
+  event: string,
+  payload: unknown,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number> {
+  const hooks = await db.all<{
+    id: string;
+    subscriber_url: string;
+    secret: string | null;
+    event_triggers: unknown;
+    active: number;
+  }>(
+    sql`SELECT id, subscriber_url, secret, event_triggers, active FROM webhook
+        WHERE account_id = ${accountId} AND active = 1`,
+  );
+  const body = JSON.stringify({ event, data: payload });
+  let sent = 0;
+  await Promise.all(
+    hooks.map(async (h) => {
+      const triggers = parseJsonColumn<string[]>(h.event_triggers, []);
+      if (!triggers.includes(event)) return;
+      const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': event };
+      if (h.secret) {
+        headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+      }
+      try {
+        await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
+        sent++;
+      } catch {
+        /* best-effort — swallow */
+      }
+    }),
+  );
+  return sent;
 }

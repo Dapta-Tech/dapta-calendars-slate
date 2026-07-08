@@ -4,6 +4,8 @@ import {
   cancelBooking,
   createBooking,
   createTeamBooking,
+  dispatchWebhooks,
+  getAccountByCode,
   getAvailability,
   getPublicProfile,
   getTeamAvailability,
@@ -120,6 +122,19 @@ export class BookingService {
           manageUrl,
         })
         .catch(() => undefined);
+      void getAccountByCode(this.db, input.accountCode)
+        .then((acc) =>
+          acc
+            ? dispatchWebhooks(this.db, acc.id, 'booking.created', {
+                uid: b.uid,
+                status: b.status,
+                startUtc,
+                endUtc,
+                title: b.title,
+              })
+            : undefined,
+        )
+        .catch(() => undefined);
     }
 
     return {
@@ -187,6 +202,7 @@ export class BookingService {
         })
         .catch(() => undefined);
     }
+    this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
     return { uid: out.uid, status: 'cancelled' };
   }
 
@@ -215,7 +231,15 @@ export class BookingService {
         })
         .catch(() => undefined);
     }
+    this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     return { uid: out.uid, startUtc: out.startUtc, endUtc: out.endUtc };
+  }
+
+  /** Best-effort webhook dispatch for a booking lifecycle event. */
+  private fireWebhook(uid: string, event: string, data: Record<string, unknown>): void {
+    void resolveBooking(this.db, uid)
+      .then((bk) => (bk ? dispatchWebhooks(this.db, bk.account_id, event, data) : undefined))
+      .catch(() => undefined);
   }
 
   private mapMutation(reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE'): ServiceError {

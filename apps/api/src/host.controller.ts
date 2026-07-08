@@ -116,6 +116,24 @@ export class HostController {
     );
   }
 
+  @Post('host/bookings/:uid/confirm')
+  @HttpCode(200)
+  async hostConfirm(@Req() req: ReqLike, @Param('uid') uid: string) {
+    const p = await this.auth.resolveHost(req);
+    const out = await this.admin.confirm(p, uid);
+    if (!out.ok) throw new ConflictException({ error: out.reason, message: 'Cannot confirm.' });
+    return { uid, status: 'accepted' };
+  }
+
+  @Post('host/bookings/:uid/decline')
+  @HttpCode(200)
+  async hostDecline(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { reason?: string }) {
+    const p = await this.auth.resolveHost(req);
+    const out = await this.admin.decline(p, uid, body?.reason);
+    if (!out.ok) throw new ConflictException({ error: out.reason, message: 'Cannot decline.' });
+    return { uid, status: 'rejected' };
+  }
+
   // Connections.
   @Get('connections')
   async listConnections(@Req() req: ReqLike) {

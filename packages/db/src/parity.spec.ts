@@ -159,6 +159,64 @@ describe('parity (SQLite in-memory)', () => {
     expect((await checkHandleAvailable(db, accountId, 'api')).reason).toBe('reserved');
   });
 
+  it('requiresConfirmation → booking is pending, host confirm → accepted', async () => {
+    const { createEventType } = await import('./crud');
+    const account = await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM account WHERE code='acme'`);
+    const member = await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`);
+    const created = await createEventType(db, account!.id, member!.id, {
+      slug: 'confirm-me',
+      title: 'Needs Confirmation',
+      lengthMinutes: 30,
+      requiresConfirmation: true,
+      scheduleId: null,
+    });
+    expect(created.ok).toBe(true);
+    const av = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-me',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'confirm-me',
+      startMs: new Date(av!.slots[0]!).getTime(),
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+    });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.booking.status).toBe('pending');
+      const { confirmBooking } = await import('./parity');
+      const conf = await confirmBooking(db, out.booking.uid);
+      expect(conf.ok).toBe(true);
+      const b = await resolveBooking(db, out.booking.uid);
+      expect(b?.status).toBe('accepted');
+    }
+  });
+
+  it('dispatchWebhooks signs the body with HMAC and posts to subscribers', async () => {
+    const { createWebhook, dispatchWebhooks } = await import('./parity');
+    await createWebhook(db, {
+      accountId,
+      subscriberUrl: 'https://example.com/hook',
+      eventTriggers: ['booking.created'],
+      secret: 's3cret',
+    });
+    const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+    const fakeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      return { ok: true } as Response;
+    }) as unknown as typeof fetch;
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    expect(sent).toBe(1);
+    expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
+    // A non-matching event fires nothing.
+    const none = await dispatchWebhooks(db, accountId, 'booking.cancelled', {}, fakeFetch);
+    expect(none).toBe(0);
+  });
+
   it('branding persists and api keys verify', async () => {
     const memberId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
     await updateBranding(db, memberId, { brandColor: '#123456', style: { density: 'compact' } });

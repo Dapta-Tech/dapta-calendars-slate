@@ -2,9 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   checkHandleAvailable,
+  confirmBooking,
   createApiKey,
   createBooking,
   createConnection,
+  declineBooking,
   createWebhook,
   deleteConnection,
   deleteWebhook,
@@ -87,6 +89,14 @@ export class AdminService {
 
   hostCancel(_p: HostPrincipal, uid: string, reason?: string) {
     return cancelBooking(this.db, { uid, reason, byHost: true });
+  }
+
+  confirm(_p: HostPrincipal, uid: string) {
+    return confirmBooking(this.db, uid);
+  }
+
+  decline(_p: HostPrincipal, uid: string, reason?: string) {
+    return declineBooking(this.db, uid, reason);
   }
 
   // Connections (behind the CalendarProvider port — generic).

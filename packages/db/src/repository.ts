@@ -266,7 +266,7 @@ export async function loadBusyForHost(
 ): Promise<Interval[]> {
   const rows = await db.all<{ start_ms: number; end_ms: number }>(
     sql`SELECT start_ms, end_ms FROM booking
-        WHERE host_member_id = ${hostMemberId} AND status = 'accepted'
+        WHERE host_member_id = ${hostMemberId} AND status IN ('accepted','pending')
               AND start_ms < ${toMs} AND end_ms > ${fromMs}`,
   );
   return rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) }));
@@ -356,7 +356,7 @@ export async function getAvailability(
 function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: number): boolean {
   // SQLite synchronous read via the native drizzle instance (inside a txn).
   const row = db.sqlite!.drizzle.get<{ id: string }>(
-    sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId} AND status = 'accepted'
+    sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId} AND status IN ('accepted','pending')
         AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`,
   );
   return !!row;
@@ -393,6 +393,9 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
 
   // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
   // text param is cast on write. SQLite stores the same JSON as text.
+  // requiresConfirmation → the booking starts 'pending' (host confirms later);
+  // otherwise 'accepted'. Pending still HOLDS the slot (overlap check includes it).
+  const status = eventType.requires_confirmation ? 'pending' : 'accepted';
   const metaExpr = db.dialect === 'postgres' ? sql`${metadata}::jsonb` : sql`${metadata}`;
   const responsesExpr = jsonParam(db, args.answers ?? null);
   const insertBooking = sql`
@@ -400,7 +403,7 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
       created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
-      ${startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
+      ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
@@ -409,7 +412,7 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
 
   const record: BookingRecord = {
     uid,
-    status: 'accepted',
+    status,
     title,
     startMs,
     endMs,
@@ -439,7 +442,7 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   try {
     const conflicted = await pg.transaction(async (tx) => {
       const rows = (await tx.execute(
-        sql`SELECT id FROM booking WHERE host_member_id = ${member.id} AND status = 'accepted'
+        sql`SELECT id FROM booking WHERE host_member_id = ${member.id} AND status IN ('accepted','pending')
             AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`,
       )) as unknown as Array<{ id: string }>;
       if (rows.length > 0) return true;
