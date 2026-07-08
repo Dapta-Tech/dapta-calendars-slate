@@ -81,7 +81,7 @@ export interface EventTypeRow {
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' }
+  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' }
   | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
@@ -379,6 +379,19 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   if (args.idempotencyKey) {
     const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
     if (prior) return { ok: true, booking: prior.record, manageToken: '' };
+  }
+
+  // Hold validation at consume: a reservation that is missing or expired → 410.
+  // (The two-layer expiry: app-level release_at check here + the DB sweep.)
+  if (args.reservationUid) {
+    const hold = await db.get<{ release_at_ms: number }>(
+      sql`SELECT release_at_ms FROM slot_reservation WHERE uid = ${args.reservationUid} LIMIT 1`,
+    );
+    if (!hold) return { ok: false, reason: 'RESERVATION_EXPIRED' };
+    if (Number(hold.release_at_ms) <= Date.now()) {
+      await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+      return { ok: false, reason: 'RESERVATION_EXPIRED' };
+    }
   }
 
   const startMs = args.startMs;

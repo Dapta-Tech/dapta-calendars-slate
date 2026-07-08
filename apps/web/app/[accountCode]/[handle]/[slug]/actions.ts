@@ -40,7 +40,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     answers: answersObj,
   });
   if (!parsed.success) {
-    return { ok: false, error: 'BAD_REQUEST', message: parsed.error.issues[0]?.message };
+    return { ok: false, status: 400, error: 'BAD_REQUEST', message: parsed.error.issues[0]?.message };
   }
   return postBooking(parsed.data);
 }

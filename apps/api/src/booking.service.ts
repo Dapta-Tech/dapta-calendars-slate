@@ -100,6 +100,8 @@ export class BookingService {
         return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
       if (outcome.reason === 'INVALID')
         return { error: 'INTAKE_INVALID', message: outcome.message, status: 400 };
+      if (outcome.reason === 'RESERVATION_EXPIRED')
+        return { error: 'RESERVATION_EXPIRED', message: 'Your hold on this time expired. Please pick a time again.', status: 410 };
       return { error: 'SLOT_TAKEN', message: 'That time was just booked. Pick another slot.', status: 409 };
     }
 

@@ -22,9 +22,9 @@ export default async function ProfilePage({
     <BrandedShell brandColor={m.brandColor} style={m.style}>
       <main className="mx-auto max-w-2xl px-6 py-12">
         {m.coverUrl ? (
-          <img src={m.coverUrl} alt="" className="mb-4 h-32 w-full rounded-md object-cover" />
+          <img src={m.coverUrl} alt="" className="bp-cover mb-4 h-32 w-full rounded-md object-cover" />
         ) : (
-          <div className="mb-4 h-24 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
+          <div className="bp-cover mb-4 h-24 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
         )}
         <header className="mb-8 flex items-center gap-4">
           {m.avatarUrl ? (
@@ -49,8 +49,7 @@ export default async function ProfilePage({
             <li key={et.slug}>
               <Link
                 href={`/${accountCode}/${handle}/${et.slug}`}
-                style={{ borderRadius: 'var(--bp-radius, 0.5rem)' }}
-                className="flex items-center justify-between border border-border bg-card p-4 text-card-foreground transition-transform hover:border-primary active:scale-[0.99]"
+                className="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]"
               >
                 <span className="flex flex-col">
                   <span className="font-medium">{et.title}</span>

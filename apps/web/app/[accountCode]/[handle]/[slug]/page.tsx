@@ -48,7 +48,6 @@ export default async function BookingPage({
           slots={availability.slots}
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
-          style={profile.member.style as Record<string, string> | null}
         />
       </main>
     </BrandedShell>

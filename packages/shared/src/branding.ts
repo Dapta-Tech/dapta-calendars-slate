@@ -199,12 +199,28 @@ export function brandingStyleVars(b: PublicBranding): Record<string, string> {
 }
 
 export function brandingClass(b: PublicBranding): string {
+  return brandingClassOf(b);
+}
+
+/**
+ * Emit the host-class list from just the (possibly partial) style axes — the
+ * bridge that makes the 5 class-driven axes reach the DOM. Pair with the
+ * `.branded-surface` CSS. `template`/`cardStyle`/`slotLayout`/`dayGroup`/
+ * `slotSelect` render via these classes; `corners`/`buttons`/`density`/`font`
+ * render via the `--bp-*` custom properties (widgetStyleVars).
+ */
+export function brandingClassOf(
+  axes: Partial<
+    Pick<PublicBranding, 'template' | 'cardStyle' | 'slotLayout' | 'dayGroup' | 'slotSelect'>
+  >,
+): string {
   return [
-    `tpl-${b.template}`,
-    `card-${b.cardStyle ?? DEFAULT_CARD_STYLE}`,
-    `slots-${b.slotLayout ?? DEFAULT_SLOT_LAYOUT}`,
-    `day-${b.dayGroup ?? DEFAULT_DAY_GROUP}`,
-    `sel-${b.slotSelect ?? DEFAULT_SLOT_SELECT}`,
+    'branded-surface',
+    `tpl-${axes.template ?? 'classic'}`,
+    `card-${axes.cardStyle ?? DEFAULT_CARD_STYLE}`,
+    `slots-${axes.slotLayout ?? DEFAULT_SLOT_LAYOUT}`,
+    `day-${axes.dayGroup ?? DEFAULT_DAY_GROUP}`,
+    `sel-${axes.slotSelect ?? DEFAULT_SLOT_SELECT}`,
   ].join(' ');
 }
 

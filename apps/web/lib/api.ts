@@ -59,8 +59,8 @@ export async function postTeamBooking(
     },
   );
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, booking: json as unknown as BookingView };
-  return { ok: false, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
+  if (res.status === 201) return { ok: true, status: 201, booking: json as unknown as BookingView };
+  return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
 }
 
 export function getAvailability(params: {
@@ -84,9 +84,43 @@ export function getAvailability(params: {
 
 export interface BookResult {
   ok: boolean;
+  /** The HTTP status — surfaced so the UI can handle 409 (taken) / 410 (expired). */
+  status: number;
   booking?: BookingView;
   error?: string;
   message?: string;
+}
+
+export interface ReserveResult {
+  ok: boolean;
+  status: number;
+  reservationUid?: string;
+  expiresAt?: string;
+  message?: string;
+}
+
+/** Create a soft hold on a slot (public reserve→confirm two-step). */
+export async function postReservation(body: {
+  accountCode: string;
+  handle: string;
+  slug: string;
+  startUtc: string;
+}): Promise<ReserveResult> {
+  const res = await fetch(`${API_URL}/v1/reservations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status === 201)
+    return {
+      ok: true,
+      status: 201,
+      reservationUid: json.reservationUid as string,
+      expiresAt: json.expiresAt as string,
+    };
+  return { ok: false, status: res.status, message: (json.message as string) ?? 'Could not hold the time.' };
 }
 
 export function getManageView(uid: string, token: string): Promise<BookingView | null> {
@@ -121,9 +155,10 @@ export async function postBooking(body: unknown): Promise<BookResult> {
     cache: 'no-store',
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, booking: json as unknown as BookingView };
+  if (res.status === 201) return { ok: true, status: 201, booking: json as unknown as BookingView };
   return {
     ok: false,
+    status: res.status,
     error: (json.error as string) ?? 'ERROR',
     message: (json.message as string) ?? 'Something went wrong.',
   };

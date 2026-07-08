@@ -4,7 +4,7 @@ import { useActionState, useMemo, useState } from 'react';
 import { groupSlotsByDay, detectTimeZone, formatSlotDateTime, type Slot } from '@slate/shared';
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
-import type { BookResult } from '@/lib/api';
+import { postReservation, type BookResult } from '@/lib/api';
 
 interface Props {
   accountCode: string;
@@ -15,14 +15,19 @@ interface Props {
   bookingFields: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
-  /** Branding axes (slotLayout/dayGroup/slotSelect) — from the host's studio. */
-  style?: Record<string, string> | null;
+}
+
+interface Hold {
+  uid: string;
+  expiresAt: string;
 }
 
 /**
- * The interactive island: pick a timezone, pick a slot, fill the form, book.
- * Slots are absolute UTC instants, so switching timezone regroups them with no
- * refetch. Submission goes through the bookAction Server Action.
+ * The interactive island: pick a timezone, pick a slot (which places a soft
+ * HOLD), fill the form, book. Slots are absolute UTC instants (tz switch
+ * regroups with no refetch). Errors surface by HTTP status: 409 slot-taken and
+ * 410 hold-expired both offer a Retry (R22 error+retry). Branding renders via
+ * the ancestor `.branded-surface` classes + `--bp-*` vars (preview == prod).
  */
 export function BookingFlow({
   accountCode,
@@ -32,42 +37,88 @@ export function BookingFlow({
   bookingFields,
   initialTimeZone,
   mode = 'personal',
-  style,
 }: Props) {
-  const slotLayout = style?.slotLayout ?? 'grid';
-  const dayGroup = style?.dayGroup ?? 'flat';
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
-  const [result, formAction, pending] = useActionState<BookResult | null, FormData>(
-    bookAction,
-    null,
-  );
+  const [hold, setHold] = useState<Hold | null>(null);
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
 
-  // On the client, prefer the visitor's own detected zone once mounted.
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
 
+  async function pick(startUtc: string) {
+    setSelected(startUtc);
+    setDismissed(false);
+    setHoldError(null);
+    setHold(null);
+    // Team events round-robin the host at booking time — no per-host hold.
+    if (mode !== 'personal') return;
+    const r = await postReservation({ accountCode, handle: ownerSlug, slug, startUtc });
+    if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
+    else setHoldError(r.message ?? 'Could not hold this time.');
+  }
+
+  function retry() {
+    setSelected(null);
+    setHold(null);
+    setHoldError(null);
+    setDismissed(true);
+  }
+
+  // --- Confirmed ----------------------------------------------------------
   if (result?.ok && result.booking) {
     const b = result.booking;
-    const pending = b.status === 'pending';
+    const isPending = b.status === 'pending';
     return (
-      <section className="rounded-md border border-border bg-card p-6 text-card-foreground">
+      <section className="bp-card border border-border bg-card p-6 text-card-foreground">
         <h2 className="mb-2 text-xl font-semibold">
-          {pending ? 'Booking requested' : 'Booking confirmed'}
+          {isPending ? 'Booking requested' : 'Booking confirmed'}
         </h2>
         <p className="text-muted-foreground">
           {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {pending
+          {isPending
             ? `Awaiting the host’s confirmation. We’ll email ${b.attendee.email} once it’s confirmed.`
             : `A confirmation was sent to ${b.attendee.email}.`}
         </p>
+        {b.manageUrl ? (
+          <a
+            href={b.manageUrl}
+            className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
+          >
+            Manage your booking (reschedule or cancel) →
+          </a>
+        ) : null}
+      </section>
+    );
+  }
+
+  const conflict = result && !result.ok && !dismissed && (result.status === 409 || result.status === 410);
+  const intakeError = result && !result.ok && !dismissed && result.status === 400;
+
+  // --- Conflict (409/410): R22 error + retry ------------------------------
+  if (conflict) {
+    return (
+      <section className="bp-card border border-destructive bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold">
+          {result!.status === 410 ? 'Your hold expired' : 'That time was just taken'}
+        </h2>
+        <p className="mb-4 text-sm text-muted-foreground">{result!.message}</p>
+        <button
+          type="button"
+          onClick={retry}
+          className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98]"
+        >
+          Pick another time
+        </button>
       </section>
     );
   }
 
   return (
-    <div className="grid gap-8 md:grid-cols-[1fr_320px]">
+    <div className="bp-canvas grid gap-8 md:grid-cols-[1fr_320px]">
       <section aria-label="Available times">
         <div className="mb-4 flex items-center gap-2">
           <label htmlFor="tz" className="text-sm text-muted-foreground">
@@ -92,32 +143,18 @@ export function BookingFlow({
         {days.length === 0 ? (
           <p className="text-muted-foreground">No available times in this range.</p>
         ) : (
-          <div className="flex max-h-[28rem] flex-col gap-6 overflow-y-auto pr-2">
+          <div className="flex max-h-[28rem] flex-col overflow-y-auto pr-2">
             {days.map((day) => (
-              <div
-                key={day.dayKey}
-                className={dayGroup === 'boxed' ? 'rounded-md border border-border p-3' : ''}
-                style={dayGroup === 'boxed' ? { borderRadius: 'var(--bp-radius, 0.5rem)' } : undefined}
-              >
+              <div key={day.dayKey} className="bp-day">
                 <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{day.heading}</h3>
-                <div
-                  className={
-                    slotLayout === 'list' ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-3 gap-2 sm:grid-cols-4'
-                  }
-                >
+                <div className="bp-slots">
                   {day.slots.map((s) => (
                     <button
                       key={s.startUtc}
                       type="button"
-                      onClick={() => setSelected(s.startUtc)}
+                      onClick={() => pick(s.startUtc)}
                       aria-pressed={selected === s.startUtc}
-                      style={{ borderRadius: 'var(--bp-btn-radius, 0.5rem)' }}
-                      className={
-                        'border px-2 py-2 text-sm transition-transform active:scale-[0.97] ' +
-                        (selected === s.startUtc
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border bg-card hover:border-primary')
-                      }
+                      className="bp-slot text-sm"
                     >
                       {s.label}
                     </button>
@@ -131,38 +168,33 @@ export function BookingFlow({
 
       <aside aria-label="Your details">
         {selected ? (
-          <form
-            action={formAction}
-            style={{ borderRadius: 'var(--bp-radius, 0.5rem)' }}
-            className="flex flex-col gap-3 border border-border bg-card p-4"
-          >
+          <form action={formAction} className="bp-card flex flex-col gap-3 border border-border bg-card p-4">
             <input type="hidden" name="accountCode" value={accountCode} />
             <input type="hidden" name="ownerSlug" value={ownerSlug} />
             <input type="hidden" name="kind" value={mode} />
             <input type="hidden" name="slug" value={slug} />
             <input type="hidden" name="startUtc" value={selected} />
             <input type="hidden" name="timeZone" value={timeZone} />
+            {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
 
-            <p className="text-sm text-muted-foreground">
-              {formatSlotDateTime(selected, timeZone)}
-            </p>
+            <p className="text-sm text-muted-foreground">{formatSlotDateTime(selected, timeZone)}</p>
+            {hold ? (
+              <p className="text-xs text-muted-foreground">
+                Held until {new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(hold.expiresAt))}
+              </p>
+            ) : holdError ? (
+              <p className="text-xs text-destructive">{holdError}</p>
+            ) : null}
+
             <label className="flex flex-col gap-1 text-sm">
               Your name
-              <input
-                name="name"
-                required
-                className="rounded-md border border-input bg-background px-3 py-2"
-              />
+              <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               Your email
-              <input
-                name="email"
-                type="email"
-                required
-                className="rounded-md border border-input bg-background px-3 py-2"
-              />
+              <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
+
             {bookingFields.map((f) => (
               <label key={f.name} className="flex flex-col gap-1 text-sm">
                 {f.label}
@@ -189,22 +221,15 @@ export function BookingFlow({
 
             <label className="flex flex-col gap-1 text-sm">
               Notes (optional)
-              <textarea
-                name="notes"
-                rows={2}
-                className="rounded-md border border-input bg-background px-3 py-2"
-              />
+              <textarea name="notes" rows={2} className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 
-            {result && !result.ok ? (
-              <p className="text-sm text-destructive">{result.message}</p>
-            ) : null}
+            {intakeError ? <p className="text-sm text-destructive">{result!.message}</p> : null}
 
             <button
               type="submit"
               disabled={pending}
-              style={{ borderRadius: 'var(--bp-btn-radius, 0.5rem)' }}
-              className="bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+              className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98] disabled:opacity-60"
             >
               {pending ? 'Confirming…' : 'Confirm booking'}
             </button>

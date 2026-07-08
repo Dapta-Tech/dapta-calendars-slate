@@ -84,6 +84,25 @@ describe('parity (SQLite in-memory)', () => {
     expect(out.ok).toBe(true);
   });
 
+  it('booking with an EXPIRED hold is rejected (410 path)', async () => {
+    const { sql } = await import('drizzle-orm');
+    const startMs = await firstSlotMs(db);
+    const held = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs });
+    // Force the hold to be expired.
+    await db.run(sql`UPDATE slot_reservation SET release_at_ms = ${Date.now() - 1000} WHERE uid = ${held!.uid}`);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+      reservationUid: held!.uid,
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe('RESERVATION_EXPIRED');
+  });
+
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
     const startMs = await firstSlotMs(db);
     const created = await createBooking(db, {

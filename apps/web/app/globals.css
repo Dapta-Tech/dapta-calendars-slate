@@ -56,3 +56,95 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Booking-page branding classes (R25). The .branded-surface wrapper carries
+ * brandingClassOf() output + the --bp-* custom properties (widgetStyleVars).
+ * These rules make ALL 9 axes reach the DOM so the studio preview == the live
+ * public page. Corners/buttons/density/font come from the vars; cardStyle/
+ * slotLayout/dayGroup/slotSelect/template come from these classes.
+ * ------------------------------------------------------------------------- */
+.branded-surface {
+  font-family: var(--bp-font-body);
+}
+.branded-surface .bp-card {
+  border-radius: var(--bp-radius);
+  padding: var(--bp-pad);
+}
+/* cardStyle */
+.branded-surface.card-outline .bp-card {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.branded-surface.card-elevated .bp-card {
+  border: none;
+  background: var(--card);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.branded-surface.card-filled .bp-card {
+  border: none;
+  background: var(--accent-soft);
+}
+/* slotLayout */
+.branded-surface .bp-slots {
+  display: grid;
+  gap: var(--bp-gap);
+}
+.branded-surface.slots-grid .bp-slots {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .branded-surface.slots-grid .bp-slots {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.branded-surface.slots-list .bp-slots {
+  grid-template-columns: 1fr;
+}
+/* dayGroup */
+.branded-surface .bp-day + .bp-day {
+  margin-top: var(--bp-gap);
+}
+.branded-surface.day-boxed .bp-day {
+  border: 1px solid var(--border);
+  border-radius: var(--bp-radius);
+  padding: var(--bp-pad);
+}
+/* slot chip base + selected treatment (slotSelect) */
+.branded-surface .bp-slot {
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius);
+  padding: var(--bp-slot-pad);
+  background: var(--card);
+  text-align: center;
+  transition: transform 120ms var(--ease-standard, ease);
+}
+.branded-surface .bp-slot:hover {
+  border-color: var(--accent);
+}
+.branded-surface .bp-slot:active {
+  transform: scale(0.97);
+}
+.branded-surface.sel-soft .bp-slot[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--foreground);
+}
+.branded-surface.sel-solid .bp-slot[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+/* accent buttons on branded surfaces */
+.branded-surface .bp-btn {
+  border-radius: var(--bp-btn-radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+/* template: banded shows a cover band; split widens the canvas */
+.branded-surface.tpl-banded .bp-cover {
+  height: 7rem;
+}
+.branded-surface.tpl-split .bp-canvas {
+  max-width: 44rem;
+}

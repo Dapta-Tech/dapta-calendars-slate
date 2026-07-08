@@ -1,11 +1,20 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { accentVars, widgetStyleVars, clampAccent, onAccent, DEFAULT_ACCENT } from '@slate/shared';
+import {
+  accentVars,
+  widgetStyleVars,
+  brandingClassOf,
+  clampAccent,
+  onAccent,
+  DEFAULT_ACCENT,
+} from '@slate/shared';
 
 /**
  * Wraps a public surface with the host's branding — the SAME engine output the
  * studio preview uses (preview == prod). Applies the accent (AA-clamped) as the
- * page's `--primary` so all existing `bg-primary`/`text-primary-foreground`
- * components pick up the brand color, plus the widget vars (radii/spacing/font).
+ * page's `--primary` and the widget vars (radii/spacing/font), AND emits
+ * brandingClassOf() so the class-driven axes (cardStyle/slotLayout/dayGroup/
+ * slotSelect/template) render via the .branded-surface CSS. All 9 axes reach the
+ * DOM through this single wrapper.
  */
 export function BrandedShell({
   brandColor,
@@ -29,8 +38,19 @@ export function BrandedShell({
     '--primary': accent,
     '--primary-foreground': onAccent(accent),
     '--ring': accent,
-    fontFamily: 'var(--bp-font-body)',
   } as CSSProperties;
 
-  return <div style={vars}>{children}</div>;
+  const cls = brandingClassOf({
+    template: axes.template as never,
+    cardStyle: axes.cardStyle as never,
+    slotLayout: axes.slotLayout as never,
+    dayGroup: axes.dayGroup as never,
+    slotSelect: axes.slotSelect as never,
+  });
+
+  return (
+    <div className={cls} style={vars}>
+      {children}
+    </div>
+  );
 }

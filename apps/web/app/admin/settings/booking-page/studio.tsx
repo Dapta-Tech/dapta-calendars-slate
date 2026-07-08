@@ -6,6 +6,7 @@ import {
   THEME_PRESETS,
   accentVars,
   widgetStyleVars,
+  brandingClassOf,
   clampAccent,
   accentWasAdjusted,
   accentLabelContrast,
@@ -331,10 +332,7 @@ export function Studio(init: StudioInit) {
           </div>
 
           <div className="rounded-md border border-border p-6" style={previewVars}>
-            <div
-              className={device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}
-              style={{ fontFamily: 'var(--bp-font-body)' }}
-            >
+            <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
               {surface === 'profile' ? (
                 <ProfilePreview
                   displayName={displayName}
@@ -345,7 +343,7 @@ export function Studio(init: StudioInit) {
                   eventTypes={init.eventTypes}
                 />
               ) : (
-                <BookingPreview accent={accent} axes={axes} />
+                <BookingPreview accent={accent} />
               )}
             </div>
           </div>
@@ -373,9 +371,9 @@ function ProfilePreview({
   return (
     <div>
       {coverUrl ? (
-        <img src={coverUrl} alt="" className="mb-3 h-24 w-full rounded-md object-cover" />
+        <img src={coverUrl} alt="" className="bp-cover mb-3 h-24 w-full rounded-md object-cover" />
       ) : (
-        <div className="mb-3 h-20 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
+        <div className="bp-cover mb-3 h-20 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
       )}
       <div className="mb-4 flex items-center gap-3">
         {avatarUrl ? (
@@ -397,16 +395,7 @@ function ProfilePreview({
       </div>
       <div className="flex flex-col" style={{ gap: 'var(--bp-gap)' }}>
         {(eventTypes.length ? eventTypes : [{ slug: 'intro', title: 'Intro Call', lengthMinutes: 30 }]).map((et) => (
-          <div
-            key={et.slug}
-            className="flex items-center justify-between"
-            style={{
-              borderRadius: 'var(--bp-radius)',
-              padding: 'var(--bp-pad)',
-              border: '1px solid var(--border)',
-              background: 'var(--card)',
-            }}
-          >
+          <div key={et.slug} className="bp-card flex items-center justify-between">
             <span className="font-medium">{et.title}</span>
             <span className="text-sm text-muted-foreground">{et.lengthMinutes} min</span>
           </div>
@@ -416,37 +405,18 @@ function ProfilePreview({
   );
 }
 
-function BookingPreview({ accent, axes }: { accent: string; axes: Axes }) {
+function BookingPreview({ accent: _accent }: { accent: string }) {
   return (
     <div>
-      <div
-        className="mb-4"
-        style={{
-          borderRadius: 'var(--bp-radius)',
-          padding: 'var(--bp-pad)',
-          border: axes.cardStyle === 'outline' ? '1px solid var(--border)' : 'none',
-          background: axes.cardStyle === 'filled' ? 'var(--accent-soft)' : 'var(--card)',
-          boxShadow: axes.cardStyle === 'elevated' ? '0 6px 20px rgba(0,0,0,0.25)' : 'none',
-        }}
-      >
+      <div className="bp-card mb-4">
         <div className="font-medium">Intro Call</div>
         <div className="text-sm text-muted-foreground">30 min</div>
       </div>
-      <div className={axes.slotLayout === 'list' ? 'flex flex-col' : 'flex flex-wrap'} style={{ gap: 'var(--bp-gap)' }}>
+      <div className="bp-slots">
         {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-          <span
-            key={s}
-            style={{
-              borderRadius: 'var(--bp-btn-radius)',
-              padding: 'var(--bp-slot-pad)',
-              border: '1px solid var(--accent)',
-              background: i === 0 ? 'var(--accent)' : axes.slotSelect === 'solid' ? 'transparent' : 'transparent',
-              color: i === 0 ? onAccent(clampAccent(accent)) : 'var(--foreground)',
-            }}
-            className="text-center text-sm"
-          >
+          <button key={s} type="button" aria-pressed={i === 0} className="bp-slot text-sm">
             {s}
-          </span>
+          </button>
         ))}
       </div>
     </div>
