@@ -7,6 +7,7 @@ export * from './client';
 export * from './repository';
 export * from './parity';
 export * from './crud';
+export * from './calendar-refs';
 export * from './webhook-url';
 export { migrate } from './migrate';
 export { seed, type SeedResult } from './seed';
