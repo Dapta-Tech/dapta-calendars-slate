@@ -11,7 +11,7 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "dev": "pnpm build:packages && pnpm setup && turbo run dev",
+    "dev": "pnpm run build:packages && pnpm run db:setup && turbo run dev",
     "build": "turbo run build",
     "build:packages": "turbo run build --filter=./packages/*",
     "lint": "turbo run lint",
@@ -20,7 +20,7 @@
     "db:migrate": "pnpm --filter @slate/db migrate",
     "db:seed": "pnpm --filter @slate/db seed",
     "db:reset": "pnpm --filter @slate/db reset",
-    "setup": "pnpm db:migrate && pnpm db:seed",
+    "db:setup": "pnpm run db:migrate && pnpm run db:seed",
     "changeset": "changeset",
     "publish-gate": "bash scripts/publish-gate.sh",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
