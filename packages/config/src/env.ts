@@ -1,0 +1,72 @@
+/**
+ * Central environment schema (zod). Validated once at server startup; fails
+ * loud on a missing *required* production var, never silently. A bare fork with
+ * NOTHING set must still boot — so every var has a safe default that selects the
+ * zero-infra path (SQLite, log-only email, local auth).
+ *
+ * `NEXT_PUBLIC_*` client vars are validated separately (see `clientEnvSchema`)
+ * because only they may cross into the browser bundle — a server secret in a
+ * client bundle is a leak.
+ */
+import { z } from 'zod';
+
+/** Coerce common truthy/falsey strings to boolean. */
+const boolish = z
+  .string()
+  .transform((v) => v === 'true' || v === '1' || v === 'yes')
+  .pipe(z.boolean());
+
+export const serverEnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+
+  // Database — unset selects SQLite (zero-infra). `file:` = SQLite, `postgres://` = pg.
+  DATABASE_URL: z.string().default('file:./.data/dev.db'),
+
+  // API
+  API_PORT: z.coerce.number().int().positive().default(4000),
+  PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
+
+  // Email / notifications
+  EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),
+  MAIL_FROM_EMAIL: z.string().default('bookings@example.com'),
+  MAIL_FROM_NAME: z.string().default('Calendars'),
+
+  // SMTP adapter
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_SECURE: boolish.optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+
+  // Generic HTTP mailer adapter
+  EMAIL_HTTP_ENDPOINT: z.string().url().optional(),
+  EMAIL_HTTP_TOKEN: z.string().optional(),
+
+  // Auth — unset selects the local dev stub.
+  AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
+});
+
+export type ServerEnv = z.infer<typeof serverEnvSchema>;
+
+export const clientEnvSchema = z.object({
+  NEXT_PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
+});
+
+export type ClientEnv = z.infer<typeof clientEnvSchema>;
+
+/** Parse + validate server env, throwing a readable error on misconfiguration. */
+export function loadServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
+  const parsed = serverEnvSchema.safeParse(source);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('\n');
+    throw new Error(`Invalid environment configuration:\n${issues}`);
+  }
+  return parsed.data;
+}
+
+/** True when DATABASE_URL points at Postgres (vs SQLite). */
+export function isPostgresUrl(url: string): boolean {
+  return url.startsWith('postgres://') || url.startsWith('postgresql://');
+}

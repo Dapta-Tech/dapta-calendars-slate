@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# Publish gate — the hard check that must pass before this repo is ever made
+# public, and on every PR so the tree stays publishable. Three layers:
+#   1. gitleaks    — secret patterns (keys, tokens, credentialed URLs)
+#   2. trufflehog  — high-entropy + verified-secret detection (second engine)
+#   3. an internal-token grep — the project-specific denylist the generic
+#      scanners don't know about.
+#
+# Layers 1 & 2 are skipped with a warning if the tools aren't installed locally
+# (CI installs them). Layer 3 always runs — it needs nothing but grep.
+#
+# Usage: bash scripts/publish-gate.sh
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+FAIL=0
+
+echo "== publish-gate: internal-token scan =="
+# The denylist: internal hosts, cloud/account markers, internal service names,
+# and WIP markers that must never reach public history. Extend as needed.
+PATTERN='dapta\.(ai|dev)|amazonaws|\bbooking_ms\b|dapta_lab|dapta-iam|integration\.app|apps-configs-flux2|DO[ -]NOT[ -]MERGE'
+
+# Scan tracked/working files, excluding vendored/build/self paths. The deploy/
+# overlay is gitignored (never in public history) so it is not scanned here.
+MATCHES=$(grep -RInE "$PATTERN" \
+  --exclude-dir=node_modules \
+  --exclude-dir=.git \
+  --exclude-dir=dist \
+  --exclude-dir=.next \
+  --exclude-dir=.turbo \
+  --exclude-dir=deploy \
+  --exclude=publish-gate.sh \
+  . 2>/dev/null)
+
+if [ -n "$MATCHES" ]; then
+  echo "FAIL: internal tokens found in tree:"
+  echo "$MATCHES"
+  FAIL=1
+else
+  echo "OK: no internal tokens found."
+fi
+
+echo
+echo "== publish-gate: gitleaks =="
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks detect --no-banner --redact -v || FAIL=1
+  gitleaks detect --no-git --no-banner --redact -v || FAIL=1
+else
+  echo "WARN: gitleaks not installed — skipped locally (runs in CI)."
+fi
+
+echo
+echo "== publish-gate: trufflehog =="
+if command -v trufflehog >/dev/null 2>&1; then
+  trufflehog filesystem --no-update --fail --results=verified,unknown . || FAIL=1
+else
+  echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
+fi
+
+echo
+if [ "$FAIL" -ne 0 ]; then
+  echo "publish-gate: FAILED — do not publish."
+  exit 1
+fi
+echo "publish-gate: PASSED."
