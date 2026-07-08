@@ -202,7 +202,9 @@ describe('parity (SQLite in-memory)', () => {
     const { createWebhook, dispatchWebhooks } = await import('./parity');
     await createWebhook(db, {
       accountId,
-      subscriberUrl: 'https://example.com/hook',
+      // Public IP literal → the SSRF guard passes without a real DNS lookup,
+      // keeping this HMAC assertion deterministic and offline-safe.
+      subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
       secret: 's3cret',
     });

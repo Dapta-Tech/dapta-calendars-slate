@@ -29,6 +29,7 @@ import {
   resolveScheduleTimeZone,
   type BookingFieldDef,
 } from './repository';
+import { checkWebhookUrl } from './webhook-url';
 
 // --- Reservation holds ----------------------------------------------------
 
@@ -935,6 +936,9 @@ export async function dispatchWebhooks(
     hooks.map(async (h) => {
       const triggers = parseJsonColumn<string[]>(h.event_triggers, []);
       if (!triggers.includes(event)) return;
+      // Re-validate at egress (defends against a URL that resolved public at
+      // creation but was later re-pointed at a private address — DNS rebinding).
+      if (!(await checkWebhookUrl(h.subscriber_url)).ok) return;
       const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': event };
       if (h.secret) {
         headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;

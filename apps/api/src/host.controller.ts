@@ -14,6 +14,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { brandingSchema } from '@slate/types';
+import { checkWebhookUrl } from '@slate/db';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
 import { AuthService, type ReqLike } from './auth.service';
@@ -183,6 +184,12 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     if (!body?.subscriberUrl)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'subscriberUrl required' });
+    const urlCheck = await checkWebhookUrl(body.subscriberUrl);
+    if (!urlCheck.ok)
+      throw new BadRequestException({
+        error: 'INVALID_WEBHOOK_URL',
+        message: `Subscriber URL rejected (${urlCheck.reason}). Must be a public https:// endpoint.`,
+      });
     return this.admin.createWebhook(p, { subscriberUrl: body.subscriberUrl, eventTriggers: body.eventTriggers ?? [], secret: body.secret });
   }
   @Delete('webhooks/:id')
