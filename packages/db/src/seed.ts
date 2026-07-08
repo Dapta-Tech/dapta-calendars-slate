@@ -81,6 +81,73 @@ export async function seed(db: Db): Promise<SeedResult> {
           ${tomorrow10}, ${tomorrow10 + 30 * 60_000}, 'accepted', ${null}, ${now}, ${now})`,
   );
 
+  // A dialect-aware JSON literal (jsonb on Postgres, text on SQLite).
+  const j = (v: unknown) =>
+    db.dialect === 'postgres' ? sql`${JSON.stringify(v)}::jsonb` : sql`${JSON.stringify(v)}`;
+
+  // Intake: a required "company" question on the Intro Call.
+  await db.run(
+    sql`UPDATE event_type SET booking_fields = ${j([
+      { name: 'company', label: 'Company', type: 'text', required: true },
+      { name: 'topic', label: 'What would you like to discuss?', type: 'textarea', required: false },
+    ])} WHERE id = ${eventTypeId}`,
+  );
+
+  // Branding / studio persistence on the host's booking page.
+  await db.run(
+    sql`UPDATE member SET brand_color = ${'#CBE84F'}, booking_page_style = ${j({
+      cardStyle: 'bordered',
+      cornerRadius: 'rounded',
+      buttonStyle: 'solid',
+      density: 'comfortable',
+      font: 'sans',
+      slotShape: 'rectangle',
+      themeMode: 'dark',
+      showCover: true,
+    })} WHERE id = ${memberId}`,
+  );
+
+  // A second host + a round-robin team so team availability/booking works.
+  const jordanId = randomUUID();
+  const jordanSchedId = randomUUID();
+  await db.run(
+    sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
+        VALUES (${jordanId}, ${accountId}, ${'jordan-lee'}, ${'Jordan Lee'}, ${'jordan@example.com'}, ${'America/New_York'}, ${jordanSchedId}, ${now})`,
+  );
+  await db.run(
+    sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+        VALUES (${jordanSchedId}, ${accountId}, ${jordanId}, ${'Working Hours'}, ${'America/New_York'}, ${now})`,
+  );
+  await db.run(
+    sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+        VALUES (${randomUUID()}, ${jordanSchedId}, ${JSON.stringify([1, 2, 3, 4, 5])}, ${'09:00'}, ${'17:00'}, ${null})`,
+  );
+
+  const teamId = randomUUID();
+  const teamEventId = randomUUID();
+  await db.run(
+    sql`INSERT INTO team (id, account_id, name, slug, logo_url, time_zone, hide_branding, created_at)
+        VALUES (${teamId}, ${accountId}, ${'Sales'}, ${'sales'}, ${null}, ${'America/New_York'}, 0, ${now})`,
+  );
+  for (const m of [memberId, jordanId]) {
+    await db.run(
+      sql`INSERT INTO team_membership (id, account_id, team_id, member_id, role, accepted, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${teamId}, ${m}, ${'member'}, 1, ${now})`,
+    );
+  }
+  await db.run(
+    sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description, length_minutes,
+          hidden, scheduling_type, minimum_booking_notice, slot_interval, created_at)
+        VALUES (${teamEventId}, ${accountId}, ${null}, ${teamId}, ${'team-demo'}, ${'Team Demo'},
+          ${'A 30-minute team demo (round-robin).'}, ${30}, 0, ${'round_robin'}, ${120}, ${30}, ${now})`,
+  );
+  for (const m of [memberId, jordanId]) {
+    await db.run(
+      sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${teamEventId}, ${m}, 0, ${null}, ${100}, ${null}, ${now})`,
+    );
+  }
+
   return { accountCode, handle, slug, bookingPagePath: `/${accountCode}/${handle}/${slug}` };
 }
 

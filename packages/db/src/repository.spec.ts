@@ -61,6 +61,7 @@ describe('repository (SQLite in-memory)', () => {
       slug: 'intro-call',
       startMs,
       attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
     });
     expect(first.ok).toBe(true);
 
@@ -70,6 +71,7 @@ describe('repository (SQLite in-memory)', () => {
       slug: 'intro-call',
       startMs,
       attendee: { name: 'Pat Guest', email: 'pat@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
     });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.reason).toBe('SLOT_TAKEN');
@@ -92,6 +94,7 @@ describe('repository (SQLite in-memory)', () => {
       slug: 'intro-call',
       startMs,
       attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
       idempotencyKey: 'key-123',
     };
     const a = await createBooking(db, args);

@@ -81,7 +81,8 @@ export interface EventTypeRow {
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' };
+  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' }
+  | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
   uid: string;
@@ -99,8 +100,29 @@ export interface CreateBookingArgs {
   handle: string;
   slug: string;
   startMs: number;
-  attendee: { name: string; email: string; timeZone: string; notes?: string };
+  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+  /** Answers to the event type's custom intake fields. */
+  answers?: Record<string, unknown>;
+  /** A held reservation to consume (deleted on success). */
+  reservationUid?: string;
   idempotencyKey?: string;
+  /** True when a host/agent booked on behalf (attribution; skips manage-token gating upstream). */
+  onBehalf?: boolean;
+}
+
+/** Validate submitted intake answers against a set of field definitions. */
+export function validateIntakeAnswers(
+  fields: BookingFieldDef[],
+  answers: Record<string, unknown> | undefined,
+): string | null {
+  for (const f of fields) {
+    if (!f.required) continue;
+    const v = answers?.[f.name];
+    const missing =
+      v == null || v === '' || (Array.isArray(v) && v.length === 0) || v === false;
+    if (missing) return `Missing required field: ${f.label}`;
+  }
+  return null;
 }
 
 // --- Resolvers ------------------------------------------------------------
@@ -219,7 +241,7 @@ export interface AvailabilityResult {
   slots: string[];
 }
 
-async function loadAvailabilityRules(db: Db, scheduleId: string): Promise<AvailabilityRule[]> {
+export async function loadAvailabilityRules(db: Db, scheduleId: string): Promise<AvailabilityRule[]> {
   const rows = await db.all<{
     days: string | null;
     start_time: string;
@@ -236,7 +258,7 @@ async function loadAvailabilityRules(db: Db, scheduleId: string): Promise<Availa
   }));
 }
 
-async function loadBusyForHost(
+export async function loadBusyForHost(
   db: Db,
   hostMemberId: string,
   fromMs: number,
@@ -250,7 +272,26 @@ async function loadBusyForHost(
   return rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) }));
 }
 
-async function resolveScheduleTimeZone(
+/** Active (unexpired) slot holds for a host — subtracted from availability. */
+export async function loadReservationBusy(
+  db: Db,
+  memberId: string,
+  fromMs: number,
+  toMs: number,
+  now = Date.now(),
+): Promise<Interval[]> {
+  const rows = await db.all<{ slot_start_ms: number; slot_end_ms: number }>(
+    sql`SELECT slot_start_ms, slot_end_ms FROM slot_reservation
+        WHERE member_id = ${memberId} AND release_at_ms > ${now}
+              AND slot_start_ms < ${toMs} AND slot_end_ms > ${fromMs}`,
+  );
+  return rows.map((r) => ({
+    start: new Date(Number(r.slot_start_ms)),
+    end: new Date(Number(r.slot_end_ms)),
+  }));
+}
+
+export async function resolveScheduleTimeZone(
   db: Db,
   scheduleId: string | null,
 ): Promise<{ id: string; timeZone: string } | undefined> {
@@ -279,7 +320,10 @@ export async function getAvailability(
   let rules: AvailabilityRule[] = [];
   if (schedule) rules = await loadAvailabilityRules(db, schedule.id);
 
-  const busy = await loadBusyForHost(db, member.id, args.fromMs, args.toMs);
+  const busy = [
+    ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs)),
+    ...(await loadReservationBusy(db, member.id, args.fromMs, args.toMs, args.now?.getTime())),
+  ];
 
   const slots = computeSlots({
     fromUtc: new Date(args.fromMs),
@@ -326,6 +370,11 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
+  // Required-intake validation (server-side; never trust the client).
+  const fields = parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []);
+  const invalid = validateIntakeAnswers(fields, args.answers);
+  if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
+
   // Idempotency: return the prior booking for a repeated key.
   if (args.idempotencyKey) {
     const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
@@ -345,16 +394,18 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
   // text param is cast on write. SQLite stores the same JSON as text.
   const metaExpr = db.dialect === 'postgres' ? sql`${metadata}::jsonb` : sql`${metadata}`;
+  const responsesExpr = jsonParam(db, args.answers ?? null);
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title,
-      start_ms, end_ms, status, metadata, idempotency_key, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
+      created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
-      ${startMs}, ${endMs}, 'accepted', ${metaExpr},
+      ${startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
-      ${args.attendee.timeZone}, ${args.attendee.notes ?? null}, ${now})`;
+      ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
 
   const record: BookingRecord = {
     uid,
@@ -378,9 +429,9 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
       db.sqlite!.drizzle.run(insertAttendee);
       return 'ok';
     });
-    return outcome === 'conflict'
-      ? { ok: false, reason: 'SLOT_TAKEN' }
-      : { ok: true, booking: record, manageToken: token };
+    if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+    if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    return { ok: true, booking: record, manageToken: token };
   }
 
   // Postgres: async transaction; the EXCLUDE constraint is the ultimate backstop.
@@ -396,9 +447,9 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
       await tx.execute(insertAttendee);
       return false;
     });
-    return conflicted
-      ? { ok: false, reason: 'SLOT_TAKEN' }
-      : { ok: true, booking: record, manageToken: token };
+    if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };
+    if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    return { ok: true, booking: record, manageToken: token };
   } catch (err) {
     if (isExclusionViolation(err) || isUniqueViolation(err)) {
       return { ok: false, reason: 'SLOT_TAKEN' };

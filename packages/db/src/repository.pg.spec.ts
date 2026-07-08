@@ -41,6 +41,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       slug: 'intro-call',
       startMs,
       attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
     };
     const first = await createBooking(db, args);
     expect(first.ok).toBe(true);
