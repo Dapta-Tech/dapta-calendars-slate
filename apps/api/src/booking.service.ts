@@ -5,6 +5,7 @@ import { BookingNotifier } from '@slate/notifications';
 import type { ServerEnv } from '@slate/config/env';
 import {
   availabilityQuerySchema,
+  availabilityResponseSchema,
   createBookingSchema,
   type AvailabilityResponse,
   type BookingView,
@@ -38,11 +39,13 @@ export class BookingService {
       displayTimeZone: q.timeZone,
     });
     if (!result) return null;
-    return {
+    // Validate + normalize the outbound contract (coerces the intake-field
+    // shapes read from the DB into the typed AvailabilityResponse).
+    return availabilityResponseSchema.parse({
       eventType: result.eventType,
       timeZone: result.timeZone,
       slots: result.slots.map((startUtc) => ({ startUtc })),
-    };
+    });
   }
 
   /** Returns the created booking, or a typed error the controller maps to HTTP. */

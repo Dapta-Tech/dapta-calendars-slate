@@ -1,13 +1,14 @@
 /**
  * Postgres schema — THE SOURCE OF TRUTH. Postgres is what we trust: CI runs the
- * Postgres path first-class and production is Aurora Postgres. This schema uses
- * Postgres to its full power (jsonb, the `booking_no_overlap` GiST EXCLUDE
- * constraint over int8range gated on status='accepted', proper indexes). SQLite
- * (schema.sqlite.ts) is a PORTABLE SUBSET for zero-infra dev only and never
- * limits what this schema may use — where a feature needs Postgres, we use it
- * and the SQLite-dev path degrades (documented), prod is never constrained.
+ * Postgres path first-class and production is Aurora. Full power: jsonb for
+ * structured columns, the `booking_no_overlap` GiST EXCLUDE constraint (in the
+ * migration). schema.sqlite.ts is a portable subset for zero-infra dev and never
+ * limits this schema. Column names mirror it 1:1 so the repository is
+ * dialect-agnostic; JSON columns are read through parseJsonColumn (object on PG,
+ * string on SQLite) and written with a ::jsonb cast on PG.
  *
- * Column names mirror schema.sqlite.ts so the repository is dialect-agnostic.
+ * Booleans are INTEGER 0/1 on both engines (uniform reads); instants are BIGINT
+ * epoch-ms (the int8range EXCLUDE operates over them).
  */
 import { pgTable, text, bigint, integer, jsonb } from 'drizzle-orm/pg-core';
 
@@ -25,7 +26,14 @@ export const member = pgTable('member', {
   displayName: text('display_name'),
   email: text('email'),
   avatarUrl: text('avatar_url'),
+  coverUrl: text('cover_url'),
+  brandColor: text('brand_color'),
+  layout: text('layout'),
+  bookingPageStyle: jsonb('booking_page_style'),
   timeZone: text('time_zone').notNull().default('UTC'),
+  weekStart: text('week_start').notNull().default('sunday'),
+  locale: text('locale'),
+  timeFormat: integer('time_format').notNull().default(12),
   defaultScheduleId: text('default_schedule_id'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
@@ -48,20 +56,60 @@ export const availability = pgTable('availability', {
   date: text('date'),
 });
 
+export const team = pgTable('team', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  name: text('name').notNull(),
+  slug: text('slug'),
+  logoUrl: text('logo_url'),
+  timeZone: text('time_zone').notNull().default('UTC'),
+  hideBranding: integer('hide_branding').notNull().default(0),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const teamMembership = pgTable('team_membership', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  teamId: text('team_id').notNull(),
+  memberId: text('member_id').notNull(),
+  role: text('role').notNull().default('member'),
+  accepted: integer('accepted').notNull().default(0),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
 export const eventType = pgTable('event_type', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
-  memberId: text('member_id').notNull(),
+  memberId: text('member_id'),
+  teamId: text('team_id'),
   slug: text('slug').notNull(),
   title: text('title').notNull(),
   description: text('description'),
   lengthMinutes: integer('length_minutes').notNull(),
   scheduleId: text('schedule_id'),
   hidden: integer('hidden').notNull().default(0),
+  schedulingType: text('scheduling_type'),
+  locations: jsonb('locations'),
+  bookingFields: jsonb('booking_fields'),
+  metadata: jsonb('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
+  requiresConfirmation: integer('requires_confirmation').notNull().default(0),
+  seatsPerTimeSlot: integer('seats_per_time_slot'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const eventTypeHost = pgTable('event_type_host', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  eventTypeId: text('event_type_id').notNull(),
+  memberId: text('member_id').notNull(),
+  isFixed: integer('is_fixed').notNull().default(0),
+  priority: integer('priority'),
+  weight: integer('weight'),
+  scheduleId: text('schedule_id'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -71,15 +119,21 @@ export const booking = pgTable('booking', {
   uid: text('uid').notNull().unique(),
   eventTypeId: text('event_type_id'),
   hostMemberId: text('host_member_id'),
+  teamId: text('team_id'),
   title: text('title').notNull(),
   startMs: bigint('start_ms', { mode: 'number' }).notNull(),
   endMs: bigint('end_ms', { mode: 'number' }).notNull(),
   status: text('status').notNull().default('accepted'),
   location: text('location'),
   meetingUrl: text('meeting_url'),
-  // Full Postgres power: jsonb (SQLite stores the same shape as text).
+  attendeeTimeZone: text('attendee_time_zone'),
+  responses: jsonb('responses'),
   metadata: jsonb('metadata'),
   cancellationReason: text('cancellation_reason'),
+  cancelledBy: text('cancelled_by'),
+  rescheduled: integer('rescheduled'),
+  fromReschedule: text('from_reschedule'),
+  recurringEventId: text('recurring_event_id'),
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
@@ -91,7 +145,71 @@ export const bookingAttendee = pgTable('booking_attendee', {
   name: text('name').notNull(),
   email: text('email').notNull(),
   timeZone: text('time_zone'),
+  phone: text('phone'),
   notes: text('notes'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const slotReservation = pgTable('slot_reservation', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  eventTypeId: text('event_type_id').notNull(),
+  memberId: text('member_id').notNull(),
+  slotStartMs: bigint('slot_start_ms', { mode: 'number' }).notNull(),
+  slotEndMs: bigint('slot_end_ms', { mode: 'number' }).notNull(),
+  uid: text('uid').notNull(),
+  releaseAtMs: bigint('release_at_ms', { mode: 'number' }).notNull(),
+  isSeat: integer('is_seat').notNull().default(0),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const connectedCalendar = pgTable('connected_calendar', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  memberId: text('member_id').notNull(),
+  provider: text('provider').notNull(),
+  externalId: text('external_id').notNull(),
+  primaryEmail: text('primary_email'),
+  isDestination: integer('is_destination').notNull().default(0),
+  checkConflicts: integer('check_conflicts').notNull().default(1),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const apiKey = pgTable('api_key', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  name: text('name').notNull(),
+  prefix: text('prefix').notNull().unique(),
+  last4: text('last4').notNull(),
+  keyHash: text('key_hash').notNull().unique(),
+  scopes: jsonb('scopes'),
+  eventTypeIds: jsonb('event_type_ids'),
+  lastUsedAtMs: bigint('last_used_at_ms', { mode: 'number' }),
+  expiresAtMs: bigint('expires_at_ms', { mode: 'number' }),
+  revokedAtMs: bigint('revoked_at_ms', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const webhook = pgTable('webhook', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  memberId: text('member_id'),
+  teamId: text('team_id'),
+  eventTypeId: text('event_type_id'),
+  subscriberUrl: text('subscriber_url').notNull(),
+  secret: text('secret'),
+  eventTriggers: jsonb('event_triggers'),
+  active: integer('active').notNull().default(1),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+export const bookingReference = pgTable('booking_reference', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  type: text('type').notNull(),
+  externalEventId: text('external_event_id'),
+  externalCalendarId: text('external_calendar_id'),
+  meetingUrl: text('meeting_url'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -100,7 +218,15 @@ export const pgSchema = {
   member,
   schedule,
   availability,
+  team,
+  teamMembership,
   eventType,
+  eventTypeHost,
   booking,
   bookingAttendee,
+  slotReservation,
+  connectedCalendar,
+  apiKey,
+  webhook,
+  bookingReference,
 };

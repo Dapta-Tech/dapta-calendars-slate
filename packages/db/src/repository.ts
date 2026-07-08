@@ -18,6 +18,29 @@ import {
 } from '@slate/engine';
 import type { Db } from './client';
 
+/**
+ * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
+ * SQLite text comes back as a string. Returns `fallback` for null/empty.
+ */
+export function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
+}
+
+/** Build a JSON write value: cast text → jsonb on Postgres, bind text on SQLite. */
+export function jsonParam(db: Db, value: unknown) {
+  const text = value == null ? null : JSON.stringify(value);
+  if (text == null) return sql`NULL`;
+  return db.dialect === 'postgres' ? sql`${text}::jsonb` : sql`${text}`;
+}
+
 export interface AccountRow {
   id: string;
   code: string;
@@ -29,22 +52,31 @@ export interface MemberRow {
   handle: string | null;
   display_name: string | null;
   email: string | null;
+  avatar_url: string | null;
+  cover_url: string | null;
+  brand_color: string | null;
+  layout: string | null;
+  booking_page_style: unknown;
   time_zone: string;
   default_schedule_id: string | null;
 }
 export interface EventTypeRow {
   id: string;
   account_id: string;
-  member_id: string;
+  member_id: string | null;
+  team_id: string | null;
   slug: string;
   title: string;
   description: string | null;
   length_minutes: number;
   schedule_id: string | null;
+  scheduling_type: string | null;
+  booking_fields: unknown;
   minimum_booking_notice: number;
   before_event_buffer: number;
   after_event_buffer: number;
   slot_interval: number | null;
+  requires_confirmation: number;
 }
 
 export type BookingOutcome =
@@ -83,7 +115,8 @@ export async function getMember(
   handle: string,
 ): Promise<MemberRow | undefined> {
   return db.get<MemberRow>(
-    sql`SELECT id, account_id, handle, display_name, email, time_zone, default_schedule_id
+    sql`SELECT id, account_id, handle, display_name, email, avatar_url, cover_url, brand_color,
+               layout, booking_page_style, time_zone, default_schedule_id
         FROM member WHERE account_id = ${accountId} AND handle = ${handle} LIMIT 1`,
   );
 }
@@ -95,8 +128,9 @@ export async function getEventType(
   slug: string,
 ): Promise<EventTypeRow | undefined> {
   return db.get<EventTypeRow>(
-    sql`SELECT id, account_id, member_id, slug, title, description, length_minutes, schedule_id,
-               minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval
+    sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
+               schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               before_event_buffer, after_event_buffer, slot_interval, requires_confirmation
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
               AND hidden = 0 LIMIT 1`,
@@ -105,7 +139,16 @@ export async function getEventType(
 
 export interface PublicProfile {
   account: { code: string; name: string };
-  member: { handle: string; displayName: string | null; timeZone: string };
+  member: {
+    handle: string;
+    displayName: string | null;
+    timeZone: string;
+    avatarUrl: string | null;
+    coverUrl: string | null;
+    brandColor: string | null;
+    layout: string | null;
+    style: Record<string, unknown> | null;
+  };
   eventTypes: Array<{
     slug: string;
     title: string;
@@ -135,7 +178,16 @@ export async function getPublicProfile(
   );
   return {
     account: { code: account.code, name: account.name },
-    member: { handle: member.handle, displayName: member.display_name, timeZone: member.time_zone },
+    member: {
+      handle: member.handle,
+      displayName: member.display_name,
+      timeZone: member.time_zone,
+      avatarUrl: member.avatar_url,
+      coverUrl: member.cover_url,
+      brandColor: member.brand_color,
+      layout: member.layout,
+      style: parseJsonColumn<Record<string, unknown> | null>(member.booking_page_style, null),
+    },
     eventTypes: rows.map((r) => ({
       slug: r.slug,
       title: r.title,
@@ -147,8 +199,22 @@ export async function getPublicProfile(
 
 // --- Availability ---------------------------------------------------------
 
+export interface BookingFieldDef {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+
 export interface AvailabilityResult {
-  eventType: { slug: string; title: string; lengthMinutes: number };
+  eventType: {
+    slug: string;
+    title: string;
+    lengthMinutes: number;
+    bookingFields: BookingFieldDef[];
+  };
   timeZone: string;
   slots: string[];
 }
@@ -234,6 +300,7 @@ export async function getAvailability(
       slug: eventType.slug,
       title: eventType.title,
       lengthMinutes: eventType.length_minutes,
+      bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
     },
     timeZone: args.displayTimeZone ?? scheduleTimeZone,
     slots: slots.map((d) => d.toISOString()),
