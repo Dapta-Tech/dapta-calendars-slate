@@ -19,6 +19,7 @@ import {
 import { sql, type Db } from './client';
 import {
   getAccountByCode,
+  getAvailability,
   getEventType,
   getMember,
   jsonParam,
@@ -34,6 +35,8 @@ import { checkWebhookUrl } from './webhook-url';
 // --- Reservation holds ----------------------------------------------------
 
 const DEFAULT_HOLD_MS = 10 * 60_000;
+/** Cap on concurrent unexpired holds per booking page (per host member). */
+const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
 export async function releaseReservation(db: Db, uid: string): Promise<void> {
   await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${uid}`);
@@ -43,25 +46,52 @@ export async function sweepExpiredReservations(db: Db, now = Date.now()): Promis
   await db.run(sql`DELETE FROM slot_reservation WHERE release_at_ms <= ${now}`);
 }
 
-export interface ReserveResult {
-  uid: string;
-  releaseAtMs: number;
-}
+export type ReserveOutcome =
+  | { ok: true; uid: string; releaseAtMs: number }
+  | { ok: false; reason: 'NOT_FOUND' | 'INVALID_SLOT' | 'RATE_LIMITED' };
 
+/**
+ * Place a soft hold on a slot. Hardened (M5):
+ *  - opportunistically sweeps expired holds so rows can't accrete;
+ *  - validates the requested start is a REAL, currently-bookable slot (no
+ *    holding arbitrary/blocked instants to blank out a page's availability);
+ *  - caps concurrent unexpired holds per page to blunt hold-spam DoS.
+ */
 export async function reserveSlot(
   db: Db,
   args: { accountCode: string; handle: string; slug: string; startMs: number; holdMs?: number },
-): Promise<ReserveResult | null> {
+): Promise<ReserveOutcome> {
+  const now = Date.now();
+  await sweepExpiredReservations(db, now);
+
   const account = await getAccountByCode(db, args.accountCode);
-  if (!account) return null;
+  if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const member = await getMember(db, account.id, args.handle);
-  if (!member) return null;
+  if (!member) return { ok: false, reason: 'NOT_FOUND' };
   const eventType = await getEventType(db, account.id, member.id, args.slug);
-  if (!eventType) return null;
+  if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
+
+  // The requested start must currently be offered by the availability engine.
+  const avail = await getAvailability(db, {
+    accountCode: args.accountCode,
+    handle: args.handle,
+    slug: args.slug,
+    fromMs: args.startMs,
+    toMs: endMs,
+  });
+  const offered = avail?.slots.some((s) => new Date(s).getTime() === args.startMs) ?? false;
+  if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
+
+  // Per-page hold cap (rate limit).
+  const active = await db.get<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
+  );
+  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER)
+    return { ok: false, reason: 'RATE_LIMITED' };
+
   const uid = randomUUID();
-  const now = Date.now();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
   await db.run(
     sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
@@ -69,7 +99,7 @@ export async function reserveSlot(
         VALUES (${randomUUID()}, ${account.id}, ${eventType.id}, ${member.id}, ${args.startMs},
           ${endMs}, ${uid}, ${releaseAtMs}, 0, ${now})`,
   );
-  return { uid, releaseAtMs };
+  return { ok: true, uid, releaseAtMs };
 }
 
 // --- Identity / multi-tenant ----------------------------------------------

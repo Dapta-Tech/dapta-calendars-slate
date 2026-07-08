@@ -66,7 +66,8 @@ describe('parity (SQLite in-memory)', () => {
       slug: 'intro-call',
       startMs,
     });
-    expect(held).not.toBeNull();
+    expect(held.ok).toBe(true);
+    if (!held.ok) throw new Error('setup');
     // The held instant is no longer offered.
     const a = await getAvailability(db, {
       accountCode: 'acme',
@@ -84,9 +85,45 @@ describe('parity (SQLite in-memory)', () => {
       startMs,
       attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
       answers: { company: 'Acme' },
-      reservationUid: held!.uid,
+      reservationUid: held.uid,
     });
     expect(out.ok).toBe(true);
+  });
+
+  it('M5 — reserveSlot rejects an instant that is not a real bookable slot', async () => {
+    // 03:17 on the first offered day is never an offered slot (outside 9–17 and
+    // off the 30-min grid) → INVALID_SLOT, so holds can't blank out availability.
+    const startMs = await firstSlotMs(db);
+    const bogus = startMs + 137 * 60_000 + 999; // off-grid, unaligned
+    const out = await reserveSlot(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs: bogus,
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe('INVALID_SLOT');
+  });
+
+  it('M5 — reserveSlot caps concurrent holds per page (rate limit)', async () => {
+    const avail = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const slots = avail!.slots.map((s) => new Date(s).getTime());
+    let ok = 0;
+    let limited = 0;
+    // Try to hold more distinct real slots than the cap allows.
+    for (const s of slots.slice(0, 15)) {
+      const r = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs: s });
+      if (r.ok) ok++;
+      else if (r.reason === 'RATE_LIMITED') limited++;
+    }
+    expect(ok).toBeLessThanOrEqual(10); // MAX_ACTIVE_HOLDS_PER_MEMBER
+    expect(limited).toBeGreaterThan(0);
   });
 
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
