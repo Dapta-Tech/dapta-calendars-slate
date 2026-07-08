@@ -28,3 +28,16 @@ export async function deleteConnectionAction(id: string): Promise<void> {
   await adminApi.deleteConnection(id);
   revalidatePath('/admin/connections');
 }
+
+export async function toggleConnectionAction(
+  id: string,
+  patch: { isDestination?: boolean; checkConflicts?: boolean },
+): Promise<void> {
+  await adminApi.updateConnection(id, patch);
+  revalidatePath('/admin/connections');
+}
+
+export async function pingConnectionAction(id: string): Promise<{ enabled: boolean; message: string }> {
+  const r = await adminApi.pingConnection(id);
+  return { enabled: r.enabled, message: r.message };
+}

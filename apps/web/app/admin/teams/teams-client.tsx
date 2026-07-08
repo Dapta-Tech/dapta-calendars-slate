@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState, useTransition } from 'react';
 import type { Team } from '@/lib/admin-api';
 import {
@@ -58,7 +59,9 @@ export function TeamCard({
     <div className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
       <div className="flex items-center justify-between">
         <span className="flex flex-col">
-          <span className="font-medium">{team.name}</span>
+          <Link href={`/admin/teams/${team.id}`} className="font-medium hover:text-primary hover:underline">
+            {team.name}
+          </Link>
           <span className="text-sm text-muted-foreground">/{team.slug}</span>
         </span>
         <button

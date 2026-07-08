@@ -78,6 +78,9 @@ export const adminApi = {
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
+  updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),
+  pingConnection: (id: string) =>
+    req<{ ok: boolean; enabled: boolean; message: string }>('POST', `/v1/connections/${id}/ping`, {}),
   deleteConnection: (id: string) => req<void>('DELETE', `/v1/connections/${id}`),
 
   // API keys

@@ -1,35 +1,75 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
+import { useActionState, useState, useTransition } from 'react';
 import type { Connection } from '@/lib/admin-api';
-import { createConnectionAction, deleteConnectionAction, type ActionResult } from './actions';
+import {
+  createConnectionAction,
+  deleteConnectionAction,
+  pingConnectionAction,
+  toggleConnectionAction,
+  type ActionResult,
+} from './actions';
+
+function ConnectionRow({ c }: { c: Connection }) {
+  const [pending, start] = useTransition();
+  const [ping, setPing] = useState<string | null>(null);
+  return (
+    <li className="flex items-center justify-between rounded-md border border-border bg-card p-4">
+      <span className="flex flex-col gap-1">
+        <span className="font-medium capitalize">{c.provider}</span>
+        <span className="text-sm text-muted-foreground">{c.primaryEmail ?? c.externalId}</span>
+        <span className="mt-1 flex gap-4 text-sm">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={c.isDestination}
+              disabled={pending}
+              onChange={(e) => start(() => toggleConnectionAction(c.id, { isDestination: e.target.checked }))}
+            />
+            Destination
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={c.checkConflicts}
+              disabled={pending}
+              onChange={(e) => start(() => toggleConnectionAction(c.id, { checkConflicts: e.target.checked }))}
+            />
+            Conflict check
+          </label>
+        </span>
+        {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+      </span>
+      <span className="flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(async () => setPing((await pingConnectionAction(c.id)).message))}
+          className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+        >
+          Test
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(() => deleteConnectionAction(c.id))}
+          className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+        >
+          Disconnect
+        </button>
+      </span>
+    </li>
+  );
+}
 
 export function ConnectionsClient({ connections }: { connections: Connection[] }) {
   const [res, action, pending] = useActionState<ActionResult | null, FormData>(createConnectionAction, null);
-  const [delPending, start] = useTransition();
 
   return (
     <div className="flex flex-col gap-6">
       <ul className="flex flex-col gap-2">
         {connections.map((c) => (
-          <li key={c.id} className="flex items-center justify-between rounded-md border border-border bg-card p-4">
-            <span className="flex flex-col">
-              <span className="font-medium capitalize">{c.provider}</span>
-              <span className="text-sm text-muted-foreground">
-                {c.primaryEmail ?? c.externalId}
-                {c.isDestination ? ' · destination' : ''}
-                {c.checkConflicts ? ' · conflict check' : ''}
-              </span>
-            </span>
-            <button
-              type="button"
-              disabled={delPending}
-              onClick={() => start(() => deleteConnectionAction(c.id))}
-              className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
-            >
-              Disconnect
-            </button>
-          </li>
+          <ConnectionRow key={c.id} c={c} />
         ))}
         {connections.length === 0 ? (
           <li className="text-sm text-muted-foreground">No connected calendars.</li>

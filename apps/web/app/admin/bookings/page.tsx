@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { adminApi } from '@/lib/admin-api';
 import { CancelAction, PendingActions } from './booking-actions';
 
@@ -16,7 +17,15 @@ export default async function BookingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
-      <h1 className="mb-6 text-3xl font-semibold tracking-tight">Bookings</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-3xl font-semibold tracking-tight">Bookings</h1>
+        <Link
+          href="/admin/bookings/new"
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          + New booking
+        </Link>
+      </div>
 
       {pending.length > 0 ? (
         <Section title={`Pending confirmation (${pending.length})`} rows={pending} action="pending" />

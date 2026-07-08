@@ -148,6 +148,26 @@ export class HostController {
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'provider, externalId required' });
     return this.admin.createConnection(p, body);
   }
+  @Patch('connections/:id')
+  async updateConnection(
+    @Req() req: ReqLike,
+    @Param('id') id: string,
+    @Body() body: { isDestination?: boolean; checkConflicts?: boolean },
+  ) {
+    const p = await this.auth.resolveHost(req);
+    await this.admin.updateConnection(p, id, body);
+    return { ok: true };
+  }
+
+  @Post('connections/:id/ping')
+  @HttpCode(200)
+  async pingConnection(@Req() req: ReqLike, @Param('id') _id: string) {
+    await this.auth.resolveHost(req);
+    // OSS default: no external calendar provider is wired, so a ping reports the
+    // disabled state (a private overlay adapter makes this a real reachability test).
+    return { ok: true, enabled: false, message: 'No external calendar provider configured (OSS default).' };
+  }
+
   @Delete('connections/:id')
   @HttpCode(204)
   async deleteConnection(@Req() req: ReqLike, @Param('id') id: string) {

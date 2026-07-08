@@ -6,6 +6,7 @@ import {
   createApiKey,
   createBooking,
   createConnection,
+  updateConnection,
   declineBooking,
   createWebhook,
   deleteConnection,
@@ -108,6 +109,9 @@ export class AdminService {
   }
   deleteConnection(p: HostPrincipal, id: string) {
     return deleteConnection(this.db, p.memberId, id);
+  }
+  updateConnection(p: HostPrincipal, id: string, patch: { isDestination?: boolean; checkConflicts?: boolean }) {
+    return updateConnection(this.db, p.memberId, id, patch);
   }
 
   // API keys.

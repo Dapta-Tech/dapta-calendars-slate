@@ -834,6 +834,29 @@ export async function deleteConnection(db: Db, memberId: string, id: string): Pr
   );
 }
 
+/**
+ * Toggle a connection's destination / conflict-check flags. Destination is
+ * EXCLUSIVE per member (R20): setting one as destination clears the others.
+ * This is connection-record management only — it does not call the external
+ * calendar provider.
+ */
+export async function updateConnection(
+  db: Db,
+  memberId: string,
+  id: string,
+  patch: { isDestination?: boolean; checkConflicts?: boolean },
+): Promise<void> {
+  if (patch.isDestination === true) {
+    await db.run(sql`UPDATE connected_calendar SET is_destination = 0 WHERE member_id = ${memberId}`);
+  }
+  const sets: ReturnType<typeof sql>[] = [];
+  if (patch.isDestination !== undefined) sets.push(sql`is_destination = ${patch.isDestination ? 1 : 0}`);
+  if (patch.checkConflicts !== undefined) sets.push(sql`check_conflicts = ${patch.checkConflicts ? 1 : 0}`);
+  if (sets.length === 0) return;
+  const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
+  await db.run(sql`UPDATE connected_calendar SET ${assign} WHERE id = ${id} AND member_id = ${memberId}`);
+}
+
 // --- API keys -------------------------------------------------------------
 
 export interface CreatedApiKey {
