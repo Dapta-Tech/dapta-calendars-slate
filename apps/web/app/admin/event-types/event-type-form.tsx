@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import type { BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
+
+type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
 const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
 
@@ -16,9 +19,11 @@ interface IntakeField {
 export function EventTypeForm({
   initial,
   schedules = [],
+  messages: m,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
+  messages: EventTypeMessages;
 }) {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [slug, setSlug] = useState(initial?.slug ?? '');
@@ -73,42 +78,42 @@ export function EventTypeForm({
   return (
     <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Title">
+        <Field label={m.fTitle}>
           <input value={title} onChange={(e) => onTitle(e.target.value)} className={inputCls} />
         </Field>
-        <Field label="Slug">
+        <Field label={m.fSlug}>
           <input value={slug} onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }} className={inputCls} />
         </Field>
       </div>
-      <Field label="Description">
+      <Field label={m.fDescription}>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
       </Field>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Length (min)">
+        <Field label={m.fLength}>
           <input type="number" value={lengthMinutes} onChange={(e) => setLength(Number(e.target.value))} className={inputCls} />
         </Field>
-        <Field label="Slot interval (min)">
+        <Field label={m.fSlotInterval}>
           <input type="number" value={slotInterval} onChange={(e) => setSlotInterval(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
         </Field>
-        <Field label="Min. notice (min)">
+        <Field label={m.fMinNotice}>
           <input type="number" value={minNotice} onChange={(e) => setMinNotice(Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Buffer before (min)">
+        <Field label={m.fBufferBefore}>
           <input type="number" value={beforeBuf} onChange={(e) => setBeforeBuf(Number(e.target.value))} className={inputCls} />
         </Field>
-        <Field label="Buffer after (min)">
+        <Field label={m.fBufferAfter}>
           <input type="number" value={afterBuf} onChange={(e) => setAfterBuf(Number(e.target.value))} className={inputCls} />
         </Field>
-        <Field label="Seats / slot (group)">
+        <Field label={m.fSeats}>
           <input type="number" min={1} placeholder="1" value={seats} onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
-      <Field label="Availability schedule">
+      <Field label={m.fSchedule}>
         <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} className={inputCls}>
           <option value="">
-            {schedules.length ? 'Use my default schedule' : 'No schedules yet — create one in Availability'}
+            {schedules.length ? m.useDefaultSchedule : m.noSchedules}
           </option>
           {schedules.map((s) => (
             <option key={s.id} value={s.id}>
@@ -121,27 +126,27 @@ export function EventTypeForm({
       <div className="flex gap-6">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
-          Requires confirmation
+          {m.requiresConfirmation}
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-          Hidden
+          {m.hiddenLabel}
         </label>
       </div>
 
       {/* Intake questions */}
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-muted-foreground">Intake questions</span>
+        <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
         {fields.map((f, i) => (
           <div key={i} className="flex items-center gap-2">
             <input
-              placeholder="name"
+              placeholder={m.namePlaceholder}
               value={f.name}
               onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
               className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
             />
             <input
-              placeholder="Label"
+              placeholder={m.labelPlaceholder}
               value={f.label}
               onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
               className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
@@ -157,7 +162,7 @@ export function EventTypeForm({
             </select>
             <label className="flex items-center gap-1 text-sm">
               <input type="checkbox" checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
-              req
+              {m.req}
             </label>
             <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
           </div>
@@ -167,19 +172,19 @@ export function EventTypeForm({
           onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
           className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary"
         >
-          + Add question
+          {m.addQuestion}
         </button>
       </div>
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
-      {res?.ok ? <p className="text-sm text-primary">Saved.</p> : null}
+      {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
       <button
         type="button"
         onClick={save}
         disabled={pending || !title || !slug}
         className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
       >
-        {pending ? 'Saving…' : initial ? 'Save changes' : 'Create event type'}
+        {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
       </button>
     </div>
   );

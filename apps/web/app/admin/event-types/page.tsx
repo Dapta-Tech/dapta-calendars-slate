@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
+import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from './event-type-form';
 import { DeleteButton } from './delete-button';
 
@@ -10,10 +12,12 @@ export default async function EventTypesPage() {
     adminApi.listEventTypes(),
     adminApi.listSchedules(),
   ]);
+  const admin = getMessages(await getLocale()).admin;
+  const m = admin.eventTypes;
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <h1 className="mb-6 text-3xl font-semibold tracking-tight">Event Types</h1>
+      <h1 className="mb-6 text-3xl font-semibold tracking-tight">{m.title}</h1>
 
       <ul className="mb-8 flex flex-col gap-2">
         {eventTypes.map((et) => (
@@ -24,11 +28,11 @@ export default async function EventTypesPage() {
             <span className="flex flex-col">
               <span className="font-medium">
                 {et.title}
-                {et.hidden ? <span className="ml-2 text-xs text-muted-foreground">(hidden)</span> : null}
+                {et.hidden ? <span className="ml-2 text-xs text-muted-foreground">({m.hidden})</span> : null}
               </span>
               <span className="text-sm text-muted-foreground">
-                /{et.slug} · {et.lengthMinutes} min
-                {et.requiresConfirmation ? ' · needs confirmation' : ''}
+                /{et.slug} · {et.lengthMinutes} {m.minSuffix}
+                {et.requiresConfirmation ? ` · ${m.needsConfirmation}` : ''}
               </span>
             </span>
             <div className="flex items-center gap-2">
@@ -36,19 +40,19 @@ export default async function EventTypesPage() {
                 href={`/admin/event-types/${et.id}`}
                 className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
               >
-                Edit
+                {admin.common.edit}
               </Link>
               <DeleteButton id={et.id} />
             </div>
           </li>
         ))}
         {eventTypes.length === 0 ? (
-          <li className="text-sm text-muted-foreground">No event types yet — create one below.</li>
+          <li className="text-sm text-muted-foreground">{m.emptyList}</li>
         ) : null}
       </ul>
 
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">New event type</h2>
-      <EventTypeForm schedules={schedules} />
+      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{m.newEventType}</h2>
+      <EventTypeForm schedules={schedules} messages={m} />
     </div>
   );
 }

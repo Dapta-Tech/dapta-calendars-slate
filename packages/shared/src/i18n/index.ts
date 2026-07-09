@@ -103,6 +103,37 @@ export interface BookingMessages {
       calendars: string;
       developer: string;
     };
+    eventTypes: {
+      title: string;
+      newEventType: string;
+      emptyList: string;
+      hidden: string;
+      needsConfirmation: string;
+      minSuffix: string;
+      fTitle: string;
+      fSlug: string;
+      fDescription: string;
+      fLength: string;
+      fSlotInterval: string;
+      fMinNotice: string;
+      fBufferBefore: string;
+      fBufferAfter: string;
+      fSeats: string;
+      fSchedule: string;
+      useDefaultSchedule: string;
+      noSchedules: string;
+      requiresConfirmation: string;
+      hiddenLabel: string;
+      intakeQuestions: string;
+      namePlaceholder: string;
+      labelPlaceholder: string;
+      req: string;
+      addQuestion: string;
+      saved: string;
+      saveChanges: string;
+      createEventType: string;
+      saving: string;
+    };
   };
 }
 
@@ -206,6 +237,37 @@ export const en: BookingMessages = {
       calendars: 'Calendars',
       developer: 'Developer',
     },
+    eventTypes: {
+      title: 'Event Types',
+      newEventType: 'New event type',
+      emptyList: 'No event types yet — create one below.',
+      hidden: 'hidden',
+      needsConfirmation: 'needs confirmation',
+      minSuffix: 'min',
+      fTitle: 'Title',
+      fSlug: 'Slug',
+      fDescription: 'Description',
+      fLength: 'Length (min)',
+      fSlotInterval: 'Slot interval (min)',
+      fMinNotice: 'Min. notice (min)',
+      fBufferBefore: 'Buffer before (min)',
+      fBufferAfter: 'Buffer after (min)',
+      fSeats: 'Seats / slot (group)',
+      fSchedule: 'Availability schedule',
+      useDefaultSchedule: 'Use my default schedule',
+      noSchedules: 'No schedules yet — create one in Availability',
+      requiresConfirmation: 'Requires confirmation',
+      hiddenLabel: 'Hidden',
+      intakeQuestions: 'Intake questions',
+      namePlaceholder: 'name',
+      labelPlaceholder: 'Label',
+      req: 'req',
+      addQuestion: '+ Add question',
+      saved: 'Saved.',
+      saveChanges: 'Save changes',
+      createEventType: 'Create event type',
+      saving: 'Saving…',
+    },
   },
 };
 
@@ -308,6 +370,37 @@ export const es: BookingMessages = {
       bookingPage: 'Página de reservas',
       calendars: 'Calendarios',
       developer: 'Desarrollador',
+    },
+    eventTypes: {
+      title: 'Tipos de evento',
+      newEventType: 'Nuevo tipo de evento',
+      emptyList: 'Aún no hay tipos de evento — crea uno abajo.',
+      hidden: 'oculto',
+      needsConfirmation: 'requiere confirmación',
+      minSuffix: 'min',
+      fTitle: 'Título',
+      fSlug: 'Identificador',
+      fDescription: 'Descripción',
+      fLength: 'Duración (min)',
+      fSlotInterval: 'Intervalo entre horarios (min)',
+      fMinNotice: 'Antelación mínima (min)',
+      fBufferBefore: 'Margen antes (min)',
+      fBufferAfter: 'Margen después (min)',
+      fSeats: 'Cupos / horario (grupo)',
+      fSchedule: 'Horario de disponibilidad',
+      useDefaultSchedule: 'Usar mi horario predeterminado',
+      noSchedules: 'Aún no hay horarios — crea uno en Disponibilidad',
+      requiresConfirmation: 'Requiere confirmación',
+      hiddenLabel: 'Oculto',
+      intakeQuestions: 'Preguntas del formulario',
+      namePlaceholder: 'nombre',
+      labelPlaceholder: 'Etiqueta',
+      req: 'obl.',
+      addQuestion: '+ Añadir pregunta',
+      saved: 'Guardado.',
+      saveChanges: 'Guardar cambios',
+      createEventType: 'Crear tipo de evento',
+      saving: 'Guardando…',
     },
   },
 };
