@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
-import { formatSlotDateTime } from '@slate/shared';
+import { headers } from 'next/headers';
+import { formatSlotDateTime, getMessages, t } from '@slate/shared';
 import { getManageView, getAvailability } from '@/lib/api';
 import { ManageActions } from './manage-actions';
 
@@ -20,6 +21,11 @@ export default async function ManagePage({
   if (!booking) notFound();
 
   const tz = booking.attendee.timeZone;
+  // Public emailed link — no admin cookie; take the locale from the browser.
+  const accept = (await headers()).get('accept-language') ?? '';
+  const m = getMessages(accept.toLowerCase().startsWith('es') ? 'es' : 'en').manage;
+  const statusText = (s: string) =>
+    s === 'pending' ? m.statusPending : s === 'cancelled' ? m.statusCancelled : s === 'rejected' ? m.statusRejected : s;
 
   // Engine-backed reschedule options (G7): only real, bookable slots.
   const now = new Date();
@@ -45,20 +51,18 @@ export default async function ManagePage({
         <h1 className="text-2xl font-semibold tracking-tight">{booking.title}</h1>
         <p className="text-muted-foreground">{formatSlotDateTime(booking.startUtc, tz)}</p>
         <p className="text-sm text-muted-foreground">
-          With {booking.host.name ?? booking.attendee.name} · {booking.attendee.email}
+          {m.withLabel} {booking.host.name ?? booking.attendee.name} · {booking.attendee.email}
         </p>
         {booking.status !== 'accepted' ? (
-          <p className="text-sm text-destructive">This booking is {booking.status}.</p>
+          <p className="text-sm text-destructive">{t(m.bookingIs, { status: statusText(booking.status) })}</p>
         ) : null}
       </header>
 
       {canManage ? (
-        <ManageActions uid={uid} token={token} slots={avail?.slots ?? []} timeZone={tz} />
+        <ManageActions uid={uid} token={token} slots={avail?.slots ?? []} timeZone={tz} messages={m} />
       ) : (
         <p className="rounded-md border border-border bg-card p-4 text-muted-foreground">
-          {isPast && booking.status === 'accepted'
-            ? 'This booking has already taken place.'
-            : 'This booking can no longer be changed.'}
+          {isPast && booking.status === 'accepted' ? m.alreadyTookPlace : m.cannotChange}
         </p>
       )}
     </main>

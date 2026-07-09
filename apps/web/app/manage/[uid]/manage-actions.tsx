@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { groupSlotsByDay, type Slot } from '@slate/shared';
+import { groupSlotsByDay, type BookingMessages, type Slot } from '@slate/shared';
 import { cancelAction, rescheduleAction } from './actions';
 
 export function ManageActions({
@@ -10,11 +10,13 @@ export function ManageActions({
   token,
   slots,
   timeZone,
+  messages: m,
 }: {
   uid: string;
   token: string;
   slots: Slot[];
   timeZone: string;
+  messages: BookingMessages['manage'];
 }) {
   const router = useRouter();
   const [cancelRes, cancelForm, cancelPending] = useActionState(cancelAction, null);
@@ -34,14 +36,14 @@ export function ManageActions({
   if (cancelRes?.ok) {
     return (
       <p className="rounded-md border border-border bg-card p-4 text-card-foreground">
-        Your booking has been cancelled.
+        {m.cancelled}
       </p>
     );
   }
   if (rsRes?.ok) {
     return (
       <p className="rounded-md border border-border bg-card p-4 text-card-foreground">
-        Your booking has been rescheduled. Check your email for the updated invite.
+        {m.rescheduled}
       </p>
     );
   }
@@ -52,9 +54,9 @@ export function ManageActions({
         <input type="hidden" name="uid" value={uid} />
         <input type="hidden" name="token" value={token} />
         <input type="hidden" name="newStartUtc" value={newStartUtc} />
-        <span className="text-sm text-muted-foreground">Reschedule to</span>
+        <span className="text-sm text-muted-foreground">{m.rescheduleTo}</span>
         {days.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No open times in the next 3 weeks.</p>
+          <p className="text-sm text-muted-foreground">{m.noOpenTimes}</p>
         ) : (
           <div className="flex max-h-64 flex-col gap-3 overflow-y-auto pr-1">
             {days.map((day) => (
@@ -88,7 +90,7 @@ export function ManageActions({
           disabled={rsPending || !newStartUtc}
           className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
         >
-          {rsPending ? 'Rescheduling…' : 'Reschedule'}
+          {rsPending ? m.rescheduling : m.reschedule}
         </button>
       </form>
 
@@ -96,12 +98,12 @@ export function ManageActions({
         <input type="hidden" name="uid" value={uid} />
         <input type="hidden" name="token" value={token} />
         <label className="text-sm text-muted-foreground" htmlFor="reason">
-          Cancel this booking
+          {m.cancelThis}
         </label>
         <input
           id="reason"
           name="reason"
-          placeholder="Reason (optional)"
+          placeholder={m.cancelReason}
           className="rounded-md border border-input bg-background px-3 py-2"
         />
         {cancelRes && !cancelRes.ok ? (
@@ -112,7 +114,7 @@ export function ManageActions({
           disabled={cancelPending}
           className="rounded-md border border-destructive px-4 py-2 font-semibold text-destructive transition-transform active:scale-[0.98] disabled:opacity-60"
         >
-          {cancelPending ? 'Cancelling…' : 'Cancel booking'}
+          {cancelPending ? m.cancelling : m.cancel}
         </button>
       </form>
     </div>

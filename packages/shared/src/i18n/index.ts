@@ -39,6 +39,14 @@ export interface BookingMessages {
     cancelled: string;
     rescheduled: string;
     cannotChange: string;
+    withLabel: string;
+    bookingIs: string;
+    alreadyTookPlace: string;
+    statusPending: string;
+    statusCancelled: string;
+    statusRejected: string;
+    cancelThis: string;
+    noOpenTimes: string;
   };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
@@ -266,6 +274,12 @@ export interface BookingMessages {
       calendarId: string;
       addConnection: string;
     };
+    login: {
+      title: string;
+      subtitle: string;
+      continue: string;
+      footnote: string;
+    };
   };
 }
 
@@ -306,6 +320,14 @@ export const en: BookingMessages = {
     cancelled: 'Your booking has been cancelled.',
     rescheduled: 'Your booking has been rescheduled. Check your email for the updated invite.',
     cannotChange: 'This booking can no longer be changed.',
+    withLabel: 'With',
+    bookingIs: 'This booking is {status}.',
+    alreadyTookPlace: 'This booking has already taken place.',
+    statusPending: 'pending',
+    statusCancelled: 'cancelled',
+    statusRejected: 'rejected',
+    cancelThis: 'Cancel this booking',
+    noOpenTimes: 'No open times in the next 3 weeks.',
   },
   admin: {
     nav: {
@@ -532,6 +554,12 @@ export const en: BookingMessages = {
       calendarId: 'Calendar id / email',
       addConnection: 'Add connection',
     },
+    login: {
+      title: 'Sign in',
+      subtitle: 'Open-source scheduling. This build uses the local dev provider — configure WorkOS in your deployment for real accounts.',
+      continue: 'Continue',
+      footnote: 'No account needed in local mode — you’re signed in as the seeded host.',
+    },
   },
 };
 
@@ -572,6 +600,14 @@ export const es: BookingMessages = {
     cancelled: 'Tu reserva ha sido cancelada.',
     rescheduled: 'Tu reserva fue reprogramada. Revisa tu correo para la invitación actualizada.',
     cannotChange: 'Esta reserva ya no se puede cambiar.',
+    withLabel: 'Con',
+    bookingIs: 'Esta reserva está {status}.',
+    alreadyTookPlace: 'Esta reserva ya se realizó.',
+    statusPending: 'pendiente',
+    statusCancelled: 'cancelada',
+    statusRejected: 'rechazada',
+    cancelThis: 'Cancelar esta reserva',
+    noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
   },
   admin: {
     nav: {
@@ -797,6 +833,12 @@ export const es: BookingMessages = {
       provider: 'Proveedor',
       calendarId: 'Id de calendario / correo',
       addConnection: 'Añadir conexión',
+    },
+    login: {
+      title: 'Iniciar sesión',
+      subtitle: 'Programación de código abierto. Esta versión usa el proveedor de desarrollo local — configura WorkOS en tu despliegue para cuentas reales.',
+      continue: 'Continuar',
+      footnote: 'No se necesita cuenta en modo local — has iniciado sesión como el anfitrión de ejemplo.',
     },
   },
 };
