@@ -103,6 +103,28 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(refs[0]!.external_event_id).toBe('evt-1');
   });
 
+  it('DH1: a retried/concurrent write is idempotent — no duplicate external event', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+
+    // Two sequential writes (retry) and two concurrent writes (race) must all
+    // collapse to a SINGLE createEvent + a single reference for the destination.
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    await Promise.all([
+      (effects as unknown as Awaitable).writeEvent(uid),
+      (effects as unknown as Awaitable).writeEvent(uid),
+    ]);
+
+    expect(provider.created).toHaveLength(1);
+    const refs = await db.all(
+      sql`SELECT br.id FROM booking_reference br JOIN booking b ON b.id = br.booking_id
+          WHERE b.uid = ${uid} AND br.destination = ${CAL_REF}`,
+    );
+    expect(refs).toHaveLength(1);
+  });
+
   it('cancel → deletes the remote event and clears the reference', async () => {
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);

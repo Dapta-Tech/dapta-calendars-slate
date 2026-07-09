@@ -34,6 +34,7 @@ function ConnectCta() {
 function ConnectionRow({ c }: { c: Connection }) {
   const [pending, start] = useTransition();
   const [ping, setPing] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   return (
     <li className="flex items-center justify-between rounded-md border border-border bg-card p-4">
       <span className="flex flex-col gap-1">
@@ -60,6 +61,7 @@ function ConnectionRow({ c }: { c: Connection }) {
           </label>
         </span>
         {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+        {err ? <span className="text-xs text-destructive">{err}</span> : null}
       </span>
       <span className="flex gap-2">
         <button
@@ -73,7 +75,12 @@ function ConnectionRow({ c }: { c: Connection }) {
         <button
           type="button"
           disabled={pending}
-          onClick={() => start(() => deleteConnectionAction(c.id))}
+          onClick={() =>
+            start(async () => {
+              const r = await deleteConnectionAction(c.id);
+              setErr(r.ok ? null : (r.message ?? 'Could not disconnect.'));
+            })
+          }
           className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
         >
           Disconnect

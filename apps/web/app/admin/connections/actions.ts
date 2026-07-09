@@ -24,9 +24,15 @@ export async function createConnectionAction(
   }
 }
 
-export async function deleteConnectionAction(id: string): Promise<void> {
-  await adminApi.deleteConnection(id);
-  revalidatePath('/admin/connections');
+export async function deleteConnectionAction(id: string): Promise<{ ok: boolean; message?: string }> {
+  try {
+    await adminApi.deleteConnection(id);
+    revalidatePath('/admin/connections');
+    return { ok: true };
+  } catch (e) {
+    // Surfaces LAST_DESTINATION_REQUIRED (409) and any other API error.
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not disconnect.' };
+  }
 }
 
 export async function toggleConnectionAction(

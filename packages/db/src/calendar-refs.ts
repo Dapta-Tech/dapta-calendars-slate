@@ -165,6 +165,51 @@ export async function writeBookingReference(
   );
 }
 
+/**
+ * DH1 idempotency: atomically CLAIM a (booking_id, destination) slot before
+ * creating the remote event. The UNIQUE index makes the INSERT the guard — a
+ * retried or concurrent write loses the race and gets `null`, so it skips
+ * createEvent and cannot produce a duplicate external event. Returns the new
+ * reference id on success, or null if this destination is already claimed.
+ */
+export async function claimBookingDestination(
+  db: Db,
+  bookingId: string,
+  destination: string,
+): Promise<string | null> {
+  const id = randomUUID();
+  try {
+    await db.run(
+      sql`INSERT INTO booking_reference (id, booking_id, destination, type, created_at)
+          VALUES (${id}, ${bookingId}, ${destination}, 'calendar_event', ${Date.now()})`,
+    );
+    return id;
+  } catch {
+    // Unique-violation (already claimed) — idempotent no-op.
+    return null;
+  }
+}
+
+/** Fill a claimed reference with the created event's ids once createEvent succeeds. */
+export async function fillBookingReference(
+  db: Db,
+  referenceId: string,
+  ref: { externalEventId: string; externalCalendarId: string | null; meetingUrl: string | null },
+): Promise<void> {
+  await db.run(
+    sql`UPDATE booking_reference
+        SET external_event_id = ${ref.externalEventId},
+            external_calendar_id = ${ref.externalCalendarId},
+            meeting_url = ${ref.meetingUrl}
+        WHERE id = ${referenceId}`,
+  );
+}
+
+/** Release a claim (e.g. createEvent failed) so a later retry can re-create it. */
+export async function releaseBookingReference(db: Db, referenceId: string): Promise<void> {
+  await db.run(sql`DELETE FROM booking_reference WHERE id = ${referenceId}`);
+}
+
 export async function loadBookingReferences(
   db: Db,
   bookingId: string,

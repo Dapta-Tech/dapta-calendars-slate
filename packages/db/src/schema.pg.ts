@@ -206,6 +206,8 @@ export const webhook = pgTable('webhook', {
 export const bookingReference = pgTable('booking_reference', {
   id: text('id').primaryKey(),
   bookingId: text('booking_id').notNull(),
+  /** DH1: destination (connection ref) this event was written to; UNIQUE with booking_id. */
+  destination: text('destination'),
   type: text('type').notNull(),
   externalEventId: text('external_event_id'),
   externalCalendarId: text('external_calendar_id'),

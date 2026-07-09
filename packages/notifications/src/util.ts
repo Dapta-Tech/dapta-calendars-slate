@@ -15,3 +15,18 @@ export function normalizeRecipients(to: EmailMessage['to']): string[] {
 export function formatSender(fromEmail: string, fromName?: string): string {
   return fromName ? `${fromName} <${fromEmail}>` : fromEmail;
 }
+
+/**
+ * HTML-escape a string for safe interpolation into email HTML bodies. Booking
+ * fields (attendee name, event title, cancellation reason) are attacker-
+ * controlled; interpolating them raw is stored XSS (E8). Escape EVERY dynamic
+ * value on the HTML path.
+ */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

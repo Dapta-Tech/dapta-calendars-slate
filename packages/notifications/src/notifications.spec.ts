@@ -80,4 +80,31 @@ describe('BookingNotifier', () => {
     expect(msg.subject).toContain('Intro Call');
     expect(msg.text).toContain('Alex Rivera');
   });
+
+  it('E8 — HTML-escapes attacker-controlled values in the email body (no XSS)', async () => {
+    const sent: Array<{ html?: string; text: string }> = [];
+    const provider = {
+      send: (m: { html?: string; text: string }) => {
+        sent.push(m);
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    const notifier = new BookingNotifier(provider);
+    const payload = '<script>alert(1)</script>';
+    await notifier.sendCancellation({
+      uid: 'u2',
+      title: payload,
+      startUtc: '2026-08-01T14:00:00.000Z',
+      endUtc: '2026-08-01T14:30:00.000Z',
+      host: { name: 'Alex' },
+      attendee: { name: payload, email: 'sam@example.com', timeZone: 'UTC' },
+      cancellationReason: payload,
+    });
+    const html = sent[0]!.html!;
+    // The raw script tag must NOT appear; its escaped form must.
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+    // Plaintext body is unescaped by design (not an injection surface).
+    expect(sent[0]!.text).toContain('<script>');
+  });
 });

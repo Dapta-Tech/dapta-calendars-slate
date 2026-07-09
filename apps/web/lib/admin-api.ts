@@ -5,6 +5,19 @@
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+/** An API error that carries the HTTP status + error code so callers can drive
+ *  status-specific UX (409 slot-taken, 410 gone, 400 validation, …). */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method,
@@ -14,7 +27,8 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   });
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    throw new Error(j.message ?? j.error ?? `${method} ${path} → ${res.status}`);
+    // Surface the HTTP status (was discarded) so the UI can handle 409/410/400.
+    throw new ApiError(res.status, j.message ?? j.error ?? `${method} ${path} → ${res.status}`, j.error);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json().catch(() => ({}))) as T;

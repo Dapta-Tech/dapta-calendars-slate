@@ -185,9 +185,14 @@ export class HostController {
   }
 
   @Delete('connections/:id')
-  @HttpCode(204)
   async deleteConnection(@Req() req: ReqLike, @Param('id') id: string) {
-    await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
+    const out = await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
+    if (!out.ok)
+      throw new ConflictException({
+        error: 'LAST_DESTINATION_REQUIRED',
+        message: 'Keep at least one destination calendar — unset it as a destination first.',
+      });
+    return { ok: true };
   }
 
   // API keys.

@@ -698,7 +698,11 @@ export async function confirmBooking(
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
     AND status = 'accepted' AND id <> ${b.id}
     AND start_ms < ${b.end_ms} AND end_ms > ${b.start_ms} LIMIT 1`;
-  const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now} WHERE id = ${b.id}`;
+  // DH1: guard the transition on the CURRENT status so a concurrent/retried
+  // confirm can only move pending→accepted once (defence-in-depth alongside the
+  // idempotent calendar write claim).
+  const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
+    WHERE id = ${b.id} AND status = 'pending'`;
   const ok = await runGuardedUpdate(db, overlapSql, updateSql);
   if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
@@ -854,10 +858,26 @@ export async function createConnection(
   return { id };
 }
 
-export async function deleteConnection(db: Db, memberId: string, id: string): Promise<void> {
-  await db.run(
-    sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`,
+export async function deleteConnection(
+  db: Db,
+  memberId: string,
+  id: string,
+): Promise<{ ok: boolean; reason?: 'LAST_DESTINATION_REQUIRED' }> {
+  const conn = await db.get<{ is_destination: number }>(
+    sql`SELECT is_destination FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
   );
+  if (!conn) return { ok: true }; // already gone — idempotent
+  // R20 guard: don't strand bookings with nowhere to write — a host that has a
+  // destination calendar must keep at least one. Unset `isDestination` first.
+  if (conn.is_destination) {
+    const others = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM connected_calendar
+          WHERE member_id = ${memberId} AND is_destination = 1 AND id <> ${id}`,
+    );
+    if (Number(others?.n ?? 0) === 0) return { ok: false, reason: 'LAST_DESTINATION_REQUIRED' };
+  }
+  await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
+  return { ok: true };
 }
 
 /**

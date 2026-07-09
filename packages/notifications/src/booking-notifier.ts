@@ -1,5 +1,11 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
+import { escapeHtml } from './util';
+
+/** Render plaintext lines to a safe HTML body — every line HTML-escaped (E8). */
+function htmlBody(lines: string[]): string {
+  return `<p>${lines.map(escapeHtml).join('<br/>')}</p>`;
+}
 
 /** Everything a booking notification needs to render, provider-agnostic. */
 export interface BookingNotification {
@@ -39,7 +45,7 @@ export class BookingNotifier {
       to: n.attendee.email,
       subject: `Confirmed: ${n.title} — ${when}`,
       text: lines.join('\n'),
-      html: `<p>${lines.join('<br/>')}</p>`,
+      html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
       attachments: [this.ics(n, 'REQUEST', 0)],
     });
@@ -60,7 +66,7 @@ export class BookingNotifier {
       to: n.attendee.email,
       subject: `Rescheduled: ${n.title} — ${when}`,
       text: lines.join('\n'),
-      html: `<p>${lines.join('<br/>')}</p>`,
+      html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
       attachments: [this.ics(n, 'REQUEST', 1)],
     });
@@ -78,7 +84,7 @@ export class BookingNotifier {
       to: n.attendee.email,
       subject: `Cancelled: ${n.title} — ${when}`,
       text: lines.join('\n'),
-      html: `<p>${lines.join('<br/>')}</p>`,
+      html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
       attachments: [this.ics(n, 'CANCEL', 2)],
     });
