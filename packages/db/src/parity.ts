@@ -163,6 +163,21 @@ export interface HandleAvailability {
   handle: string;
   available: boolean;
   reason: string | null;
+  /** A free alternative to offer when the requested handle is taken (D18). */
+  suggestion?: string;
+}
+
+async function isHandleFree(
+  db: Db,
+  accountId: string,
+  h: string,
+  excludeMemberId?: string,
+): Promise<boolean> {
+  if (RESERVED_HANDLES.has(h)) return false;
+  const row = await db.get<{ id: string }>(
+    sql`SELECT id FROM member WHERE account_id = ${accountId} AND handle = ${h} LIMIT 1`,
+  );
+  return !row || row.id === excludeMemberId;
 }
 
 export async function checkHandleAvailable(
@@ -177,11 +192,18 @@ export async function checkHandleAvailable(
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h))
     return { handle: h, available: false, reason: 'invalid' };
   if (RESERVED_HANDLES.has(h)) return { handle: h, available: false, reason: 'reserved' };
-  const existing = await db.get<{ id: string }>(
-    sql`SELECT id FROM member WHERE account_id = ${accountId} AND handle = ${h} LIMIT 1`,
-  );
-  if (existing && existing.id !== excludeMemberId)
-    return { handle: h, available: false, reason: 'taken' };
+  if (!(await isHandleFree(db, accountId, h, excludeMemberId))) {
+    // Offer the first free handle-N (D18 — old contract returns a suggestion).
+    let suggestion: string | undefined;
+    for (let n = 2; n <= 99; n++) {
+      const candidate = `${h}-${n}`.slice(0, 40);
+      if (await isHandleFree(db, accountId, candidate, excludeMemberId)) {
+        suggestion = candidate;
+        break;
+      }
+    }
+    return { handle: h, available: false, reason: 'taken', suggestion };
+  }
   return { handle: h, available: true, reason: null };
 }
 

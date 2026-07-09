@@ -47,7 +47,7 @@ export interface Me {
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   handleAvailable: (handle: string) =>
-    req<{ handle: string; available: boolean; reason: string | null }>(
+    req<{ handle: string; available: boolean; reason: string | null; suggestion?: string }>(
       'GET',
       `/v1/handle-available?handle=${encodeURIComponent(handle)}`,
     ),

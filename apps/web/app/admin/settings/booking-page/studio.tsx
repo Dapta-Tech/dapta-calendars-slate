@@ -69,6 +69,7 @@ export function Studio(init: StudioInit) {
   const [surface, setSurface] = useState<'profile' | 'booking'>('profile');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [handleState, setHandleState] = useState<HandleState>('idle');
+  const [handleSuggestion, setHandleSuggestion] = useState<string | null>(null);
   const [saved, setSaved] = useState<'idle' | 'ok' | 'err'>('idle');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -103,8 +104,9 @@ export function Studio(init: StudioInit) {
         const r = await fetch(`${API}/v1/handle-available?handle=${encodeURIComponent(handle)}`, {
           cache: 'no-store',
         });
-        const j = (await r.json()) as { available: boolean };
+        const j = (await r.json()) as { available: boolean; suggestion?: string };
         setHandleState(j.available ? 'available' : 'taken');
+        setHandleSuggestion(j.available ? null : (j.suggestion ?? null));
       } catch {
         setHandleState('idle');
       }
@@ -199,6 +201,15 @@ export function Studio(init: StudioInit) {
                 />
               </div>
               <HandleHint state={handleState} />
+              {handleState === 'taken' && handleSuggestion ? (
+                <button
+                  type="button"
+                  onClick={() => setHandle(handleSuggestion)}
+                  className="self-start text-xs text-primary hover:underline"
+                >
+                  Try {handleSuggestion} →
+                </button>
+              ) : null}
             </Field>
             <Field label="Bio">
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} className={inputCls} />
