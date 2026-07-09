@@ -50,6 +50,15 @@ export const serverEnvSchema = z.object({
   // the concrete adapter shipped in the private deploy overlay (no vendor named
   // in the OSS build); selecting it here without that overlay fails loud.
   CALENDAR_PROVIDER: z.enum(['disabled', 'external']).default('disabled'),
+
+  // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
+  // webhook delivery) with retry+backoff. Enabled by default; the poll interval
+  // and retry ceiling are tunable. Set OUTBOX_WORKER_ENABLED=false to run the
+  // API without the background drainer (e.g. when a separate worker process owns
+  // it). On a bare clone the queue is empty, so the worker just idles.
+  OUTBOX_WORKER_ENABLED: boolish.default('true'),
+  OUTBOX_POLL_MS: z.coerce.number().int().positive().default(5000),
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

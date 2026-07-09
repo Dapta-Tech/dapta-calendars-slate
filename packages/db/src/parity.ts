@@ -33,6 +33,7 @@ import {
 } from './repository';
 import { loadExternalBusy } from './calendar-refs';
 import { checkWebhookUrl } from './webhook-url';
+import { enqueueOutbox } from './outbox';
 
 // --- Reservation holds ----------------------------------------------------
 
@@ -1070,4 +1071,101 @@ export async function dispatchWebhooks(
     }),
   );
   return sent;
+}
+
+// --- Durable webhook delivery via the outbox (B7 / audit DM1) --------------
+//
+// `dispatchWebhooks` above is the legacy best-effort fan-out (kept for tests and
+// any direct caller). The lifecycle now goes through the OUTBOX instead: one
+// durable row PER SUBSCRIBER, drained by the worker with retry+backoff. That
+// gives per-subscriber isolation (a slow/broken subscriber can't starve the
+// others), per-subscriber retry, and a delivery log.
+
+export interface MatchingWebhook {
+  id: string;
+  subscriberUrl: string;
+  secret: string | null;
+}
+
+/** Active webhooks in the account whose triggers include `event`. */
+export async function loadMatchingWebhooks(
+  db: Db,
+  accountId: string,
+  event: string,
+): Promise<MatchingWebhook[]> {
+  const hooks = await db.all<{
+    id: string;
+    subscriber_url: string;
+    secret: string | null;
+    event_triggers: unknown;
+  }>(
+    sql`SELECT id, subscriber_url, secret, event_triggers FROM webhook
+        WHERE account_id = ${accountId} AND active = 1`,
+  );
+  return hooks
+    .filter((h) => parseJsonColumn<string[]>(h.event_triggers, []).includes(event))
+    .map((h) => ({ id: h.id, subscriberUrl: h.subscriber_url, secret: h.secret }));
+}
+
+/**
+ * Enqueue one outbox row per matching subscriber. Returns how many were queued.
+ * On a bare clone-and-run (no webhooks configured) this enqueues nothing, so the
+ * outbox stays empty and behavior is unchanged.
+ */
+export async function enqueueWebhookDeliveries(
+  db: Db,
+  accountId: string,
+  event: string,
+  payload: unknown,
+  now = Date.now(),
+): Promise<number> {
+  const hooks = await loadMatchingWebhooks(db, accountId, event);
+  const body = JSON.stringify({ event, data: payload });
+  for (const h of hooks) {
+    await enqueueOutbox(db, {
+      kind: 'webhook',
+      action: event,
+      accountId,
+      webhookId: h.id,
+      payload: body,
+      now,
+    });
+  }
+  return hooks.length;
+}
+
+/**
+ * Deliver ONE webhook (the worker's per-row executor). Loads the subscriber by
+ * id (so a delete/rotate between enqueue and delivery is honored), re-validates
+ * the URL at egress (DNS-rebinding defense), signs with the CURRENT secret, and
+ * POSTs. THROWS on any failure (missing hook, blocked URL, network error, or a
+ * non-2xx response) so the worker retries; a 2xx resolves the row.
+ */
+export async function deliverWebhookEvent(
+  db: Db,
+  args: { webhookId: string; body: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const hook = await db.get<{ subscriber_url: string; secret: string | null; active: number }>(
+    sql`SELECT subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  );
+  if (!hook || hook.active !== 1) {
+    // Subscriber gone/disabled since enqueue — nothing to deliver, don't retry.
+    return;
+  }
+  if (!(await checkWebhookUrl(hook.subscriber_url)).ok) {
+    throw new Error(`webhook URL blocked at egress: ${hook.subscriber_url}`);
+  }
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'X-Slate-Event': (JSON.parse(args.body) as { event?: string }).event ?? '',
+  };
+  if (hook.secret) {
+    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
+  }
+  const res = await fetchImpl(hook.subscriber_url, { method: 'POST', headers, body: args.body });
+  // A Response-like result must be 2xx; a thrown fetch already propagates.
+  if (res && typeof (res as Response).ok === 'boolean' && !(res as Response).ok) {
+    throw new Error(`webhook delivery failed: HTTP ${(res as Response).status}`);
+  }
 }

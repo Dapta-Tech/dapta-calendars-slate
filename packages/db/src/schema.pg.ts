@@ -215,6 +215,24 @@ export const bookingReference = pgTable('booking_reference', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
+/** B7/DM1: durable side-effect queue (calendar write-out + webhook delivery). */
+export const outbox = pgTable('outbox', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  action: text('action').notNull(),
+  bookingUid: text('booking_uid'),
+  accountId: text('account_id'),
+  webhookId: text('webhook_id'),
+  payload: text('payload'),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  maxAttempts: integer('max_attempts').notNull().default(5),
+  nextAttemptAt: bigint('next_attempt_at', { mode: 'number' }).notNull(),
+  lastError: text('last_error'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -231,4 +249,5 @@ export const pgSchema = {
   apiKey,
   webhook,
   bookingReference,
+  outbox,
 };
