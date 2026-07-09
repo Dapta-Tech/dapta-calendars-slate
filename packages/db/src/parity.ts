@@ -620,18 +620,47 @@ export type MutationOutcome =
       manageToken?: string;
       /** The instant the booking was at BEFORE a reschedule (for the email). */
       previousStartUtc?: string;
+      /**
+       * True when this call was an idempotent no-op (already-cancelled, or a
+       * reschedule retried with the same Idempotency-Key) — the state was NOT
+       * changed, so the caller must skip side-effects (no duplicate email/webhook).
+       */
+      alreadyApplied?: boolean;
     }
   | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' };
 
 export async function rescheduleBooking(
   db: Db,
-  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string; now?: Date },
+  args: {
+    uid: string;
+    newStartMs: number;
+    manageToken?: string;
+    byHost?: boolean;
+    accountId?: string;
+    now?: Date;
+    idempotencyKey?: string;
+  },
 ): Promise<MutationOutcome> {
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
+
+  // P1-2: honor the Idempotency-Key. A retry with the same key returns the
+  // already-applied state WITHOUT moving again or re-rotating the manage token
+  // (a double-move would silently invalidate the token the first response
+  // handed back). Keyed on the booking's stored `_idem.reschedule`.
+  const meta = parseJsonColumn<{ _manage?: unknown; _idem?: { reschedule?: string } }>(b.metadata, {});
+  if (args.idempotencyKey && meta._idem?.reschedule === args.idempotencyKey) {
+    return {
+      ok: true,
+      uid: b.uid,
+      startUtc: new Date(Number(b.start_ms)).toISOString(),
+      endUtc: new Date(Number(b.end_ms)).toISOString(),
+      alreadyApplied: true,
+    };
+  }
 
   // B6: the new time must be a REAL bookable slot — enforce the host's schedule
   // rules, min-notice, buffers, and not-in-the-past (the old path only checked
@@ -653,7 +682,12 @@ export async function rescheduleBooking(
   const previousStartUtc = new Date(Number(b.start_ms)).toISOString();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
-  const metaExpr = jsonParam(db, { _manage: { tokenHash } });
+  // Preserve any other metadata; rotate the manage token and record the
+  // idempotency key so an identical retry short-circuits above.
+  const newMeta: Record<string, unknown> = { ...meta, _manage: { tokenHash } };
+  if (args.idempotencyKey)
+    newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
+  const metaExpr = jsonParam(db, newMeta);
 
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
     AND status = 'accepted' AND id <> ${b.id}
@@ -700,24 +734,35 @@ async function runGuardedUpdate(
 
 export async function cancelBooking(
   db: Db,
-  args: { uid: string; reason?: string; manageToken?: string; byHost?: boolean; accountId?: string },
+  args: {
+    uid: string;
+    reason?: string;
+    manageToken?: string;
+    byHost?: boolean;
+    accountId?: string;
+    /** Retries with the same key (or any retry of an already-cancelled booking) are idempotent. */
+    idempotencyKey?: string;
+  },
 ): Promise<MutationOutcome> {
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
-  if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
+  // Verify the caller BEFORE revealing status (no existence/timing leak on a
+  // bad token), so an idempotent retry still requires a valid principal.
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
+  const nowIso = { startUtc: new Date(Number(b.start_ms)).toISOString(), endUtc: new Date(Number(b.end_ms)).toISOString() };
+  // P1-1: cancel is IDEMPOTENT. A retried cancel of an already-cancelled booking
+  // returns success (was 410 GONE, which broke agent retry loops that treat
+  // non-2xx as failure). Only a truly non-cancellable state (pending/rejected)
+  // is GONE.
+  if (b.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
+  if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   const now = Date.now();
   await db.run(
     sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${args.reason ?? null},
         cancelled_by = ${args.byHost ? 'host' : 'attendee'}, updated_at = ${now} WHERE id = ${b.id}`,
   );
-  return {
-    ok: true,
-    uid: b.uid,
-    startUtc: new Date(Number(b.start_ms)).toISOString(),
-    endUtc: new Date(Number(b.end_ms)).toISOString(),
-  };
+  return { ok: true, uid: b.uid, ...nowIso };
 }
 
 /**
@@ -877,8 +922,10 @@ export async function listBookings(
      * array allows nothing; null/undefined means no event-type restriction.
      */
     eventTypeIds?: string[] | null;
+    /** Opaque keyset cursor from a prior page's `nextCursor` (P1-3). */
+    cursor?: string;
   },
-): Promise<{ items: BookingListItem[] }> {
+): Promise<{ items: BookingListItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
   const conds = [sql`account_id = ${args.accountId}`];
   if (args.memberId) conds.push(sql`host_member_id = ${args.memberId}`);
@@ -894,7 +941,17 @@ export async function listBookings(
       conds.push(sql`event_type_id IN (${inList})`);
     }
   }
+  // Keyset pagination on the stable sort key (start_ms DESC, then uid DESC to
+  // break ties deterministically). The cursor encodes the last row of the prior
+  // page, so paging never skips or repeats rows even as new bookings arrive.
+  const cursor = decodeBookingCursor(args.cursor);
+  if (cursor) {
+    conds.push(
+      sql`(start_ms < ${cursor.startMs} OR (start_ms = ${cursor.startMs} AND uid < ${cursor.uid}))`,
+    );
+  }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
+  // Fetch one extra row to know whether a further page exists.
   const rows = await db.all<{
     uid: string;
     status: string;
@@ -904,10 +961,13 @@ export async function listBookings(
     host_member_id: string | null;
   }>(
     sql`SELECT uid, status, title, start_ms, end_ms, host_member_id FROM booking
-        WHERE ${where} ORDER BY start_ms DESC LIMIT ${limit}`,
+        WHERE ${where} ORDER BY start_ms DESC, uid DESC LIMIT ${limit + 1}`,
   );
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
   return {
-    items: rows.map((r) => ({
+    items: page.map((r) => ({
       uid: r.uid,
       status: r.status,
       title: r.title,
@@ -915,7 +975,28 @@ export async function listBookings(
       endUtc: new Date(Number(r.end_ms)).toISOString(),
       hostMemberId: r.host_member_id,
     })),
+    nextCursor: hasMore && last ? encodeBookingCursor(Number(last.start_ms), last.uid) : null,
   };
+}
+
+/** Opaque, URL-safe cursor = base64url("<startMs>:<uid>"). */
+function encodeBookingCursor(startMs: number, uid: string): string {
+  return Buffer.from(`${startMs}:${uid}`, 'utf8').toString('base64url');
+}
+
+function decodeBookingCursor(cursor?: string): { startMs: number; uid: string } | null {
+  if (!cursor) return null;
+  try {
+    const raw = Buffer.from(cursor, 'base64url').toString('utf8');
+    const idx = raw.indexOf(':');
+    if (idx <= 0) return null;
+    const startMs = Number(raw.slice(0, idx));
+    const uid = raw.slice(idx + 1);
+    if (!Number.isFinite(startMs) || !uid) return null;
+    return { startMs, uid };
+  } catch {
+    return null;
+  }
 }
 
 // --- Connections (behind the CalendarProvider port — generic, no vendor) --
