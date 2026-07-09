@@ -1,16 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+const stripProtocol = (u: string) => u.replace(/^https?:\/\//, '');
 
 /** The booking link with a copy-to-clipboard button (F1). Absolute URL resolved
- *  client-side from the real origin; a 2s "Copied" flash confirms (R22). */
+ *  client-side from the real origin; a 2s "Copied" flash confirms (R22).
+ *  The displayed text starts as the server-stable `path` so SSR and the first
+ *  client render match (no hydration mismatch), then upgrades to the absolute
+ *  origin after mount. */
 export function CopyLink({ path }: { path: string }) {
   const [copied, setCopied] = useState(false);
-  const url = typeof window !== 'undefined' ? `${window.location.origin}${path}` : path;
+  const [display, setDisplay] = useState(() => stripProtocol(path));
+
+  useEffect(() => {
+    setDisplay(stripProtocol(`${window.location.origin}${path}`));
+  }, [path]);
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(`${window.location.origin}${path}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -20,7 +29,7 @@ export function CopyLink({ path }: { path: string }) {
 
   return (
     <div className="flex items-center gap-3">
-      <code className="rounded-sm bg-muted px-2 py-1 text-sm">{url.replace(/^https?:\/\//, '')}</code>
+      <code className="rounded-sm bg-muted px-2 py-1 text-sm">{display}</code>
       <button
         type="button"
         onClick={copy}
