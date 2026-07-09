@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState, useTransition } from 'react';
+import { useEffect, useActionState, useState, useTransition } from 'react';
 import type { Connection } from '@/lib/admin-api';
 import {
   connectCalendarAction,
@@ -11,6 +11,66 @@ import {
   type ActionResult,
 } from './actions';
 
+// User-facing end-provider choices (not the private integration vendor — R15).
+const PROVIDERS = [
+  { id: 'google', label: 'Google Calendar' },
+  { id: 'outlook', label: 'Outlook / Microsoft 365' },
+] as const;
+
+/** Provider-choice dialog for the connect flow. Runs against the CalendarProvider
+ *  port via connectCalendarAction: when a provider is configured it yields a
+ *  connect token/URL; otherwise it honestly reports that sync is off. */
+function ConnectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setMsg(null);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  const choose = () =>
+    start(async () => {
+      const r = await connectCalendarAction();
+      // A configured provider returns a token → begin its flow; else report status.
+      setMsg(r.message);
+    });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" aria-hidden tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-background/80" />
+      <div role="dialog" aria-modal="true" aria-label="Connect a calendar" className="relative w-full max-w-md rounded-xl border border-border bg-popover p-6 shadow-lg">
+        <h2 className="mb-1 text-lg font-semibold">Connect a calendar</h2>
+        <p className="mb-4 text-sm text-muted-foreground">Choose a provider to link.</p>
+        <div className="flex flex-col gap-2">
+          {PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              disabled={pending}
+              onClick={choose}
+              className="flex items-center justify-between rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
+            >
+              <span className="font-medium">{p.label}</span>
+              <span aria-hidden className="text-muted-foreground">→</span>
+            </button>
+          ))}
+        </div>
+        {msg ? <p className="mt-4 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">{msg}</p> : null}
+        <div className="mt-5 flex justify-end">
+          <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export interface ProviderStatus {
   enabled: boolean;
   message: string;
@@ -20,43 +80,48 @@ export interface ProviderStatus {
  *  connect flow accordingly (fixes "los calendarios no se conectan" — the OSS
  *  default has no provider wired, which the old UI never communicated). */
 function ProviderBanner({ status }: { status: ProviderStatus }) {
-  const [msg, setMsg] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  if (status.enabled) {
-    return (
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-4">
-        <span className="flex h-2.5 w-2.5 rounded-full bg-primary" aria-hidden />
-        <span className="flex-1 text-sm">
-          <span className="font-medium text-foreground">Calendar sync is on.</span>{' '}
-          <span className="text-muted-foreground">Connect Google or Outlook to check conflicts and write events.</span>
-        </span>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => start(async () => setMsg((await connectCalendarAction()).message))}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-        >
-          Connect a calendar
-        </button>
-        {msg ? <span className="w-full text-sm text-muted-foreground">{msg}</span> : null}
-      </div>
-    );
-  }
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-4">
-      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <span className="flex h-2.5 w-2.5 rounded-full bg-muted-foreground/60" aria-hidden />
-        Calendar sync is off in this build
-      </span>
-      <p className="text-sm text-muted-foreground">
-        No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet.
-        Connections you add below are <strong>recorded</strong> but not synced. To turn sync on, set{' '}
-        <code className="rounded-sm bg-background px-1">CALENDAR_PROVIDER=external</code> and configure a provider
-        adapter in your deployment.
-      </p>
-    </div>
+    <>
+      {status.enabled ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-4">
+          <span className="flex h-2.5 w-2.5 rounded-full bg-primary" aria-hidden />
+          <span className="flex-1 text-sm">
+            <span className="font-medium text-foreground">Calendar sync is on.</span>{' '}
+            <span className="text-muted-foreground">Connect Google or Outlook to check conflicts and write events.</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            Connect a calendar
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-4">
+          <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <span className="flex h-2.5 w-2.5 rounded-full bg-muted-foreground/60" aria-hidden />
+            Calendar sync is off in this build
+          </span>
+          <p className="text-sm text-muted-foreground">
+            No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet.
+            Connections you add below are <strong>recorded</strong> but not synced. To turn sync on, set{' '}
+            <code className="rounded-sm bg-background px-1">CALENDAR_PROVIDER=external</code> and configure a provider
+            adapter in your deployment.
+          </p>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="self-start text-sm text-primary hover:underline"
+          >
+            Connect a calendar →
+          </button>
+        </div>
+      )}
+      <ConnectDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+    </>
   );
 }
 
