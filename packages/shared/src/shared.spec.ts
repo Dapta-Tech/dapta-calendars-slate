@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { groupSlotsByDay } from './booking';
 import { slugifyHandle, validateHandle } from './handle';
 import { t, en, es } from './i18n';
+import { phoneValidator, parseGuests, guestsValidator } from './booking-fields';
+import { validateDayRanges, copyRangesToDays, daysToBlocks, blocksToDays } from './availability';
 import {
   clampAccent,
   accentWasAdjusted,
@@ -60,6 +62,38 @@ describe('handle', () => {
 describe('t', () => {
   it('interpolates placeholders', () => {
     expect(t('{minutes} min', { minutes: 30 })).toBe('30 min');
+  });
+});
+
+describe('booking-fields validators (H5)', () => {
+  it('phoneValidator accepts intl formats, rejects junk, allows empty', () => {
+    expect(phoneValidator('')).toBeNull();
+    expect(phoneValidator('+1 (555) 123-4567')).toBeNull();
+    expect(phoneValidator('abc')).not.toBeNull();
+  });
+  it('parseGuests dedupes + lowercases; guestsValidator flags bad emails', () => {
+    expect(parseGuests('A@x.com, a@x.com\n b@y.io')).toEqual(['a@x.com', 'b@y.io']);
+    expect(guestsValidator('a@x.com, b@y.io')).toBeNull();
+    expect(guestsValidator('a@x.com, nope')).toMatch(/valid email/);
+  });
+});
+
+describe('availability-editor util (H1)', () => {
+  it('validateDayRanges flags bad times, inverted, and overlaps', () => {
+    expect(validateDayRanges([{ start: '09:00', end: '17:00' }])).toBeNull();
+    expect(validateDayRanges([{ start: '17:00', end: '09:00' }])).not.toBeNull();
+    expect(
+      validateDayRanges([
+        { start: '09:00', end: '12:00' },
+        { start: '11:00', end: '13:00' },
+      ]),
+    ).toMatch(/overlap/);
+  });
+  it('copyRangesToDays clones one day into others; blocks round-trip', () => {
+    const copied = copyRangesToDays({ 1: [{ start: '09:00', end: '17:00' }] }, 1, [2, 3]);
+    expect(copied[2]).toEqual([{ start: '09:00', end: '17:00' }]);
+    const blocks = daysToBlocks(copied);
+    expect(blocksToDays(blocks)[3]).toEqual([{ start: '09:00', end: '17:00' }]);
   });
 });
 

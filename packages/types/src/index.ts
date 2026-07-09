@@ -29,6 +29,7 @@ export const bookingFieldType = [
   'number',
   'select',
   'checkbox',
+  'guests',
 ] as const;
 export type BookingFieldType = (typeof bookingFieldType)[number];
 
