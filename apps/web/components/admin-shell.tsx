@@ -27,7 +27,7 @@ const NAV: NavItem[] = [
   { label: 'Home', href: '/admin', icon: 'home' },
   { label: 'Bookings', href: '/admin/bookings', icon: 'calendar' },
   { label: 'Availability', href: '/admin/availability', icon: 'clock' },
-  { label: 'Event Types', href: '/admin/event-types', icon: 'ticket' },
+  { label: 'Event types', href: '/admin/event-types', icon: 'ticket' },
   { label: 'Teams', href: '/admin/teams', icon: 'users' },
   { label: 'Settings', href: '/admin/settings', icon: 'cog', match: ['/admin/settings', '/admin/connections'] },
 ];
@@ -114,7 +114,7 @@ function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
               title={collapsed ? item.label : undefined}
               aria-current={active ? 'page' : undefined}
               className={[
-                'flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors active:scale-[0.99]',
+                'flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors active:scale-[0.99]',
                 collapsed ? 'justify-center gap-0' : '',
                 active
                   ? 'bg-muted font-medium text-foreground'
@@ -204,8 +204,18 @@ export function AdminShell({
           title={collapsed ? 'Expand' : 'Collapse'}
           className={`hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
         >
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-            {collapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            {collapsed ? (
+              <>
+                <path d="m13 17 5-5-5-5" />
+                <path d="m6 17 5-5-5-5" />
+              </>
+            ) : (
+              <>
+                <path d="m11 17-5-5 5-5" />
+                <path d="m18 17-5-5 5-5" />
+              </>
+            )}
           </svg>
         </button>
       ) : null}
@@ -215,25 +225,30 @@ export function AdminShell({
   const footer = (
     <div
       className={`mt-auto grid items-center gap-2 border-t border-border pt-3 ${
-        railCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr]'
+        railCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr_auto]'
       }`}
     >
       <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
         {initial}
       </span>
       {!railCollapsed ? (
-        <span className="flex flex-col overflow-hidden">
+        <>
           <span className="truncate text-sm text-foreground" title={userLabel}>
             {userLabel}
           </span>
           {user?.handle ? (
-            <Link href={`/${user.accountCode}/${user.handle}`} className="truncate text-xs text-primary hover:underline">
-              View public page →
+            <Link
+              href={`/${user.accountCode}/${user.handle}`}
+              title="View public page"
+              aria-label="View public page"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M7 17 17 7M9 7h8v8" />
+              </svg>
             </Link>
-          ) : (
-            <span className="text-xs text-muted-foreground opacity-60">dev auth stub</span>
-          )}
-        </span>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
