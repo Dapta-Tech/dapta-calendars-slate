@@ -2,8 +2,11 @@
 
 import Link from 'next/link';
 import { useActionState, useState, useTransition } from 'react';
+import type { BookingMessages } from '@slate/shared';
 import type { Team } from '@/lib/admin-api';
 import { createTeamAction, deleteTeamAction, type ActionResult } from './actions';
+
+type TeamsMessages = BookingMessages['admin']['teams'];
 
 const monogram = (name: string) =>
   name
@@ -13,20 +16,20 @@ const monogram = (name: string) =>
     .join('')
     .toUpperCase() || 'T';
 
-export function NewTeamForm() {
+export function NewTeamForm({ messages: m }: { messages: TeamsMessages }) {
   const [res, action, pending] = useActionState<ActionResult | null, FormData>(createTeamAction, null);
   return (
     <form action={action} className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-4">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">Name</span>
+        <span className="text-muted-foreground">{m.name}</span>
         <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">Slug</span>
+        <span className="text-muted-foreground">{m.slug}</span>
         <input name="slug" required className="rounded-md border border-input bg-background px-3 py-2" />
       </label>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">Timezone</span>
+        <span className="text-muted-foreground">{m.timezone}</span>
         <input name="timeZone" defaultValue="America/New_York" className="rounded-md border border-input bg-background px-3 py-2" />
       </label>
       <button
@@ -34,7 +37,7 @@ export function NewTeamForm() {
         disabled={pending}
         className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
       >
-        {pending ? '…' : 'Create team'}
+        {pending ? '…' : m.createTeam}
       </button>
       {res && !res.ok ? <p className="w-full text-sm text-destructive">{res.message}</p> : null}
     </form>
@@ -43,7 +46,7 @@ export function NewTeamForm() {
 
 /** Clean list row: monogram + name→detail + member count, with obvious Manage
  *  and a confirm-gated Delete. Member editing lives on the detail page. */
-export function TeamCard({ team, memberCount }: { team: Team; memberCount: number }) {
+export function TeamCard({ team, memberCount, messages: m }: { team: Team; memberCount: number; messages: TeamsMessages }) {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -57,7 +60,7 @@ export function TeamCard({ team, memberCount }: { team: Team; memberCount: numbe
         <span className="flex min-w-0 flex-col">
           <span className="truncate font-medium hover:text-primary">{team.name}</span>
           <span className="truncate text-sm text-muted-foreground">
-            /{team.slug} · {memberCount} member{memberCount === 1 ? '' : 's'}
+            /{team.slug} · {memberCount} {memberCount === 1 ? m.memberSingular : m.memberPlural}
           </span>
         </span>
       </Link>
@@ -66,7 +69,7 @@ export function TeamCard({ team, memberCount }: { team: Team; memberCount: numbe
           href={`/admin/teams/${team.id}`}
           className="rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:border-primary"
         >
-          Manage
+          {m.manage}
         </Link>
         {confirming ? (
           <span className="flex items-center gap-1 text-sm">
@@ -76,16 +79,16 @@ export function TeamCard({ team, memberCount }: { team: Team; memberCount: numbe
               onClick={() =>
                 start(async () => {
                   const r = await deleteTeamAction(team.id);
-                  if (!r.ok) setErr(r.message ?? 'Could not delete.');
+                  if (!r.ok) setErr(r.message ?? m.deleteError);
                   setConfirming(false);
                 })
               }
               className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
             >
-              Delete
+              {m.delete}
             </button>
             <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-2 py-1">
-              Cancel
+              {m.cancel}
             </button>
           </span>
         ) : (
@@ -94,7 +97,7 @@ export function TeamCard({ team, memberCount }: { team: Team; memberCount: numbe
             onClick={() => setConfirming(true)}
             className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
           >
-            Delete
+            {m.delete}
           </button>
         )}
       </div>

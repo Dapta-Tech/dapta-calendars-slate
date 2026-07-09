@@ -202,6 +202,43 @@ export interface BookingMessages {
       newSubtitle: string;
       createEventFirst: string;
     };
+    teams: {
+      title: string;
+      subtitle: string;
+      emptyList: string;
+      newTeam: string;
+      name: string;
+      slug: string;
+      timezone: string;
+      createTeam: string;
+      manage: string;
+      delete: string;
+      cancel: string;
+      deleteError: string;
+      memberSingular: string;
+      memberPlural: string;
+      noMembers: string;
+      addMember: string;
+      chooseSomeone: string;
+      role: string;
+      roleOwner: string;
+      roleMember: string;
+      add: string;
+      allOnTeam: string;
+      remove: string;
+      lastOwner: string;
+      lastOwnerTitle: string;
+      roleUpdated: string;
+      memberRemoved: string;
+      memberAdded: string;
+      genericError: string;
+      backToTeams: string;
+      viewPublicTeam: string;
+      roundRobin: string;
+      members: string;
+      teamEventTypes: string;
+      noTeamEventTypes: string;
+    };
   };
 }
 
@@ -404,6 +441,43 @@ export const en: BookingMessages = {
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event type first.',
     },
+    teams: {
+      title: 'Teams',
+      subtitle: 'Round-robin scheduling across a group of hosts.',
+      emptyList: 'No teams yet — create one below to round-robin bookings across hosts.',
+      newTeam: 'New team',
+      name: 'Name',
+      slug: 'Slug',
+      timezone: 'Timezone',
+      createTeam: 'Create team',
+      manage: 'Manage',
+      delete: 'Delete',
+      cancel: 'Cancel',
+      deleteError: 'Could not delete.',
+      memberSingular: 'member',
+      memberPlural: 'members',
+      noMembers: 'No members yet. Add someone from your account below.',
+      addMember: 'Add member',
+      chooseSomeone: 'Choose someone…',
+      role: 'Role',
+      roleOwner: 'Owner',
+      roleMember: 'Member',
+      add: 'Add',
+      allOnTeam: 'All account members are on this team.',
+      remove: 'Remove',
+      lastOwner: 'Last owner',
+      lastOwnerTitle: 'A team must keep at least one owner',
+      roleUpdated: 'Role updated.',
+      memberRemoved: 'Member removed.',
+      memberAdded: 'Member added.',
+      genericError: 'Something went wrong.',
+      backToTeams: '← Teams',
+      viewPublicTeam: 'View public team page →',
+      roundRobin: 'round-robin scheduling',
+      members: 'Members',
+      teamEventTypes: 'Team event types',
+      noTeamEventTypes: 'No team event types yet.',
+    },
   },
 };
 
@@ -605,6 +679,43 @@ export const es: BookingMessages = {
       backToBookings: '← Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un tipo de evento.',
+    },
+    teams: {
+      title: 'Equipos',
+      subtitle: 'Programación por turnos entre un grupo de anfitriones.',
+      emptyList: 'Aún no hay equipos — crea uno abajo para repartir reservas por turnos entre anfitriones.',
+      newTeam: 'Nuevo equipo',
+      name: 'Nombre',
+      slug: 'Identificador',
+      timezone: 'Zona horaria',
+      createTeam: 'Crear equipo',
+      manage: 'Gestionar',
+      delete: 'Eliminar',
+      cancel: 'Cancelar',
+      deleteError: 'No se pudo eliminar.',
+      memberSingular: 'miembro',
+      memberPlural: 'miembros',
+      noMembers: 'Aún no hay miembros. Añade a alguien de tu cuenta abajo.',
+      addMember: 'Añadir miembro',
+      chooseSomeone: 'Elige a alguien…',
+      role: 'Rol',
+      roleOwner: 'Propietario',
+      roleMember: 'Miembro',
+      add: 'Añadir',
+      allOnTeam: 'Todos los miembros de la cuenta están en este equipo.',
+      remove: 'Quitar',
+      lastOwner: 'Último propietario',
+      lastOwnerTitle: 'Un equipo debe conservar al menos un propietario',
+      roleUpdated: 'Rol actualizado.',
+      memberRemoved: 'Miembro eliminado.',
+      memberAdded: 'Miembro añadido.',
+      genericError: 'Algo salió mal.',
+      backToTeams: '← Equipos',
+      viewPublicTeam: 'Ver página pública del equipo →',
+      roundRobin: 'programación por turnos',
+      members: 'Miembros',
+      teamEventTypes: 'Tipos de evento del equipo',
+      noTeamEventTypes: 'Aún no hay tipos de evento del equipo.',
     },
   },
 };

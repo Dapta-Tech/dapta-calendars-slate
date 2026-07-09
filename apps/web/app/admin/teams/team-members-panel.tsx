@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import type { BookingMessages } from '@slate/shared';
 import { useToast } from '@/components/toast';
 import { addMemberAction, removeMemberAction, setMemberRoleAction } from './actions';
+
+type TeamsMessages = BookingMessages['admin']['teams'];
 
 interface Member {
   member_id: string;
@@ -23,10 +26,12 @@ export function TeamMembersPanel({
   teamId,
   members,
   accountMembers,
+  messages: m,
 }: {
   teamId: string;
   members: Member[];
   accountMembers: AccountMember[];
+  messages: TeamsMessages;
 }) {
   const [pending, start] = useTransition();
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -45,7 +50,7 @@ export function TeamMembersPanel({
         success(ok);
         setConfirmRemove(null);
       } else {
-        error(r.message ?? 'Something went wrong.');
+        error(r.message ?? m.genericError);
       }
     });
 
@@ -53,61 +58,61 @@ export function TeamMembersPanel({
     <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
       {members.length === 0 ? (
         <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-          No members yet. Add someone from your account below.
+          {m.noMembers}
         </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border">
-          {members.map((m) => {
-            const isLastOwner = m.role === 'owner' && ownerCount === 1;
+          {members.map((member) => {
+            const isLastOwner = member.role === 'owner' && ownerCount === 1;
             return (
-              <li key={m.member_id} className="flex flex-wrap items-center gap-3 py-3">
+              <li key={member.member_id} className="flex flex-wrap items-center gap-3 py-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-xs font-semibold text-muted-foreground">
-                  {initialOf(m)}
+                  {initialOf(member)}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{m.display_name ?? m.member_id.slice(0, 8)}</span>
-                  {m.email ? <span className="truncate text-xs text-muted-foreground">{m.email}</span> : null}
+                  <span className="truncate text-sm font-medium">{member.display_name ?? member.member_id.slice(0, 8)}</span>
+                  {member.email ? <span className="truncate text-xs text-muted-foreground">{member.email}</span> : null}
                 </span>
                 <select
-                  value={m.role === 'owner' ? 'owner' : 'member'}
+                  value={member.role === 'owner' ? 'owner' : 'member'}
                   disabled={pending || isLastOwner}
-                  title={isLastOwner ? 'A team must keep at least one owner' : undefined}
-                  onChange={(e) => run(setMemberRoleAction(teamId, m.member_id, e.target.value as 'owner' | 'member'), 'Role updated.')}
+                  title={isLastOwner ? m.lastOwnerTitle : undefined}
+                  onChange={(e) => run(setMemberRoleAction(teamId, member.member_id, e.target.value as 'owner' | 'member'), m.roleUpdated)}
                   className="rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-60"
                 >
-                  <option value="owner">Owner</option>
-                  <option value="member">Member</option>
+                  <option value="owner">{m.roleOwner}</option>
+                  <option value="member">{m.roleMember}</option>
                 </select>
-                {confirmRemove === m.member_id ? (
+                {confirmRemove === member.member_id ? (
                   <span className="flex items-center gap-1 text-sm">
                     <button
                       type="button"
                       disabled={pending}
-                      onClick={() => run(removeMemberAction(teamId, m.member_id), 'Member removed.')}
+                      onClick={() => run(removeMemberAction(teamId, member.member_id), m.memberRemoved)}
                       className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
                     >
-                      Remove
+                      {m.remove}
                     </button>
                     <button type="button" onClick={() => setConfirmRemove(null)} className="rounded-md border border-border px-2 py-1">
-                      Cancel
+                      {m.cancel}
                     </button>
                   </span>
                 ) : isLastOwner ? (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground" title="A team must keep at least one owner">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.lastOwnerTitle}>
                     <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
                       <rect x="5" y="11" width="14" height="9" rx="2" />
                       <path d="M8 11V8a4 4 0 0 1 8 0v3" />
                     </svg>
-                    Last owner
+                    {m.lastOwner}
                   </span>
                 ) : (
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => setConfirmRemove(m.member_id)}
+                    onClick={() => setConfirmRemove(member.member_id)}
                     className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
                   >
-                    Remove
+                    {m.remove}
                   </button>
                 )}
               </li>
@@ -121,45 +126,45 @@ export function TeamMembersPanel({
         {addable.length > 0 ? (
           <>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted-foreground">Add member</span>
+              <span className="text-muted-foreground">{m.addMember}</span>
               <select
                 value={addId}
                 onChange={(e) => setAddId(e.target.value)}
                 className="w-56 rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="">Choose someone…</option>
-                {addable.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.display_name ?? m.email ?? m.id.slice(0, 8)}
+                <option value="">{m.chooseSomeone}</option>
+                {addable.map((am) => (
+                  <option key={am.id} value={am.id}>
+                    {am.display_name ?? am.email ?? am.id.slice(0, 8)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted-foreground">Role</span>
+              <span className="text-muted-foreground">{m.role}</span>
               <select
                 value={addRole}
                 onChange={(e) => setAddRole(e.target.value as 'owner' | 'member')}
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="member">Member</option>
-                <option value="owner">Owner</option>
+                <option value="member">{m.roleMember}</option>
+                <option value="owner">{m.roleOwner}</option>
               </select>
             </label>
             <button
               type="button"
               disabled={pending || !addId}
               onClick={() => {
-                run(addMemberAction(teamId, addId, addRole), 'Member added.');
+                run(addMemberAction(teamId, addId, addRole), m.memberAdded);
                 setAddId('');
               }}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
             >
-              Add
+              {m.add}
             </button>
           </>
         ) : (
-          <span className="text-sm text-muted-foreground">All account members are on this team.</span>
+          <span className="text-sm text-muted-foreground">{m.allOnTeam}</span>
         )}
       </div>
 
