@@ -179,6 +179,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@slate/calendar':
+        specifier: workspace:*
+        version: link:../calendar
       '@slate/engine':
         specifier: workspace:*
         version: link:../engine

@@ -19,6 +19,7 @@ import {
 import { verifyManageToken } from '@slate/engine';
 import { BookingNotifier } from '@slate/notifications';
 import type { ServerEnv } from '@slate/config/env';
+import { CalendarEffects } from './calendar-effects';
 import {
   availabilityQuerySchema,
   availabilityResponseSchema,
@@ -39,6 +40,7 @@ export class BookingService {
     @Inject(DB) private readonly db: Db,
     @Inject(NOTIFIER) private readonly notifier: BookingNotifier,
     @Inject(ENV) private readonly env: ServerEnv,
+    @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
   ) {}
 
   private manageUrl(uid: string, token: string): string {
@@ -52,14 +54,20 @@ export class BookingService {
 
   async availability(raw: unknown): Promise<AvailabilityResponse | null> {
     const q = availabilityQuerySchema.parse(raw);
-    const result = await getAvailability(this.db, {
-      accountCode: q.accountCode,
-      handle: q.handle,
-      slug: q.slug,
-      fromMs: new Date(q.from).getTime(),
-      toMs: new Date(q.to).getTime(),
-      displayTimeZone: q.timeZone,
-    });
+    const result = await getAvailability(
+      this.db,
+      {
+        accountCode: q.accountCode,
+        handle: q.handle,
+        slug: q.slug,
+        fromMs: new Date(q.from).getTime(),
+        toMs: new Date(q.to).getTime(),
+        displayTimeZone: q.timeZone,
+      },
+      // Subtract the host's real connected-calendar busy times (no-op on the
+      // OSS default disabled provider).
+      this.calendar.provider,
+    );
     if (!result) return null;
     return availabilityResponseSchema.parse({
       eventType: result.eventType,
@@ -119,6 +127,10 @@ export class BookingService {
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
 
     if (outcome.manageToken) {
+      // Write the event to the host's real calendar — only once the booking is
+      // ACCEPTED. A pending (requiresConfirmation) booking writes out on confirm,
+      // not now. No-op when no calendar is connected. (B8: never blocks/rolls back.)
+      if (b.status === 'accepted') this.calendar.onBookingAccepted(b.uid);
       void this.notifier
         .sendConfirmation({
           uid: b.uid,
@@ -195,6 +207,8 @@ export class BookingService {
       byHost: opts.byHost,
     });
     if (!out.ok) return this.mapMutation(out.reason);
+    // Delete the remote calendar event (no-op when none was written).
+    this.calendar.onBookingCancelled(uid);
     // Best-effort cancellation email with a CANCEL .ics.
     const att = await this.loadAttendee(uid);
     if (att) {
@@ -225,6 +239,8 @@ export class BookingService {
       byHost: opts.byHost,
     });
     if (!out.ok) return this.mapMutation(out.reason);
+    // Move the remote calendar event to the new time (delete + re-create).
+    this.calendar.onBookingRescheduled(uid);
     const att = await this.loadAttendee(uid);
     if (att && out.manageToken) {
       void this.notifier
@@ -299,14 +315,18 @@ export class BookingService {
     to: string,
     timeZone?: string,
   ): Promise<AvailabilityResponse | null> {
-    const result = await getTeamAvailability(this.db, {
-      accountCode,
-      teamSlug,
-      slug,
-      fromMs: new Date(from).getTime(),
-      toMs: new Date(to).getTime(),
-      displayTimeZone: timeZone,
-    });
+    const result = await getTeamAvailability(
+      this.db,
+      {
+        accountCode,
+        teamSlug,
+        slug,
+        fromMs: new Date(from).getTime(),
+        toMs: new Date(to).getTime(),
+        displayTimeZone: timeZone,
+      },
+      this.calendar.provider,
+    );
     if (!result) return null;
     return availabilityResponseSchema.parse({
       eventType: result.eventType,
@@ -334,6 +354,8 @@ export class BookingService {
         return { error: 'INTAKE_INVALID', message: out.message ?? 'Invalid.', status: 400 };
       return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
     }
+    // A team booking is created `accepted` → write it to the chosen host's calendar.
+    this.calendar.onBookingAccepted(out.uid);
     return { uid: out.uid, hostMemberId: out.hostMemberId };
   }
 }

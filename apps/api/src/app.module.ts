@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
-import { DisabledCalendarProvider } from '@slate/calendar';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
 import { AuthService } from './auth.service';
+import { CalendarEffects } from './calendar-effects';
+import { createCalendarProvider } from './calendar.provider';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
 import { HealthController } from './controllers';
@@ -49,9 +50,10 @@ import { AdminCrudController } from './admin-crud.controller';
       useFactory: (email: EmailProvider) => new BookingNotifier(email),
       inject: [EMAIL],
     },
-    // The OSS default CalendarProvider is disabled (no external calendar). A
-    // private overlay swaps this for a concrete adapter.
-    { provide: CALENDAR, useFactory: () => new DisabledCalendarProvider() },
+    // CalendarProvider selected by CALENDAR_PROVIDER: the OSS default is
+    // `disabled` (no external calendar); a private overlay ships the `external`
+    // adapter. See calendar.provider.ts.
+    { provide: CALENDAR, useFactory: (env: ServerEnv) => createCalendarProvider(env), inject: [ENV] },
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,
@@ -61,6 +63,7 @@ import { AdminCrudController } from './admin-crud.controller';
     BookingService,
     AdminService,
     AuthService,
+    CalendarEffects,
   ],
 })
 export class AppModule {}

@@ -16,6 +16,7 @@ import {
   type HostCandidate,
   type Interval,
 } from '@slate/engine';
+import type { CalendarProvider } from '@slate/calendar';
 import { sql, type Db } from './client';
 import {
   getAccountByCode,
@@ -30,6 +31,7 @@ import {
   resolveScheduleTimeZone,
   type BookingFieldDef,
 } from './repository';
+import { loadExternalBusy } from './calendar-refs';
 import { checkWebhookUrl } from './webhook-url';
 
 // --- Reservation holds ----------------------------------------------------
@@ -329,6 +331,7 @@ async function hostFreeSlotMs(
   fromMs: number,
   toMs: number,
   now: Date,
+  calendar?: CalendarProvider,
 ): Promise<Set<number>> {
   const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
     sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
@@ -343,6 +346,7 @@ async function hostFreeSlotMs(
   const busy: Interval[] = [
     ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
     ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
+    ...(await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs)),
   ];
   const slots = computeSlots({
     fromUtc: new Date(fromMs),
@@ -381,6 +385,8 @@ export async function getTeamAvailability(
     displayTimeZone?: string;
     now?: Date;
   },
+  /** Wired provider — each host's external busy is subtracted. See getAvailability. */
+  calendar?: CalendarProvider,
 ): Promise<TeamAvailabilityResult | null> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return null;
@@ -393,7 +399,7 @@ export async function getTeamAvailability(
 
   const union = new Set<number>();
   for (const host of hosts) {
-    const free = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now);
+    const free = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
     for (const ms of free) union.add(ms);
   }
   const slots = [...union].sort((a, b) => a - b).map((ms) => new Date(ms).toISOString());

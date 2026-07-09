@@ -23,12 +23,16 @@ import {
   cancelBooking,
 } from '@slate/db';
 import type { HostPrincipal } from './auth.service';
+import { CalendarEffects } from './calendar-effects';
 import { DB } from './tokens';
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
 export class AdminService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
+  ) {}
 
   me(p: HostPrincipal) {
     return getMe(this.db, p.accountId, p.memberId);
@@ -66,7 +70,7 @@ export class AdminService {
     });
   }
 
-  hostCreate(
+  async hostCreate(
     p: HostPrincipal,
     body: {
       handle: string;
@@ -77,7 +81,7 @@ export class AdminService {
     },
     accountCode: string,
   ) {
-    return createBooking(this.db, {
+    const outcome = await createBooking(this.db, {
       accountCode,
       handle: body.handle,
       slug: body.slug,
@@ -86,14 +90,23 @@ export class AdminService {
       answers: body.answers,
       onBehalf: true,
     });
+    // Write out only a fresh ACCEPTED booking (pending waits for confirm).
+    if (outcome.ok && outcome.booking.status === 'accepted')
+      this.calendar.onBookingAccepted(outcome.booking.uid);
+    return outcome;
   }
 
-  hostCancel(p: HostPrincipal, uid: string, reason?: string) {
-    return cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
+  async hostCancel(p: HostPrincipal, uid: string, reason?: string) {
+    const out = await cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
+    if (out.ok) this.calendar.onBookingCancelled(uid);
+    return out;
   }
 
-  confirm(p: HostPrincipal, uid: string) {
-    return confirmBooking(this.db, uid, p.accountId);
+  async confirm(p: HostPrincipal, uid: string) {
+    const out = await confirmBooking(this.db, uid, p.accountId);
+    // pending→accepted: NOW write the event to the host's calendar.
+    if (out.ok) this.calendar.onBookingAccepted(uid);
+    return out;
   }
 
   decline(p: HostPrincipal, uid: string, reason?: string) {

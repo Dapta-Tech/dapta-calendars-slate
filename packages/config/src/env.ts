@@ -44,6 +44,12 @@ export const serverEnvSchema = z.object({
 
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
+
+  // Calendar — `disabled` (default) runs with no external calendar: slots
+  // subtract only local busy and no events are written out. `external` selects
+  // the concrete adapter shipped in the private deploy overlay (no vendor named
+  // in the OSS build); selecting it here without that overlay fails loud.
+  CALENDAR_PROVIDER: z.enum(['disabled', 'external']).default('disabled'),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

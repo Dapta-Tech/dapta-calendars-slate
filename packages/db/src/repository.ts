@@ -16,7 +16,9 @@ import {
   type AvailabilityRule,
   type Interval,
 } from '@slate/engine';
+import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
+import { loadExternalBusy } from './calendar-refs';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -304,6 +306,12 @@ export async function resolveScheduleTimeZone(
 export async function getAvailability(
   db: Db,
   args: { accountCode: string; handle: string; slug: string; fromMs: number; toMs: number; displayTimeZone?: string; now?: Date },
+  /**
+   * The wired CalendarProvider. When enabled, the host's external busy times are
+   * subtracted from the offered slots. Undefined / disabled ⇒ local busy only
+   * (the OSS clone-and-run default — no behavior change).
+   */
+  calendar?: CalendarProvider,
 ): Promise<AvailabilityResult | undefined> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return undefined;
@@ -323,6 +331,7 @@ export async function getAvailability(
   const busy = [
     ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs)),
     ...(await loadReservationBusy(db, member.id, args.fromMs, args.toMs, args.now?.getTime())),
+    ...(await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs)),
   ];
 
   const slots = computeSlots({

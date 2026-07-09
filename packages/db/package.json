@@ -20,6 +20,7 @@
     "reset": "tsx src/cli/reset.ts"
   },
   "dependencies": {
+    "@slate/calendar": "workspace:*",
     "@slate/engine": "workspace:*",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.38.2",
