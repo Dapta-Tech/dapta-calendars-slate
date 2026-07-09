@@ -692,8 +692,13 @@ export async function rescheduleBooking(
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
     AND status = 'accepted' AND id <> ${b.id}
     AND start_ms < ${newEndMs} AND end_ms > ${args.newStartMs} LIMIT 1`;
+  // Restore the reschedule audit trail: since this is an in-place move (uid
+  // stable, no mint-new row), record where it came FROM (the previous start) in
+  // `from_reschedule` — the old system's back-pointer analog. `rescheduled=1`
+  // flags that it moved at all.
   const updateSql = sql`UPDATE booking SET start_ms = ${args.newStartMs}, end_ms = ${newEndMs},
-    rescheduled = 1, metadata = ${metaExpr}, updated_at = ${now} WHERE id = ${b.id}`;
+    rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
+    updated_at = ${now} WHERE id = ${b.id}`;
 
   const moved = await runGuardedUpdate(db, overlapSql, updateSql);
   if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };

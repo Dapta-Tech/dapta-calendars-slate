@@ -19,7 +19,9 @@ import {
   addAttendeeToBooking,
   getAccountByCode,
   getEventType,
+  getEventTypeRowById,
   getMember,
+  getMemberById,
   listBookings,
   resolveBooking,
   sql,
@@ -61,15 +63,53 @@ export class MachineController {
     return et?.id ?? null;
   }
 
+  /**
+   * R12 addressing compat: map an `eventTypeId` (how the Dapta call-worker
+   * agents are configured) to the `{handle, slug}` the booking engine addresses
+   * by. Account-scoped (an id in another account resolves to null); team event
+   * types have no member handle and aren't addressable this way.
+   */
+  private async resolveByEventTypeId(
+    accountId: string,
+    eventTypeId: string,
+  ): Promise<{ handle: string; slug: string; etId: string } | null> {
+    const et = await getEventTypeRowById(this.db, eventTypeId);
+    if (!et || et.account_id !== accountId || !et.member_id) return null;
+    const member = await getMemberById(this.db, et.member_id);
+    if (!member?.handle) return null;
+    return { handle: member.handle, slug: et.slug, etId: et.id };
+  }
+
   @Get('availability')
   async availability(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const principal = await this.auth.resolveMachine(req, 'availability:read');
     const code = await this.accountCode(principal.accountId);
-    if (!code || !q.handle || !q.slug || !q.from || !q.to)
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'handle, slug, from, to required' });
-    const etId = await this.resolveEventTypeId(principal.accountId, q.handle, q.slug);
+    if (!code || !q.from || !q.to)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'from, to required' });
+    // Address by eventTypeId (R12) OR handle+slug.
+    let handle = q.handle;
+    let slug = q.slug;
+    let etId: string | null;
+    if (q.eventTypeId) {
+      const r = await this.resolveByEventTypeId(principal.accountId, q.eventTypeId);
+      if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+      handle = r.handle;
+      slug = r.slug;
+      etId = r.etId;
+    } else {
+      if (!handle || !slug)
+        throw new BadRequestException({ error: 'BAD_REQUEST', message: 'eventTypeId OR handle+slug required' });
+      etId = await this.resolveEventTypeId(principal.accountId, handle, slug);
+    }
     this.auth.assertEventTypeAllowed(principal, etId);
-    const r = await this.svc.availability({ ...q, accountCode: code });
+    const r = await this.svc.availability({
+      accountCode: code,
+      handle,
+      slug,
+      from: q.from,
+      to: q.to,
+      timeZone: q.timeZone,
+    });
     if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     return r;
   }
@@ -80,8 +120,9 @@ export class MachineController {
     @Req() req: ReqLike,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: {
-      handle: string;
-      slug: string;
+      eventTypeId?: string;
+      handle?: string;
+      slug?: string;
       startUtc: string;
       attendees: Array<{ name: string; email: string; timeZone: string; notes?: string; phone?: string }>;
       answers?: Record<string, unknown>;
@@ -89,9 +130,23 @@ export class MachineController {
   ) {
     const principal = await this.auth.resolveMachine(req, 'bookings:write');
     const code = await this.accountCode(principal.accountId);
-    if (!code || !body?.handle || !body?.slug || !body?.startUtc || !Array.isArray(body?.attendees) || body.attendees.length === 0)
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'handle, slug, startUtc, attendees[] required' });
-    const etId = await this.resolveEventTypeId(principal.accountId, body.handle, body.slug);
+    if (!code || !body?.startUtc || !Array.isArray(body?.attendees) || body.attendees.length === 0)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'startUtc, attendees[] required' });
+    // Address by eventTypeId (R12) OR handle+slug.
+    let handle = body.handle;
+    let slug = body.slug;
+    let etId: string | null;
+    if (body.eventTypeId) {
+      const r = await this.resolveByEventTypeId(principal.accountId, body.eventTypeId);
+      if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+      handle = r.handle;
+      slug = r.slug;
+      etId = r.etId;
+    } else {
+      if (!handle || !slug)
+        throw new BadRequestException({ error: 'BAD_REQUEST', message: 'eventTypeId OR handle+slug required' });
+      etId = await this.resolveEventTypeId(principal.accountId, handle, slug);
+    }
     this.auth.assertEventTypeAllowed(principal, etId);
 
     const primary = body.attendees[0]!;
@@ -99,8 +154,8 @@ export class MachineController {
       await this.svc.book(
         {
           accountCode: code,
-          handle: body.handle,
-          slug: body.slug,
+          handle,
+          slug,
           startUtc: body.startUtc,
           attendee: primary,
           answers: body.answers,

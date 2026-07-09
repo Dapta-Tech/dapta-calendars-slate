@@ -57,20 +57,20 @@ describe('notification matrix', () => {
     expect(m.attachments?.[0]?.contentType).toContain('method=REQUEST');
   });
 
-  it('pending (requiresConfirmation) → attendee only, NO ics, "request received"', async () => {
+  it('pending (requiresConfirmation) → attendee+host, NO ics, "request received"', async () => {
     await notifier.sendPendingRequest(base);
     const m = only();
-    expect(m.to).toBe('sam@example.com');
+    expect(recipients(m).sort()).toEqual(['alex@example.com', 'sam@example.com']);
     expect(m.subject).toMatch(/^Request received: Intro Call/);
     expect(m.text).toContain('pending confirmation');
     // B5: nothing is confirmed yet — do NOT ship a confirmed invite.
     expect(m.attachments ?? []).toHaveLength(0);
   });
 
-  it('declined → attendee only, NO ics, reason included', async () => {
+  it('declined → attendee+host, NO ics, reason included', async () => {
     await notifier.sendDeclined({ ...base, cancellationReason: 'Out of office' });
     const m = only();
-    expect(m.to).toBe('sam@example.com');
+    expect(recipients(m).sort()).toEqual(['alex@example.com', 'sam@example.com']);
     expect(m.subject).toMatch(/^Not accepted: Intro Call/);
     expect(m.text).toContain('Reason: Out of office');
     expect(m.attachments ?? []).toHaveLength(0);

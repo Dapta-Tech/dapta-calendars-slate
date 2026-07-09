@@ -84,7 +84,8 @@ export class BookingNotifier {
       n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
-      to: n.attendee.email,
+      // Host is copied too — a pending request is the host's cue to confirm/decline.
+      to: this.recipients(n),
       subject: `Request received: ${n.title} — ${when}`,
       text: lines.join('\n'),
       html: htmlBody(lines),
@@ -103,7 +104,8 @@ export class BookingNotifier {
       n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
     ].filter(Boolean);
     return this.email.send({
-      to: n.attendee.email,
+      // Host is copied too — confirms to the host that the request was declined.
+      to: this.recipients(n),
       subject: `Not accepted: ${n.title} — ${when}`,
       text: lines.join('\n'),
       html: htmlBody(lines),
