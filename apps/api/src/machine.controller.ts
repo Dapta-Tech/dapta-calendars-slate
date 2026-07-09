@@ -131,8 +131,10 @@ export class MachineController {
       to: q.to ? new Date(q.to).getTime() : undefined,
       status: q.status,
       limit: q.limit ? Number(q.limit) : undefined,
+      cursor: q.cursor,
     });
-    return { items: res.items, nextCursor: null };
+    // P1-3: real keyset pagination — nextCursor is non-null when more remain.
+    return { items: res.items, nextCursor: res.nextCursor };
   }
 
   /**
@@ -149,18 +151,30 @@ export class MachineController {
   }
 
   @Patch('bookings/:uid')
-  async reschedule(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { newStartUtc: string }) {
+  async reschedule(
+    @Req() req: ReqLike,
+    @Param('uid') uid: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: { newStartUtc: string },
+  ) {
     await this.scopedBooking(req, uid, 'bookings:write');
     if (!body?.newStartUtc)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'newStartUtc required' });
-    return unwrap(await this.svc.reschedule(uid, { newStartUtc: body.newStartUtc, byHost: true }));
+    // P1-2: honor Idempotency-Key so an agent retry doesn't double-move.
+    return unwrap(await this.svc.reschedule(uid, { newStartUtc: body.newStartUtc, byHost: true, idempotencyKey }));
   }
 
   @Post('bookings/:uid/cancel')
   @HttpCode(200)
-  async cancel(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { reason?: string }) {
+  async cancel(
+    @Req() req: ReqLike,
+    @Param('uid') uid: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() body: { reason?: string },
+  ) {
     await this.scopedBooking(req, uid, 'bookings:write');
-    return unwrap(await this.svc.cancel(uid, { reason: body?.reason, byHost: true }));
+    // P1-1/P1-2: a retried cancel returns success (already-cancelled), not 410.
+    return unwrap(await this.svc.cancel(uid, { reason: body?.reason, byHost: true, idempotencyKey }));
   }
 
   @Post('bookings/:uid/attendees')
