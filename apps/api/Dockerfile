@@ -9,7 +9,7 @@
 # whole monorepo in the runtime layer.
 #
 # Deployment-agnostic: the same artifact runs on EKS, a bare Node host, or
-# docker-compose. Point DATABASE_URL at Postgres (Aurora) in prod; leave it
+# docker-compose. Point DATABASE_URL at managed Postgres in prod; leave it
 # unset for SQLite. Database MIGRATIONS are NOT run here — they are a separate,
 # gated release step (see deploy/DEPLOY-INTERNAL.md § migration-safety), so
 # scaling to N replicas never races N migrators.

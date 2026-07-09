@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { groupSlotsByDay } from './booking';
 import { slugifyHandle, validateHandle } from './handle';
-import { t } from './i18n';
+import { t, en, es } from './i18n';
 import {
   clampAccent,
   accentWasAdjusted,
@@ -60,5 +60,29 @@ describe('handle', () => {
 describe('t', () => {
   it('interpolates placeholders', () => {
     expect(t('{minutes} min', { minutes: 30 })).toBe('30 min');
+  });
+});
+
+describe('i18n parity', () => {
+  const keys = (o: Record<string, unknown>, prefix = ''): string[] =>
+    Object.entries(o).flatMap(([k, v]) =>
+      v && typeof v === 'object'
+        ? keys(v as Record<string, unknown>, `${prefix}${k}.`)
+        : [`${prefix}${k}`],
+    );
+
+  it('EN and ES have identical key sets (no missing translations)', () => {
+    expect(keys(es as unknown as Record<string, unknown>).sort()).toEqual(
+      keys(en as unknown as Record<string, unknown>).sort(),
+    );
+  });
+
+  it('every message is a non-empty string in both locales', () => {
+    for (const cat of [en, es]) {
+      for (const k of keys(cat as unknown as Record<string, unknown>)) {
+        const val = k.split('.').reduce<unknown>((o, part) => (o as Record<string, unknown>)[part], cat);
+        expect(typeof val === 'string' && val.length > 0).toBe(true);
+      }
+    }
   });
 });

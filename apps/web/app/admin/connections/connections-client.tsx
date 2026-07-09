@@ -3,12 +3,33 @@
 import { useActionState, useState, useTransition } from 'react';
 import type { Connection } from '@/lib/admin-api';
 import {
+  connectCalendarAction,
   createConnectionAction,
   deleteConnectionAction,
   pingConnectionAction,
   toggleConnectionAction,
   type ActionResult,
 } from './actions';
+
+function ConnectCta() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-dashed border-border p-4">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => start(async () => setMsg((await connectCalendarAction()).message))}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+      >
+        Connect a calendar
+      </button>
+      <span className="text-sm text-muted-foreground">
+        {msg ?? 'Google / Outlook via OAuth (needs a configured provider in your deployment).'}
+      </span>
+    </div>
+  );
+}
 
 function ConnectionRow({ c }: { c: Connection }) {
   const [pending, start] = useTransition();
@@ -67,6 +88,7 @@ export function ConnectionsClient({ connections }: { connections: Connection[] }
 
   return (
     <div className="flex flex-col gap-6">
+      <ConnectCta />
       <ul className="flex flex-col gap-2">
         {connections.map((c) => (
           <ConnectionRow key={c.id} c={c} />

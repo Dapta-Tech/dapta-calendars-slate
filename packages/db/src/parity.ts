@@ -665,6 +665,26 @@ export async function cancelBooking(
   };
 }
 
+/**
+ * Add an attendee to an existing booking (agent/group use). Account-scoped: a
+ * uid outside the account resolves to not-found (anti-uid-probing upstream).
+ */
+export async function addAttendeeToBooking(
+  db: Db,
+  uid: string,
+  accountId: string,
+  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string },
+): Promise<{ ok: boolean; reason?: 'NOT_FOUND' }> {
+  const b = await resolveBooking(db, uid, accountId);
+  if (!b) return { ok: false, reason: 'NOT_FOUND' };
+  await db.run(
+    sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email}, ${attendee.timeZone},
+          ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
+  );
+  return { ok: true };
+}
+
 /** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
 export async function confirmBooking(
   db: Db,

@@ -2,17 +2,28 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Headers,
   HttpCode,
   Inject,
   NotFoundException,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
 import type { Db } from '@slate/db';
-import { getAccountByCode, getEventType, getMember, listBookings, sql } from '@slate/db';
+import {
+  addAttendeeToBooking,
+  getAccountByCode,
+  getEventType,
+  getMember,
+  listBookings,
+  resolveBooking,
+  sql,
+} from '@slate/db';
 import { BookingService } from './booking.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { unwrap } from './http';
@@ -122,5 +133,54 @@ export class MachineController {
       limit: q.limit ? Number(q.limit) : undefined,
     });
     return { items: res.items, nextCursor: null };
+  }
+
+  /**
+   * Resolve a booking within the key's account + resource allowlist. A uid that
+   * is out-of-account OR out-of-scope both surface as 403 (anti-uid-probing) so
+   * an agent can't enumerate other tenants' booking ids.
+   */
+  private async scopedBooking(req: ReqLike, uid: string, scope: 'bookings:write' | 'bookings:read') {
+    const principal = await this.auth.resolveMachine(req, scope);
+    const b = await resolveBooking(this.db, uid, principal.accountId);
+    if (!b) throw new ForbiddenException({ error: 'FORBIDDEN', message: 'Not permitted.' });
+    this.auth.assertEventTypeAllowed(principal, b.event_type_id);
+    return { principal, b };
+  }
+
+  @Patch('bookings/:uid')
+  async reschedule(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { newStartUtc: string }) {
+    await this.scopedBooking(req, uid, 'bookings:write');
+    if (!body?.newStartUtc)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'newStartUtc required' });
+    return unwrap(await this.svc.reschedule(uid, { newStartUtc: body.newStartUtc, byHost: true }));
+  }
+
+  @Post('bookings/:uid/cancel')
+  @HttpCode(200)
+  async cancel(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { reason?: string }) {
+    await this.scopedBooking(req, uid, 'bookings:write');
+    return unwrap(await this.svc.cancel(uid, { reason: body?.reason, byHost: true }));
+  }
+
+  @Post('bookings/:uid/attendees')
+  @HttpCode(201)
+  async addAttendee(
+    @Req() req: ReqLike,
+    @Param('uid') uid: string,
+    @Body() body: { attendee: { name: string; email: string; timeZone?: string; notes?: string; phone?: string } },
+  ) {
+    const { principal } = await this.scopedBooking(req, uid, 'bookings:write');
+    const a = body?.attendee;
+    if (!a?.name || !a?.email)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'attendee name + email required' });
+    await addAttendeeToBooking(this.db, uid, principal.accountId, {
+      name: a.name,
+      email: a.email,
+      timeZone: a.timeZone ?? 'UTC',
+      notes: a.notes,
+      phone: a.phone,
+    });
+    return { ok: true, uid };
   }
 }

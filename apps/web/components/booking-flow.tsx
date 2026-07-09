@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
-import { groupSlotsByDay, detectTimeZone, formatSlotDateTime, type Slot } from '@slate/shared';
+import { groupSlotsByDay, detectTimeZone, formatSlotDateTime, getMessages, t, type Slot } from '@slate/shared';
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
@@ -15,6 +15,8 @@ interface Props {
   bookingFields: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
+  /** Visitor locale ('en' | 'es') for EN/ES copy. */
+  locale?: string;
 }
 
 interface Hold {
@@ -37,7 +39,9 @@ export function BookingFlow({
   bookingFields,
   initialTimeZone,
   mode = 'personal',
+  locale = 'en',
 }: Props) {
+  const m = getMessages(locale).booking;
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
@@ -72,15 +76,13 @@ export function BookingFlow({
     const isPending = b.status === 'pending';
     return (
       <section className="bp-card border border-border bg-card p-6 text-card-foreground">
-        <h2 className="mb-2 text-xl font-semibold">
-          {isPending ? 'Booking requested' : 'Booking confirmed'}
-        </h2>
+        <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
         <p className="text-muted-foreground">
           {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
           {isPending
-            ? `Awaiting the host’s confirmation. We’ll email ${b.attendee.email} once it’s confirmed.`
+            ? t(m.awaitingConfirmation, { email: b.attendee.email })
             : `A confirmation was sent to ${b.attendee.email}.`}
         </p>
         {b.manageUrl ? (
@@ -88,7 +90,7 @@ export function BookingFlow({
             href={b.manageUrl}
             className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
           >
-            Manage your booking (reschedule or cancel) →
+            {getMessages(locale).manage.title} →
           </a>
         ) : null}
       </section>
@@ -103,7 +105,7 @@ export function BookingFlow({
     return (
       <section className="bp-card border border-destructive bg-card p-6">
         <h2 className="mb-1 text-lg font-semibold">
-          {result!.status === 410 ? 'Your hold expired' : 'That time was just taken'}
+          {result!.status === 410 ? m.holdExpired : m.slotTaken}
         </h2>
         <p className="mb-4 text-sm text-muted-foreground">{result!.message}</p>
         <button
@@ -111,7 +113,7 @@ export function BookingFlow({
           onClick={retry}
           className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98]"
         >
-          Pick another time
+          {m.pickAnother}
         </button>
       </section>
     );
@@ -122,7 +124,7 @@ export function BookingFlow({
       <section aria-label="Available times">
         <div className="mb-4 flex items-center gap-2">
           <label htmlFor="tz" className="text-sm text-muted-foreground">
-            Timezone
+            {m.timezone}
           </label>
           <select
             id="tz"
@@ -141,7 +143,7 @@ export function BookingFlow({
         </div>
 
         {days.length === 0 ? (
-          <p className="text-muted-foreground">No available times in this range.</p>
+          <p className="text-muted-foreground">{m.noSlots}</p>
         ) : (
           <div className="flex max-h-[28rem] flex-col overflow-y-auto pr-2">
             {days.map((day) => (
@@ -180,18 +182,20 @@ export function BookingFlow({
             <p className="text-sm text-muted-foreground">{formatSlotDateTime(selected, timeZone)}</p>
             {hold ? (
               <p className="text-xs text-muted-foreground">
-                Held until {new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(hold.expiresAt))}
+                {t(m.heldUntil, {
+                  time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(hold.expiresAt)),
+                })}
               </p>
             ) : holdError ? (
               <p className="text-xs text-destructive">{holdError}</p>
             ) : null}
 
             <label className="flex flex-col gap-1 text-sm">
-              Your name
+              {m.yourName}
               <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              Your email
+              {m.yourEmail}
               <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 
@@ -220,7 +224,7 @@ export function BookingFlow({
             ))}
 
             <label className="flex flex-col gap-1 text-sm">
-              Notes (optional)
+              {m.notes}
               <textarea name="notes" rows={2} className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 
@@ -231,12 +235,12 @@ export function BookingFlow({
               disabled={pending}
               className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98] disabled:opacity-60"
             >
-              {pending ? 'Confirming…' : 'Confirm booking'}
+              {pending ? m.confirming : m.confirm}
             </button>
           </form>
         ) : (
           <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-            Select a time to continue.
+            {m.selectTime}
           </p>
         )}
       </aside>

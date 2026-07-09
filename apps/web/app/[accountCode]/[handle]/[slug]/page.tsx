@@ -8,10 +8,14 @@ import { BrandedShell } from '@/components/branded-shell';
 // the interactive slot picker + form is a client island (BookingFlow).
 export default async function BookingPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountCode: string; handle: string; slug: string }>;
+  searchParams: Promise<{ lang?: string }>;
 }) {
   const { accountCode, handle, slug } = await params;
+  const { lang } = await searchParams;
+  const locale = lang?.startsWith('es') ? 'es' : 'en';
 
   const now = new Date();
   const from = now.toISOString();
@@ -48,6 +52,7 @@ export default async function BookingPage({
           slots={availability.slots}
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
+          locale={locale}
         />
       </main>
     </BrandedShell>

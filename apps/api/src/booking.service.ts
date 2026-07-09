@@ -54,14 +54,18 @@ export class BookingService {
 
   async availability(raw: unknown): Promise<AvailabilityResponse | null> {
     const q = availabilityQuerySchema.parse(raw);
+    const fromMs = new Date(q.from).getTime();
+    // Cap the search window at 60 days (contract §Engine) — clamp `to` rather
+    // than reject, so an over-wide agent query still returns a bounded result.
+    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
     const result = await getAvailability(
       this.db,
       {
         accountCode: q.accountCode,
         handle: q.handle,
         slug: q.slug,
-        fromMs: new Date(q.from).getTime(),
-        toMs: new Date(q.to).getTime(),
+        fromMs,
+        toMs,
         displayTimeZone: q.timeZone,
       },
       // Subtract the host's real connected-calendar busy times (no-op on the

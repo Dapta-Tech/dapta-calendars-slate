@@ -148,6 +148,22 @@ export class HostController {
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'provider, externalId required' });
     return this.admin.createConnection(p, body);
   }
+
+  /**
+   * Mint the token/URL the client uses to start a vendor connect flow. In the
+   * OSS build no external provider is wired, so this reports the disabled state
+   * (a private overlay adapter returns a real bridge token/authorize URL here).
+   */
+  @Post('connections/token')
+  @HttpCode(200)
+  async connectionToken(@Req() req: ReqLike) {
+    await this.auth.resolveHost(req);
+    return {
+      enabled: false,
+      token: null,
+      message: 'No external calendar provider configured (OSS default). Add a connection manually.',
+    };
+  }
   @Patch('connections/:id')
   async updateConnection(
     @Req() req: ReqLike,

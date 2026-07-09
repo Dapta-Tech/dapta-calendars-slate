@@ -41,3 +41,8 @@ export async function pingConnectionAction(id: string): Promise<{ enabled: boole
   const r = await adminApi.pingConnection(id);
   return { enabled: r.enabled, message: r.message };
 }
+
+export async function connectCalendarAction(): Promise<{ enabled: boolean; message: string }> {
+  const r = await adminApi.connectionToken();
+  return { enabled: r.enabled, message: r.message };
+}

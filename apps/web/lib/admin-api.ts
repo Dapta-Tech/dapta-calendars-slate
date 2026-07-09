@@ -78,6 +78,8 @@ export const adminApi = {
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
+  connectionToken: () =>
+    req<{ enabled: boolean; token: string | null; message: string }>('POST', '/v1/connections/token', {}),
   updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),
   pingConnection: (id: string) =>
     req<{ ok: boolean; enabled: boolean; message: string }>('POST', `/v1/connections/${id}/ping`, {}),
