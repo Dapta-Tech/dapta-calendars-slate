@@ -40,6 +40,42 @@ export interface BookingMessages {
     rescheduled: string;
     cannotChange: string;
   };
+  /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
+  admin: {
+    nav: {
+      home: string;
+      bookings: string;
+      availability: string;
+      eventTypes: string;
+      teams: string;
+      settings: string;
+      bookingPage: string;
+    };
+    common: {
+      save: string;
+      saving: string;
+      cancel: string;
+      delete: string;
+      deleting: string;
+      edit: string;
+      remove: string;
+      add: string;
+      create: string;
+      creating: string;
+      confirm: string;
+      back: string;
+      retry: string;
+      loading: string;
+      saved: string;
+      search: string;
+      none: string;
+      signOut: string;
+      viewPublic: string;
+      language: string;
+      collapse: string;
+      expand: string;
+    };
+  };
 }
 
 export const en: BookingMessages = {
@@ -80,6 +116,41 @@ export const en: BookingMessages = {
     rescheduled: 'Your booking has been rescheduled. Check your email for the updated invite.',
     cannotChange: 'This booking can no longer be changed.',
   },
+  admin: {
+    nav: {
+      home: 'Home',
+      bookings: 'Bookings',
+      availability: 'Availability',
+      eventTypes: 'Event types',
+      teams: 'Teams',
+      settings: 'Settings',
+      bookingPage: 'Booking page',
+    },
+    common: {
+      save: 'Save',
+      saving: 'Saving…',
+      cancel: 'Cancel',
+      delete: 'Delete',
+      deleting: 'Deleting…',
+      edit: 'Edit',
+      remove: 'Remove',
+      add: 'Add',
+      create: 'Create',
+      creating: 'Creating…',
+      confirm: 'Confirm',
+      back: 'Back',
+      retry: 'Try again',
+      loading: 'Loading…',
+      saved: 'All changes saved',
+      search: 'Search',
+      none: 'None',
+      signOut: 'Sign out',
+      viewPublic: 'View public page',
+      language: 'Language',
+      collapse: 'Collapse sidebar',
+      expand: 'Expand sidebar',
+    },
+  },
 };
 
 export const es: BookingMessages = {
@@ -119,6 +190,41 @@ export const es: BookingMessages = {
     cancelled: 'Tu reserva ha sido cancelada.',
     rescheduled: 'Tu reserva fue reprogramada. Revisa tu correo para la invitación actualizada.',
     cannotChange: 'Esta reserva ya no se puede cambiar.',
+  },
+  admin: {
+    nav: {
+      home: 'Inicio',
+      bookings: 'Reservas',
+      availability: 'Disponibilidad',
+      eventTypes: 'Tipos de evento',
+      teams: 'Equipos',
+      settings: 'Ajustes',
+      bookingPage: 'Página de reservas',
+    },
+    common: {
+      save: 'Guardar',
+      saving: 'Guardando…',
+      cancel: 'Cancelar',
+      delete: 'Eliminar',
+      deleting: 'Eliminando…',
+      edit: 'Editar',
+      remove: 'Quitar',
+      add: 'Añadir',
+      create: 'Crear',
+      creating: 'Creando…',
+      confirm: 'Confirmar',
+      back: 'Volver',
+      retry: 'Reintentar',
+      loading: 'Cargando…',
+      saved: 'Todos los cambios guardados',
+      search: 'Buscar',
+      none: 'Ninguno',
+      signOut: 'Cerrar sesión',
+      viewPublic: 'Ver página pública',
+      language: 'Idioma',
+      collapse: 'Contraer barra lateral',
+      expand: 'Expandir barra lateral',
+    },
   },
 };
 

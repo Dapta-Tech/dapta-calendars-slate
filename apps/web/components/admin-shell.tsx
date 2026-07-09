@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { isNavItemActive } from '@slate/shared';
+import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
+
+type AdminMessages = BookingMessages['admin'];
 
 /** Design-parity admin shell — mirrors the old Angular app-shell: a flush 240px
  *  sidebar (bg-popover, right border, never a floating card), a flat 6-item nav
@@ -15,7 +17,7 @@ import { signOutAction } from '@/app/login/actions';
 type IconName = 'home' | 'calendar' | 'clock' | 'ticket' | 'users' | 'cog';
 
 interface NavItem {
-  label: string;
+  key: keyof AdminMessages['nav'];
   href: string;
   icon: IconName;
   /** Active when the path starts with any of these (in addition to href). */
@@ -24,14 +26,15 @@ interface NavItem {
 
 // Same information architecture + order as the old app: Home, Bookings,
 // Availability, Event Types, Teams, Settings (Settings is a single item with
-// its own sub-nav; Calendars lives under it at /admin/connections).
+// its own sub-nav; Calendars lives under it at /admin/connections). Labels are
+// resolved from the active locale's catalog (F8).
 const NAV: NavItem[] = [
-  { label: 'Home', href: '/admin', icon: 'home' },
-  { label: 'Bookings', href: '/admin/bookings', icon: 'calendar' },
-  { label: 'Availability', href: '/admin/availability', icon: 'clock' },
-  { label: 'Event types', href: '/admin/event-types', icon: 'ticket' },
-  { label: 'Teams', href: '/admin/teams', icon: 'users' },
-  { label: 'Settings', href: '/admin/settings', icon: 'cog', match: ['/admin/settings', '/admin/connections'] },
+  { key: 'home', href: '/admin', icon: 'home' },
+  { key: 'bookings', href: '/admin/bookings', icon: 'calendar' },
+  { key: 'availability', href: '/admin/availability', icon: 'clock' },
+  { key: 'eventTypes', href: '/admin/event-types', icon: 'ticket' },
+  { key: 'teams', href: '/admin/teams', icon: 'users' },
+  { key: 'settings', href: '/admin/settings', icon: 'cog', match: ['/admin/settings', '/admin/connections'] },
 ];
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
@@ -96,18 +99,27 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
   }
 }
 
-function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+function NavLinks({
+  collapsed,
+  nav,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  nav: AdminMessages['nav'];
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   return (
     <ul className="flex flex-col gap-1">
       {NAV.map((item) => {
         const active = isNavItemActive(pathname, item.href, item.match);
+        const label = nav[item.key];
         return (
           <li key={item.href}>
             <Link
               href={item.href}
               onClick={onNavigate}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? label : undefined}
               aria-current={active ? 'page' : undefined}
               className={[
                 'flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors active:scale-[0.99]',
@@ -120,7 +132,7 @@ function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
               <Icon name={item.icon} />
               {/* Label stays in the a11y tree when collapsed (sr-only) so the
                   icon-only link keeps a discernible name (WCAG 4.1.2). */}
-              <span className={collapsed ? 'sr-only' : ''}>{item.label}</span>
+              <span className={collapsed ? 'sr-only' : ''}>{label}</span>
             </Link>
           </li>
         );
@@ -137,15 +149,19 @@ interface ShellUser {
 
 export function AdminShell({
   user,
+  messages,
   initialCollapsed = false,
   children,
 }: {
   user: ShellUser | null;
+  /** Active-locale admin catalog (F8) — nav + common labels. */
+  messages: AdminMessages;
   /** Server-read cookie value → no collapse-rail FOUC on reload. */
   initialCollapsed?: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const c = messages.common;
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
@@ -197,8 +213,8 @@ export function AdminShell({
           type="button"
           onClick={toggleCollapse}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          title={collapsed ? 'Expand' : 'Collapse'}
+          aria-label={collapsed ? c.expand : c.collapse}
+          title={collapsed ? c.expand : c.collapse}
           className={`hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
         >
           <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -226,8 +242,8 @@ export function AdminShell({
       href={`/${user.accountCode}/${user.handle}`}
       target="_blank"
       rel="noopener noreferrer"
-      title="View public page"
-      aria-label="View public page (opens in a new tab)"
+      title={c.viewPublic}
+      aria-label={`${c.viewPublic} (opens in a new tab)`}
       className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
     >
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -241,8 +257,8 @@ export function AdminShell({
     <form action={signOutAction}>
       <button
         type="submit"
-        title="Sign out"
-        aria-label="Sign out"
+        title={c.signOut}
+        aria-label={c.signOut}
         className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
       >
         <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -305,7 +321,7 @@ export function AdminShell({
       >
         {brand}
         <nav aria-label="Primary">
-          <NavLinks collapsed={railCollapsed} />
+          <NavLinks collapsed={railCollapsed} nav={messages.nav} />
         </nav>
         {renderFooter(railCollapsed)}
       </aside>
@@ -335,7 +351,7 @@ export function AdminShell({
           <span className="text-sm font-semibold text-foreground">Slate</span>
         </div>
         <nav>
-          <NavLinks collapsed={false} onNavigate={() => setDrawerOpen(false)} />
+          <NavLinks collapsed={false} nav={messages.nav} onNavigate={() => setDrawerOpen(false)} />
         </nav>
         {renderFooter(false)}
       </aside>
