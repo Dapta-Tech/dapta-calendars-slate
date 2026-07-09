@@ -239,6 +239,33 @@ export interface BookingMessages {
       teamEventTypes: string;
       noTeamEventTypes: string;
     };
+    connections: {
+      pageDesc: string;
+      dialogTitle: string;
+      dialogSubtitle: string;
+      close: string;
+      providerGoogle: string;
+      providerOutlook: string;
+      syncOnTitle: string;
+      syncOnDesc: string;
+      connectButton: string;
+      syncOffTitle: string;
+      syncOffDesc: string;
+      syncOffSetPre: string;
+      syncOffSetPost: string;
+      connectLink: string;
+      destination: string;
+      conflictCheck: string;
+      test: string;
+      disconnect: string;
+      disconnectError: string;
+      noCalendars: string;
+      manualTitle: string;
+      manualDesc: string;
+      provider: string;
+      calendarId: string;
+      addConnection: string;
+    };
   };
 }
 
@@ -478,6 +505,33 @@ export const en: BookingMessages = {
       teamEventTypes: 'Team event types',
       noTeamEventTypes: 'No team event types yet.',
     },
+    connections: {
+      pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
+      dialogTitle: 'Connect a calendar',
+      dialogSubtitle: 'Choose a provider to link.',
+      close: 'Close',
+      providerGoogle: 'Google Calendar',
+      providerOutlook: 'Outlook / Microsoft 365',
+      syncOnTitle: 'Calendar sync is on.',
+      syncOnDesc: 'Connect Google or Outlook to check conflicts and write events.',
+      connectButton: 'Connect a calendar',
+      syncOffTitle: 'Calendar sync is off in this build',
+      syncOffDesc: 'No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet. Connections you add below are recorded but not synced.',
+      syncOffSetPre: 'To turn sync on, set',
+      syncOffSetPost: 'and configure a provider adapter in your deployment.',
+      connectLink: 'Connect a calendar →',
+      destination: 'Destination',
+      conflictCheck: 'Conflict check',
+      test: 'Test',
+      disconnect: 'Disconnect',
+      disconnectError: 'Could not disconnect.',
+      noCalendars: 'No calendars linked yet.',
+      manualTitle: 'Link a calendar manually',
+      manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
+      provider: 'Provider',
+      calendarId: 'Calendar id / email',
+      addConnection: 'Add connection',
+    },
   },
 };
 
@@ -716,6 +770,33 @@ export const es: BookingMessages = {
       members: 'Miembros',
       teamEventTypes: 'Tipos de evento del equipo',
       noTeamEventTypes: 'Aún no hay tipos de evento del equipo.',
+    },
+    connections: {
+      pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
+      dialogTitle: 'Conectar un calendario',
+      dialogSubtitle: 'Elige un proveedor para vincular.',
+      close: 'Cerrar',
+      providerGoogle: 'Google Calendar',
+      providerOutlook: 'Outlook / Microsoft 365',
+      syncOnTitle: 'La sincronización de calendario está activa.',
+      syncOnDesc: 'Conecta Google u Outlook para verificar conflictos y escribir eventos.',
+      connectButton: 'Conectar un calendario',
+      syncOffTitle: 'La sincronización de calendario está desactivada en esta versión',
+      syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que Slate aún no lee horas ocupadas ni escribe eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
+      syncOffSetPre: 'Para activar la sincronización, define',
+      syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
+      connectLink: 'Conectar un calendario →',
+      destination: 'Destino',
+      conflictCheck: 'Verificar conflictos',
+      test: 'Probar',
+      disconnect: 'Desconectar',
+      disconnectError: 'No se pudo desconectar.',
+      noCalendars: 'Aún no hay calendarios vinculados.',
+      manualTitle: 'Vincular un calendario manualmente',
+      manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
+      provider: 'Proveedor',
+      calendarId: 'Id de calendario / correo',
+      addConnection: 'Añadir conexión',
     },
   },
 };

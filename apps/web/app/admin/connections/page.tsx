@@ -12,18 +12,17 @@ export default async function ConnectionsPage() {
     // Provider status: enabled only when an external calendar adapter is wired.
     adminApi.connectionToken().catch(() => ({ enabled: false, message: 'Calendar sync unavailable.' })),
   ]);
-  const messages = getMessages(await getLocale()).admin.settings;
+  const admin = getMessages(await getLocale()).admin;
   // Calendars lives under Settings — reuse SettingsChrome (header + sub-nav) so
   // it reads as a settings tab even though its route is /admin/connections.
   return (
-    <SettingsChrome messages={messages}>
+    <SettingsChrome messages={admin.settings}>
       <div className="max-w-3xl">
-        <p className="mb-6 text-muted-foreground">
-          Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.
-        </p>
+        <p className="mb-6 text-muted-foreground">{admin.connections.pageDesc}</p>
         <ConnectionsClient
           connections={connections}
           status={{ enabled: token.enabled, message: token.message }}
+          messages={admin.connections}
         />
       </div>
     </SettingsChrome>
