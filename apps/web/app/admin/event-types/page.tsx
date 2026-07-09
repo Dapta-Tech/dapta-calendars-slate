@@ -6,7 +6,10 @@ import { DeleteButton } from './delete-button';
 export const dynamic = 'force-dynamic';
 
 export default async function EventTypesPage() {
-  const eventTypes = await adminApi.listEventTypes().catch(() => []);
+  const [eventTypes, schedules] = await Promise.all([
+    adminApi.listEventTypes().catch(() => []),
+    adminApi.listSchedules().catch(() => []),
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
@@ -45,7 +48,7 @@ export default async function EventTypesPage() {
       </ul>
 
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">New event type</h2>
-      <EventTypeForm />
+      <EventTypeForm schedules={schedules} />
     </div>
   );
 }

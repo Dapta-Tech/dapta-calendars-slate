@@ -7,7 +7,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function EditEventType({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const et = await adminApi.getEventType(id).catch(() => null);
+  const [et, schedules] = await Promise.all([
+    adminApi.getEventType(id).catch(() => null),
+    adminApi.listSchedules().catch(() => []),
+  ]);
   if (!et) notFound();
 
   return (
@@ -16,7 +19,7 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
         ← Event Types
       </Link>
       <h1 className="mb-6 mt-2 text-3xl font-semibold tracking-tight">{et.title}</h1>
-      <EventTypeForm initial={et} />
+      <EventTypeForm initial={et} schedules={schedules} />
     </div>
   );
 }

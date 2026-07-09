@@ -13,7 +13,13 @@ interface IntakeField {
   required: boolean;
 }
 
-export function EventTypeForm({ initial }: { initial?: EventType }) {
+export function EventTypeForm({
+  initial,
+  schedules = [],
+}: {
+  initial?: EventType;
+  schedules?: Array<{ id: string; name: string }>;
+}) {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(!!initial);
@@ -24,6 +30,7 @@ export function EventTypeForm({ initial }: { initial?: EventType }) {
   const [beforeBuf, setBeforeBuf] = useState(0);
   const [afterBuf, setAfterBuf] = useState(0);
   const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
+  const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
   const [fields, setFields] = useState<IntakeField[]>(
@@ -55,6 +62,7 @@ export function EventTypeForm({ initial }: { initial?: EventType }) {
         beforeEventBuffer: Number(beforeBuf),
         afterEventBuffer: Number(afterBuf),
         seatsPerTimeSlot: seats === '' ? null : Number(seats),
+        scheduleId: scheduleId || null,
         requiresConfirmation,
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
@@ -97,6 +105,19 @@ export function EventTypeForm({ initial }: { initial?: EventType }) {
           <input type="number" min={1} placeholder="1" value={seats} onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
+      <Field label="Availability schedule">
+        <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} className={inputCls}>
+          <option value="">
+            {schedules.length ? 'Use my default schedule' : 'No schedules yet — create one in Availability'}
+          </option>
+          {schedules.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       <div className="flex gap-6">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />

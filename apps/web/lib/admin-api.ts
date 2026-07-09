@@ -136,6 +136,7 @@ export interface EventType {
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
   hostMemberIds: string[];
+  scheduleId: string | null;
 }
 export interface Schedule {
   id: string;

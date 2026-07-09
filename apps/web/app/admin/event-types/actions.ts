@@ -18,6 +18,7 @@ export interface EventTypePayload {
   seatsPerTimeSlot: number | null;
   requiresConfirmation: boolean;
   hidden: boolean;
+  scheduleId: string | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean }>;
 }
 
