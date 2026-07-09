@@ -162,6 +162,46 @@ export interface BookingMessages {
       create: string;
       days: string[];
     };
+    bookings: {
+      title: string;
+      newBooking: string;
+      pendingConfirmation: string;
+      upcoming: string;
+      pastCancelled: string;
+      nothingHere: string;
+      confirm: string;
+      decline: string;
+      cancel: string;
+      cancelPrompt: string;
+      yes: string;
+      no: string;
+      confirmedToast: string;
+      declinedToast: string;
+      cancelledToast: string;
+      cancelError: string;
+      genericError: string;
+      statusAccepted: string;
+      statusPending: string;
+      statusCancelled: string;
+      statusRejected: string;
+      newTitle: string;
+      eventType: string;
+      fromSlots: string;
+      anyTime: string;
+      noSlotsRange: string;
+      dateTimeHost: string;
+      attendeeName: string;
+      attendeeEmail: string;
+      attendeeTimezone: string;
+      pickTime: string;
+      creating: string;
+      createBooking: string;
+      createdTitle: string;
+      createdNote: string;
+      backToBookings: string;
+      newSubtitle: string;
+      createEventFirst: string;
+    };
   };
 }
 
@@ -324,6 +364,46 @@ export const en: BookingMessages = {
       create: 'Create schedule',
       days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
     },
+    bookings: {
+      title: 'Bookings',
+      newBooking: '+ New booking',
+      pendingConfirmation: 'Pending confirmation',
+      upcoming: 'Upcoming',
+      pastCancelled: 'Past & cancelled',
+      nothingHere: 'Nothing here.',
+      confirm: 'Confirm',
+      decline: 'Decline',
+      cancel: 'Cancel',
+      cancelPrompt: 'Cancel?',
+      yes: 'Yes',
+      no: 'No',
+      confirmedToast: 'Booking confirmed.',
+      declinedToast: 'Booking declined.',
+      cancelledToast: 'Booking cancelled.',
+      cancelError: 'Could not cancel the booking.',
+      genericError: 'Something went wrong.',
+      statusAccepted: 'accepted',
+      statusPending: 'pending',
+      statusCancelled: 'cancelled',
+      statusRejected: 'rejected',
+      newTitle: 'New booking',
+      eventType: 'Event type',
+      fromSlots: 'From available slots',
+      anyTime: 'Any time (outside availability)',
+      noSlotsRange: 'No slots in range.',
+      dateTimeHost: 'Date & time (host timezone)',
+      attendeeName: 'Attendee name',
+      attendeeEmail: 'Attendee email',
+      attendeeTimezone: 'Attendee timezone',
+      pickTime: 'Pick a time.',
+      creating: 'Creating…',
+      createBooking: 'Create booking',
+      createdTitle: 'Booking created',
+      createdNote: 'The attendee has been notified.',
+      backToBookings: '← Back to bookings',
+      newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
+      createEventFirst: 'Create an event type first.',
+    },
   },
 };
 
@@ -485,6 +565,46 @@ export const es: BookingMessages = {
       newSchedulePlaceholder: 'Nombre del horario',
       create: 'Crear horario',
       days: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+    },
+    bookings: {
+      title: 'Reservas',
+      newBooking: '+ Nueva reserva',
+      pendingConfirmation: 'Pendientes de confirmación',
+      upcoming: 'Próximas',
+      pastCancelled: 'Pasadas y canceladas',
+      nothingHere: 'Nada por aquí.',
+      confirm: 'Confirmar',
+      decline: 'Rechazar',
+      cancel: 'Cancelar',
+      cancelPrompt: '¿Cancelar?',
+      yes: 'Sí',
+      no: 'No',
+      confirmedToast: 'Reserva confirmada.',
+      declinedToast: 'Reserva rechazada.',
+      cancelledToast: 'Reserva cancelada.',
+      cancelError: 'No se pudo cancelar la reserva.',
+      genericError: 'Algo salió mal.',
+      statusAccepted: 'aceptada',
+      statusPending: 'pendiente',
+      statusCancelled: 'cancelada',
+      statusRejected: 'rechazada',
+      newTitle: 'Nueva reserva',
+      eventType: 'Tipo de evento',
+      fromSlots: 'Desde horarios disponibles',
+      anyTime: 'Cualquier hora (fuera de disponibilidad)',
+      noSlotsRange: 'No hay horarios en el rango.',
+      dateTimeHost: 'Fecha y hora (zona del anfitrión)',
+      attendeeName: 'Nombre del invitado',
+      attendeeEmail: 'Correo del invitado',
+      attendeeTimezone: 'Zona horaria del invitado',
+      pickTime: 'Elige una hora.',
+      creating: 'Creando…',
+      createBooking: 'Crear reserva',
+      createdTitle: 'Reserva creada',
+      createdNote: 'Se ha notificado al invitado.',
+      backToBookings: '← Volver a reservas',
+      newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
+      createEventFirst: 'Primero crea un tipo de evento.',
     },
   },
 };

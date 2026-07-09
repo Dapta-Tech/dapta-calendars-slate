@@ -1,10 +1,29 @@
 import Link from 'next/link';
+import { getMessages, type BookingMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
+import { getLocale } from '@/lib/locale';
 import { CancelAction, PendingActions } from './booking-actions';
 
 export const dynamic = 'force-dynamic';
 
+type BookingsMessages = BookingMessages['admin']['bookings'];
 type Row = { uid: string; status: string; title: string; startUtc: string };
+
+/** Localized label for a raw booking status string. */
+function statusLabel(status: string, m: BookingsMessages): string {
+  switch (status) {
+    case 'accepted':
+      return m.statusAccepted;
+    case 'pending':
+      return m.statusPending;
+    case 'cancelled':
+      return m.statusCancelled;
+    case 'rejected':
+      return m.statusRejected;
+    default:
+      return status;
+  }
+}
 
 export default async function BookingsPage() {
   const [{ items }, me] = await Promise.all([
@@ -12,6 +31,7 @@ export default async function BookingsPage() {
     adminApi.me(),
   ]);
   const tz = me?.timeZone ?? 'UTC';
+  const m = getMessages(await getLocale()).admin.bookings;
   const now = Date.now();
   const pending = items.filter((b) => b.status === 'pending');
   const upcoming = items.filter((b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > now);
@@ -22,20 +42,20 @@ export default async function BookingsPage() {
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">Bookings</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{m.title}</h1>
         <Link
           href="/admin/bookings/new"
           className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
         >
-          + New booking
+          {m.newBooking}
         </Link>
       </div>
 
       {pending.length > 0 ? (
-        <Section title={`Pending confirmation (${pending.length})`} rows={pending} action="pending" timeZone={tz} />
+        <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} m={m} />
       ) : null}
-      <Section title={`Upcoming (${upcoming.length})`} rows={upcoming} action="cancel" timeZone={tz} />
-      <Section title={`Past & cancelled (${past.length})`} rows={past} muted timeZone={tz} />
+      <Section title={`${m.upcoming} (${upcoming.length})`} rows={upcoming} action="cancel" timeZone={tz} m={m} />
+      <Section title={`${m.pastCancelled} (${past.length})`} rows={past} muted timeZone={tz} m={m} />
     </div>
   );
 }
@@ -46,18 +66,20 @@ function Section({
   muted,
   action,
   timeZone,
+  m,
 }: {
   title: string;
   rows: Row[];
   muted?: boolean;
   action?: 'pending' | 'cancel';
   timeZone: string;
+  m: BookingsMessages;
 }) {
   return (
     <section className="mb-8">
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{title}</h2>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing here.</p>
+        <p className="text-sm text-muted-foreground">{m.nothingHere}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((b) => (
@@ -82,8 +104,8 @@ function Section({
                 </span>
               </span>
               <div className="flex items-center gap-3">
-                {action === 'pending' ? <PendingActions uid={b.uid} /> : null}
-                {action === 'cancel' ? <CancelAction uid={b.uid} /> : null}
+                {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
+                {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
                 <span
                   className={`rounded-sm px-2 py-1 text-xs ${
                     b.status === 'accepted'
@@ -95,7 +117,7 @@ function Section({
                           : 'bg-muted text-muted-foreground'
                   }`}
                 >
-                  {b.status}
+                  {statusLabel(b.status, m)}
                 </span>
               </div>
             </li>

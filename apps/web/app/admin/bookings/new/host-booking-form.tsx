@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { commonTimeZones } from '@slate/shared';
+import { commonTimeZones, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createHostBookingAction } from './actions';
+
+type BookingsMessages = BookingMessages['admin']['bookings'];
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -40,10 +42,12 @@ export function HostBookingForm({
   accountCode,
   handle,
   eventTypes,
+  messages: m,
 }: {
   accountCode: string;
   handle: string;
   eventTypes: EventType[];
+  messages: BookingsMessages;
 }) {
   // Only offer bookable (non-hidden) events.
   const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
@@ -79,7 +83,7 @@ export function HostBookingForm({
   const submit = () =>
     startT(async () => {
       const start = mode === 'any' ? (customLocal ? wallClockToUtc(customLocal, tz) : '') : startUtc;
-      if (!start) return setResult({ ok: false, message: 'Pick a time.' });
+      if (!start) return setResult({ ok: false, message: m.pickTime });
       const r = await createHostBookingAction({
         handle,
         slug,
@@ -93,10 +97,10 @@ export function HostBookingForm({
   if (result?.ok) {
     return (
       <div className="rounded-md border border-border bg-card p-6">
-        <h2 className="mb-2 text-xl font-semibold">Booking created</h2>
-        <p className="mb-4 text-sm text-muted-foreground">The attendee has been notified.</p>
+        <h2 className="mb-2 text-xl font-semibold">{m.createdTitle}</h2>
+        <p className="mb-4 text-sm text-muted-foreground">{m.createdNote}</p>
         <Link href="/admin/bookings" className="text-sm text-primary underline underline-offset-4">
-          ← Back to bookings
+          {m.backToBookings}
         </Link>
       </div>
     );
@@ -105,7 +109,7 @@ export function HostBookingForm({
   return (
     <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">Event type</span>
+        <span className="text-muted-foreground">{m.eventType}</span>
         <select value={slug} onChange={(e) => setSlug(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2">
           {bookable.map((et) => (
             <option key={et.slug} value={et.slug}>
@@ -117,10 +121,10 @@ export function HostBookingForm({
 
       <div className="flex gap-2 text-sm">
         <Button variant={mode === 'slots' ? 'default' : 'outline'} size="sm" onClick={() => setMode('slots')}>
-          From available slots
+          {m.fromSlots}
         </Button>
         <Button variant={mode === 'any' ? 'default' : 'outline'} size="sm" onClick={() => setMode('any')}>
-          Any time (outside availability)
+          {m.anyTime}
         </Button>
       </div>
 
@@ -140,27 +144,27 @@ export function HostBookingForm({
               {new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz }).format(new Date(s))}
             </button>
           ))}
-          {slots.length === 0 ? <span className="col-span-full text-sm text-muted-foreground">No slots in range.</span> : null}
+          {slots.length === 0 ? <span className="col-span-full text-sm text-muted-foreground">{m.noSlotsRange}</span> : null}
         </div>
       ) : (
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Date & time (host timezone)</span>
+          <span className="text-muted-foreground">{m.dateTimeHost}</span>
           <Input type="datetime-local" value={customLocal} onChange={(e) => setCustomLocal(e.target.value)} />
         </label>
       )}
 
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Attendee name</span>
+          <span className="text-muted-foreground">{m.attendeeName}</span>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Attendee email</span>
+          <span className="text-muted-foreground">{m.attendeeEmail}</span>
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
       </div>
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">Attendee timezone</span>
+        <span className="text-muted-foreground">{m.attendeeTimezone}</span>
         <select
           value={tz}
           onChange={(e) => setTz(e.target.value)}
@@ -190,7 +194,7 @@ export function HostBookingForm({
 
       {result && !result.ok ? <p className="text-sm text-destructive">{result.message}</p> : null}
       <Button onClick={submit} disabled={pending || !name || !email} className="self-start">
-        {pending ? 'Creating…' : 'Create booking'}
+        {pending ? m.creating : m.createBooking}
       </Button>
     </div>
   );
