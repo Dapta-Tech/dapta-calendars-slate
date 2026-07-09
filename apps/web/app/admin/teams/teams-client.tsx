@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useTransition } from 'react';
+import { useActionState, useState, useTransition } from 'react';
 import type { Team } from '@/lib/admin-api';
 import {
   addMemberAction,
   createTeamAction,
   deleteTeamAction,
   removeMemberAction,
+  setMemberRoleAction,
   type ActionResult,
 } from './actions';
 
@@ -52,6 +53,7 @@ export function TeamCard({
   accountMembers: Member[];
 }) {
   const [pending, start] = useTransition();
+  const [memberErr, setMemberErr] = useState<string | null>(null);
   const inTeam = new Set(members.map((m) => m.member_id));
   const addable = accountMembers.filter((m) => !inTeam.has(m.id));
 
@@ -79,7 +81,28 @@ export function TeamCard({
             {m.display_name ?? m.member_id.slice(0, 6)}
             <button
               type="button"
-              onClick={() => start(() => removeMemberAction(team.id, m.member_id))}
+              title={m.role === 'owner' ? 'Owner — click to make member' : 'Member — click to make owner'}
+              onClick={() =>
+                start(async () => {
+                  const r = await setMemberRoleAction(team.id, m.member_id, m.role === 'owner' ? 'member' : 'owner');
+                  setMemberErr(r.ok ? null : (r.message ?? null));
+                })
+              }
+              className={
+                'rounded-sm px-1.5 text-[11px] ' +
+                (m.role === 'owner' ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground')
+              }
+            >
+              {m.role === 'owner' ? 'owner' : 'member'}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                start(async () => {
+                  const r = await removeMemberAction(team.id, m.member_id);
+                  setMemberErr(r.ok ? null : (r.message ?? null));
+                })
+              }
               className="text-muted-foreground hover:text-destructive"
             >
               ×
@@ -88,6 +111,7 @@ export function TeamCard({
         ))}
         {members.length === 0 ? <span className="text-sm text-muted-foreground">No members</span> : null}
       </div>
+      {memberErr ? <p className="text-xs text-destructive">{memberErr}</p> : null}
       {addable.length > 0 ? (
         <select
           onChange={(e) => e.target.value && start(() => addMemberAction(team.id, e.target.value))}

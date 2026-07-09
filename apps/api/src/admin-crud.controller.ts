@@ -35,6 +35,7 @@ import {
   updateEventType,
   updateSchedule,
   updateTeam,
+  updateTeamMemberRole,
   type CrudResult,
 } from '@slate/db';
 import {
@@ -164,7 +165,10 @@ export class AdminCrudController {
   async createTeam(@Req() req: ReqLike, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     const input = parse(teamInputSchema, body);
-    return unwrapCrud(await createTeam(this.db, p.accountId, input));
+    const team = unwrapCrud(await createTeam(this.db, p.accountId, input));
+    // The creator is the first OWNER (so a team always has ≥1 owner — F14).
+    await addTeamMember(this.db, p.accountId, team.id, p.memberId, 'owner');
+    return team;
   }
 
   @Patch('teams/:id')
@@ -198,11 +202,25 @@ export class AdminCrudController {
     return { ok: true };
   }
 
+  @Patch('teams/:id/members/:memberId')
+  async updateMemberRole(
+    @Req() req: ReqLike,
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+    @Body() body: { role?: 'owner' | 'member' },
+  ) {
+    const p = await this.auth.resolveHost(req);
+    const role = body?.role === 'owner' ? 'owner' : 'member';
+    unwrapCrud(await updateTeamMemberRole(this.db, p.accountId, id, memberId, role));
+    return { ok: true };
+  }
+
   @Delete('teams/:id/members/:memberId')
-  @HttpCode(204)
   async removeMember(@Req() req: ReqLike, @Param('id') id: string, @Param('memberId') memberId: string) {
     const p = await this.auth.resolveHost(req);
-    await removeTeamMember(this.db, p.accountId, id, memberId);
+    // Owner-protection: refuses to remove the last owner (409 LAST_OWNER).
+    unwrapCrud(await removeTeamMember(this.db, p.accountId, id, memberId));
+    return { ok: true };
   }
 
   @Get('teams/:id/event-types')

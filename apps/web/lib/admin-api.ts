@@ -74,6 +74,8 @@ export const adminApi = {
       `/v1/teams/${id}/members`,
     ),
   addTeamMember: (id: string, b: unknown) => req('POST', `/v1/teams/${id}/members`, b),
+  updateTeamMemberRole: (id: string, memberId: string, role: 'owner' | 'member') =>
+    req('PATCH', `/v1/teams/${id}/members/${memberId}`, { role }),
   removeTeamMember: (id: string, memberId: string) =>
     req<void>('DELETE', `/v1/teams/${id}/members/${memberId}`),
   teamEventTypes: (id: string) => req<EventType[]>('GET', `/v1/teams/${id}/event-types`),

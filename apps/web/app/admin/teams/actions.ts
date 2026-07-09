@@ -33,7 +33,32 @@ export async function addMemberAction(teamId: string, memberId: string): Promise
   revalidatePath('/admin/teams');
 }
 
-export async function removeMemberAction(teamId: string, memberId: string): Promise<void> {
-  await adminApi.removeTeamMember(teamId, memberId);
-  revalidatePath('/admin/teams');
+export async function removeMemberAction(
+  teamId: string,
+  memberId: string,
+): Promise<ActionResult> {
+  try {
+    await adminApi.removeTeamMember(teamId, memberId);
+    revalidatePath('/admin/teams');
+    revalidatePath(`/admin/teams/${teamId}`);
+    return { ok: true };
+  } catch (e) {
+    // Surfaces LAST_OWNER (409) etc.
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not remove member.' };
+  }
+}
+
+export async function setMemberRoleAction(
+  teamId: string,
+  memberId: string,
+  role: 'owner' | 'member',
+): Promise<ActionResult> {
+  try {
+    await adminApi.updateTeamMemberRole(teamId, memberId, role);
+    revalidatePath('/admin/teams');
+    revalidatePath(`/admin/teams/${teamId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not change role.' };
+  }
 }
