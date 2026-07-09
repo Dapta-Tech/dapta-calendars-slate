@@ -1,12 +1,12 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { commonTimeZones, validateDayRanges, type TimeRange } from '@slate/shared';
+import { commonTimeZones, validateDayRanges, type BookingMessages, type TimeRange } from '@slate/shared';
 import { useToast } from '@/components/toast';
 import type { Schedule } from '@/lib/admin-api';
 import { deleteScheduleAction, saveScheduleFullAction, type RuleInput } from './actions';
 
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+type AvailabilityMessages = BookingMessages['admin']['availability'];
 
 interface Override {
   date: string;
@@ -16,7 +16,7 @@ interface Override {
 
 /** Seed each weekday with ALL of its ranges (was: last-rule-wins → data loss). */
 function seedWeek(schedule: Schedule): TimeRange[][] {
-  const week: TimeRange[][] = DAY_NAMES.map(() => []);
+  const week: TimeRange[][] = Array.from({ length: 7 }, () => []);
   for (const r of schedule.rules) {
     if (!r.days) continue;
     for (const d of r.days) week[d]!.push({ start: r.startTime, end: r.endTime });
@@ -24,7 +24,7 @@ function seedWeek(schedule: Schedule): TimeRange[][] {
   return week;
 }
 
-export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
+export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; messages: AvailabilityMessages }) {
   const [name, setName] = useState(schedule.name);
   const [timeZone, setTimeZone] = useState(schedule.timeZone);
   const [week, setWeek] = useState<TimeRange[][]>(() => seedWeek(schedule));
@@ -60,15 +60,15 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
         if (o.date) rules.push({ days: null, startTime: o.start, endTime: o.end, date: o.date });
       }
       const res = await saveScheduleFullAction(schedule.id, name, timeZone, rules);
-      if (res.ok) success('Availability saved.');
-      else error(res.message ?? 'Could not save availability.');
+      if (res.ok) success(m.savedToast);
+      else error(res.message ?? m.saveError);
     });
 
   const remove = () =>
     start(async () => {
       const r = await deleteScheduleAction(schedule.id);
-      if (!r.ok) error(r.message ?? 'Could not delete the schedule.');
-      else success('Schedule deleted.');
+      if (!r.ok) error(r.message ?? m.deleteError);
+      else success(m.deletedToast);
     });
 
   return (
@@ -77,12 +77,12 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          aria-label="Schedule name"
+          aria-label={m.scheduleNameLabel}
           className="rounded-md border border-transparent bg-transparent px-1 text-lg font-medium hover:border-border focus:border-input"
         />
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            Timezone
+            {m.timezone}
             <select
               value={timeZone}
               onChange={(e) => setTimeZone(e.target.value)}
@@ -97,12 +97,12 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
           </label>
           {confirmDel ? (
             <span className="flex items-center gap-1 text-sm">
-              <span className="text-muted-foreground">Delete?</span>
+              <span className="text-muted-foreground">{m.deletePrompt}</span>
               <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-2 py-1 text-destructive">
-                Yes
+                {m.yes}
               </button>
               <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-2 py-1">
-                No
+                {m.no}
               </button>
             </span>
           ) : (
@@ -111,15 +111,15 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
               onClick={() => setConfirmDel(true)}
               className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive transition-colors hover:bg-destructive/10"
             >
-              Delete
+              {m.deleteSchedule}
             </button>
           )}
         </div>
       </div>
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-muted-foreground">Weekly hours</span>
-        {DAY_NAMES.map((dayName, d) => {
+        <span className="text-sm font-semibold text-muted-foreground">{m.weeklyHours}</span>
+        {m.days.map((dayName, d) => {
           const ranges = week[d]!;
           const on = ranges.length > 0;
           const err = dayError(d);
@@ -149,7 +149,7 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
                         />
                         <button
                           type="button"
-                          aria-label="Remove range"
+                          aria-label={m.removeRange}
                           onClick={() => setRanges(d, ranges.filter((_, j) => j !== ri))}
                           className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive"
                         >
@@ -162,11 +162,11 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
                       onClick={() => addRange(d)}
                       className="self-start text-xs text-primary hover:underline"
                     >
-                      + Add a range
+                      {m.addRange}
                     </button>
                   </div>
                 ) : (
-                  <span className="py-1.5 text-sm text-muted-foreground">Unavailable</span>
+                  <span className="py-1.5 text-sm text-muted-foreground">{m.unavailable}</span>
                 )}
               </div>
               {err ? <span className="pl-32 text-xs text-destructive">{err}</span> : null}
@@ -176,7 +176,7 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-muted-foreground">Date overrides</span>
+        <span className="text-sm font-semibold text-muted-foreground">{m.dateOverrides}</span>
         {overrides.map((o, i) => (
           <div key={i} className="flex items-center gap-3">
             <input
@@ -212,9 +212,9 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
           onClick={() => setOverrides((os) => [...os, { date: '', start: '09:00', end: '17:00' }])}
           className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary"
         >
-          + Add date override
+          {m.addOverride}
         </button>
-        <p className="text-xs text-muted-foreground">An override replaces the weekly hours for that specific date.</p>
+        <p className="text-xs text-muted-foreground">{m.overrideNote}</p>
       </div>
 
       <button
@@ -223,7 +223,7 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
         disabled={pending || !!firstError}
         className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
       >
-        {pending ? 'Saving…' : 'Save availability'}
+        {pending ? m.saving : m.save}
       </button>
     </div>
   );

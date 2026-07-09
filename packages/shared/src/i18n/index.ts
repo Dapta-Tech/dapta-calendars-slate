@@ -134,6 +134,34 @@ export interface BookingMessages {
       createEventType: string;
       saving: string;
     };
+    availability: {
+      title: string;
+      subtitle: string;
+      emptyList: string;
+      weeklyHours: string;
+      dateOverrides: string;
+      timezone: string;
+      unavailable: string;
+      addRange: string;
+      addOverride: string;
+      overrideNote: string;
+      deleteSchedule: string;
+      deletePrompt: string;
+      yes: string;
+      no: string;
+      save: string;
+      saving: string;
+      scheduleNameLabel: string;
+      removeRange: string;
+      savedToast: string;
+      deletedToast: string;
+      saveError: string;
+      deleteError: string;
+      newSchedule: string;
+      newSchedulePlaceholder: string;
+      create: string;
+      days: string[];
+    };
   };
 }
 
@@ -268,6 +296,34 @@ export const en: BookingMessages = {
       createEventType: 'Create event type',
       saving: 'Saving…',
     },
+    availability: {
+      title: 'Availability',
+      subtitle: 'Weekly hours and date overrides. Add multiple ranges per day (e.g. 9–12 and 14–18).',
+      emptyList: 'No schedules yet — create one to set your weekly hours.',
+      weeklyHours: 'Weekly hours',
+      dateOverrides: 'Date overrides',
+      timezone: 'Timezone',
+      unavailable: 'Unavailable',
+      addRange: '+ Add a range',
+      addOverride: '+ Add date override',
+      overrideNote: 'An override replaces the weekly hours for that specific date.',
+      deleteSchedule: 'Delete',
+      deletePrompt: 'Delete?',
+      yes: 'Yes',
+      no: 'No',
+      save: 'Save availability',
+      saving: 'Saving…',
+      scheduleNameLabel: 'Schedule name',
+      removeRange: 'Remove range',
+      savedToast: 'Availability saved.',
+      deletedToast: 'Schedule deleted.',
+      saveError: 'Could not save availability.',
+      deleteError: 'Could not delete the schedule.',
+      newSchedule: 'New schedule',
+      newSchedulePlaceholder: 'Schedule name',
+      create: 'Create schedule',
+      days: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    },
   },
 };
 
@@ -401,6 +457,34 @@ export const es: BookingMessages = {
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear tipo de evento',
       saving: 'Guardando…',
+    },
+    availability: {
+      title: 'Disponibilidad',
+      subtitle: 'Horas semanales y excepciones por fecha. Añade varios rangos por día (p. ej. 9–12 y 14–18).',
+      emptyList: 'Aún no hay horarios — crea uno para definir tus horas semanales.',
+      weeklyHours: 'Horas semanales',
+      dateOverrides: 'Excepciones por fecha',
+      timezone: 'Zona horaria',
+      unavailable: 'No disponible',
+      addRange: '+ Añadir un rango',
+      addOverride: '+ Añadir excepción por fecha',
+      overrideNote: 'Una excepción reemplaza las horas semanales para esa fecha específica.',
+      deleteSchedule: 'Eliminar',
+      deletePrompt: '¿Eliminar?',
+      yes: 'Sí',
+      no: 'No',
+      save: 'Guardar disponibilidad',
+      saving: 'Guardando…',
+      scheduleNameLabel: 'Nombre del horario',
+      removeRange: 'Quitar rango',
+      savedToast: 'Disponibilidad guardada.',
+      deletedToast: 'Horario eliminado.',
+      saveError: 'No se pudo guardar la disponibilidad.',
+      deleteError: 'No se pudo eliminar el horario.',
+      newSchedule: 'Nuevo horario',
+      newSchedulePlaceholder: 'Nombre del horario',
+      create: 'Crear horario',
+      days: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
     },
   },
 };
