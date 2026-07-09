@@ -59,6 +59,19 @@ export const serverEnvSchema = z.object({
   OUTBOX_WORKER_ENABLED: boolish.default('true'),
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(5000),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+
+  // CORS: a comma-separated allowlist of origins permitted to call the API from
+  // a browser. When UNSET we default to PUBLIC_APP_URL only (the app's own web
+  // origin) — NOT reflect-any. To embed the public booking widget on other
+  // domains, list them here, e.g. CORS_ORIGINS="https://acme.com,https://foo.io".
+  CORS_ORIGINS: z.string().optional(),
+
+  // Rate limiting (public booking/availability). A per-IP token bucket: burst up
+  // to CAPACITY, sustained REFILL tokens/sec. Enabled by default; a fork can
+  // disable it or plug a distributed limiter in the private overlay.
+  RATE_LIMIT_ENABLED: boolish.default('true'),
+  RATE_LIMIT_CAPACITY: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_REFILL_PER_SEC: z.coerce.number().positive().default(1),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

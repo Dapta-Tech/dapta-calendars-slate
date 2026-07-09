@@ -103,10 +103,11 @@ export class AdminService {
 
   async hostCancel(p: HostPrincipal, uid: string, reason?: string) {
     const out = await cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
-    if (out.ok) {
-      // B2: the host-dashboard cancel bypassed BookingService and sent NOTHING.
-      // Now it deletes the remote event, emails the attendee (+ host), and fires
-      // the webhook — all durably via the outbox.
+    // B2: the host-dashboard cancel bypassed BookingService and sent NOTHING.
+    // Now it deletes the remote event, emails the attendee (+ host), and fires
+    // the webhook — all durably via the outbox. Skip side-effects on an
+    // idempotent retry (already cancelled) so nothing is duplicated (P1-1).
+    if (out.ok && !out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: reason ?? null });
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {

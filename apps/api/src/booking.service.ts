@@ -215,45 +215,52 @@ export class BookingService {
 
   async cancel(
     uid: string,
-    opts: { reason?: string; token?: string; byHost?: boolean },
+    opts: { reason?: string; token?: string; byHost?: boolean; idempotencyKey?: string },
   ): Promise<{ uid: string; status: string } | ServiceError> {
     const out = await cancelBooking(this.db, {
       uid,
       reason: opts.reason,
       manageToken: opts.token,
       byHost: opts.byHost,
+      idempotencyKey: opts.idempotencyKey,
     });
     if (!out.ok) return this.mapMutation(out.reason);
-    // Delete the remote calendar event (no-op when none was written).
-    this.calendar.onBookingCancelled(uid);
-    // Durable cancellation email (attendee + host) with a CANCEL .ics.
-    void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
-    this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
+    // Idempotent retry (already cancelled): skip side-effects so a retried
+    // cancel doesn't send a second email / fire a second webhook.
+    if (!out.alreadyApplied) {
+      this.calendar.onBookingCancelled(uid);
+      void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
+      this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
+    }
     return { uid: out.uid, status: 'cancelled' };
   }
 
   async reschedule(
     uid: string,
-    opts: { newStartUtc: string; token?: string; byHost?: boolean },
+    opts: { newStartUtc: string; token?: string; byHost?: boolean; idempotencyKey?: string },
   ): Promise<{ uid: string; startUtc: string; endUtc: string } | ServiceError> {
     const out = await rescheduleBooking(this.db, {
       uid,
       newStartMs: new Date(opts.newStartUtc).getTime(),
       manageToken: opts.token,
       byHost: opts.byHost,
+      idempotencyKey: opts.idempotencyKey,
     });
     if (!out.ok) return this.mapMutation(out.reason);
-    // Move the remote calendar event to the new time (delete + re-create).
-    this.calendar.onBookingRescheduled(uid);
-    // Durable reschedule email (attendee + host) with the previous time + a
-    // REQUEST .ics so the existing calendar event is updated in place.
-    if (out.manageToken) {
-      void this.email.enqueueReschedule(uid, {
-        manageUrl: this.manageUrl(uid, out.manageToken),
-        previousStartUtc: out.previousStartUtc ?? null,
-      });
+    // Idempotent retry (same Idempotency-Key): the booking was NOT moved again,
+    // so skip all side-effects (no duplicate calendar move / email / webhook).
+    if (!out.alreadyApplied) {
+      this.calendar.onBookingRescheduled(uid);
+      // Durable reschedule email (attendee + host) with the previous time + a
+      // REQUEST .ics so the existing calendar event is updated in place.
+      if (out.manageToken) {
+        void this.email.enqueueReschedule(uid, {
+          manageUrl: this.manageUrl(uid, out.manageToken),
+          previousStartUtc: out.previousStartUtc ?? null,
+        });
+      }
+      this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     }
-    this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     return { uid: out.uid, startUtc: out.startUtc, endUtc: out.endUtc };
   }
 

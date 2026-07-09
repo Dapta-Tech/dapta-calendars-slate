@@ -235,4 +235,35 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     expect('error' in out).toBe(false);
     if (!('error' in out)) expect(out.startUtc).toBe(target);
   });
+
+  it('P1-1: a retried cancel succeeds AND does not send a second cancellation email', async () => {
+    const uid = await bookAccepted();
+    email.sent.length = 0;
+    expect((await admin.hostCancel(principal, uid, 'x')).ok).toBe(true);
+    await drain();
+    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(1);
+    // Retry — succeeds (not 410) and enqueues NO second email.
+    expect((await admin.hostCancel(principal, uid, 'x')).ok).toBe(true);
+    await drain();
+    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(1);
+  });
+
+  it('P1-2: a reschedule retried with the same Idempotency-Key sends no second email', async () => {
+    const uid = await bookAccepted();
+    const target = (await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 2 * 86_400_000,
+      toMs: Date.now() + 6 * 86_400_000,
+    }))!.slots[0]!.startUtc;
+    email.sent.length = 0;
+    await booking.reschedule(uid, { newStartUtc: target, byHost: true, idempotencyKey: 'RK' });
+    await drain();
+    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(1);
+    // Replay with the same key → dedup, no second reschedule email.
+    await booking.reschedule(uid, { newStartUtc: target, byHost: true, idempotencyKey: 'RK' });
+    await drain();
+    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(1);
+  });
 });
