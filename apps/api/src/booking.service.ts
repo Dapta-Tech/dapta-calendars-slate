@@ -171,6 +171,7 @@ export class BookingService {
       host: { name: b.hostName, handle: b.hostHandle },
       attendee: b.attendee,
       manageUrl,
+      deduplicated: outcome.deduplicated || undefined,
     };
   }
 
