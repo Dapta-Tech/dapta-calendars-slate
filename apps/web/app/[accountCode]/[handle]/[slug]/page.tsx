@@ -19,7 +19,7 @@ export default async function BookingPage({
 
   const now = new Date();
   const from = now.toISOString();
-  const to = new Date(now.getTime() + 14 * 86_400_000).toISOString();
+  const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
 
   const [profile, availability] = await Promise.all([
     getProfile(accountCode, handle),

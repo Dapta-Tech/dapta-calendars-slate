@@ -25,6 +25,8 @@ export interface BookingMessages {
     retry: string;
     poweredBy: string;
     with: string;
+    seatsLeft: string;
+    full: string;
   };
   manage: {
     title: string;
@@ -63,6 +65,8 @@ export const en: BookingMessages = {
     retry: 'Try again',
     poweredBy: 'Powered by Slate',
     with: 'with',
+    seatsLeft: '{n} left',
+    full: 'Full',
   },
   manage: {
     title: 'Manage your booking',
@@ -101,6 +105,8 @@ export const es: BookingMessages = {
     retry: 'Reintentar',
     poweredBy: 'Con la tecnología de Slate',
     with: 'con',
+    seatsLeft: '{n} disponibles',
+    full: 'Lleno',
   },
   manage: {
     title: 'Gestiona tu reserva',
