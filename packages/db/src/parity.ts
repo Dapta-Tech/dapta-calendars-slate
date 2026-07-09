@@ -113,6 +113,8 @@ export interface MeView {
   handle: string | null;
   displayName: string | null;
   email: string | null;
+  timeZone: string | null;
+  locale: string | null;
 }
 
 /** Resolve the authenticated principal's account + member for /me. */
@@ -130,10 +132,12 @@ export async function getMe(
     handle: string | null;
     display_name: string | null;
     email: string | null;
+    time_zone: string | null;
+    locale: string | null;
   }>(
     memberId
-      ? sql`SELECT id, handle, display_name, email FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
-      : sql`SELECT id, handle, display_name, email FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
+      ? sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
+      : sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
   );
   if (!member) return null;
   return {
@@ -143,6 +147,8 @@ export async function getMe(
     handle: member.handle,
     displayName: member.display_name,
     email: member.email,
+    timeZone: member.time_zone,
+    locale: member.locale,
   };
 }
 

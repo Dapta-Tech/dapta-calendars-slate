@@ -41,6 +41,8 @@ export interface Me {
   handle: string | null;
   displayName: string | null;
   email: string | null;
+  timeZone: string | null;
+  locale: string | null;
 }
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { adminApi } from '@/lib/admin-api';
+import { CopyLink } from '@/components/copy-link';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,14 +26,17 @@ export default async function AdminHome() {
       {publicUrl ? (
         <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
           <span className="text-sm text-muted-foreground">Your booking link</span>
-          <div className="flex items-center gap-3">
-            <code className="rounded-sm bg-muted px-2 py-1 text-sm">localhost:3300{publicUrl}</code>
-            <Link href={publicUrl} className="text-sm text-primary hover:underline">
-              Open →
-            </Link>
-          </div>
+          <CopyLink path={publicUrl} />
         </div>
-      ) : null}
+      ) : (
+        <div className="mb-8 rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">
+          Set a handle in{' '}
+          <Link href="/admin/settings/booking-page" className="text-primary hover:underline">
+            your booking page
+          </Link>{' '}
+          to get a shareable link.
+        </div>
+      )}
 
       <div className="mb-8 grid grid-cols-3 gap-4">
         <Stat label="Event types" value={eventTypes.length} href="/admin/event-types" />

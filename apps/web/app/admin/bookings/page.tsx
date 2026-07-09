@@ -7,7 +7,11 @@ export const dynamic = 'force-dynamic';
 type Row = { uid: string; status: string; title: string; startUtc: string };
 
 export default async function BookingsPage() {
-  const { items } = await adminApi.listBookings('limit=200').catch(() => ({ items: [] }));
+  const [{ items }, me] = await Promise.all([
+    adminApi.listBookings('limit=200').catch(() => ({ items: [] })),
+    adminApi.me().catch(() => null),
+  ]);
+  const tz = me?.timeZone ?? 'UTC';
   const now = Date.now();
   const pending = items.filter((b) => b.status === 'pending');
   const upcoming = items.filter((b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > now);
@@ -28,10 +32,10 @@ export default async function BookingsPage() {
       </div>
 
       {pending.length > 0 ? (
-        <Section title={`Pending confirmation (${pending.length})`} rows={pending} action="pending" />
+        <Section title={`Pending confirmation (${pending.length})`} rows={pending} action="pending" timeZone={tz} />
       ) : null}
-      <Section title={`Upcoming (${upcoming.length})`} rows={upcoming} action="cancel" />
-      <Section title={`Past & cancelled (${past.length})`} rows={past} muted />
+      <Section title={`Upcoming (${upcoming.length})`} rows={upcoming} action="cancel" timeZone={tz} />
+      <Section title={`Past & cancelled (${past.length})`} rows={past} muted timeZone={tz} />
     </div>
   );
 }
@@ -41,11 +45,13 @@ function Section({
   rows,
   muted,
   action,
+  timeZone,
 }: {
   title: string;
   rows: Row[];
   muted?: boolean;
   action?: 'pending' | 'cancel';
+  timeZone: string;
 }) {
   return (
     <section className="mb-8">
@@ -70,6 +76,8 @@ function Section({
                     day: 'numeric',
                     hour: 'numeric',
                     minute: '2-digit',
+                    timeZone,
+                    timeZoneName: 'short',
                   }).format(new Date(b.startUtc))}
                 </span>
               </span>
