@@ -9,10 +9,12 @@ import {
   Param,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ZodError } from 'zod';
 import { BookingService } from './booking.service';
 import { unwrap } from './http';
+import { RateLimitGuard } from './rate-limit';
 
 function badReq(err: unknown): never {
   if (err instanceof ZodError)
@@ -20,7 +22,12 @@ function badReq(err: unknown): never {
   throw err;
 }
 
-/** Public, unauthenticated booking surface (personal + team + manage). */
+/**
+ * Public, unauthenticated booking surface (personal + team + manage).
+ * Rate-limited per IP (P1-5) — this is the only surface an anonymous client can
+ * hit, so booking spam / availability scraping / uid-token probing are throttled.
+ */
+@UseGuards(RateLimitGuard)
 @Controller('v1')
 export class PublicController {
   constructor(@Inject(BookingService) private readonly svc: BookingService) {}

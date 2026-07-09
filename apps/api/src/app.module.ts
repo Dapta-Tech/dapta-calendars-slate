@@ -2,13 +2,14 @@ import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
+import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENV, NOTIFIER, RATE_LIMITER } from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
+import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProvider } from './calendar.provider';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
@@ -63,6 +64,10 @@ import { AdminCrudController } from './admin-crud.controller';
       useFactory: (env: ServerEnv, db: Db) => createAuthProvider(env, db),
       inject: [ENV, DB],
     },
+    // Rate limiter for the public surface (P1-5): token bucket by default, noop
+    // when RATE_LIMIT_ENABLED=false; swappable for a distributed limiter.
+    { provide: RATE_LIMITER, useFactory: (env: ServerEnv) => createRateLimiter(env), inject: [ENV] },
+    RateLimitGuard,
     BookingService,
     AdminService,
     AuthService,
