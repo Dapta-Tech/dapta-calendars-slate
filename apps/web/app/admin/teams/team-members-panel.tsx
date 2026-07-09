@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useToast } from '@/components/toast';
 import { addMemberAction, removeMemberAction, setMemberRoleAction } from './actions';
 
 interface Member {
@@ -28,20 +29,24 @@ export function TeamMembersPanel({
   accountMembers: AccountMember[];
 }) {
   const [pending, start] = useTransition();
-  const [err, setErr] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [addId, setAddId] = useState('');
   const [addRole, setAddRole] = useState<'owner' | 'member'>('member');
+  const { success, error } = useToast();
 
   const inTeam = new Set(members.map((m) => m.member_id));
   const addable = accountMembers.filter((m) => !inTeam.has(m.id));
   const ownerCount = members.filter((m) => m.role === 'owner').length;
 
-  const run = (p: Promise<{ ok: boolean; message?: string }>) =>
+  const run = (p: Promise<{ ok: boolean; message?: string }>, ok: string) =>
     start(async () => {
       const r = await p;
-      setErr(r.ok ? null : (r.message ?? 'Something went wrong.'));
-      if (r.ok) setConfirmRemove(null);
+      if (r.ok) {
+        success(ok);
+        setConfirmRemove(null);
+      } else {
+        error(r.message ?? 'Something went wrong.');
+      }
     });
 
   return (
@@ -67,7 +72,7 @@ export function TeamMembersPanel({
                   value={m.role === 'owner' ? 'owner' : 'member'}
                   disabled={pending || isLastOwner}
                   title={isLastOwner ? 'A team must keep at least one owner' : undefined}
-                  onChange={(e) => run(setMemberRoleAction(teamId, m.member_id, e.target.value as 'owner' | 'member'))}
+                  onChange={(e) => run(setMemberRoleAction(teamId, m.member_id, e.target.value as 'owner' | 'member'), 'Role updated.')}
                   className="rounded-md border border-input bg-background px-2 py-1 text-sm disabled:opacity-60"
                 >
                   <option value="owner">Owner</option>
@@ -78,7 +83,7 @@ export function TeamMembersPanel({
                     <button
                       type="button"
                       disabled={pending}
-                      onClick={() => run(removeMemberAction(teamId, m.member_id))}
+                      onClick={() => run(removeMemberAction(teamId, m.member_id), 'Member removed.')}
                       className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
                     >
                       Remove
@@ -145,7 +150,7 @@ export function TeamMembersPanel({
               type="button"
               disabled={pending || !addId}
               onClick={() => {
-                run(addMemberAction(teamId, addId, addRole));
+                run(addMemberAction(teamId, addId, addRole), 'Member added.');
                 setAddId('');
               }}
               className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
@@ -158,7 +163,6 @@ export function TeamMembersPanel({
         )}
       </div>
 
-      {err ? <p className="text-sm text-destructive">{err}</p> : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { commonTimeZones, validateDayRanges, type TimeRange } from '@slate/shared';
+import { useToast } from '@/components/toast';
 import type { Schedule } from '@/lib/admin-api';
 import { deleteScheduleAction, saveScheduleFullAction, type RuleInput } from './actions';
 
@@ -30,9 +31,9 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
   const [overrides, setOverrides] = useState<Override[]>(() =>
     schedule.rules.filter((r) => r.date).map((r) => ({ date: r.date!, start: r.startTime, end: r.endTime })),
   );
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [pending, start] = useTransition();
+  const { success, error } = useToast();
   const zones = useMemo(() => commonTimeZones(timeZone), [timeZone]);
 
   const setRanges = (d: number, ranges: TimeRange[]) =>
@@ -48,7 +49,7 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
   const save = () =>
     start(async () => {
       if (firstError) {
-        setMsg({ ok: false, text: firstError });
+        error(firstError);
         return;
       }
       const rules: RuleInput[] = [];
@@ -59,10 +60,16 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
         if (o.date) rules.push({ days: null, startTime: o.start, endTime: o.end, date: o.date });
       }
       const res = await saveScheduleFullAction(schedule.id, name, timeZone, rules);
-      setMsg({ ok: res.ok, text: res.ok ? 'Saved.' : (res.message ?? 'Failed') });
+      if (res.ok) success('Availability saved.');
+      else error(res.message ?? 'Could not save availability.');
     });
 
-  const remove = () => start(async () => void (await deleteScheduleAction(schedule.id)));
+  const remove = () =>
+    start(async () => {
+      const r = await deleteScheduleAction(schedule.id);
+      if (!r.ok) error(r.message ?? 'Could not delete the schedule.');
+      else success('Schedule deleted.');
+    });
 
   return (
     <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
@@ -210,7 +217,6 @@ export function ScheduleEditor({ schedule }: { schedule: Schedule }) {
         <p className="text-xs text-muted-foreground">An override replaces the weekly hours for that specific date.</p>
       </div>
 
-      {msg ? <p className={`text-sm ${msg.ok ? 'text-primary' : 'text-destructive'}`}>{msg.text}</p> : null}
       <button
         type="button"
         onClick={save}
