@@ -5,9 +5,9 @@ import { Studio } from './studio';
 export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
-  const me = await adminApi.me().catch(() => null);
+  const me = await adminApi.me();
   const profile = me?.handle
-    ? await adminApi.profile(me.accountCode, me.handle).catch(() => null)
+    ? await adminApi.profile(me.accountCode, me.handle)
     : null;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';

@@ -5,11 +5,11 @@ import { CopyLink } from '@/components/copy-link';
 export const dynamic = 'force-dynamic';
 
 export default async function AdminHome() {
-  const me = await adminApi.me().catch(() => null);
+  const me = await adminApi.me();
   const [eventTypes, bookings, teams] = await Promise.all([
-    adminApi.listEventTypes().catch(() => []),
-    adminApi.listBookings('limit=100').catch(() => ({ items: [] })),
-    adminApi.listTeams().catch(() => []),
+    adminApi.listEventTypes(),
+    adminApi.listBookings('limit=100'),
+    adminApi.listTeams(),
   ]);
   const upcoming = bookings.items.filter(
     (b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > Date.now(),

@@ -6,8 +6,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function NewHostBooking() {
   const [me, eventTypes] = await Promise.all([
-    adminApi.me().catch(() => null),
-    adminApi.listEventTypes().catch(() => []),
+    adminApi.me(),
+    adminApi.listEventTypes(),
   ]);
 
   return (

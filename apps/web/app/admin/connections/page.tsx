@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function ConnectionsPage() {
   const [connections, token] = await Promise.all([
-    adminApi.listConnections().catch(() => []),
+    adminApi.listConnections(),
     // Provider status: enabled only when an external calendar adapter is wired.
     adminApi.connectionToken().catch(() => ({ enabled: false, message: 'Calendar sync unavailable.' })),
   ]);

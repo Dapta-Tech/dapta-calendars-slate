@@ -4,9 +4,9 @@ import { NewTeamForm, TeamCard } from './teams-client';
 export const dynamic = 'force-dynamic';
 
 export default async function TeamsPage() {
-  const teams = await adminApi.listTeams().catch(() => []);
+  const teams = await adminApi.listTeams();
   const withMembers = await Promise.all(
-    teams.map(async (t) => ({ team: t, count: (await adminApi.teamMembers(t.id).catch(() => [])).length })),
+    teams.map(async (t) => ({ team: t, count: (await adminApi.teamMembers(t.id)).length })),
   );
 
   return (

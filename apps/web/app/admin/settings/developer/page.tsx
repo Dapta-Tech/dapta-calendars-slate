@@ -5,8 +5,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function DeveloperSettings() {
   const [keys, webhooks] = await Promise.all([
-    adminApi.listApiKeys().catch(() => []),
-    adminApi.listWebhooks().catch(() => []),
+    adminApi.listApiKeys(),
+    adminApi.listWebhooks(),
   ]);
   return (
     <div className="flex max-w-3xl flex-col gap-8">

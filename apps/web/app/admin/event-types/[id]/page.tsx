@@ -8,8 +8,8 @@ export const dynamic = 'force-dynamic';
 export default async function EditEventType({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [et, schedules] = await Promise.all([
-    adminApi.getEventType(id).catch(() => null),
-    adminApi.listSchedules().catch(() => []),
+    adminApi.getEventType(id),
+    adminApi.listSchedules(),
   ]);
   if (!et) notFound();
 

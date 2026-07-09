@@ -7,8 +7,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function EventTypesPage() {
   const [eventTypes, schedules] = await Promise.all([
-    adminApi.listEventTypes().catch(() => []),
-    adminApi.listSchedules().catch(() => []),
+    adminApi.listEventTypes(),
+    adminApi.listSchedules(),
   ]);
 
   return (

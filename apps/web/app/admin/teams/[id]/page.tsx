@@ -8,15 +8,15 @@ export const dynamic = 'force-dynamic';
 export default async function TeamDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [me, teams, accountMembers] = await Promise.all([
-    adminApi.me().catch(() => null),
-    adminApi.listTeams().catch(() => []),
-    adminApi.listMembers().catch(() => []),
+    adminApi.me(),
+    adminApi.listTeams(),
+    adminApi.listMembers(),
   ]);
   const team = teams.find((t) => t.id === id);
   if (!team) notFound();
   const [members, eventTypes] = await Promise.all([
-    adminApi.teamMembers(id).catch(() => []),
-    adminApi.teamEventTypes(id).catch(() => []),
+    adminApi.teamMembers(id),
+    adminApi.teamEventTypes(id),
   ]);
 
   return (

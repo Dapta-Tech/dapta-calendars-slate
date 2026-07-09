@@ -5,8 +5,8 @@ import { NewSchedule } from './new-schedule';
 export const dynamic = 'force-dynamic';
 
 export default async function AvailabilityPage() {
-  const schedules = await adminApi.listSchedules().catch(() => []);
-  const full = await Promise.all(schedules.map((s) => adminApi.getSchedule(s.id).catch(() => null)));
+  const schedules = await adminApi.listSchedules();
+  const full = await Promise.all(schedules.map((s) => adminApi.getSchedule(s.id)));
   const ready = full.filter(Boolean);
 
   return (

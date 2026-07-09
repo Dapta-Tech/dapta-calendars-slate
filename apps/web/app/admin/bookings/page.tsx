@@ -8,8 +8,8 @@ type Row = { uid: string; status: string; title: string; startUtc: string };
 
 export default async function BookingsPage() {
   const [{ items }, me] = await Promise.all([
-    adminApi.listBookings('limit=200').catch(() => ({ items: [] })),
-    adminApi.me().catch(() => null),
+    adminApi.listBookings('limit=200'),
+    adminApi.me(),
   ]);
   const tz = me?.timeZone ?? 'UTC';
   const now = Date.now();
