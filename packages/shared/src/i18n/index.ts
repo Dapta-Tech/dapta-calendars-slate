@@ -95,6 +95,14 @@ export interface BookingMessages {
       apiKeys: string;
       apiKeysDesc: string;
     };
+    settings: {
+      title: string;
+      subtitle: string;
+      general: string;
+      bookingPage: string;
+      calendars: string;
+      developer: string;
+    };
   };
 }
 
@@ -190,6 +198,14 @@ export const en: BookingMessages = {
       apiKeys: 'API keys & webhooks',
       apiKeysDesc: 'Integrate agents & automations.',
     },
+    settings: {
+      title: 'Settings',
+      subtitle: 'Manage your account and preferences.',
+      general: 'General',
+      bookingPage: 'Booking Page',
+      calendars: 'Calendars',
+      developer: 'Developer',
+    },
   },
 };
 
@@ -284,6 +300,14 @@ export const es: BookingMessages = {
       stylePageDesc: 'Marca + estudio de 9 ejes.',
       apiKeys: 'Claves API y webhooks',
       apiKeysDesc: 'Integra agentes y automatizaciones.',
+    },
+    settings: {
+      title: 'Ajustes',
+      subtitle: 'Gestiona tu cuenta y preferencias.',
+      general: 'General',
+      bookingPage: 'Página de reservas',
+      calendars: 'Calendarios',
+      developer: 'Desarrollador',
     },
   },
 };
