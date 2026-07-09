@@ -1,10 +1,16 @@
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
 import { ToastProvider } from '@/components/toast';
+import { SESSION_COOKIE } from '@/lib/session';
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
+  const jar = await cookies();
+  // Local-auth gate: no session → the sign-in screen (WorkOS replaces this in prod).
+  if (!jar.get(SESSION_COOKIE)) redirect('/login');
+
   let me: Awaited<ReturnType<typeof adminApi.me>> | null = null;
   try {
     me = await adminApi.me();
@@ -14,7 +20,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   // Server-read the collapse pref so the sidebar renders at the right width on
   // first paint (no rail FOUC).
-  const initialCollapsed = (await cookies()).get('slate.nav.collapsed')?.value === '1';
+  const initialCollapsed = jar.get('slate.nav.collapsed')?.value === '1';
 
   return (
     <ToastProvider>

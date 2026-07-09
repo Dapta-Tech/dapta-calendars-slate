@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive } from '@slate/shared';
+import { signOutAction } from '@/app/login/actions';
 
 /** Design-parity admin shell — mirrors the old Angular app-shell: a flush 240px
  *  sidebar (bg-popover, right border, never a floating card), a flat 6-item nav
@@ -235,6 +236,22 @@ export function AdminShell({
     </Link>
   ) : null;
 
+  // Sign-out (local provider): a server action clears the session cookie.
+  const signOut = (
+    <form action={signOutAction}>
+      <button
+        type="submit"
+        title="Sign out"
+        aria-label="Sign out"
+        className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
+      >
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 17l-5-5 5-5M5 12h11" />
+        </svg>
+      </button>
+    </form>
+  );
+
   const renderFooter = (footerCollapsed: boolean) => (
     <div
       className={`mt-auto grid items-center gap-2 border-t border-border pt-3 ${
@@ -249,8 +266,11 @@ export function AdminShell({
           {userLabel}
         </span>
       ) : null}
-      {/* The icon-only action stays reachable in the collapsed rail too. */}
-      {viewPublic}
+      {/* Icon actions stay reachable in the collapsed rail too. */}
+      <span className={`flex items-center ${footerCollapsed ? 'flex-col gap-1' : 'gap-0.5'}`}>
+        {viewPublic}
+        {signOut}
+      </span>
     </div>
   );
 
