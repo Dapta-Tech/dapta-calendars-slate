@@ -43,6 +43,18 @@ interface EventTypeLite {
   lengthMinutes: number;
 }
 
+/** Read an image file to a data-URL (like the old app): image/* only, ≤1MB. */
+function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) return resolve({ ok: false, error: 'Please choose an image file.' });
+    if (file.size > 1024 * 1024) return resolve({ ok: false, error: 'Image must be under 1 MB.' });
+    const reader = new FileReader();
+    reader.onload = () => resolve({ ok: true, dataUrl: String(reader.result) });
+    reader.onerror = () => resolve({ ok: false, error: 'Could not read that file.' });
+    reader.readAsDataURL(file);
+  });
+}
+
 export interface StudioInit {
   accountCode: string;
   displayName: string;
@@ -250,11 +262,11 @@ export function Studio(init: StudioInit) {
                 {adjusted ? ` · adjusted to ${clampAccent(accent)} for legibility (AA)` : ''}
               </p>
             </Field>
-            <Field label="Avatar URL">
-              <input value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" className={inputCls} />
+            <Field label="Photo / avatar">
+              <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" />
             </Field>
-            <Field label="Cover URL">
-              <input value={coverUrl} onChange={(e) => setCoverUrl(e.target.value)} placeholder="https://…" className={inputCls} />
+            <Field label="Cover image">
+              <ImageInput value={coverUrl} onChange={setCoverUrl} preview="cover" />
             </Field>
           </Section>
 
@@ -504,5 +516,71 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Image picker: upload (data-URL, 1MB/type-validated) with a preview + clear,
+ *  or paste a URL. Matches the old app's dropzone-to-data-URL behaviour. */
+function ImageInput({
+  value,
+  onChange,
+  preview,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  preview: 'avatar' | 'cover';
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  const isData = value.startsWith('data:');
+  return (
+    <div className="flex flex-col gap-2">
+      {value ? (
+        <img
+          src={value}
+          alt=""
+          className={preview === 'avatar' ? 'h-12 w-12 rounded-full object-cover' : 'h-16 w-full rounded-md object-cover'}
+        />
+      ) : null}
+      <div className="flex items-center gap-2">
+        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:border-primary">
+          Upload image
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const r = await readImageFile(f);
+              if (r.ok) {
+                onChange(r.dataUrl);
+                setErr(null);
+              } else {
+                setErr(r.error);
+              }
+            }}
+          />
+        </label>
+        {value ? (
+          <button
+            type="button"
+            onClick={() => {
+              onChange('');
+              setErr(null);
+            }}
+            className="text-xs text-muted-foreground hover:text-destructive"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <input
+        value={isData ? '' : value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="…or paste an image URL"
+        className={inputCls}
+      />
+      {err ? <span className="text-xs text-destructive">{err}</span> : null}
+    </div>
   );
 }
