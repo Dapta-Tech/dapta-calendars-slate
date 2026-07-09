@@ -47,6 +47,8 @@ export interface BookingMessages {
     statusRejected: string;
     cancelThis: string;
     noOpenTimes: string;
+    whereLabel: string;
+    joinMeeting: string;
   };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
@@ -246,6 +248,15 @@ export interface BookingMessages {
       members: string;
       teamEventTypes: string;
       noTeamEventTypes: string;
+      inviteTitle: string;
+      inviteLead: string;
+      emailLabel: string;
+      emailPlaceholder: string;
+      emailInvalid: string;
+      sendInvite: string;
+      ownerLock: string;
+      memberPending: string;
+      noAccountMember: string;
     };
     connections: {
       pageDesc: string;
@@ -328,6 +339,8 @@ export const en: BookingMessages = {
     statusRejected: 'rejected',
     cancelThis: 'Cancel this booking',
     noOpenTimes: 'No open times in the next 3 weeks.',
+    whereLabel: 'Where',
+    joinMeeting: 'Join the meeting',
   },
   admin: {
     nav: {
@@ -526,6 +539,15 @@ export const en: BookingMessages = {
       members: 'Members',
       teamEventTypes: 'Team event types',
       noTeamEventTypes: 'No team event types yet.',
+      inviteTitle: 'Add a member',
+      inviteLead: 'Invite someone from your account to this team by email.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'name@company.com',
+      emailInvalid: 'Enter a valid email address.',
+      sendInvite: 'Add member',
+      ownerLock: 'Owners can’t be removed — change their role first.',
+      memberPending: 'Pending',
+      noAccountMember: 'No account member with that email — they need to sign up first.',
     },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
@@ -608,6 +630,8 @@ export const es: BookingMessages = {
     statusRejected: 'rechazada',
     cancelThis: 'Cancelar esta reserva',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
+    whereLabel: 'Dónde',
+    joinMeeting: 'Unirse a la reunión',
   },
   admin: {
     nav: {
@@ -806,6 +830,15 @@ export const es: BookingMessages = {
       members: 'Miembros',
       teamEventTypes: 'Tipos de evento del equipo',
       noTeamEventTypes: 'Aún no hay tipos de evento del equipo.',
+      inviteTitle: 'Añadir un miembro',
+      inviteLead: 'Invita por correo a alguien de tu cuenta a este equipo.',
+      emailLabel: 'Correo',
+      emailPlaceholder: 'nombre@empresa.com',
+      emailInvalid: 'Introduce un correo válido.',
+      sendInvite: 'Añadir miembro',
+      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      memberPending: 'Pendiente',
+      noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',

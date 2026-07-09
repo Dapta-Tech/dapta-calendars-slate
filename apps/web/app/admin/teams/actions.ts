@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
+/** Invite outcome carries a stable code so the client can localize the message. */
+export type InviteResult = { ok: boolean; code?: 'INVALID_EMAIL' | 'NO_MATCH' | 'FAILED'; message?: string };
 
 export async function createTeamAction(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
   try {
@@ -42,6 +44,37 @@ export async function addMemberAction(
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not add member.' };
+  }
+}
+
+/**
+ * Invite-by-email (old-app parity): resolve the email to an existing account
+ * member and add them with the chosen role. A fork's local provider has no
+ * pending-invite/email flow, so we match by an already-registered account
+ * member and report honestly when there's no match (they must sign up first).
+ */
+export async function inviteMemberByEmailAction(
+  teamId: string,
+  email: string,
+  role: 'owner' | 'member' = 'member',
+): Promise<InviteResult> {
+  const target = email.trim().toLowerCase();
+  if (!target || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+    return { ok: false, code: 'INVALID_EMAIL' };
+  }
+  try {
+    const members = await adminApi.listMembers();
+    const match = members.find((m) => m.email?.trim().toLowerCase() === target);
+    if (!match) {
+      return { ok: false, code: 'NO_MATCH' };
+    }
+    await adminApi.addTeamMember(teamId, { memberId: match.id, role });
+    revalidatePath('/admin/teams');
+    revalidatePath(`/admin/teams/${teamId}`);
+    return { ok: true };
+  } catch (e) {
+    // BE may 409 when already on the team — pass its message through verbatim.
+    return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
   }
 }
 

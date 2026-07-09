@@ -26,6 +26,9 @@ export default async function ManagePage({
   const m = getMessages(accept.toLowerCase().startsWith('es') ? 'es' : 'en').manage;
   const statusText = (s: string) =>
     s === 'pending' ? m.statusPending : s === 'cancelled' ? m.statusCancelled : s === 'rejected' ? m.statusRejected : s;
+  // Only render a meeting link if it's an http(s) URL — `meeting_url` is a
+  // free-text column; never render a javascript:/data: value as an href.
+  const meetingUrl = booking.meetingUrl && /^https?:\/\//i.test(booking.meetingUrl) ? booking.meetingUrl : null;
 
   // Engine-backed reschedule options (G7): only real, bookable slots.
   const now = new Date();
@@ -53,6 +56,18 @@ export default async function ManagePage({
         <p className="text-sm text-muted-foreground">
           {m.withLabel} {booking.host.name ?? booking.attendee.name} · {booking.attendee.email}
         </p>
+        {booking.location ? (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{m.whereLabel}:</span> {booking.location}
+          </p>
+        ) : null}
+        {meetingUrl ? (
+          <p className="text-sm">
+            <a href={meetingUrl} className="text-primary underline underline-offset-4" target="_blank" rel="noopener noreferrer">
+              {m.joinMeeting} →<span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </p>
+        ) : null}
         {booking.status !== 'accepted' ? (
           <p className="text-sm text-destructive">{t(m.bookingIs, { status: statusText(booking.status) })}</p>
         ) : null}

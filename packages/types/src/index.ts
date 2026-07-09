@@ -198,6 +198,11 @@ export const bookingViewSchema = z.object({
   endUtc: isoUtcSchema,
   host: z.object({ name: z.string().nullable(), handle: z.string().nullable() }),
   attendee: z.object({ name: z.string(), email: z.string(), timeZone: z.string() }),
+  /** Where the meeting happens (physical/phone/free-text) and, when generated,
+   *  the meeting link — surfaced on the manage page. Both optional/nullable so
+   *  existing responses stay valid. */
+  location: z.string().nullable().optional(),
+  meetingUrl: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
   /** True when an idempotent replay returned the existing booking (B3). */

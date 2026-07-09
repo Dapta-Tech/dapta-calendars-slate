@@ -186,6 +186,17 @@ export class BookingService {
     const attendee = await this.db.get<{ name: string; email: string; time_zone: string | null }>(
       sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`,
     );
+    // Where/meeting-link for the manage page. `location` is the booking's own
+    // location column (same field calendar write-out reads); the meeting link is
+    // the provider-generated URL persisted per booking in booking_reference (the
+    // real source — booking.meeting_url is not populated by the create flow).
+    const details = await this.db.get<{ location: string | null }>(
+      sql`SELECT location FROM booking WHERE id = ${b.id} LIMIT 1`,
+    );
+    const ref = await this.db.get<{ meeting_url: string | null }>(
+      sql`SELECT meeting_url FROM booking_reference
+          WHERE booking_id = ${b.id} AND meeting_url IS NOT NULL LIMIT 1`,
+    );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
     const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
@@ -208,6 +219,8 @@ export class BookingService {
         email: attendee?.email ?? '',
         timeZone: attendee?.time_zone ?? 'UTC',
       },
+      location: details?.location ?? null,
+      meetingUrl: ref?.meeting_url ?? null,
       reschedule:
         ctx?.handle && ctx.slug ? { accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug } : undefined,
     };
