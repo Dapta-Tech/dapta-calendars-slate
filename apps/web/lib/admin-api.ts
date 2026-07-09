@@ -41,11 +41,13 @@ export interface Me {
   handle: string | null;
   displayName: string | null;
   email: string | null;
+  timeZone: string | null;
+  locale: string | null;
 }
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   handleAvailable: (handle: string) =>
-    req<{ handle: string; available: boolean; reason: string | null }>(
+    req<{ handle: string; available: boolean; reason: string | null; suggestion?: string }>(
       'GET',
       `/v1/handle-available?handle=${encodeURIComponent(handle)}`,
     ),
@@ -74,6 +76,8 @@ export const adminApi = {
       `/v1/teams/${id}/members`,
     ),
   addTeamMember: (id: string, b: unknown) => req('POST', `/v1/teams/${id}/members`, b),
+  updateTeamMemberRole: (id: string, memberId: string, role: 'owner' | 'member') =>
+    req('PATCH', `/v1/teams/${id}/members/${memberId}`, { role }),
   removeTeamMember: (id: string, memberId: string) =>
     req<void>('DELETE', `/v1/teams/${id}/members/${memberId}`),
   teamEventTypes: (id: string) => req<EventType[]>('GET', `/v1/teams/${id}/event-types`),
@@ -107,6 +111,9 @@ export const adminApi = {
   // Webhooks
   listWebhooks: () => req<WebhookRow[]>('GET', '/v1/webhooks'),
   createWebhook: (b: unknown) => req('POST', '/v1/webhooks', b),
+  updateWebhook: (id: string, active: boolean) => req('PATCH', `/v1/webhooks/${id}`, { active }),
+  pingWebhook: (id: string) =>
+    req<{ ok: boolean; status?: number; message?: string }>('POST', `/v1/webhooks/${id}/ping`, {}),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
   // Branding

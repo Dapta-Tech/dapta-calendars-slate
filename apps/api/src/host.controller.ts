@@ -233,6 +233,18 @@ export class HostController {
       });
     return this.admin.createWebhook(p, { subscriberUrl: body.subscriberUrl, eventTriggers: body.eventTriggers ?? [], secret: body.secret });
   }
+  @Patch('webhooks/:id')
+  async updateWebhook(@Req() req: ReqLike, @Param('id') id: string, @Body() body: { active?: boolean }) {
+    await this.admin.updateWebhook(await this.auth.resolveHost(req), id, body);
+    return { ok: true };
+  }
+
+  @Post('webhooks/:id/ping')
+  @HttpCode(200)
+  async pingWebhook(@Req() req: ReqLike, @Param('id') id: string) {
+    return this.admin.pingWebhook(await this.auth.resolveHost(req), id);
+  }
+
   @Delete('webhooks/:id')
   @HttpCode(204)
   async deleteWebhook(@Req() req: ReqLike, @Param('id') id: string) {

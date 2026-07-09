@@ -83,7 +83,7 @@ export interface EventTypeRow {
 }
 
 export type BookingOutcome =
-  | { ok: true; booking: BookingRecord; manageToken: string }
+  | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
   | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' }
   | { ok: false; reason: 'INVALID'; message: string };
 
@@ -436,7 +436,9 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   // Idempotency: return the prior booking for a repeated key.
   if (args.idempotencyKey) {
     const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
-    if (prior) return { ok: true, booking: prior.record, manageToken: '' };
+    // Replay: return the existing booking, do NOT re-mint the token, and flag it
+    // deduplicated (B3 — contract).
+    if (prior) return { ok: true, booking: prior.record, manageToken: '', deduplicated: true };
   }
 
   // Hold validation at consume: a reservation that is missing or expired → 410.

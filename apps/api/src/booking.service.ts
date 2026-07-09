@@ -174,6 +174,7 @@ export class BookingService {
       host: { name: b.hostName, handle: b.hostHandle },
       attendee: b.attendee,
       manageUrl,
+      deduplicated: outcome.deduplicated || undefined,
     };
   }
 
@@ -189,18 +190,30 @@ export class BookingService {
     const attendee = await this.db.get<{ name: string; email: string; time_zone: string | null }>(
       sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`,
     );
+    // Event context so the manage page can fetch availability and offer a real
+    // slot picker for reschedule (instead of a free-form datetime — G7).
+    const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
+      sql`SELECT a.code AS code, m.handle AS handle, et.slug AS slug
+          FROM booking bk
+          JOIN account a ON a.id = bk.account_id
+          JOIN event_type et ON et.id = bk.event_type_id
+          LEFT JOIN member m ON m.id = bk.host_member_id
+          WHERE bk.id = ${b.id} LIMIT 1`,
+    );
     return {
       uid: b.uid,
       status: b.status as BookingView['status'],
       title: b.title,
       startUtc: new Date(Number(b.start_ms)).toISOString(),
       endUtc: new Date(Number(b.end_ms)).toISOString(),
-      host: { name: null, handle: null },
+      host: { name: null, handle: ctx?.handle ?? null },
       attendee: {
         name: attendee?.name ?? '',
         email: attendee?.email ?? '',
         timeZone: attendee?.time_zone ?? 'UTC',
       },
+      reschedule:
+        ctx?.handle && ctx.slug ? { accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug } : undefined,
     };
   }
 

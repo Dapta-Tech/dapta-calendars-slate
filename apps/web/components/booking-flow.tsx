@@ -1,7 +1,16 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
-import { groupSlotsByDay, detectTimeZone, formatSlotDateTime, getMessages, t, type Slot } from '@slate/shared';
+import {
+  groupSlotsByDay,
+  detectTimeZone,
+  formatSlotDateTime,
+  getMessages,
+  t,
+  validateBookingFieldValue,
+  type DisplaySlot,
+  type Slot,
+} from '@slate/shared';
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
@@ -47,18 +56,22 @@ export function BookingFlow({
   const [hold, setHold] = useState<Hold | null>(null);
   const [holdError, setHoldError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
 
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
 
-  async function pick(startUtc: string) {
-    setSelected(startUtc);
+  async function pick(slot: DisplaySlot) {
+    setSelected(slot.startUtc);
     setDismissed(false);
     setHoldError(null);
     setHold(null);
     // Team events round-robin the host at booking time — no per-host hold.
     if (mode !== 'personal') return;
-    const r = await postReservation({ accountCode, handle: ownerSlug, slug, startUtc });
+    // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
+    // would blank the whole slot, so skip the hold for group slots.
+    if ((slot.capacity ?? 1) > 1) return;
+    const r = await postReservation({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc });
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
@@ -150,17 +163,27 @@ export function BookingFlow({
               <div key={day.dayKey} className="bp-day">
                 <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{day.heading}</h3>
                 <div className="bp-slots">
-                  {day.slots.map((s) => (
-                    <button
-                      key={s.startUtc}
-                      type="button"
-                      onClick={() => pick(s.startUtc)}
-                      aria-pressed={selected === s.startUtc}
-                      className="bp-slot text-sm"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+                  {day.slots.map((s) => {
+                    const isGroup = (s.capacity ?? 1) > 1;
+                    const full = isGroup && (s.spotsLeft ?? 1) <= 0;
+                    return (
+                      <button
+                        key={s.startUtc}
+                        type="button"
+                        onClick={() => pick(s)}
+                        aria-pressed={selected === s.startUtc}
+                        disabled={full}
+                        className="bp-slot flex flex-col items-center text-sm disabled:opacity-50"
+                      >
+                        <span>{s.label}</span>
+                        {isGroup ? (
+                          <span className="text-[11px] text-muted-foreground">
+                            {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -199,29 +222,39 @@ export function BookingFlow({
               <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 
-            {bookingFields.map((f) => (
-              <label key={f.name} className="flex flex-col gap-1 text-sm">
-                {f.label}
-                {f.required ? <span className="text-destructive"> *</span> : null}
-                {f.type === 'textarea' ? (
-                  <textarea
-                    name={`answer_${f.name}`}
-                    required={f.required}
-                    rows={2}
-                    placeholder={f.placeholder}
-                    className="rounded-md border border-input bg-background px-3 py-2"
-                  />
-                ) : (
-                  <input
-                    name={`answer_${f.name}`}
-                    type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
-                    required={f.required}
-                    placeholder={f.placeholder}
-                    className="rounded-md border border-input bg-background px-3 py-2"
-                  />
-                )}
-              </label>
-            ))}
+            {bookingFields.map((f) => {
+              const validate = (v: string) =>
+                setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
+              const isMulti = f.type === 'textarea' || f.type === 'guests';
+              return (
+                <label key={f.name} className="flex flex-col gap-1 text-sm">
+                  {f.label}
+                  {f.required ? <span className="text-destructive"> *</span> : null}
+                  {isMulti ? (
+                    <textarea
+                      name={`answer_${f.name}`}
+                      required={f.required}
+                      rows={2}
+                      placeholder={f.type === 'guests' ? 'guest1@example.com, guest2@example.com' : f.placeholder}
+                      onBlur={(e) => validate(e.target.value)}
+                      className="rounded-md border border-input bg-background px-3 py-2"
+                    />
+                  ) : (
+                    <input
+                      name={`answer_${f.name}`}
+                      type={f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : f.type === 'number' ? 'number' : 'text'}
+                      required={f.required}
+                      placeholder={f.placeholder}
+                      onBlur={(e) => validate(e.target.value)}
+                      className="rounded-md border border-input bg-background px-3 py-2"
+                    />
+                  )}
+                  {fieldErrors[f.name] ? (
+                    <span className="text-xs text-destructive">{fieldErrors[f.name]}</span>
+                  ) : null}
+                </label>
+              );
+            })}
 
             <label className="flex flex-col gap-1 text-sm">
               {m.notes}
@@ -232,7 +265,7 @@ export function BookingFlow({
 
             <button
               type="submit"
-              disabled={pending}
+              disabled={pending || Object.values(fieldErrors).some(Boolean)}
               className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98] disabled:opacity-60"
             >
               {pending ? m.confirming : m.confirm}

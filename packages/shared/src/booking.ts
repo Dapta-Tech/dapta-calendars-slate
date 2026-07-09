@@ -1,4 +1,16 @@
 /**
+ * Is a nav item active for the current path? Exact-match a root href like
+ * "/admin" (so it doesn't light up on every sub-route); prefix-match everything
+ * else, honouring extra `matches` (e.g. Settings also owns /admin/connections).
+ * Pure + framework-agnostic so the shell's active-state logic is unit-testable.
+ */
+export function isNavItemActive(pathname: string, href: string, matches?: string[]): boolean {
+  if (href === '/admin') return pathname === '/admin';
+  const targets = matches ?? [href];
+  return targets.some((t) => pathname === t || pathname.startsWith(`${t}/`));
+}
+
+/**
  * Slot-grouping helpers (ported from the original FE booking util). Slots are
  * absolute UTC instants; regrouping them by the visitor's zone needs no refetch.
  */

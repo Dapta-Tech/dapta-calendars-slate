@@ -29,6 +29,7 @@ export const bookingFieldType = [
   'number',
   'select',
   'checkbox',
+  'guests',
 ] as const;
 export type BookingFieldType = (typeof bookingFieldType)[number];
 
@@ -199,6 +200,12 @@ export const bookingViewSchema = z.object({
   attendee: z.object({ name: z.string(), email: z.string(), timeZone: z.string() }),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
+  /** True when an idempotent replay returned the existing booking (B3). */
+  deduplicated: z.boolean().optional(),
+  /** Event context for the manage page's availability-backed reschedule picker. */
+  reschedule: z
+    .object({ accountCode: z.string(), handle: z.string(), slug: z.string() })
+    .optional(),
 });
 export type BookingView = z.infer<typeof bookingViewSchema>;
 

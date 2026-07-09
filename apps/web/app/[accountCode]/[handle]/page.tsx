@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { clampAccent, monogram, onAccent } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { BrandedShell } from '@/components/branded-shell';
@@ -14,6 +14,14 @@ export default async function ProfilePage({
   if (!profile) notFound();
 
   const m = profile.member;
+
+  // R25 optional landing (G6): when the host disabled the landing page and set a
+  // default event, jump straight to that event's booking page.
+  const landing = m.style as { landingEnabled?: boolean; defaultEventSlug?: string | null } | null;
+  const defaultSlug = landing?.defaultEventSlug;
+  if (landing?.landingEnabled === false && defaultSlug && profile.eventTypes.some((e) => e.slug === defaultSlug)) {
+    redirect(`/${accountCode}/${handle}/${defaultSlug}`);
+  }
   const accent = clampAccent(m.brandColor ?? '#cbe84f');
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;

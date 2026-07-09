@@ -4,6 +4,8 @@
  */
 export * from './time';
 export * from './booking';
+export * from './booking-fields';
+export * from './availability';
 export * from './handle';
 export * from './branding';
 export * from './i18n';

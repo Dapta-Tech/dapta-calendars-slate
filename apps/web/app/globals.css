@@ -27,9 +27,9 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-md: var(--radius);
-  /* Poppins is the brand font; a system stack keeps clone-and-run offline-safe.
-     Wire next/font Poppins in production for pixel-perfect brand type. */
-  --font-sans: 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Poppins is the brand font, self-hosted via next/font (--font-poppins);
+     falls back to a system stack if the variable is ever absent. */
+  --font-sans: var(--font-poppins), 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 * {

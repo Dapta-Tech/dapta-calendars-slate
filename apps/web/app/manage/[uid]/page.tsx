@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { formatSlotDateTime } from '@slate/shared';
-import { getManageView } from '@/lib/api';
+import { getManageView, getAvailability } from '@/lib/api';
 import { ManageActions } from './manage-actions';
 
 // The emailed manage link lands here: /manage/:uid?token=… — token-gated view
@@ -21,6 +21,19 @@ export default async function ManagePage({
 
   const tz = booking.attendee.timeZone;
 
+  // Engine-backed reschedule options (G7): only real, bookable slots.
+  const now = new Date();
+  const avail =
+    booking.status === 'accepted' && booking.reschedule
+      ? await getAvailability({
+          accountCode: booking.reschedule.accountCode,
+          handle: booking.reschedule.handle,
+          slug: booking.reschedule.slug,
+          from: now.toISOString(),
+          to: new Date(now.getTime() + 21 * 86_400_000).toISOString(),
+        })
+      : null;
+
   return (
     <main className="mx-auto max-w-xl px-6 py-12">
       <header className="mb-6 flex flex-col gap-1">
@@ -32,7 +45,7 @@ export default async function ManagePage({
       </header>
 
       {booking.status === 'accepted' ? (
-        <ManageActions uid={uid} token={token} />
+        <ManageActions uid={uid} token={token} slots={avail?.slots ?? []} timeZone={tz} />
       ) : (
         <p className="rounded-md border border-border bg-card p-4 text-muted-foreground">
           This booking can no longer be changed.

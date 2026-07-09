@@ -7,7 +7,9 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 
-export type CrudResult<T> = { ok: true; value: T } | { ok: false; reason: 'NOT_FOUND' | 'SLUG_TAKEN' | 'CONFLICT'; message?: string };
+export type CrudResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: 'NOT_FOUND' | 'SLUG_TAKEN' | 'CONFLICT' | 'LAST_OWNER'; message?: string };
 
 // --- Event types ----------------------------------------------------------
 
@@ -440,17 +442,64 @@ export async function addTeamMember(
   return { ok: true, value: { id } };
 }
 
-/** Remove a member — scoped so only teams in `accountId` can be altered. */
+/**
+ * Remove a member — scoped so only teams in `accountId` can be altered. Guards
+ * the LAST owner: a team must always keep at least one owner (F14/DL6), so
+ * removing the sole owner is refused.
+ */
 export async function removeTeamMember(
   db: Db,
   accountId: string,
   teamId: string,
   memberId: string,
-): Promise<void> {
+): Promise<CrudResult<{ id: string }>> {
+  const row = await db.get<{ role: string }>(
+    sql`SELECT tm.role FROM team_membership tm
+        WHERE tm.team_id = ${teamId} AND tm.member_id = ${memberId}
+          AND tm.team_id IN (SELECT id FROM team WHERE account_id = ${accountId}) LIMIT 1`,
+  );
+  if (!row) return { ok: true, value: { id: memberId } }; // already gone — idempotent
+  if (row.role === 'owner') {
+    const owners = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM team_membership
+          WHERE team_id = ${teamId} AND role = 'owner' AND member_id <> ${memberId}`,
+    );
+    if (Number(owners?.n ?? 0) === 0)
+      return { ok: false, reason: 'LAST_OWNER', message: 'A team must keep at least one owner.' };
+  }
   await db.run(
     sql`DELETE FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}
         AND team_id IN (SELECT id FROM team WHERE account_id = ${accountId})`,
   );
+  return { ok: true, value: { id: memberId } };
+}
+
+/** Change a member's role (owner|member), scoped to the account. */
+export async function updateTeamMemberRole(
+  db: Db,
+  accountId: string,
+  teamId: string,
+  memberId: string,
+  role: 'owner' | 'member',
+): Promise<CrudResult<{ id: string }>> {
+  const row = await db.get<{ role: string }>(
+    sql`SELECT role FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}
+        AND team_id IN (SELECT id FROM team WHERE account_id = ${accountId}) LIMIT 1`,
+  );
+  if (!row) return { ok: false, reason: 'NOT_FOUND' };
+  // Demoting the last owner would orphan the team.
+  if (row.role === 'owner' && role === 'member') {
+    const owners = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM team_membership
+          WHERE team_id = ${teamId} AND role = 'owner' AND member_id <> ${memberId}`,
+    );
+    if (Number(owners?.n ?? 0) === 0)
+      return { ok: false, reason: 'LAST_OWNER', message: 'A team must keep at least one owner.' };
+  }
+  await db.run(
+    sql`UPDATE team_membership SET role = ${role} WHERE team_id = ${teamId} AND member_id = ${memberId}`,
+  );
+  return { ok: true, value: { id: memberId } };
 }
 
 /** List all members of an account (for team member pickers, host selection). */

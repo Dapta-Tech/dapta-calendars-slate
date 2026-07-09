@@ -12,7 +12,7 @@ export default async function TeamBookingPage({
   const { accountCode, teamSlug, slug } = await params;
   const now = new Date();
   const from = now.toISOString();
-  const to = new Date(now.getTime() + 14 * 86_400_000).toISOString();
+  const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
 
   const [team, availability] = await Promise.all([
     getTeamProfile(accountCode, teamSlug),

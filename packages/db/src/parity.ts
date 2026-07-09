@@ -114,6 +114,8 @@ export interface MeView {
   handle: string | null;
   displayName: string | null;
   email: string | null;
+  timeZone: string | null;
+  locale: string | null;
 }
 
 /** Resolve the authenticated principal's account + member for /me. */
@@ -131,10 +133,12 @@ export async function getMe(
     handle: string | null;
     display_name: string | null;
     email: string | null;
+    time_zone: string | null;
+    locale: string | null;
   }>(
     memberId
-      ? sql`SELECT id, handle, display_name, email FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
-      : sql`SELECT id, handle, display_name, email FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
+      ? sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
+      : sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
   );
   if (!member) return null;
   return {
@@ -144,6 +148,8 @@ export async function getMe(
     handle: member.handle,
     displayName: member.display_name,
     email: member.email,
+    timeZone: member.time_zone,
+    locale: member.locale,
   };
 }
 
@@ -158,6 +164,21 @@ export interface HandleAvailability {
   handle: string;
   available: boolean;
   reason: string | null;
+  /** A free alternative to offer when the requested handle is taken (D18). */
+  suggestion?: string;
+}
+
+async function isHandleFree(
+  db: Db,
+  accountId: string,
+  h: string,
+  excludeMemberId?: string,
+): Promise<boolean> {
+  if (RESERVED_HANDLES.has(h)) return false;
+  const row = await db.get<{ id: string }>(
+    sql`SELECT id FROM member WHERE account_id = ${accountId} AND handle = ${h} LIMIT 1`,
+  );
+  return !row || row.id === excludeMemberId;
 }
 
 export async function checkHandleAvailable(
@@ -172,11 +193,18 @@ export async function checkHandleAvailable(
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h))
     return { handle: h, available: false, reason: 'invalid' };
   if (RESERVED_HANDLES.has(h)) return { handle: h, available: false, reason: 'reserved' };
-  const existing = await db.get<{ id: string }>(
-    sql`SELECT id FROM member WHERE account_id = ${accountId} AND handle = ${h} LIMIT 1`,
-  );
-  if (existing && existing.id !== excludeMemberId)
-    return { handle: h, available: false, reason: 'taken' };
+  if (!(await isHandleFree(db, accountId, h, excludeMemberId))) {
+    // Offer the first free handle-N (D18 — old contract returns a suggestion).
+    let suggestion: string | undefined;
+    for (let n = 2; n <= 99; n++) {
+      const candidate = `${h}-${n}`.slice(0, 40);
+      if (await isHandleFree(db, accountId, candidate, excludeMemberId)) {
+        suggestion = candidate;
+        break;
+      }
+    }
+    return { handle: h, available: false, reason: 'taken', suggestion };
+  }
   return { handle: h, available: true, reason: null };
 }
 
@@ -1023,6 +1051,46 @@ export async function createWebhook(
 
 export async function deleteWebhook(db: Db, accountId: string, id: string): Promise<void> {
   await db.run(sql`DELETE FROM webhook WHERE id = ${id} AND account_id = ${accountId}`);
+}
+
+/** Enable/disable a webhook (D17). Account-scoped. */
+export async function updateWebhook(
+  db: Db,
+  accountId: string,
+  id: string,
+  patch: { active?: boolean },
+): Promise<void> {
+  if (patch.active === undefined) return;
+  await db.run(
+    sql`UPDATE webhook SET active = ${patch.active ? 1 : 0} WHERE id = ${id} AND account_id = ${accountId}`,
+  );
+}
+
+/**
+ * Send a signed test `ping` event to a webhook (D17). Re-validates the URL at
+ * egress (SSRF guard) and signs like a real dispatch. Returns the delivery
+ * result — never throws.
+ */
+export async function pingWebhook(
+  db: Db,
+  accountId: string,
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; status?: number; message?: string }> {
+  const h = await db.get<{ subscriber_url: string; secret: string | null }>(
+    sql`SELECT subscriber_url, secret FROM webhook WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
+  );
+  if (!h) return { ok: false, message: 'Webhook not found.' };
+  if (!(await checkWebhookUrl(h.subscriber_url)).ok) return { ok: false, message: 'URL is not allowed.' };
+  const body = JSON.stringify({ event: 'ping', data: { ok: true } });
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': 'ping' };
+  if (h.secret) headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+  try {
+    const res = await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, message: 'Subscriber unreachable.' };
+  }
 }
 
 /**

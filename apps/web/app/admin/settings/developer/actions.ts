@@ -32,3 +32,17 @@ export async function deleteWebhookAction(id: string): Promise<void> {
   await adminApi.deleteWebhook(id);
   revalidatePath('/admin/settings/developer');
 }
+
+export async function toggleWebhookAction(id: string, active: boolean): Promise<void> {
+  await adminApi.updateWebhook(id, active);
+  revalidatePath('/admin/settings/developer');
+}
+
+export async function pingWebhookAction(id: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const r = await adminApi.pingWebhook(id);
+    return { ok: r.ok, message: r.ok ? `Delivered (${r.status})` : (r.message ?? 'Failed') };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}

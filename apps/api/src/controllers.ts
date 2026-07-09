@@ -1,7 +1,8 @@
-import { Controller, Get, HttpException, HttpStatus, Inject } from '@nestjs/common';
+import { Controller, Get, Header, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import { countOutbox, sql } from '@slate/db';
 import { DB } from './tokens';
+import { openapiSpec } from './openapi';
 
 @Controller('health')
 export class HealthController {
@@ -51,5 +52,25 @@ export class HealthController {
     const body = { status: db === 'up' ? 'ready' : 'unavailable', service: 'slate-api', db, outbox };
     if (db !== 'up') throw new HttpException(body, HttpStatus.SERVICE_UNAVAILABLE);
     return body;
+  }
+}
+
+/** Public API documentation (E11): the OpenAPI JSON + a dependency-free viewer. */
+@Controller()
+export class DocsController {
+  @Get('openapi.json')
+  spec() {
+    return openapiSpec;
+  }
+
+  @Get('docs')
+  @Header('content-type', 'text/html; charset=utf-8')
+  docs(): string {
+    // No CDN (offline/CSP-safe): pretty-print the spec with a link to the raw JSON.
+    return `<!doctype html><html><head><title>Slate API</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}
+pre{background:#f6f8fa;padding:1rem;border-radius:8px;overflow:auto}a{color:#2563eb}</style></head>
+<body><h1>Slate API</h1><p>OpenAPI 3.1 · <a href="/openapi.json">/openapi.json</a></p>
+<pre>${JSON.stringify(openapiSpec, null, 2).replace(/</g, '&lt;')}</pre></body></html>`;
   }
 }

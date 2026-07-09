@@ -9,6 +9,8 @@ import {
   updateConnection,
   declineBooking,
   createWebhook,
+  updateWebhook,
+  pingWebhook,
   deleteConnection,
   deleteWebhook,
   getMe,
@@ -147,6 +149,12 @@ export class AdminService {
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);
+  }
+  updateWebhook(p: HostPrincipal, id: string, patch: { active?: boolean }) {
+    return updateWebhook(this.db, p.accountId, id, patch);
+  }
+  pingWebhook(p: HostPrincipal, id: string) {
+    return pingWebhook(this.db, p.accountId, id);
   }
 
   /** Resolve the account code for a principal (for host on-behalf booking). */

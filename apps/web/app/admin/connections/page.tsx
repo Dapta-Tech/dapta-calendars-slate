@@ -1,18 +1,23 @@
 import { adminApi } from '@/lib/admin-api';
+import { SettingsChrome } from '../settings/settings-chrome';
 import { ConnectionsClient } from './connections-client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ConnectionsPage() {
   const connections = await adminApi.listConnections().catch(() => []);
+  // Calendars lives under Settings — reuse SettingsChrome (header + sub-nav) so
+  // it reads as a settings tab even though its route is /admin/connections, and
+  // never drifts from the other settings pages.
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight">Connections</h1>
-      <p className="mb-6 text-muted-foreground">
-        Connected calendars. Slate reads busy times (conflict check) and can write events to a
-        destination — via a generic provider port (no external calendar configured in this OSS build).
-      </p>
-      <ConnectionsClient connections={connections} />
-    </div>
+    <SettingsChrome>
+      <div className="max-w-3xl">
+        <p className="mb-6 text-muted-foreground">
+          Connected calendars. Slate reads busy times (conflict check) and can write events to a
+          destination — via a generic provider port (no external calendar configured in this OSS build).
+        </p>
+        <ConnectionsClient connections={connections} />
+      </div>
+    </SettingsChrome>
   );
 }

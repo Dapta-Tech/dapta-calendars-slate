@@ -6,6 +6,8 @@ import {
   createApiKeyAction,
   createWebhookAction,
   deleteWebhookAction,
+  pingWebhookAction,
+  toggleWebhookAction,
   revokeApiKeyAction,
 } from './actions';
 
@@ -91,6 +93,52 @@ export function ApiKeys({ keys }: { keys: ApiKeyRow[] }) {
   );
 }
 
+function WebhookItem({
+  w,
+  start,
+  pending,
+}: {
+  w: WebhookRow;
+  start: (fn: () => void) => void;
+  pending: boolean;
+}) {
+  const [ping, setPing] = useState<string | null>(null);
+  return (
+    <li className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
+      <div className="flex items-center justify-between gap-3">
+        <code className="break-all text-sm">{w.subscriber_url}</code>
+        <span className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={w.active === 1}
+              disabled={pending}
+              onChange={(e) => start(() => toggleWebhookAction(w.id, e.target.checked))}
+            />
+            active
+          </label>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}
+            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+          >
+            Ping
+          </button>
+          <button
+            type="button"
+            onClick={() => start(() => deleteWebhookAction(w.id))}
+            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+          >
+            Delete
+          </button>
+        </span>
+      </div>
+      {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+    </li>
+  );
+}
+
 export function Webhooks({ webhooks }: { webhooks: WebhookRow[] }) {
   const [url, setUrl] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['booking.created']);
@@ -101,16 +149,7 @@ export function Webhooks({ webhooks }: { webhooks: WebhookRow[] }) {
       <h2 className="mb-3 text-xl font-semibold">Webhooks</h2>
       <ul className="mb-4 flex flex-col gap-2">
         {webhooks.map((w) => (
-          <li key={w.id} className="flex items-center justify-between rounded-md border border-border bg-card p-3">
-            <code className="break-all text-sm">{w.subscriber_url}</code>
-            <button
-              type="button"
-              onClick={() => start(() => deleteWebhookAction(w.id))}
-              className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
-            >
-              Delete
-            </button>
-          </li>
+          <WebhookItem key={w.id} w={w} start={start} pending={pending} />
         ))}
         {webhooks.length === 0 ? <li className="text-sm text-muted-foreground">No webhooks.</li> : null}
       </ul>

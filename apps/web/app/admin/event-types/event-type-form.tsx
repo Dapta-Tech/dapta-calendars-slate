@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 import type { EventType } from '@/lib/admin-api';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
-const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox'];
+const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
 
 interface IntakeField {
   name: string;
