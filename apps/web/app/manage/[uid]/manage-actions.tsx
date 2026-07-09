@@ -1,6 +1,7 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { groupSlotsByDay, type Slot } from '@slate/shared';
 import { cancelAction, rescheduleAction } from './actions';
 
@@ -15,10 +16,20 @@ export function ManageActions({
   slots: Slot[];
   timeZone: string;
 }) {
+  const router = useRouter();
   const [cancelRes, cancelForm, cancelPending] = useActionState(cancelAction, null);
   const [rsRes, rsForm, rsPending] = useActionState(rescheduleAction, null);
   const [newStartUtc, setNewStartUtc] = useState('');
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
+
+  // On a reschedule conflict (the slot was just taken), re-fetch availability so
+  // the picker drops the stale/taken time instead of letting the user retry it.
+  useEffect(() => {
+    if (rsRes && !rsRes.ok) {
+      setNewStartUtc('');
+      router.refresh();
+    }
+  }, [rsRes, router]);
 
   if (cancelRes?.ok) {
     return (
