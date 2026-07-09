@@ -20,7 +20,7 @@ export default async function BookingsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-semibold tracking-tight">Bookings</h1>
         <Link

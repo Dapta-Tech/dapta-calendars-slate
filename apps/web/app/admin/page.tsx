@@ -17,7 +17,7 @@ export default async function AdminHome() {
   const publicUrl = me?.handle ? `/${me.accountCode}/${me.handle}` : null;
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">
         Welcome{me?.displayName ? `, ${me.displayName.split(' ')[0]}` : ''}
       </h1>

@@ -10,7 +10,7 @@ export default async function TeamsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">Teams</h1>
       <p className="mb-6 text-muted-foreground">Round-robin scheduling across a group of hosts.</p>
       <div className="mb-8 flex flex-col gap-3">

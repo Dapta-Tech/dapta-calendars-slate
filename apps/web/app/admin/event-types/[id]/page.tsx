@@ -14,7 +14,7 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
   if (!et) notFound();
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-4xl px-8 py-10">
       <Link href="/admin/event-types" className="text-sm text-muted-foreground hover:text-foreground">
         ← Event Types
       </Link>

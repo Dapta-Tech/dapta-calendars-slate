@@ -10,7 +10,7 @@ export default async function AvailabilityPage() {
   const ready = full.filter(Boolean);
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">Availability</h1>
       <p className="mb-6 text-muted-foreground">
         Weekly hours and date overrides. Add multiple ranges per day (e.g. 9–12 and 14–18).

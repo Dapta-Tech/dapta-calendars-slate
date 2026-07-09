@@ -20,7 +20,7 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
   ]);
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <Link href="/admin/teams" className="text-sm text-muted-foreground hover:text-foreground">
         ← Teams
       </Link>
