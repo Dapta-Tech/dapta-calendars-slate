@@ -34,21 +34,31 @@ export default async function ManagePage({
         })
       : null;
 
+  // Granular gate: an accepted booking is manageable only while it's in the
+  // future (can't reschedule/cancel a meeting that already happened).
+  const isPast = new Date(booking.startUtc).getTime() <= now.getTime();
+  const canManage = booking.status === 'accepted' && !isPast;
+
   return (
     <main className="mx-auto max-w-xl px-6 py-12">
       <header className="mb-6 flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">{booking.title}</h1>
         <p className="text-muted-foreground">{formatSlotDateTime(booking.startUtc, tz)}</p>
+        <p className="text-sm text-muted-foreground">
+          With {booking.host.name ?? booking.attendee.name} · {booking.attendee.email}
+        </p>
         {booking.status !== 'accepted' ? (
           <p className="text-sm text-destructive">This booking is {booking.status}.</p>
         ) : null}
       </header>
 
-      {booking.status === 'accepted' ? (
+      {canManage ? (
         <ManageActions uid={uid} token={token} slots={avail?.slots ?? []} timeZone={tz} />
       ) : (
         <p className="rounded-md border border-border bg-card p-4 text-muted-foreground">
-          This booking can no longer be changed.
+          {isPast && booking.status === 'accepted'
+            ? 'This booking has already taken place.'
+            : 'This booking can no longer be changed.'}
         </p>
       )}
     </main>
