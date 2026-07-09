@@ -1,21 +1,46 @@
-# Deployment-agnostic API image (Node runtime).
-# Build context = repository root:  docker build -f apps/api/Dockerfile -t slate-api .
+# Slate API — deployment-agnostic production image (Node runtime).
+#
+# Build context = repository ROOT:
+#   docker build -f apps/api/Dockerfile -t slate-api .
+#
+# Small, pnpm-workspace-aware, non-root. Uses `pnpm deploy` to emit a pruned,
+# production-only bundle (only @slate/api + its runtime workspace deps — no dev
+# deps, no other apps, no unrelated package source) instead of shipping the
+# whole monorepo in the runtime layer.
+#
+# Deployment-agnostic: the same artifact runs on EKS, a bare Node host, or
+# docker-compose. Point DATABASE_URL at Postgres (Aurora) in prod; leave it
+# unset for SQLite. Database MIGRATIONS are NOT run here — they are a separate,
+# gated release step (see deploy/DEPLOY-INTERNAL.md § migration-safety), so
+# scaling to N replicas never races N migrators.
+
+# ---- base: pnpm via corepack -------------------------------------------------
 FROM node:20-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 
+# ---- build: install, build packages, emit a pruned production bundle ---------
 FROM base AS build
 WORKDIR /repo
 COPY . .
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+# Build the workspace packages the API imports (@slate/engine, @slate/db, …) to
+# their dist/ outputs, then produce a self-contained production bundle.
 RUN pnpm build:packages
+RUN pnpm --filter @slate/api deploy --prod /prod/api
 
+# ---- run: minimal runtime, only the pruned bundle, non-root ------------------
 FROM base AS run
-WORKDIR /repo
 ENV NODE_ENV=production
-COPY --from=build /repo ./
+# Non-root (mirrors calendar-ms: runAsNonRoot / uid 1001). node:20-slim ships a
+# `node` user; use it and own the app dir.
+WORKDIR /app
+COPY --from=build --chown=node:node /prod/api ./
+USER node
 EXPOSE 4000
 ENV API_PORT=4000
-# Run migrations, then start the API. Point DATABASE_URL at Postgres in prod.
-CMD ["sh", "-c", "pnpm db:migrate && pnpm --filter @slate/api start"]
+# Start the API only. tsx is a runtime dependency of @slate/api; the bundle
+# carries the compiled workspace deps under node_modules.
+CMD ["pnpm", "start"]
