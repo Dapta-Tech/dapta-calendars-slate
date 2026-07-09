@@ -52,6 +52,8 @@ export interface StudioInit {
   coverUrl: string;
   accent: string;
   axes: Axes;
+  landingEnabled: boolean;
+  defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
 }
 
@@ -65,6 +67,8 @@ export function Studio(init: StudioInit) {
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
+  const [landingEnabled, setLandingEnabled] = useState(init.landingEnabled);
+  const [defaultEventSlug, setDefaultEventSlug] = useState(init.defaultEventSlug ?? '');
   const [customizeOpen, setCustomizeOpen] = useState(matchTheme(init.axes) === null);
   const [surface, setSurface] = useState<'profile' | 'booking'>('profile');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
@@ -75,8 +79,8 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, bio, avatarUrl, coverUrl, accent, axes }),
-    [displayName, handle, bio, avatarUrl, coverUrl, accent, axes],
+    () => JSON.stringify({ displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug }),
+    [displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
@@ -126,6 +130,8 @@ export function Studio(init: StudioInit) {
     setCoverUrl(init.coverUrl);
     setAccent(init.accent);
     setAxes(init.axes);
+    setLandingEnabled(init.landingEnabled);
+    setDefaultEventSlug(init.defaultEventSlug ?? '');
   };
 
   const save = () =>
@@ -136,7 +142,7 @@ export function Studio(init: StudioInit) {
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
         brandColor: clampAccent(accent),
-        style: { ...axes, bio: bio.trim() || null },
+        style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null },
       });
       if (r.ok) {
         setSaved('ok');
@@ -313,6 +319,38 @@ export function Studio(init: StudioInit) {
             <a href="/admin/event-types" className="mt-2 inline-block text-xs text-primary hover:underline">
               Add, reorder, hide or configure event types →
             </a>
+
+            {/* Landing (R25): show the picker, or send visitors straight to one event. */}
+            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={landingEnabled}
+                  onChange={(e) => setLandingEnabled(e.target.checked)}
+                />
+                Show the landing page (list of events)
+              </label>
+              {!landingEnabled ? (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-muted-foreground">Send visitors directly to</span>
+                  <select
+                    value={defaultEventSlug}
+                    onChange={(e) => setDefaultEventSlug(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">Choose an event…</option>
+                    {init.eventTypes.map((et) => (
+                      <option key={et.slug} value={et.slug}>
+                        {et.title}
+                      </option>
+                    ))}
+                  </select>
+                  {!defaultEventSlug ? (
+                    <span className="text-xs text-destructive">Pick a default event, or keep the landing page on.</span>
+                  ) : null}
+                </label>
+              ) : null}
+            </div>
           </Section>
         </div>
 

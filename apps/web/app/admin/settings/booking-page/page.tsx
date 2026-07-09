@@ -12,7 +12,7 @@ export default async function BookingPageSettings() {
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
   const accent = profile?.member.brandColor ?? '#cbe84f';
-  const style = (profile?.member.style ?? {}) as Record<string, string>;
+  const style = (profile?.member.style ?? {}) as Record<string, unknown>;
   const def = defaultBranding(displayName);
   const axes = {
     template: (style.template as never) ?? def.template,
@@ -41,6 +41,8 @@ export default async function BookingPageSettings() {
         coverUrl={profile?.member.coverUrl ?? ''}
         accent={accent}
         axes={axes}
+        landingEnabled={style.landingEnabled !== false}
+        defaultEventSlug={(style.defaultEventSlug as string) ?? null}
         eventTypes={profile?.eventTypes ?? []}
       />
     </div>
