@@ -75,6 +75,26 @@ export interface BookingMessages {
       collapse: string;
       expand: string;
     };
+    home: {
+      welcome: string;
+      welcomeNamed: string;
+      subtitle: string;
+      bookingLink: string;
+      setHandlePre: string;
+      setHandleLink: string;
+      setHandlePost: string;
+      statEventTypes: string;
+      statUpcoming: string;
+      statTeams: string;
+      createEvent: string;
+      createEventDesc: string;
+      setAvailability: string;
+      setAvailabilityDesc: string;
+      stylePage: string;
+      stylePageDesc: string;
+      apiKeys: string;
+      apiKeysDesc: string;
+    };
   };
 }
 
@@ -150,6 +170,26 @@ export const en: BookingMessages = {
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
     },
+    home: {
+      welcome: 'Welcome',
+      welcomeNamed: 'Welcome, {name}',
+      subtitle: 'Your scheduling at a glance.',
+      bookingLink: 'Your booking link',
+      setHandlePre: 'Set a handle in',
+      setHandleLink: 'your booking page',
+      setHandlePost: 'to get a shareable link.',
+      statEventTypes: 'Event types',
+      statUpcoming: 'Upcoming bookings',
+      statTeams: 'Teams',
+      createEvent: 'Create an event type',
+      createEventDesc: 'Define a bookable meeting.',
+      setAvailability: 'Set your availability',
+      setAvailabilityDesc: 'Weekly hours + date overrides.',
+      stylePage: 'Style your booking page',
+      stylePageDesc: 'Brand + 9-axis studio.',
+      apiKeys: 'API keys & webhooks',
+      apiKeysDesc: 'Integrate agents & automations.',
+    },
   },
 };
 
@@ -224,6 +264,26 @@ export const es: BookingMessages = {
       language: 'Idioma',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
+    },
+    home: {
+      welcome: 'Bienvenido',
+      welcomeNamed: 'Bienvenido, {name}',
+      subtitle: 'Tu agenda de un vistazo.',
+      bookingLink: 'Tu enlace de reservas',
+      setHandlePre: 'Configura un identificador en',
+      setHandleLink: 'tu página de reservas',
+      setHandlePost: 'para obtener un enlace para compartir.',
+      statEventTypes: 'Tipos de evento',
+      statUpcoming: 'Próximas reservas',
+      statTeams: 'Equipos',
+      createEvent: 'Crear un tipo de evento',
+      createEventDesc: 'Define una reunión reservable.',
+      setAvailability: 'Configura tu disponibilidad',
+      setAvailabilityDesc: 'Horas semanales + excepciones por fecha.',
+      stylePage: 'Personaliza tu página de reservas',
+      stylePageDesc: 'Marca + estudio de 9 ejes.',
+      apiKeys: 'Claves API y webhooks',
+      apiKeysDesc: 'Integra agentes y automatizaciones.',
     },
   },
 };

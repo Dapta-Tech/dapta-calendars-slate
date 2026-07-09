@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { getMessages, t } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
+import { getLocale } from '@/lib/locale';
 import { CopyLink } from '@/components/copy-link';
 
 export const dynamic = 'force-dynamic';
@@ -15,40 +17,42 @@ export default async function AdminHome() {
     (b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > Date.now(),
   );
   const publicUrl = me?.handle ? `/${me.accountCode}/${me.handle}` : null;
+  const h = getMessages(await getLocale()).admin.home;
+  const firstName = me?.displayName?.split(' ')[0];
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">
-        Welcome{me?.displayName ? `, ${me.displayName.split(' ')[0]}` : ''}
+        {firstName ? t(h.welcomeNamed, { name: firstName }) : h.welcome}
       </h1>
-      <p className="mb-8 text-muted-foreground">Your scheduling at a glance.</p>
+      <p className="mb-8 text-muted-foreground">{h.subtitle}</p>
 
       {publicUrl ? (
         <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
-          <span className="text-sm text-muted-foreground">Your booking link</span>
+          <span className="text-sm text-muted-foreground">{h.bookingLink}</span>
           <CopyLink path={publicUrl} />
         </div>
       ) : (
         <div className="mb-8 rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">
-          Set a handle in{' '}
+          {h.setHandlePre}{' '}
           <Link href="/admin/settings/booking-page" className="text-primary hover:underline">
-            your booking page
+            {h.setHandleLink}
           </Link>{' '}
-          to get a shareable link.
+          {h.setHandlePost}
         </div>
       )}
 
       <div className="mb-8 grid grid-cols-3 gap-4">
-        <Stat label="Event types" value={eventTypes.length} href="/admin/event-types" />
-        <Stat label="Upcoming bookings" value={upcoming.length} href="/admin/bookings" />
-        <Stat label="Teams" value={teams.length} href="/admin/teams" />
+        <Stat label={h.statEventTypes} value={eventTypes.length} href="/admin/event-types" />
+        <Stat label={h.statUpcoming} value={upcoming.length} href="/admin/bookings" />
+        <Stat label={h.statTeams} value={teams.length} href="/admin/teams" />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Shortcut href="/admin/event-types" title="Create an event type" desc="Define a bookable meeting." />
-        <Shortcut href="/admin/availability" title="Set your availability" desc="Weekly hours + date overrides." />
-        <Shortcut href="/admin/settings/booking-page" title="Style your booking page" desc="Brand + 9-axis studio." />
-        <Shortcut href="/admin/settings/developer" title="API keys & webhooks" desc="Integrate agents & automations." />
+        <Shortcut href="/admin/event-types" title={h.createEvent} desc={h.createEventDesc} />
+        <Shortcut href="/admin/availability" title={h.setAvailability} desc={h.setAvailabilityDesc} />
+        <Shortcut href="/admin/settings/booking-page" title={h.stylePage} desc={h.stylePageDesc} />
+        <Shortcut href="/admin/settings/developer" title={h.apiKeys} desc={h.apiKeysDesc} />
       </div>
     </div>
   );
