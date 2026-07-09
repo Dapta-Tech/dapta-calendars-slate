@@ -64,6 +64,7 @@ export const adminApi = {
   getSchedule: (id: string) => req<Schedule>('GET', `/v1/schedules/${id}`),
   createSchedule: (b: unknown) => req<Schedule>('POST', '/v1/schedules', b),
   updateSchedule: (id: string, b: unknown) => req<Schedule>('PATCH', `/v1/schedules/${id}`, b),
+  deleteSchedule: (id: string) => req<void>('DELETE', `/v1/schedules/${id}`),
 
   // Teams
   listTeams: () => req<Team[]>('GET', '/v1/teams'),
