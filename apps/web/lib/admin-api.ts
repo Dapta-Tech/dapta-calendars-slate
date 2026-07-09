@@ -109,6 +109,9 @@ export const adminApi = {
   // Webhooks
   listWebhooks: () => req<WebhookRow[]>('GET', '/v1/webhooks'),
   createWebhook: (b: unknown) => req('POST', '/v1/webhooks', b),
+  updateWebhook: (id: string, active: boolean) => req('PATCH', `/v1/webhooks/${id}`, { active }),
+  pingWebhook: (id: string) =>
+    req<{ ok: boolean; status?: number; message?: string }>('POST', `/v1/webhooks/${id}/ping`, {}),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
   // Branding

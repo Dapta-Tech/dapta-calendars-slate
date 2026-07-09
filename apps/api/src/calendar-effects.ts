@@ -43,13 +43,22 @@ export class CalendarEffects {
    */
   onBookingAccepted(uid: string): void {
     if (!this.calendar.enabled) return;
-    void this.writeEvent(uid).catch(() => undefined);
+    void this.writeEvent(uid).catch((e) => this.warn('write-out', uid, e));
   }
 
   /** A booking was cancelled/declined: delete its remote event(s). */
   onBookingCancelled(uid: string): void {
     if (!this.calendar.enabled) return;
-    void this.removeEvent(uid).catch(() => undefined);
+    void this.removeEvent(uid).catch((e) => this.warn('remove', uid, e));
+  }
+
+  /**
+   * B7/DM1: side-effects are best-effort (never roll back the booking), but a
+   * failure must NOT vanish silently — log it so a dropped/orphaned external
+   * event is traceable until the transactional outbox lands.
+   */
+  private warn(op: string, uid: string, err: unknown): void {
+    console.error(`[calendar-effects] ${op} failed for booking ${uid}:`, err instanceof Error ? err.message : err);
   }
 
   /**
@@ -62,7 +71,7 @@ export class CalendarEffects {
     void (async () => {
       await this.removeEvent(uid);
       await this.writeEvent(uid);
-    })().catch(() => undefined);
+    })().catch((e) => this.warn('reschedule', uid, e));
   }
 
   private async writeEvent(uid: string): Promise<void> {

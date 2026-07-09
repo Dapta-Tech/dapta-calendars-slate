@@ -1024,6 +1024,46 @@ export async function deleteWebhook(db: Db, accountId: string, id: string): Prom
   await db.run(sql`DELETE FROM webhook WHERE id = ${id} AND account_id = ${accountId}`);
 }
 
+/** Enable/disable a webhook (D17). Account-scoped. */
+export async function updateWebhook(
+  db: Db,
+  accountId: string,
+  id: string,
+  patch: { active?: boolean },
+): Promise<void> {
+  if (patch.active === undefined) return;
+  await db.run(
+    sql`UPDATE webhook SET active = ${patch.active ? 1 : 0} WHERE id = ${id} AND account_id = ${accountId}`,
+  );
+}
+
+/**
+ * Send a signed test `ping` event to a webhook (D17). Re-validates the URL at
+ * egress (SSRF guard) and signs like a real dispatch. Returns the delivery
+ * result — never throws.
+ */
+export async function pingWebhook(
+  db: Db,
+  accountId: string,
+  id: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; status?: number; message?: string }> {
+  const h = await db.get<{ subscriber_url: string; secret: string | null }>(
+    sql`SELECT subscriber_url, secret FROM webhook WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
+  );
+  if (!h) return { ok: false, message: 'Webhook not found.' };
+  if (!(await checkWebhookUrl(h.subscriber_url)).ok) return { ok: false, message: 'URL is not allowed.' };
+  const body = JSON.stringify({ event: 'ping', data: { ok: true } });
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': 'ping' };
+  if (h.secret) headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+  try {
+    const res = await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
+    return { ok: res.ok, status: res.status };
+  } catch {
+    return { ok: false, message: 'Subscriber unreachable.' };
+  }
+}
+
 /**
  * Fire matching webhooks for a lifecycle event (best-effort, fire-and-forget).
  * Each dispatch signs the JSON body with HMAC-SHA256 over the webhook's secret
