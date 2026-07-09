@@ -7,6 +7,7 @@ import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 import { createCalendarProvider } from './calendar.provider';
 import { createAuthProvider } from './auth.provider';
@@ -66,8 +67,9 @@ import { AdminCrudController } from './admin-crud.controller';
     AdminService,
     AuthService,
     CalendarEffects,
-    // Drains the durable outbox (calendar write-out + webhook delivery) with
-    // retry+backoff — no silent loss on a provider outage (B7/DM1).
+    EmailEffects,
+    // Drains the durable outbox (calendar write-out + webhook delivery + booking
+    // emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
     OutboxWorker,
   ],
 })

@@ -13,6 +13,7 @@ import {
   pingWebhook,
   deleteConnection,
   deleteWebhook,
+  enqueueWebhookDeliveries,
   getMe,
   listApiKeys,
   listBookings,
@@ -26,6 +27,7 @@ import {
 } from '@slate/db';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import { DB } from './tokens';
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
@@ -34,6 +36,7 @@ export class AdminService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
+    @Inject(EmailEffects) private readonly email: EmailEffects,
   ) {}
 
   me(p: HostPrincipal) {
@@ -100,19 +103,47 @@ export class AdminService {
 
   async hostCancel(p: HostPrincipal, uid: string, reason?: string) {
     const out = await cancelBooking(this.db, { uid, reason, byHost: true, accountId: p.accountId });
-    if (out.ok) this.calendar.onBookingCancelled(uid);
+    if (out.ok) {
+      // B2: the host-dashboard cancel bypassed BookingService and sent NOTHING.
+      // Now it deletes the remote event, emails the attendee (+ host), and fires
+      // the webhook — all durably via the outbox.
+      this.calendar.onBookingCancelled(uid);
+      void this.email.enqueueCancellation(uid, { reason: reason ?? null });
+      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
+        uid,
+        reason: reason ?? null,
+      }).catch(() => undefined);
+    }
     return out;
   }
 
   async confirm(p: HostPrincipal, uid: string) {
     const out = await confirmBooking(this.db, uid, p.accountId);
-    // pending→accepted: NOW write the event to the host's calendar.
-    if (out.ok) this.calendar.onBookingAccepted(uid);
+    if (out.ok) {
+      // pending→accepted: NOW write the event to the host's calendar and send
+      // the attendee the confirmation (they already hold the manage link from
+      // the "request received" email; the token isn't retrievable here).
+      this.calendar.onBookingAccepted(uid);
+      void this.email.enqueueConfirmation(uid);
+      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.confirmed', { uid }).catch(
+        () => undefined,
+      );
+    }
     return out;
   }
 
-  decline(p: HostPrincipal, uid: string, reason?: string) {
-    return declineBooking(this.db, uid, reason, p.accountId);
+  async decline(p: HostPrincipal, uid: string, reason?: string) {
+    const out = await declineBooking(this.db, uid, reason, p.accountId);
+    if (out.ok) {
+      // B3: tell the attendee their pending request was declined (previously
+      // nobody was notified — they'd show up to a meeting that never was).
+      void this.email.enqueueDeclined(uid, { reason: reason ?? null });
+      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
+        uid,
+        reason: reason ?? null,
+      }).catch(() => undefined);
+    }
+    return out;
   }
 
   // Connections (behind the CalendarProvider port — generic).

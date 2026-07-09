@@ -16,6 +16,7 @@ import {
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import { DB, ENV } from './tokens';
 
 /**
@@ -47,7 +48,11 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(ENV) private readonly env: ServerEnv,
-    private readonly calendar: CalendarEffects,
+    // Explicit tokens: esbuild/tsx elides type-only imports, so relying on
+    // reflected metadata for these class deps injects `undefined`. @Inject keeps
+    // the class a value and gives Nest the token directly.
+    @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
+    @Inject(EmailEffects) private readonly email: EmailEffects,
   ) {}
 
   onModuleInit(): void {
@@ -126,6 +131,11 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
         { webhookId: row.webhookId, body: row.payload },
         this.fetchImpl,
       );
+      return;
+    }
+    if (row.kind === 'email') {
+      if (row.payload == null) throw new Error('email outbox row missing payload');
+      await this.email.deliver(row.action, row.payload);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);

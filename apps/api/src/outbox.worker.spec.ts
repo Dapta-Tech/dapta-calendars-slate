@@ -22,8 +22,15 @@ import type {
   DeleteEventInput,
 } from '@slate/calendar';
 import { loadServerEnv } from '@slate/config/env';
+import { BookingNotifier, NoopEmailProvider, type EmailProvider, type EmailResult } from '@slate/notifications';
 import { CalendarEffects } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
+
+/** An EmailEffects backed by the silent noop provider (worker calendar/webhook tests don't assert email). */
+function makeEmailEffects(db: Db): EmailEffects {
+  return new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db);
+}
 
 /** A calendar provider whose createEvent fails a controllable number of times. */
 class FlakyCalendarProvider implements CalendarProvider {
@@ -101,7 +108,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('retries a failing calendar write and eventually succeeds (no silent loss)', async () => {
     const provider = new FlakyCalendarProvider(1); // fail once, then succeed
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects);
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
     const uid = await bookFirstSlot();
 
     await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid, now: 0 });
@@ -130,7 +137,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('a duplicate-enqueued calendar job does NOT double-create the remote event (DH1)', async () => {
     const provider = new FlakyCalendarProvider(0); // always succeeds
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects);
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
     const uid = await bookFirstSlot();
 
     // Two rows for the same booking (e.g. a retry that also got re-enqueued).
@@ -155,7 +162,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     try {
       const provider = new FlakyCalendarProvider(0);
       const effects = new CalendarEffects(provider, db);
-      const worker = new OutboxWorker(db, ENV, effects);
+      const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
       // A real, active subscriber (public IP literal → SSRF guard passes offline).
       const wh = await createWebhook(db, {
         accountId,
@@ -200,7 +207,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('delivers a webhook successfully via the outbox and marks it done', async () => {
     const provider = new FlakyCalendarProvider(0);
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects);
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
     const wh = await createWebhook(db, {
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
@@ -232,7 +239,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('a webhook that returns non-2xx is retried (treated as a failure)', async () => {
     const provider = new FlakyCalendarProvider(0);
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects);
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
     const wh = await createWebhook(db, {
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
@@ -253,5 +260,51 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     expect(row.status).toBe('pending');
     expect(row.attempts).toBe(1);
     expect(row.lastError).toContain('HTTP 500');
+  });
+
+  it('B1: a failing email (SMTP blip) is retried, then delivered — never silently lost', async () => {
+    // A provider that throws once (transient SMTP error) then succeeds. A THROW
+    // is the retry signal; log-only's delivered:false would be a success no-op.
+    let failuresRemaining = 1;
+    const flakyEmail: EmailProvider = {
+      send(): Promise<EmailResult> {
+        if (failuresRemaining > 0) {
+          failuresRemaining--;
+          return Promise.reject(new Error('smtp 421 try again'));
+        }
+        return Promise.resolve({ delivered: true, driver: 'smtp' });
+      },
+    };
+    const effects = new CalendarEffects(new FlakyCalendarProvider(0), db);
+    const emailEffects = new EmailEffects(new BookingNotifier(flakyEmail), db);
+    const worker = new OutboxWorker(db, ENV, effects, emailEffects);
+
+    const notification = {
+      uid: 'bk-x',
+      title: 'Intro',
+      startUtc: '2026-08-01T15:00:00.000Z',
+      endUtc: '2026-08-01T15:30:00.000Z',
+      host: { name: 'Alex', email: 'alex@example.com' },
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    };
+    await enqueueOutbox(db, {
+      kind: 'email',
+      action: 'confirmation',
+      bookingUid: 'bk-x',
+      payload: JSON.stringify(notification),
+      now: 0,
+    });
+
+    // First drain: send throws → row stays pending (retry scheduled).
+    await worker.drainOnce(0);
+    const afterFail = (await listOutbox(db, { kind: 'email' }))[0]!;
+    expect(afterFail.status).toBe('pending');
+    expect(afterFail.attempts).toBe(1);
+    expect(afterFail.lastError).toContain('smtp 421');
+
+    // Second drain after backoff: succeeds → done (no silent loss).
+    await worker.drainOnce(backoffMs(1) + 1);
+    expect(await countOutbox(db, 'done')).toBe(1);
+    expect(await countOutbox(db, 'pending')).toBe(0);
   });
 });
