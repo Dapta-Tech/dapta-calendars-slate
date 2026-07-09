@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Inject,
   NotFoundException,
@@ -20,6 +21,21 @@ function badReq(err: unknown): never {
   if (err instanceof ZodError)
     throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
   throw err;
+}
+
+/**
+ * Resolve the manage token from the least-leaky source available. Prefer the
+ * `X-Manage-Token` header, then a POST body field, and only then the `?token=`
+ * query param — kept for backward-compat because links already in the wild
+ * (emails, calendar invites) carry the token in the query string. New links
+ * should use the header/body so the token stays out of access logs and Referer.
+ */
+function manageToken(sources: {
+  headerToken?: string;
+  bodyToken?: string;
+  queryToken?: string;
+}): string {
+  return (sources.headerToken || sources.bodyToken || sources.queryToken || '').trim();
 }
 
 /**
@@ -71,17 +87,23 @@ export class PublicController {
   }
 
   @Get('bookings/:uid')
-  async manageView(@Param('uid') uid: string, @Query('token') token: string) {
-    return unwrap(await this.svc.manageView(uid, token ?? ''));
+  async manageView(
+    @Param('uid') uid: string,
+    @Headers('x-manage-token') headerToken: string | undefined,
+    @Query('token') queryToken: string | undefined,
+  ) {
+    return unwrap(await this.svc.manageView(uid, manageToken({ headerToken, queryToken })));
   }
 
   @Post('bookings/:uid/cancel')
   @HttpCode(200)
   async cancel(
     @Param('uid') uid: string,
-    @Query('token') token: string,
-    @Body() body: { reason?: string },
+    @Headers('x-manage-token') headerToken: string | undefined,
+    @Query('token') queryToken: string | undefined,
+    @Body() body: { reason?: string; token?: string },
   ) {
+    const token = manageToken({ headerToken, bodyToken: body?.token, queryToken });
     return unwrap(await this.svc.cancel(uid, { token, reason: body?.reason }));
   }
 
@@ -89,11 +111,13 @@ export class PublicController {
   @HttpCode(200)
   async reschedule(
     @Param('uid') uid: string,
-    @Query('token') token: string,
-    @Body() body: { newStartUtc: string },
+    @Headers('x-manage-token') headerToken: string | undefined,
+    @Query('token') queryToken: string | undefined,
+    @Body() body: { newStartUtc: string; token?: string },
   ) {
     if (!body?.newStartUtc)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'newStartUtc required' });
+    const token = manageToken({ headerToken, bodyToken: body?.token, queryToken });
     return unwrap(await this.svc.reschedule(uid, { token, newStartUtc: body.newStartUtc }));
   }
 

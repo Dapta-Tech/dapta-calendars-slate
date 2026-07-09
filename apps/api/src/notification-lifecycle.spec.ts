@@ -164,7 +164,8 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     await worker.drainOnce(Date.now());
     const declined = email.sent.filter((m) => m.subject.startsWith('Not accepted:'));
     expect(declined).toHaveLength(1);
-    expect(declined[0]!.to).toBe('sam@example.com');
+    const to = Array.isArray(declined[0]!.to) ? declined[0]!.to : [declined[0]!.to];
+    expect(to).toContain('sam@example.com'); // attendee always; host copied too
   });
 
   it('B2: host-dashboard cancel emails the attendee (+host) and fires the webhook', async () => {
