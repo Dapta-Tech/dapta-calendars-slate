@@ -2,15 +2,19 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { adminApi } from '@/lib/admin-api';
 
-const NAV = [
+const NAV_MAIN = [
   { href: '/admin', label: 'Home', icon: '⌂' },
   { href: '/admin/event-types', label: 'Event Types', icon: '◷' },
   { href: '/admin/availability', label: 'Availability', icon: '▦' },
   { href: '/admin/bookings', label: 'Bookings', icon: '☑' },
   { href: '/admin/teams', label: 'Teams', icon: '👥' },
-  { href: '/admin/connections', label: 'Connections', icon: '🔗' },
+];
+
+// Settings sub-nav (F16): General / Booking page / Calendars / Developer.
+const NAV_SETTINGS = [
   { href: '/admin/settings/general', label: 'General', icon: '⚙' },
   { href: '/admin/settings/booking-page', label: 'Booking Page', icon: '🎨' },
+  { href: '/admin/connections', label: 'Calendars', icon: '🔗' },
   { href: '/admin/settings/developer', label: 'Developer', icon: '⌨' },
 ];
 
@@ -32,7 +36,20 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <span className="text-sm text-muted-foreground">admin</span>
         </div>
         <nav className="flex flex-col gap-0.5">
-          {NAV.map((n) => (
+          {NAV_MAIN.map((n) => (
+            <Link
+              key={n.href}
+              href={n.href}
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent"
+            >
+              <span className="w-5 text-center text-muted-foreground">{n.icon}</span>
+              {n.label}
+            </Link>
+          ))}
+          <span className="mt-4 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Settings
+          </span>
+          {NAV_SETTINGS.map((n) => (
             <Link
               key={n.href}
               href={n.href}
