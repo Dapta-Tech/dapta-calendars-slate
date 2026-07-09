@@ -27,7 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Db } from './client';
 
-export type OutboxKind = 'calendar' | 'webhook';
+export type OutboxKind = 'calendar' | 'webhook' | 'email';
 export type OutboxStatus = 'pending' | 'done' | 'failed';
 
 export interface OutboxRow {

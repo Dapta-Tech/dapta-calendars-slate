@@ -23,6 +23,7 @@ import {
   getAvailability,
   getEventType,
   getMember,
+  isSlotBookable,
   jsonParam,
   loadAvailabilityRules,
   loadBusyForHost,
@@ -611,12 +612,20 @@ function manageHashOf(metadata: unknown): string | null {
 }
 
 export type MutationOutcome =
-  | { ok: true; uid: string; startUtc: string; endUtc: string; manageToken?: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' };
+  | {
+      ok: true;
+      uid: string;
+      startUtc: string;
+      endUtc: string;
+      manageToken?: string;
+      /** The instant the booking was at BEFORE a reschedule (for the email). */
+      previousStartUtc?: string;
+    }
+  | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' };
 
 export async function rescheduleBooking(
   db: Db,
-  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string },
+  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string; now?: Date },
 ): Promise<MutationOutcome> {
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
@@ -624,8 +633,24 @@ export async function rescheduleBooking(
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
 
+  // B6: the new time must be a REAL bookable slot — enforce the host's schedule
+  // rules, min-notice, buffers, and not-in-the-past (the old path only checked
+  // booking-overlap, so a manage-link holder could move a meeting to any
+  // instant). Skipped only when the booking has no host/event to validate against.
+  if (b.host_member_id && b.event_type_id) {
+    const bookable = await isSlotBookable(db, {
+      eventTypeId: b.event_type_id,
+      hostMemberId: b.host_member_id,
+      startMs: args.newStartMs,
+      excludeBookingId: b.id,
+      now: args.now,
+    });
+    if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+  }
+
   const duration = Number(b.end_ms) - Number(b.start_ms);
   const newEndMs = args.newStartMs + duration;
+  const previousStartUtc = new Date(Number(b.start_ms)).toISOString();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
   const metaExpr = jsonParam(db, { _manage: { tokenHash } });
@@ -644,6 +669,7 @@ export async function rescheduleBooking(
     startUtc: new Date(args.newStartMs).toISOString(),
     endUtc: new Date(newEndMs).toISOString(),
     manageToken: token,
+    previousStartUtc,
   };
 }
 
@@ -761,6 +787,67 @@ export async function declineBooking(
     uid: b.uid,
     startUtc: new Date(Number(b.start_ms)).toISOString(),
     endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
+}
+
+// --- Notification context -------------------------------------------------
+
+/** Everything the email templates need for a booking, loaded once by uid. */
+export interface BookingNotificationContext {
+  uid: string;
+  title: string;
+  startUtc: string;
+  endUtc: string;
+  status: string;
+  location: string | null;
+  host: { name: string | null; email: string | null };
+  attendee: { name: string; email: string; timeZone: string };
+}
+
+/**
+ * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
+ * if the booking or its attendee is gone. Host email is included so the .ics
+ * carries an ORGANIZER and the host can be a recipient (parity with old).
+ */
+export async function loadBookingNotificationContext(
+  db: Db,
+  uid: string,
+): Promise<BookingNotificationContext | null> {
+  const row = await db.get<{
+    uid: string;
+    title: string;
+    start_ms: number;
+    end_ms: number;
+    status: string;
+    location: string | null;
+    host_name: string | null;
+    host_email: string | null;
+    att_name: string | null;
+    att_email: string | null;
+    att_tz: string | null;
+  }>(
+    sql`SELECT b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
+               m.display_name AS host_name, m.email AS host_email,
+               a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
+        FROM booking b
+        LEFT JOIN member m ON m.id = b.host_member_id
+        LEFT JOIN booking_attendee a ON a.booking_id = b.id
+        WHERE b.uid = ${uid} LIMIT 1`,
+  );
+  if (!row || !row.att_email) return null;
+  return {
+    uid: row.uid,
+    title: row.title,
+    startUtc: new Date(Number(row.start_ms)).toISOString(),
+    endUtc: new Date(Number(row.end_ms)).toISOString(),
+    status: row.status,
+    location: row.location,
+    host: { name: row.host_name, email: row.host_email },
+    attendee: {
+      name: row.att_name ?? '',
+      email: row.att_email,
+      timeZone: row.att_tz ?? 'UTC',
+    },
   };
 }
 

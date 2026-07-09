@@ -163,6 +163,85 @@ export async function getEventType(
   );
 }
 
+export async function getMemberById(db: Db, id: string): Promise<MemberRow | undefined> {
+  return db.get<MemberRow>(
+    sql`SELECT id, account_id, handle, display_name, email, avatar_url, cover_url, brand_color,
+               layout, booking_page_style, time_zone, default_schedule_id
+        FROM member WHERE id = ${id} LIMIT 1`,
+  );
+}
+
+export async function getEventTypeRowById(db: Db, id: string): Promise<EventTypeRow | undefined> {
+  return db.get<EventTypeRow>(
+    sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
+               schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
+               seats_per_time_slot
+        FROM event_type WHERE id = ${id} LIMIT 1`,
+  );
+}
+
+/**
+ * B6: is `startMs` a REAL, currently-bookable slot for this host+event type?
+ * Runs the SAME availability engine the booking flow uses — so it enforces the
+ * schedule rules, min-notice, buffers, and "not in the past" — then checks the
+ * instant is actually offered. Used to validate a reschedule target (the old
+ * path only checked booking-overlap, letting a meeting move to 3 AM Sunday or
+ * into the past). Resolves by member/event IDs so it works for personal AND
+ * team bookings (a team event has no member handle). `excludeBookingId` drops
+ * the booking being moved from the busy set so it can't block its own slot.
+ */
+export async function isSlotBookable(
+  db: Db,
+  args: {
+    eventTypeId: string;
+    hostMemberId: string;
+    startMs: number;
+    excludeBookingId?: string;
+    now?: Date;
+    calendar?: CalendarProvider;
+  },
+): Promise<boolean> {
+  const eventType = await getEventTypeRowById(db, args.eventTypeId);
+  const member = await getMemberById(db, args.hostMemberId);
+  if (!eventType || !member) return false;
+
+  const endMs = args.startMs + eventType.length_minutes * 60_000;
+  const schedule =
+    (await resolveScheduleTimeZone(db, eventType.schedule_id)) ??
+    (await resolveScheduleTimeZone(db, member.default_schedule_id));
+  const scheduleTimeZone = schedule?.timeZone ?? member.time_zone;
+  const rules: AvailabilityRule[] = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
+
+  // Host busy over the target window, minus the booking being rescheduled.
+  const exclude = args.excludeBookingId ? sql` AND id <> ${args.excludeBookingId}` : sql``;
+  const rows = await db.all<{ start_ms: number; end_ms: number }>(
+    sql`SELECT start_ms, end_ms FROM booking
+        WHERE host_member_id = ${args.hostMemberId} AND status IN ('accepted','pending')
+              AND start_ms < ${endMs} AND end_ms > ${args.startMs}${exclude}`,
+  );
+  const busy: Interval[] = [
+    ...rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) })),
+    ...(await loadReservationBusy(db, args.hostMemberId, args.startMs, endMs, args.now?.getTime())),
+    ...(await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs)),
+  ];
+
+  const slots = computeSlots({
+    fromUtc: new Date(args.startMs),
+    toUtc: new Date(endMs),
+    timeZone: scheduleTimeZone,
+    availability: rules,
+    durationMin: eventType.length_minutes,
+    slotIntervalMin: eventType.slot_interval,
+    busy,
+    beforeBufferMin: eventType.before_event_buffer,
+    afterBufferMin: eventType.after_event_buffer,
+    minimumBookingNoticeMin: eventType.minimum_booking_notice,
+    now: args.now ?? new Date(),
+  });
+  return slots.some((d) => d.getTime() === args.startMs);
+}
+
 export interface PublicProfile {
   account: { code: string; name: string };
   member: {
