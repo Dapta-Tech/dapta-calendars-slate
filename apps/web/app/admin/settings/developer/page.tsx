@@ -9,8 +9,7 @@ export default async function DeveloperSettings() {
     adminApi.listWebhooks().catch(() => []),
   ]);
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
-      <h1 className="mb-6 text-3xl font-semibold tracking-tight">Developer</h1>
+    <div className="flex max-w-3xl flex-col gap-8">
       <ApiKeys keys={keys} />
       <Webhooks webhooks={webhooks} />
     </div>
