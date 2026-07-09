@@ -71,6 +71,10 @@ export type AvailabilityQuery = z.infer<typeof availabilityQuerySchema>;
 export const slotSchema = z.object({
   /** Slot start instant (ISO-8601 UTC). */
   startUtc: isoUtcSchema,
+  /** Group events (R23): seats still available at this slot. */
+  spotsLeft: z.number().int().optional(),
+  /** Group events (R23): total seats per slot. */
+  capacity: z.number().int().optional(),
 });
 export type Slot = z.infer<typeof slotSchema>;
 

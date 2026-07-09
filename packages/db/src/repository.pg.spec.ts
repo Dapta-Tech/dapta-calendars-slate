@@ -34,7 +34,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       fromMs: Date.now(),
       toMs: Date.now() + 10 * 86_400_000,
     });
-    const startMs = new Date(avail!.slots[0]!).getTime();
+    const startMs = new Date(avail!.slots[0]!.startUtc).getTime();
     const args = {
       accountCode: 'acme',
       handle: 'alex-rivera',

@@ -76,7 +76,8 @@ export class BookingService {
     return availabilityResponseSchema.parse({
       eventType: result.eventType,
       timeZone: result.timeZone,
-      slots: result.slots.map((startUtc) => ({ startUtc })),
+      // result.slots are already {startUtc, spotsLeft?, capacity?} (group-aware).
+      slots: result.slots,
     });
   }
 

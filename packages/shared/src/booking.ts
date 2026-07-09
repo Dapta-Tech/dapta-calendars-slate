@@ -7,12 +7,17 @@ import { formatDayHeading, formatSlotTime, zonedDayKey } from './time';
 /** A slot as returned by the availability API. */
 export interface Slot {
   startUtc: string;
+  /** Group events (R23): seats left / total. Absent for 1:1 events. */
+  spotsLeft?: number;
+  capacity?: number;
 }
 
 /** A slot rendered for display: the UTC instant plus its label in the visitor's zone. */
 export interface DisplaySlot {
   startUtc: string;
   label: string;
+  spotsLeft?: number;
+  capacity?: number;
 }
 
 /** All slots that fall on one calendar day (in the visitor's zone). */
@@ -34,6 +39,8 @@ export function groupSlotsByDay(slots: Slot[], visitorTimeZone: string): SlotDay
     const display: DisplaySlot = {
       startUtc: slot.startUtc,
       label: formatSlotTime(slot.startUtc, visitorTimeZone),
+      spotsLeft: slot.spotsLeft,
+      capacity: slot.capacity,
     };
     const bucket = byDay.get(dayKey);
     if (bucket) bucket.push(display);

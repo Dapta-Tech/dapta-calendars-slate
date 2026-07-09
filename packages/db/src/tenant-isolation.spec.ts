@@ -24,7 +24,7 @@ async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
     fromMs: Date.now(),
     toMs: Date.now() + 10 * 86_400_000,
   });
-  return new Date(a!.slots[0]!).getTime();
+  return new Date(a!.slots[0]!.startUtc).getTime();
 }
 
 describe('C2 + M1 — tenant isolation (cross-account IDOR blocked)', () => {
@@ -96,7 +96,7 @@ describe('C2 + M1 — tenant isolation (cross-account IDOR blocked)', () => {
       accountCode: 'acme',
       handle: 'alex-rivera',
       slug: 'confirm-me',
-      startMs: new Date(av!.slots[0]!).getTime(),
+      startMs: new Date(av!.slots[0]!.startUtc).getTime(),
       attendee: ATTENDEE,
     });
     if (!created.ok) throw new Error('setup');

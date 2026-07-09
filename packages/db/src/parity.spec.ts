@@ -31,7 +31,7 @@ async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
     fromMs: Date.now(),
     toMs: Date.now() + 10 * 86_400_000,
   });
-  return new Date(a!.slots[0]!).getTime();
+  return new Date(a!.slots[0]!.startUtc).getTime();
 }
 
 describe('parity (SQLite in-memory)', () => {
@@ -76,7 +76,7 @@ describe('parity (SQLite in-memory)', () => {
       fromMs: Date.now(),
       toMs: Date.now() + 10 * 86_400_000,
     });
-    expect(a!.slots.map((s) => new Date(s).getTime())).not.toContain(startMs);
+    expect(a!.slots.map((s) => new Date(s.startUtc).getTime())).not.toContain(startMs);
     // Booking with the reservation succeeds and releases the hold.
     const out = await createBooking(db, {
       accountCode: 'acme',
@@ -132,7 +132,7 @@ describe('parity (SQLite in-memory)', () => {
       fromMs: Date.now(),
       toMs: Date.now() + 10 * 86_400_000,
     });
-    const slots = avail!.slots.map((s) => new Date(s).getTime());
+    const slots = avail!.slots.map((s) => new Date(s.startUtc).getTime());
     let ok = 0;
     let limited = 0;
     // Try to hold more distinct real slots than the cap allows.
@@ -143,6 +143,53 @@ describe('parity (SQLite in-memory)', () => {
     }
     expect(ok).toBeLessThanOrEqual(10); // MAX_ACTIVE_HOLDS_PER_MEMBER
     expect(limited).toBeGreaterThan(0);
+  });
+
+  it('R23 group event: seats fill up to capacity, then the slot is full', async () => {
+    // A 3-seat group event on the host's default schedule.
+    const memberId = (await db.get<{ id: string }>(
+      (await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`,
+    ))!.id;
+    const et = await createEventType(db, accountId, memberId, {
+      slug: 'group-webinar',
+      title: 'Group Webinar',
+      lengthMinutes: 30,
+      seatsPerTimeSlot: 3,
+    });
+    expect(et.ok).toBe(true);
+    const startMs = await firstSlotMs(db, 'group-webinar');
+
+    const book = (n: number) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'group-webinar',
+        startMs,
+        attendee: { name: `Guest ${n}`, email: `g${n}@example.com`, timeZone: 'UTC' },
+      });
+
+    expect((await book(1)).ok).toBe(true);
+    // The slot is still offered with fewer seats after one booking.
+    const midAvail = await getAvailability(db, {
+      accountCode: 'acme', handle: 'alex-rivera', slug: 'group-webinar',
+      fromMs: Date.now(), toMs: Date.now() + 10 * 86_400_000,
+    });
+    const midSlot = midAvail!.slots.find((s) => new Date(s.startUtc).getTime() === startMs);
+    expect(midSlot?.spotsLeft).toBe(2);
+    expect(midSlot?.capacity).toBe(3);
+
+    expect((await book(2)).ok).toBe(true);
+    expect((await book(3)).ok).toBe(true);
+
+    // Capacity reached → the slot is no longer offered, and a 4th booking is rejected.
+    const fullAvail = await getAvailability(db, {
+      accountCode: 'acme', handle: 'alex-rivera', slug: 'group-webinar',
+      fromMs: Date.now(), toMs: Date.now() + 10 * 86_400_000,
+    });
+    expect(fullAvail!.slots.some((s) => new Date(s.startUtc).getTime() === startMs)).toBe(false);
+    const overflow = await book(4);
+    expect(overflow.ok).toBe(false);
+    if (!overflow.ok) expect(overflow.reason).toBe('SLOT_TAKEN');
   });
 
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
@@ -243,7 +290,7 @@ describe('parity (SQLite in-memory)', () => {
       accountCode: 'acme',
       handle: 'alex-rivera',
       slug: 'confirm-me',
-      startMs: new Date(av!.slots[0]!).getTime(),
+      startMs: new Date(av!.slots[0]!.startUtc).getTime(),
       attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
     });
     expect(out.ok).toBe(true);
@@ -326,7 +373,7 @@ describe('parity (SQLite in-memory)', () => {
       accountCode: 'acme',
       handle: 'alex-rivera',
       slug: 'second-evt',
-      startMs: new Date(av2!.slots[0]!).getTime(),
+      startMs: new Date(av2!.slots[0]!.startUtc).getTime(),
       attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
     });
     expect(b2.ok).toBe(true);
@@ -376,7 +423,7 @@ describe('parity (SQLite in-memory)', () => {
       fromMs: Date.now(),
       toMs: Date.now() + 10 * 86_400_000,
     });
-    const startMs = new Date(av!.slots[0]!).getTime();
+    const startMs = new Date(av!.slots[0]!.startUtc).getTime();
     const first = await createBooking(db, {
       accountCode: 'acme',
       handle: 'alex-rivera',

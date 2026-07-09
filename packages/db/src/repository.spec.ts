@@ -37,7 +37,7 @@ describe('repository (SQLite in-memory)', () => {
     expect(result!.eventType.lengthMinutes).toBe(30);
     expect(result!.slots.length).toBeGreaterThan(0);
     // Slots are ISO-8601 UTC strings, ascending.
-    const times = result!.slots.map((s) => new Date(s).getTime());
+    const times = result!.slots.map((s) => new Date(s.startUtc).getTime());
     const sorted = [...times].sort((a, b) => a - b);
     expect(times).toEqual(sorted);
   });
@@ -52,7 +52,7 @@ describe('repository (SQLite in-memory)', () => {
       fromMs,
       toMs,
     });
-    const slot = avail!.slots[0]!;
+    const slot = avail!.slots[0]!.startUtc;
     const startMs = new Date(slot).getTime();
 
     const first = await createBooking(db, {
@@ -87,7 +87,7 @@ describe('repository (SQLite in-memory)', () => {
       fromMs,
       toMs,
     });
-    const startMs = new Date(avail!.slots[0]!).getTime();
+    const startMs = new Date(avail!.slots[0]!.startUtc).getTime();
     const args = {
       accountCode: 'acme',
       handle: 'alex-rivera',

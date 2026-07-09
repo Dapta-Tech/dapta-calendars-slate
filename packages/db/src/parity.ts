@@ -83,7 +83,7 @@ export async function reserveSlot(
     fromMs: args.startMs,
     toMs: endMs,
   });
-  const offered = avail?.slots.some((s) => new Date(s).getTime() === args.startMs) ?? false;
+  const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
 
   // Per-page hold cap (rate limit).

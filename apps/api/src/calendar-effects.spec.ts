@@ -51,7 +51,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       fromMs,
       toMs,
     });
-    const startMs = new Date(avail!.slots[0]!).getTime();
+    const startMs = new Date(avail!.slots[0]!.startUtc).getTime();
     const booked = await createBooking(db, {
       accountCode: 'acme',
       handle: 'alex-rivera',

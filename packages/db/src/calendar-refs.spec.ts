@@ -58,7 +58,7 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
     // Baseline: no external calendar → local availability only.
     const baseline = await getAvailability(db, args);
     expect(baseline!.slots.length).toBeGreaterThan(1);
-    const firstSlot = baseline!.slots[0]!;
+    const firstSlot = baseline!.slots[0]!.startUtc;
     const firstStartMs = new Date(firstSlot).getTime();
 
     // Connect a conflict-checked calendar and mark the first slot's hour BUSY.
@@ -70,7 +70,7 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
 
     const withBusy = await getAvailability(db, args, provider);
     // The busied slot is gone, and strictly fewer slots are offered.
-    expect(withBusy!.slots).not.toContain(firstSlot);
+    expect(withBusy!.slots.map((s) => s.startUtc)).not.toContain(firstSlot);
     expect(withBusy!.slots.length).toBeLessThan(baseline!.slots.length);
   });
 
@@ -113,7 +113,7 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
       fromMs,
       toMs,
     });
-    const startMs = new Date(avail!.slots[0]!).getTime();
+    const startMs = new Date(avail!.slots[0]!.startUtc).getTime();
     const booked = await createBooking(db, {
       accountCode: 'acme',
       handle: 'alex-rivera',

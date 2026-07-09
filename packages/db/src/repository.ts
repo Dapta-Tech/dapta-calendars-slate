@@ -79,6 +79,7 @@ export interface EventTypeRow {
   after_event_buffer: number;
   slot_interval: number | null;
   requires_confirmation: number;
+  seats_per_time_slot: number | null;
 }
 
 export type BookingOutcome =
@@ -154,7 +155,8 @@ export async function getEventType(
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
-               before_event_buffer, after_event_buffer, slot_interval, requires_confirmation
+               before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
+               seats_per_time_slot
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
               AND hidden = 0 LIMIT 1`,
@@ -240,7 +242,8 @@ export interface AvailabilityResult {
     bookingFields: BookingFieldDef[];
   };
   timeZone: string;
-  slots: string[];
+  /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
+  slots: Array<{ startUtc: string; spotsLeft?: number; capacity?: number }>;
 }
 
 export async function loadAvailabilityRules(db: Db, scheduleId: string): Promise<AvailabilityRule[]> {
@@ -265,11 +268,18 @@ export async function loadBusyForHost(
   hostMemberId: string,
   fromMs: number,
   toMs: number,
+  /**
+   * Group events (seats > 1): the event's OWN bookings must not blank out their
+   * slot — the slot stays offered until seats fill (spotsLeft handles capacity).
+   * Pass the event's id to exclude its bookings from the host busy set.
+   */
+  excludeEventTypeId?: string,
 ): Promise<Interval[]> {
+  const exclude = excludeEventTypeId ? sql` AND event_type_id <> ${excludeEventTypeId}` : sql``;
   const rows = await db.all<{ start_ms: number; end_ms: number }>(
     sql`SELECT start_ms, end_ms FROM booking
         WHERE host_member_id = ${hostMemberId} AND status IN ('accepted','pending')
-              AND start_ms < ${toMs} AND end_ms > ${fromMs}`,
+              AND start_ms < ${toMs} AND end_ms > ${fromMs}${exclude}`,
   );
   return rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) }));
 }
@@ -328,8 +338,12 @@ export async function getAvailability(
   let rules: AvailabilityRule[] = [];
   if (schedule) rules = await loadAvailabilityRules(db, schedule.id);
 
+  const capacity = eventType.seats_per_time_slot ?? 1;
+  const isGroup = capacity > 1;
+
   const busy = [
-    ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs)),
+    // Group events don't self-block: their own bookings stay offered until full.
+    ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs, isGroup ? eventType.id : undefined)),
     ...(await loadReservationBusy(db, member.id, args.fromMs, args.toMs, args.now?.getTime())),
     ...(await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs)),
   ];
@@ -348,6 +362,21 @@ export async function getAvailability(
     now: args.now ?? new Date(),
   });
 
+  // Group events (R23): annotate each slot with seats left and drop full ones.
+  let outSlots: Array<{ startUtc: string; spotsLeft?: number; capacity?: number }>;
+  if (isGroup) {
+    const taken = await seatsTakenByStart(db, eventType.id, args.fromMs, args.toMs);
+    outSlots = slots
+      .map((d) => {
+        const ms = d.getTime();
+        const spotsLeft = capacity - (taken.get(ms) ?? 0);
+        return { startUtc: d.toISOString(), spotsLeft, capacity };
+      })
+      .filter((s) => (s.spotsLeft ?? 0) > 0);
+  } else {
+    outSlots = slots.map((d) => ({ startUtc: d.toISOString() }));
+  }
+
   return {
     eventType: {
       slug: eventType.slug,
@@ -356,8 +385,28 @@ export async function getAvailability(
       bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
     },
     timeZone: args.displayTimeZone ?? scheduleTimeZone,
-    slots: slots.map((d) => d.toISOString()),
+    slots: outSlots,
   };
+}
+
+/**
+ * Seats consumed per start instant for a group event = attendee rows across its
+ * accepted/pending bookings (one booking row per slot, N attendees ≤ capacity).
+ */
+async function seatsTakenByStart(
+  db: Db,
+  eventTypeId: string,
+  fromMs: number,
+  toMs: number,
+): Promise<Map<number, number>> {
+  const rows = await db.all<{ start_ms: number; seats: number }>(
+    sql`SELECT b.start_ms AS start_ms, COUNT(a.id) AS seats
+        FROM booking b JOIN booking_attendee a ON a.booking_id = b.id
+        WHERE b.event_type_id = ${eventTypeId} AND b.status IN ('accepted','pending')
+              AND b.start_ms >= ${fromMs} AND b.start_ms < ${toMs}
+        GROUP BY b.start_ms`,
+  );
+  return new Map(rows.map((r) => [Number(r.start_ms), Number(r.seats)]));
 }
 
 // --- Create booking (the atomic, dual-enforced write) ---------------------
@@ -405,6 +454,48 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
 
   const startMs = args.startMs;
   const endMs = startMs + eventType.length_minutes * 60_000;
+
+  // R23 group events (seats > 1): a slot is ONE booking row that accrues up to
+  // `capacity` attendees. A second+ booker adds a seat to the existing row
+  // (so it never trips the one-accepted-per-slot overlap/EXCLUDE guard); the
+  // FIRST booker falls through to the normal create below.
+  const capacity = eventType.seats_per_time_slot ?? 1;
+  if (capacity > 1) {
+    const existing = await db.get<{ id: string; uid: string; status: string; start_ms: number; end_ms: number }>(
+      sql`SELECT id, uid, status, start_ms, end_ms FROM booking
+          WHERE event_type_id = ${eventType.id} AND host_member_id = ${member.id}
+                AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
+    );
+    if (existing) {
+      // NOTE: check-then-insert can transiently over-fill by one under a rare
+      // concurrent race; acceptable for v1 (one row, no EXCLUDE involved).
+      const seats = await db.get<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = ${existing.id}`,
+      );
+      if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
+      await db.run(
+        sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+            VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
+              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
+      );
+      if (args.reservationUid)
+        await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+      const rec: BookingRecord = {
+        uid: existing.uid,
+        status: existing.status,
+        title: eventType.title,
+        startMs: Number(existing.start_ms),
+        endMs: Number(existing.end_ms),
+        hostHandle: member.handle,
+        hostName: member.display_name,
+        attendee: { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.timeZone },
+      };
+      // Seat-takers join the shared group booking; the manage link stays with
+      // the first booker (per-seat manage tokens are a follow-up).
+      return { ok: true, booking: rec, manageToken: '' };
+    }
+  }
+
   const now = Date.now();
   const uid = randomUUID();
   const bookingId = randomUUID();
