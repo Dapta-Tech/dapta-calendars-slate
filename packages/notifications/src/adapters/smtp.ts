@@ -15,8 +15,10 @@ export interface SmtpOptions {
 
 /**
  * SMTP transport via nodemailer. A pooled transporter is created once and
- * reused. Delivery failures resolve with `delivered:false` (the caller decides
- * whether to retry) — a booking is never rolled back on an email failure.
+ * reused. A transport failure THROWS (the durable outbox worker catches it and
+ * retries with backoff — B1/DM1); it is never swallowed to `delivered:false`,
+ * which would look like success and silently drop the mail. A booking is still
+ * never rolled back on an email failure — the effect runs out-of-band.
  */
 export class SmtpEmailProvider implements EmailProvider {
   private readonly transporter: Transporter;
@@ -55,8 +57,9 @@ export class SmtpEmailProvider implements EmailProvider {
         })),
       });
       return { delivered: true, messageId: info.messageId, driver: 'smtp' };
-    } catch {
-      return { delivered: false, driver: 'smtp' };
+    } catch (err) {
+      // Surface the failure so the outbox worker retries (never a silent drop).
+      throw err instanceof Error ? err : new Error(`smtp send failed: ${String(err)}`);
     }
   }
 }

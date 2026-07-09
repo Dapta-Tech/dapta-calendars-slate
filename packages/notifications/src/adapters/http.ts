@@ -16,6 +16,10 @@ export interface HttpEmailOptions {
  * wiring the app to ANY managed send endpoint via configuration (the concrete
  * endpoint + auth live outside the public repo, in deployment config). No
  * provider is hardcoded here.
+ *
+ * A non-2xx response or a network error THROWS (the durable outbox worker
+ * catches it and retries — B1/DM1); failures are never swallowed to
+ * `delivered:false`, which would look like success and silently drop the mail.
  */
 export class HttpEmailProvider implements EmailProvider {
   constructor(
@@ -50,11 +54,12 @@ export class HttpEmailProvider implements EmailProvider {
         },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) return { delivered: false, driver: 'http' };
+      if (!res.ok) throw new Error(`http mailer failed: HTTP ${res.status}`);
       const body = (await res.json().catch(() => ({}))) as { messageId?: string };
       return { delivered: true, messageId: body.messageId, driver: 'http' };
-    } catch {
-      return { delivered: false, driver: 'http' };
+    } catch (err) {
+      // Surface the failure so the outbox worker retries (never a silent drop).
+      throw err instanceof Error ? err : new Error(`http mailer failed: ${String(err)}`);
     }
   }
 }
