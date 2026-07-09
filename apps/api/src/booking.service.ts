@@ -4,7 +4,7 @@ import {
   cancelBooking,
   createBooking,
   createTeamBooking,
-  dispatchWebhooks,
+  enqueueWebhookDeliveries,
   getAccountByCode,
   getAvailability,
   getPublicProfile,
@@ -147,10 +147,13 @@ export class BookingService {
           manageUrl,
         })
         .catch(() => undefined);
+      // Durable webhook delivery: enqueue one outbox row per subscriber; the
+      // OutboxWorker signs + POSTs with retry+backoff (B7/DM1). No-op when the
+      // account has no matching webhooks (bare clone-and-run).
       void getAccountByCode(this.db, input.accountCode)
         .then((acc) =>
           acc
-            ? dispatchWebhooks(this.db, acc.id, 'booking.created', {
+            ? enqueueWebhookDeliveries(this.db, acc.id, 'booking.created', {
                 uid: b.uid,
                 status: b.status,
                 startUtc,
@@ -264,10 +267,10 @@ export class BookingService {
     return { uid: out.uid, startUtc: out.startUtc, endUtc: out.endUtc };
   }
 
-  /** Best-effort webhook dispatch for a booking lifecycle event. */
+  /** Durable webhook dispatch for a booking lifecycle event (via the outbox). */
   private fireWebhook(uid: string, event: string, data: Record<string, unknown>): void {
     void resolveBooking(this.db, uid)
-      .then((bk) => (bk ? dispatchWebhooks(this.db, bk.account_id, event, data) : undefined))
+      .then((bk) => (bk ? enqueueWebhookDeliveries(this.db, bk.account_id, event, data) : undefined))
       .catch(() => undefined);
   }
 
