@@ -10,7 +10,7 @@ import { CalendarEffects } from './calendar-effects';
 import { createCalendarProvider } from './calendar.provider';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
-import { HealthController } from './controllers';
+import { HealthController, DocsController } from './controllers';
 import { PublicController } from './public.controller';
 import { HostController } from './host.controller';
 import { MachineController } from './machine.controller';
@@ -19,6 +19,7 @@ import { AdminCrudController } from './admin-crud.controller';
 @Module({
   controllers: [
     HealthController,
+    DocsController,
     PublicController,
     HostController,
     MachineController,
