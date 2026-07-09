@@ -310,6 +310,9 @@ export function Studio(init: StudioInit) {
               ))}
               {init.eventTypes.length === 0 ? <li className="text-muted-foreground">No events yet.</li> : null}
             </ul>
+            <a href="/admin/event-types" className="mt-2 inline-block text-xs text-primary hover:underline">
+              Add, reorder, hide or configure event types →
+            </a>
           </Section>
         </div>
 
