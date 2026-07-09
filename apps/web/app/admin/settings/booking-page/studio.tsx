@@ -15,7 +15,9 @@ import {
   monogram,
   type PublicBranding,
 } from '@slate/shared';
-import { saveStudioAction } from './actions';
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/components/toast';
+import { saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type Axes = Pick<
   PublicBranding,
@@ -67,6 +69,8 @@ export interface StudioInit {
   landingEnabled: boolean;
   defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
+  manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
+  eventOrder: string[];
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -81,6 +85,35 @@ export function Studio(init: StudioInit) {
   const [axes, setAxes] = useState<Axes>(init.axes);
   const [landingEnabled, setLandingEnabled] = useState(init.landingEnabled);
   const [defaultEventSlug, setDefaultEventSlug] = useState(init.defaultEventSlug ?? '');
+  // Slug order: saved order first, then any events not yet in it.
+  const [eventOrder, setEventOrder] = useState<string[]>(() => {
+    const all = init.manageableEvents.map((e) => e.slug);
+    const ordered = init.eventOrder.filter((s) => all.includes(s));
+    return [...ordered, ...all.filter((s) => !ordered.includes(s))];
+  });
+  const [eventPending, startEvent] = useTransition();
+  const router = useRouter();
+  const toast = useToast();
+
+  const moveEvent = (slug: string, dir: -1 | 1) =>
+    setEventOrder((o) => {
+      const i = o.indexOf(slug);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= o.length) return o;
+      const next = [...o];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  const toggleHidden = (id: string, hidden: boolean) =>
+    startEvent(async () => {
+      const r = await toggleEventHiddenAction(id, hidden);
+      if (r.ok) {
+        toast.success(hidden ? 'Event hidden.' : 'Event shown.');
+        router.refresh();
+      } else {
+        toast.error(r.message ?? 'Could not update visibility.');
+      }
+    });
   const [customizeOpen, setCustomizeOpen] = useState(matchTheme(init.axes) === null);
   const [surface, setSurface] = useState<'profile' | 'booking'>('profile');
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
@@ -91,8 +124,8 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug }),
-    [displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug],
+    () => JSON.stringify({ displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder }),
+    [displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
@@ -144,6 +177,11 @@ export function Studio(init: StudioInit) {
     setAxes(init.axes);
     setLandingEnabled(init.landingEnabled);
     setDefaultEventSlug(init.defaultEventSlug ?? '');
+    setEventOrder(() => {
+      const all = init.manageableEvents.map((e) => e.slug);
+      const ordered = init.eventOrder.filter((s) => all.includes(s));
+      return [...ordered, ...all.filter((s) => !ordered.includes(s))];
+    });
   };
 
   const save = () =>
@@ -154,7 +192,7 @@ export function Studio(init: StudioInit) {
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
         brandColor: clampAccent(accent),
-        style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null },
+        style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
       });
       if (r.ok) {
         setSaved('ok');
@@ -317,19 +355,37 @@ export function Studio(init: StudioInit) {
             ) : null}
           </Section>
 
-          {/* MEETINGS */}
+          {/* MEETINGS — reorder (↑/↓) + show/hide on the public page */}
           <Section title="Meetings">
             <ul className="flex flex-col gap-1 text-sm">
-              {init.eventTypes.map((et) => (
-                <li key={et.slug} className="flex items-center justify-between rounded-sm bg-muted px-3 py-1.5">
-                  <span>{et.title}</span>
-                  <span className="text-muted-foreground">{et.lengthMinutes} min</span>
-                </li>
-              ))}
-              {init.eventTypes.length === 0 ? <li className="text-muted-foreground">No events yet.</li> : null}
+              {eventOrder
+                .map((s) => init.manageableEvents.find((e) => e.slug === s))
+                .filter((e): e is NonNullable<typeof e> => !!e)
+                .map((et, i, arr) => (
+                  <li
+                    key={et.slug}
+                    className={`flex items-center gap-2 rounded-sm bg-muted px-2 py-1.5 ${et.hidden ? 'opacity-50' : ''}`}
+                  >
+                    <span className="flex flex-col">
+                      <button type="button" aria-label="Move up" disabled={i === 0} onClick={() => moveEvent(et.slug, -1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▲</button>
+                      <button type="button" aria-label="Move down" disabled={i === arr.length - 1} onClick={() => moveEvent(et.slug, 1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▼</button>
+                    </span>
+                    <span className="flex-1 truncate">{et.title}</span>
+                    <button
+                      type="button"
+                      disabled={eventPending}
+                      onClick={() => toggleHidden(et.id, !et.hidden)}
+                      className="rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-primary disabled:opacity-60"
+                    >
+                      {et.hidden ? 'Show' : 'Hide'}
+                    </button>
+                  </li>
+                ))}
+              {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">No events yet.</li> : null}
             </ul>
-            <a href="/admin/event-types" className="mt-2 inline-block text-xs text-primary hover:underline">
-              Add, reorder, hide or configure event types →
+            <p className="mt-1 text-xs text-muted-foreground">Order + visibility apply to your public page.</p>
+            <a href="/admin/event-types" className="mt-1 inline-block text-xs text-primary hover:underline">
+              Configure event types →
             </a>
 
             {/* Landing (R25): show the picker, or send visitors straight to one event. */}

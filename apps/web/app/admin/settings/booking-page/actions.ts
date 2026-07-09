@@ -7,6 +7,17 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 export type SaveResult = { ok: boolean; message?: string; field?: 'handle' | 'branding' };
 
+/** Show/hide an event type on the public booking page (studio Meetings panel). */
+export async function toggleEventHiddenAction(id: string, hidden: boolean): Promise<{ ok: boolean; message?: string }> {
+  try {
+    await adminApi.updateEventType(id, { hidden });
+    revalidatePath('/admin/settings/booking-page');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not update visibility.' };
+  }
+}
+
 export interface StudioPayload {
   handle?: string;
   displayName?: string | null;

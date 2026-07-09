@@ -26,6 +26,14 @@ export default async function ProfilePage({
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
 
+  // Honor the host's chosen event order (studio Meetings panel); unlisted last.
+  const order = (m.style as { eventOrder?: string[] } | null)?.eventOrder ?? [];
+  const rank = (slug: string) => {
+    const i = order.indexOf(slug);
+    return i === -1 ? order.length + 1 : i;
+  };
+  const eventTypes = [...profile.eventTypes].sort((a, b) => rank(a.slug) - rank(b.slug));
+
   return (
     <BrandedShell brandColor={m.brandColor} style={m.style}>
       <main className="mx-auto max-w-2xl px-6 py-12">
@@ -53,7 +61,7 @@ export default async function ProfilePage({
         </header>
 
         <ul className="flex flex-col gap-3">
-          {profile.eventTypes.map((et) => (
+          {eventTypes.map((et) => (
             <li key={et.slug}>
               <Link
                 href={`/${accountCode}/${handle}/${et.slug}`}
@@ -71,7 +79,7 @@ export default async function ProfilePage({
               </Link>
             </li>
           ))}
-          {profile.eventTypes.length === 0 ? (
+          {eventTypes.length === 0 ? (
             <li className="text-muted-foreground">No bookable events yet.</li>
           ) : null}
         </ul>

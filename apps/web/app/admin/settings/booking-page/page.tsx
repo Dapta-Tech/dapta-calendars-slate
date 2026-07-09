@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const profile = me?.handle
-    ? await adminApi.profile(me.accountCode, me.handle)
-    : null;
+  const [profile, adminEvents] = await Promise.all([
+    me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
+    adminApi.listEventTypes(),
+  ]);
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
   const accent = profile?.member.brandColor ?? '#cbe84f';
@@ -44,6 +45,8 @@ export default async function BookingPageSettings() {
         landingEnabled={style.landingEnabled !== false}
         defaultEventSlug={(style.defaultEventSlug as string) ?? null}
         eventTypes={profile?.eventTypes ?? []}
+        manageableEvents={adminEvents.map((e) => ({ id: e.id, slug: e.slug, title: e.title, hidden: e.hidden }))}
+        eventOrder={Array.isArray(style.eventOrder) ? (style.eventOrder as string[]) : []}
       />
     </div>
   );
