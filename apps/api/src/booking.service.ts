@@ -4,7 +4,7 @@ import {
   cancelBooking,
   createBooking,
   createTeamBooking,
-  dispatchWebhooks,
+  enqueueWebhookDeliveries,
   getAccountByCode,
   getAvailability,
   getPublicProfile,
@@ -17,9 +17,9 @@ import {
   sql,
 } from '@slate/db';
 import { verifyManageToken } from '@slate/engine';
-import { BookingNotifier } from '@slate/notifications';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import {
   availabilityQuerySchema,
   availabilityResponseSchema,
@@ -30,7 +30,7 @@ import {
   type PublicProfile,
   type TeamProfile,
 } from '@slate/types';
-import { DB, ENV, NOTIFIER } from './tokens';
+import { DB, ENV } from './tokens';
 
 export type ServiceError = { error: string; message: string; status: number };
 
@@ -38,9 +38,9 @@ export type ServiceError = { error: string; message: string; status: number };
 export class BookingService {
   constructor(
     @Inject(DB) private readonly db: Db,
-    @Inject(NOTIFIER) private readonly notifier: BookingNotifier,
     @Inject(ENV) private readonly env: ServerEnv,
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
+    @Inject(EmailEffects) private readonly email: EmailEffects,
   ) {}
 
   private manageUrl(uid: string, token: string): string {
@@ -132,25 +132,24 @@ export class BookingService {
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
 
     if (outcome.manageToken) {
-      // Write the event to the host's real calendar — only once the booking is
-      // ACCEPTED. A pending (requiresConfirmation) booking writes out on confirm,
-      // not now. No-op when no calendar is connected. (B8: never blocks/rolls back.)
-      if (b.status === 'accepted') this.calendar.onBookingAccepted(b.uid);
-      void this.notifier
-        .sendConfirmation({
-          uid: b.uid,
-          title: b.title,
-          startUtc,
-          endUtc,
-          host: { name: b.hostName },
-          attendee: b.attendee,
-          manageUrl,
-        })
-        .catch(() => undefined);
+      // B5: gate the email + calendar write on STATUS. An ACCEPTED booking is
+      // confirmed (write to the calendar + send a "confirmed" mail with a
+      // REQUEST .ics). A PENDING (requiresConfirmation) booking is NOT confirmed
+      // — send a "request received" mail with NO confirmed .ics and write
+      // nothing to the calendar until the host confirms. (B8: never blocks.)
+      if (b.status === 'accepted') {
+        this.calendar.onBookingAccepted(b.uid);
+        void this.email.enqueueConfirmation(b.uid, { manageUrl });
+      } else if (b.status === 'pending') {
+        void this.email.enqueuePending(b.uid, { manageUrl });
+      }
+      // Durable webhook delivery: enqueue one outbox row per subscriber; the
+      // OutboxWorker signs + POSTs with retry+backoff (B7/DM1). No-op when the
+      // account has no matching webhooks (bare clone-and-run).
       void getAccountByCode(this.db, input.accountCode)
         .then((acc) =>
           acc
-            ? dispatchWebhooks(this.db, acc.id, 'booking.created', {
+            ? enqueueWebhookDeliveries(this.db, acc.id, 'booking.created', {
                 uid: b.uid,
                 status: b.status,
                 startUtc,
@@ -227,21 +226,8 @@ export class BookingService {
     if (!out.ok) return this.mapMutation(out.reason);
     // Delete the remote calendar event (no-op when none was written).
     this.calendar.onBookingCancelled(uid);
-    // Best-effort cancellation email with a CANCEL .ics.
-    const att = await this.loadAttendee(uid);
-    if (att) {
-      void this.notifier
-        .sendCancellation({
-          uid,
-          title: att.title,
-          startUtc: out.startUtc,
-          endUtc: out.endUtc,
-          host: { name: att.hostName },
-          attendee: att.attendee,
-          cancellationReason: opts.reason ?? null,
-        })
-        .catch(() => undefined);
-    }
+    // Durable cancellation email (attendee + host) with a CANCEL .ics.
+    void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
     this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
     return { uid: out.uid, status: 'cancelled' };
   }
@@ -259,32 +245,28 @@ export class BookingService {
     if (!out.ok) return this.mapMutation(out.reason);
     // Move the remote calendar event to the new time (delete + re-create).
     this.calendar.onBookingRescheduled(uid);
-    const att = await this.loadAttendee(uid);
-    if (att && out.manageToken) {
-      void this.notifier
-        .sendReschedule({
-          uid,
-          title: att.title,
-          startUtc: out.startUtc,
-          endUtc: out.endUtc,
-          host: { name: att.hostName },
-          attendee: att.attendee,
-          manageUrl: this.manageUrl(uid, out.manageToken),
-        })
-        .catch(() => undefined);
+    // Durable reschedule email (attendee + host) with the previous time + a
+    // REQUEST .ics so the existing calendar event is updated in place.
+    if (out.manageToken) {
+      void this.email.enqueueReschedule(uid, {
+        manageUrl: this.manageUrl(uid, out.manageToken),
+        previousStartUtc: out.previousStartUtc ?? null,
+      });
     }
     this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     return { uid: out.uid, startUtc: out.startUtc, endUtc: out.endUtc };
   }
 
-  /** Best-effort webhook dispatch for a booking lifecycle event. */
+  /** Durable webhook dispatch for a booking lifecycle event (via the outbox). */
   private fireWebhook(uid: string, event: string, data: Record<string, unknown>): void {
     void resolveBooking(this.db, uid)
-      .then((bk) => (bk ? dispatchWebhooks(this.db, bk.account_id, event, data) : undefined))
+      .then((bk) => (bk ? enqueueWebhookDeliveries(this.db, bk.account_id, event, data) : undefined))
       .catch(() => undefined);
   }
 
-  private mapMutation(reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE'): ServiceError {
+  private mapMutation(
+    reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT',
+  ): ServiceError {
     switch (reason) {
       case 'NOT_FOUND':
         return { error: 'NOT_FOUND', message: 'Booking not found.', status: 404 };
@@ -294,29 +276,13 @@ export class BookingService {
         return { error: 'GONE', message: 'Booking is no longer active.', status: 410 };
       case 'SLOT_TAKEN':
         return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+      case 'INVALID_SLOT':
+        return {
+          error: 'INVALID_SLOT',
+          message: 'That time is not available (outside the host’s hours, too soon, or in the past).',
+          status: 400,
+        };
     }
-  }
-
-  private async loadAttendee(uid: string) {
-    const row = await this.db.get<{
-      title: string;
-      name: string;
-      email: string;
-      time_zone: string | null;
-      host_name: string | null;
-    }>(
-      sql`SELECT b.title, a.name, a.email, a.time_zone, m.display_name AS host_name
-          FROM booking b
-          LEFT JOIN booking_attendee a ON a.booking_id = b.id
-          LEFT JOIN member m ON m.id = b.host_member_id
-          WHERE b.uid = ${uid} LIMIT 1`,
-    );
-    if (!row) return null;
-    return {
-      title: row.title,
-      hostName: row.host_name,
-      attendee: { name: row.name, email: row.email, timeZone: row.time_zone ?? 'UTC' },
-    };
   }
 
   // --- Teams --------------------------------------------------------------
@@ -357,7 +323,7 @@ export class BookingService {
     accountCode: string,
     teamSlug: string,
     body: { slug: string; startUtc: string; attendee: BookingView['attendee']; answers?: Record<string, unknown> },
-  ): Promise<{ uid: string; hostMemberId: string } | ServiceError> {
+  ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(this.db, {
       accountCode,
       teamSlug,
@@ -372,8 +338,18 @@ export class BookingService {
         return { error: 'INTAKE_INVALID', message: out.message ?? 'Invalid.', status: 400 };
       return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
     }
-    // A team booking is created `accepted` → write it to the chosen host's calendar.
+    // B4: a team booking is created `accepted`. It was silently unmanageable
+    // before — now write it to the chosen host's calendar, send the attendee a
+    // confirmation WITH a working manage link (the token minted by
+    // createTeamBooking, previously discarded), and fire the webhook.
     this.calendar.onBookingAccepted(out.uid);
-    return { uid: out.uid, hostMemberId: out.hostMemberId };
+    const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
+    void this.email.enqueueConfirmation(out.uid, { manageUrl });
+    this.fireWebhook(out.uid, 'booking.created', {
+      uid: out.uid,
+      status: 'accepted',
+      startUtc: body.startUtc,
+    });
+    return { uid: out.uid, hostMemberId: out.hostMemberId, manageUrl };
   }
 }

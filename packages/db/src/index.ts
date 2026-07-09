@@ -9,6 +9,7 @@ export * from './parity';
 export * from './crud';
 export * from './calendar-refs';
 export * from './webhook-url';
+export * from './outbox';
 export { migrate } from './migrate';
 export { seed, type SeedResult } from './seed';
 export { sqliteSchema } from './schema.sqlite';

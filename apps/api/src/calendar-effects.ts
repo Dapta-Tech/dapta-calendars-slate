@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { CalendarProvider } from '@slate/calendar';
 import {
   claimBookingDestination,
   deleteBookingReferences,
+  enqueueOutbox,
   fillBookingReference,
   loadBookingForCalendarWrite,
   loadBookingReferences,
@@ -11,21 +12,31 @@ import {
 } from '@slate/db';
 import { CALENDAR, DB } from './tokens';
 
+/** Calendar lifecycle transitions the outbox can carry. */
+export type CalendarAction = 'create' | 'delete' | 'reschedule';
+
 /**
  * The single place the booking lifecycle reaches the CalendarProvider PORT to
  * WRITE events out (and the availability path reaches it to READ busy times via
- * `provider`). Every method is FIRE-AND-FORGET and fully behind the port:
+ * `provider`). Fully behind the port; no vendor is named here (R15) — only the
+ * generic port + `booking_reference`.
  *
- *   - Contract B8: a calendar (vendor) failure NEVER rolls back the booking —
- *     effects run after the booking result is committed, all `void …catch`.
+ * DURABILITY (B7 / audit DM1): the lifecycle no longer fire-and-forgets the
+ * write. Each transition ENQUEUES an `outbox` row; the OutboxWorker drains it
+ * with retry+backoff and calls `runCalendarJob` below. So:
+ *   - Contract B8: a calendar failure NEVER rolls back the booking — the
+ *     lifecycle only enqueues (a fast local INSERT) and returns; the actual
+ *     vendor call happens out-of-band in the worker.
+ *   - No silent loss: a provider outage retries instead of vanishing.
+ *   - Idempotent: the DH1 claim (`booking_reference` unique index) means a retry
+ *     cannot double-create a remote event.
  *   - OSS clone-and-run: the default provider is disabled (`enabled === false`),
- *     so every method short-circuits and nothing is written. A private overlay
- *     swaps in a real provider — no call site changes.
- *
- * No vendor is named here (R15); only the generic port + `booking_reference`.
+ *     so nothing is ever enqueued and behavior is unchanged.
  */
 @Injectable()
 export class CalendarEffects {
+  private readonly log = new Logger('CalendarEffects');
+
   constructor(
     @Inject(CALENDAR) private readonly calendar: CalendarProvider,
     @Inject(DB) private readonly db: Db,
@@ -38,40 +49,50 @@ export class CalendarEffects {
 
   /**
    * A booking became `accepted` (fresh accept, host on-behalf, team, or a
-   * pending→accepted confirm): create the remote event on each destination
-   * calendar and persist a `booking_reference` per created event.
+   * pending→accepted confirm): queue a durable create of the remote event.
    */
   onBookingAccepted(uid: string): void {
-    if (!this.calendar.enabled) return;
-    void this.writeEvent(uid).catch((e) => this.warn('write-out', uid, e));
+    this.enqueue('create', uid);
   }
 
-  /** A booking was cancelled/declined: delete its remote event(s). */
+  /** A booking was cancelled/declined: queue a durable delete of its event(s). */
   onBookingCancelled(uid: string): void {
-    if (!this.calendar.enabled) return;
-    void this.removeEvent(uid).catch((e) => this.warn('remove', uid, e));
+    this.enqueue('delete', uid);
   }
 
-  /**
-   * B7/DM1: side-effects are best-effort (never roll back the booking), but a
-   * failure must NOT vanish silently — log it so a dropped/orphaned external
-   * event is traceable until the transactional outbox lands.
-   */
-  private warn(op: string, uid: string, err: unknown): void {
-    console.error(`[calendar-effects] ${op} failed for booking ${uid}:`, err instanceof Error ? err.message : err);
-  }
-
-  /**
-   * A booking moved (reschedule): delete the old remote event and re-create it
-   * at the new time. Kept as delete+create so it works for any provider whose
-   * "update" is not idempotent; the booking_reference is rewritten.
-   */
+  /** A booking moved (reschedule): queue a durable delete+re-create at the new time. */
   onBookingRescheduled(uid: string): void {
+    this.enqueue('reschedule', uid);
+  }
+
+  /**
+   * Record the transition on the outbox. No-op when no calendar is wired (the
+   * OSS default) so a bare clone enqueues nothing. The enqueue itself is a fast
+   * local INSERT; we keep the call site synchronous (never blocks the booking
+   * response) and only log if the enqueue itself fails.
+   */
+  private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void (async () => {
+    void enqueueOutbox(this.db, { kind: 'calendar', action, bookingUid: uid }).catch((err) => {
+      this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
+    });
+  }
+
+  /**
+   * The worker's executor for a claimed calendar outbox row. Performs the real
+   * vendor write via the port and THROWS on failure so the worker retries
+   * (idempotent via the DH1 claim). No-op when the provider is disabled.
+   */
+  async runCalendarJob(action: CalendarAction, uid: string): Promise<void> {
+    if (!this.calendar.enabled) return;
+    if (action === 'delete') {
+      await this.removeEvent(uid);
+    } else if (action === 'reschedule') {
       await this.removeEvent(uid);
       await this.writeEvent(uid);
-    })().catch((e) => this.warn('reschedule', uid, e));
+    } else {
+      await this.writeEvent(uid);
+    }
   }
 
   private async writeEvent(uid: string): Promise<void> {

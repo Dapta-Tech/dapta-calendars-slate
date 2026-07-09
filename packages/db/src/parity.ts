@@ -23,6 +23,7 @@ import {
   getAvailability,
   getEventType,
   getMember,
+  isSlotBookable,
   jsonParam,
   loadAvailabilityRules,
   loadBusyForHost,
@@ -33,6 +34,7 @@ import {
 } from './repository';
 import { loadExternalBusy } from './calendar-refs';
 import { checkWebhookUrl } from './webhook-url';
+import { enqueueOutbox } from './outbox';
 
 // --- Reservation holds ----------------------------------------------------
 
@@ -610,12 +612,20 @@ function manageHashOf(metadata: unknown): string | null {
 }
 
 export type MutationOutcome =
-  | { ok: true; uid: string; startUtc: string; endUtc: string; manageToken?: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' };
+  | {
+      ok: true;
+      uid: string;
+      startUtc: string;
+      endUtc: string;
+      manageToken?: string;
+      /** The instant the booking was at BEFORE a reschedule (for the email). */
+      previousStartUtc?: string;
+    }
+  | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' };
 
 export async function rescheduleBooking(
   db: Db,
-  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string },
+  args: { uid: string; newStartMs: number; manageToken?: string; byHost?: boolean; accountId?: string; now?: Date },
 ): Promise<MutationOutcome> {
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
@@ -623,8 +633,24 @@ export async function rescheduleBooking(
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
 
+  // B6: the new time must be a REAL bookable slot — enforce the host's schedule
+  // rules, min-notice, buffers, and not-in-the-past (the old path only checked
+  // booking-overlap, so a manage-link holder could move a meeting to any
+  // instant). Skipped only when the booking has no host/event to validate against.
+  if (b.host_member_id && b.event_type_id) {
+    const bookable = await isSlotBookable(db, {
+      eventTypeId: b.event_type_id,
+      hostMemberId: b.host_member_id,
+      startMs: args.newStartMs,
+      excludeBookingId: b.id,
+      now: args.now,
+    });
+    if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+  }
+
   const duration = Number(b.end_ms) - Number(b.start_ms);
   const newEndMs = args.newStartMs + duration;
+  const previousStartUtc = new Date(Number(b.start_ms)).toISOString();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
   const metaExpr = jsonParam(db, { _manage: { tokenHash } });
@@ -643,6 +669,7 @@ export async function rescheduleBooking(
     startUtc: new Date(args.newStartMs).toISOString(),
     endUtc: new Date(newEndMs).toISOString(),
     manageToken: token,
+    previousStartUtc,
   };
 }
 
@@ -760,6 +787,67 @@ export async function declineBooking(
     uid: b.uid,
     startUtc: new Date(Number(b.start_ms)).toISOString(),
     endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
+}
+
+// --- Notification context -------------------------------------------------
+
+/** Everything the email templates need for a booking, loaded once by uid. */
+export interface BookingNotificationContext {
+  uid: string;
+  title: string;
+  startUtc: string;
+  endUtc: string;
+  status: string;
+  location: string | null;
+  host: { name: string | null; email: string | null };
+  attendee: { name: string; email: string; timeZone: string };
+}
+
+/**
+ * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
+ * if the booking or its attendee is gone. Host email is included so the .ics
+ * carries an ORGANIZER and the host can be a recipient (parity with old).
+ */
+export async function loadBookingNotificationContext(
+  db: Db,
+  uid: string,
+): Promise<BookingNotificationContext | null> {
+  const row = await db.get<{
+    uid: string;
+    title: string;
+    start_ms: number;
+    end_ms: number;
+    status: string;
+    location: string | null;
+    host_name: string | null;
+    host_email: string | null;
+    att_name: string | null;
+    att_email: string | null;
+    att_tz: string | null;
+  }>(
+    sql`SELECT b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
+               m.display_name AS host_name, m.email AS host_email,
+               a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
+        FROM booking b
+        LEFT JOIN member m ON m.id = b.host_member_id
+        LEFT JOIN booking_attendee a ON a.booking_id = b.id
+        WHERE b.uid = ${uid} LIMIT 1`,
+  );
+  if (!row || !row.att_email) return null;
+  return {
+    uid: row.uid,
+    title: row.title,
+    startUtc: new Date(Number(row.start_ms)).toISOString(),
+    endUtc: new Date(Number(row.end_ms)).toISOString(),
+    status: row.status,
+    location: row.location,
+    host: { name: row.host_name, email: row.host_email },
+    attendee: {
+      name: row.att_name ?? '',
+      email: row.att_email,
+      timeZone: row.att_tz ?? 'UTC',
+    },
   };
 }
 
@@ -1138,4 +1226,101 @@ export async function dispatchWebhooks(
     }),
   );
   return sent;
+}
+
+// --- Durable webhook delivery via the outbox (B7 / audit DM1) --------------
+//
+// `dispatchWebhooks` above is the legacy best-effort fan-out (kept for tests and
+// any direct caller). The lifecycle now goes through the OUTBOX instead: one
+// durable row PER SUBSCRIBER, drained by the worker with retry+backoff. That
+// gives per-subscriber isolation (a slow/broken subscriber can't starve the
+// others), per-subscriber retry, and a delivery log.
+
+export interface MatchingWebhook {
+  id: string;
+  subscriberUrl: string;
+  secret: string | null;
+}
+
+/** Active webhooks in the account whose triggers include `event`. */
+export async function loadMatchingWebhooks(
+  db: Db,
+  accountId: string,
+  event: string,
+): Promise<MatchingWebhook[]> {
+  const hooks = await db.all<{
+    id: string;
+    subscriber_url: string;
+    secret: string | null;
+    event_triggers: unknown;
+  }>(
+    sql`SELECT id, subscriber_url, secret, event_triggers FROM webhook
+        WHERE account_id = ${accountId} AND active = 1`,
+  );
+  return hooks
+    .filter((h) => parseJsonColumn<string[]>(h.event_triggers, []).includes(event))
+    .map((h) => ({ id: h.id, subscriberUrl: h.subscriber_url, secret: h.secret }));
+}
+
+/**
+ * Enqueue one outbox row per matching subscriber. Returns how many were queued.
+ * On a bare clone-and-run (no webhooks configured) this enqueues nothing, so the
+ * outbox stays empty and behavior is unchanged.
+ */
+export async function enqueueWebhookDeliveries(
+  db: Db,
+  accountId: string,
+  event: string,
+  payload: unknown,
+  now = Date.now(),
+): Promise<number> {
+  const hooks = await loadMatchingWebhooks(db, accountId, event);
+  const body = JSON.stringify({ event, data: payload });
+  for (const h of hooks) {
+    await enqueueOutbox(db, {
+      kind: 'webhook',
+      action: event,
+      accountId,
+      webhookId: h.id,
+      payload: body,
+      now,
+    });
+  }
+  return hooks.length;
+}
+
+/**
+ * Deliver ONE webhook (the worker's per-row executor). Loads the subscriber by
+ * id (so a delete/rotate between enqueue and delivery is honored), re-validates
+ * the URL at egress (DNS-rebinding defense), signs with the CURRENT secret, and
+ * POSTs. THROWS on any failure (missing hook, blocked URL, network error, or a
+ * non-2xx response) so the worker retries; a 2xx resolves the row.
+ */
+export async function deliverWebhookEvent(
+  db: Db,
+  args: { webhookId: string; body: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const hook = await db.get<{ subscriber_url: string; secret: string | null; active: number }>(
+    sql`SELECT subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  );
+  if (!hook || hook.active !== 1) {
+    // Subscriber gone/disabled since enqueue — nothing to deliver, don't retry.
+    return;
+  }
+  if (!(await checkWebhookUrl(hook.subscriber_url)).ok) {
+    throw new Error(`webhook URL blocked at egress: ${hook.subscriber_url}`);
+  }
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'X-Slate-Event': (JSON.parse(args.body) as { event?: string }).event ?? '',
+  };
+  if (hook.secret) {
+    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
+  }
+  const res = await fetchImpl(hook.subscriber_url, { method: 'POST', headers, body: args.body });
+  // A Response-like result must be 2xx; a thrown fetch already propagates.
+  if (res && typeof (res as Response).ok === 'boolean' && !(res as Response).ok) {
+    throw new Error(`webhook delivery failed: HTTP ${(res as Response).status}`);
+  }
 }
