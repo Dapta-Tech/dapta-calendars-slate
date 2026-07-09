@@ -37,7 +37,12 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
   }
 }
 
-export async function deleteEventTypeAction(id: string): Promise<void> {
-  await adminApi.deleteEventType(id);
-  revalidatePath('/admin/event-types');
+export async function deleteEventTypeAction(id: string): Promise<ActionResult> {
+  try {
+    await adminApi.deleteEventType(id);
+    revalidatePath('/admin/event-types');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the event type.' };
+  }
 }
