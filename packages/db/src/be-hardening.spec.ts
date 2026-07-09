@@ -124,4 +124,22 @@ describe('BE hardening P1s', () => {
     expect((await listBookings(db, { accountId, limit: 200 })).nextCursor).toBeNull();
     expect((await listBookings(db, { accountId, limit: 1 })).nextCursor).not.toBeNull();
   });
+
+  it('polish: an in-place reschedule records from_reschedule (the previous start)', async () => {
+    const startMs = (await slots(db))[0]!;
+    const created = await book(db, startMs);
+    if (!created.ok) throw new Error('setup');
+    const uid = created.booking.uid;
+    const prevIso = new Date(startMs).toISOString();
+
+    const target = (await slots(db, 2, 6))[0]!;
+    const out = await rescheduleBooking(db, { uid, newStartMs: target, byHost: true, accountId });
+    expect(out.ok).toBe(true);
+
+    const row = await db.get<{ from_reschedule: string | null; rescheduled: number }>(
+      sql`SELECT from_reschedule, rescheduled FROM booking WHERE uid = ${uid}`,
+    );
+    expect(row!.rescheduled).toBe(1);
+    expect(row!.from_reschedule).toBe(prevIso); // audit trail: moved FROM the original time
+  });
 });
