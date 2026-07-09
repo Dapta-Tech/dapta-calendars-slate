@@ -1,13 +1,40 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { commonTimeZones } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createHostBookingAction } from './actions';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+/** Interpret a `datetime-local` wall-clock in a SPECIFIC timezone (the attendee's),
+ *  not the host browser's — DST-safe two-pass. */
+function wallClockToUtc(local: string, tz: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local);
+  if (!m) return new Date(local).toISOString();
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  const naive = Date.UTC(y!, mo! - 1, d!, h!, mi!);
+  const offsetAt = (ms: number) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(new Date(ms));
+    const g = Object.fromEntries(parts.map((p) => [p.type, p.value])) as Record<string, string>;
+    return Date.UTC(+g.year!, +g.month! - 1, +g.day!, +g.hour!, +g.minute!, +g.second!) - ms;
+  };
+  let ms = naive - offsetAt(naive);
+  ms = naive - offsetAt(ms);
+  return new Date(ms).toISOString();
+}
 
 export function HostBookingForm({
   accountCode,
@@ -18,7 +45,9 @@ export function HostBookingForm({
   handle: string;
   eventTypes: EventType[];
 }) {
-  const [slug, setSlug] = useState(eventTypes[0]?.slug ?? '');
+  // Only offer bookable (non-hidden) events.
+  const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
+  const [slug, setSlug] = useState(bookable[0]?.slug ?? '');
   const [mode, setMode] = useState<'slots' | 'any'>('slots');
   const [slots, setSlots] = useState<string[]>([]);
   const [startUtc, setStartUtc] = useState('');
@@ -30,7 +59,7 @@ export function HostBookingForm({
   const [result, setResult] = useState<{ ok: boolean; uid?: string; message?: string } | null>(null);
   const [pending, startT] = useTransition();
 
-  const event = eventTypes.find((e) => e.slug === slug);
+  const event = bookable.find((e) => e.slug === slug);
   const fields = (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>;
 
   // Load available slots for the chosen event (slots mode).
@@ -49,7 +78,7 @@ export function HostBookingForm({
 
   const submit = () =>
     startT(async () => {
-      const start = mode === 'any' ? (customLocal ? new Date(customLocal).toISOString() : '') : startUtc;
+      const start = mode === 'any' ? (customLocal ? wallClockToUtc(customLocal, tz) : '') : startUtc;
       if (!start) return setResult({ ok: false, message: 'Pick a time.' });
       const r = await createHostBookingAction({
         handle,
@@ -78,7 +107,7 @@ export function HostBookingForm({
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">Event type</span>
         <select value={slug} onChange={(e) => setSlug(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2">
-          {eventTypes.map((et) => (
+          {bookable.map((et) => (
             <option key={et.slug} value={et.slug}>
               {et.title} · {et.lengthMinutes} min
             </option>
@@ -132,7 +161,17 @@ export function HostBookingForm({
       </div>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">Attendee timezone</span>
-        <Input value={tz} onChange={(e) => setTz(e.target.value)} />
+        <select
+          value={tz}
+          onChange={(e) => setTz(e.target.value)}
+          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          {commonTimeZones(tz).map((z) => (
+            <option key={z} value={z}>
+              {z}
+            </option>
+          ))}
+        </select>
       </label>
 
       {fields.map((f) => (
