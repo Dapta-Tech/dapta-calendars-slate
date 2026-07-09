@@ -19,18 +19,30 @@ export async function createTeamAction(_prev: ActionResult | null, form: FormDat
   }
 }
 
-export async function deleteTeamAction(id: string): Promise<void> {
+export async function deleteTeamAction(id: string): Promise<ActionResult> {
   try {
     await adminApi.deleteTeam(id);
-  } catch {
-    /* orphan guard may block — surfaced via reload */
+    revalidatePath('/admin/teams');
+    return { ok: true };
+  } catch (e) {
+    // Orphan guard (409: delete the team's event types first) etc.
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the team.' };
   }
-  revalidatePath('/admin/teams');
 }
 
-export async function addMemberAction(teamId: string, memberId: string): Promise<void> {
-  await adminApi.addTeamMember(teamId, { memberId });
-  revalidatePath('/admin/teams');
+export async function addMemberAction(
+  teamId: string,
+  memberId: string,
+  role: 'owner' | 'member' = 'member',
+): Promise<ActionResult> {
+  try {
+    await adminApi.addTeamMember(teamId, { memberId, role });
+    revalidatePath('/admin/teams');
+    revalidatePath(`/admin/teams/${teamId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not add member.' };
+  }
 }
 
 export async function removeMemberAction(

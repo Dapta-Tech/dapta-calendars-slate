@@ -3,17 +3,15 @@
 import Link from 'next/link';
 import { useActionState, useState, useTransition } from 'react';
 import type { Team } from '@/lib/admin-api';
-import {
-  addMemberAction,
-  createTeamAction,
-  deleteTeamAction,
-  removeMemberAction,
-  setMemberRoleAction,
-  type ActionResult,
-} from './actions';
+import { createTeamAction, deleteTeamAction, type ActionResult } from './actions';
 
-type Member = { id: string; display_name: string | null; email: string | null };
-type TeamMember = { member_id: string; role: string; display_name: string | null };
+const monogram = (name: string) =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0] ?? '')
+    .join('')
+    .toUpperCase() || 'T';
 
 export function NewTeamForm() {
   const [res, action, pending] = useActionState<ActionResult | null, FormData>(createTeamAction, null);
@@ -43,91 +41,64 @@ export function NewTeamForm() {
   );
 }
 
-export function TeamCard({
-  team,
-  members,
-  accountMembers,
-}: {
-  team: Team;
-  members: TeamMember[];
-  accountMembers: Member[];
-}) {
+/** Clean list row: monogram + name→detail + member count, with obvious Manage
+ *  and a confirm-gated Delete. Member editing lives on the detail page. */
+export function TeamCard({ team, memberCount }: { team: Team; memberCount: number }) {
   const [pending, start] = useTransition();
-  const [memberErr, setMemberErr] = useState<string | null>(null);
-  const inTeam = new Set(members.map((m) => m.member_id));
-  const addable = accountMembers.filter((m) => !inTeam.has(m.id));
+  const [confirming, setConfirming] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <span className="flex flex-col">
-          <Link href={`/admin/teams/${team.id}`} className="font-medium hover:text-primary hover:underline">
-            {team.name}
-          </Link>
-          <span className="text-sm text-muted-foreground">/{team.slug}</span>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
+      <Link href={`/admin/teams/${team.id}`} className="flex min-w-0 items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground">
+          {monogram(team.name)}
         </span>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => confirm(`Delete team ${team.name}?`) && start(() => deleteTeamAction(team.id))}
-          className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate font-medium hover:text-primary">{team.name}</span>
+          <span className="truncate text-sm text-muted-foreground">
+            /{team.slug} · {memberCount} member{memberCount === 1 ? '' : 's'}
+          </span>
+        </span>
+      </Link>
+      <div className="flex items-center gap-2">
+        <Link
+          href={`/admin/teams/${team.id}`}
+          className="rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:border-primary"
         >
-          Delete
-        </button>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {members.map((m) => (
-          <span key={m.member_id} className="flex items-center gap-2 rounded-sm bg-muted px-2 py-1 text-sm">
-            {m.display_name ?? m.member_id.slice(0, 6)}
+          Manage
+        </Link>
+        {confirming ? (
+          <span className="flex items-center gap-1 text-sm">
             <button
               type="button"
-              title={m.role === 'owner' ? 'Owner — click to make member' : 'Member — click to make owner'}
+              disabled={pending}
               onClick={() =>
                 start(async () => {
-                  const r = await setMemberRoleAction(team.id, m.member_id, m.role === 'owner' ? 'member' : 'owner');
-                  setMemberErr(r.ok ? null : (r.message ?? null));
+                  const r = await deleteTeamAction(team.id);
+                  if (!r.ok) setErr(r.message ?? 'Could not delete.');
+                  setConfirming(false);
                 })
               }
-              className={
-                'rounded-sm px-1.5 text-[11px] ' +
-                (m.role === 'owner' ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground')
-              }
+              className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
             >
-              {m.role === 'owner' ? 'owner' : 'member'}
+              Delete
             </button>
-            <button
-              type="button"
-              onClick={() =>
-                start(async () => {
-                  const r = await removeMemberAction(team.id, m.member_id);
-                  setMemberErr(r.ok ? null : (r.message ?? null));
-                })
-              }
-              className="text-muted-foreground hover:text-destructive"
-            >
-              ×
+            <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-2 py-1">
+              Cancel
             </button>
           </span>
-        ))}
-        {members.length === 0 ? <span className="text-sm text-muted-foreground">No members</span> : null}
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
+          >
+            Delete
+          </button>
+        )}
       </div>
-      {memberErr ? <p className="text-xs text-destructive">{memberErr}</p> : null}
-      {addable.length > 0 ? (
-        <select
-          onChange={(e) => e.target.value && start(() => addMemberAction(team.id, e.target.value))}
-          defaultValue=""
-          className="w-56 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-        >
-          <option value="" disabled>
-            + Add member…
-          </option>
-          {addable.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.display_name ?? m.email ?? m.id}
-            </option>
-          ))}
-        </select>
-      ) : null}
+      {err ? <p className="w-full text-xs text-destructive">{err}</p> : null}
     </div>
   );
 }

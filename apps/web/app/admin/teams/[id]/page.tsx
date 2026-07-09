@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
-import { TeamCard } from '../teams-client';
+import { TeamMembersPanel } from '../team-members-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,11 +20,11 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
   ]);
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-4xl px-8 py-10">
       <Link href="/admin/teams" className="text-sm text-muted-foreground hover:text-foreground">
         ← Teams
       </Link>
-      <div className="mb-6 mt-2 flex items-center justify-between">
+      <div className="mb-1 mt-2 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-3xl font-semibold tracking-tight">{team.name}</h1>
         {me?.accountCode && team.slug ? (
           <Link href={`/${me.accountCode}/team/${team.slug}`} className="text-sm text-primary hover:underline">
@@ -32,10 +32,13 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
           </Link>
         ) : null}
       </div>
+      <p className="mb-6 text-sm text-muted-foreground">/{team.slug} · round-robin scheduling</p>
 
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Members</h2>
+      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
+        Members <span className="font-normal">({members.length})</span>
+      </h2>
       <div className="mb-8">
-        <TeamCard team={team} members={members} accountMembers={accountMembers} />
+        <TeamMembersPanel teamId={team.id} members={members} accountMembers={accountMembers} />
       </div>
 
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Team event types</h2>
