@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { isNavItemActive } from '@slate/shared';
 
 /** Design-parity admin shell — mirrors the old Angular app-shell: a flush 240px
  *  sidebar (bg-popover, right border, never a floating card), a flat 6-item nav
@@ -94,18 +95,12 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
   }
 }
 
-function isActive(pathname: string, item: NavItem): boolean {
-  if (item.href === '/admin') return pathname === '/admin';
-  const targets = item.match ?? [item.href];
-  return targets.some((t) => pathname === t || pathname.startsWith(`${t}/`));
-}
-
 function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <ul className="flex flex-col gap-1">
       {NAV.map((item) => {
-        const active = isActive(pathname, item);
+        const active = isNavItemActive(pathname, item.href, item.match);
         return (
           <li key={item.href}>
             <Link
@@ -166,7 +161,8 @@ export function AdminShell({
       const next = !c;
       try {
         localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0');
-        document.cookie = `${NAV_COLLAPSED_KEY}=${next ? '1' : '0'}; path=/; max-age=31536000; samesite=lax`;
+        const secure = window.location.protocol === 'https:' ? '; secure' : '';
+        document.cookie = `${NAV_COLLAPSED_KEY}=${next ? '1' : '0'}; path=/; max-age=31536000; samesite=lax${secure}`;
       } catch {
         /* ignore */
       }
@@ -222,41 +218,50 @@ export function AdminShell({
     </div>
   );
 
-  const footer = (
+  // The mobile drawer is always full-width, so its footer must render expanded
+  // regardless of the DESKTOP rail state — hence a param, not the shared const.
+  const viewPublic = user?.handle ? (
+    <Link
+      href={`/${user.accountCode}/${user.handle}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View public page"
+      aria-label="View public page (opens in a new tab)"
+      className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
+    >
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M7 17 17 7M9 7h8v8" />
+      </svg>
+    </Link>
+  ) : null;
+
+  const renderFooter = (footerCollapsed: boolean) => (
     <div
       className={`mt-auto grid items-center gap-2 border-t border-border pt-3 ${
-        railCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr_auto]'
+        footerCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr_auto]'
       }`}
     >
       <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
         {initial}
       </span>
-      {!railCollapsed ? (
-        <>
-          <span className="truncate text-sm text-foreground" title={userLabel}>
-            {userLabel}
-          </span>
-          {user?.handle ? (
-            <Link
-              href={`/${user.accountCode}/${user.handle}`}
-              title="View public page"
-              aria-label="View public page"
-              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
-            >
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M7 17 17 7M9 7h8v8" />
-              </svg>
-            </Link>
-          ) : null}
-        </>
+      {!footerCollapsed ? (
+        <span className="truncate text-sm text-foreground" title={userLabel}>
+          {userLabel}
+        </span>
       ) : null}
+      {/* The icon-only action stays reachable in the collapsed rail too. */}
+      {viewPublic}
     </div>
   );
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
-      {/* Mobile top bar (<768px) */}
-      <header className="sticky top-0 z-30 flex items-center gap-2 border-b border-border bg-popover px-3 py-2 md:hidden">
+      {/* Mobile top bar (<768px). Inert while the drawer is open so focus can't
+          escape the modal (WCAG 2.4.3 / APG modal-dialog). */}
+      <header
+        inert={drawerOpen || undefined}
+        className="sticky top-0 z-30 flex items-center gap-2 border-b border-border bg-popover px-3 py-2 md:hidden"
+      >
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
@@ -282,7 +287,7 @@ export function AdminShell({
         <nav aria-label="Primary">
           <NavLinks collapsed={railCollapsed} />
         </nav>
-        {footer}
+        {renderFooter(railCollapsed)}
       </aside>
 
       {/* Mobile drawer + backdrop */}
@@ -312,10 +317,12 @@ export function AdminShell({
         <nav>
           <NavLinks collapsed={false} onNavigate={() => setDrawerOpen(false)} />
         </nav>
-        {footer}
+        {renderFooter(false)}
       </aside>
 
-      <main className="min-w-0 flex-1 bg-background">{children}</main>
+      <main inert={drawerOpen || undefined} className="min-w-0 flex-1 bg-background">
+        {children}
+      </main>
     </div>
   );
 }

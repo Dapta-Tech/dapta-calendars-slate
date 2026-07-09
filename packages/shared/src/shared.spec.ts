@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { groupSlotsByDay } from './booking';
+import { groupSlotsByDay, isNavItemActive } from './booking';
 import { slugifyHandle, validateHandle } from './handle';
 import { t, en, es } from './i18n';
 import { phoneValidator, parseGuests, guestsValidator } from './booking-fields';
@@ -47,6 +47,22 @@ describe('groupSlotsByDay', () => {
     expect(days).toHaveLength(2);
     expect(days[0]!.slots).toHaveLength(2);
     expect(days[0]!.slots[0]!.label).toMatch(/9:00/);
+  });
+});
+
+describe('isNavItemActive (admin shell)', () => {
+  it('exact-matches the /admin root, prefix-matches others', () => {
+    expect(isNavItemActive('/admin', '/admin')).toBe(true);
+    expect(isNavItemActive('/admin/bookings', '/admin')).toBe(false); // root must not light up everywhere
+    expect(isNavItemActive('/admin/bookings', '/admin/bookings')).toBe(true);
+    expect(isNavItemActive('/admin/bookings/new', '/admin/bookings')).toBe(true);
+    expect(isNavItemActive('/admin/event-types', '/admin/bookings')).toBe(false);
+  });
+  it('honours extra matches (Settings owns /admin/connections)', () => {
+    const m = ['/admin/settings', '/admin/connections'];
+    expect(isNavItemActive('/admin/settings/general', '/admin/settings', m)).toBe(true);
+    expect(isNavItemActive('/admin/connections', '/admin/settings', m)).toBe(true);
+    expect(isNavItemActive('/admin/teams', '/admin/settings', m)).toBe(false);
   });
 });
 
