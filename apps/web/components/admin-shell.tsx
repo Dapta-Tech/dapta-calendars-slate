@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -97,7 +97,7 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
 function isActive(pathname: string, item: NavItem): boolean {
   if (item.href === '/admin') return pathname === '/admin';
   const targets = item.match ?? [item.href];
-  return targets.some((t) => pathname === t || pathname.startsWith(`${t}/`) || pathname === t);
+  return targets.some((t) => pathname === t || pathname.startsWith(`${t}/`));
 }
 
 function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
@@ -122,7 +122,9 @@ function NavLinks({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: 
               ].join(' ')}
             >
               <Icon name={item.icon} />
-              {!collapsed ? <span>{item.label}</span> : null}
+              {/* Label stays in the a11y tree when collapsed (sr-only) so the
+                  icon-only link keeps a discernible name (WCAG 4.1.2). */}
+              <span className={collapsed ? 'sr-only' : ''}>{item.label}</span>
             </Link>
           </li>
         );
@@ -137,23 +139,34 @@ interface ShellUser {
   accountCode: string;
 }
 
-export function AdminShell({ user, children }: { user: ShellUser | null; children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+export function AdminShell({
+  user,
+  initialCollapsed = false,
+  children,
+}: {
+  user: ShellUser | null;
+  /** Server-read cookie value → no collapse-rail FOUC on reload. */
+  initialCollapsed?: boolean;
+  children: ReactNode;
+}) {
+  const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
 
-  // Restore + persist the desktop rail preference.
-  useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
-    } catch {
-      /* storage disabled */
-    }
-  }, []);
+  // The booking-page studio wants the widest canvas → force the rail collapsed
+  // on that route (old app's isStudio parity), without touching the saved pref.
+  const studio = pathname.startsWith('/admin/settings/booking-page');
+  const railCollapsed = collapsed || studio;
+
+  // Persist the desktop rail preference to a cookie so the SERVER renders the
+  // correct width on the next load (no flash) — see AdminLayout.
   const toggleCollapse = () => {
     setCollapsed((c) => {
       const next = !c;
       try {
         localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0');
+        document.cookie = `${NAV_COLLAPSED_KEY}=${next ? '1' : '0'}; path=/; max-age=31536000; samesite=lax`;
       } catch {
         /* ignore */
       }
@@ -161,11 +174,12 @@ export function AdminShell({ user, children }: { user: ShellUser | null; childre
     });
   };
 
-  // Lock body scroll + close on Escape while the mobile drawer is open (R28).
+  // Lock body scroll + close on Escape + move focus into the drawer on open (R28).
   useEffect(() => {
     document.body.style.overflow = drawerOpen ? 'hidden' : '';
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDrawerOpen(false);
     window.addEventListener('keydown', onKey);
+    if (drawerOpen) drawerRef.current?.querySelector<HTMLElement>('a,button')?.focus();
     return () => {
       document.body.style.overflow = '';
       window.removeEventListener('keydown', onKey);
@@ -176,34 +190,38 @@ export function AdminShell({ user, children }: { user: ShellUser | null; childre
   const userLabel = user?.displayName ?? 'Not signed in';
 
   const brand = (
-    <div className={`flex items-center gap-2 px-2 ${collapsed ? 'flex-col px-0' : ''}`}>
+    <div className={`flex items-center gap-2 px-2 ${railCollapsed ? 'flex-col px-0' : ''}`}>
       <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
-      {!collapsed ? <span className="text-sm font-semibold text-foreground">Slate</span> : null}
-      <button
-        type="button"
-        onClick={toggleCollapse}
-        aria-expanded={!collapsed}
-        aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-        title={collapsed ? 'Expand' : 'Collapse'}
-        className={`hidden rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
-      >
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-          {collapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
-        </svg>
-      </button>
+      {!railCollapsed ? <span className="text-sm font-semibold text-foreground">Slate</span> : null}
+      {/* The rail toggle is a desktop pref; hidden on the studio route where the
+          rail is force-collapsed for canvas. */}
+      {!studio ? (
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          className={`hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
+        >
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+            {collapsed ? <path d="m9 6 6 6-6 6" /> : <path d="m15 6-6 6 6 6" />}
+          </svg>
+        </button>
+      ) : null}
     </div>
   );
 
   const footer = (
     <div
       className={`mt-auto grid items-center gap-2 border-t border-border pt-3 ${
-        collapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr]'
+        railCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr]'
       }`}
     >
       <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
         {initial}
       </span>
-      {!collapsed ? (
+      {!railCollapsed ? (
         <span className="flex flex-col overflow-hidden">
           <span className="truncate text-sm text-foreground" title={userLabel}>
             {userLabel}
@@ -242,12 +260,12 @@ export function AdminShell({ user, children }: { user: ShellUser | null; childre
       {/* Desktop sidebar — flush, bordered, collapsible rail */}
       <aside
         className={`hidden shrink-0 flex-col gap-6 border-r border-border bg-popover p-4 transition-[width] md:flex ${
-          collapsed ? 'w-[68px]' : 'w-60'
+          railCollapsed ? 'w-[68px]' : 'w-60'
         }`}
       >
         {brand}
         <nav aria-label="Primary">
-          <NavLinks collapsed={collapsed} />
+          <NavLinks collapsed={railCollapsed} />
         </nav>
         {footer}
       </aside>
@@ -259,15 +277,18 @@ export function AdminShell({ user, children }: { user: ShellUser | null; childre
           aria-hidden
           tabIndex={-1}
           onClick={() => setDrawerOpen(false)}
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="fixed inset-0 z-40 bg-background/80 md:hidden"
         />
       ) : null}
       <aside
+        ref={drawerRef}
         className={`fixed inset-y-0 left-0 z-50 flex w-[82vw] max-w-[320px] flex-col gap-6 overflow-y-auto border-r border-border bg-popover p-4 transition-transform md:hidden ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
+        role="dialog"
+        aria-modal="true"
         aria-label="Primary"
-        aria-hidden={!drawerOpen}
+        inert={!drawerOpen || undefined}
       >
         <div className="flex items-center gap-2 px-2">
           <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
