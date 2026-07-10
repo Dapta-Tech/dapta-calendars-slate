@@ -45,6 +45,17 @@ export const serverEnvSchema = z.object({
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 
+  // Host-session token (validated by the `workos` provider). The dashboard token
+  // is an HS256 JWT minted by the upstream identity service (a shared symmetric
+  // secret — so the SAME validation runs identically in local dev and remote).
+  // All optional here: a bare OSS fork sets nothing and stays on `local`. The
+  // provider fails loud if `workos` is selected without JWT_SECRET. Issuer/
+  // audience are enforced ONLY when set (leave the vendor's real values to
+  // deploy config / a local .env — never hardcoded in this public schema).
+  JWT_SECRET: z.string().optional(),
+  JWT_ISSUER: z.string().optional(),
+  JWT_AUDIENCE: z.string().optional(),
+
   // Calendar — `disabled` (default) runs with no external calendar: slots
   // subtract only local busy and no events are written out. `external` selects
   // the concrete adapter shipped in the private deploy overlay (no vendor named
