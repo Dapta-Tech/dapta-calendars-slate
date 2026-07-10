@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { commonTimeZones, type BookingMessages } from '@slate/shared';
+import { FieldHelp } from '@/components/field-help';
 import { createTeamFullAction } from '../actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -16,7 +17,15 @@ function readImageFile(file: File, onOk: (dataUrl: string) => void, onErr: (msg:
   reader.readAsDataURL(file);
 }
 
-export function CreateTeamForm({ messages: m, defaultTimeZone }: { messages: TeamsMessages; defaultTimeZone: string }) {
+export function CreateTeamForm({
+  messages: m,
+  defaultTimeZone,
+  accountCode,
+}: {
+  messages: TeamsMessages;
+  defaultTimeZone: string;
+  accountCode: string;
+}) {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -51,11 +60,17 @@ export function CreateTeamForm({ messages: m, defaultTimeZone }: { messages: Tea
     <div className="flex max-w-2xl flex-col gap-4 rounded-md border border-border bg-card p-6">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">{m.name}</span>
+          <span className="flex items-center gap-1 text-muted-foreground">
+            {m.name}
+            <FieldHelp text={m.nameHelp} />
+          </span>
           <input value={name} onChange={(e) => onName(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2" />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">{m.slug}</span>
+          <span className="flex items-center gap-1 text-muted-foreground">
+            {m.slug}
+            <FieldHelp text={m.slugHelp} />
+          </span>
           <input
             value={slug}
             onChange={(e) => {
@@ -64,16 +79,26 @@ export function CreateTeamForm({ messages: m, defaultTimeZone }: { messages: Tea
             }}
             className="rounded-md border border-input bg-background px-3 py-2"
           />
+          {/* Live public-URL preview (R25). */}
+          <span className="truncate text-xs text-muted-foreground">
+            /{accountCode || '…'}/team/{slug || '…'}
+          </span>
         </label>
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">{m.bioLabel}</span>
+        <span className="flex items-center gap-1 text-muted-foreground">
+          {m.bioLabel}
+          <FieldHelp text={m.bioHelp} />
+        </span>
         <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} placeholder={m.bioPlaceholder} className="rounded-md border border-input bg-background px-3 py-2" />
       </label>
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm text-muted-foreground">{m.logoLabel}</span>
+        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+          {m.logoLabel}
+          <FieldHelp text={m.logoHelp} />
+        </span>
         <div className="flex items-center gap-3">
           {logoUrl ? (
             <img src={logoUrl} alt={m.logoLabel} className="h-12 w-12 rounded-md border border-border object-cover" />

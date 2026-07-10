@@ -272,6 +272,10 @@ export interface BookingMessages {
       creating: string;
       backToTeamsList: string;
       imageReadError: string;
+      nameHelp: string;
+      slugHelp: string;
+      bioHelp: string;
+      logoHelp: string;
     };
     connections: {
       pageDesc: string;
@@ -675,6 +679,10 @@ export const en: BookingMessages = {
       creating: 'Creating…',
       backToTeamsList: '← Teams',
       imageReadError: 'Could not read that file.',
+      nameHelp: 'Shown at the top of the team’s public booking page.',
+      slugHelp: 'Used in the public URL. Lowercase letters, numbers and dashes.',
+      bioHelp: 'A short line under the team name on the public page.',
+      logoHelp: 'Square image works best. Max 1MB.',
     },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
@@ -1078,6 +1086,10 @@ export const es: BookingMessages = {
       creating: 'Creando…',
       backToTeamsList: '← Equipos',
       imageReadError: 'No se pudo leer el archivo.',
+      nameHelp: 'Se muestra en la parte superior de la página pública del equipo.',
+      slugHelp: 'Se usa en la URL pública. Minúsculas, números y guiones.',
+      bioHelp: 'Una línea breve bajo el nombre del equipo en la página pública.',
+      logoHelp: 'Una imagen cuadrada funciona mejor. Máx. 1MB.',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',

@@ -18,7 +18,7 @@ export default async function NewTeamPage() {
       </Link>
       <h1 className="mb-1 mt-2 text-3xl font-semibold tracking-tight">{m.createTitle}</h1>
       <p className="mb-6 text-muted-foreground">{m.createSubtitle}</p>
-      <CreateTeamForm messages={m} defaultTimeZone={tz} />
+      <CreateTeamForm messages={m} defaultTimeZone={tz} accountCode={me?.accountCode ?? ''} />
     </div>
   );
 }

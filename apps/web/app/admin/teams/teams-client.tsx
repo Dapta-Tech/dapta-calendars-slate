@@ -16,24 +16,41 @@ const monogram = (name: string) =>
     .join('')
     .toUpperCase() || 'T';
 
-/** Clean list row: monogram + name→detail + member count, with obvious Manage
- *  and a confirm-gated Delete. Member editing lives on the detail page. */
-export function TeamCard({ team, memberCount, messages: m }: { team: Team; memberCount: number; messages: TeamsMessages }) {
+/** Clean list row: logo/monogram + name→detail + member count + public-URL line,
+ *  with obvious Manage and a confirm-gated Delete. Member editing lives on the
+ *  detail page. */
+export function TeamCard({
+  team,
+  memberCount,
+  accountCode,
+  messages: m,
+}: {
+  team: Team;
+  memberCount: number;
+  accountCode: string;
+  messages: TeamsMessages;
+}) {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const publicPath = accountCode && team.slug ? `/${accountCode}/team/${team.slug}` : null;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
       <Link href={`/admin/teams/${team.id}`} className="flex min-w-0 items-center gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground">
-          {monogram(team.name)}
-        </span>
+        {team.logoUrl ? (
+          <img src={team.logoUrl} alt="" className="h-10 w-10 shrink-0 rounded-md border border-border object-cover" />
+        ) : (
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground">
+            {monogram(team.name)}
+          </span>
+        )}
         <span className="flex min-w-0 flex-col">
           <span className="truncate font-medium hover:text-primary">{team.name}</span>
           <span className="truncate text-sm text-muted-foreground">
             /{team.slug} · {memberCount} {memberCount === 1 ? m.memberSingular : m.memberPlural}
           </span>
+          {publicPath ? <span className="truncate text-xs text-muted-foreground">{publicPath}</span> : null}
         </span>
       </Link>
       <div className="flex items-center gap-2">
