@@ -12,7 +12,7 @@ function readImageFile(file: File, onOk: (dataUrl: string) => void, onErr: (msg:
   if (file.size > 1_000_000) return onErr(m.imageTooLarge);
   const reader = new FileReader();
   reader.onload = () => onOk(String(reader.result));
-  reader.onerror = () => onErr(m.imageInvalidType);
+  reader.onerror = () => onErr(m.imageReadError);
   reader.readAsDataURL(file);
 }
 
@@ -49,7 +49,7 @@ export function CreateTeamForm({ messages: m, defaultTimeZone }: { messages: Tea
 
   return (
     <div className="flex max-w-2xl flex-col gap-4 rounded-md border border-border bg-card p-6">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.name}</span>
           <input value={name} onChange={(e) => onName(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2" />
@@ -76,7 +76,7 @@ export function CreateTeamForm({ messages: m, defaultTimeZone }: { messages: Tea
         <span className="text-sm text-muted-foreground">{m.logoLabel}</span>
         <div className="flex items-center gap-3">
           {logoUrl ? (
-            <img src={logoUrl} alt="" className="h-12 w-12 rounded-md border border-border object-cover" />
+            <img src={logoUrl} alt={m.logoLabel} className="h-12 w-12 rounded-md border border-border object-cover" />
           ) : (
             <span className="flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-border text-xs text-muted-foreground">
               {(name.trim()[0] ?? 'T').toUpperCase()}

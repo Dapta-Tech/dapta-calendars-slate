@@ -271,6 +271,7 @@ export interface BookingMessages {
       imageInvalidType: string;
       creating: string;
       backToTeamsList: string;
+      imageReadError: string;
     };
     connections: {
       pageDesc: string;
@@ -669,6 +670,7 @@ export const en: BookingMessages = {
       imageInvalidType: 'Please choose an image file.',
       creating: 'Creating…',
       backToTeamsList: '← Teams',
+      imageReadError: 'Could not read that file.',
     },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
@@ -1067,6 +1069,7 @@ export const es: BookingMessages = {
       imageInvalidType: 'Elige un archivo de imagen.',
       creating: 'Creando…',
       backToTeamsList: '← Equipos',
+      imageReadError: 'No se pudo leer el archivo.',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',

@@ -331,7 +331,9 @@ export const teamInputSchema = z.object({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(80),
   bio: z.string().max(2000).nullable().optional(),
-  logoUrl: z.string().nullable().optional(),
+  // A https URL or a small data-URL logo. Capped server-side (~1MB image →
+  // base64 overhead) so a non-UI caller can't push an unbounded TEXT value.
+  logoUrl: z.string().max(1_500_000).nullable().optional(),
   timeZone: timeZoneSchema.optional(),
   hideBranding: z.boolean().optional(),
 });

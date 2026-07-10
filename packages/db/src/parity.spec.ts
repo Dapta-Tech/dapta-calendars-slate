@@ -68,6 +68,35 @@ describe('parity (SQLite in-memory)', () => {
     expect(row?.location).toBe('Google Meet');
   });
 
+  it('F5 (team): a team event type Location is snapshotted onto booking.location too', async () => {
+    const { sql } = await import('drizzle-orm');
+    // Seed has a round-robin team event type (team_id set).
+    const et = await db.get<{ id: string; slug: string }>(sql`SELECT id, slug FROM event_type WHERE team_id IS NOT NULL LIMIT 1`);
+    if (!et) return; // no team event in seed → nothing to assert
+    await updateEventType(db, accountId, et.id, { location: 'Zoom' });
+    const team = (await db.get<{ slug: string }>(sql`SELECT slug FROM team LIMIT 1`))!;
+    const now = Date.now();
+    const avail = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: team.slug,
+      slug: et.slug,
+      fromMs: now,
+      toMs: now + 21 * 86_400_000,
+    });
+    const startMs = new Date(avail!.slots[0]!).getTime();
+    const out = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: team.slug,
+      slug: et.slug,
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { uid: string }).uid;
+    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
+    expect(row?.location).toBe('Zoom');
+  });
+
   it('rejects a booking missing a required intake field', async () => {
     const startMs = await firstSlotMs(db);
     const out = await createBooking(db, {

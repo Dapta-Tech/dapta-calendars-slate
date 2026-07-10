@@ -319,6 +319,7 @@ interface TeamEventType {
   slug: string;
   title: string;
   length_minutes: number;
+  locations: unknown;
   slot_interval: number | null;
   minimum_booking_notice: number;
   before_event_buffer: number;
@@ -329,7 +330,7 @@ interface TeamEventType {
 
 async function getTeamEventType(db: Db, accountId: string, teamId: string, slug: string) {
   return db.get<TeamEventType>(
-    sql`SELECT id, account_id, team_id, slug, title, length_minutes, slot_interval,
+    sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
                booking_fields
         FROM event_type
@@ -512,10 +513,13 @@ export async function createTeamBooking(
   const metaExpr = jsonParam(db, { _manage: { tokenHash } });
   const responsesExpr = jsonParam(db, args.answers ?? null);
 
+  // Snapshot the team event type's configured Where onto the booking (F5), same
+  // as the personal path — otherwise team bookings show no location.
+  const eventLocation = parseJsonColumn<string | null>(et.locations, null);
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${lucky.memberId}, ${team.id}, ${et.title},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${lucky.memberId}, ${team.id}, ${et.title}, ${eventLocation},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${now}, ${now})`;
   const insertAttendee = sql`
