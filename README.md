@@ -41,6 +41,13 @@ is the source of truth; SQLite is a portable subset for convenience and **never
 limits the schema** — features that need Postgres use Postgres, and the
 SQLite-dev path documents where it degrades.
 
+> **Port already in use?** The container maps host port **5432** by default. If
+> you already run Postgres locally (e.g. Homebrew), set `PG_PORT` to remap the
+> host side — it's read by both `docker-compose.yml` and the `dev:pg` script:
+> ```bash
+> PG_PORT=5433 pnpm dev:pg
+> ```
+
 ## What you get
 
 - A **public booking page** (`/[accountCode]/[handle]/[slug]`) that server-renders

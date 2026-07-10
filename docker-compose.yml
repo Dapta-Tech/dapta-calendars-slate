@@ -13,8 +13,10 @@ services:
       POSTGRES_USER: slate
       POSTGRES_PASSWORD: slate
       POSTGRES_DB: slate
+    # Host port is configurable so it doesn't collide with a local Postgres
+    # (e.g. Homebrew on 5432): set PG_PORT to remap. Container port stays 5432.
     ports:
-      - '5432:5432'
+      - '${PG_PORT:-5432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U slate -d slate']
       interval: 5s

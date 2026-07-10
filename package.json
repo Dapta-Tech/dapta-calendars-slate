@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "pnpm run build:packages && pnpm run db:setup && turbo run dev",
-    "dev:pg": "docker compose up -d --wait db && cross-env DATABASE_URL=postgres://slate:slate@localhost:5432/slate pnpm run db:setup && cross-env DATABASE_URL=postgres://slate:slate@localhost:5432/slate turbo run dev",
+    "dev:pg": "docker compose up -d --wait db && cross-env DATABASE_URL=postgres://slate:slate@localhost:${PG_PORT:-5432}/slate pnpm run db:setup && cross-env DATABASE_URL=postgres://slate:slate@localhost:${PG_PORT:-5432}/slate turbo run dev",
     "build": "turbo run build",
     "build:packages": "turbo run build --filter=./packages/*",
     "lint": "turbo run lint",
