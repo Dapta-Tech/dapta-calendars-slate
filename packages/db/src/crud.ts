@@ -21,6 +21,7 @@ export interface EventTypeView {
   title: string;
   description: string | null;
   lengthMinutes: number;
+  location: string | null;
   scheduleId: string | null;
   hidden: boolean;
   schedulingType: string | null;
@@ -42,6 +43,7 @@ interface EventTypeDbRow {
   title: string;
   description: string | null;
   length_minutes: number;
+  locations: unknown;
   schedule_id: string | null;
   hidden: number;
   scheduling_type: string | null;
@@ -54,9 +56,9 @@ interface EventTypeDbRow {
   booking_fields: unknown;
 }
 
-const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, schedule_id,
-  hidden, scheduling_type, minimum_booking_notice, before_event_buffer, after_event_buffer,
-  slot_interval, requires_confirmation, seats_per_time_slot, booking_fields`;
+const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
+  schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
+  after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string }>(
@@ -70,6 +72,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     title: r.title,
     description: r.description,
     lengthMinutes: r.length_minutes,
+    location: parseJsonColumn<string | null>(r.locations, null),
     scheduleId: r.schedule_id,
     hidden: !!r.hidden,
     schedulingType: r.scheduling_type,
@@ -115,6 +118,7 @@ export interface EventTypeInputRepo {
   title: string;
   description?: string | null;
   lengthMinutes: number;
+  location?: string | null;
   scheduleId?: string | null;
   hidden?: boolean;
   schedulingType?: string | null;
@@ -147,12 +151,13 @@ export async function createEventType(
   const now = Date.now();
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
-          length_minutes, schedule_id, hidden, scheduling_type, booking_fields,
+          length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, seats_per_time_slot, created_at)
         VALUES (${id}, ${accountId}, ${input.teamId ? null : memberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
-          ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0}, ${input.schedulingType ?? null},
+          ${jsonParam(db, input.location ?? null)}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
+          ${input.schedulingType ?? null},
           ${jsonParam(db, input.bookingFields ?? null)}, ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${now})`,
@@ -177,6 +182,7 @@ export async function updateEventType(
   if (input.title !== undefined) set('title', sql`${input.title}`);
   if (input.description !== undefined) set('description', sql`${input.description ?? null}`);
   if (input.lengthMinutes !== undefined) set('length_minutes', sql`${input.lengthMinutes}`);
+  if (input.location !== undefined) set('locations', jsonParam(db, input.location ?? null));
   if (input.scheduleId !== undefined) set('schedule_id', sql`${input.scheduleId ?? null}`);
   if (input.hidden !== undefined) set('hidden', sql`${input.hidden ? 1 : 0}`);
   if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);

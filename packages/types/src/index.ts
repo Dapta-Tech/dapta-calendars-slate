@@ -287,6 +287,9 @@ export const eventTypeInputSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(2000).nullable().optional(),
   lengthMinutes: z.number().int().positive().max(1440),
+  /** Where the meeting happens (free text: "Google Meet", "Phone", an address).
+   *  Copied onto each booking's `location` so the manage page can show a Where. */
+  location: z.string().max(500).nullable().optional(),
   scheduleId: z.string().nullable().optional(),
   hidden: z.boolean().optional(),
   schedulingType: z.enum(schedulingType).nullable().optional(),

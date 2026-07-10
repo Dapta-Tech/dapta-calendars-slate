@@ -71,6 +71,7 @@ export interface EventTypeRow {
   title: string;
   description: string | null;
   length_minutes: number;
+  locations: unknown;
   schedule_id: string | null;
   scheduling_type: string | null;
   booking_fields: unknown;
@@ -154,7 +155,7 @@ export async function getEventType(
 ): Promise<EventTypeRow | undefined> {
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
-               schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                seats_per_time_slot
         FROM event_type
@@ -174,7 +175,7 @@ export async function getMemberById(db: Db, id: string): Promise<MemberRow | und
 export async function getEventTypeRowById(db: Db, id: string): Promise<EventTypeRow | undefined> {
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
-               schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                seats_per_time_slot
         FROM event_type WHERE id = ${id} LIMIT 1`,
@@ -592,11 +593,14 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
   const status = eventType.requires_confirmation ? 'pending' : 'accepted';
   const metaExpr = db.dialect === 'postgres' ? sql`${metadata}::jsonb` : sql`${metadata}`;
   const responsesExpr = jsonParam(db, args.answers ?? null);
+  // Snapshot the event type's configured Where onto the booking so the manage
+  // page (and calendar write-out) can show it, even if the event is edited later.
+  const eventLocation = parseJsonColumn<string | null>(eventType.locations, null);
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
       created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title}, ${eventLocation},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`

@@ -11,6 +11,7 @@ export interface EventTypePayload {
   slug: string;
   description: string | null;
   lengthMinutes: number;
+  location: string | null;
   minimumBookingNotice: number;
   slotInterval: number | null;
   beforeEventBuffer: number;

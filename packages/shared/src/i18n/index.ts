@@ -123,6 +123,8 @@ export interface BookingMessages {
       fTitle: string;
       fSlug: string;
       fDescription: string;
+      fLocation: string;
+      locationPlaceholder: string;
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
@@ -414,6 +416,8 @@ export const en: BookingMessages = {
       fTitle: 'Title',
       fSlug: 'Slug',
       fDescription: 'Description',
+      fLocation: 'Location',
+      locationPlaceholder: 'e.g. Google Meet, Phone, or an address',
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
@@ -705,6 +709,8 @@ export const es: BookingMessages = {
       fTitle: 'Título',
       fSlug: 'Identificador',
       fDescription: 'Descripción',
+      fLocation: 'Ubicación',
+      locationPlaceholder: 'p. ej. Google Meet, Teléfono o una dirección',
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',

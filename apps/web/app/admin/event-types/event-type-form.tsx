@@ -29,6 +29,7 @@ export function EventTypeForm({
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(!!initial);
   const [description, setDescription] = useState(initial?.description ?? '');
+  const [location, setLocation] = useState(initial?.location ?? '');
   const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
   const [minNotice, setMinNotice] = useState(120);
   const [slotInterval, setSlotInterval] = useState<number | ''>(initial?.lengthMinutes ?? 30);
@@ -61,6 +62,7 @@ export function EventTypeForm({
         title,
         slug,
         description: description.trim() || null,
+        location: location.trim() || null,
         lengthMinutes: Number(lengthMinutes),
         minimumBookingNotice: Number(minNotice),
         slotInterval: slotInterval === '' ? null : Number(slotInterval),
@@ -87,6 +89,9 @@ export function EventTypeForm({
       </div>
       <Field label={m.fDescription}>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
+      </Field>
+      <Field label={m.fLocation}>
+        <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={m.locationPlaceholder} className={inputCls} />
       </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label={m.fLength}>

@@ -130,6 +130,7 @@ export interface EventType {
   title: string;
   description: string | null;
   lengthMinutes: number;
+  location: string | null;
   hidden: boolean;
   schedulingType: string | null;
   requiresConfirmation: boolean;
