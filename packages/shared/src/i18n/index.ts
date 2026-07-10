@@ -299,6 +299,10 @@ export interface BookingMessages {
       provider: string;
       calendarId: string;
       addConnection: string;
+      healthSyncing: string;
+      healthRecorded: string;
+      destinationHelp: string;
+      conflictHelp: string;
     };
     login: {
       title: string;
@@ -698,6 +702,10 @@ export const en: BookingMessages = {
       provider: 'Provider',
       calendarId: 'Calendar id / email',
       addConnection: 'Add connection',
+      healthSyncing: 'Syncing',
+      healthRecorded: 'Recorded only',
+      destinationHelp: 'Booked events are written to this calendar.',
+      conflictHelp: 'Busy times here block new bookings.',
     },
     login: {
       title: 'Sign in',
@@ -1097,6 +1105,10 @@ export const es: BookingMessages = {
       provider: 'Proveedor',
       calendarId: 'Id de calendario / correo',
       addConnection: 'Añadir conexión',
+      healthSyncing: 'Sincronizando',
+      healthRecorded: 'Solo registrado',
+      destinationHelp: 'Las reservas se escriben en este calendario.',
+      conflictHelp: 'Las horas ocupadas aquí bloquean nuevas reservas.',
     },
     login: {
       title: 'Iniciar sesión',

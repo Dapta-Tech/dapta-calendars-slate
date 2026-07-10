@@ -3,6 +3,7 @@
 import { useEffect, useActionState, useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import type { Connection } from '@/lib/admin-api';
+import { FieldHelp } from '@/components/field-help';
 import {
   connectCalendarAction,
   createConnectionAction,
@@ -13,6 +14,38 @@ import {
 } from './actions';
 
 type ConnectionsMessages = BookingMessages['admin']['connections'];
+
+/** End-provider mark (R15-safe: Google/Outlook are end-provider names). Generic
+ *  calendar glyph for anything else. */
+function ProviderIcon({ provider }: { provider: string }) {
+  const p = provider.toLowerCase();
+  const common = { width: 18, height: 18, viewBox: '0 0 24 24', 'aria-hidden': true } as const;
+  if (p.includes('google')) {
+    return (
+      <svg {...common}>
+        <path fill="#4285F4" d="M21.6 12.2c0-.6-.05-1.2-.15-1.7H12v3.4h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.2Z" />
+        <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.7-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22Z" />
+        <path fill="#FBBC05" d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1a10 10 0 0 0 0 9.2L6.4 14Z" />
+        <path fill="#EA4335" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 0 0 3.1 7.4L6.4 10c.8-2.4 3-4.1 5.6-4.1Z" />
+      </svg>
+    );
+  }
+  if (p.includes('outlook') || p.includes('microsoft')) {
+    return (
+      <svg {...common}>
+        <rect x="3" y="6" width="12" height="12" rx="2" fill="#0A6ED1" />
+        <path fill="#fff" d="M9 9.2c1.6 0 2.6 1.2 2.6 2.9S10.6 15 9 15s-2.6-1.2-2.6-2.9S7.4 9.2 9 9.2Zm0 1.4c-.8 0-1.2.7-1.2 1.5s.4 1.5 1.2 1.5 1.2-.7 1.2-1.5-.4-1.5-1.2-1.5Z" />
+        <path fill="#0A6ED1" d="M15 8.5 21 7v10l-6-1.5Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4.5" width="18" height="16" rx="2" />
+      <path d="M3 9h18M8 2.5v4M16 2.5v4" />
+    </svg>
+  );
+}
 
 /** Provider-choice dialog for the connect flow. Runs against the CalendarProvider
  *  port via connectCalendarAction: when a provider is configured it yields a
@@ -122,39 +155,57 @@ function ProviderBanner({ status, m }: { status: ProviderStatus; m: ConnectionsM
   );
 }
 
-function ConnectionRow({ c, m }: { c: Connection; m: ConnectionsMessages }) {
+function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessages; enabled: boolean }) {
   const [pending, start] = useTransition();
   const [ping, setPing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   return (
-    <li className="flex items-center justify-between rounded-md border border-border bg-card p-4">
-      <span className="flex flex-col gap-1">
-        <span className="font-medium capitalize">{c.provider}</span>
-        <span className="text-sm text-muted-foreground">{c.primaryEmail ?? c.externalId}</span>
-        <span className="mt-1 flex gap-4 text-sm">
-          <label className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={c.isDestination}
-              disabled={pending}
-              onChange={(e) => start(() => toggleConnectionAction(c.id, { isDestination: e.target.checked }))}
-            />
-            {m.destination}
-          </label>
-          <label className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={c.checkConflicts}
-              disabled={pending}
-              onChange={(e) => start(() => toggleConnectionAction(c.id, { checkConflicts: e.target.checked }))}
-            />
-            {m.conflictCheck}
-          </label>
+    <li className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
+      <span className="flex min-w-0 items-start gap-3">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+          <ProviderIcon provider={c.provider} />
         </span>
-        {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
-        {err ? <span className="text-xs text-destructive">{err}</span> : null}
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="flex items-center gap-2">
+            <span className="font-medium capitalize">{c.provider}</span>
+            {/* Honest health tag: green when a provider is wired (syncing), muted
+                when the OSS default just records the connection. */}
+            <span
+              className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${
+                enabled ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {enabled ? m.healthSyncing : m.healthRecorded}
+            </span>
+          </span>
+          <span className="truncate text-sm text-muted-foreground">{c.primaryEmail ?? c.externalId}</span>
+          <span className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <label className="flex items-center gap-1" title={m.destinationHelp}>
+              <input
+                type="checkbox"
+                checked={c.isDestination}
+                disabled={pending}
+                onChange={(e) => start(() => toggleConnectionAction(c.id, { isDestination: e.target.checked }))}
+              />
+              {m.destination}
+              <FieldHelp text={m.destinationHelp} />
+            </label>
+            <label className="flex items-center gap-1" title={m.conflictHelp}>
+              <input
+                type="checkbox"
+                checked={c.checkConflicts}
+                disabled={pending}
+                onChange={(e) => start(() => toggleConnectionAction(c.id, { checkConflicts: e.target.checked }))}
+              />
+              {m.conflictCheck}
+              <FieldHelp text={m.conflictHelp} />
+            </label>
+          </span>
+          {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+          {err ? <span className="text-xs text-destructive">{err}</span> : null}
+        </span>
       </span>
-      <span className="flex gap-2">
+      <span className="flex shrink-0 gap-2">
         <button
           type="button"
           disabled={pending}
@@ -195,16 +246,21 @@ export function ConnectionsClient({
   return (
     <div className="flex flex-col gap-6">
       <ProviderBanner status={status} m={m} />
-      <ul className="flex flex-col gap-2">
-        {connections.map((c) => (
-          <ConnectionRow key={c.id} c={c} m={m} />
-        ))}
-        {connections.length === 0 ? (
-          <li className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-            {m.noCalendars}
-          </li>
-        ) : null}
-      </ul>
+      {connections.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {connections.map((c) => (
+            <ConnectionRow key={c.id} c={c} m={m} enabled={status.enabled} />
+          ))}
+        </ul>
+      ) : (
+        <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border p-8 text-center">
+          <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
+            <rect x="3" y="4.5" width="18" height="16" rx="2" />
+            <path d="M3 9h18M8 2.5v4M16 2.5v4" />
+          </svg>
+          <p className="text-sm text-muted-foreground">{m.noCalendars}</p>
+        </div>
+      )}
 
       <div>
         <h3 className="mb-1 text-sm font-medium text-foreground">{m.manualTitle}</h3>
