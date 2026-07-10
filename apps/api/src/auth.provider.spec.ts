@@ -51,3 +51,69 @@ describe('C1 — host auth is a real, safe-by-default port', () => {
     expect(() => loadServerEnv({ NODE_ENV: 'production', AUTH_PROVIDER: 'workos' })).not.toThrow();
   });
 });
+
+describe('LocalAuthProvider — email-aware dev login', () => {
+  let db: Db;
+  let seededAccountId: string;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    seededAccountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
+  });
+
+  async function memberEmail(memberId: string): Promise<string | null> {
+    const row = await db.get<{ email: string | null }>(sql`SELECT email FROM member WHERE id = ${memberId}`);
+    return row?.email ?? null;
+  }
+
+  it('a KNOWN email resolves its OWN seeded account+member (not the first one)', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
+    // jordan is the SECOND seeded member — proving it does not just pick the first.
+    const p = await dev.resolveHost(reqWith({ 'x-slate-email': 'jordan@example.com' }));
+    expect(p.accountId).toBe(seededAccountId);
+    expect(await memberEmail(p.memberId)).toBe('jordan@example.com');
+  });
+
+  it('an UNKNOWN email JIT-provisions a fresh account+member', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
+    const p = await dev.resolveHost(reqWith({ 'x-slate-email': 'felipe@daptatech.com' }));
+    expect(p.accountId).not.toBe(seededAccountId);
+    expect(await memberEmail(p.memberId)).toBe('felipe@daptatech.com');
+    // Idempotent: a second login lands on the SAME account+member.
+    const again = await dev.resolveHost(reqWith({ 'x-slate-email': 'felipe@daptatech.com' }));
+    expect(again).toEqual(p);
+  });
+
+  it('two DIFFERENT emails get ISOLATED accounts', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
+    const a = await dev.resolveHost(reqWith({ 'x-slate-email': 'alice@a.example' }));
+    const b = await dev.resolveHost(reqWith({ 'x-slate-email': 'bob@b.example' }));
+    expect(a.accountId).not.toBe(b.accountId);
+    expect(a.memberId).not.toBe(b.memberId);
+  });
+
+  it('falls back to DEV_LOGIN_EMAIL env when no header is sent', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development', DEV_LOGIN_EMAIL: 'env@daptatech.com' });
+    const p = await dev.resolveHost(reqWith({}));
+    expect(await memberEmail(p.memberId)).toBe('env@daptatech.com');
+  });
+
+  it('impersonation headers still take precedence over email', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development', DEV_LOGIN_EMAIL: 'env@daptatech.com' });
+    const p = await dev.resolveHost(
+      reqWith({ 'x-slate-account': 'IMP-ACCT', 'x-slate-member': 'IMP-MEMBER', 'x-slate-email': 'x@y.z' }),
+    );
+    expect(p).toEqual({ accountId: 'IMP-ACCT', memberId: 'IMP-MEMBER' });
+  });
+
+  it('IGNORES email hints in production (resolves the seeded principal only)', async () => {
+    const prod = new LocalAuthProvider(db, { NODE_ENV: 'production', DEV_LOGIN_EMAIL: 'felipe@daptatech.com' });
+    const p = await prod.resolveHost(reqWith({ 'x-slate-email': 'felipe@daptatech.com' }));
+    expect(p.accountId).toBe(seededAccountId);
+    // No JIT account was created for the email.
+    const jit = await db.get(sql`SELECT id FROM member WHERE email = 'felipe@daptatech.com'`);
+    expect(jit).toBeUndefined();
+  });
+});

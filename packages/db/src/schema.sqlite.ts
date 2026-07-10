@@ -15,12 +15,20 @@ export const account = sqliteTable('account', {
   id: text('id').primaryKey(),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
+  // Stable id of this account in an upstream identity service, used by the
+  // `workos` auth provider to project the external tenant onto a local account.
+  // Nullable + unique (NULLs distinct): seeded/local accounts have none.
+  externalId: text('external_id'),
   createdAt: integer('created_at').notNull(),
 });
 
 export const member = sqliteTable('member', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
+  // Stable id of this member's user in an upstream identity service (the JWT
+  // `sub`). Unique per account; the `workos` provider resolves/creates the
+  // member projection by it. Nullable: seeded/local members have none.
+  externalId: text('external_id'),
   handle: text('handle'),
   displayName: text('display_name'),
   email: text('email'),
