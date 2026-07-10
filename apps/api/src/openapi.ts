@@ -18,7 +18,7 @@ export const openapiSpec = {
   components: {
     securitySchemes: {
       // Machine/agent surface — API key.
-      apiKey: { type: 'http', scheme: 'bearer', description: 'slk_ API key (Authorization: Bearer …).' },
+      apiKey: { type: 'http', scheme: 'bearer', description: 'dcl_ API key (Authorization: Bearer …).' },
       // Host/dashboard surface — pluggable AuthProvider (session/JWT in prod).
       hostSession: { type: 'apiKey', in: 'header', name: 'authorization', description: 'Host session (AuthProvider).' },
     },

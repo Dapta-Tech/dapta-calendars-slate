@@ -948,7 +948,7 @@ export async function createApiKey(
 ): Promise<CreatedApiKey> {
   const id = randomUUID();
   const secret = randomBytes(24).toString('base64url');
-  const prefix = `slk_${randomBytes(4).toString('hex')}`;
+  const prefix = `dcl_${randomBytes(4).toString('hex')}`;
   const plaintext = `${prefix}_${secret}`;
   const keyHash = createHash('sha256').update(plaintext).digest('hex');
   const last4 = plaintext.slice(-4);
