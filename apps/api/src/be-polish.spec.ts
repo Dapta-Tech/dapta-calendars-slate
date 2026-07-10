@@ -84,6 +84,29 @@ describe('BE polish', () => {
       // The controller unwraps a ServiceError into a thrown 403 HttpException.
       await expect(pub.manageView(uid, 'nope', undefined)).rejects.toMatchObject({ status: 403 });
     });
+
+    it('reschedule returns the ROTATED manage URL so the caller can keep acting', async () => {
+      const { uid, token } = await bookOne();
+      // Move to another real slot: rotation invalidates the old token.
+      const a = await getAvailability(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        fromMs: Date.now(),
+        toMs: Date.now() + 10 * 86_400_000,
+      });
+      const newStart = a!.slots.at(-1)!.startUtc;
+      const out = await svc.reschedule(uid, { newStartUtc: newStart, token });
+      if ('error' in out) throw new Error('reschedule failed');
+      // The response must hand back the fresh manage URL…
+      expect(out.manageUrl).toBeTruthy();
+      const newToken = new URL(out.manageUrl!).searchParams.get('token')!;
+      expect(newToken).not.toBe(token);
+      // …the new token works, and the old one is dead (single-active-token).
+      const view = await pub.manageView(uid, newToken, undefined);
+      expect('error' in view).toBe(false);
+      await expect(pub.manageView(uid, token, undefined)).rejects.toMatchObject({ status: 403 });
+    });
   });
 
   // --- Item 3: machine addressing by eventTypeId (R12) ---------------------

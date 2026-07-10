@@ -251,7 +251,7 @@ export class BookingService {
   async reschedule(
     uid: string,
     opts: { newStartUtc: string; token?: string; byHost?: boolean; idempotencyKey?: string },
-  ): Promise<{ uid: string; startUtc: string; endUtc: string } | ServiceError> {
+  ): Promise<{ uid: string; startUtc: string; endUtc: string; manageUrl?: string } | ServiceError> {
     const out = await rescheduleBooking(this.db, {
       uid,
       newStartMs: new Date(opts.newStartUtc).getTime(),
@@ -274,7 +274,17 @@ export class BookingService {
       }
       this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     }
-    return { uid: out.uid, startUtc: out.startUtc, endUtc: out.endUtc };
+    // The repo layer ROTATES the manage token on a real move (single-active-token
+    // invariant), which invalidates the token the caller just used. Return the
+    // fresh manage URL so the web manage page (and API callers) can keep acting
+    // on the booking without digging the new link out of the reschedule email.
+    // Idempotent replays don't rotate (out.manageToken is empty) → no URL here.
+    return {
+      uid: out.uid,
+      startUtc: out.startUtc,
+      endUtc: out.endUtc,
+      manageUrl: out.manageToken ? this.manageUrl(uid, out.manageToken) : undefined,
+    };
   }
 
   /** Durable webhook dispatch for a booking lifecycle event (via the outbox). */
