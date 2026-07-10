@@ -66,6 +66,10 @@ export function HostBookingForm({
   const event = bookable.find((e) => e.slug === slug);
   const fields = (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>;
 
+  // `reloadKey` bumps to force a slots refetch after a 409 (the picked slot was
+  // just taken) so the stale/taken time drops out and the user can really retry.
+  const [reloadKey, setReloadKey] = useState(0);
+
   // Load available slots for the chosen event (slots mode).
   useEffect(() => {
     if (mode !== 'slots' || !slug) return;
@@ -78,7 +82,7 @@ export function HostBookingForm({
       .then((j: { slots?: { startUtc: string }[] }) => setSlots((j.slots ?? []).map((s) => s.startUtc)))
       .catch(() => setSlots([]));
     setStartUtc('');
-  }, [mode, slug, accountCode, handle]);
+  }, [mode, slug, accountCode, handle, reloadKey]);
 
   const submit = () =>
     startT(async () => {
@@ -92,6 +96,12 @@ export function HostBookingForm({
         answers: Object.keys(answers).length ? answers : undefined,
       });
       setResult(r);
+      // Slot just taken → drop the stale selection and refetch a fresh list so
+      // "pick another slot" is actionable, not a dead end.
+      if (!r.ok && r.status === 409 && mode === 'slots') {
+        setStartUtc('');
+        setReloadKey((k) => k + 1);
+      }
     });
 
   if (result?.ok) {

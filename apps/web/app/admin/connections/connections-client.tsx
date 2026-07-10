@@ -160,7 +160,7 @@ function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessage
   const [ping, setPing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   return (
-    <li className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
+    <li className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
       <span className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
           <ProviderIcon provider={c.provider} />
@@ -168,19 +168,19 @@ function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessage
         <span className="flex min-w-0 flex-col gap-1">
           <span className="flex items-center gap-2">
             <span className="font-medium capitalize">{c.provider}</span>
-            {/* Honest health tag: green when a provider is wired (syncing), muted
-                when the OSS default just records the connection. */}
-            <span
-              className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium ${
-                enabled ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
-              }`}
-            >
-              {enabled ? m.healthSyncing : m.healthRecorded}
-            </span>
+            {/* Honest health: only claim what we know account-wide — when no
+                provider is wired NOTHING syncs ("Recorded only"). We can't verify
+                a single connection's live status here, so we make no per-row
+                "Syncing" claim when a provider IS enabled. */}
+            {!enabled ? (
+              <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                {m.healthRecorded}
+              </span>
+            ) : null}
           </span>
           <span className="truncate text-sm text-muted-foreground">{c.primaryEmail ?? c.externalId}</span>
           <span className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-            <label className="flex items-center gap-1" title={m.destinationHelp}>
+            <label className="flex items-center gap-1">
               <input
                 type="checkbox"
                 checked={c.isDestination}
@@ -190,7 +190,7 @@ function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessage
               {m.destination}
               <FieldHelp text={m.destinationHelp} />
             </label>
-            <label className="flex items-center gap-1" title={m.conflictHelp}>
+            <label className="flex items-center gap-1">
               <input
                 type="checkbox"
                 checked={c.checkConflicts}
