@@ -111,11 +111,16 @@ export function TeamMembersPanel({
             const isLastOwner = isOwner && ownerCount === 1;
             return (
               <li key={member.member_id} className="flex flex-wrap items-center gap-3 py-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-xs font-semibold text-muted-foreground">
+                {/* Member avatar — an initials monogram (members carry no image URL). */}
+                <span
+                  aria-hidden
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-xs font-semibold text-muted-foreground"
+                >
                   {initialOf(member)}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm font-medium">{member.display_name ?? member.member_id.slice(0, 8)}</span>
+                  {/* Email line (or a Pending label when the member hasn't a resolved email). */}
                   <span className="truncate text-xs text-muted-foreground">{member.email ?? m.memberPending}</span>
                 </span>
                 {/* Role pill (owner = accent) with an inline change select; the last
