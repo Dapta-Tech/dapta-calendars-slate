@@ -305,6 +305,99 @@ export interface BookingMessages {
       continue: string;
       footnote: string;
     };
+    settingsGeneral: {
+      displayName: string;
+      publicHandle: string;
+      timezone: string;
+      saved: string;
+      save: string;
+      saving: string;
+    };
+    developer: {
+      apiKeys: string;
+      noKeys: string;
+      revoke: string;
+      revoked: string;
+      copyOnce: string;
+      name: string;
+      scopes: string;
+      createKey: string;
+      webhooks: string;
+      noWebhooks: string;
+      subscriberUrl: string;
+      events: string;
+      addWebhook: string;
+      ping: string;
+      delete: string;
+      active: string;
+    };
+    bookingPageHeader: {
+      title: string;
+      subtitle: string;
+    };
+    studio: {
+      unsavedChanges: string;
+      allChangesSaved: string;
+      saved: string;
+      reset: string;
+      save: string;
+      saving: string;
+      saveFailed: string;
+      profile: string;
+      brand: string;
+      appearance: string;
+      meetings: string;
+      displayName: string;
+      publicHandle: string;
+      bio: string;
+      tryHandle: string;
+      accent: string;
+      contrast: string;
+      adjustedNote: string;
+      photoAvatar: string;
+      coverImage: string;
+      custom: string;
+      customizeAppearance: string;
+      axisTemplate: string;
+      axisCardStyle: string;
+      axisCorners: string;
+      axisButtons: string;
+      axisDensity: string;
+      axisFont: string;
+      axisSlotLayout: string;
+      axisDayGroup: string;
+      axisSlotSelect: string;
+      show: string;
+      hide: string;
+      noEvents: string;
+      orderVisibilityNote: string;
+      configureEventTypes: string;
+      showLandingPage: string;
+      sendVisitorsTo: string;
+      chooseEvent: string;
+      pickDefaultEvent: string;
+      eventHidden: string;
+      eventShown: string;
+      couldNotUpdateVisibility: string;
+      moveUp: string;
+      moveDown: string;
+      previewProfile: string;
+      bookingFlow: string;
+      desktop: string;
+      mobile: string;
+      checking: string;
+      available: string;
+      taken: string;
+      invalid: string;
+      uploadImage: string;
+      clear: string;
+      orPasteUrl: string;
+      imageInvalid: string;
+      imageTooLarge: string;
+      couldNotRead: string;
+      introCall: string;
+      minSuffix: string;
+    };
   };
 }
 
@@ -610,6 +703,99 @@ export const en: BookingMessages = {
       continue: 'Continue',
       footnote: 'No account needed in local mode — you’re signed in as the seeded host.',
     },
+    settingsGeneral: {
+      displayName: 'Display name',
+      publicHandle: 'Public handle',
+      timezone: 'Timezone',
+      saved: 'Saved.',
+      save: 'Save',
+      saving: 'Saving…',
+    },
+    developer: {
+      apiKeys: 'API keys',
+      noKeys: 'No API keys.',
+      revoke: 'Revoke',
+      revoked: 'revoked',
+      copyOnce: 'Copy this now — it won’t be shown again:',
+      name: 'Name',
+      scopes: 'Scopes',
+      createKey: 'Create key',
+      webhooks: 'Webhooks',
+      noWebhooks: 'No webhooks.',
+      subscriberUrl: 'Subscriber URL',
+      events: 'Events',
+      addWebhook: 'Add webhook',
+      ping: 'Ping',
+      delete: 'Delete',
+      active: 'active',
+    },
+    bookingPageHeader: {
+      title: 'Booking Page',
+      subtitle: 'Style your public page. Preview updates live — what you see is what visitors get.',
+    },
+    studio: {
+      unsavedChanges: 'Unsaved changes',
+      allChangesSaved: 'All changes saved',
+      saved: 'Saved.',
+      reset: 'Reset',
+      save: 'Save',
+      saving: 'Saving…',
+      saveFailed: 'Save failed.',
+      profile: 'Profile',
+      brand: 'Brand',
+      appearance: 'Appearance',
+      meetings: 'Meetings',
+      displayName: 'Display name',
+      publicHandle: 'Public handle',
+      bio: 'Bio',
+      tryHandle: 'Try {handle} →',
+      accent: 'Accent',
+      contrast: 'Contrast {ratio}:1',
+      adjustedNote: ' · adjusted to {hex} for legibility (AA)',
+      photoAvatar: 'Photo / avatar',
+      coverImage: 'Cover image',
+      custom: 'Custom',
+      customizeAppearance: 'Customize appearance',
+      axisTemplate: 'Template',
+      axisCardStyle: 'Card style',
+      axisCorners: 'Corners',
+      axisButtons: 'Buttons',
+      axisDensity: 'Density',
+      axisFont: 'Font',
+      axisSlotLayout: 'Slot layout',
+      axisDayGroup: 'Day group',
+      axisSlotSelect: 'Slot select',
+      show: 'Show',
+      hide: 'Hide',
+      noEvents: 'No events yet.',
+      orderVisibilityNote: 'Order + visibility apply to your public page.',
+      configureEventTypes: 'Configure event types →',
+      showLandingPage: 'Show the landing page (list of events)',
+      sendVisitorsTo: 'Send visitors directly to',
+      chooseEvent: 'Choose an event…',
+      pickDefaultEvent: 'Pick a default event, or keep the landing page on.',
+      eventHidden: 'Event hidden.',
+      eventShown: 'Event shown.',
+      couldNotUpdateVisibility: 'Could not update visibility.',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      previewProfile: 'Profile',
+      bookingFlow: 'Booking flow',
+      desktop: 'desktop',
+      mobile: 'mobile',
+      checking: 'Checking…',
+      available: '✓ Available',
+      taken: '✗ Taken',
+      invalid: 'Invalid (3–40 chars, a–z 0–9 -)',
+      uploadImage: 'Upload image',
+      clear: 'Clear',
+      orPasteUrl: '…or paste an image URL',
+      imageInvalid: 'Please choose an image file.',
+      imageTooLarge: 'Image must be under 1 MB.',
+      couldNotRead: 'Could not read that file.',
+      introCall: 'Intro Call',
+      minSuffix: 'min',
+    },
   },
 };
 
@@ -914,6 +1100,99 @@ export const es: BookingMessages = {
       subtitle: 'Programación de código abierto. Esta versión usa el proveedor de desarrollo local — configura WorkOS en tu despliegue para cuentas reales.',
       continue: 'Continuar',
       footnote: 'No se necesita cuenta en modo local — has iniciado sesión como el anfitrión de ejemplo.',
+    },
+    settingsGeneral: {
+      displayName: 'Nombre visible',
+      publicHandle: 'Identificador público',
+      timezone: 'Zona horaria',
+      saved: 'Guardado.',
+      save: 'Guardar',
+      saving: 'Guardando…',
+    },
+    developer: {
+      apiKeys: 'Claves API',
+      noKeys: 'No hay claves API.',
+      revoke: 'Revocar',
+      revoked: 'revocada',
+      copyOnce: 'Cópiala ahora — no se volverá a mostrar:',
+      name: 'Nombre',
+      scopes: 'Permisos',
+      createKey: 'Crear clave',
+      webhooks: 'Webhooks',
+      noWebhooks: 'No hay webhooks.',
+      subscriberUrl: 'URL del suscriptor',
+      events: 'Eventos',
+      addWebhook: 'Añadir webhook',
+      ping: 'Probar',
+      delete: 'Eliminar',
+      active: 'activo',
+    },
+    bookingPageHeader: {
+      title: 'Página de reservas',
+      subtitle: 'Personaliza tu página pública. La vista previa se actualiza en vivo — lo que ves es lo que reciben los visitantes.',
+    },
+    studio: {
+      unsavedChanges: 'Cambios sin guardar',
+      allChangesSaved: 'Todos los cambios guardados',
+      saved: 'Guardado.',
+      reset: 'Restablecer',
+      save: 'Guardar',
+      saving: 'Guardando…',
+      saveFailed: 'Error al guardar.',
+      profile: 'Perfil',
+      brand: 'Marca',
+      appearance: 'Apariencia',
+      meetings: 'Reuniones',
+      displayName: 'Nombre visible',
+      publicHandle: 'Identificador público',
+      bio: 'Biografía',
+      tryHandle: 'Prueba {handle} →',
+      accent: 'Color de acento',
+      contrast: 'Contraste {ratio}:1',
+      adjustedNote: ' · ajustado a {hex} para mejor legibilidad (AA)',
+      photoAvatar: 'Foto / avatar',
+      coverImage: 'Imagen de portada',
+      custom: 'Personalizado',
+      customizeAppearance: 'Personalizar apariencia',
+      axisTemplate: 'Plantilla',
+      axisCardStyle: 'Estilo de tarjeta',
+      axisCorners: 'Esquinas',
+      axisButtons: 'Botones',
+      axisDensity: 'Densidad',
+      axisFont: 'Fuente',
+      axisSlotLayout: 'Disposición de horarios',
+      axisDayGroup: 'Agrupación por día',
+      axisSlotSelect: 'Selección de horario',
+      show: 'Mostrar',
+      hide: 'Ocultar',
+      noEvents: 'Aún no hay eventos.',
+      orderVisibilityNote: 'El orden y la visibilidad se aplican a tu página pública.',
+      configureEventTypes: 'Configurar tipos de evento →',
+      showLandingPage: 'Mostrar la página de inicio (lista de eventos)',
+      sendVisitorsTo: 'Enviar a los visitantes directamente a',
+      chooseEvent: 'Elige un evento…',
+      pickDefaultEvent: 'Elige un evento predeterminado o deja activa la página de inicio.',
+      eventHidden: 'Evento oculto.',
+      eventShown: 'Evento visible.',
+      couldNotUpdateVisibility: 'No se pudo actualizar la visibilidad.',
+      moveUp: 'Subir',
+      moveDown: 'Bajar',
+      previewProfile: 'Perfil',
+      bookingFlow: 'Flujo de reserva',
+      desktop: 'escritorio',
+      mobile: 'móvil',
+      checking: 'Comprobando…',
+      available: '✓ Disponible',
+      taken: '✗ Ocupado',
+      invalid: 'No válido (3–40 caracteres, a–z 0–9 -)',
+      uploadImage: 'Subir imagen',
+      clear: 'Quitar',
+      orPasteUrl: '…o pega una URL de imagen',
+      imageInvalid: 'Elige un archivo de imagen.',
+      imageTooLarge: 'La imagen debe pesar menos de 1 MB.',
+      couldNotRead: 'No se pudo leer el archivo.',
+      introCall: 'Llamada de introducción',
+      minSuffix: 'min',
     },
   },
 };

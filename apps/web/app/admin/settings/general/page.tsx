@@ -21,6 +21,7 @@ export default async function GeneralSettings() {
         handle={me?.handle ?? ''}
         accountCode={me?.accountCode ?? ''}
         timeZone={(profile?.member as { timeZone?: string })?.timeZone ?? 'UTC'}
+        messages={m.settingsGeneral}
       />
       <div className="border-t border-border pt-6">
         <LanguageSwitcher locale={locale} label={m.common.language} />

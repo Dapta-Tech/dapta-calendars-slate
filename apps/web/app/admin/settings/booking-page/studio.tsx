@@ -13,16 +13,32 @@ import {
   onAccent,
   matchTheme,
   monogram,
+  t,
+  type BookingMessages,
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
 import { saveStudioAction, toggleEventHiddenAction } from './actions';
 
+type StudioMessages = BookingMessages['admin']['studio'];
+
 type Axes = Pick<
   PublicBranding,
   'template' | 'cardStyle' | 'corners' | 'buttons' | 'density' | 'font' | 'slotLayout' | 'dayGroup' | 'slotSelect'
 >;
+
+const AXIS_LABEL: Record<keyof Axes, keyof StudioMessages> = {
+  template: 'axisTemplate',
+  cardStyle: 'axisCardStyle',
+  corners: 'axisCorners',
+  buttons: 'axisButtons',
+  density: 'axisDensity',
+  font: 'axisFont',
+  slotLayout: 'axisSlotLayout',
+  dayGroup: 'axisDayGroup',
+  slotSelect: 'axisSlotSelect',
+};
 
 const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
   template: ['classic', 'split', 'banded'],
@@ -45,14 +61,15 @@ interface EventTypeLite {
   lengthMinutes: number;
 }
 
-/** Read an image file to a data-URL (like the old app): image/* only, ≤1MB. */
-function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
+/** Read an image file to a data-URL (like the old app): image/* only, ≤1MB.
+ *  Returns a stable error code the caller localizes. */
+function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok: false; code: 'invalid' | 'tooLarge' | 'read' }> {
   return new Promise((resolve) => {
-    if (!file.type.startsWith('image/')) return resolve({ ok: false, error: 'Please choose an image file.' });
-    if (file.size > 1024 * 1024) return resolve({ ok: false, error: 'Image must be under 1 MB.' });
+    if (!file.type.startsWith('image/')) return resolve({ ok: false, code: 'invalid' });
+    if (file.size > 1024 * 1024) return resolve({ ok: false, code: 'tooLarge' });
     const reader = new FileReader();
     reader.onload = () => resolve({ ok: true, dataUrl: String(reader.result) });
-    reader.onerror = () => resolve({ ok: false, error: 'Could not read that file.' });
+    reader.onerror = () => resolve({ ok: false, code: 'read' });
     reader.readAsDataURL(file);
   });
 }
@@ -71,11 +88,13 @@ export interface StudioInit {
   eventTypes: EventTypeLite[];
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
+  messages: StudioMessages;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
 export function Studio(init: StudioInit) {
+  const m = init.messages;
   const [displayName, setDisplayName] = useState(init.displayName);
   const [handle, setHandle] = useState(init.handle);
   const [bio, setBio] = useState(init.bio);
@@ -108,10 +127,10 @@ export function Studio(init: StudioInit) {
     startEvent(async () => {
       const r = await toggleEventHiddenAction(id, hidden);
       if (r.ok) {
-        toast.success(hidden ? 'Event hidden.' : 'Event shown.');
+        toast.success(hidden ? m.eventHidden : m.eventShown);
         router.refresh();
       } else {
-        toast.error(r.message ?? 'Could not update visibility.');
+        toast.error(r.message ?? m.couldNotUpdateVisibility);
       }
     });
   const [customizeOpen, setCustomizeOpen] = useState(matchTheme(init.axes) === null);
@@ -200,7 +219,7 @@ export function Studio(init: StudioInit) {
         initialSnapshot.current = snapshot;
       } else {
         setSaved('err');
-        setSaveMsg(r.message ?? 'Save failed.');
+        setSaveMsg(r.message ?? m.saveFailed);
       }
     });
 
@@ -214,9 +233,9 @@ export function Studio(init: StudioInit) {
               isDirty ? 'bg-secondary text-secondary-foreground' : 'bg-muted text-muted-foreground'
             }`}
           >
-            {isDirty ? 'Unsaved changes' : 'All changes saved'}
+            {isDirty ? m.unsavedChanges : m.allChangesSaved}
           </span>
-          {saved === 'ok' ? <span className="text-sm text-primary">Saved.</span> : null}
+          {saved === 'ok' ? <span className="text-sm text-primary">{m.saved}</span> : null}
           {saved === 'err' ? <span className="text-sm text-destructive">{saveMsg}</span> : null}
         </div>
         <div className="flex items-center gap-2">
@@ -226,7 +245,7 @@ export function Studio(init: StudioInit) {
             disabled={!isDirty || pending}
             className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-50"
           >
-            Reset
+            {m.reset}
           </button>
           <button
             type="button"
@@ -234,7 +253,7 @@ export function Studio(init: StudioInit) {
             disabled={!isDirty || pending || handleBlocksSave}
             className="rounded-md bg-primary px-5 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
           >
-            {pending ? 'Saving…' : 'Save'}
+            {pending ? m.saving : m.save}
           </button>
         </div>
       </div>
@@ -243,11 +262,11 @@ export function Studio(init: StudioInit) {
         {/* Controls */}
         <div className="flex flex-col gap-6">
           {/* PROFILE */}
-          <Section title="Profile">
-            <Field label="Display name">
+          <Section title={m.profile}>
+            <Field label={m.displayName}>
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Public handle">
+            <Field label={m.publicHandle}>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">/{init.accountCode}/</span>
                 <input
@@ -256,25 +275,25 @@ export function Studio(init: StudioInit) {
                   className={`${inputCls} flex-1`}
                 />
               </div>
-              <HandleHint state={handleState} />
+              <HandleHint state={handleState} m={m} />
               {handleState === 'taken' && handleSuggestion ? (
                 <button
                   type="button"
                   onClick={() => setHandle(handleSuggestion)}
                   className="self-start text-xs text-primary hover:underline"
                 >
-                  Try {handleSuggestion} →
+                  {t(m.tryHandle, { handle: handleSuggestion })}
                 </button>
               ) : null}
             </Field>
-            <Field label="Bio">
+            <Field label={m.bio}>
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} className={inputCls} />
             </Field>
           </Section>
 
           {/* BRAND */}
-          <Section title="Brand">
-            <Field label="Accent">
+          <Section title={m.brand}>
+            <Field label={m.accent}>
               <div className="mb-2 flex flex-wrap gap-2">
                 {ACCENT_PRESETS.map((c) => (
                   <button
@@ -296,20 +315,20 @@ export function Studio(init: StudioInit) {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Contrast {accentLabelContrast(accent)}:1
-                {adjusted ? ` · adjusted to ${clampAccent(accent)} for legibility (AA)` : ''}
+                {t(m.contrast, { ratio: accentLabelContrast(accent) })}
+                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent) }) : ''}
               </p>
             </Field>
-            <Field label="Photo / avatar">
-              <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" />
+            <Field label={m.photoAvatar}>
+              <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" m={m} />
             </Field>
-            <Field label="Cover image">
-              <ImageInput value={coverUrl} onChange={setCoverUrl} preview="cover" />
+            <Field label={m.coverImage}>
+              <ImageInput value={coverUrl} onChange={setCoverUrl} preview="cover" m={m} />
             </Field>
           </Section>
 
           {/* APPEARANCE */}
-          <Section title="Appearance">
+          <Section title={m.appearance}>
             <div className="mb-3 flex flex-wrap gap-2">
               {ALL_BOOKING_THEMES.map((t) => (
                 <button
@@ -323,20 +342,20 @@ export function Studio(init: StudioInit) {
                   {t}
                 </button>
               ))}
-              <span className="self-center text-xs text-muted-foreground">{activeTheme ? '' : 'Custom'}</span>
+              <span className="self-center text-xs text-muted-foreground">{activeTheme ? '' : m.custom}</span>
             </div>
             <button
               type="button"
               onClick={() => setCustomizeOpen((o) => !o)}
               className="text-sm text-muted-foreground hover:text-foreground"
             >
-              {customizeOpen ? '▾' : '▸'} Customize appearance
+              {customizeOpen ? '▾' : '▸'} {m.customizeAppearance}
             </button>
             {customizeOpen ? (
               <div className="mt-3 grid grid-cols-2 gap-3">
                 {(Object.keys(AXIS_OPTIONS) as (keyof Axes)[]).map((k) => (
                   <label key={k} className="flex flex-col gap-1 text-sm">
-                    <span className="capitalize text-muted-foreground">{k}</span>
+                    <span className="text-muted-foreground">{m[AXIS_LABEL[k]]}</span>
                     <select
                       value={axes[k]}
                       onChange={(e) => setAxis(k, e.target.value)}
@@ -356,7 +375,7 @@ export function Studio(init: StudioInit) {
           </Section>
 
           {/* MEETINGS — reorder (↑/↓) + show/hide on the public page */}
-          <Section title="Meetings">
+          <Section title={m.meetings}>
             <ul className="flex flex-col gap-1 text-sm">
               {eventOrder
                 .map((s) => init.manageableEvents.find((e) => e.slug === s))
@@ -367,8 +386,8 @@ export function Studio(init: StudioInit) {
                     className={`flex items-center gap-2 rounded-sm bg-muted px-2 py-1.5 ${et.hidden ? 'opacity-50' : ''}`}
                   >
                     <span className="flex flex-col">
-                      <button type="button" aria-label="Move up" disabled={i === 0} onClick={() => moveEvent(et.slug, -1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▲</button>
-                      <button type="button" aria-label="Move down" disabled={i === arr.length - 1} onClick={() => moveEvent(et.slug, 1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▼</button>
+                      <button type="button" aria-label={m.moveUp} disabled={i === 0} onClick={() => moveEvent(et.slug, -1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▲</button>
+                      <button type="button" aria-label={m.moveDown} disabled={i === arr.length - 1} onClick={() => moveEvent(et.slug, 1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▼</button>
                     </span>
                     <span className="flex-1 truncate">{et.title}</span>
                     <button
@@ -377,15 +396,15 @@ export function Studio(init: StudioInit) {
                       onClick={() => toggleHidden(et.id, !et.hidden)}
                       className="rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-primary disabled:opacity-60"
                     >
-                      {et.hidden ? 'Show' : 'Hide'}
+                      {et.hidden ? m.show : m.hide}
                     </button>
                   </li>
                 ))}
-              {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">No events yet.</li> : null}
+              {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">{m.noEvents}</li> : null}
             </ul>
-            <p className="mt-1 text-xs text-muted-foreground">Order + visibility apply to your public page.</p>
+            <p className="mt-1 text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
             <a href="/admin/event-types" className="mt-1 inline-block text-xs text-primary hover:underline">
-              Configure event types →
+              {m.configureEventTypes}
             </a>
 
             {/* Landing (R25): show the picker, or send visitors straight to one event. */}
@@ -396,17 +415,17 @@ export function Studio(init: StudioInit) {
                   checked={landingEnabled}
                   onChange={(e) => setLandingEnabled(e.target.checked)}
                 />
-                Show the landing page (list of events)
+                {m.showLandingPage}
               </label>
               {!landingEnabled ? (
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-muted-foreground">Send visitors directly to</span>
+                  <span className="text-muted-foreground">{m.sendVisitorsTo}</span>
                   <select
                     value={defaultEventSlug}
                     onChange={(e) => setDefaultEventSlug(e.target.value)}
                     className={inputCls}
                   >
-                    <option value="">Choose an event…</option>
+                    <option value="">{m.chooseEvent}</option>
                     {init.eventTypes.map((et) => (
                       <option key={et.slug} value={et.slug}>
                         {et.title}
@@ -414,7 +433,7 @@ export function Studio(init: StudioInit) {
                     ))}
                   </select>
                   {!defaultEventSlug ? (
-                    <span className="text-xs text-destructive">Pick a default event, or keep the landing page on.</span>
+                    <span className="text-xs text-destructive">{m.pickDefaultEvent}</span>
                   ) : null}
                 </label>
               ) : null}
@@ -431,9 +450,9 @@ export function Studio(init: StudioInit) {
                   key={s}
                   type="button"
                   onClick={() => setSurface(s)}
-                  className={`rounded-sm px-3 py-1 capitalize ${surface === s ? 'bg-accent' : ''}`}
+                  className={`rounded-sm px-3 py-1 ${surface === s ? 'bg-accent' : ''}`}
                 >
-                  {s === 'booking' ? 'Booking flow' : 'Profile'}
+                  {s === 'booking' ? m.bookingFlow : m.previewProfile}
                 </button>
               ))}
             </div>
@@ -445,7 +464,7 @@ export function Studio(init: StudioInit) {
                   onClick={() => setDevice(d)}
                   className={`rounded-sm px-3 py-1 capitalize ${device === d ? 'bg-accent' : ''}`}
                 >
-                  {d}
+                  {d === 'desktop' ? m.desktop : m.mobile}
                 </button>
               ))}
             </div>
@@ -461,9 +480,10 @@ export function Studio(init: StudioInit) {
                   coverUrl={coverUrl}
                   accent={accent}
                   eventTypes={init.eventTypes}
+                  m={m}
                 />
               ) : (
-                <BookingPreview accent={accent} />
+                <BookingPreview accent={accent} m={m} />
               )}
             </div>
           </div>
@@ -480,6 +500,7 @@ function ProfilePreview({
   coverUrl,
   accent,
   eventTypes,
+  m,
 }: {
   displayName: string;
   bio: string;
@@ -487,6 +508,7 @@ function ProfilePreview({
   coverUrl: string;
   accent: string;
   eventTypes: EventTypeLite[];
+  m: StudioMessages;
 }) {
   return (
     <div>
@@ -514,10 +536,10 @@ function ProfilePreview({
         </div>
       </div>
       <div className="flex flex-col" style={{ gap: 'var(--bp-gap)' }}>
-        {(eventTypes.length ? eventTypes : [{ slug: 'intro', title: 'Intro Call', lengthMinutes: 30 }]).map((et) => (
+        {(eventTypes.length ? eventTypes : [{ slug: 'intro', title: m.introCall, lengthMinutes: 30 }]).map((et) => (
           <div key={et.slug} className="bp-card flex items-center justify-between">
             <span className="font-medium">{et.title}</span>
-            <span className="text-sm text-muted-foreground">{et.lengthMinutes} min</span>
+            <span className="text-sm text-muted-foreground">{et.lengthMinutes} {m.minSuffix}</span>
           </div>
         ))}
       </div>
@@ -525,12 +547,12 @@ function ProfilePreview({
   );
 }
 
-function BookingPreview({ accent: _accent }: { accent: string }) {
+function BookingPreview({ accent: _accent, m }: { accent: string; m: StudioMessages }) {
   return (
     <div>
       <div className="bp-card mb-4">
-        <div className="font-medium">Intro Call</div>
-        <div className="text-sm text-muted-foreground">30 min</div>
+        <div className="font-medium">{m.introCall}</div>
+        <div className="text-sm text-muted-foreground">30 {m.minSuffix}</div>
       </div>
       <div className="bp-slots">
         {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
@@ -543,13 +565,13 @@ function BookingPreview({ accent: _accent }: { accent: string }) {
   );
 }
 
-function HandleHint({ state }: { state: HandleState }) {
+function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   const map: Record<HandleState, { text: string; cls: string } | null> = {
     idle: null,
-    checking: { text: 'Checking…', cls: 'text-muted-foreground' },
-    available: { text: '✓ Available', cls: 'text-primary' },
-    taken: { text: '✗ Taken', cls: 'text-destructive' },
-    invalid: { text: 'Invalid (3–40 chars, a–z 0–9 -)', cls: 'text-destructive' },
+    checking: { text: m.checking, cls: 'text-muted-foreground' },
+    available: { text: m.available, cls: 'text-primary' },
+    taken: { text: m.taken, cls: 'text-destructive' },
+    invalid: { text: m.invalid, cls: 'text-destructive' },
   };
   const h = map[state];
   return h ? <span className={`text-xs ${h.cls}`}>{h.text}</span> : null;
@@ -581,13 +603,17 @@ function ImageInput({
   value,
   onChange,
   preview,
+  m,
 }: {
   value: string;
   onChange: (v: string) => void;
   preview: 'avatar' | 'cover';
+  m: StudioMessages;
 }) {
   const [err, setErr] = useState<string | null>(null);
   const isData = value.startsWith('data:');
+  const errText = (code: 'invalid' | 'tooLarge' | 'read') =>
+    code === 'invalid' ? m.imageInvalid : code === 'tooLarge' ? m.imageTooLarge : m.couldNotRead;
   return (
     <div className="flex flex-col gap-2">
       {value ? (
@@ -599,7 +625,7 @@ function ImageInput({
       ) : null}
       <div className="flex items-center gap-2">
         <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:border-primary">
-          Upload image
+          {m.uploadImage}
           <input
             type="file"
             accept="image/*"
@@ -612,7 +638,7 @@ function ImageInput({
                 onChange(r.dataUrl);
                 setErr(null);
               } else {
-                setErr(r.error);
+                setErr(errText(r.code));
               }
             }}
           />
@@ -626,14 +652,14 @@ function ImageInput({
             }}
             className="text-xs text-muted-foreground hover:text-destructive"
           >
-            Clear
+            {m.clear}
           </button>
         ) : null}
       </div>
       <input
         value={isData ? '' : value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="…or paste an image URL"
+        placeholder={m.orPasteUrl}
         className={inputCls}
       />
       {err ? <span className="text-xs text-destructive">{err}</span> : null}

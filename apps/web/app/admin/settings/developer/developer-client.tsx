@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import type { BookingMessages } from '@slate/shared';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
 import {
   createApiKeyAction,
@@ -11,10 +12,12 @@ import {
   revokeApiKeyAction,
 } from './actions';
 
+type DevMessages = BookingMessages['admin']['developer'];
+
 const SCOPES = ['availability:read', 'bookings:read', 'bookings:write'];
 const TRIGGERS = ['booking.created', 'booking.rescheduled', 'booking.cancelled'];
 
-export function ApiKeys({ keys }: { keys: ApiKeyRow[] }) {
+export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: DevMessages }) {
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['availability:read']);
   const [reveal, setReveal] = useState<string | null>(null);
@@ -22,14 +25,14 @@ export function ApiKeys({ keys }: { keys: ApiKeyRow[] }) {
 
   return (
     <section className="mb-10">
-      <h2 className="mb-3 text-xl font-semibold">API keys</h2>
+      <h2 className="mb-3 text-xl font-semibold">{m.apiKeys}</h2>
       <ul className="mb-4 flex flex-col gap-2">
         {keys.map((k) => (
           <li key={k.id} className="flex items-center justify-between rounded-md border border-border bg-card p-3">
             <span className="text-sm">
               <span className="font-medium">{k.name}</span>{' '}
               <code className="text-muted-foreground">{k.prefix}…{k.last4}</code>
-              {k.revoked_at_ms ? <span className="ml-2 text-destructive">revoked</span> : null}
+              {k.revoked_at_ms ? <span className="ml-2 text-destructive">{m.revoked}</span> : null}
             </span>
             {!k.revoked_at_ms ? (
               <button
@@ -37,28 +40,28 @@ export function ApiKeys({ keys }: { keys: ApiKeyRow[] }) {
                 onClick={() => start(() => revokeApiKeyAction(k.id))}
                 className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
               >
-                Revoke
+                {m.revoke}
               </button>
             ) : null}
           </li>
         ))}
-        {keys.length === 0 ? <li className="text-sm text-muted-foreground">No API keys.</li> : null}
+        {keys.length === 0 ? <li className="text-sm text-muted-foreground">{m.noKeys}</li> : null}
       </ul>
 
       {reveal ? (
         <div className="mb-4 rounded-md border border-primary bg-card p-3">
-          <p className="mb-1 text-sm text-muted-foreground">Copy this now — it won’t be shown again:</p>
+          <p className="mb-1 text-sm text-muted-foreground">{m.copyOnce}</p>
           <code className="break-all text-sm">{reveal}</code>
         </div>
       ) : null}
 
       <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-4">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Name</span>
+          <span className="text-muted-foreground">{m.name}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2" />
         </label>
         <div className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Scopes</span>
+          <span className="text-muted-foreground">{m.scopes}</span>
           <div className="flex gap-3">
             {SCOPES.map((s) => (
               <label key={s} className="flex items-center gap-1">
@@ -86,7 +89,7 @@ export function ApiKeys({ keys }: { keys: ApiKeyRow[] }) {
           }
           className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {pending ? '…' : 'Create key'}
+          {pending ? '…' : m.createKey}
         </button>
       </div>
     </section>
@@ -97,10 +100,12 @@ function WebhookItem({
   w,
   start,
   pending,
+  m,
 }: {
   w: WebhookRow;
   start: (fn: () => void) => void;
   pending: boolean;
+  m: DevMessages;
 }) {
   const [ping, setPing] = useState<string | null>(null);
   return (
@@ -115,7 +120,7 @@ function WebhookItem({
               disabled={pending}
               onChange={(e) => start(() => toggleWebhookAction(w.id, e.target.checked))}
             />
-            active
+            {m.active}
           </label>
           <button
             type="button"
@@ -123,14 +128,14 @@ function WebhookItem({
             onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}
             className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
           >
-            Ping
+            {m.ping}
           </button>
           <button
             type="button"
             onClick={() => start(() => deleteWebhookAction(w.id))}
             className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
           >
-            Delete
+            {m.delete}
           </button>
         </span>
       </div>
@@ -139,27 +144,27 @@ function WebhookItem({
   );
 }
 
-export function Webhooks({ webhooks }: { webhooks: WebhookRow[] }) {
+export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; messages: DevMessages }) {
   const [url, setUrl] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['booking.created']);
   const [pending, start] = useTransition();
 
   return (
     <section>
-      <h2 className="mb-3 text-xl font-semibold">Webhooks</h2>
+      <h2 className="mb-3 text-xl font-semibold">{m.webhooks}</h2>
       <ul className="mb-4 flex flex-col gap-2">
         {webhooks.map((w) => (
-          <WebhookItem key={w.id} w={w} start={start} pending={pending} />
+          <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} />
         ))}
-        {webhooks.length === 0 ? <li className="text-sm text-muted-foreground">No webhooks.</li> : null}
+        {webhooks.length === 0 ? <li className="text-sm text-muted-foreground">{m.noWebhooks}</li> : null}
       </ul>
       <div className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-4">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Subscriber URL</span>
+          <span className="text-muted-foreground">{m.subscriberUrl}</span>
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className="w-72 rounded-md border border-input bg-background px-3 py-2" />
         </label>
         <div className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">Events</span>
+          <span className="text-muted-foreground">{m.events}</span>
           <div className="flex gap-3">
             {TRIGGERS.map((t) => (
               <label key={t} className="flex items-center gap-1">
@@ -179,7 +184,7 @@ export function Webhooks({ webhooks }: { webhooks: WebhookRow[] }) {
           onClick={() => start(async () => { await createWebhookAction(url, triggers); setUrl(''); })}
           className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-60"
         >
-          {pending ? '…' : 'Add webhook'}
+          {pending ? '…' : m.addWebhook}
         </button>
       </div>
     </section>

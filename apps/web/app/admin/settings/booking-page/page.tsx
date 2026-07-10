@@ -1,15 +1,18 @@
 import { adminApi } from '@/lib/admin-api';
-import { defaultBranding } from '@slate/shared';
+import { defaultBranding, getMessages } from '@slate/shared';
+import { getLocale } from '@/lib/locale';
 import { Studio } from './studio';
 
 export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const [profile, adminEvents] = await Promise.all([
+  const [profile, adminEvents, locale] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
     adminApi.listEventTypes(),
+    getLocale(),
   ]);
+  const t = getMessages(locale).admin;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
   const accent = profile?.member.brandColor ?? '#cbe84f';
@@ -29,11 +32,10 @@ export default async function BookingPageSettings() {
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-10">
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight">Booking Page</h1>
-      <p className="mb-6 text-muted-foreground">
-        Style your public page. Preview updates live — what you see is what visitors get.
-      </p>
+      <h1 className="mb-1 text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
+      <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
+        messages={t.studio}
         accountCode={me?.accountCode ?? ''}
         displayName={displayName}
         handle={me?.handle ?? ''}
