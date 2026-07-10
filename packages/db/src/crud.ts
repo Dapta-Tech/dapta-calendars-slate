@@ -334,19 +334,21 @@ export interface TeamView {
   id: string;
   name: string;
   slug: string | null;
+  bio: string | null;
   logoUrl: string | null;
   timeZone: string;
   hideBranding: boolean;
 }
 
 export async function listTeams(db: Db, accountId: string): Promise<TeamView[]> {
-  const rows = await db.all<{ id: string; name: string; slug: string | null; logo_url: string | null; time_zone: string; hide_branding: number }>(
-    sql`SELECT id, name, slug, logo_url, time_zone, hide_branding FROM team WHERE account_id = ${accountId} ORDER BY created_at ASC`,
+  const rows = await db.all<{ id: string; name: string; slug: string | null; bio: string | null; logo_url: string | null; time_zone: string; hide_branding: number }>(
+    sql`SELECT id, name, slug, bio, logo_url, time_zone, hide_branding FROM team WHERE account_id = ${accountId} ORDER BY created_at ASC`,
   );
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     slug: r.slug,
+    bio: r.bio,
     logoUrl: r.logo_url,
     timeZone: r.time_zone,
     hideBranding: !!r.hide_branding,
@@ -361,7 +363,7 @@ export async function getTeamById(db: Db, accountId: string, id: string): Promis
 export async function createTeam(
   db: Db,
   accountId: string,
-  input: { name: string; slug: string; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
+  input: { name: string; slug: string; bio?: string | null; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
 ): Promise<CrudResult<TeamView>> {
   const clash = await db.get<{ id: string }>(
     sql`SELECT id FROM team WHERE account_id = ${accountId} AND slug = ${input.slug} LIMIT 1`,
@@ -369,8 +371,8 @@ export async function createTeam(
   if (clash) return { ok: false, reason: 'SLUG_TAKEN', message: 'That team slug is in use.' };
   const id = randomUUID();
   await db.run(
-    sql`INSERT INTO team (id, account_id, name, slug, logo_url, time_zone, hide_branding, created_at)
-        VALUES (${id}, ${accountId}, ${input.name}, ${input.slug}, ${input.logoUrl ?? null},
+    sql`INSERT INTO team (id, account_id, name, slug, bio, logo_url, time_zone, hide_branding, created_at)
+        VALUES (${id}, ${accountId}, ${input.name}, ${input.slug}, ${input.bio ?? null}, ${input.logoUrl ?? null},
           ${input.timeZone ?? 'UTC'}, ${input.hideBranding ? 1 : 0}, ${Date.now()})`,
   );
   return { ok: true, value: (await getTeamById(db, accountId, id))! };
@@ -380,12 +382,13 @@ export async function updateTeam(
   db: Db,
   accountId: string,
   id: string,
-  input: { name?: string; slug?: string; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
+  input: { name?: string; slug?: string; bio?: string | null; logoUrl?: string | null; timeZone?: string; hideBranding?: boolean },
 ): Promise<CrudResult<TeamView>> {
   const existing = await getTeamById(db, accountId, id);
   if (!existing) return { ok: false, reason: 'NOT_FOUND' };
   await db.run(
     sql`UPDATE team SET name = ${input.name ?? existing.name}, slug = ${input.slug ?? existing.slug},
+        bio = ${input.bio !== undefined ? input.bio : existing.bio},
         logo_url = ${input.logoUrl !== undefined ? input.logoUrl : existing.logoUrl},
         time_zone = ${input.timeZone ?? existing.timeZone},
         hide_branding = ${input.hideBranding !== undefined ? (input.hideBranding ? 1 : 0) : existing.hideBranding ? 1 : 0}

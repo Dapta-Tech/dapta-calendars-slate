@@ -150,6 +150,7 @@ export interface Team {
   id: string;
   name: string;
   slug: string | null;
+  bio: string | null;
   logoUrl: string | null;
   timeZone: string;
   hideBranding: boolean;

@@ -1,25 +1,33 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
+
+export interface TeamCreatePayload {
+  name: string;
+  slug: string;
+  bio: string | null;
+  logoUrl: string | null;
+  timeZone: string;
+}
+
+/** Dedicated create-page action: creates the team then redirects to its detail. */
+export async function createTeamFullAction(p: TeamCreatePayload): Promise<ActionResult> {
+  let id: string | undefined;
+  try {
+    const team = await adminApi.createTeam(p);
+    id = team.id;
+    revalidatePath('/admin/teams');
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not create the team.' };
+  }
+  redirect(`/admin/teams/${id}`);
+}
 /** Invite outcome carries a stable code so the client can localize the message. */
 export type InviteResult = { ok: boolean; code?: 'INVALID_EMAIL' | 'NO_MATCH' | 'FAILED'; message?: string };
-
-export async function createTeamAction(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
-  try {
-    await adminApi.createTeam({
-      name: String(form.get('name') ?? ''),
-      slug: String(form.get('slug') ?? ''),
-      timeZone: String(form.get('timeZone') ?? 'UTC'),
-    });
-    revalidatePath('/admin/teams');
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
-  }
-}
 
 export async function deleteTeamAction(id: string): Promise<ActionResult> {
   try {

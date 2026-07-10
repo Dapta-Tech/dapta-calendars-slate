@@ -60,6 +60,7 @@ export const team = sqliteTable('team', {
   accountId: text('account_id').notNull(),
   name: text('name').notNull(),
   slug: text('slug'),
+  bio: text('bio'),
   logoUrl: text('logo_url'),
   timeZone: text('time_zone').notNull().default('UTC'),
   hideBranding: integer('hide_branding').notNull().default(0),

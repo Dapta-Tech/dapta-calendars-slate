@@ -330,7 +330,8 @@ export type ScheduleInput = z.infer<typeof scheduleInputSchema>;
 export const teamInputSchema = z.object({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(80),
-  logoUrl: z.string().url().nullable().optional(),
+  bio: z.string().max(2000).nullable().optional(),
+  logoUrl: z.string().nullable().optional(),
   timeZone: timeZoneSchema.optional(),
   hideBranding: z.boolean().optional(),
 });

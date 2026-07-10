@@ -259,6 +259,18 @@ export interface BookingMessages {
       ownerLock: string;
       memberPending: string;
       noAccountMember: string;
+      createTitle: string;
+      createSubtitle: string;
+      bioLabel: string;
+      bioPlaceholder: string;
+      logoLabel: string;
+      uploadImage: string;
+      orPasteUrl: string;
+      clearImage: string;
+      imageTooLarge: string;
+      imageInvalidType: string;
+      creating: string;
+      backToTeamsList: string;
     };
     connections: {
       pageDesc: string;
@@ -552,6 +564,18 @@ export const en: BookingMessages = {
       ownerLock: 'Owners can’t be removed — change their role first.',
       memberPending: 'Pending',
       noAccountMember: 'No account member with that email — they need to sign up first.',
+      createTitle: 'New team',
+      createSubtitle: 'Round-robin bookings across a group of hosts. You can add members after creating.',
+      bioLabel: 'Bio',
+      bioPlaceholder: 'A short description shown on the team’s public page.',
+      logoLabel: 'Logo',
+      uploadImage: 'Upload image',
+      orPasteUrl: '…or paste an image URL',
+      clearImage: 'Clear',
+      imageTooLarge: 'Image must be 1MB or smaller.',
+      imageInvalidType: 'Please choose an image file.',
+      creating: 'Creating…',
+      backToTeamsList: '← Teams',
     },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
@@ -845,6 +869,18 @@ export const es: BookingMessages = {
       ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
       memberPending: 'Pendiente',
       noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
+      createTitle: 'Nuevo equipo',
+      createSubtitle: 'Reparte reservas por turnos entre un grupo de anfitriones. Puedes añadir miembros después de crearlo.',
+      bioLabel: 'Biografía',
+      bioPlaceholder: 'Una breve descripción que se muestra en la página pública del equipo.',
+      logoLabel: 'Logo',
+      uploadImage: 'Subir imagen',
+      orPasteUrl: '…o pega una URL de imagen',
+      clearImage: 'Quitar',
+      imageTooLarge: 'La imagen debe pesar 1MB o menos.',
+      imageInvalidType: 'Elige un archivo de imagen.',
+      creating: 'Creando…',
+      backToTeamsList: '← Equipos',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
