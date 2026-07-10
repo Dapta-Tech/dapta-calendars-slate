@@ -30,7 +30,7 @@ export default async function BookingPage({
 
   return (
     <BrandedShell brandColor={profile.member.brandColor} style={profile.member.style}>
-      <main className="mx-auto max-w-3xl px-6 py-12">
+      <main className="mx-auto max-w-4xl px-6 py-12">
         <header className="mb-8 flex flex-col gap-1">
         <Link
           href={`/${accountCode}/${handle}`}

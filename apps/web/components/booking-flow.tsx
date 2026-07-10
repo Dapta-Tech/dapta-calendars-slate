@@ -158,7 +158,10 @@ export function BookingFlow({
         {days.length === 0 ? (
           <p className="text-muted-foreground">{m.noSlots}</p>
         ) : (
-          <div className="flex max-h-[28rem] flex-col overflow-y-auto pr-2">
+          // Page-scroll, no inner scroll region (Design Quality Bar §2): the list
+          // flows in the page so there's no native scrollbar or mid-row cut, and
+          // the day headers stay sticky for context.
+          <div className="flex flex-col gap-4">
             {days.map((day) => (
               <div key={day.dayKey} className="bp-day">
                 <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{day.heading}</h3>
@@ -173,11 +176,11 @@ export function BookingFlow({
                         onClick={() => pick(s)}
                         aria-pressed={selected === s.startUtc}
                         disabled={full}
-                        className="bp-slot flex flex-col items-center text-sm disabled:opacity-50"
+                        className="bp-slot text-sm disabled:opacity-50"
                       >
-                        <span>{s.label}</span>
+                        <span className="whitespace-nowrap">{s.label}</span>
                         {isGroup ? (
-                          <span className="text-[11px] text-muted-foreground">
+                          <span className="whitespace-nowrap text-[11px] text-muted-foreground">
                             {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
                           </span>
                         ) : null}
@@ -191,7 +194,7 @@ export function BookingFlow({
         )}
       </section>
 
-      <aside aria-label="Your details">
+      <aside aria-label="Your details" className="md:sticky md:top-6 md:self-start">
         {selected ? (
           <form action={formAction} className="bp-card flex flex-col gap-3 border border-border bg-card p-4">
             <input type="hidden" name="accountCode" value={accountCode} />
@@ -214,11 +217,11 @@ export function BookingFlow({
             ) : null}
 
             <label className="flex flex-col gap-1 text-sm">
-              {m.yourName}
+              <span>{m.yourName} <span className="text-destructive">*</span></span>
               <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              {m.yourEmail}
+              <span>{m.yourEmail} <span className="text-destructive">*</span></span>
               <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 
@@ -228,8 +231,11 @@ export function BookingFlow({
               const isMulti = f.type === 'textarea' || f.type === 'guests';
               return (
                 <label key={f.name} className="flex flex-col gap-1 text-sm">
-                  {f.label}
-                  {f.required ? <span className="text-destructive"> *</span> : null}
+                  {/* Required marker stays INLINE with the label (Bar §7). */}
+                  <span>
+                    {f.label}
+                    {f.required ? <span className="text-destructive"> *</span> : null}
+                  </span>
                   {isMulti ? (
                     <textarea
                       name={`answer_${f.name}`}
@@ -257,7 +263,7 @@ export function BookingFlow({
             })}
 
             <label className="flex flex-col gap-1 text-sm">
-              {m.notes}
+              <span>{m.notes}</span>
               <textarea name="notes" rows={2} className="rounded-md border border-input bg-background px-3 py-2" />
             </label>
 

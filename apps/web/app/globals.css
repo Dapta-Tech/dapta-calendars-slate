@@ -50,6 +50,31 @@ body {
   outline-offset: 2px;
 }
 
+/* Themed scrollbars app-wide — a native white track on the dark theme is an
+   automatic FAIL (Design Quality Bar §1). Thin, on-surface, transparent track;
+   applies to the page and every overflow region (Firefox + WebKit). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+  background-clip: padding-box;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;
@@ -110,14 +135,32 @@ body {
   border-radius: var(--bp-radius);
   padding: var(--bp-pad);
 }
-/* slot chip base + selected treatment (slotSelect) */
+/* Sticky day header (Design Quality Bar §3) — grouped slots always keep their
+   date context as the page scrolls; never a row of orphan "AM" fragments. */
+.branded-surface .bp-day > h3 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background);
+  padding-block: 0.375rem;
+}
+/* slot chip base + selected treatment (slotSelect). Fixed height + never-wrap
+   text → a consistent grid of single-line "11:00 AM" buttons (Bar §4). */
 .branded-surface .bp-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem; /* 44px hit target (R28) */
   border: 1px solid var(--border);
   border-radius: var(--bp-btn-radius);
   padding: var(--bp-slot-pad);
   background: var(--card);
   text-align: center;
-  transition: transform 120ms var(--ease-standard, ease);
+  white-space: nowrap;
+  transition:
+    transform 120ms var(--ease-standard, ease),
+    border-color 120ms var(--ease-standard, ease);
 }
 .branded-surface .bp-slot:hover {
   border-color: var(--accent);
@@ -125,15 +168,20 @@ body {
 .branded-surface .bp-slot:active {
   transform: scale(0.97);
 }
+/* Selected: unmistakable at a glance (Bar §5) — accent ring + fill + weight,
+   both slotSelect axes. */
 .branded-surface.sel-soft .bp-slot[aria-pressed='true'] {
   background: var(--accent-soft);
   border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--foreground);
+  font-weight: 600;
 }
 .branded-surface.sel-solid .bp-slot[aria-pressed='true'] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-contrast);
+  font-weight: 600;
 }
 /* accent buttons on branded surfaces */
 .branded-surface .bp-btn {
