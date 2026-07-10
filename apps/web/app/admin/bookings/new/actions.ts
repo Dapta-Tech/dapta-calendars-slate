@@ -8,6 +8,8 @@ export interface HostBookingResult {
   ok: boolean;
   uid?: string;
   message?: string;
+  /** HTTP status of the failed attempt (409 = the slot was just taken). */
+  status?: number;
 }
 
 /**
@@ -33,7 +35,7 @@ export async function createHostBookingAction(payload: {
       revalidatePath('/admin/bookings');
       return { ok: true, uid: j.uid as string };
     }
-    return { ok: false, message: (j.message as string) ?? 'Could not create the booking.' };
+    return { ok: false, status: res.status, message: (j.message as string) ?? 'Could not create the booking.' };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }

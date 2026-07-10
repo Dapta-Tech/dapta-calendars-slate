@@ -60,7 +60,7 @@ export function HostBookingForm({
   const [email, setEmail] = useState('');
   const [tz, setTz] = useState('America/New_York');
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<{ ok: boolean; uid?: string; message?: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; uid?: string; message?: string; status?: number } | null>(null);
   const [pending, startT] = useTransition();
 
   const event = bookable.find((e) => e.slug === slug);
@@ -192,7 +192,9 @@ export function HostBookingForm({
         </label>
       ))}
 
-      {result && !result.ok ? <p className="text-sm text-destructive">{result.message}</p> : null}
+      {result && !result.ok ? (
+        <p className="text-sm text-destructive">{result.status === 409 ? m.slotTaken : result.message}</p>
+      ) : null}
       <Button onClick={submit} disabled={pending || !name || !email} className="self-start">
         {pending ? m.creating : m.createBooking}
       </Button>

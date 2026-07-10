@@ -79,7 +79,13 @@ function Section({
     <section className="mb-8">
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{title}</h2>
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{m.nothingHere}</p>
+        <div className="flex items-center gap-2 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="4.5" width="18" height="16" rx="2" />
+            <path d="M3 9h18M8 2.5v4M16 2.5v4" />
+          </svg>
+          {m.nothingHere}
+        </div>
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((b) => (

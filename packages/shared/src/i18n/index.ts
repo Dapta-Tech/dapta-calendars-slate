@@ -213,6 +213,7 @@ export interface BookingMessages {
       backToBookings: string;
       newSubtitle: string;
       createEventFirst: string;
+      slotTaken: string;
     };
     teams: {
       title: string;
@@ -620,6 +621,7 @@ export const en: BookingMessages = {
       backToBookings: '← Back to bookings',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event type first.',
+      slotTaken: 'That time was just taken — pick another slot.',
     },
     teams: {
       title: 'Teams',
@@ -1027,6 +1029,7 @@ export const es: BookingMessages = {
       backToBookings: '← Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un tipo de evento.',
+      slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
     },
     teams: {
       title: 'Equipos',
