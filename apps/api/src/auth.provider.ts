@@ -16,6 +16,10 @@ import { UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import { sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
+// The concrete `workos` adapter. The cycle (adapter imports the port/`header`
+// from here) is safe: each side references the other only inside function
+// bodies, never during module evaluation.
+import { WorkOsAuthProvider } from './auth.provider.workos';
 
 export interface ReqLike {
   headers: Record<string, string | string[] | undefined>;
@@ -74,20 +78,28 @@ export class LocalAuthProvider implements AuthProvider {
 
 /**
  * Select the host AuthProvider for the configured `AUTH_PROVIDER`. This is the
- * DI seam `app.module` uses. `workos` throws unless the private overlay has
- * replaced this factory with one that returns a concrete WorkOS adapter — never
- * a silent fallback to the insecure stub.
+ * DI seam `app.module` uses.
+ *
+ * `workos` resolves to the concrete `WorkOsAuthProvider` (a downstream validator
+ * of the upstream identity service's HS256 platform JWT) — but ONLY when a
+ * `JWT_SECRET` is configured. A pure OSS build with no secret still fails loud
+ * here rather than silently falling back to the insecure local stub. (In the
+ * internal-first phase the adapter lives in-repo; it later moves to the private
+ * overlay behind this same seam.)
  */
 export function createAuthProvider(env: ServerEnv, db: Db): AuthProvider {
   switch (env.AUTH_PROVIDER) {
     case 'local':
       return new LocalAuthProvider(db, env);
     case 'workos':
-      throw new Error(
-        'AUTH_PROVIDER=workos requires the private WorkOS AuthKit adapter overlay, which is not bundled in ' +
-          'the open-source build. Provide a concrete AuthProvider (see docs/auth) or use AUTH_PROVIDER=local ' +
-          'for development only.',
-      );
+      if (!env.JWT_SECRET) {
+        throw new Error(
+          'AUTH_PROVIDER=workos requires JWT_SECRET (the shared secret the upstream identity service signs ' +
+            'the host session token with). Set it via the deploy secret / a local .env, or use ' +
+            'AUTH_PROVIDER=local for development only.',
+        );
+      }
+      return new WorkOsAuthProvider(db, env);
     default:
       throw new Error(`Unknown AUTH_PROVIDER: ${String((env as ServerEnv).AUTH_PROVIDER)}`);
   }
