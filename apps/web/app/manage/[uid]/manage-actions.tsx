@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { groupSlotsByDay, type BookingMessages, type Slot } from '@slate/shared';
 import { cancelAction, rescheduleAction } from './actions';
 
@@ -28,6 +28,7 @@ export function ManageActions({
   messages: BookingMessages['manage'];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [cancelRes, cancelForm, cancelPending] = useActionState(cancelAction, null);
   const [rsRes, rsForm, rsPending] = useActionState(rescheduleAction, null);
   const [newStartUtc, setNewStartUtc] = useState('');
@@ -35,6 +36,7 @@ export function ManageActions({
   // hold the live token in state and adopt the rotated one from the response —
   // otherwise a second cancel/reschedule from this page would 403.
   const [token, setToken] = useState(initialToken);
+  const [navPending, startNav] = useTransition();
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
 
   useEffect(() => {
@@ -45,29 +47,46 @@ export function ManageActions({
       if (next && next !== token) {
         setToken(next);
         setNewStartUtc('');
-        router.replace(`/manage/${uid}?token=${encodeURIComponent(next)}`);
+        // Preserve any other query params; only swap the token. Wrapped in a
+        // transition so the header→new-time RSC round-trip has a pending state.
+        const params = new URLSearchParams(searchParams);
+        params.set('token', next);
+        startNav(() => router.replace(`/manage/${uid}?${params.toString()}`));
       }
     } else {
       // Conflict (slot just taken) → refetch availability, drop the stale time.
       setNewStartUtc('');
       router.refresh();
     }
-  }, [rsRes, router, uid, token]);
+  }, [rsRes, router, uid, token, searchParams]);
 
   if (cancelRes?.ok) {
     return (
-      <p className="rounded-md border border-border bg-card p-4 text-card-foreground">
+      <p role="status" aria-live="polite" className="rounded-md border border-border bg-card p-4 text-card-foreground">
         {m.cancelled}
       </p>
     );
   }
 
+  // Reschedule succeeded but no rotated token came back (shouldn't happen on the
+  // public path, which always rotates) → the current token is dead, so we can't
+  // safely keep the forms live. Show a terminal success instead.
+  if (rsRes?.ok && !rsRes.manageUrl) {
+    return (
+      <p role="status" aria-live="polite" className="rounded-md border border-border bg-card p-4 text-card-foreground">
+        {m.rescheduled}
+      </p>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className={`flex flex-col gap-6 ${navPending ? 'opacity-60' : ''}`}>
       {/* Non-terminal success: the token is adopted, so the host can reschedule
           again or cancel from here without a 403. */}
       {rsRes?.ok ? (
-        <p className="rounded-md border border-border bg-card p-4 text-card-foreground">{m.rescheduled}</p>
+        <p role="status" aria-live="polite" className="rounded-md border border-border bg-card p-4 text-card-foreground">
+          {m.rescheduled}
+        </p>
       ) : null}
       <form action={rsForm} className="flex flex-col gap-2 rounded-md border border-border bg-card p-4">
         <input type="hidden" name="uid" value={uid} />
@@ -103,10 +122,13 @@ export function ManageActions({
             ))}
           </div>
         )}
-        {rsRes && !rsRes.ok ? <p className="text-sm text-destructive">{rsRes.message}</p> : null}
+        {rsRes && !rsRes.ok ? <p role="alert" className="text-sm text-destructive">{rsRes.message}</p> : null}
         <button
           type="submit"
-          disabled={rsPending || !newStartUtc}
+          // Also disable synchronously once a reschedule has succeeded (rsRes.ok)
+          // so a fast double-click can't resubmit the stale slot with the rotated
+          // (now-dead) token before the effect clears the selection.
+          disabled={rsPending || navPending || !newStartUtc || rsRes?.ok}
           className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
         >
           {rsPending ? m.rescheduling : m.reschedule}
@@ -126,7 +148,7 @@ export function ManageActions({
           className="rounded-md border border-input bg-background px-3 py-2"
         />
         {cancelRes && !cancelRes.ok ? (
-          <p className="text-sm text-destructive">{cancelRes.message}</p>
+          <p role="alert" className="text-sm text-destructive">{cancelRes.message}</p>
         ) : null}
         <button
           type="submit"

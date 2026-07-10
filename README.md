@@ -47,6 +47,8 @@ SQLite-dev path documents where it degrades.
 > ```bash
 > PG_PORT=5433 pnpm dev:pg
 > ```
+> On Windows, run the `pnpm` scripts from **git-bash or WSL** — they use POSIX
+> shell syntax (`${PG_PORT:-5432}`) that `cmd.exe`/PowerShell don't expand.
 
 ## What you get
 
