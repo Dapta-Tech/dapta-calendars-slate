@@ -13,6 +13,7 @@
  * lives on `AuthService`.
  */
 import { UnauthorizedException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { Db } from '@slate/db';
 import { sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
@@ -42,30 +43,47 @@ export interface AuthProvider {
   resolveHost(req: ReqLike): Promise<HostPrincipal>;
 }
 
+/** DEV-only account code derived from an email; stable + unique per email. */
+function devCodeFromEmail(email: string): string {
+  const slug = email.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return `dev-${slug || 'user'}`;
+}
+
 /**
- * OSS dev stub. It resolves the FIRST seeded account+member and does NOT trust
- * arbitrary client identity: the `x-slate-account` / `x-slate-member`
- * impersonation headers are a development-only convenience for exercising
- * multi-account flows without an auth server, and are IGNORED unless
- * `NODE_ENV` is development/test. `loadServerEnv` additionally refuses to boot
- * this provider in production, so it is doubly impossible to spoof in prod.
+ * OSS dev stub. It does NOT trust arbitrary client identity: all identity hints
+ * here are development-only conveniences, IGNORED unless `NODE_ENV` is
+ * development/test (and `loadServerEnv` additionally refuses to boot this
+ * provider in production, so it is doubly impossible to spoof in prod).
+ *
+ * Resolution order (dev/test only):
+ *   1. `x-slate-account` + `x-slate-member` — explicit impersonation (unchanged).
+ *   2. an email — from the `x-slate-email` header, else `DEV_LOGIN_EMAIL` env:
+ *      resolve the member with that email, JIT-provisioning a fresh
+ *      account+member if none exists (so a developer lands in THEIR workspace,
+ *      not the first seeded demo account). Mirrors the workos adapter's JIT.
+ *   3. fallback — the FIRST seeded account+member (single-tenant stub).
  */
 export class LocalAuthProvider implements AuthProvider {
   readonly name = 'local';
 
   constructor(
     private readonly db: Db,
-    private readonly env: Pick<ServerEnv, 'NODE_ENV'>,
+    private readonly env: Pick<ServerEnv, 'NODE_ENV' | 'DEV_LOGIN_EMAIL'>,
   ) {}
 
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
     if (this.env.NODE_ENV !== 'production') {
+      // 1. Explicit impersonation (highest precedence, unchanged).
       const accountId = header(req, 'x-slate-account');
       const memberId = header(req, 'x-slate-member');
       if (accountId && memberId) return { accountId, memberId };
+
+      // 2. Email-aware dev login (header wins over the env default).
+      const email = header(req, 'x-slate-email') ?? this.env.DEV_LOGIN_EMAIL;
+      if (email) return this.resolveByEmail(email);
     }
 
-    // Dev fallback: the first account + its first member (single-tenant stub).
+    // 3. Dev fallback: the first account + its first member (single-tenant stub).
     const row = await this.db.get<{ account_id: string; member_id: string }>(
       sql`SELECT a.id AS account_id, m.id AS member_id
           FROM account a JOIN member m ON m.account_id = a.id
@@ -73,6 +91,37 @@ export class LocalAuthProvider implements AuthProvider {
     );
     if (!row) throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
     return { accountId: row.account_id, memberId: row.member_id };
+  }
+
+  /** Resolve (or JIT-create) the member with this email. Dev/test only. */
+  private async resolveByEmail(email: string): Promise<HostPrincipal> {
+    const existing = await this.db.get<{ account_id: string; member_id: string }>(
+      sql`SELECT account_id, id AS member_id FROM member
+          WHERE email = ${email} ORDER BY created_at ASC LIMIT 1`,
+    );
+    if (existing) return { accountId: existing.account_id, memberId: existing.member_id };
+
+    // JIT: a fresh isolated account+member for this email. Reuse the account if
+    // its derived code already exists (idempotent across reseeds/races).
+    const code = devCodeFromEmail(email);
+    let account = await this.db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = ${code}`);
+    if (!account) {
+      const id = randomUUID();
+      await this.db.run(
+        sql`INSERT INTO account (id, code, name, created_at)
+            VALUES (${id}, ${code}, ${email}, ${Date.now()})
+            ON CONFLICT (code) DO NOTHING`,
+      );
+      account = await this.db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = ${code}`);
+    }
+    if (!account) throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
+
+    const memberId = randomUUID();
+    await this.db.run(
+      sql`INSERT INTO member (id, account_id, email, display_name, created_at)
+          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${Date.now()})`,
+    );
+    return { accountId: account.id, memberId };
   }
 }
 

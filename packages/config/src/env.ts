@@ -45,6 +45,13 @@ export const serverEnvSchema = z.object({
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 
+  // DEV ONLY — which host the local stub logs in as. When AUTH_PROVIDER=local
+  // and this is set (or an `x-slate-email` header is sent), the stub resolves
+  // the member with this email, JIT-creating a fresh account+member if none
+  // exists — so a developer lands in THEIR own workspace instead of the first
+  // seeded demo account. Ignored in production (the stub refuses to boot there).
+  DEV_LOGIN_EMAIL: z.string().optional(),
+
   // Host-session token (validated by the `workos` provider). The dashboard token
   // is an HS256 JWT minted by the upstream identity service (a shared symmetric
   // secret — so the SAME validation runs identically in local dev and remote).
