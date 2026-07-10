@@ -24,7 +24,7 @@ import {
   updateBranding,
   verifyApiKey,
 } from './parity';
-import { createEventType, createTeam, setEventTypeHosts } from './crud';
+import { createEventType, createTeam, setEventTypeHosts, updateEventType } from './crud';
 
 async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
   const a = await getAvailability(db, {
@@ -45,6 +45,27 @@ describe('parity (SQLite in-memory)', () => {
     await migrate(db);
     await seed(db);
     accountId = (await db.get<{ id: string }>((await import('drizzle-orm')).sql`SELECT id FROM account WHERE code='acme'`))!.id;
+  });
+
+  it('F5: an event type Location is snapshotted onto booking.location at book time', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, { location: 'Google Meet' });
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
+    // The chain event editor → event_type.locations → booking.location is closed.
+    expect(row?.location).toBe('Google Meet');
   });
 
   it('rejects a booking missing a required intake field', async () => {
