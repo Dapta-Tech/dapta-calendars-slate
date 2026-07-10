@@ -132,7 +132,7 @@ export async function postManage(
   token: string,
   action: 'cancel' | 'reschedule',
   body: Record<string, unknown>,
-): Promise<{ ok: boolean; message?: string }> {
+): Promise<{ ok: boolean; message?: string; manageUrl?: string }> {
   const res = await fetch(
     `${API_URL}/v1/bookings/${encodeURIComponent(uid)}/${action}?token=${encodeURIComponent(token)}`,
     {
@@ -142,7 +142,13 @@ export async function postManage(
       cache: 'no-store',
     },
   );
-  if (res.ok) return { ok: true };
+  if (res.ok) {
+    // A real reschedule ROTATES the manage token (single-active-token invariant),
+    // so the token just used is now dead. Surface the fresh manageUrl so the
+    // client can adopt the new token for any further cancel/reschedule.
+    const j = (await res.json().catch(() => ({}))) as { manageUrl?: string };
+    return { ok: true, manageUrl: j.manageUrl };
+  }
   const j = (await res.json().catch(() => ({}))) as { message?: string };
   return { ok: false, message: j.message ?? 'Something went wrong.' };
 }
