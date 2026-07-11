@@ -9,7 +9,11 @@ import { jsonParam, parseJsonColumn } from './repository';
 
 export type CrudResult<T> =
   | { ok: true; value: T }
-  | { ok: false; reason: 'NOT_FOUND' | 'SLUG_TAKEN' | 'CONFLICT' | 'LAST_OWNER'; message?: string };
+  | {
+      ok: false;
+      reason: 'NOT_FOUND' | 'SLUG_TAKEN' | 'CONFLICT' | 'LAST_OWNER' | 'EMAIL_TAKEN';
+      message?: string;
+    };
 
 // --- Event types ----------------------------------------------------------
 

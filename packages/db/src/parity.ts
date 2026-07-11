@@ -117,6 +117,9 @@ export interface MeView {
   email: string | null;
   timeZone: string | null;
   locale: string | null;
+  /** Account-level role — the FE gates admin-only surfaces on this. */
+  role: string;
+  status: string;
 }
 
 /** Resolve the authenticated principal's account + member for /me. */
@@ -136,10 +139,12 @@ export async function getMe(
     email: string | null;
     time_zone: string | null;
     locale: string | null;
+    role: string;
+    status: string;
   }>(
     memberId
-      ? sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
-      : sql`SELECT id, handle, display_name, email, time_zone, locale FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
+      ? sql`SELECT id, handle, display_name, email, time_zone, locale, role, status FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`
+      : sql`SELECT id, handle, display_name, email, time_zone, locale, role, status FROM member WHERE account_id = ${accountId} ORDER BY created_at ASC LIMIT 1`,
   );
   if (!member) return null;
   return {
@@ -151,6 +156,8 @@ export async function getMe(
     email: member.email,
     timeZone: member.time_zone,
     locale: member.locale,
+    role: member.role ?? 'member',
+    status: member.status ?? 'active',
   };
 }
 
