@@ -399,7 +399,13 @@ async function hostFreeSlotMs(
 }
 
 export interface TeamAvailabilityResult {
-  eventType: { slug: string; title: string; lengthMinutes: number; bookingFields: BookingFieldDef[] };
+  eventType: {
+    slug: string;
+    title: string;
+    lengthMinutes: number;
+    bookingFields: BookingFieldDef[];
+    schedulingType: string | null;
+  };
   timeZone: string;
   slots: string[];
 }
@@ -479,6 +485,7 @@ export async function getTeamAvailability(
       title: et.title,
       lengthMinutes: et.length_minutes,
       bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
+      schedulingType: et.scheduling_type,
     },
     timeZone: args.displayTimeZone ?? team.time_zone,
     slots,

@@ -86,6 +86,8 @@ export const availabilityResponseSchema = z.object({
     lengthMinutes: z.number().int().positive(),
     /** Custom intake fields to render on the booking form. */
     bookingFields: z.array(bookingFieldSchema).default([]),
+    /** Team scheduling method (null for personal events). */
+    schedulingType: z.enum(schedulingType).nullable().default(null),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),

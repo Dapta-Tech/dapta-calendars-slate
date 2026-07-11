@@ -1,5 +1,7 @@
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
 import Link from 'next/link';
+import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
@@ -10,6 +12,8 @@ export default async function TeamBookingPage({
   params: Promise<{ accountCode: string; teamSlug: string; slug: string }>;
 }) {
   const { accountCode, teamSlug, slug } = await params;
+  const lang = (await headers()).get('accept-language') ?? '';
+  const messages = getMessages(lang.startsWith('es') ? 'es' : 'en');
   const now = new Date();
   const from = now.toISOString();
   const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
@@ -29,7 +33,8 @@ export default async function TeamBookingPage({
           </Link>
           <h1 className="text-3xl font-semibold tracking-tight">{availability.eventType.title}</h1>
           <p className="text-sm text-muted-foreground">
-            {availability.eventType.lengthMinutes} min · {team.team.name} (round-robin)
+            {availability.eventType.lengthMinutes} min · {team.team.name} ·{' '}
+            {schedulingMethodLabel(messages, availability.eventType.schedulingType)}
           </p>
         </header>
 
