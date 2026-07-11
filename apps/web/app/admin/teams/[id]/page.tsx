@@ -23,10 +23,10 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
   const m = getMessages(await getLocale()).admin.teams;
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 pb-10">
       <FormHeader
         backHref="/admin/teams"
-        backLabel={m.backToTeams}
+        backLabel={m.title}
         title={team.name}
         actions={
           me?.accountCode && team.slug ? (

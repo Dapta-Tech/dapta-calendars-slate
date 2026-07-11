@@ -13,7 +13,7 @@ export default async function EditSchedule({ params }: { params: Promise<{ id: s
   const m = getMessages(await getLocale()).admin.availability;
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-3xl px-8 pb-10">
       <ScheduleEditor schedule={schedule} messages={m} backHref="/admin/availability" backLabel={m.title} />
     </div>
   );

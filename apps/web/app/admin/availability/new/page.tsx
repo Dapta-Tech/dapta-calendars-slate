@@ -8,7 +8,7 @@ export default async function NewSchedulePage() {
   const m = getMessages(await getLocale()).admin.availability;
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
+    <div className="mx-auto max-w-3xl px-8 pb-10">
       <NewSchedule messages={m} backHref="/admin/availability" backLabel={m.title} />
     </div>
   );

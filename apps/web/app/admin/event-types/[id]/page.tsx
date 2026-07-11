@@ -16,7 +16,7 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
   const m = getMessages(await getLocale()).admin.eventTypes;
 
   return (
-    <div className="mx-auto max-w-4xl px-8 py-10">
+    <div className="mx-auto max-w-4xl px-8 pb-10">
       <EventTypeForm
         initial={et}
         schedules={schedules}

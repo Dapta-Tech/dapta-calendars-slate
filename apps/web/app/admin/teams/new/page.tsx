@@ -11,13 +11,13 @@ export default async function NewTeamPage() {
   const tz = me?.timeZone ?? 'America/New_York';
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 pb-10">
       <CreateTeamForm
         messages={m}
         defaultTimeZone={tz}
         accountCode={me?.accountCode ?? ''}
         backHref="/admin/teams"
-        backLabel={m.backToTeamsList}
+        backLabel={m.title}
         heading={m.createTitle}
       />
     </div>
