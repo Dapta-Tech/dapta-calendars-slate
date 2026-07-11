@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useActionState, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import type { Connection } from '@/lib/admin-api';
 import { FieldHelp } from '@/components/field-help';
@@ -8,9 +9,9 @@ import {
   connectCalendarAction,
   createConnectionAction,
   deleteConnectionAction,
+  discoverConnectionsAction,
   pingConnectionAction,
   toggleConnectionAction,
-  type ActionResult,
 } from './actions';
 
 type ConnectionsMessages = BookingMessages['admin']['connections'];
@@ -47,54 +48,184 @@ function ProviderIcon({ provider }: { provider: string }) {
   );
 }
 
-/** Provider-choice dialog for the connect flow. Runs against the CalendarProvider
- *  port via connectCalendarAction: when a provider is configured it yields a
- *  connect token/URL; otherwise it honestly reports that sync is off. */
-function ConnectDialog({ open, onClose, m }: { open: boolean; onClose: () => void; m: ConnectionsMessages }) {
+const PROVIDERS: Array<{ key: string; labelKey: 'providerGoogle' | 'providerOutlook' }> = [
+  { key: 'google', labelKey: 'providerGoogle' },
+  { key: 'outlook', labelKey: 'providerOutlook' },
+];
+
+/**
+ * The connect flow. Popup-blocker-safe: the popup is opened SYNCHRONOUSLY inside
+ * the click gesture (to about:blank), then redirected to the minted connect URL
+ * once the server responds — so Safari/Chrome never treat it as programmatic.
+ * After the popup, we poll `discover` (server-side detection; no vendor SDK in
+ * the browser — R15) until the new connection appears, then refresh.
+ */
+function ConnectDialog({
+  open,
+  onClose,
+  enabled,
+  baselineCount,
+  m,
+}: {
+  open: boolean;
+  onClose: () => void;
+  enabled: boolean;
+  baselineCount: number;
+  m: ConnectionsMessages;
+}) {
+  const router = useRouter();
+  const [stage, setStage] = useState<'choose' | 'waiting'>('choose');
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const popupRef = useRef<Window | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeProvider = useRef<string>('google');
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+  }, []);
+
+  const reset = useCallback(() => {
+    stopPolling();
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+    popupRef.current = null;
+    setStage('choose');
+    setMsg(null);
+    setErr(null);
+  }, [stopPolling]);
+
+  const finish = useCallback(
+    (success: boolean) => {
+      reset();
+      onClose();
+      if (success) router.refresh();
+    },
+    [reset, onClose, router],
+  );
+
+  // Poll for the just-connected account; success when the connection count grows.
+  const checkForNew = useCallback(() => {
+    void discoverConnectionsAction(activeProvider.current).then((r) => {
+      if (r.ok && r.count > baselineCount) {
+        setMsg(m.connectSuccess);
+        finish(true);
+      }
+    });
+  }, [baselineCount, finish, m.connectSuccess]);
+
+  const beginConnect = (provider: string) => {
+    setErr(null);
+    activeProvider.current = provider;
+    // Open the popup NOW, in the gesture, so it is not blocked.
+    const popup = window.open('about:blank', 'slate-connect', 'width=520,height=720');
+    if (!popup) {
+      setErr(m.popupBlocked);
+      return;
+    }
+    popupRef.current = popup;
+    setStage('waiting');
+    setMsg(m.connectHint);
+    start(async () => {
+      const r = await connectCalendarAction(provider);
+      if (!r.enabled || !r.connectUrl) {
+        if (!popup.closed) popup.close();
+        setErr(r.message || m.connectFailed);
+        setStage('choose');
+        return;
+      }
+      popup.location.href = r.connectUrl;
+      // Detect completion by polling the server (revalidated by the action).
+      stopPolling();
+      pollRef.current = setInterval(checkForNew, 2500);
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
-    setMsg(null);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && finish(false);
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // A refocus of our window is a strong signal the popup flow finished.
+    const onFocus = () => {
+      if (stage === 'waiting') checkForNew();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [open, stage, checkForNew, finish]);
+
+  // Clean up timers/popup if the dialog unmounts.
+  useEffect(() => () => reset(), [reset]);
 
   if (!open) return null;
-  // User-facing end-provider choices (not the private integration vendor — R15).
-  const providers = [m.providerGoogle, m.providerOutlook];
-  const choose = () =>
-    start(async () => {
-      const r = await connectCalendarAction();
-      // A configured provider returns a token → begin its flow; else report status.
-      setMsg(r.message);
-    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-hidden tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-background/80" />
+      <button type="button" aria-hidden tabIndex={-1} onClick={() => finish(false)} className="absolute inset-0 bg-background/80" />
       <div role="dialog" aria-modal="true" aria-label={m.dialogTitle} className="relative w-full max-w-md rounded-xl border border-border bg-popover p-6 shadow-lg">
         <h2 className="mb-1 text-lg font-semibold">{m.dialogTitle}</h2>
         <p className="mb-4 text-sm text-muted-foreground">{m.dialogSubtitle}</p>
-        <div className="flex flex-col gap-2">
-          {providers.map((label) => (
+
+        {stage === 'choose' ? (
+          <div className="flex flex-col gap-2">
+            {PROVIDERS.map(({ key, labelKey }) => (
+              <button
+                key={key}
+                type="button"
+                disabled={pending}
+                onClick={() => beginConnect(key)}
+                className="flex items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                  <ProviderIcon provider={key} />
+                </span>
+                <span className="flex-1 text-left font-medium">{m[labelKey]}</span>
+                <span aria-hidden className="text-muted-foreground">→</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 rounded-md border border-border bg-muted/30 p-5 text-center">
+            <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" aria-hidden />
+            <span className="text-sm font-medium text-foreground">{m.connectWaiting}</span>
+            <p className="text-sm text-muted-foreground">{msg ?? m.connectHint}</p>
             <button
-              key={label}
               type="button"
-              disabled={pending}
-              onClick={choose}
-              className="flex items-center justify-between rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
+              onClick={checkForNew}
+              className="rounded-md border border-border px-4 py-2 text-sm hover:border-primary"
             >
-              <span className="font-medium">{label}</span>
-              <span aria-hidden className="text-muted-foreground">→</span>
+              {m.connectDone}
             </button>
-          ))}
+          </div>
+        )}
+
+        {err ? <p className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{err}</p> : null}
+
+        {!enabled ? (
+          <p className="mt-4 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+            {m.syncOffDesc} {m.syncOffSetPre}{' '}
+            <code className="rounded-sm bg-background px-1">CALENDAR_PROVIDER=external</code> {m.syncOffSetPost}
+          </p>
+        ) : null}
+
+        {/* Advanced: manual reference add, kept OUT of the list surface (R30). */}
+        <div className="mt-5 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={() => setShowManual((v) => !v)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            {showManual ? '▾' : '▸'} {m.manualTitle}
+          </button>
+          {showManual ? <ManualAddForm m={m} onAdded={() => finish(true)} /> : null}
         </div>
-        {msg ? <p className="mt-4 rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">{msg}</p> : null}
+
         <div className="mt-5 flex justify-end">
-          <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm">
+          <button type="button" onClick={() => finish(false)} className="rounded-md border border-border px-4 py-2 text-sm">
             {m.close}
           </button>
         </div>
@@ -103,55 +234,52 @@ function ConnectDialog({ open, onClose, m }: { open: boolean; onClose: () => voi
   );
 }
 
-export interface ProviderStatus {
-  enabled: boolean;
-  message: string;
-}
-
-/** Status-aware header: clearly says whether calendar sync is ON, and drives the
- *  connect flow accordingly (fixes "los calendarios no se conectan" — the OSS
- *  default has no provider wired, which the old UI never communicated). */
-function ProviderBanner({ status, m }: { status: ProviderStatus; m: ConnectionsMessages }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-
+/** Advanced manual-add: record a calendar reference by id (adapter/testing use). */
+function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => void }) {
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
   return (
-    <>
-      {status.enabled ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-primary/40 bg-primary/5 p-4">
-          <span className="flex h-2.5 w-2.5 rounded-full bg-primary" aria-hidden />
-          <span className="flex-1 text-sm">
-            <span className="font-medium text-foreground">{m.syncOnTitle}</span>{' '}
-            <span className="text-muted-foreground">{m.syncOnDesc}</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
-            {m.connectButton}
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-4">
-          <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-            <span className="flex h-2.5 w-2.5 rounded-full bg-muted-foreground/60" aria-hidden />
-            {m.syncOffTitle}
-          </span>
-          <p className="text-sm text-muted-foreground">
-            {m.syncOffDesc} {m.syncOffSetPre}{' '}
-            <code className="rounded-sm bg-background px-1">CALENDAR_PROVIDER=external</code> {m.syncOffSetPost}
-          </p>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="self-start text-sm text-primary hover:underline"
-          >
-            {m.connectLink}
-          </button>
-        </div>
-      )}
-      <ConnectDialog open={dialogOpen} onClose={() => setDialogOpen(false)} m={m} />
-    </>
+    <form
+      className="mt-3 flex flex-col gap-3"
+      action={(form) =>
+        start(async () => {
+          const r = await createConnectionAction(null, form);
+          if (r.ok) onAdded();
+          else setErr(r.message ?? m.disconnectError);
+        })
+      }
+    >
+      <p className="text-xs text-muted-foreground">{m.manualDesc}</p>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-muted-foreground">{m.provider}</span>
+          <select name="provider" className="rounded-md border border-input bg-background px-3 py-2">
+            <option value="google">google</option>
+            <option value="outlook">outlook</option>
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <span className="text-muted-foreground">{m.calendarId}</span>
+          <input name="externalId" required className="rounded-md border border-input bg-background px-3 py-2" />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="checkConflicts" defaultChecked /> {m.conflictCheck.toLowerCase()}
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="isDestination" /> {m.destination.toLowerCase()}
+        </label>
+        <button
+          type="submit"
+          disabled={pending}
+          className="ml-auto rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {pending ? '…' : m.addConnection}
+        </button>
+      </div>
+      {err ? <p className="text-sm text-destructive">{err}</p> : null}
+    </form>
   );
 }
 
@@ -168,10 +296,6 @@ function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessage
         <span className="flex min-w-0 flex-col gap-1">
           <span className="flex items-center gap-2">
             <span className="font-medium capitalize">{c.provider}</span>
-            {/* Honest health: only claim what we know account-wide — when no
-                provider is wired NOTHING syncs ("Recorded only"). We can't verify
-                a single connection's live status here, so we make no per-row
-                "Syncing" claim when a provider IS enabled. */}
             {!enabled ? (
               <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {m.healthRecorded}
@@ -232,6 +356,11 @@ function ConnectionRow({ c, m, enabled }: { c: Connection; m: ConnectionsMessage
   );
 }
 
+export interface ProviderStatus {
+  enabled: boolean;
+  message: string;
+}
+
 export function ConnectionsClient({
   connections,
   status,
@@ -241,11 +370,29 @@ export function ConnectionsClient({
   status: ProviderStatus;
   messages: ConnectionsMessages;
 }) {
-  const [res, action, pending] = useActionState<ActionResult | null, FormData>(createConnectionAction, null);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-6">
-      <ProviderBanner status={status} m={m} />
+    <div className="flex flex-col gap-5">
+      {/* Header: honest sync status on the left, primary Connect at top-right
+          (R30 list/create pattern — creation happens in the dialog surface). */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-sm">
+          <span
+            className={`flex h-2.5 w-2.5 rounded-full ${status.enabled ? 'bg-primary' : 'bg-muted-foreground/60'}`}
+            aria-hidden
+          />
+          <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setDialogOpen(true)}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          {m.connectButton}
+        </button>
+      </div>
+
       {connections.length > 0 ? (
         <ul className="flex flex-col gap-2">
           {connections.map((c) => (
@@ -253,46 +400,29 @@ export function ConnectionsClient({
           ))}
         </ul>
       ) : (
-        <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border p-8 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
           <svg width={28} height={28} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
             <rect x="3" y="4.5" width="18" height="16" rx="2" />
             <path d="M3 9h18M8 2.5v4M16 2.5v4" />
           </svg>
           <p className="text-sm text-muted-foreground">{m.noCalendars}</p>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="text-sm text-primary hover:underline"
+          >
+            {m.connectLink}
+          </button>
         </div>
       )}
 
-      <div>
-        <h3 className="mb-1 text-sm font-medium text-foreground">{m.manualTitle}</h3>
-        <p className="mb-2 text-xs text-muted-foreground">{m.manualDesc}</p>
-        <form action={action} className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-card p-4">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-muted-foreground">{m.provider}</span>
-          <select name="provider" className="rounded-md border border-input bg-background px-3 py-2">
-            <option value="google">google</option>
-            <option value="outlook">outlook</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">{m.calendarId}</span>
-          <input name="externalId" required className="rounded-md border border-input bg-background px-3 py-2" />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="checkConflicts" defaultChecked /> {m.conflictCheck.toLowerCase()}
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="isDestination" /> {m.destination.toLowerCase()}
-        </label>
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-60"
-        >
-          {pending ? '…' : m.addConnection}
-        </button>
-          {res && !res.ok ? <p className="w-full text-sm text-destructive">{res.message}</p> : null}
-        </form>
-      </div>
+      <ConnectDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        enabled={status.enabled}
+        baselineCount={connections.length}
+        m={m}
+      />
     </div>
   );
 }

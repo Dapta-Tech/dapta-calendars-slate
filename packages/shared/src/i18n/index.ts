@@ -293,6 +293,13 @@ export interface BookingMessages {
       syncOffSetPre: string;
       syncOffSetPost: string;
       connectLink: string;
+      connectWaiting: string;
+      connectHint: string;
+      connectDone: string;
+      connectSuccess: string;
+      connectCancelled: string;
+      connectFailed: string;
+      popupBlocked: string;
       destination: string;
       conflictCheck: string;
       test: string;
@@ -701,6 +708,13 @@ export const en: BookingMessages = {
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
       connectLink: 'Connect a calendar →',
+      connectWaiting: 'Waiting for you to finish connecting…',
+      connectHint: 'Finish signing in and granting access in the popup window, then return here.',
+      connectDone: 'I’ve finished connecting',
+      connectSuccess: 'Calendar connected.',
+      connectCancelled: 'Connect cancelled — no calendar was linked.',
+      connectFailed: 'Could not start the connect flow. Please try again.',
+      popupBlocked: 'Your browser blocked the popup. Allow popups for this site and try again.',
       destination: 'Destination',
       conflictCheck: 'Conflict check',
       test: 'Test',
@@ -1109,6 +1123,13 @@ export const es: BookingMessages = {
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
       connectLink: 'Conectar un calendario →',
+      connectWaiting: 'Esperando a que termines de conectar…',
+      connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
+      connectDone: 'Ya terminé de conectar',
+      connectSuccess: 'Calendario conectado.',
+      connectCancelled: 'Conexión cancelada: no se vinculó ningún calendario.',
+      connectFailed: 'No se pudo iniciar la conexión. Inténtalo de nuevo.',
+      popupBlocked: 'Tu navegador bloqueó la ventana emergente. Permite ventanas emergentes e inténtalo de nuevo.',
       destination: 'Destino',
       conflictCheck: 'Verificar conflictos',
       test: 'Probar',
