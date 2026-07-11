@@ -159,6 +159,15 @@ export const bookingAttendee = pgTable('booking_attendee', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
+/** Assigned host set for multi-host bookings (collective / fixed_round_robin). */
+export const bookingHost = pgTable('booking_host', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  memberId: text('member_id').notNull(),
+  isFixed: integer('is_fixed').notNull().default(0),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
 export const slotReservation = pgTable('slot_reservation', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
@@ -253,6 +262,7 @@ export const pgSchema = {
   eventTypeHost,
   booking,
   bookingAttendee,
+  bookingHost,
   slotReservation,
   connectedCalendar,
   apiKey,

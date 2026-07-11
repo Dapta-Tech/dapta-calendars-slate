@@ -117,9 +117,33 @@ export async function loadBookingForCalendarWrite(
   const attendees = await db.all<{ email: string }>(
     sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}`,
   );
-  const destinationRefs = b.host_member_id
-    ? await loadDestinationConnectionRefs(db, b.host_member_id)
-    : [];
+
+  // The assigned host set: co-hosts recorded in booking_host (collective /
+  // fixed_round_robin) plus the primary organizer. Round-robin bookings have no
+  // booking_host rows, so this is just the single host_member_id — behavior
+  // unchanged. Each host's destination calendar gets the event; co-hosts are
+  // added as attendees so everyone sees one shared event with all hosts on it.
+  const coHosts = await db.all<{ member_id: string; email: string | null }>(
+    sql`SELECT bh.member_id, m.email
+        FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
+        WHERE bh.booking_id = ${b.id}`,
+  );
+  const hostMemberIds = new Set<string>();
+  if (b.host_member_id) hostMemberIds.add(b.host_member_id);
+  for (const h of coHosts) hostMemberIds.add(h.member_id);
+
+  const destinationSet = new Set<string>();
+  for (const memberId of hostMemberIds) {
+    for (const ref of await loadDestinationConnectionRefs(db, memberId)) destinationSet.add(ref);
+  }
+
+  // On multi-host bookings the co-hosts join the invite as attendees (the
+  // organizer is the booking's primary host, so exclude their email).
+  const coHostEmails = coHosts
+    .map((h) => h.email)
+    .filter((e): e is string => !!e && e !== b.host_email);
+  const attendeeEmails = [...new Set([...attendees.map((a) => a.email), ...coHostEmails])].filter(Boolean);
+
   return {
     bookingId: b.id,
     uid: b.uid,
@@ -128,9 +152,9 @@ export async function loadBookingForCalendarWrite(
     endUtc: new Date(Number(b.end_ms)).toISOString(),
     location: b.location,
     attendeeTimeZone: b.attendee_time_zone,
-    attendeeEmails: attendees.map((a) => a.email).filter(Boolean),
+    attendeeEmails,
     organizerEmail: b.host_email,
-    destinationRefs,
+    destinationRefs: [...destinationSet],
   };
 }
 

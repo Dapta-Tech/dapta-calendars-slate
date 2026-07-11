@@ -95,6 +95,7 @@ export class EmailEffects {
       startUtc: ctx.startUtc,
       endUtc: ctx.endUtc,
       host: ctx.host,
+      coHosts: ctx.coHosts,
       attendee: ctx.attendee,
       location: ctx.location,
       manageUrl: extra.manageUrl ?? null,

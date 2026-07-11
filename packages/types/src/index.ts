@@ -11,7 +11,7 @@ import { z } from 'zod';
 export const bookingStatus = ['accepted', 'pending', 'cancelled', 'rejected'] as const;
 export type BookingStatus = (typeof bookingStatus)[number];
 
-export const schedulingType = ['round_robin', 'collective'] as const;
+export const schedulingType = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 export type SchedulingType = (typeof schedulingType)[number];
 
 export const membershipRole = ['member', 'admin', 'owner'] as const;

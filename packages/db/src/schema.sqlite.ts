@@ -158,6 +158,15 @@ export const bookingAttendee = sqliteTable('booking_attendee', {
   createdAt: integer('created_at').notNull(),
 });
 
+/** Assigned host set for multi-host bookings (collective / fixed_round_robin). */
+export const bookingHost = sqliteTable('booking_host', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  memberId: text('member_id').notNull(),
+  isFixed: integer('is_fixed').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+});
+
 export const slotReservation = sqliteTable('slot_reservation', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
@@ -253,6 +262,7 @@ export const sqliteSchema = {
   eventTypeHost,
   booking,
   bookingAttendee,
+  bookingHost,
   slotReservation,
   connectedCalendar,
   apiKey,

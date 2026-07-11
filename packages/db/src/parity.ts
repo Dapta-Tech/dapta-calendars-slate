@@ -10,7 +10,10 @@ import { randomUUID, createHash, randomBytes, createHmac } from 'node:crypto';
 import {
   computeSlots,
   generateManageToken,
+  intersectInstants,
+  selectFixedRoundRobinHosts,
   selectLuckyHost,
+  unionInstants,
   verifyManageToken,
   type AvailabilityRule,
   type HostCandidate,
@@ -401,9 +404,44 @@ export interface TeamAvailabilityResult {
   slots: string[];
 }
 
+/** The three FREE team scheduling methods; null/unknown → round_robin. */
+export type TeamSchedulingMethod = 'round_robin' | 'collective' | 'fixed_round_robin';
+
+export function normalizeSchedulingMethod(raw: string | null | undefined): TeamSchedulingMethod {
+  return raw === 'collective' || raw === 'fixed_round_robin' ? raw : 'round_robin';
+}
+
 /**
- * Team availability = the UNION of every host's free slots (a slot is offered
- * if AT LEAST ONE host is free). The specific host is chosen at booking time.
+ * Combine per-host free-slot sets into the slots the team offers, per method:
+ *   - round_robin       → UNION (any host free; host chosen at booking time).
+ *   - collective        → INTERSECTION (every host must be free — all attend).
+ *   - fixed_round_robin  → all fixed hosts free ∩ (≥1 rotating host free);
+ *     with no fixed hosts it degrades to round_robin, with no rotating hosts to
+ *     collective over the fixed set.
+ */
+function combineTeamSlots(
+  method: TeamSchedulingMethod,
+  hostSets: Array<{ isFixed: boolean; free: Set<number> }>,
+): number[] {
+  if (hostSets.length === 0) return [];
+  const all = hostSets.map((h) => h.free);
+  if (method === 'collective') return intersectInstants(all);
+  if (method === 'fixed_round_robin') {
+    const fixed = hostSets.filter((h) => h.isFixed).map((h) => h.free);
+    const rotating = hostSets.filter((h) => !h.isFixed).map((h) => h.free);
+    if (fixed.length === 0) return unionInstants(rotating); // misconfigured → plain RR
+    const fixedAllFree = intersectInstants(fixed);
+    if (rotating.length === 0) return fixedAllFree; // fixed-only → collective over fixed
+    const rotUnion = new Set(unionInstants(rotating));
+    return fixedAllFree.filter((ms) => rotUnion.has(ms));
+  }
+  return unionInstants(all); // round_robin
+}
+
+/**
+ * Team availability, combined across hosts per the event's scheduling method
+ * (UNION for round-robin, INTERSECTION for collective, fixed∩union for
+ * fixed round-robin). The concrete host(s) are assigned at booking time.
  */
 export async function getTeamAvailability(
   db: Db,
@@ -427,13 +465,14 @@ export async function getTeamAvailability(
   if (!et) return null;
   const hosts = await getEventHosts(db, et.id);
   const now = args.now ?? new Date();
+  const method = normalizeSchedulingMethod(et.scheduling_type);
 
-  const union = new Set<number>();
+  const hostSets: Array<{ isFixed: boolean; free: Set<number> }> = [];
   for (const host of hosts) {
     const free = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
-    for (const ms of free) union.add(ms);
+    hostSets.push({ isFixed: host.is_fixed === 1, free });
   }
-  const slots = [...union].sort((a, b) => a - b).map((ms) => new Date(ms).toISOString());
+  const slots = combineTeamSlots(method, hostSets).map((ms) => new Date(ms).toISOString());
   return {
     eventType: {
       slug: et.slug,
@@ -450,10 +489,38 @@ export type TeamBookingOutcome =
   | { ok: true; uid: string; hostMemberId: string; manageToken: string }
   | { ok: false; reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID'; message?: string };
 
+/** True (as a 1-row SELECT) if `memberId` already holds an overlapping booking —
+ * whether as the primary host_member_id OR an assigned co-host (booking_host). */
+function memberOverlapSql(memberId: string, startMs: number, endMs: number) {
+  return sql`SELECT b.id FROM booking b
+    WHERE b.status IN ('accepted','pending')
+      AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}
+      AND (b.host_member_id = ${memberId}
+           OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))
+    LIMIT 1`;
+}
+
+/** The organizer (booking.host_member_id) for a resolved assignment. */
+function pickOrganizer(
+  method: TeamSchedulingMethod,
+  assigned: [HostCandidate, ...HostCandidate[]],
+): HostCandidate {
+  if (method === 'fixed_round_robin') {
+    // Prefer a fixed host as the durable organizer (always present); fair among them.
+    const fixed = assigned.filter((h) => h.isFixed);
+    return selectLuckyHost(fixed) ?? selectLuckyHost(assigned) ?? assigned[0];
+  }
+  // collective: rotate the organizer role fairly; round_robin: the sole host.
+  return selectLuckyHost(assigned) ?? assigned[0];
+}
+
 /**
- * Book a team event: among the hosts FREE at the chosen slot, pick the fair one
- * (round-robin via the engine's selectLuckyHost), then insert with the same
- * dual-enforced overlap guard used for personal bookings.
+ * Book a team event, resolving the assigned host set from the event's scheduling
+ * method (round_robin = one fair host; collective = ALL hosts; fixed_round_robin
+ * = every fixed host + one rotating pick), then inserting under a dual-enforced
+ * overlap guard applied to EVERY assigned host. Multi-host bookings also record
+ * a booking_host row per host so calendar write-out and notifications fan out to
+ * all of them.
  */
 export async function createTeamBooking(
   db: Db,
@@ -478,32 +545,35 @@ export async function createTeamBooking(
 
   const endMs = args.startMs + et.length_minutes * 60_000;
   const hosts = await getEventHosts(db, et.id);
+  const method = normalizeSchedulingMethod(et.scheduling_type);
 
-  // Which hosts are actually free at this instant?
-  const candidates: (HostCandidate & { row: EventHostRow })[] = [];
+  // Which hosts are actually free at this instant (busy whether primary or co-host)?
+  const candidates: HostCandidate[] = [];
   for (const host of hosts) {
-    // A pending booking still holds the slot (parity with personal createBooking).
-    const conflict = await db.get<{ id: string }>(
-      sql`SELECT id FROM booking WHERE host_member_id = ${host.member_id}
-          AND status IN ('accepted','pending')
-          AND start_ms < ${endMs} AND end_ms > ${args.startMs} LIMIT 1`,
-    );
+    const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
     const counts = await db.get<{ n: number; last: number | null }>(
-      sql`SELECT COUNT(*) AS n, MAX(start_ms) AS last FROM booking
-          WHERE host_member_id = ${host.member_id} AND status = 'accepted'`,
+      sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
+          WHERE b.status = 'accepted'
+            AND (b.host_member_id = ${host.member_id}
+                 OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${host.member_id}))`,
     );
     candidates.push({
       memberId: host.member_id,
       priority: host.priority,
       weight: host.weight,
+      isFixed: host.is_fixed === 1,
       bookingCount: Number(counts?.n ?? 0),
       lastBookedAt: counts?.last ? new Date(Number(counts.last)) : null,
-      row: host,
     });
   }
-  const lucky = selectLuckyHost(candidates);
-  if (!lucky) return { ok: false, reason: 'SLOT_TAKEN' };
+
+  // Resolve the assigned host set for the method.
+  const assigned = resolveAssignment(method, hosts, candidates);
+  if (!assigned || assigned.length === 0) return { ok: false, reason: 'SLOT_TAKEN' };
+
+  const organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
+  const assignedIds = assigned.map((h) => h.memberId);
 
   const uid = randomUUID();
   const bookingId = randomUUID();
@@ -519,18 +589,61 @@ export async function createTeamBooking(
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${lucky.memberId}, ${team.id}, ${et.title}, ${eventLocation},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title}, ${eventLocation},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  // Multi-host bookings (collective / fixed_round_robin) record every assigned
+  // host so write-out + notifications fan out. Round-robin's single host is
+  // already carried by host_member_id, so it writes no booking_host rows.
+  const insertHostRows =
+    assignedIds.length > 1
+      ? assigned.map(
+          (h) =>
+            sql`INSERT INTO booking_host (id, booking_id, member_id, is_fixed, created_at)
+                VALUES (${randomUUID()}, ${bookingId}, ${h.memberId}, ${h.isFixed ? 1 : 0}, ${now})`,
+        )
+      : [];
 
-  const booked = await insertBookingGuarded(db, lucky.memberId, args.startMs, endMs, insertBooking, insertAttendee);
+  const booked = await insertBookingGuarded(
+    db,
+    assignedIds,
+    args.startMs,
+    endMs,
+    [insertBooking, insertAttendee, ...insertHostRows],
+  );
   return booked
-    ? { ok: true, uid, hostMemberId: lucky.memberId, manageToken: token }
+    ? { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token }
     : { ok: false, reason: 'SLOT_TAKEN' };
+}
+
+/**
+ * Turn the free candidates into the assigned host set for a method, or null if
+ * the slot can't be booked (a required host is busy).
+ *   - round_robin       → the one fair host.
+ *   - collective        → every event host (all must be free).
+ *   - fixed_round_robin  → every fixed host (all must be free) + one rotating pick.
+ */
+function resolveAssignment(
+  method: TeamSchedulingMethod,
+  hosts: EventHostRow[],
+  free: HostCandidate[],
+): HostCandidate[] | null {
+  const freeIds = new Set(free.map((c) => c.memberId));
+  if (method === 'collective') {
+    // Everyone attends — the booking is valid only if every host is free.
+    return hosts.every((h) => freeIds.has(h.member_id)) && free.length > 0 ? free : null;
+  }
+  if (method === 'fixed_round_robin') {
+    const requiredFixed = hosts.filter((h) => h.is_fixed === 1).map((h) => h.member_id);
+    if (!requiredFixed.every((id) => freeIds.has(id))) return null; // a fixed host is busy
+    return selectFixedRoundRobinHosts(free);
+  }
+  const lucky = selectLuckyHost(free);
+  return lucky ? [lucky] : null;
 }
 
 function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>): string | null {
@@ -544,32 +657,36 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
   return null;
 }
 
-/** Shared dual-enforced insert (SQLite sync txn / Postgres async txn + EXCLUDE). */
+/**
+ * Shared dual-enforced insert (SQLite sync txn / Postgres async txn + EXCLUDE).
+ * Re-checks overlap for EVERY assigned host inside the transaction so a
+ * collective/fixed-RR booking can't slip past a co-host who got booked
+ * concurrently, then runs the ordered statement list (booking, attendee, and any
+ * booking_host rows).
+ */
 async function insertBookingGuarded(
   db: Db,
-  hostMemberId: string,
+  hostMemberIds: string[],
   startMs: number,
   endMs: number,
-  insertBooking: ReturnType<typeof sql>,
-  insertAttendee: ReturnType<typeof sql>,
+  statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
-  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId}
-    AND status IN ('accepted','pending') AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`;
+  const overlapChecks = hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs));
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
-      if (db.sqlite!.drizzle.get(overlapSql)) return false;
-      db.sqlite!.drizzle.run(insertBooking);
-      db.sqlite!.drizzle.run(insertAttendee);
+      for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
+      for (const stmt of statements) db.sqlite!.drizzle.run(stmt);
       return true;
     });
   }
   const pg = db.pg!.drizzle;
   try {
     return await pg.transaction(async (tx) => {
-      const rows = (await tx.execute(overlapSql)) as unknown as unknown[];
-      if (rows.length > 0) return false;
-      await tx.execute(insertBooking);
-      await tx.execute(insertAttendee);
+      for (const check of overlapChecks) {
+        const rows = (await tx.execute(check)) as unknown as unknown[];
+        if (rows.length > 0) return false;
+      }
+      for (const stmt of statements) await tx.execute(stmt);
       return true;
     });
   } catch {
@@ -856,32 +973,38 @@ export interface BookingNotificationContext {
   location: string | null;
   host: { name: string | null; email: string | null };
   attendee: { name: string; email: string; timeZone: string };
+  /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
+  coHosts: Array<{ name: string | null; email: string | null }>;
 }
 
 /**
  * Load the attendee + host + timing a booking email needs (B1-B4). Returns null
  * if the booking or its attendee is gone. Host email is included so the .ics
- * carries an ORGANIZER and the host can be a recipient (parity with old).
+ * carries an ORGANIZER and the host can be a recipient (parity with old). On
+ * multi-host team bookings, every assigned co-host is loaded too so all hosts
+ * are notified.
  */
 export async function loadBookingNotificationContext(
   db: Db,
   uid: string,
 ): Promise<BookingNotificationContext | null> {
   const row = await db.get<{
+    id: string;
     uid: string;
     title: string;
     start_ms: number;
     end_ms: number;
     status: string;
     location: string | null;
+    host_member_id: string | null;
     host_name: string | null;
     host_email: string | null;
     att_name: string | null;
     att_email: string | null;
     att_tz: string | null;
   }>(
-    sql`SELECT b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
-               m.display_name AS host_name, m.email AS host_email,
+    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
+               b.host_member_id, m.display_name AS host_name, m.email AS host_email,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -889,6 +1012,13 @@ export async function loadBookingNotificationContext(
         WHERE b.uid = ${uid} LIMIT 1`,
   );
   if (!row || !row.att_email) return null;
+  // Multi-host bookings: every assigned co-host (excluding the organizer) is
+  // notified too. Round-robin bookings have no booking_host rows → empty.
+  const coHostRows = await db.all<{ member_id: string; name: string | null; email: string | null }>(
+    sql`SELECT bh.member_id, m.display_name AS name, m.email AS email
+        FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
+        WHERE bh.booking_id = ${row.id} AND bh.member_id <> ${row.host_member_id ?? ''}`,
+  );
   return {
     uid: row.uid,
     title: row.title,
@@ -902,6 +1032,7 @@ export async function loadBookingNotificationContext(
       email: row.att_email,
       timeZone: row.att_tz ?? 'UTC',
     },
+    coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
   };
 }
 
