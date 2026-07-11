@@ -147,7 +147,7 @@ export function MembersClient({
               <span
                 className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
                   member.status === 'invited'
-                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                    ? 'bg-primary/10 text-primary'
                     : member.status === 'disabled'
                       ? 'bg-destructive/10 text-destructive'
                       : 'bg-muted text-muted-foreground'
@@ -168,7 +168,7 @@ export function MembersClient({
                 value={member.role}
                 disabled={pending || lockRole}
                 title={isLastOwner ? m.lastOwnerTitle : undefined}
-                aria-label={m.roleLabel}
+                aria-label={`${m.roleLabel} · ${member.displayName ?? member.email ?? ''}`}
                 onChange={(e) => run(setMemberRoleAction(member.id, e.target.value as AccountRole), m.roleUpdated)}
                 className="min-h-[44px] rounded-md border border-input bg-background px-2 py-2 text-sm disabled:opacity-60"
               >

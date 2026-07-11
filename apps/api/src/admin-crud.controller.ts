@@ -53,7 +53,7 @@ import {
 } from '@slate/types';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
-import { assertAdmin, assertCanManageTarget, assertOwnsOrAdmin } from './permissions';
+import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwnsOrAdmin } from './permissions';
 import { DB } from './tokens';
 
 function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
@@ -103,6 +103,7 @@ export class AdminCrudController {
   async updateMember(@Req() req: ReqLike, @Param('id') id: string, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
+    assertNotSelf(p, id);
     const input = parse(memberPatchSchema, body);
     const target = await getAccountMember(this.db, p.accountId, id);
     if (!target) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
@@ -119,6 +120,7 @@ export class AdminCrudController {
   async removeMember(@Req() req: ReqLike, @Param('id') id: string) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
+    assertNotSelf(p, id);
     const target = await getAccountMember(this.db, p.accountId, id);
     if (!target) return { ok: true }; // idempotent — already gone
     assertCanManageTarget(p, target);

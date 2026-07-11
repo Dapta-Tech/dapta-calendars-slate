@@ -151,19 +151,25 @@ describe('permission matrix — guarded routes (real controllers)', () => {
     expect(off).toMatchObject({ status: 'disabled' });
   });
 
-  it('last-owner guard: owner demoting/removing the sole owner → 409', async () => {
+  it('no self-administration: a caller cannot change or remove their own membership', async () => {
+    // Even the owner cannot demote/remove themselves via the members endpoints
+    // (own-profile edits go through /v1/me; this prevents self-lockout/escalation).
     as('owner', alex);
     await expect(
       crud.updateMember(REQ, alex, { role: 'member' }),
-    ).rejects.toBeInstanceOf(ConflictException); // LAST_OWNER
-    await expect(crud.removeMember(REQ, alex)).rejects.toBeInstanceOf(ConflictException);
-    // With a second owner, the first can step down.
-    await changeMemberRole(db, accountId, jordan, 'owner');
-    const demoted = await crud.updateMember(REQ, alex, { role: 'admin' });
-    expect(demoted).toMatchObject({ role: 'admin' });
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      crud.updateMember(REQ, alex, { status: 'disabled' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(crud.removeMember(REQ, alex)).rejects.toBeInstanceOf(ForbiddenException);
+    // Acting on ANOTHER member is unaffected.
+    await changeMemberRole(db, accountId, jordan, 'admin');
+    as('owner', alex);
+    const other = await crud.updateMember(REQ, jordan, { role: 'member' });
+    expect(other).toMatchObject({ role: 'member' });
   });
 
-  it('DELETE /members/:id: member 403; owner removes a member', async () => {
+  it('DELETE /members/:id: member 403; owner removes another member', async () => {
     as('member', jordan);
     await expect(crud.removeMember(REQ, alex)).rejects.toBeInstanceOf(ForbiddenException);
     as('owner', alex);

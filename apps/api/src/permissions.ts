@@ -62,3 +62,13 @@ export function assertCanManageTarget(
   const touchesOwner = isOwner(target.role) || opts.toRole === 'owner';
   if (touchesOwner && !isOwner(p.role)) forbidden('Only an owner can manage owners.');
 }
+
+/**
+ * No self-administration via the member-management endpoints: a caller may not
+ * change their OWN role/status or remove themselves (they can't lock themselves
+ * out or self-escalate). Own-profile edits go through /v1/me; ownership changes
+ * hands go through a dedicated (future) transfer flow.
+ */
+export function assertNotSelf(p: RoledPrincipal, targetMemberId: string): void {
+  if (p.memberId === targetMemberId) forbidden('You cannot change your own membership here.');
+}
