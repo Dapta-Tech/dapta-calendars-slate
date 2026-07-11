@@ -1,12 +1,21 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import { createScheduleAction } from './actions';
 
 type AvailabilityMessages = BookingMessages['admin']['availability'];
 
-export function NewSchedule({ messages: m }: { messages: AvailabilityMessages }) {
+export function NewSchedule({
+  messages: m,
+  redirectOnSuccess,
+}: {
+  messages: AvailabilityMessages;
+  /** When set (the dedicated /new surface), navigate here after a create. */
+  redirectOnSuccess?: string;
+}) {
+  const router = useRouter();
   const [name, setName] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -16,7 +25,10 @@ export function NewSchedule({ messages: m }: { messages: AvailabilityMessages })
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const r = await createScheduleAction(name, tz);
       setMsg(r.ok ? null : (r.message ?? m.saveError));
-      if (r.ok) setName('');
+      if (r.ok) {
+        setName('');
+        if (redirectOnSuccess) router.push(redirectOnSuccess);
+      }
     });
 
   return (
