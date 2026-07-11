@@ -10,7 +10,15 @@ type SettingsMessages = BookingMessages['admin']['settings'];
 /** Settings chrome: header + sub-nav for the standard settings pages, but the
  *  booking-page STUDIO renders full-bleed with no header/sub-nav (mirrors the
  *  old app's isStudio mode — header dropped, rail collapsed for full width). */
-export function SettingsChrome({ messages, children }: { messages: SettingsMessages; children: ReactNode }) {
+export function SettingsChrome({
+  messages,
+  isAdmin,
+  children,
+}: {
+  messages: SettingsMessages;
+  isAdmin: boolean;
+  children: ReactNode;
+}) {
   const pathname = usePathname();
   const isStudio = pathname.startsWith('/admin/settings/booking-page');
 
@@ -22,7 +30,7 @@ export function SettingsChrome({ messages, children }: { messages: SettingsMessa
         <h1 className="text-3xl font-semibold tracking-tight">{messages.title}</h1>
         <p className="text-muted-foreground">{messages.subtitle}</p>
       </header>
-      <SettingsTabs messages={messages} />
+      <SettingsTabs messages={messages} isAdmin={isAdmin} />
       {children}
     </div>
   );

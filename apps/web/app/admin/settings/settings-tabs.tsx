@@ -7,21 +7,27 @@ import type { BookingMessages } from '@slate/shared';
 type SettingsMessages = BookingMessages['admin']['settings'];
 
 // Second-level settings nav (mirrors the old app's Settings sub-nav):
-// General · Booking Page · Calendars · Developer. Labels resolve per-locale.
-const TABS: { key: keyof Omit<SettingsMessages, 'title' | 'subtitle'>; href: string }[] = [
+// General · Booking Page · Calendars · Members · Developer. Labels resolve
+// per-locale. Members + Developer are admin/owner-only (`adminOnly`).
+const TABS: {
+  key: keyof Omit<SettingsMessages, 'title' | 'subtitle'>;
+  href: string;
+  adminOnly?: boolean;
+}[] = [
   { key: 'general', href: '/admin/settings/general' },
   { key: 'bookingPage', href: '/admin/settings/booking-page' },
   { key: 'calendars', href: '/admin/connections' },
-  { key: 'developer', href: '/admin/settings/developer' },
+  { key: 'members', href: '/admin/settings/members', adminOnly: true },
+  { key: 'developer', href: '/admin/settings/developer', adminOnly: true },
 ];
 
-export function SettingsTabs({ messages }: { messages: SettingsMessages }) {
+export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages; isAdmin: boolean }) {
   const pathname = usePathname();
   return (
     // Horizontal, scrollable settings sub-nav. Active = raised fill + medium
     // weight (DS recipe — no accent bar), matching the main sidebar nav.
     <nav className="mb-6 flex gap-1 overflow-x-auto" aria-label="Settings">
-      {TABS.map((tab) => {
+      {TABS.filter((tab) => isAdmin || !tab.adminOnly).map((tab) => {
         const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         return (
           <Link
