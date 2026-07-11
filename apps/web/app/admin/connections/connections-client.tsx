@@ -16,12 +16,22 @@ import {
 
 type ConnectionsMessages = BookingMessages['admin']['connections'];
 
+/** The end-provider kind for a stored provider slug (R15-safe: Google/Outlook
+ *  are end-provider names). Single source of truth for icon + label branching. */
+type ProviderKind = 'google' | 'outlook' | 'other';
+function providerKind(provider: string): ProviderKind {
+  const p = provider.toLowerCase();
+  if (p.includes('google')) return 'google';
+  if (p.includes('outlook') || p.includes('microsoft')) return 'outlook';
+  return 'other';
+}
+
 /** End-provider mark (R15-safe: Google/Outlook are end-provider names). Generic
  *  calendar glyph for anything else. */
 function ProviderIcon({ provider }: { provider: string }) {
-  const p = provider.toLowerCase();
+  const kind = providerKind(provider);
   const common = { width: 18, height: 18, viewBox: '0 0 24 24', 'aria-hidden': true } as const;
-  if (p.includes('google')) {
+  if (kind === 'google') {
     return (
       <svg {...common}>
         <path fill="#4285F4" d="M21.6 12.2c0-.6-.05-1.2-.15-1.7H12v3.4h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.2Z" />
@@ -31,7 +41,7 @@ function ProviderIcon({ provider }: { provider: string }) {
       </svg>
     );
   }
-  if (p.includes('outlook') || p.includes('microsoft')) {
+  if (kind === 'outlook') {
     return (
       <svg {...common}>
         <rect x="3" y="6" width="12" height="12" rx="2" fill="#0A6ED1" />
@@ -55,10 +65,14 @@ const PROVIDERS: Array<{ key: string; labelKey: 'providerGoogle' | 'providerOutl
 
 /** Friendly end-provider name (R15-safe) for a stored provider slug. */
 function providerLabel(provider: string, m: ConnectionsMessages): string {
-  const p = provider.toLowerCase();
-  if (p.includes('google')) return m.providerGoogle;
-  if (p.includes('outlook') || p.includes('microsoft')) return m.providerOutlook;
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
+  switch (providerKind(provider)) {
+    case 'google':
+      return m.providerGoogle;
+    case 'outlook':
+      return m.providerOutlook;
+    default:
+      return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
 }
 
 /**
@@ -305,11 +319,17 @@ function HealthPill({ id, enabled, m }: { id: string; enabled: boolean; m: Conne
     if (!enabled) return;
     setState('checking');
     start(async () => {
-      const r = await pingConnectionAction(id);
-      setDetail(r.message);
-      setState(!r.enabled ? 'off' : r.ok ? 'ok' : 'error');
+      try {
+        const r = await pingConnectionAction(id);
+        setDetail(r.message);
+        setState(!r.enabled ? 'off' : r.ok ? 'ok' : 'error');
+      } catch {
+        // A thrown probe must not leave the pill spinning forever.
+        setDetail(m.healthError);
+        setState('error');
+      }
     });
-  }, [enabled, id]);
+  }, [enabled, id, m.healthError]);
 
   // Probe once when this row mounts (only when a provider is actually wired).
   const ran = useRef(false);
@@ -337,21 +357,28 @@ function HealthPill({ id, enabled, m }: { id: string; enabled: boolean; m: Conne
           : m.healthRecorded;
 
   return (
-    <button
-      type="button"
-      onClick={probe}
-      disabled={!enabled || pending}
-      title={detail ?? (enabled ? m.recheck : m.syncOffTitle)}
-      aria-label={`${label}${enabled ? ` — ${m.recheck}` : ''}`}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors enabled:hover:border-primary disabled:cursor-default"
-    >
-      {state === 'checking' ? (
-        <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary" aria-hidden />
-      ) : (
-        <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
-      )}
-      <span>{label}</span>
-    </button>
+    <span className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={probe}
+        disabled={!enabled || pending}
+        title={detail ?? (enabled ? m.recheck : m.syncOffTitle)}
+        // Detail is in the accessible name too, so screen-reader / touch users
+        // get the reason without a hover-only tooltip.
+        aria-label={`${label}${detail ? `: ${detail}` : ''}${enabled ? ` — ${m.recheck}` : ''}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors enabled:hover:border-primary disabled:cursor-default"
+      >
+        {state === 'checking' ? (
+          <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary" aria-hidden />
+        ) : (
+          <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
+        )}
+        <span>{label}</span>
+      </button>
+      {state === 'error' && detail ? (
+        <span className="max-w-[220px] text-right text-[11px] leading-tight text-destructive">{detail}</span>
+      ) : null}
+    </span>
   );
 }
 
@@ -359,18 +386,23 @@ function ConnectionRow({
   c,
   m,
   enabled,
+  busy,
+  error,
   onSetDestination,
   onToggleConflicts,
+  onDisconnect,
 }: {
   c: Connection;
   m: ConnectionsMessages;
   enabled: boolean;
+  // True while any mutation on THIS row is in flight — disables every control
+  // so a toggle and a disconnect (or two rapid toggles) can't race.
+  busy: boolean;
+  error: string | null;
   onSetDestination: (id: string) => void;
   onToggleConflicts: (id: string, value: boolean) => void;
+  onDisconnect: (id: string) => void;
 }) {
-  const [busy, start] = useTransition();
-  const [err, setErr] = useState<string | null>(null);
-
   return (
     <li
       className={`flex flex-col gap-4 rounded-lg border p-4 transition-colors ${
@@ -403,12 +435,7 @@ function ConnectionRow({
           <button
             type="button"
             disabled={busy}
-            onClick={() =>
-              start(async () => {
-                const r = await deleteConnectionAction(c.id);
-                setErr(r.ok ? null : (r.message ?? m.disconnectError));
-              })
-            }
+            onClick={() => onDisconnect(c.id)}
             className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
           >
             {m.disconnect}
@@ -444,7 +471,7 @@ function ConnectionRow({
         </label>
       </div>
 
-      {err ? <p className="text-xs text-destructive">{err}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </li>
   );
 }
@@ -508,23 +535,69 @@ export function ConnectionsClient({
   // toggles respond instantly; the server action revalidates in the background
   // and re-seeds this state when the fresh props arrive.
   const [rows, setRows] = useState<Connection[]>(connections);
+  // The row with a mutation in flight (disables that row's controls), plus its
+  // error if the write failed. One-at-a-time per row prevents toggle/disconnect
+  // and rapid-toggle races.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [, startToggle] = useTransition();
-  useEffect(() => setRows(connections), [connections]);
+  // Don't clobber an in-flight optimistic toggle when an unrelated action
+  // revalidates first; reseed from server only when nothing is pending.
+  const pendingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingRef.current) setRows(connections);
+  }, [connections]);
 
-  const setDestination = useCallback((id: string) => {
+  // Shared runner: optimistic update (if any) → server write → on failure roll
+  // back and surface the reason. `prev` is captured from the committed rows.
+  const run = useCallback(
+    (
+      id: string,
+      optimistic: ((rs: Connection[]) => Connection[]) | null,
+      call: () => Promise<{ ok: boolean; message?: string }>,
+    ) => {
+      const prev = rows;
+      setRowError(null);
+      pendingRef.current = id;
+      setPendingId(id);
+      if (optimistic) setRows(optimistic(prev));
+      startToggle(async () => {
+        const r = await call();
+        if (!r.ok) {
+          if (optimistic) setRows(prev);
+          setRowError({ id, message: r.message ?? m.disconnectError });
+        }
+        pendingRef.current = null;
+        setPendingId((cur) => (cur === id ? null : cur));
+      });
+    },
+    [rows, m.disconnectError],
+  );
+
+  const setDestination = useCallback(
     // R20: exactly one destination — mirror the server's exclusive update.
-    setRows((rs) => rs.map((r) => ({ ...r, isDestination: r.id === id })));
-    startToggle(async () => {
-      await toggleConnectionAction(id, { isDestination: true });
-    });
-  }, []);
+    (id: string) =>
+      run(
+        id,
+        (rs) => rs.map((r) => ({ ...r, isDestination: r.id === id })),
+        () => toggleConnectionAction(id, { isDestination: true }),
+      ),
+    [run],
+  );
 
-  const toggleConflicts = useCallback((id: string, value: boolean) => {
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, checkConflicts: value } : r)));
-    startToggle(async () => {
-      await toggleConnectionAction(id, { checkConflicts: value });
-    });
-  }, []);
+  const toggleConflicts = useCallback(
+    (id: string, value: boolean) =>
+      run(
+        id,
+        (rs) => rs.map((r) => (r.id === id ? { ...r, checkConflicts: value } : r)),
+        () => toggleConnectionAction(id, { checkConflicts: value }),
+      ),
+    [run],
+  );
+
+  // No optimistic removal: the row disappears on revalidation; on failure
+  // (e.g. R20 last-destination guard) the row stays and shows the reason.
+  const disconnect = useCallback((id: string) => run(id, null, () => deleteConnectionAction(id)), [run]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -559,8 +632,11 @@ export function ConnectionsClient({
                   c={c}
                   m={m}
                   enabled={status.enabled}
+                  busy={pendingId === c.id}
+                  error={rowError?.id === c.id ? rowError.message : null}
                   onSetDestination={setDestination}
                   onToggleConflicts={toggleConflicts}
+                  onDisconnect={disconnect}
                 />
               ))}
             </ul>
