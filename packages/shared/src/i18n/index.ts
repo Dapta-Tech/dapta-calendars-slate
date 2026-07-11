@@ -340,6 +340,7 @@ export interface BookingMessages {
       ping: string;
       delete: string;
       active: string;
+      cancel: string;
     };
     bookingPageHeader: {
       title: string;
@@ -748,6 +749,7 @@ export const en: BookingMessages = {
       ping: 'Ping',
       delete: 'Delete',
       active: 'active',
+      cancel: 'Cancel',
     },
     bookingPageHeader: {
       title: 'Booking Page',
@@ -1156,6 +1158,7 @@ export const es: BookingMessages = {
       ping: 'Probar',
       delete: 'Eliminar',
       active: 'activo',
+      cancel: 'Cancelar',
     },
     bookingPageHeader: {
       title: 'Página de reservas',
