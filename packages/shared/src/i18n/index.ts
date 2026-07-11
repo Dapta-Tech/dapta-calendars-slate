@@ -354,7 +354,6 @@ export interface BookingMessages {
       syncOffDesc: string;
       syncOffSetPre: string;
       syncOffSetPost: string;
-      connectLink: string;
       connectWaiting: string;
       connectHint: string;
       connectDone: string;
@@ -364,10 +363,8 @@ export interface BookingMessages {
       popupBlocked: string;
       destination: string;
       conflictCheck: string;
-      test: string;
       disconnect: string;
       disconnectError: string;
-      noCalendars: string;
       manualTitle: string;
       manualDesc: string;
       provider: string;
@@ -375,8 +372,25 @@ export interface BookingMessages {
       addConnection: string;
       healthSyncing: string;
       healthRecorded: string;
-      destinationHelp: string;
-      conflictHelp: string;
+      yourCalendars: string;
+      connectAnother: string;
+      addEventsHere: string;
+      addEventsHereHelp: string;
+      checkForConflicts: string;
+      checkForConflictsHelp: string;
+      summaryDestination: string;
+      summaryNoDestination: string;
+      summaryConflictsNone: string;
+      summaryConflictsOne: string;
+      summaryConflictsMany: string;
+      healthChecking: string;
+      healthOk: string;
+      healthError: string;
+      recheck: string;
+      emptyTitle: string;
+      emptyBody: string;
+      emptyConflicts: string;
+      emptyDestination: string;
     };
     login: {
       title: string;
@@ -835,7 +849,6 @@ export const en: BookingMessages = {
       syncOffDesc: 'No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
-      connectLink: 'Connect a calendar →',
       connectWaiting: 'Waiting for you to finish connecting…',
       connectHint: 'Finish signing in and granting access in the popup window, then return here.',
       connectDone: 'I’ve finished connecting',
@@ -845,10 +858,8 @@ export const en: BookingMessages = {
       popupBlocked: 'Your browser blocked the popup. Allow popups for this site and try again.',
       destination: 'Destination',
       conflictCheck: 'Conflict check',
-      test: 'Test',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
-      noCalendars: 'No calendars linked yet.',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
@@ -856,8 +867,25 @@ export const en: BookingMessages = {
       addConnection: 'Add connection',
       healthSyncing: 'Syncing',
       healthRecorded: 'Recorded only',
-      destinationHelp: 'Booked events are written to this calendar.',
-      conflictHelp: 'Busy times here block new bookings.',
+      yourCalendars: 'Your calendars',
+      connectAnother: 'Connect another',
+      addEventsHere: 'Add new events here',
+      addEventsHereHelp: 'Booked events are written to this calendar. Only one calendar can receive events.',
+      checkForConflicts: 'Check for conflicts',
+      checkForConflictsHelp: 'Busy times on this calendar block new bookings. You can check any number of calendars.',
+      summaryDestination: 'New events are added to',
+      summaryNoDestination: 'No calendar is set to receive new events yet.',
+      summaryConflictsNone: 'No calendars checked for conflicts',
+      summaryConflictsOne: '1 calendar checked for conflicts',
+      summaryConflictsMany: '{n} calendars checked for conflicts',
+      healthChecking: 'Checking…',
+      healthOk: 'Connected',
+      healthError: 'Needs attention',
+      recheck: 'Re-check',
+      emptyTitle: 'No calendars connected yet',
+      emptyBody: 'Connect Google or Outlook so Slate can read your busy times and add booked events to your calendar. You can connect more than one account.',
+      emptyConflicts: 'Check for conflicts so busy times block new bookings',
+      emptyDestination: 'Pick one calendar to receive your booked events',
     },
     login: {
       title: 'Sign in',
@@ -1316,7 +1344,6 @@ export const es: BookingMessages = {
       syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que Slate aún no lee horas ocupadas ni escribe eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
-      connectLink: 'Conectar un calendario →',
       connectWaiting: 'Esperando a que termines de conectar…',
       connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
       connectDone: 'Ya terminé de conectar',
@@ -1326,10 +1353,8 @@ export const es: BookingMessages = {
       popupBlocked: 'Tu navegador bloqueó la ventana emergente. Permite ventanas emergentes e inténtalo de nuevo.',
       destination: 'Destino',
       conflictCheck: 'Verificar conflictos',
-      test: 'Probar',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
-      noCalendars: 'Aún no hay calendarios vinculados.',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',
@@ -1337,8 +1362,25 @@ export const es: BookingMessages = {
       addConnection: 'Añadir conexión',
       healthSyncing: 'Sincronizando',
       healthRecorded: 'Solo registrado',
-      destinationHelp: 'Las reservas se escriben en este calendario.',
-      conflictHelp: 'Las horas ocupadas aquí bloquean nuevas reservas.',
+      yourCalendars: 'Tus calendarios',
+      connectAnother: 'Conectar otro',
+      addEventsHere: 'Añadir eventos nuevos aquí',
+      addEventsHereHelp: 'Las reservas se escriben en este calendario. Solo un calendario puede recibir eventos.',
+      checkForConflicts: 'Verificar conflictos',
+      checkForConflictsHelp: 'Las horas ocupadas en este calendario bloquean nuevas reservas. Puedes verificar cualquier número de calendarios.',
+      summaryDestination: 'Los eventos nuevos se añaden a',
+      summaryNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
+      summaryConflictsNone: 'Ningún calendario verificado por conflictos',
+      summaryConflictsOne: '1 calendario verificado por conflictos',
+      summaryConflictsMany: '{n} calendarios verificados por conflictos',
+      healthChecking: 'Comprobando…',
+      healthOk: 'Conectado',
+      healthError: 'Requiere atención',
+      recheck: 'Volver a comprobar',
+      emptyTitle: 'Aún no hay calendarios conectados',
+      emptyBody: 'Conecta Google u Outlook para que Slate pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
+      emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
+      emptyDestination: 'Elige un calendario para recibir tus reservas',
     },
     login: {
       title: 'Iniciar sesión',
