@@ -33,6 +33,13 @@ export const member = pgTable('member', {
   handle: text('handle'),
   displayName: text('display_name'),
   email: text('email'),
+  // Account-level role (distinct from team_membership.role): `owner` | `admin` |
+  // `member`. Every account keeps ≥1 owner (last-owner guard). Default `member`;
+  // the first member of an account is promoted to `owner` (seed + migration backfill).
+  role: text('role').notNull().default('member'),
+  // Lifecycle: `active` | `invited` (invited-by-email, not yet signed in) |
+  // `disabled` (revoked access, row kept for history). Default `active`.
+  status: text('status').notNull().default('active'),
   avatarUrl: text('avatar_url'),
   coverUrl: text('cover_url'),
   brandColor: text('brand_color'),

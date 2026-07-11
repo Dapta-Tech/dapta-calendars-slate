@@ -66,7 +66,28 @@ export interface Me {
   email: string | null;
   timeZone: string | null;
   locale: string | null;
+  /** Account-level role + status — the FE gates admin-only surfaces on these. */
+  role: AccountRole;
+  status: MemberStatus;
 }
+
+export type AccountRole = 'owner' | 'admin' | 'member';
+export type MemberStatus = 'active' | 'invited' | 'disabled';
+
+/** A workspace member as returned by the (admin-only) roster endpoint. */
+export interface AccountMember {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  handle: string | null;
+  avatarUrl: string | null;
+  role: AccountRole;
+  status: MemberStatus;
+  createdAt: number;
+}
+
+/** True when the role may administer the workspace (manage members, settings). */
+export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || role === 'admin';
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   handleAvailable: (handle: string) =>
@@ -106,12 +127,13 @@ export const adminApi = {
     req<void>('DELETE', `/v1/teams/${id}/members/${memberId}`),
   teamEventTypes: (id: string) => req<EventType[]>('GET', `/v1/teams/${id}/event-types`),
 
-  // Members
-  listMembers: () =>
-    req<{ id: string; handle: string | null; display_name: string | null; email: string | null }[]>(
-      'GET',
-      '/v1/members',
-    ),
+  // Members (workspace roster — admin/owner only)
+  listMembers: () => req<AccountMember[]>('GET', '/v1/members'),
+  inviteMember: (b: { email: string; role?: 'admin' | 'member' }) =>
+    req<AccountMember>('POST', '/v1/members', b),
+  updateMember: (id: string, b: { role?: AccountRole; status?: MemberStatus }) =>
+    req<AccountMember>('PATCH', `/v1/members/${id}`, b),
+  removeMember: (id: string) => req<{ ok: boolean }>('DELETE', `/v1/members/${id}`),
 
   // Bookings (host)
   listBookings: (q = '') =>

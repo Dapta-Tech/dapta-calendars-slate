@@ -55,6 +55,9 @@ export async function seed(db: Db): Promise<SeedResult> {
     sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
         VALUES (${memberId}, ${accountId}, ${handle}, ${'Alex Rivera'}, ${'alex@example.com'}, ${'America/New_York'}, ${scheduleId}, ${now})`,
   );
+  // Alex is the account owner (the first member of a new account is the owner).
+  // Jordan (added below) stays the default `member` — a "staff" example.
+  await db.run(sql`UPDATE member SET role = 'owner' WHERE id = ${memberId}`);
   await db.run(
     sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
         VALUES (${scheduleId}, ${accountId}, ${memberId}, ${'Working Hours'}, ${'America/New_York'}, ${now})`,
