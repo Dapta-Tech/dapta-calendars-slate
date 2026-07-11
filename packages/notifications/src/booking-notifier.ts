@@ -65,7 +65,39 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:confirmation`,
       attachments: [this.ics(n, 'REQUEST', 0)],
+    });
+  }
+
+  /**
+   * A scheduled REMINDER before the meeting (attendee + host). No new .ics — the
+   * confirmed invite already lives in the calendar; this is just a nudge. The
+   * `payload` carries `reminderLeadMinutes` so the copy can say "starts in X".
+   */
+  sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
+    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const lead = n.reminderLeadMinutes;
+    const inWord =
+      lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
+    const lines = [
+      `Hi ${n.attendee.name},`,
+      ``,
+      `Reminder: "${n.title}" starts ${inWord}.`,
+      `When: ${when}`,
+      n.host.name ? `Host: ${n.host.name}` : '',
+      n.location ? `Where: ${n.location}` : '',
+      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+    ].filter(Boolean);
+    return this.email.send({
+      to: this.recipients(n),
+      subject: `Reminder: ${n.title} — ${when}`,
+      text: lines.join('\n'),
+      html: htmlBody(lines),
+      headers: { 'X-Booking-Uid': n.uid },
+      // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
+      idempotencyKey: `calendar:${n.uid}:reminder:${lead ?? 'x'}`,
+      // No .ics on a reminder.
     });
   }
 
@@ -93,6 +125,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:pending`,
       // No .ics on purpose — nothing is confirmed yet.
     });
   }
@@ -113,6 +146,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:declined`,
       // No .ics — the pending request never produced a confirmed event.
     });
   }
@@ -136,6 +170,9 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      // Keyed by the TARGET start: a retry of the same reschedule is de-duped,
+      // but a second reschedule to a different time is a distinct message.
+      idempotencyKey: `calendar:${n.uid}:reschedule:${n.startUtc}`,
       attachments: [this.ics(n, 'REQUEST', 1)],
     });
   }
@@ -154,6 +191,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:cancellation`,
       attachments: [this.ics(n, 'CANCEL', 2)],
     });
   }

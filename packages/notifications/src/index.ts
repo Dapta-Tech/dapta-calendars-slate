@@ -10,5 +10,11 @@ export * from './ics';
 export { LogOnlyEmailProvider } from './adapters/log-only';
 export { NoopEmailProvider } from './adapters/noop';
 export { SmtpEmailProvider, type SmtpOptions } from './adapters/smtp';
-export { HttpEmailProvider, type HttpEmailOptions } from './adapters/http';
+export {
+  HttpEmailProvider,
+  type HttpEmailOptions,
+  type HttpWireProfile,
+  DEFAULT_TRANSACTIONAL_CATEGORY,
+  interpretTransactionalResponse,
+} from './adapters/http';
 export { normalizeRecipients, formatSender } from './util';
