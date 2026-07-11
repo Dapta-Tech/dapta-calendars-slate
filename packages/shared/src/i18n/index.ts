@@ -119,6 +119,7 @@ export interface BookingMessages {
       general: string;
       bookingPage: string;
       calendars: string;
+      members: string;
       developer: string;
     };
     eventTypes: {
@@ -285,6 +286,42 @@ export interface BookingMessages {
       slugHelp: string;
       bioHelp: string;
       logoHelp: string;
+    };
+    /** Members / Staff — the workspace roster (account roles owner/admin/member). */
+    members: {
+      title: string;
+      subtitle: string;
+      rosterLabel: string;
+      invite: string;
+      inviteTitle: string;
+      inviteLead: string;
+      emailLabel: string;
+      emailPlaceholder: string;
+      emailInvalid: string;
+      emailTaken: string;
+      roleLabel: string;
+      roleOwner: string;
+      roleAdmin: string;
+      roleMember: string;
+      sendInvite: string;
+      cancel: string;
+      you: string;
+      noEmail: string;
+      statusActive: string;
+      statusInvited: string;
+      statusDisabled: string;
+      enable: string;
+      disable: string;
+      remove: string;
+      ownerLock: string;
+      lastOwnerTitle: string;
+      roleUpdated: string;
+      statusUpdated: string;
+      memberInvited: string;
+      memberRemoved: string;
+      genericError: string;
+      noAccessTitle: string;
+      noAccessBody: string;
     };
     connections: {
       pageDesc: string;
@@ -550,6 +587,7 @@ export const en: BookingMessages = {
       general: 'General',
       bookingPage: 'Booking Page',
       calendars: 'Calendars',
+      members: 'Members',
       developer: 'Developer',
     },
     eventTypes: {
@@ -716,6 +754,41 @@ export const en: BookingMessages = {
       slugHelp: 'Used in the public URL. Lowercase letters, numbers and dashes.',
       bioHelp: 'A short line under the team name on the public page.',
       logoHelp: 'Square image works best. Max 1MB.',
+    },
+    members: {
+      title: 'Members',
+      subtitle: 'Invite your team and control who can administer this workspace.',
+      rosterLabel: 'Workspace members',
+      invite: 'Invite member',
+      inviteTitle: 'Invite a member',
+      inviteLead: 'They’ll join your workspace with the role you choose.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'name@company.com',
+      emailInvalid: 'Enter a valid email address.',
+      emailTaken: 'A member with that email already exists.',
+      roleLabel: 'Role',
+      roleOwner: 'Owner',
+      roleAdmin: 'Admin',
+      roleMember: 'Member',
+      sendInvite: 'Send invite',
+      cancel: 'Cancel',
+      you: 'You',
+      noEmail: 'No email',
+      statusActive: 'Active',
+      statusInvited: 'Invited',
+      statusDisabled: 'Disabled',
+      enable: 'Enable',
+      disable: 'Disable',
+      remove: 'Remove',
+      ownerLock: 'Owners can’t be removed — change their role first.',
+      lastOwnerTitle: 'A workspace must keep at least one owner',
+      roleUpdated: 'Role updated.',
+      statusUpdated: 'Member updated.',
+      memberInvited: 'Invitation sent.',
+      memberRemoved: 'Member removed.',
+      genericError: 'Something went wrong.',
+      noAccessTitle: 'You don’t have access',
+      noAccessBody: 'This section is available to workspace admins and owners.',
     },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
@@ -981,6 +1054,7 @@ export const es: BookingMessages = {
       general: 'General',
       bookingPage: 'Página de reservas',
       calendars: 'Calendarios',
+      members: 'Miembros',
       developer: 'Desarrollador',
     },
     eventTypes: {
@@ -1147,6 +1221,41 @@ export const es: BookingMessages = {
       slugHelp: 'Se usa en la URL pública. Minúsculas, números y guiones.',
       bioHelp: 'Una línea breve bajo el nombre del equipo en la página pública.',
       logoHelp: 'Una imagen cuadrada funciona mejor. Máx. 1MB.',
+    },
+    members: {
+      title: 'Miembros',
+      subtitle: 'Invita a tu equipo y controla quién puede administrar este espacio.',
+      rosterLabel: 'Miembros del espacio',
+      invite: 'Invitar miembro',
+      inviteTitle: 'Invitar a un miembro',
+      inviteLead: 'Se unirá a tu espacio con el rol que elijas.',
+      emailLabel: 'Correo',
+      emailPlaceholder: 'nombre@empresa.com',
+      emailInvalid: 'Introduce un correo válido.',
+      emailTaken: 'Ya existe un miembro con ese correo.',
+      roleLabel: 'Rol',
+      roleOwner: 'Propietario',
+      roleAdmin: 'Administrador',
+      roleMember: 'Miembro',
+      sendInvite: 'Enviar invitación',
+      cancel: 'Cancelar',
+      you: 'Tú',
+      noEmail: 'Sin correo',
+      statusActive: 'Activo',
+      statusInvited: 'Invitado',
+      statusDisabled: 'Desactivado',
+      enable: 'Activar',
+      disable: 'Desactivar',
+      remove: 'Quitar',
+      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
+      roleUpdated: 'Rol actualizado.',
+      statusUpdated: 'Miembro actualizado.',
+      memberInvited: 'Invitación enviada.',
+      memberRemoved: 'Miembro eliminado.',
+      genericError: 'Algo salió mal.',
+      noAccessTitle: 'No tienes acceso',
+      noAccessBody: 'Esta sección está disponible para administradores y propietarios del espacio.',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
