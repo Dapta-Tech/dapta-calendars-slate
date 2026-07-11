@@ -30,6 +30,7 @@ import type {
   CalendarTokenSource,
   CalendarWire,
   ConnectStart,
+  DiscoveredConnection,
   WireRequest,
 } from './calendar.http-provider';
 
@@ -136,6 +137,24 @@ export class GenericRestWire implements CalendarWire {
     const url = asRecord(raw)['connectUrl'];
     if (typeof url !== 'string' || !url) throw new Error('calendar backend returned no connectUrl');
     return { token, connectUrl: url };
+  }
+
+  discoverConnections(tenantKey: string, provider: string): WireRequest {
+    const qs = `tenantKey=${enc(tenantKey)}&provider=${enc(provider)}`;
+    return { method: 'GET', path: `/v1/connect/connections?${qs}`, scope: 'admin', subject: tenantKey };
+  }
+  parseDiscovered(raw: unknown): DiscoveredConnection[] {
+    const conns = asRecord(raw)['connections'];
+    if (!Array.isArray(conns)) return [];
+    return conns
+      .map((c) => asRecord(c))
+      .filter((c) => typeof c['connectionRef'] === 'string')
+      .map((c) => ({
+        connectionRef: String(c['connectionRef']),
+        provider: typeof c['provider'] === 'string' ? c['provider'] : 'unknown',
+        primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
+        name: typeof c['name'] === 'string' ? c['name'] : null,
+      }));
   }
 }
 

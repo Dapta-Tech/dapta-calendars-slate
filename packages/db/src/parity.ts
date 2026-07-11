@@ -1109,6 +1109,28 @@ export async function updateConnection(
   await db.run(sql`UPDATE connected_calendar SET ${assign} WHERE id = ${id} AND member_id = ${memberId}`);
 }
 
+/** The opaque provider ref (external_id) + provider for one connection, or null. */
+export async function getConnectionRef(
+  db: Db,
+  memberId: string,
+  id: string,
+): Promise<{ externalId: string; provider: string } | null> {
+  const row = await db.get<{ external_id: string; provider: string }>(
+    sql`SELECT external_id, provider FROM connected_calendar
+        WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
+  );
+  return row ? { externalId: row.external_id, provider: row.provider } : null;
+}
+
+/** True when this member already has a connection for the given opaque ref. */
+export async function connectionExists(db: Db, memberId: string, externalId: string): Promise<boolean> {
+  const row = await db.get<{ id: string }>(
+    sql`SELECT id FROM connected_calendar
+        WHERE member_id = ${memberId} AND external_id = ${externalId} LIMIT 1`,
+  );
+  return !!row;
+}
+
 // --- API keys -------------------------------------------------------------
 
 export interface CreatedApiKey {

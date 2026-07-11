@@ -42,6 +42,18 @@ export interface ConnectStart {
   connectUrl: string;
 }
 
+/**
+ * A connection the backend reports for a tenant after an OAuth popup completes.
+ * `connectionRef` is opaque — it is stored verbatim and later round-tripped to
+ * `listCalendars`/`checkConnection`.
+ */
+export interface DiscoveredConnection {
+  connectionRef: string;
+  provider: string;
+  primaryEmail?: string | null;
+  name?: string | null;
+}
+
 /** A single HTTP call the adapter should make on the wire's behalf. */
 export interface WireRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -72,6 +84,26 @@ export interface CalendarWire {
   parseHealth(raw: unknown): ConnectionHealth;
   startConnect(provider: string, tenantKey: string): WireRequest;
   parseConnectStart(raw: unknown, token: string): ConnectStart;
+  discoverConnections(tenantKey: string, provider: string): WireRequest;
+  parseDiscovered(raw: unknown): DiscoveredConnection[];
+}
+
+/**
+ * The connect-flow capability (used by the connections API, not the booking
+ * engine). A provider that supports OAuth connect implements this in addition to
+ * `CalendarProvider`; the disabled OSS default does not.
+ */
+export interface CalendarConnector {
+  startConnect(provider: string, tenantKey: string): Promise<ConnectStart>;
+  discoverConnections(tenantKey: string, provider: string): Promise<DiscoveredConnection[]>;
+}
+
+/** Narrow a provider to a connect-capable one, or null when connect is unsupported. */
+export function asConnector(p: CalendarProvider): CalendarConnector | null {
+  const c = p as unknown as Partial<CalendarConnector>;
+  return typeof c.startConnect === 'function' && typeof c.discoverConnections === 'function'
+    ? (c as unknown as CalendarConnector)
+    : null;
 }
 
 /** Thrown on any non-2xx backend response so the outbox worker retries. */
@@ -152,6 +184,13 @@ export class ExternalCalendarProvider implements CalendarProvider {
     const token = await this.tokens.mint(req.scope, req.subject);
     const raw = await this.send('startConnect', req, token);
     return this.wire.parseConnectStart(raw, token);
+  }
+
+  /** List the tenant's connections after a popup completes (to register them). */
+  async discoverConnections(tenantKey: string, provider: string): Promise<DiscoveredConnection[]> {
+    return this.wire.parseDiscovered(
+      await this.send('discoverConnections', this.wire.discoverConnections(tenantKey, provider)),
+    );
   }
 
   /** Generic HTTP: auth + JSON + timeout + non-2xx→throw. Returns parsed JSON. */

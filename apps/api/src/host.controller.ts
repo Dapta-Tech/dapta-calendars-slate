@@ -150,20 +150,34 @@ export class HostController {
   }
 
   /**
-   * Mint the token/URL the client uses to start a vendor connect flow. In the
-   * OSS build no external provider is wired, so this reports the disabled state
-   * (a private overlay adapter returns a real bridge token/authorize URL here).
+   * Mint the token + connect URL the browser uses to start an OAuth connect flow.
+   * When a provider is wired this returns a real `{ token, connectUrl }`; with the
+   * OSS default it honestly reports the disabled state (no vendor named — R15).
    */
   @Post('connections/token')
   @HttpCode(200)
-  async connectionToken(@Req() req: ReqLike) {
-    await this.auth.resolveHost(req);
-    return {
-      enabled: false,
-      token: null,
-      message: 'No external calendar provider configured (OSS default). Add a connection manually.',
-    };
+  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.connectionToken(p, body?.provider ?? 'google');
   }
+
+  /**
+   * After the OAuth popup completes, discover + persist the tenant's connection(s)
+   * for the provider (idempotent) and return the current connection list.
+   */
+  @Post('connections/discover')
+  @HttpCode(200)
+  async discoverConnections(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.discoverConnections(p, body?.provider ?? 'google');
+  }
+
+  /** List the calendars a connected account exposes (post-connect pick). */
+  @Get('connections/:id/calendars')
+  async listConnectionCalendars(@Req() req: ReqLike, @Param('id') id: string) {
+    return this.admin.listConnectionCalendars(await this.auth.resolveHost(req), id);
+  }
+
   @Patch('connections/:id')
   async updateConnection(
     @Req() req: ReqLike,
@@ -177,11 +191,10 @@ export class HostController {
 
   @Post('connections/:id/ping')
   @HttpCode(200)
-  async pingConnection(@Req() req: ReqLike, @Param('id') _id: string) {
-    await this.auth.resolveHost(req);
-    // OSS default: no external calendar provider is wired, so a ping reports the
-    // disabled state (a private overlay adapter makes this a real reachability test).
-    return { ok: true, enabled: false, message: 'No external calendar provider configured (OSS default).' };
+  async pingConnection(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    // Real reachability test when a provider is wired; honest disabled state otherwise.
+    return this.admin.pingConnection(p, id);
   }
 
   @Delete('connections/:id')

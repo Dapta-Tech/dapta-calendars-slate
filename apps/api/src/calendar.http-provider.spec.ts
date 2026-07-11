@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
-import { CalendarHttpError, ExternalCalendarProvider } from './calendar.http-provider';
+import { asConnector, CalendarHttpError, ExternalCalendarProvider } from './calendar.http-provider';
+import { DisabledCalendarProvider } from '@slate/calendar';
 
 interface Call {
   url: string;
@@ -143,5 +144,22 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(start).toEqual({ token: 'tok-123', connectUrl: 'https://cal.example.test/oauth?x=1' });
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/connect');
     expect(calls[0]!.body).toMatchObject({ provider: 'google', tenantKey: 'tenant-1' });
+  });
+
+  it('discoverConnections lists the tenant connections after a popup', async () => {
+    const { provider, calls } = makeProvider([
+      { json: { connections: [{ connectionRef: 'conn-A', provider: 'google', primaryEmail: 'me@x.com' }] } },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found).toEqual([
+      { connectionRef: 'conn-A', provider: 'google', primaryEmail: 'me@x.com', name: null },
+    ]);
+    expect(calls[0]!.url).toBe('https://cal.example.test/v1/connect/connections?tenantKey=tenant-1&provider=google');
+  });
+
+  it('asConnector narrows the external provider but rejects the disabled default', () => {
+    const { provider } = makeProvider([]);
+    expect(asConnector(provider)).not.toBeNull();
+    expect(asConnector(new DisabledCalendarProvider())).toBeNull();
   });
 });
