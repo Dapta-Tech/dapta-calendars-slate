@@ -2,24 +2,28 @@ import Link from 'next/link';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
-import { EventTypeForm } from './event-type-form';
 import { DeleteButton } from './delete-button';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EventTypesPage() {
-  const [eventTypes, schedules] = await Promise.all([
-    adminApi.listEventTypes(),
-    adminApi.listSchedules(),
-  ]);
+  const eventTypes = await adminApi.listEventTypes();
   const admin = getMessages(await getLocale()).admin;
   const m = admin.eventTypes;
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <h1 className="mb-6 text-3xl font-semibold tracking-tight">{m.title}</h1>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h1 className="text-3xl font-semibold tracking-tight">{m.title}</h1>
+        <Link
+          href="/admin/event-types/new"
+          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          {m.newEventType}
+        </Link>
+      </div>
 
-      <ul className="mb-8 flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
         {eventTypes.map((et) => (
           <li
             key={et.id}
@@ -46,13 +50,22 @@ export default async function EventTypesPage() {
             </div>
           </li>
         ))}
-        {eventTypes.length === 0 ? (
-          <li className="text-sm text-muted-foreground">{m.emptyList}</li>
-        ) : null}
       </ul>
-
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{m.newEventType}</h2>
-      <EventTypeForm schedules={schedules} messages={m} />
+      {eventTypes.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
+          <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
+            <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-4Z" />
+            <path d="M14 6v12" strokeDasharray="2 2" />
+          </svg>
+          <p className="max-w-sm text-sm text-muted-foreground">{m.emptyList}</p>
+          <Link
+            href="/admin/event-types/new"
+            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.newEventType}
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }

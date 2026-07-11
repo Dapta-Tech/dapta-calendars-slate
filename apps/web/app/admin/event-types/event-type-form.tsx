@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
@@ -20,11 +21,15 @@ export function EventTypeForm({
   initial,
   schedules = [],
   messages: m,
+  redirectOnSuccess,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
   messages: EventTypeMessages;
+  /** When set (the dedicated /new surface), navigate here after a create. */
+  redirectOnSuccess?: string;
 }) {
+  const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(!!initial);
@@ -74,7 +79,10 @@ export function EventTypeForm({
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
       };
-      setRes(await saveEventTypeAction(payload));
+      const r = await saveEventTypeAction(payload);
+      setRes(r);
+      // Create on a dedicated /new surface → return to the list on success.
+      if (r.ok && !initial && redirectOnSuccess) router.push(redirectOnSuccess);
     });
 
   return (
