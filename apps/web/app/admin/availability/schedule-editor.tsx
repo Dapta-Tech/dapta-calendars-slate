@@ -3,6 +3,8 @@
 import { useMemo, useState, useTransition } from 'react';
 import { commonTimeZones, validateDayRanges, type BookingMessages, type TimeRange } from '@slate/shared';
 import { useToast } from '@/components/toast';
+import { Checkbox } from '@/components/ui/checkbox';
+import { TimeField } from '@/components/ui/time-field';
 import type { Schedule } from '@/lib/admin-api';
 import { deleteScheduleAction, saveScheduleFullAction, type RuleInput } from './actions';
 
@@ -72,36 +74,24 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
     });
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="rounded-md border border-border bg-card">
+      {/* Sticky action header — Dapta pattern: name on the left, primary Save
+          (+ Delete) top-right, pinned as the editor scrolls. */}
+      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-t-md border-b border-border bg-card/95 px-5 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           aria-label={m.scheduleNameLabel}
-          className="rounded-md border border-transparent bg-transparent px-1 text-lg font-medium hover:border-border focus:border-input"
+          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-lg font-medium hover:border-border focus:border-input focus-visible:outline-none"
         />
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            {m.timezone}
-            <select
-              value={timeZone}
-              onChange={(e) => setTimeZone(e.target.value)}
-              className="rounded-md border border-input bg-background px-2 py-1"
-            >
-              {zones.map((z) => (
-                <option key={z} value={z}>
-                  {z}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="flex items-center gap-2">
           {confirmDel ? (
             <span className="flex items-center gap-1 text-sm">
               <span className="text-muted-foreground">{m.deletePrompt}</span>
-              <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-2 py-1 text-destructive">
+              <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-2 py-1 text-destructive transition-colors hover:bg-destructive/10">
                 {m.yes}
               </button>
-              <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-2 py-1">
+              <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-2 py-1 transition-colors hover:bg-accent">
                 {m.no}
               </button>
             </span>
@@ -109,13 +99,37 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
             <button
               type="button"
               onClick={() => setConfirmDel(true)}
-              className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive transition-colors hover:bg-destructive/10"
+              className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
             >
               {m.deleteSchedule}
             </button>
           )}
+          <button
+            type="button"
+            onClick={save}
+            disabled={pending || !!firstError}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+          >
+            {pending ? m.saving : m.save}
+          </button>
         </div>
       </div>
+
+      <div className="flex flex-col gap-4 p-5">
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        {m.timezone}
+        <select
+          value={timeZone}
+          onChange={(e) => setTimeZone(e.target.value)}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-foreground"
+        >
+          {zones.map((z) => (
+            <option key={z} value={z}>
+              {z}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted-foreground">{m.weeklyHours}</span>
@@ -126,26 +140,26 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
           return (
             <div key={d} className="flex flex-col gap-1 border-b border-border/50 py-2 last:border-b-0">
               <div className="flex flex-wrap items-start gap-3">
-                <label className="flex w-32 shrink-0 items-center gap-2 py-1.5 text-sm">
-                  <input type="checkbox" checked={on} onChange={(e) => toggleDay(d, e.target.checked)} />
+                <label className="flex w-32 shrink-0 cursor-pointer items-center gap-2 py-1.5 text-sm">
+                  <Checkbox checked={on} onChange={(e) => toggleDay(d, e.target.checked)} />
                   {dayName}
                 </label>
                 {on ? (
                   <div className="flex flex-1 flex-col gap-2">
                     {ranges.map((r, ri) => (
                       <div key={ri} className="flex items-center gap-2">
-                        <input
-                          type="time"
+                        <TimeField
+                          className="w-32"
+                          aria-label={`${dayName} start`}
                           value={r.start}
-                          onChange={(e) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, start: e.target.value } : x)))}
-                          className="rounded-md border border-input bg-background px-2 py-1"
+                          onChange={(v) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, start: v } : x)))}
                         />
                         <span className="text-muted-foreground">–</span>
-                        <input
-                          type="time"
+                        <TimeField
+                          className="w-32"
+                          aria-label={`${dayName} end`}
                           value={r.end}
-                          onChange={(e) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, end: e.target.value } : x)))}
-                          className="rounded-md border border-input bg-background px-2 py-1"
+                          onChange={(v) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, end: v } : x)))}
                         />
                         <button
                           type="button"
@@ -185,18 +199,16 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
               onChange={(e) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))}
               className="rounded-md border border-input bg-background px-2 py-1"
             />
-            <input
-              type="time"
+            <TimeField
+              className="w-32"
               value={o.start}
-              onChange={(e) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))}
-              className="rounded-md border border-input bg-background px-2 py-1"
+              onChange={(v) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, start: v } : x)))}
             />
             <span className="text-muted-foreground">–</span>
-            <input
-              type="time"
+            <TimeField
+              className="w-32"
               value={o.end}
-              onChange={(e) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))}
-              className="rounded-md border border-input bg-background px-2 py-1"
+              onChange={(v) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, end: v } : x)))}
             />
             <button
               type="button"
@@ -216,15 +228,7 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
         </button>
         <p className="text-xs text-muted-foreground">{m.overrideNote}</p>
       </div>
-
-      <button
-        type="button"
-        onClick={save}
-        disabled={pending || !!firstError}
-        className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-      >
-        {pending ? m.saving : m.save}
-      </button>
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
+import { AppSwitcher } from '@/components/app-switcher';
 
 type AdminMessages = BookingMessages['admin'];
 
@@ -42,8 +43,8 @@ const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
 function Icon({ name, className }: { name: IconName; className?: string }) {
   const common = {
     className,
-    width: 18,
-    height: 18,
+    width: 20,
+    height: 20,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
@@ -122,8 +123,8 @@ function NavLinks({
               title={collapsed ? label : undefined}
               aria-current={active ? 'page' : undefined}
               className={[
-                'flex min-h-[44px] items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors active:scale-[0.99]',
-                collapsed ? 'justify-center gap-0' : '',
+                'flex items-center gap-3 rounded-md text-sm transition-colors active:scale-[0.99]',
+                collapsed ? 'mx-auto h-11 w-11 justify-center gap-0 px-0' : 'min-h-[44px] px-3 py-2.5',
                 active
                   ? 'bg-muted font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -203,9 +204,10 @@ export function AdminShell({
   const userLabel = user?.displayName ?? 'Not signed in';
 
   const brand = (
-    <div className={`flex items-center gap-2 px-2 ${railCollapsed ? 'flex-col px-0' : ''}`}>
+    <div className={`flex items-center gap-2 ${railCollapsed ? 'flex-col px-0' : 'px-2'}`}>
       <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
       {!railCollapsed ? <span className="text-sm font-semibold text-foreground">Slate</span> : null}
+      <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
           rail is force-collapsed for canvas. */}
       {!studio ? (
@@ -315,8 +317,8 @@ export function AdminShell({
 
       {/* Desktop sidebar — flush, bordered, collapsible rail */}
       <aside
-        className={`hidden shrink-0 flex-col gap-6 border-r border-border bg-popover p-4 transition-[width] md:flex ${
-          railCollapsed ? 'w-[68px]' : 'w-60'
+        className={`hidden shrink-0 flex-col gap-6 border-r border-border bg-popover py-4 transition-[width] md:flex ${
+          railCollapsed ? 'w-[64px] px-2' : 'w-60 px-4'
         }`}
       >
         {brand}
@@ -349,6 +351,7 @@ export function AdminShell({
         <div className="flex items-center gap-2 px-2">
           <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
           <span className="text-sm font-semibold text-foreground">Slate</span>
+          <AppSwitcher messages={c.switcher} />
         </div>
         <nav>
           <NavLinks collapsed={false} nav={messages.nav} onNavigate={() => setDrawerOpen(false)} />

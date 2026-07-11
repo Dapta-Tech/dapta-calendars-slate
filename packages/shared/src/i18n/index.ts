@@ -84,6 +84,14 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      switcher: {
+        trigger: string;
+        menuLabel: string;
+        eyebrow: string;
+        comingSoon: string;
+        opensNewTab: string;
+        forms: string;
+      };
     };
     home: {
       welcome: string;
@@ -493,6 +501,14 @@ export const en: BookingMessages = {
       language: 'Language',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
+      switcher: {
+        trigger: 'Switch product',
+        menuLabel: 'Dapta products',
+        eyebrow: 'Dapta',
+        comingSoon: 'Coming soon',
+        opensNewTab: '(opens in a new tab)',
+        forms: 'Forms',
+      },
     },
     home: {
       welcome: 'Welcome',
@@ -902,6 +918,14 @@ export const es: BookingMessages = {
       language: 'Idioma',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
+      switcher: {
+        trigger: 'Cambiar producto',
+        menuLabel: 'Productos Dapta',
+        eyebrow: 'Dapta',
+        comingSoon: 'Próximamente',
+        opensNewTab: '(se abre en una pestaña nueva)',
+        forms: 'Forms',
+      },
     },
     home: {
       welcome: 'Bienvenido',
