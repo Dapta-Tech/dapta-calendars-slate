@@ -60,7 +60,7 @@ export class CalendarEffects {
     this.enqueue('delete', uid);
   }
 
-  /** A booking moved (reschedule): queue a durable delete+re-create at the new time. */
+  /** A booking moved (reschedule): queue a durable MOVE of the existing event. */
   onBookingRescheduled(uid: string): void {
     this.enqueue('reschedule', uid);
   }
@@ -88,10 +88,40 @@ export class CalendarEffects {
     if (action === 'delete') {
       await this.removeEvent(uid);
     } else if (action === 'reschedule') {
-      await this.removeEvent(uid);
-      await this.writeEvent(uid);
+      await this.moveEvent(uid);
     } else {
       await this.writeEvent(uid);
+    }
+  }
+
+  /**
+   * A true reschedule: MOVE the existing remote event(s) to the booking's new
+   * time via `updateEvent`, keeping the same `externalEventId` so attendees see
+   * the event move (no cancel + fresh invite, no duplicate). Slate's reschedule
+   * keeps the same booking uid, so the stored `booking_reference` rows are the
+   * events to move. If nothing was written yet (e.g. accepted then rescheduled
+   * before the create drained), fall back to a fresh create.
+   */
+  private async moveEvent(uid: string): Promise<void> {
+    const ctx = await loadBookingForCalendarWrite(this.db, uid);
+    if (!ctx) return;
+    const refs = await loadBookingReferences(this.db, ctx.bookingId);
+    const movable = refs.filter((r) => r.externalEventId);
+    if (movable.length === 0) {
+      await this.writeEvent(uid);
+      return;
+    }
+    for (const ref of movable) {
+      await this.calendar.updateEvent({
+        connectionRef: ref.externalCalendarId ?? ctx.destinationRefs[0] ?? '',
+        externalEventId: ref.externalEventId!,
+        title: ctx.title,
+        startUtc: ctx.startUtc,
+        endUtc: ctx.endUtc,
+        attendeeEmails: ctx.attendeeEmails,
+        organizerEmail: ctx.organizerEmail,
+        timeZone: ctx.attendeeTimeZone,
+      });
     }
   }
 
