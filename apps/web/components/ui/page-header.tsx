@@ -57,9 +57,7 @@ export function FormHeader({
         href={backHref}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="m15 18-6-6 6-6" />
-        </svg>
+        <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
         {backLabel}
       </Link>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">

@@ -40,64 +40,26 @@ const NAV: NavItem[] = [
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
 
+// Dapta's icon system is PrimeIcons (pi pi-*) — the same set the production
+// Angular admin panel uses. Nav glyphs map 1:1 to their pi names; sized at the
+// design-system's 20px sidebar icon.
+const PI_BY_NAME: Record<IconName, string> = {
+  home: 'pi-home',
+  calendar: 'pi-calendar',
+  clock: 'pi-clock',
+  ticket: 'pi-ticket',
+  users: 'pi-users',
+  cog: 'pi-cog',
+};
+
 function Icon({ name, className }: { name: IconName; className?: string }) {
-  const common = {
-    className,
-    width: 20,
-    height: 20,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.75,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    'aria-hidden': true,
-  };
-  switch (name) {
-    case 'home':
-      return (
-        <svg {...common}>
-          <path d="M3 10.5 12 3l9 7.5" />
-          <path d="M5 9.5V21h14V9.5" />
-        </svg>
-      );
-    case 'calendar':
-      return (
-        <svg {...common}>
-          <rect x="3" y="4.5" width="18" height="16" rx="2" />
-          <path d="M3 9h18M8 2.5v4M16 2.5v4" />
-        </svg>
-      );
-    case 'clock':
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7.5V12l3 2" />
-        </svg>
-      );
-    case 'ticket':
-      return (
-        <svg {...common}>
-          <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-4Z" />
-          <path d="M14 6v12" strokeDasharray="2 2" />
-        </svg>
-      );
-    case 'users':
-      return (
-        <svg {...common}>
-          <circle cx="9" cy="8" r="3.2" />
-          <path d="M3.5 20a5.5 5.5 0 0 1 11 0" />
-          <path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 20a5.5 5.5 0 0 0-3-4.9" />
-        </svg>
-      );
-    case 'cog':
-      return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H1a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 2.6 7a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 8 2.6h.1A1.6 1.6 0 0 0 9 1.1V1a2 2 0 1 1 4 0v.1A1.6 1.6 0 0 0 15 2.6a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
-        </svg>
-      );
-  }
+  return (
+    <i
+      aria-hidden
+      className={`pi ${PI_BY_NAME[name]}${className ? ` ${className}` : ''}`}
+      style={{ fontSize: 20 }}
+    />
+  );
 }
 
 function NavLinks({
@@ -219,19 +181,7 @@ export function AdminShell({
           title={collapsed ? c.expand : c.collapse}
           className={`hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
         >
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            {collapsed ? (
-              <>
-                <path d="m13 17 5-5-5-5" />
-                <path d="m6 17 5-5-5-5" />
-              </>
-            ) : (
-              <>
-                <path d="m11 17-5-5 5-5" />
-                <path d="m18 17-5-5 5-5" />
-              </>
-            )}
-          </svg>
+          <i aria-hidden className={`pi ${collapsed ? 'pi-angle-double-right' : 'pi-angle-double-left'}`} style={{ fontSize: 16 }} />
         </button>
       ) : null}
     </div>
@@ -248,9 +198,7 @@ export function AdminShell({
       aria-label={`${c.viewPublic} (opens in a new tab)`}
       className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
     >
-      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M7 17 17 7M9 7h8v8" />
-      </svg>
+      <i aria-hidden className="pi pi-external-link" style={{ fontSize: 16 }} />
     </Link>
   ) : null;
 
@@ -263,9 +211,7 @@ export function AdminShell({
         aria-label={c.signOut}
         className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
       >
-        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 17l-5-5 5-5M5 12h11" />
-        </svg>
+        <i aria-hidden className="pi pi-sign-out" style={{ fontSize: 16 }} />
       </button>
     </form>
   );
@@ -307,9 +253,7 @@ export function AdminShell({
           aria-expanded={drawerOpen}
           className="flex h-11 w-11 items-center justify-center rounded-md text-foreground hover:bg-muted active:scale-[0.98]"
         >
-          <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
-            <path d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <i aria-hidden className="pi pi-bars" style={{ fontSize: 20 }} />
         </button>
         <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
         <span className="text-sm font-semibold">Slate</span>
