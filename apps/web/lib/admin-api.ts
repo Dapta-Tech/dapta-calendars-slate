@@ -5,7 +5,8 @@
  * its configured provider expects and ignores the other. A `401` throws an
  * ApiError the /admin gate turns into a redirect to /login.
  */
-import { getSession } from './auth-session';
+import { redirect } from 'next/navigation';
+import { getSession, clearSession, authProvider } from './auth-session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -35,6 +36,18 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   });
+  if (res.status === 401) {
+    // Global 401 guard (AUTH-WEB-CONTRACT §4): the session is invalid → clear it
+    // (best-effort: allowed in an action, a no-op during render) and bounce to
+    // login. In an action, wrap the caller's catch with `unstable_rethrow` so
+    // this redirect isn't swallowed.
+    try {
+      await clearSession();
+    } catch {
+      /* cookies are immutable during render — the redirect still fires */
+    }
+    redirect(authProvider() === 'workos' ? '/api/auth/logout' : '/login');
+  }
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
     // Surface the HTTP status (was discarded) so the UI can handle 409/410/400.

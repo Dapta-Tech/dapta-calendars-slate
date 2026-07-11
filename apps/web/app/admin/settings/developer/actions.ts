@@ -1,5 +1,7 @@
 'use server';
 
+import { unstable_rethrow } from 'next/navigation';
+
 import { revalidatePath } from 'next/cache';
 import { adminApi } from '@/lib/admin-api';
 
@@ -9,6 +11,7 @@ export async function createApiKeyAction(name: string, scopes: string[]): Promis
     revalidatePath('/admin/settings/developer');
     return { plaintext: r.plaintext };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { error: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -24,6 +27,7 @@ export async function createWebhookAction(subscriberUrl: string, triggers: strin
     revalidatePath('/admin/settings/developer');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -43,6 +47,7 @@ export async function pingWebhookAction(id: string): Promise<{ ok: boolean; mess
     const r = await adminApi.pingWebhook(id);
     return { ok: r.ok, message: r.ok ? `Delivered (${r.status})` : (r.message ?? 'Failed') };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

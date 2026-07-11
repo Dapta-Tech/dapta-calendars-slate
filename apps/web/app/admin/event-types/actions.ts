@@ -1,5 +1,7 @@
 'use server';
 
+import { unstable_rethrow } from 'next/navigation';
+
 import { revalidatePath } from 'next/cache';
 import { adminApi } from '@/lib/admin-api';
 
@@ -34,6 +36,7 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
     if (p.id) revalidatePath(`/admin/event-types/${p.id}`);
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -44,6 +47,7 @@ export async function deleteEventTypeAction(id: string): Promise<ActionResult> {
     revalidatePath('/admin/event-types');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the event type.' };
   }
 }

@@ -19,7 +19,7 @@ import {
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
-import { saveStudioAction, toggleEventHiddenAction } from './actions';
+import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
 
@@ -53,7 +53,6 @@ const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
 };
 
 const ACCENT_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '#ff6fae'];
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 interface EventTypeLite {
   slug: string;
@@ -169,10 +168,8 @@ export function Studio(init: StudioInit) {
     setHandleState('checking');
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`${API}/v1/handle-available?handle=${encodeURIComponent(handle)}`, {
-          cache: 'no-store',
-        });
-        const j = (await r.json()) as { available: boolean; suggestion?: string };
+        // Server action (identity-scoped endpoint — no client-side API fetch).
+        const j = await checkHandleAction(handle);
         setHandleState(j.available ? 'available' : 'taken');
         setHandleSuggestion(j.available ? null : (j.suggestion ?? null));
       } catch {

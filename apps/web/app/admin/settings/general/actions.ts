@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { unstable_rethrow } from 'next/navigation';
+import { hostFetch } from '@/lib/auth-session';
 
 export type ActionResult = { ok: boolean; message?: string };
 
@@ -14,11 +14,10 @@ export async function saveGeneralAction(_prev: ActionResult | null, form: FormDa
 
     // Rename handle first (if changed + present); only then save the rest.
     if (handle) {
-      const r = await fetch(`${API}/v1/me/handle`, {
+      const r = await hostFetch(`/v1/me/handle`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ handle }),
-        cache: 'no-store',
       });
       if (!r.ok && r.status !== 409) {
         return { ok: false, message: 'Failed to update handle.' };
@@ -29,16 +28,16 @@ export async function saveGeneralAction(_prev: ActionResult | null, form: FormDa
       }
     }
 
-    const res = await fetch(`${API}/v1/me/settings`, {
+    const res = await hostFetch(`/v1/me/settings`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ displayName, timeZone }),
-      cache: 'no-store',
     });
     if (!res.ok) return { ok: false, message: 'Failed to save settings.' };
     revalidatePath('/admin/settings/general');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

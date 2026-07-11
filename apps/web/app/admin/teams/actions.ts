@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -22,6 +22,7 @@ export async function createTeamFullAction(p: TeamCreatePayload): Promise<Action
     id = team.id;
     revalidatePath('/admin/teams');
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not create the team.' };
   }
   redirect(`/admin/teams/${id}`);
@@ -35,6 +36,7 @@ export async function deleteTeamAction(id: string): Promise<ActionResult> {
     revalidatePath('/admin/teams');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     // Orphan guard (409: delete the team's event types first) etc.
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the team.' };
   }
@@ -51,6 +53,7 @@ export async function addMemberAction(
     revalidatePath(`/admin/teams/${teamId}`);
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not add member.' };
   }
 }
@@ -81,6 +84,7 @@ export async function inviteMemberByEmailAction(
     revalidatePath(`/admin/teams/${teamId}`);
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     // BE may 409 when already on the team — pass its message through verbatim.
     return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
   }
@@ -96,6 +100,7 @@ export async function removeMemberAction(
     revalidatePath(`/admin/teams/${teamId}`);
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     // Surfaces LAST_OWNER (409) etc.
     return { ok: false, message: e instanceof Error ? e.message : 'Could not remove member.' };
   }
@@ -112,6 +117,7 @@ export async function setMemberRoleAction(
     revalidatePath(`/admin/teams/${teamId}`);
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not change role.' };
   }
 }

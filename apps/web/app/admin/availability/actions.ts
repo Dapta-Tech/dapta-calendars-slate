@@ -1,5 +1,7 @@
 'use server';
 
+import { unstable_rethrow } from 'next/navigation';
+
 import { revalidatePath } from 'next/cache';
 import { adminApi } from '@/lib/admin-api';
 
@@ -29,6 +31,7 @@ export async function saveScheduleFullAction(
     revalidatePath('/admin/availability');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -42,6 +45,7 @@ export async function createScheduleAction(
     revalidatePath('/admin/availability');
     return { ok: true, id: created.id };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
@@ -52,6 +56,7 @@ export async function deleteScheduleAction(id: string): Promise<ActionResult> {
     revalidatePath('/admin/availability');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete schedule.' };
   }
 }

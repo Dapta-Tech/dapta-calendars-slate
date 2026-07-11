@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { unstable_rethrow } from 'next/navigation';
+import { hostFetch } from '@/lib/auth-session';
 
 export interface HostBookingResult {
   ok: boolean;
@@ -24,11 +24,10 @@ export async function createHostBookingAction(payload: {
   answers?: Record<string, string>;
 }): Promise<HostBookingResult> {
   try {
-    const res = await fetch(`${API}/v1/host/bookings`, {
+    const res = await hostFetch(`/v1/host/bookings`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
-      cache: 'no-store',
     });
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (res.status === 201) {
@@ -37,6 +36,7 @@ export async function createHostBookingAction(payload: {
     }
     return { ok: false, status: res.status, message: (j.message as string) ?? 'Could not create the booking.' };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

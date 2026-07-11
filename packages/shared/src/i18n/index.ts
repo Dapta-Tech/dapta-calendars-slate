@@ -327,6 +327,8 @@ export interface BookingMessages {
       emailInvalid: string;
       workosCta: string;
       workosSubtitle: string;
+      error: string;
+      retry: string;
     };
     settingsGeneral: {
       displayName: string;
@@ -749,6 +751,8 @@ export const en: BookingMessages = {
       emailInvalid: 'Enter a valid email address.',
       workosCta: 'Continue with Dapta',
       workosSubtitle: 'You’ll be redirected to sign in securely.',
+      error: 'Something went wrong signing in. Please try again.',
+      retry: 'Try again',
     },
     settingsGeneral: {
       displayName: 'Display name',
@@ -1171,6 +1175,8 @@ export const es: BookingMessages = {
       emailInvalid: 'Introduce un correo válido.',
       workosCta: 'Continuar con Dapta',
       workosSubtitle: 'Te redirigiremos para iniciar sesión de forma segura.',
+      error: 'Algo salió mal al iniciar sesión. Inténtalo de nuevo.',
+      retry: 'Reintentar',
     },
     settingsGeneral: {
       displayName: 'Nombre visible',

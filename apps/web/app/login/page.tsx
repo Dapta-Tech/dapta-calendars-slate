@@ -6,9 +6,14 @@ import { LoginForm } from './login-form';
 
 export const metadata = { title: 'Sign in — Slate' };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
   const m = getMessages(await getLocale()).admin.login;
   const workos = authProvider() === 'workos';
+  const { error } = await searchParams;
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">
@@ -20,6 +25,13 @@ export default async function LoginPage() {
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6">
         <h1 className="mb-1 text-xl font-semibold">{m.title}</h1>
         <p className="mb-6 text-sm text-muted-foreground">{workos ? m.workosSubtitle : m.subtitle}</p>
+        {/* A failed WorkOS login/callback comes back with ?error= — surface it
+            with a retry CTA instead of a silent plain sign-in screen (R22). */}
+        {error ? (
+          <p role="alert" className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {m.error}
+          </p>
+        ) : null}
         {workos ? (
           // WorkOS provider: hand off to IAM's hosted login (Google/Microsoft/
           // LinkedIn are rendered by WorkOS — nothing per-provider to build).

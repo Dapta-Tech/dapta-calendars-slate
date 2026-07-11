@@ -1,11 +1,29 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { unstable_rethrow } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { hostFetch } from '@/lib/auth-session';
 
 export type SaveResult = { ok: boolean; message?: string; field?: 'handle' | 'branding' };
+
+/**
+ * Handle-availability check (server action) — `/v1/handle-available` is
+ * identity-scoped, so the client CANNOT call it directly (the httpOnly session
+ * cookie isn't readable cross-origin under workos). Routed through adminApi so
+ * it carries identity + the global 401 guard.
+ */
+export async function checkHandleAction(
+  handle: string,
+): Promise<{ available: boolean; suggestion?: string | null }> {
+  try {
+    const r = await adminApi.handleAvailable(handle);
+    return { available: r.available, suggestion: r.suggestion ?? null };
+  } catch (e) {
+    unstable_rethrow(e); // a 401 redirects to /login rather than reporting "taken"
+    return { available: false };
+  }
+}
 
 /** Show/hide an event type on the public booking page (studio Meetings panel). */
 export async function toggleEventHiddenAction(id: string, hidden: boolean): Promise<{ ok: boolean; message?: string }> {
@@ -14,6 +32,7 @@ export async function toggleEventHiddenAction(id: string, hidden: boolean): Prom
     revalidatePath('/admin/settings/booking-page');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not update visibility.' };
   }
 }
@@ -34,11 +53,10 @@ export interface StudioPayload {
 export async function saveStudioAction(payload: StudioPayload): Promise<SaveResult> {
   try {
     if (payload.handle) {
-      const res = await fetch(`${API}/v1/me/handle`, {
+      const res = await hostFetch(`/v1/me/handle`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ handle: payload.handle }),
-        cache: 'no-store',
       });
       if (res.status === 409) {
         const j = (await res.json().catch(() => ({}))) as { message?: string };
@@ -57,6 +75,7 @@ export async function saveStudioAction(payload: StudioPayload): Promise<SaveResu
     revalidatePath('/admin/settings/booking-page');
     return { ok: true };
   } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, field: 'branding', message: e instanceof Error ? e.message : 'Failed' };
   }
 }
