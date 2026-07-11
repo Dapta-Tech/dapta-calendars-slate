@@ -43,12 +43,52 @@ export interface DeleteEventInput {
   externalEventId: string;
 }
 
+/**
+ * Move an EXISTING remote event to a new time (a true reschedule). Keeps the same
+ * `externalEventId` so attendees see the event MOVE rather than a cancel + a fresh
+ * invite, and no duplicate is created.
+ */
+export interface UpdateEventInput {
+  connectionRef: string;
+  externalEventId: string;
+  title: string;
+  description?: string | null;
+  startUtc: string;
+  endUtc: string;
+  attendeeEmails: string[];
+  organizerEmail?: string | null;
+  timeZone?: string | null;
+}
+
+/** One calendar exposed by a connected account (for the post-connect pick). */
+export interface CalendarSummary {
+  /** Opaque calendar ref the provider round-trips (never an OAuth token). */
+  id: string;
+  name: string;
+  primaryEmail?: string | null;
+  /** The account's default calendar — a sensible default destination. */
+  isPrimary?: boolean;
+}
+
+/** Health of a single connection, surfaced in the connections UI. */
+export interface ConnectionHealth {
+  ok: boolean;
+  /** Human-readable detail (e.g. "Connected", "Reauthorization required"). */
+  detail: string;
+}
+
 export interface CalendarProvider {
   /** True when a real provider is wired; false disables all calendar effects. */
   readonly enabled: boolean;
   listBusy(input: ListBusyInput): Promise<BusyInterval[]>;
   createEvent(input: CreateEventInput): Promise<CreatedEvent>;
+  /** Move an existing event in place (true reschedule). */
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent>;
   deleteEvent(input: DeleteEventInput): Promise<void>;
+  /** List the calendars a connected account exposes (post-connect pick). */
+  listCalendars(connectionRef: string): Promise<CalendarSummary[]>;
+  /** Probe a connection's live health (drives the per-row status + ping). */
+  checkConnection(connectionRef: string): Promise<ConnectionHealth>;
 }
 
 /**
@@ -65,8 +105,17 @@ export class DisabledCalendarProvider implements CalendarProvider {
   createEvent(input: CreateEventInput): Promise<CreatedEvent> {
     return Promise.resolve({ externalEventId: `disabled-${input.connectionRef}`, meetingUrl: null });
   }
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null });
+  }
   deleteEvent(): Promise<void> {
     return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: false, detail: 'No external calendar provider configured.' });
   }
 }
 
@@ -74,11 +123,18 @@ export class DisabledCalendarProvider implements CalendarProvider {
 export class InMemoryCalendarProvider implements CalendarProvider {
   readonly enabled = true;
   private busy = new Map<string, BusyInterval[]>();
+  private calendars = new Map<string, CalendarSummary[]>();
   readonly created: CreateEventInput[] = [];
+  readonly updated: UpdateEventInput[] = [];
+  readonly deleted: DeleteEventInput[] = [];
   private seq = 0;
 
   seedBusy(connectionRef: string, intervals: BusyInterval[]): void {
     this.busy.set(connectionRef, intervals);
+  }
+
+  seedCalendars(connectionRef: string, calendars: CalendarSummary[]): void {
+    this.calendars.set(connectionRef, calendars);
   }
 
   listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
@@ -94,7 +150,19 @@ export class InMemoryCalendarProvider implements CalendarProvider {
     this.created.push(input);
     return Promise.resolve({ externalEventId: `evt-${++this.seq}`, meetingUrl: null });
   }
-  deleteEvent(): Promise<void> {
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    this.updated.push(input);
+    // A move keeps the same external event id.
+    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null });
+  }
+  deleteEvent(input: DeleteEventInput): Promise<void> {
+    this.deleted.push(input);
     return Promise.resolve();
+  }
+  listCalendars(connectionRef: string): Promise<CalendarSummary[]> {
+    return Promise.resolve(this.calendars.get(connectionRef) ?? []);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true, detail: 'Connected' });
   }
 }

@@ -3,16 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { createDb, migrate, seed, sql, createBooking, getAvailability, type Db } from '@slate/db';
 import type {
   CalendarProvider,
+  CalendarSummary,
+  ConnectionHealth,
   CreateEventInput,
   CreatedEvent,
   DeleteEventInput,
+  UpdateEventInput,
 } from '@slate/calendar';
 import { CalendarEffects } from './calendar-effects';
 
-/** A fake provider that records both writes AND deletes (the port's two effects). */
+/** A fake provider that records writes, moves AND deletes (the port's effects). */
 class RecordingCalendarProvider implements CalendarProvider {
   readonly enabled = true;
   readonly created: CreateEventInput[] = [];
+  readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
   private seq = 0;
   listBusy(): Promise<[]> {
@@ -22,9 +26,19 @@ class RecordingCalendarProvider implements CalendarProvider {
     this.created.push(input);
     return Promise.resolve({ externalEventId: `evt-${++this.seq}`, meetingUrl: 'https://meet/x' });
   }
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    this.updated.push(input);
+    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: 'https://meet/x' });
+  }
   deleteEvent(input: DeleteEventInput): Promise<void> {
     this.deleted.push(input);
     return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true, detail: 'Connected' });
   }
 }
 
@@ -160,9 +174,14 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       createEvent: () => {
         throw new Error('must not be called');
       },
+      updateEvent: () => {
+        throw new Error('must not be called');
+      },
       deleteEvent: () => {
         throw new Error('must not be called');
       },
+      listCalendars: () => Promise.resolve([]),
+      checkConnection: () => Promise.resolve({ ok: false, detail: 'disabled' }),
     };
     const effects = new CalendarEffects(disabled, db);
     const uid = await bookFirstSlot();
