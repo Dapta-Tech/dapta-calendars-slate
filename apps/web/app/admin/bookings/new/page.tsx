@@ -14,7 +14,7 @@ export default async function NewHostBooking() {
   const m = getMessages(await getLocale()).admin.bookings;
 
   return (
-    <div className="mx-auto max-w-2xl px-8 py-10">
+    <div className="mx-auto max-w-2xl px-8 pb-10">
       {me?.handle && eventTypes.length > 0 ? (
         <HostBookingForm
           accountCode={me.accountCode}

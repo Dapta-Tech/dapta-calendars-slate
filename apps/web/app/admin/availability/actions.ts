@@ -36,12 +36,22 @@ export async function saveScheduleFullAction(
   }
 }
 
+/** Seed a new schedule with sensible defaults — Mon–Fri 09:00–17:00 — so it
+ *  opens ready to tweak (one screen), not blank. Matches Cal.com/Calendly. */
+const DEFAULT_RULES: RuleInput[] = [
+  { days: [1, 2, 3, 4, 5], startTime: '09:00', endTime: '17:00', date: null },
+];
+
 export async function createScheduleAction(
   name: string,
   timeZone: string,
 ): Promise<ActionResult & { id?: string }> {
   try {
-    const created = await adminApi.createSchedule({ name: name.trim() || 'New schedule', timeZone, rules: [] });
+    const created = await adminApi.createSchedule({
+      name: name.trim() || 'Working hours',
+      timeZone,
+      rules: DEFAULT_RULES,
+    });
     revalidatePath('/admin/availability');
     return { ok: true, id: created.id };
   } catch (e) {

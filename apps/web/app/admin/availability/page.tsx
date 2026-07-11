@@ -4,6 +4,7 @@ import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
 import { DeleteScheduleButton } from './delete-schedule-button';
+import { NewScheduleButton } from './new-schedule-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,14 +13,7 @@ export default async function AvailabilityPage() {
   const admin = getMessages(await getLocale()).admin;
   const m = admin.availability;
 
-  const newButton = (
-    <Link
-      href="/admin/availability/new"
-      className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-    >
-      {m.newSchedule}
-    </Link>
-  );
+  const newButton = <NewScheduleButton messages={m} />;
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">

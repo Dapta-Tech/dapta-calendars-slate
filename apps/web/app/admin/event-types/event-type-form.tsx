@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FormHeader } from '@/components/ui/page-header';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
@@ -157,12 +158,12 @@ export function EventTypeForm({
       </Field>
 
       <div className="flex gap-6">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
           {m.requiresConfirmation}
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
           {m.hiddenLabel}
         </label>
       </div>
@@ -193,8 +194,8 @@ export function EventTypeForm({
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
-            <label className="flex items-center gap-1 text-sm">
-              <input type="checkbox" checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+            <label className="flex cursor-pointer items-center gap-1 text-sm">
+              <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
               {m.req}
             </label>
             <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
@@ -216,7 +217,8 @@ export function EventTypeForm({
   );
 }
 
-const inputCls = 'rounded-md border border-input bg-background px-3 py-2 w-full';
+const inputCls =
+  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

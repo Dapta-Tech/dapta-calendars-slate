@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Poppins } from 'next/font/google';
+import 'primeicons/primeicons.css';
 import './globals.css';
 
 // Poppins is the brand typeface (Dapta design system). next/font self-hosts it
