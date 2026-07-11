@@ -65,6 +65,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:confirmation`,
       attachments: [this.ics(n, 'REQUEST', 0)],
     });
   }
@@ -93,6 +94,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:pending`,
       // No .ics on purpose — nothing is confirmed yet.
     });
   }
@@ -113,6 +115,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:declined`,
       // No .ics — the pending request never produced a confirmed event.
     });
   }
@@ -136,6 +139,9 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      // Keyed by the TARGET start: a retry of the same reschedule is de-duped,
+      // but a second reschedule to a different time is a distinct message.
+      idempotencyKey: `calendar:${n.uid}:reschedule:${n.startUtc}`,
       attachments: [this.ics(n, 'REQUEST', 1)],
     });
   }
@@ -154,6 +160,7 @@ export class BookingNotifier {
       text: lines.join('\n'),
       html: htmlBody(lines),
       headers: { 'X-Booking-Uid': n.uid },
+      idempotencyKey: `calendar:${n.uid}:cancellation`,
       attachments: [this.ics(n, 'CANCEL', 2)],
     });
   }

@@ -1,21 +1,47 @@
-import type { EmailMessage, EmailProvider, EmailResult } from '../email.port';
+import type { EmailAttachment, EmailMessage, EmailProvider, EmailResult } from '../email.port';
 import { normalizeRecipients } from '../util';
+
+/**
+ * Which HTTP wire to speak:
+ *   - `generic` (default): the original provider-agnostic payload + optional
+ *     Bearer auth. Unchanged — any managed endpoint wired via config keeps
+ *     working exactly as before.
+ *   - `transactional-v1`: the managed transactional-email contract (mode,
+ *     to[], replyTo, subject, html/text, category, idempotencyKey, and
+ *     base64 attachments), authenticated with `X-API-Key`.
+ */
+export type HttpWireProfile = 'generic' | 'transactional-v1';
+
+/** Default category for the transactional-v1 profile (Req 5). */
+export const DEFAULT_TRANSACTIONAL_CATEGORY = 'lifecycle';
 
 export interface HttpEmailOptions {
   /** The email-service endpoint to POST the message to. */
   endpoint: string;
-  /** Optional bearer token for the endpoint. */
+  /** Wire/profile to speak. Defaults to `generic` for backwards compatibility. */
+  profile?: HttpWireProfile;
+  /** Optional Bearer token — `generic` profile only. */
   token?: string;
+  /** API key sent as `X-API-Key` — `transactional-v1` profile only. Never logged. */
+  apiKey?: string;
+  /** Message category for `transactional-v1` (defaults to `lifecycle`). */
+  category?: string;
   fromEmail: string;
   fromName?: string;
 }
 
 /**
- * Generic HTTP mailer adapter — POSTs a provider-agnostic JSON payload to an
- * external email service and treats a 2xx as delivered. This is the seam for
- * wiring the app to ANY managed send endpoint via configuration (the concrete
- * endpoint + auth live outside the public repo, in deployment config). No
- * provider is hardcoded here.
+ * HTTP mailer adapter — POSTs a booking email to an external email service and
+ * treats a successful dispatch as delivered. The concrete endpoint + auth live
+ * outside the public repo, in deployment config; no provider is hardcoded here.
+ *
+ * Two profiles share this adapter (selected by config):
+ *   - `generic` POSTs a provider-agnostic JSON body and treats any 2xx as
+ *     delivered (the original behavior — preserved as the default).
+ *   - `transactional-v1` POSTs the managed transactional contract and reads the
+ *     JSON response: `accepted`/`delivered` and valid idempotent duplicates
+ *     count as dispatched; `blocked_by_policy` or a malformed 2xx body THROW so
+ *     the durable outbox retries instead of silently dropping the mail.
  *
  * A non-2xx response or a network error THROWS (the durable outbox worker
  * catches it and retries — B1/DM1); failures are never swallowed to
@@ -29,6 +55,13 @@ export class HttpEmailProvider implements EmailProvider {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     const to = normalizeRecipients(message.to);
+    return this.opts.profile === 'transactional-v1'
+      ? this.sendTransactional(message, to)
+      : this.sendGeneric(message, to);
+  }
+
+  /** The original generic wire — payload + auth unchanged. */
+  private async sendGeneric(message: EmailMessage, to: string[]): Promise<EmailResult> {
     const payload = {
       from: message.from ?? this.opts.fromEmail,
       fromName: this.opts.fromName,
@@ -62,4 +95,111 @@ export class HttpEmailProvider implements EmailProvider {
       throw err instanceof Error ? err : new Error(`http mailer failed: ${String(err)}`);
     }
   }
+
+  /**
+   * The managed transactional-v1 contract. Sends ONLY the supported fields — no
+   * `from`/`fromName`/`headers` (the managed service owns the sender identity) —
+   * and reads the JSON response to decide dispatched-vs-throw.
+   */
+  private async sendTransactional(message: EmailMessage, to: string[]): Promise<EmailResult> {
+    const hasHtml = typeof message.html === 'string' && message.html.length > 0;
+    const payload: Record<string, unknown> = {
+      mode: hasHtml ? 'html' : 'text',
+      to,
+      replyTo: message.replyTo,
+      subject: message.subject,
+      category: this.opts.category ?? DEFAULT_TRANSACTIONAL_CATEGORY,
+      idempotencyKey: message.idempotencyKey,
+      attachments: message.attachments?.map(toTransactionalAttachment),
+    };
+    if (hasHtml) payload.html = message.html;
+    if (typeof message.text === 'string' && message.text.length > 0) payload.text = message.text;
+
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.opts.endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          // X-API-Key auth. Kept out of every log/throw path below.
+          ...(this.opts.apiKey ? { 'x-api-key': this.opts.apiKey } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      // Network/transport error — surface so the outbox worker retries.
+      throw err instanceof Error ? err : new Error(`transactional email failed: ${String(err)}`);
+    }
+    const body = await res.json().catch(() => null);
+    return interpretTransactionalResponse(res.status, body);
+  }
+}
+
+/** Map an EmailAttachment to the managed transactional attachment object. */
+function toTransactionalAttachment(a: EmailAttachment) {
+  const contentBase64 =
+    typeof a.content === 'string'
+      ? Buffer.from(a.content, 'utf8').toString('base64')
+      : a.content.toString('base64');
+  return {
+    filename: a.filename,
+    contentType: a.contentType,
+    contentBase64,
+    disposition: 'attachment' as const,
+  };
+}
+
+/** The managed response fields this consumer reads. */
+interface TransactionalResponseBody {
+  status?: string;
+  messageId?: string;
+  id?: string;
+  /** Informational — set alongside status `accepted`/`delivered` on an idempotent replay. */
+  duplicate?: boolean;
+  blockedReason?: string;
+}
+
+/**
+ * Interpret a transactional-v1 response into a dispatched result, or THROW so
+ * the durable outbox retries / records the failure — never a silent drop (Req 6).
+ *
+ * A non-2xx response is a failure REGARDLESS of body (enforced first). On a 2xx:
+ *   - `accepted` / `delivered`          → dispatched (a valid idempotent
+ *                                          duplicate arrives as accepted/delivered
+ *                                          with `duplicate:true` — still dispatched)
+ *   - `blocked_by_policy`               → throw (a real, non-retryable refusal,
+ *                                          surfaced so it lands in the outbox log)
+ *   - any other / missing status        → throw (malformed — do not assume
+ *                                          success)
+ *
+ * Exported for direct contract testing.
+ */
+export function interpretTransactionalResponse(
+  httpStatus: number,
+  body: unknown,
+): EmailResult {
+  // Non-2xx is a transport failure — never interpret a body status past it.
+  if (httpStatus < 200 || httpStatus >= 300) {
+    throw new Error(`transactional email failed: HTTP ${httpStatus}`);
+  }
+
+  const b = (body ?? {}) as TransactionalResponseBody;
+  const status = typeof b.status === 'string' ? b.status : undefined;
+  const messageId = b.messageId ?? b.id;
+
+  // accepted/delivered is the sole success criterion (idempotent duplicates come
+  // through here with `duplicate:true` — still a real dispatch).
+  if (status === 'accepted' || status === 'delivered') {
+    return { delivered: true, messageId, driver: 'http' };
+  }
+  if (status === 'blocked_by_policy') {
+    throw new Error(
+      `transactional email blocked by policy${b.blockedReason ? `: ${b.blockedReason}` : ''}`,
+    );
+  }
+  if (status) {
+    throw new Error(`transactional email returned unexpected status: ${status}`);
+  }
+  // 2xx but no status field — a malformed success. Do not silently drop.
+  throw new Error('transactional email returned a malformed response (no status)');
 }

@@ -25,6 +25,14 @@ export interface EmailMessage {
   from?: string;
   replyTo?: string;
   headers?: Record<string, string>;
+  /**
+   * Stable, event-specific de-duplication key. The BookingNotifier sets one per
+   * message so a retried delivery (same booking + same lifecycle event) is
+   * de-duplicated by a managed service, while distinct events (e.g. two separate
+   * reschedules to different times) get distinct keys. The generic wire ignores
+   * it; the `transactional-v1` profile forwards it as `idempotencyKey`.
+   */
+  idempotencyKey?: string;
 }
 
 export interface EmailResult {

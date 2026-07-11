@@ -38,9 +38,18 @@ export const serverEnvSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
 
-  // Generic HTTP mailer adapter
+  // HTTP mailer adapter (EMAIL_PROVIDER=http).
   EMAIL_HTTP_ENDPOINT: z.string().url().optional(),
+  // Wire/profile: `generic` (default, provider-agnostic body + Bearer auth) or
+  // `transactional-v1` (managed transactional contract + X-API-Key auth).
+  EMAIL_HTTP_PROFILE: z.enum(['generic', 'transactional-v1']).default('generic'),
+  // Bearer token — `generic` profile.
   EMAIL_HTTP_TOKEN: z.string().optional(),
+  // API key sent as `X-API-Key` — `transactional-v1` profile. A secret; set it
+  // in deploy config, never in this schema, and it is never logged.
+  EMAIL_HTTP_API_KEY: z.string().optional(),
+  // Message category for `transactional-v1` (defaults to `lifecycle`).
+  EMAIL_HTTP_CATEGORY: z.string().optional(),
 
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
