@@ -1,4 +1,11 @@
-import { AvailabilityRule, computeSlots, Interval, mergeIntervals } from './slots';
+import {
+  AvailabilityRule,
+  computeSlots,
+  Interval,
+  mergeIntervals,
+  unionInstants,
+  intersectInstants,
+} from './slots';
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const iso = (slots: Date[]) => slots.map(d => d.toISOString());
@@ -147,5 +154,37 @@ describe('mergeIntervals', () => {
       '2026-07-06T12:00:00.000Z',
       '2026-07-06T13:30:00.000Z',
     ]);
+  });
+});
+
+describe('unionInstants (round-robin team availability)', () => {
+  it('offers a slot if any host is free, sorted and de-duplicated', () => {
+    expect(unionInstants([new Set([30, 10]), new Set([10, 20])])).toEqual([10, 20, 30]);
+  });
+
+  it('returns empty for no hosts', () => {
+    expect(unionInstants([])).toEqual([]);
+  });
+});
+
+describe('intersectInstants (collective team availability)', () => {
+  it('offers a slot only if every host is free', () => {
+    expect(intersectInstants([new Set([10, 20, 30]), new Set([20, 30, 40]), new Set([30, 20])])).toEqual([20, 30]);
+  });
+
+  it('is empty when the hosts never overlap', () => {
+    expect(intersectInstants([new Set([1, 2]), new Set([3, 4])])).toEqual([]);
+  });
+
+  it('is empty when any host has no free slots', () => {
+    expect(intersectInstants([new Set([1, 2]), new Set()])).toEqual([]);
+  });
+
+  it('returns empty for no hosts', () => {
+    expect(intersectInstants([])).toEqual([]);
+  });
+
+  it('with a single host equals that host free set (sorted)', () => {
+    expect(intersectInstants([new Set([30, 10, 20])])).toEqual([10, 20, 30]);
   });
 });
