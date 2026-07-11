@@ -65,9 +65,25 @@ export const serverEnvSchema = z.object({
 
   // Calendar — `disabled` (default) runs with no external calendar: slots
   // subtract only local busy and no events are written out. `external` selects
-  // the concrete adapter shipped in the private deploy overlay (no vendor named
-  // in the OSS build); selecting it here without that overlay fails loud.
+  // the concrete generic-HTTP adapter (`ExternalCalendarProvider`); selecting it
+  // without a backend configured (below) fails loud rather than silent-disabling.
   CALENDAR_PROVIDER: z.enum(['disabled', 'external']).default('disabled'),
+
+  // External calendar backend (only read when CALENDAR_PROVIDER=external). The
+  // adapter speaks a generic REST contract to CALENDAR_API_BASE_URL, authorized
+  // by a bearer. Two ways to supply the bearer + request shaping:
+  //   - Self-host / simple REST backend: set CALENDAR_API_TOKEN (a static bearer)
+  //     and the committed GenericRestWire is used.
+  //   - Real integration platform: set CALENDAR_BACKEND_MODULE to a PRIVATE
+  //     overlay module (gitignored, e.g. under deploy/) that default-exports a
+  //     factory `(env) => { baseUrl, tokenSource, wire }` — the JWT authority +
+  //     vendor request mapping live there, never in this public build (R15).
+  // Base URL / token / module path are all left to deploy config or a local
+  // .env — never hardcoded here (same rule as JWT_ISSUER/JWT_AUDIENCE).
+  CALENDAR_API_BASE_URL: z.string().url().optional(),
+  CALENDAR_API_TOKEN: z.string().optional(),
+  CALENDAR_BACKEND_MODULE: z.string().optional(),
+  CALENDAR_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval
