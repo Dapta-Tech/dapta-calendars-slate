@@ -111,7 +111,6 @@ export function AppSwitcher({
             onClick={() => setOpen(false)}
             className="flex items-center gap-2.5 rounded-sm px-2 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/dapta-mark.png" alt="" width={24} height={24} className="h-6 w-6 shrink-0 rounded-md object-contain" />
             <span className="flex-1 truncate">Dapta AI</span>
             <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
