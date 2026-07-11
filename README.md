@@ -59,8 +59,12 @@ SQLite-dev path documents where it degrades.
 - **One portable schema** over SQLite (dev) and Postgres (prod) via `DATABASE_URL`
   (`@slate/db`, Drizzle).
 - **Hexagonal notifications** (`@slate/notifications`) — an `EmailProvider` port
-  with `log-only` / `noop` / `smtp` / generic `http` adapters. A bare fork "sends"
-  to the log; wire any provider by config.
+  with `log-only` / `noop` / `smtp` / `http` adapters. A bare fork "sends"
+  to the log; wire any provider by config. The `http` adapter speaks two wires,
+  selected by `EMAIL_HTTP_PROFILE`: a `generic` provider-agnostic body (default)
+  or a managed `transactional-v1` contract (mode/category/idempotencyKey +
+  base64 attachments, `X-API-Key` auth). Lifecycle emails carry stable,
+  namespaced idempotency keys so retries de-duplicate at the provider.
 
 ## Architecture
 
@@ -103,6 +107,7 @@ Everything has a safe default (see [`.env.example`](.env.example)). Copy it to
 |---|---|---|
 | `DATABASE_URL` | `file:./.data/dev.db` | `postgres://…` switches to Postgres |
 | `EMAIL_PROVIDER` | `log-only` | `noop` \| `smtp` \| `http` |
+| `EMAIL_HTTP_PROFILE` | `generic` | `transactional-v1` opts into the managed contract (see `.env.example`) |
 | `API_PORT` | `4000` | |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | where the web app reaches the API |
 

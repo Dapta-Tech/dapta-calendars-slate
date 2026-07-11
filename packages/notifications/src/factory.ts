@@ -2,7 +2,7 @@ import type { EmailProvider } from './email.port';
 import { LogOnlyEmailProvider } from './adapters/log-only';
 import { NoopEmailProvider } from './adapters/noop';
 import { SmtpEmailProvider } from './adapters/smtp';
-import { HttpEmailProvider } from './adapters/http';
+import { HttpEmailProvider, type HttpWireProfile } from './adapters/http';
 
 export interface EmailConfig {
   provider: 'log-only' | 'noop' | 'smtp' | 'http';
@@ -17,7 +17,14 @@ export interface EmailConfig {
   };
   http?: {
     endpoint?: string;
+    /** Wire/profile to speak (`generic` default, or `transactional-v1`). */
+    profile?: HttpWireProfile;
+    /** Bearer token — `generic` profile. */
     token?: string;
+    /** X-API-Key — `transactional-v1` profile. */
+    apiKey?: string;
+    /** Message category — `transactional-v1` profile (defaults to `lifecycle`). */
+    category?: string;
   };
 }
 
@@ -47,7 +54,10 @@ export function createEmailProvider(config: EmailConfig): EmailProvider {
       if (config.http?.endpoint) {
         return new HttpEmailProvider({
           endpoint: config.http.endpoint,
+          profile: config.http.profile,
           token: config.http.token,
+          apiKey: config.http.apiKey,
+          category: config.http.category,
           fromEmail: config.fromEmail,
           fromName: config.fromName,
         });
