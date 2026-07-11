@@ -43,9 +43,11 @@ export async function toggleConnectionAction(
   revalidatePath('/admin/connections');
 }
 
-export async function pingConnectionAction(id: string): Promise<{ enabled: boolean; message: string }> {
+export async function pingConnectionAction(
+  id: string,
+): Promise<{ ok: boolean; enabled: boolean; message: string }> {
   const r = await adminApi.pingConnection(id);
-  return { enabled: r.enabled, message: r.message };
+  return { ok: r.ok, enabled: r.enabled, message: r.message };
 }
 
 export async function connectCalendarAction(
