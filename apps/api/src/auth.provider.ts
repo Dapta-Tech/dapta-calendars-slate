@@ -14,7 +14,7 @@
  */
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Db } from '@slate/db';
+import type { Db, AccountRole } from '@slate/db';
 import { sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 // The concrete `workos` adapter. The cycle (adapter imports the port/`header`
@@ -26,9 +26,20 @@ export interface ReqLike {
   headers: Record<string, string | string[] | undefined>;
 }
 
-export interface HostPrincipal {
+/**
+ * What an AuthProvider resolves: the tenant + user projection. The account role
+ * is NOT the provider's concern — `AuthService` enriches this into a full
+ * `HostPrincipal` (adds `role`) by reading `member.role`, so every provider
+ * stays role-agnostic.
+ */
+export interface ResolvedHost {
   accountId: string;
   memberId: string;
+}
+
+/** The authenticated host, enriched with the account role for authorization. */
+export interface HostPrincipal extends ResolvedHost {
+  role: AccountRole;
 }
 
 export function header(req: ReqLike, name: string): string | undefined {
@@ -40,7 +51,7 @@ export function header(req: ReqLike, name: string): string | undefined {
 export interface AuthProvider {
   readonly name: string;
   /** Resolve the authenticated host (dashboard). Throws 401 if unresolved. */
-  resolveHost(req: ReqLike): Promise<HostPrincipal>;
+  resolveHost(req: ReqLike): Promise<ResolvedHost>;
 }
 
 /** DEV-only account code derived from an email; stable + unique per email. */
@@ -73,7 +84,7 @@ export class LocalAuthProvider implements AuthProvider {
     private readonly env: Pick<ServerEnv, 'NODE_ENV' | 'DEV_LOGIN_EMAIL' | 'AUTH_LOCAL_STRICT'>,
   ) {}
 
-  async resolveHost(req: ReqLike): Promise<HostPrincipal> {
+  async resolveHost(req: ReqLike): Promise<ResolvedHost> {
     if (this.env.NODE_ENV !== 'production') {
       // 1. Explicit impersonation (highest precedence, unchanged).
       const accountId = header(req, 'x-slate-account');
@@ -101,7 +112,7 @@ export class LocalAuthProvider implements AuthProvider {
   }
 
   /** Resolve (or JIT-create) the member with this email. Dev/test only. */
-  private async resolveByEmail(email: string): Promise<HostPrincipal> {
+  private async resolveByEmail(email: string): Promise<ResolvedHost> {
     const existing = await this.db.get<{ account_id: string; member_id: string }>(
       sql`SELECT account_id, id AS member_id FROM member
           WHERE email = ${email} ORDER BY created_at ASC LIMIT 1`,
@@ -123,10 +134,17 @@ export class LocalAuthProvider implements AuthProvider {
     }
     if (!account) throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
 
+    // The first member of an account is its owner (matches the seed + migration
+    // backfill); subsequent JIT members default to `member`.
+    const role: AccountRole = (await this.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE account_id = ${account.id} LIMIT 1`,
+    ))
+      ? 'member'
+      : 'owner';
     const memberId = randomUUID();
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, email, display_name, created_at)
-          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${Date.now()})`,
+      sql`INSERT INTO member (id, account_id, email, display_name, role, created_at)
+          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${role}, ${Date.now()})`,
     );
     return { accountId: account.id, memberId };
   }

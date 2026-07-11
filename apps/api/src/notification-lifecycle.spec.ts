@@ -42,7 +42,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
   let worker: OutboxWorker;
   let accountId: string;
   let memberId: string;
-  let principal: { accountId: string; memberId: string };
+  let principal: { accountId: string; memberId: string; role: 'owner' };
 
   const fakeFetch = (async () => ({ ok: true, status: 200 }) as Response) as unknown as typeof fetch;
 
@@ -65,7 +65,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     memberId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
     // Give the host an email so the attendee+host recipient set is deterministic.
     await db.run(sql`UPDATE member SET email='alex@dapta.test' WHERE id=${memberId}`);
-    principal = { accountId, memberId };
+    principal = { accountId, memberId, role: 'owner' };
 
     email = new RecordingEmailProvider();
     const notifier = new BookingNotifier(email);

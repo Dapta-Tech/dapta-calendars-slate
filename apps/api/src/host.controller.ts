@@ -18,6 +18,7 @@ import { checkWebhookUrl } from '@slate/db';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
 import { AuthService, type ReqLike } from './auth.service';
+import { assertAdmin } from './permissions';
 import { unwrap } from './http';
 
 /**
@@ -208,15 +209,18 @@ export class HostController {
     return { ok: true };
   }
 
-  // API keys.
+  // API keys (Developer surface) — admin/owner only.
   @Get('api-keys')
   async listApiKeys(@Req() req: ReqLike) {
-    return this.admin.listApiKeys(await this.auth.resolveHost(req));
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.listApiKeys(p);
   }
   @Post('api-keys')
   @HttpCode(201)
   async createApiKey(@Req() req: ReqLike, @Body() body: { name: string; scopes: string[]; eventTypeIds?: string[] }) {
     const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
     if (!body?.name || !Array.isArray(body?.scopes) || body.scopes.length === 0)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'name and >=1 scope required' });
     return this.admin.createApiKey(p, body);
@@ -224,18 +228,23 @@ export class HostController {
   @Delete('api-keys/:id')
   @HttpCode(204)
   async revokeApiKey(@Req() req: ReqLike, @Param('id') id: string) {
-    await this.admin.revokeApiKey(await this.auth.resolveHost(req), id);
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    await this.admin.revokeApiKey(p, id);
   }
 
-  // Webhooks.
+  // Webhooks (Developer surface) — admin/owner only.
   @Get('webhooks')
   async listWebhooks(@Req() req: ReqLike) {
-    return this.admin.listWebhooks(await this.auth.resolveHost(req));
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.listWebhooks(p);
   }
   @Post('webhooks')
   @HttpCode(201)
   async createWebhook(@Req() req: ReqLike, @Body() body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
     const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
     if (!body?.subscriberUrl)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'subscriberUrl required' });
     const urlCheck = await checkWebhookUrl(body.subscriberUrl);
@@ -248,19 +257,25 @@ export class HostController {
   }
   @Patch('webhooks/:id')
   async updateWebhook(@Req() req: ReqLike, @Param('id') id: string, @Body() body: { active?: boolean }) {
-    await this.admin.updateWebhook(await this.auth.resolveHost(req), id, body);
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    await this.admin.updateWebhook(p, id, body);
     return { ok: true };
   }
 
   @Post('webhooks/:id/ping')
   @HttpCode(200)
   async pingWebhook(@Req() req: ReqLike, @Param('id') id: string) {
-    return this.admin.pingWebhook(await this.auth.resolveHost(req), id);
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.pingWebhook(p, id);
   }
 
   @Delete('webhooks/:id')
   @HttpCode(204)
   async deleteWebhook(@Req() req: ReqLike, @Param('id') id: string) {
-    await this.admin.deleteWebhook(await this.auth.resolveHost(req), id);
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    await this.admin.deleteWebhook(p, id);
   }
 }
