@@ -1,8 +1,12 @@
 /**
- * Server-side admin API client. The dashboard runs against the host identity
- * (dev: the API's local-stub resolves the seeded account/member; prod: WorkOS).
- * All calls are no-store so the dashboard always reflects live data.
+ * Server-side admin API client. Every host call carries the current session's
+ * identity (AUTH-WEB-CONTRACT §1): `Authorization: Bearer <jwt>` for the workos
+ * provider, `x-slate-email` for the local dev provider. The API reads whichever
+ * its configured provider expects and ignores the other. A `401` throws an
+ * ApiError the /admin gate turns into a redirect to /login.
  */
+import { getSession } from './auth-session';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /** An API error that carries the HTTP status + error code so callers can drive
@@ -19,9 +23,15 @@ export class ApiError extends Error {
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const session = await getSession();
+  const headers: Record<string, string> = {};
+  if (body) headers['content-type'] = 'application/json';
+  if (session?.provider === 'workos') headers['authorization'] = `Bearer ${session.accessToken}`;
+  else if (session?.provider === 'local') headers['x-slate-email'] = session.email;
+
   const res = await fetch(`${API_URL}${path}`, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   });

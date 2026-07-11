@@ -322,6 +322,11 @@ export interface BookingMessages {
       subtitle: string;
       continue: string;
       footnote: string;
+      emailLabel: string;
+      emailPlaceholder: string;
+      emailInvalid: string;
+      workosCta: string;
+      workosSubtitle: string;
     };
     settingsGeneral: {
       displayName: string;
@@ -736,9 +741,14 @@ export const en: BookingMessages = {
     },
     login: {
       title: 'Sign in',
-      subtitle: 'Open-source scheduling. This build uses the local dev provider — configure WorkOS in your deployment for real accounts.',
+      subtitle: 'Open-source scheduling. This build uses the local dev provider — enter your email to sign in as yourself.',
       continue: 'Continue',
-      footnote: 'No account needed in local mode — you’re signed in as the seeded host.',
+      footnote: 'Local mode: any email signs you into its own workspace. Configure WorkOS in your deployment for real accounts.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'you@example.com',
+      emailInvalid: 'Enter a valid email address.',
+      workosCta: 'Continue with Dapta',
+      workosSubtitle: 'You’ll be redirected to sign in securely.',
     },
     settingsGeneral: {
       displayName: 'Display name',
@@ -1153,9 +1163,14 @@ export const es: BookingMessages = {
     },
     login: {
       title: 'Iniciar sesión',
-      subtitle: 'Programación de código abierto. Esta versión usa el proveedor de desarrollo local — configura WorkOS en tu despliegue para cuentas reales.',
+      subtitle: 'Programación de código abierto. Esta versión usa el proveedor de desarrollo local — introduce tu correo para entrar como tú mismo.',
       continue: 'Continuar',
-      footnote: 'No se necesita cuenta en modo local — has iniciado sesión como el anfitrión de ejemplo.',
+      footnote: 'Modo local: cualquier correo entra a su propio espacio. Configura WorkOS en tu despliegue para cuentas reales.',
+      emailLabel: 'Correo',
+      emailPlaceholder: 'tu@ejemplo.com',
+      emailInvalid: 'Introduce un correo válido.',
+      workosCta: 'Continuar con Dapta',
+      workosSubtitle: 'Te redirigiremos para iniciar sesión de forma segura.',
     },
     settingsGeneral: {
       displayName: 'Nombre visible',
