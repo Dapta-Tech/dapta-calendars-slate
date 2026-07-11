@@ -102,7 +102,7 @@ export class GenericRestWire implements CalendarWire {
       subject: connectionRef,
     };
   }
-  parseCalendars(raw: unknown): CalendarSummary[] {
+  parseCalendars(raw: unknown, _connectionRef: string): CalendarSummary[] {
     const cals = asRecord(raw)['calendars'];
     if (!Array.isArray(cals)) return [];
     return cals
@@ -143,7 +143,7 @@ export class GenericRestWire implements CalendarWire {
     const qs = `tenantKey=${enc(tenantKey)}&provider=${enc(provider)}`;
     return { method: 'GET', path: `/v1/connect/connections?${qs}`, scope: 'admin', subject: tenantKey };
   }
-  parseDiscovered(raw: unknown): DiscoveredConnection[] {
+  parseDiscovered(raw: unknown, _tenantKey: string, _provider: string): DiscoveredConnection[] {
     const conns = asRecord(raw)['connections'];
     if (!Array.isArray(conns)) return [];
     return conns

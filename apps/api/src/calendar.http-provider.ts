@@ -79,13 +79,15 @@ export interface CalendarWire {
   parseEvent(raw: unknown): CreatedEvent;
   deleteEvent(input: DeleteEventInput): WireRequest;
   listCalendars(connectionRef: string): WireRequest;
-  parseCalendars(raw: unknown): CalendarSummary[];
+  /** `connectionRef` is passed back so a wire can re-encode opaque calendar refs. */
+  parseCalendars(raw: unknown, connectionRef: string): CalendarSummary[];
   checkConnection(connectionRef: string): WireRequest;
   parseHealth(raw: unknown): ConnectionHealth;
   startConnect(provider: string, tenantKey: string): WireRequest;
   parseConnectStart(raw: unknown, token: string): ConnectStart;
   discoverConnections(tenantKey: string, provider: string): WireRequest;
-  parseDiscovered(raw: unknown): DiscoveredConnection[];
+  /** tenantKey/provider are passed back so a wire can build stable opaque refs. */
+  parseDiscovered(raw: unknown, tenantKey: string, provider: string): DiscoveredConnection[];
 }
 
 /**
@@ -145,7 +147,15 @@ export class ExternalCalendarProvider implements CalendarProvider {
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
     if (input.connectionRefs.length === 0) return [];
-    return this.wire.parseBusy(await this.send('listBusy', this.wire.listBusy(input)));
+    // Per-connection reads, merged: a backend need not offer a batch free-busy
+    // (many calendar APIs expose only per-calendar event listing). The engine
+    // sorts/merges the union itself, so an unsorted concat is fine.
+    const out: BusyInterval[] = [];
+    for (const ref of input.connectionRefs) {
+      const req = this.wire.listBusy({ connectionRefs: [ref], fromUtc: input.fromUtc, toUtc: input.toUtc });
+      out.push(...this.wire.parseBusy(await this.send('listBusy', req)));
+    }
+    return out;
   }
 
   async createEvent(input: CreateEventInput): Promise<CreatedEvent> {
@@ -163,6 +173,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
   async listCalendars(connectionRef: string): Promise<CalendarSummary[]> {
     return this.wire.parseCalendars(
       await this.send('listCalendars', this.wire.listCalendars(connectionRef)),
+      connectionRef,
     );
   }
 
@@ -190,6 +201,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
   async discoverConnections(tenantKey: string, provider: string): Promise<DiscoveredConnection[]> {
     return this.wire.parseDiscovered(
       await this.send('discoverConnections', this.wire.discoverConnections(tenantKey, provider)),
+      tenantKey,
+      provider,
     );
   }
 

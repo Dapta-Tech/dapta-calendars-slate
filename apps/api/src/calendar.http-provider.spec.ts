@@ -69,6 +69,22 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('reads busy per connection ref and merges (one call per ref)', async () => {
+    const { provider, calls } = makeProvider([
+      { json: { busy: [{ startUtc: '2026-08-01T14:00:00.000Z', endUtc: '2026-08-01T15:00:00.000Z' }] } },
+      { json: { busy: [{ startUtc: '2026-08-01T16:00:00.000Z', endUtc: '2026-08-01T17:00:00.000Z' }] } },
+    ]);
+    const busy = await provider.listBusy({
+      connectionRefs: ['conn-A', 'conn-B'],
+      fromUtc: '2026-08-01T00:00:00.000Z',
+      toUtc: '2026-08-02T00:00:00.000Z',
+    });
+    expect(busy).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.body).toMatchObject({ connectionRefs: ['conn-A'] });
+    expect(calls[1]!.body).toMatchObject({ connectionRefs: ['conn-B'] });
+  });
+
   it('creates an event and returns the parsed CreatedEvent', async () => {
     const { provider, calls } = makeProvider([
       { json: { externalEventId: 'ext-9', externalCalendarId: 'conn-A', meetingUrl: 'https://meet/x' } },
