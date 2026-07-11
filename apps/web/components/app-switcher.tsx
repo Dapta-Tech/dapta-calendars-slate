@@ -26,7 +26,7 @@ interface SwitcherMessages {
 const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL || '';
 
-/** app.dapta.ai carrying the app-switcher UTM tags (growth-loop measurement). */
+/** The platform URL (from NEXT_PUBLIC_PLATFORM_URL) carrying app-switcher UTM tags. */
 function platformHref(base: string): string {
   try {
     const url = new URL(base);
