@@ -14,6 +14,8 @@ export interface BookingNotification {
   startUtc: string;
   endUtc: string;
   host: { name?: string | null; email?: string | null };
+  /** Additional assigned hosts (collective / fixed_round_robin) — also notified. */
+  coHosts?: Array<{ name?: string | null; email?: string | null }>;
   attendee: { name: string; email: string; timeZone?: string | null };
   location?: string | null;
   manageUrl?: string | null;
@@ -37,11 +39,12 @@ export interface BookingNotification {
 export class BookingNotifier {
   constructor(private readonly email: EmailProvider) {}
 
-  /** Attendee + host, deduped, empty entries dropped. */
+  /** Attendee + host + any co-hosts, deduped, empty entries dropped. */
   private recipients(n: BookingNotification): string[] {
     const set = new Set<string>();
     if (n.attendee.email) set.add(n.attendee.email);
     if (n.host.email) set.add(n.host.email);
+    for (const h of n.coHosts ?? []) if (h.email) set.add(h.email);
     return [...set];
   }
 

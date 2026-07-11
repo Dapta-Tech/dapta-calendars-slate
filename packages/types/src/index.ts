@@ -11,7 +11,7 @@ import { z } from 'zod';
 export const bookingStatus = ['accepted', 'pending', 'cancelled', 'rejected'] as const;
 export type BookingStatus = (typeof bookingStatus)[number];
 
-export const schedulingType = ['round_robin', 'collective'] as const;
+export const schedulingType = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 export type SchedulingType = (typeof schedulingType)[number];
 
 export const membershipRole = ['member', 'admin', 'owner'] as const;
@@ -86,6 +86,8 @@ export const availabilityResponseSchema = z.object({
     lengthMinutes: z.number().int().positive(),
     /** Custom intake fields to render on the booking form. */
     bookingFields: z.array(bookingFieldSchema).default([]),
+    /** Team scheduling method (null for personal events). */
+    schedulingType: z.enum(schedulingType).nullable().default(null),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
@@ -302,6 +304,17 @@ export const eventTypeInputSchema = z.object({
   bookingFields: z.array(bookingFieldSchema).optional(),
   /** For team events: the host member ids (round-robin pool). */
   hostMemberIds: z.array(z.string()).optional(),
+  /** For team events: per-host round-robin detail. Takes precedence over hostMemberIds. */
+  hosts: z
+    .array(
+      z.object({
+        memberId: z.string(),
+        priority: z.number().int().nullable().optional(),
+        weight: z.number().int().positive().nullable().optional(),
+        isFixed: z.boolean().optional(),
+      }),
+    )
+    .optional(),
   teamId: z.string().nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;

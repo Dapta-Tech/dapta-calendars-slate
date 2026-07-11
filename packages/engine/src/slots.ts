@@ -62,6 +62,36 @@ export interface ComputeSlotsInput {
 
 const MINUTE_MS = 60_000;
 
+/**
+ * Combine several hosts' free-slot instant sets for a team event.
+ *
+ *   - UNION (round_robin / the rotating pool of fixed_round_robin): a slot is
+ *     offered if AT LEAST ONE host is free — the specific host is chosen at
+ *     booking time.
+ *   - INTERSECTION (collective): a slot is offered only if ALL hosts are free,
+ *     because every host must attend.
+ *
+ * Both take pre-computed per-host instant sets (ms since epoch) and return a
+ * sorted, de-duplicated ascending array — pure, so the DB layer stays a thin
+ * assembler over {@link computeSlots} + these.
+ */
+export function unionInstants(perHost: Array<Set<number>>): number[] {
+  const out = new Set<number>();
+  for (const set of perHost) for (const ms of set) out.add(ms);
+  return [...out].sort((a, b) => a - b);
+}
+
+export function intersectInstants(perHost: Array<Set<number>>): number[] {
+  if (perHost.length === 0) return [];
+  // Start from the smallest set and keep only instants present in every other.
+  const [smallest, ...rest] = [...perHost].sort((a, b) => a.size - b.size);
+  const out: number[] = [];
+  for (const ms of smallest) {
+    if (rest.every((s) => s.has(ms))) out.push(ms);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 /** Merge overlapping/adjacent intervals (sorted by start) into a minimal set. */
 export function mergeIntervals(intervals: Interval[]): Interval[] {
   if (intervals.length === 0) return [];

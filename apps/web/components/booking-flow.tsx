@@ -66,7 +66,8 @@ export function BookingFlow({
     setDismissed(false);
     setHoldError(null);
     setHold(null);
-    // Team events round-robin the host at booking time — no per-host hold.
+    // Team events resolve their host set at booking time (round-robin picks one,
+    // collective/fixed assign the required hosts) — no per-host hold here.
     if (mode !== 'personal') return;
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.

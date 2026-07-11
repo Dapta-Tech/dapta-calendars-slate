@@ -168,6 +168,7 @@ export interface EventType {
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
   hostMemberIds: string[];
+  hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;
 }
 export interface Schedule {

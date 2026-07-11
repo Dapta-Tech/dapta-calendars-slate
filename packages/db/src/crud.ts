@@ -13,6 +13,14 @@ export type CrudResult<T> =
 
 // --- Event types ----------------------------------------------------------
 
+/** A team event host with its round-robin weighting + fixed flag. */
+export interface HostDetail {
+  memberId: string;
+  priority: number | null;
+  weight: number | null;
+  isFixed: boolean;
+}
+
 export interface EventTypeView {
   id: string;
   memberId: string | null;
@@ -33,6 +41,8 @@ export interface EventTypeView {
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
   hostMemberIds: string[];
+  /** Per-host priority/weight/fixed (team events); empty for personal events. */
+  hosts: HostDetail[];
 }
 
 interface EventTypeDbRow {
@@ -61,8 +71,8 @@ const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_min
   after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
-  const hosts = await db.all<{ member_id: string }>(
-    sql`SELECT member_id FROM event_type_host WHERE event_type_id = ${r.id}`,
+  const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
+    sql`SELECT member_id, is_fixed, priority, weight FROM event_type_host WHERE event_type_id = ${r.id}`,
   );
   return {
     id: r.id,
@@ -84,6 +94,12 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     seatsPerTimeSlot: r.seats_per_time_slot,
     bookingFields: parseJsonColumn<unknown[]>(r.booking_fields, []),
     hostMemberIds: hosts.map((h) => h.member_id),
+    hosts: hosts.map((h) => ({
+      memberId: h.member_id,
+      priority: h.priority,
+      weight: h.weight,
+      isFixed: h.is_fixed === 1,
+    })),
   };
 }
 
@@ -130,7 +146,17 @@ export interface EventTypeInputRepo {
   seatsPerTimeSlot?: number | null;
   bookingFields?: unknown[];
   hostMemberIds?: string[];
+  /** Per-host detail (priority/weight/fixed). Takes precedence over hostMemberIds. */
+  hosts?: HostDetailInput[];
   teamId?: string | null;
+}
+
+/** Host detail as accepted on input — every weighting field is optional. */
+export interface HostDetailInput {
+  memberId: string;
+  priority?: number | null;
+  weight?: number | null;
+  isFixed?: boolean;
 }
 
 export async function createEventType(
@@ -162,7 +188,8 @@ export async function createEventType(
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${now})`,
   );
-  if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
+  else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
 }
@@ -198,7 +225,8 @@ export async function updateEventType(
     const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
     await db.run(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
   }
-  if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
+  else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
 }
@@ -220,17 +248,36 @@ export async function setEventTypeHosts(
   eventTypeId: string,
   memberIds: string[],
 ): Promise<void> {
+  await setEventTypeHostsDetailed(
+    db,
+    accountId,
+    eventTypeId,
+    memberIds.map((memberId) => ({ memberId, priority: null, weight: 100, isFixed: false })),
+  );
+}
+
+/**
+ * Replace the host pool with per-host round-robin detail (priority/weight/fixed).
+ * Only members of `accountId` are inserted — a cross-tenant memberId is dropped.
+ */
+export async function setEventTypeHostsDetailed(
+  db: Db,
+  accountId: string,
+  eventTypeId: string,
+  hosts: HostDetailInput[],
+): Promise<void> {
   const owned = await db.all<{ id: string }>(
     sql`SELECT id FROM member WHERE account_id = ${accountId}`,
   );
   const ownedIds = new Set(owned.map((o) => o.id));
   await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${eventTypeId}`);
   const now = Date.now();
-  for (const m of memberIds) {
-    if (!ownedIds.has(m)) continue; // reject cross-account members
+  for (const h of hosts) {
+    if (!ownedIds.has(h.memberId)) continue; // reject cross-account members
     await db.run(
       sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
-          VALUES (${randomUUID()}, ${accountId}, ${eventTypeId}, ${m}, 0, ${null}, ${100}, ${null}, ${now})`,
+          VALUES (${randomUUID()}, ${accountId}, ${eventTypeId}, ${h.memberId}, ${h.isFixed ? 1 : 0},
+            ${h.priority ?? null}, ${h.weight ?? 100}, ${null}, ${now})`,
     );
   }
 }

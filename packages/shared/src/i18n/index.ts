@@ -50,6 +50,16 @@ export interface BookingMessages {
     whereLabel: string;
     joinMeeting: string;
   };
+  /** Team scheduling method names (the FREE layer competitors paywall). */
+  scheduling: {
+    round_robin: string;
+    collective: string;
+    fixed_round_robin: string;
+    /** Short one-line descriptions for the event-type editor selector. */
+    round_robin_hint: string;
+    collective_hint: string;
+    fixed_round_robin_hint: string;
+  };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
     nav: {
@@ -153,6 +163,13 @@ export interface BookingMessages {
       saveChanges: string;
       createEventType: string;
       saving: string;
+      /** Team scheduling section (team events only). */
+      schedulingMethod: string;
+      hostsTitle: string;
+      priority: string;
+      weight: string;
+      fixedHost: string;
+      fixedHostHint: string;
     };
     availability: {
       title: string;
@@ -460,6 +477,14 @@ export const en: BookingMessages = {
     seatsLeft: '{n} left',
     full: 'Full',
   },
+  scheduling: {
+    round_robin: 'Round-robin',
+    collective: 'Collective',
+    fixed_round_robin: 'Fixed round-robin',
+    round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
+    collective_hint: 'Everyone attends — offer only times when all hosts are free.',
+    fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+  },
   manage: {
     title: 'Manage your booking',
     reschedule: 'Reschedule',
@@ -584,6 +609,12 @@ export const en: BookingMessages = {
       saveChanges: 'Save changes',
       createEventType: 'Create event type',
       saving: 'Saving…',
+      schedulingMethod: 'Scheduling method',
+      hostsTitle: 'Hosts',
+      priority: 'Priority',
+      weight: 'Weight',
+      fixedHost: 'Fixed',
+      fixedHostHint: 'Always on every booking',
     },
     availability: {
       title: 'Availability',
@@ -656,8 +687,8 @@ export const en: BookingMessages = {
     },
     teams: {
       title: 'Teams',
-      subtitle: 'Round-robin scheduling across a group of hosts.',
-      emptyList: 'No teams yet — create one below to round-robin bookings across hosts.',
+      subtitle: 'Team scheduling across a group of hosts — round-robin, collective, or fixed round-robin.',
+      emptyList: 'No teams yet — create one below to schedule bookings across hosts.',
       newTeam: 'New team',
       name: 'Name',
       slug: 'Slug',
@@ -891,6 +922,14 @@ export const es: BookingMessages = {
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
   },
+  scheduling: {
+    round_robin: 'Por turnos',
+    collective: 'Colectiva',
+    fixed_round_robin: 'Turnos con anfitrión fijo',
+    round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
+    collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
+    fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+  },
   manage: {
     title: 'Gestiona tu reserva',
     reschedule: 'Reprogramar',
@@ -1015,6 +1054,12 @@ export const es: BookingMessages = {
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear tipo de evento',
       saving: 'Guardando…',
+      schedulingMethod: 'Método de programación',
+      hostsTitle: 'Anfitriones',
+      priority: 'Prioridad',
+      weight: 'Peso',
+      fixedHost: 'Fijo',
+      fixedHostHint: 'Siempre en cada reserva',
     },
     availability: {
       title: 'Disponibilidad',
@@ -1087,8 +1132,8 @@ export const es: BookingMessages = {
     },
     teams: {
       title: 'Equipos',
-      subtitle: 'Programación por turnos entre un grupo de anfitriones.',
-      emptyList: 'Aún no hay equipos — crea uno abajo para repartir reservas por turnos entre anfitriones.',
+      subtitle: 'Programación de equipo entre un grupo de anfitriones — por turnos, colectiva o con anfitrión fijo.',
+      emptyList: 'Aún no hay equipos — crea uno abajo para programar reservas entre anfitriones.',
       newTeam: 'Nuevo equipo',
       name: 'Nombre',
       slug: 'Identificador',
@@ -1306,4 +1351,20 @@ export function getMessages(locale: string): BookingMessages {
 /** Interpolate `{name}` placeholders in a message string. */
 export function t(template: string, vars: Record<string, string | number> = {}): string {
   return template.replace(/\{(\w+)\}/g, (_, k: string) => (k in vars ? String(vars[k]) : `{${k}}`));
+}
+
+/**
+ * Localized display name for an event type's scheduling_type. Null/personal
+ * events (no team method) fall back to `personal`; unknown values echo through.
+ */
+export function schedulingMethodLabel(
+  m: BookingMessages,
+  type: string | null | undefined,
+  personal = 'Personal',
+): string {
+  if (!type) return personal;
+  if (type === 'round_robin' || type === 'collective' || type === 'fixed_round_robin') {
+    return m.scheduling[type];
+  }
+  return type;
 }
