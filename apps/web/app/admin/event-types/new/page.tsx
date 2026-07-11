@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
@@ -12,11 +11,14 @@ export default async function NewEventType() {
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
-      <Link href="/admin/event-types" className="text-sm text-muted-foreground hover:text-foreground">
-        ← {m.title}
-      </Link>
-      <h1 className="mb-6 mt-2 text-3xl font-semibold tracking-tight">{m.newEventType}</h1>
-      <EventTypeForm schedules={schedules} messages={m} redirectOnSuccess="/admin/event-types" />
+      <EventTypeForm
+        schedules={schedules}
+        messages={m}
+        redirectOnSuccess="/admin/event-types"
+        backHref="/admin/event-types"
+        backLabel={m.title}
+        heading={m.newEventType}
+      />
     </div>
   );
 }

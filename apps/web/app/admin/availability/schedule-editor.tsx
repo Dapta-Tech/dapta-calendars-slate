@@ -1,9 +1,12 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { commonTimeZones, validateDayRanges, type BookingMessages, type TimeRange } from '@slate/shared';
 import { useToast } from '@/components/toast';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { FormHeader } from '@/components/ui/page-header';
 import { TimeField } from '@/components/ui/time-field';
 import type { Schedule } from '@/lib/admin-api';
 import { deleteScheduleAction, saveScheduleFullAction, type RuleInput } from './actions';
@@ -26,7 +29,18 @@ function seedWeek(schedule: Schedule): TimeRange[][] {
   return week;
 }
 
-export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; messages: AvailabilityMessages }) {
+export function ScheduleEditor({
+  schedule,
+  messages: m,
+  backHref,
+  backLabel,
+}: {
+  schedule: Schedule;
+  messages: AvailabilityMessages;
+  backHref: string;
+  backLabel: string;
+}) {
+  const router = useRouter();
   const [name, setName] = useState(schedule.name);
   const [timeZone, setTimeZone] = useState(schedule.timeZone);
   const [week, setWeek] = useState<TimeRange[][]>(() => seedWeek(schedule));
@@ -70,52 +84,56 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
     start(async () => {
       const r = await deleteScheduleAction(schedule.id);
       if (!r.ok) error(r.message ?? m.deleteError);
-      else success(m.deletedToast);
+      else {
+        success(m.deletedToast);
+        router.push(backHref);
+      }
     });
 
-  return (
-    <div className="rounded-md border border-border bg-card">
-      {/* Sticky action header — Dapta pattern: name on the left, primary Save
-          (+ Delete) top-right, pinned as the editor scrolls. */}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-t-md border-b border-border bg-card/95 px-5 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-label={m.scheduleNameLabel}
-          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-lg font-medium hover:border-border focus:border-input focus-visible:outline-none"
-        />
-        <div className="flex items-center gap-2">
-          {confirmDel ? (
-            <span className="flex items-center gap-1 text-sm">
-              <span className="text-muted-foreground">{m.deletePrompt}</span>
-              <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-2 py-1 text-destructive transition-colors hover:bg-destructive/10">
-                {m.yes}
-              </button>
-              <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-2 py-1 transition-colors hover:bg-accent">
-                {m.no}
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmDel(true)}
-              className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
-            >
-              {m.deleteSchedule}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={save}
-            disabled={pending || !!firstError}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-          >
-            {pending ? m.saving : m.save}
+  const actions = (
+    <>
+      {confirmDel ? (
+        <span className="flex items-center gap-1 text-sm">
+          <span className="hidden text-muted-foreground sm:inline">{m.deletePrompt}</span>
+          <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-3 py-2 text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60">
+            {m.yes}
           </button>
-        </div>
-      </div>
+          <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
+            {m.no}
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmDel(true)}
+          className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
+        >
+          {m.deleteSchedule}
+        </button>
+      )}
+      <Button type="submit" disabled={pending || !!firstError}>
+        {pending ? m.saving : m.save}
+      </Button>
+    </>
+  );
 
-      <div className="flex flex-col gap-4 p-5">
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); save(); }}>
+      <FormHeader
+        backHref={backHref}
+        backLabel={backLabel}
+        actions={actions}
+        title={
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label={m.scheduleNameLabel}
+            className="w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-2xl font-semibold tracking-tight hover:border-border focus:border-input focus-visible:outline-none"
+          />
+        }
+      />
+
+      <div className="flex flex-col gap-4">
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
         {m.timezone}
         <select
@@ -229,6 +247,6 @@ export function ScheduleEditor({ schedule, messages: m }: { schedule: Schedule; 
         <p className="text-xs text-muted-foreground">{m.overrideNote}</p>
       </div>
       </div>
-    </div>
+    </form>
   );
 }

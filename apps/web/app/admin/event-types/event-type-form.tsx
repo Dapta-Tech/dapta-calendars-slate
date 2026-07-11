@@ -4,6 +4,8 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
+import { Button } from '@/components/ui/button';
+import { FormHeader } from '@/components/ui/page-header';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
@@ -22,12 +24,19 @@ export function EventTypeForm({
   schedules = [],
   messages: m,
   redirectOnSuccess,
+  backHref,
+  backLabel,
+  heading,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
   messages: EventTypeMessages;
   /** When set (the dedicated /new surface), navigate here after a create. */
   redirectOnSuccess?: string;
+  /** FormHeader nav + title (the admin screen header system). */
+  backHref: string;
+  backLabel: string;
+  heading: string;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
@@ -86,7 +95,18 @@ export function EventTypeForm({
     });
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
+    <form onSubmit={(e) => { e.preventDefault(); save(); }}>
+      <FormHeader
+        backHref={backHref}
+        backLabel={backLabel}
+        title={heading}
+        actions={
+          <Button type="submit" disabled={pending || !title || !slug}>
+            {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
+          </Button>
+        }
+      />
+      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
       <div className="grid grid-cols-2 gap-3">
         <Field label={m.fTitle}>
           <input value={title} onChange={(e) => onTitle(e.target.value)} className={inputCls} />
@@ -191,15 +211,8 @@ export function EventTypeForm({
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
-      <button
-        type="button"
-        onClick={save}
-        disabled={pending || !title || !slug}
-        className="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-      >
-        {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
-      </button>
-    </div>
+      </div>
+    </form>
   );
 }
 
