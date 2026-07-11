@@ -10,7 +10,7 @@ import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
-import { createCalendarProvider } from './calendar.provider';
+import { createCalendarProviderAsync } from './calendar.provider';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
@@ -57,7 +57,7 @@ import { AdminCrudController } from './admin-crud.controller';
     // CalendarProvider selected by CALENDAR_PROVIDER: the OSS default is
     // `disabled` (no external calendar); a private overlay ships the `external`
     // adapter. See calendar.provider.ts.
-    { provide: CALENDAR, useFactory: (env: ServerEnv) => createCalendarProvider(env), inject: [ENV] },
+    { provide: CALENDAR, useFactory: (env: ServerEnv) => createCalendarProviderAsync(env), inject: [ENV] },
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,

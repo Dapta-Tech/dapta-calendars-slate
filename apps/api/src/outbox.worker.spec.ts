@@ -20,6 +20,7 @@ import type {
   CreateEventInput,
   CreatedEvent,
   DeleteEventInput,
+  UpdateEventInput,
 } from '@slate/calendar';
 import { loadServerEnv } from '@slate/config/env';
 import { BookingNotifier, NoopEmailProvider, type EmailProvider, type EmailResult } from '@slate/notifications';
@@ -53,9 +54,18 @@ class FlakyCalendarProvider implements CalendarProvider {
     this.created.push(input);
     return Promise.resolve({ externalEventId: `evt-${++this.seq}`, meetingUrl: null });
   }
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null });
+  }
   deleteEvent(input: DeleteEventInput): Promise<void> {
     this.deleted.push(input);
     return Promise.resolve();
+  }
+  listCalendars(): Promise<[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<{ ok: boolean; detail: string }> {
+    return Promise.resolve({ ok: true, detail: 'Connected' });
   }
 }
 

@@ -48,7 +48,26 @@ export async function pingConnectionAction(id: string): Promise<{ enabled: boole
   return { enabled: r.enabled, message: r.message };
 }
 
-export async function connectCalendarAction(): Promise<{ enabled: boolean; message: string }> {
-  const r = await adminApi.connectionToken();
-  return { enabled: r.enabled, message: r.message };
+export async function connectCalendarAction(
+  provider: string,
+): Promise<{ enabled: boolean; connectUrl: string | null; message: string }> {
+  const r = await adminApi.connectionToken(provider);
+  return { enabled: r.enabled, connectUrl: r.connectUrl, message: r.message };
+}
+
+/**
+ * Called after the OAuth popup completes: persist the tenant's just-connected
+ * account(s) and return how many connections are now on record so the client can
+ * detect that the connect finished.
+ */
+export async function discoverConnectionsAction(
+  provider: string,
+): Promise<{ ok: boolean; count: number; message?: string }> {
+  try {
+    const conns = await adminApi.discoverConnections(provider);
+    revalidatePath('/admin/connections');
+    return { ok: true, count: conns.length };
+  } catch (e) {
+    return { ok: false, count: 0, message: e instanceof Error ? e.message : 'Discovery failed' };
+  }
 }

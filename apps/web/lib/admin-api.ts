@@ -120,8 +120,16 @@ export const adminApi = {
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
-  connectionToken: () =>
-    req<{ enabled: boolean; token: string | null; message: string }>('POST', '/v1/connections/token', {}),
+  connectionToken: (provider?: string) =>
+    req<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }>(
+      'POST',
+      '/v1/connections/token',
+      { provider },
+    ),
+  discoverConnections: (provider: string) =>
+    req<Connection[]>('POST', '/v1/connections/discover', { provider }),
+  listConnectionCalendars: (id: string) =>
+    req<CalendarSummary[]>('GET', `/v1/connections/${id}/calendars`),
   updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),
   pingConnection: (id: string) =>
     req<{ ok: boolean; enabled: boolean; message: string }>('POST', `/v1/connections/${id}/ping`, {}),
@@ -193,6 +201,12 @@ export interface Connection {
   primaryEmail: string | null;
   isDestination: boolean;
   checkConflicts: boolean;
+}
+export interface CalendarSummary {
+  id: string;
+  name: string;
+  primaryEmail: string | null;
+  isPrimary?: boolean;
 }
 export interface ApiKeyRow {
   id: string;

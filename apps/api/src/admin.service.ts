@@ -7,6 +7,8 @@ import {
   createBooking,
   createConnection,
   updateConnection,
+  connectionExists,
+  getConnectionRef,
   declineBooking,
   createWebhook,
   updateWebhook,
@@ -27,6 +29,7 @@ import {
 } from '@slate/db';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { asConnector } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DB } from './tokens';
 
@@ -159,6 +162,83 @@ export class AdminService {
   }
   updateConnection(p: HostPrincipal, id: string, patch: { isDestination?: boolean; checkConflicts?: boolean }) {
     return updateConnection(this.db, p.memberId, id, patch);
+  }
+
+  /** The wired calendar provider (from the effects seam). */
+  private get provider() {
+    return this.calendar.provider;
+  }
+
+  /**
+   * Start a connect flow: mint the connect token/URL from the provider. Returns
+   * an honest disabled status when no external provider is wired (OSS default),
+   * so the UI can say so instead of silently failing.
+   */
+  async connectionToken(
+    p: HostPrincipal,
+    provider: string,
+  ): Promise<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }> {
+    const connector = asConnector(this.provider);
+    if (!connector) {
+      return {
+        enabled: false,
+        token: null,
+        connectUrl: null,
+        message: 'No external calendar provider configured (OSS default). Add a connection manually.',
+      };
+    }
+    const start = await connector.startConnect(provider, p.memberId);
+    return { enabled: true, token: start.token, connectUrl: start.connectUrl, message: 'Connect started.' };
+  }
+
+  /**
+   * After the OAuth popup completes, discover the tenant's connection(s) for the
+   * provider and persist any not already stored (first destination wins R20).
+   * Returns the connections now on record.
+   */
+  async discoverConnections(p: HostPrincipal, provider: string) {
+    const connector = asConnector(this.provider);
+    if (!connector) return listConnections(this.db, p.memberId);
+    const discovered = await connector.discoverConnections(p.memberId, provider);
+    const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
+    let firstNew = !haveDestination;
+    for (const conn of discovered) {
+      if (await connectionExists(this.db, p.memberId, conn.connectionRef)) continue;
+      await createConnection(this.db, {
+        accountId: p.accountId,
+        memberId: p.memberId,
+        provider: conn.provider || provider,
+        externalId: conn.connectionRef,
+        primaryEmail: conn.primaryEmail ?? undefined,
+        // First calendar the host connects becomes the default destination.
+        isDestination: firstNew,
+        checkConflicts: true,
+      });
+      firstNew = false;
+    }
+    return listConnections(this.db, p.memberId);
+  }
+
+  /** List the calendars a connected account exposes (post-connect pick). */
+  async listConnectionCalendars(p: HostPrincipal, id: string) {
+    const ref = await getConnectionRef(this.db, p.memberId, id);
+    if (!ref) return [];
+    if (!this.provider.enabled) return [];
+    return this.provider.listCalendars(ref.externalId);
+  }
+
+  /** Probe a connection's live health for the UI (never throws). */
+  async pingConnection(
+    p: HostPrincipal,
+    id: string,
+  ): Promise<{ ok: boolean; enabled: boolean; message: string }> {
+    if (!this.provider.enabled) {
+      return { ok: true, enabled: false, message: 'No external calendar provider configured (OSS default).' };
+    }
+    const ref = await getConnectionRef(this.db, p.memberId, id);
+    if (!ref) return { ok: false, enabled: true, message: 'Connection not found.' };
+    const health = await this.provider.checkConnection(ref.externalId);
+    return { ok: health.ok, enabled: true, message: health.detail };
   }
 
   // API keys.

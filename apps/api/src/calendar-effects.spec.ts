@@ -3,16 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { createDb, migrate, seed, sql, createBooking, getAvailability, type Db } from '@slate/db';
 import type {
   CalendarProvider,
+  CalendarSummary,
+  ConnectionHealth,
   CreateEventInput,
   CreatedEvent,
   DeleteEventInput,
+  UpdateEventInput,
 } from '@slate/calendar';
 import { CalendarEffects } from './calendar-effects';
 
-/** A fake provider that records both writes AND deletes (the port's two effects). */
+/** A fake provider that records writes, moves AND deletes (the port's effects). */
 class RecordingCalendarProvider implements CalendarProvider {
   readonly enabled = true;
   readonly created: CreateEventInput[] = [];
+  readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
   private seq = 0;
   listBusy(): Promise<[]> {
@@ -22,9 +26,19 @@ class RecordingCalendarProvider implements CalendarProvider {
     this.created.push(input);
     return Promise.resolve({ externalEventId: `evt-${++this.seq}`, meetingUrl: 'https://meet/x' });
   }
+  updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
+    this.updated.push(input);
+    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: 'https://meet/x' });
+  }
   deleteEvent(input: DeleteEventInput): Promise<void> {
     this.deleted.push(input);
     return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true, detail: 'Connected' });
   }
 }
 
@@ -33,6 +47,7 @@ class RecordingCalendarProvider implements CalendarProvider {
 type Awaitable = {
   writeEvent(uid: string): Promise<void>;
   removeEvent(uid: string): Promise<void>;
+  moveEvent(uid: string): Promise<void>;
 };
 
 describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9/C14)', () => {
@@ -143,6 +158,41 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(refs).toHaveLength(0);
   });
 
+  it('reschedule → MOVES the same external event in place (no delete, no duplicate)', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    expect(provider.created).toHaveLength(1);
+
+    await (effects as unknown as Awaitable).moveEvent(uid);
+
+    // The event was UPDATED in place — same external id, nothing deleted, no re-create.
+    expect(provider.updated).toHaveLength(1);
+    expect(provider.updated[0]!.externalEventId).toBe('evt-1');
+    expect(provider.updated[0]!.connectionRef).toBe(CAL_REF);
+    expect(provider.created).toHaveLength(1);
+    expect(provider.deleted).toHaveLength(0);
+    // The single reference row is preserved (still evt-1).
+    const refs = await db.all<{ external_event_id: string }>(
+      sql`SELECT br.external_event_id FROM booking_reference br JOIN booking b ON b.id = br.booking_id
+          WHERE b.uid = ${uid}`,
+    );
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.external_event_id).toBe('evt-1');
+  });
+
+  it('reschedule with nothing created yet falls back to a fresh create', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+
+    await (effects as unknown as Awaitable).moveEvent(uid);
+
+    expect(provider.updated).toHaveLength(0);
+    expect(provider.created).toHaveLength(1);
+  });
+
   it('B9: requests a conferencing link only when location is exactly "google_meet"', async () => {
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);
@@ -160,9 +210,14 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       createEvent: () => {
         throw new Error('must not be called');
       },
+      updateEvent: () => {
+        throw new Error('must not be called');
+      },
       deleteEvent: () => {
         throw new Error('must not be called');
       },
+      listCalendars: () => Promise.resolve([]),
+      checkConnection: () => Promise.resolve({ ok: false, detail: 'disabled' }),
     };
     const effects = new CalendarEffects(disabled, db);
     const uid = await bookFirstSlot();
