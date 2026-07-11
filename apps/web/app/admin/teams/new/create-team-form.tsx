@@ -3,6 +3,8 @@
 import { useRef, useState, useTransition } from 'react';
 import { commonTimeZones, type BookingMessages } from '@slate/shared';
 import { FieldHelp } from '@/components/field-help';
+import { Button } from '@/components/ui/button';
+import { FormHeader } from '@/components/ui/page-header';
 import { createTeamFullAction } from '../actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -21,10 +23,16 @@ export function CreateTeamForm({
   messages: m,
   defaultTimeZone,
   accountCode,
+  backHref,
+  backLabel,
+  heading,
 }: {
   messages: TeamsMessages;
   defaultTimeZone: string;
   accountCode: string;
+  backHref: string;
+  backLabel: string;
+  heading: string;
 }) {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -57,7 +65,18 @@ export function CreateTeamForm({
     });
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4 rounded-md border border-border bg-card p-6">
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <FormHeader
+        backHref={backHref}
+        backLabel={backLabel}
+        title={heading}
+        actions={
+          <Button type="submit" disabled={pending || !name.trim() || !slug.trim()}>
+            {pending ? m.creating : m.createTeam}
+          </Button>
+        }
+      />
+      <div className="flex max-w-2xl flex-col gap-4 rounded-md border border-border bg-card p-6">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="flex items-center gap-1 text-muted-foreground">
@@ -152,14 +171,7 @@ export function CreateTeamForm({
       </label>
 
       {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
-      <button
-        type="button"
-        onClick={submit}
-        disabled={pending || !name.trim() || !slug.trim()}
-        className="inline-flex min-h-[44px] items-center self-start rounded-md bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-      >
-        {pending ? m.creating : m.createTeam}
-      </button>
-    </div>
+      </div>
+    </form>
   );
 }

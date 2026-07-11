@@ -33,11 +33,14 @@ export async function saveScheduleFullAction(
   }
 }
 
-export async function createScheduleAction(name: string, timeZone: string): Promise<ActionResult> {
+export async function createScheduleAction(
+  name: string,
+  timeZone: string,
+): Promise<ActionResult & { id?: string }> {
   try {
-    await adminApi.createSchedule({ name: name.trim() || 'New schedule', timeZone, rules: [] });
+    const created = await adminApi.createSchedule({ name: name.trim() || 'New schedule', timeZone, rules: [] });
     revalidatePath('/admin/availability');
-    return { ok: true };
+    return { ok: true, id: created.id };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }

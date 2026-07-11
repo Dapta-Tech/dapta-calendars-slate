@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
@@ -18,11 +17,14 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-10">
-      <Link href="/admin/event-types" className="text-sm text-muted-foreground hover:text-foreground">
-        ← {m.title}
-      </Link>
-      <h1 className="mb-6 mt-2 text-3xl font-semibold tracking-tight">{et.title}</h1>
-      <EventTypeForm initial={et} schedules={schedules} messages={m} />
+      <EventTypeForm
+        initial={et}
+        schedules={schedules}
+        messages={m}
+        backHref="/admin/event-types"
+        backLabel={m.title}
+        heading={et.title}
+      />
     </div>
   );
 }

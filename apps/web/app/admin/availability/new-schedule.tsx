@@ -3,17 +3,20 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
+import { Button } from '@/components/ui/button';
+import { FormHeader } from '@/components/ui/page-header';
 import { createScheduleAction } from './actions';
 
 type AvailabilityMessages = BookingMessages['admin']['availability'];
 
 export function NewSchedule({
   messages: m,
-  redirectOnSuccess,
+  backHref,
+  backLabel,
 }: {
   messages: AvailabilityMessages;
-  /** When set (the dedicated /new surface), navigate here after a create. */
-  redirectOnSuccess?: string;
+  backHref: string;
+  backLabel: string;
 }) {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -24,33 +27,39 @@ export function NewSchedule({
     start(async () => {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const r = await createScheduleAction(name, tz);
-      setMsg(r.ok ? null : (r.message ?? m.saveError));
       if (r.ok) {
-        setName('');
-        if (redirectOnSuccess) router.push(redirectOnSuccess);
+        // Land on the new schedule's editor so the user sets hours right away.
+        router.push(r.id ? `/admin/availability/${r.id}` : backHref);
+      } else {
+        setMsg(r.message ?? m.saveError);
       }
     });
 
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-md border border-dashed border-border p-4">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">{m.newSchedule}</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={m.newSchedulePlaceholder}
-          className="w-56 rounded-md border border-input bg-background px-3 py-2"
-        />
-      </label>
-      <button
-        type="button"
-        onClick={create}
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-      >
-        {pending ? m.saving : m.create}
-      </button>
-      {msg ? <span className="text-sm text-destructive">{msg}</span> : null}
-    </div>
+    <form onSubmit={(e) => { e.preventDefault(); create(); }}>
+      <FormHeader
+        backHref={backHref}
+        backLabel={backLabel}
+        title={m.newSchedule}
+        actions={
+          <Button type="submit" disabled={pending}>
+            {pending ? m.saving : m.create}
+          </Button>
+        }
+      />
+      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-muted-foreground">{m.scheduleNameLabel}</span>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={m.newSchedulePlaceholder}
+            className="w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        {msg ? <span className="text-sm text-destructive">{msg}</span> : null}
+      </div>
+    </form>
   );
 }

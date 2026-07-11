@@ -2,36 +2,60 @@ import Link from 'next/link';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
-import { ScheduleEditor } from './schedule-editor';
+import { PageHeader } from '@/components/ui/page-header';
+import { DeleteScheduleButton } from './delete-schedule-button';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AvailabilityPage() {
   const schedules = await adminApi.listSchedules();
-  const full = await Promise.all(schedules.map((s) => adminApi.getSchedule(s.id)));
-  const ready = full.filter(Boolean);
-  const m = getMessages(await getLocale()).admin.availability;
+  const admin = getMessages(await getLocale()).admin;
+  const m = admin.availability;
+
+  const newButton = (
+    <Link
+      href="/admin/availability/new"
+      className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+    >
+      {m.newSchedule}
+    </Link>
+  );
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <div className="mb-6 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="mb-1 text-3xl font-semibold tracking-tight">{m.title}</h1>
-          <p className="text-muted-foreground">{m.subtitle}</p>
-        </div>
-        <Link
-          href="/admin/availability/new"
-          className="inline-flex min-h-[44px] shrink-0 items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          {m.newSchedule}
-        </Link>
-      </div>
-      {ready.length > 0 ? (
-        <div className="flex flex-col gap-6">
-          {ready.map((s) => (
-            <ScheduleEditor key={s!.id} schedule={s!} messages={m} />
+      <PageHeader title={m.title} subtitle={m.subtitle} action={newButton} />
+
+      {schedules.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {schedules.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
+            >
+              <Link href={`/admin/availability/${s.id}`} className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground" aria-hidden>
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7.5V12l3 2" />
+                  </svg>
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium hover:text-primary">{s.name}</span>
+                  <span className="truncate text-sm text-muted-foreground">{s.timeZone}</span>
+                </span>
+              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/admin/availability/${s.id}`}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:border-primary"
+                >
+                  {admin.common.edit}
+                </Link>
+                <DeleteScheduleButton id={s.id} messages={m} />
+              </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
           <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
@@ -39,12 +63,7 @@ export default async function AvailabilityPage() {
             <path d="M12 7.5V12l3 2" />
           </svg>
           <p className="max-w-sm text-sm text-muted-foreground">{m.emptyList}</p>
-          <Link
-            href="/admin/availability/new"
-            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
-            {m.newSchedule}
-          </Link>
+          {newButton}
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { PageHeader } from '@/components/ui/page-header';
 import { DeleteButton } from './delete-button';
 
 export const dynamic = 'force-dynamic';
@@ -13,15 +14,17 @@ export default async function EventTypesPage() {
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight">{m.title}</h1>
-        <Link
-          href="/admin/event-types/new"
-          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          {m.newEventType}
-        </Link>
-      </div>
+      <PageHeader
+        title={m.title}
+        action={
+          <Link
+            href="/admin/event-types/new"
+            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.newEventType}
+          </Link>
+        }
+      />
 
       <ul className="flex flex-col gap-2">
         {eventTypes.map((et) => (

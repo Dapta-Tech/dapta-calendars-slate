@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { FormHeader } from '@/components/ui/page-header';
 import { TeamMembersPanel } from '../team-members-panel';
 
 export const dynamic = 'force-dynamic';
@@ -23,18 +24,22 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <Link href="/admin/teams" className="text-sm text-muted-foreground hover:text-foreground">
-        {m.backToTeams}
-      </Link>
-      <div className="mb-1 mt-2 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-3xl font-semibold tracking-tight">{team.name}</h1>
-        {me?.accountCode && team.slug ? (
-          <Link href={`/${me.accountCode}/team/${team.slug}`} className="text-sm text-primary hover:underline">
-            {m.viewPublicTeam}
-          </Link>
-        ) : null}
-      </div>
-      <p className="mb-6 text-sm text-muted-foreground">/{team.slug} · {m.roundRobin}</p>
+      <FormHeader
+        backHref="/admin/teams"
+        backLabel={m.backToTeams}
+        title={team.name}
+        actions={
+          me?.accountCode && team.slug ? (
+            <Link
+              href={`/${me.accountCode}/team/${team.slug}`}
+              className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm transition-colors hover:border-primary"
+            >
+              {m.viewPublicTeam}
+            </Link>
+          ) : undefined
+        }
+      />
+      <p className="mb-6 -mt-2 text-sm text-muted-foreground">/{team.slug} · {m.roundRobin}</p>
 
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
         {m.members} <span className="font-normal">({members.length})</span>

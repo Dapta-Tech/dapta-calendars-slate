@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getMessages, type BookingMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { PageHeader } from '@/components/ui/page-header';
 import { CancelAction, PendingActions } from './booking-actions';
 
 export const dynamic = 'force-dynamic';
@@ -41,15 +42,17 @@ export default async function BookingsPage() {
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">{m.title}</h1>
-        <Link
-          href="/admin/bookings/new"
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          {m.newBooking}
-        </Link>
-      </div>
+      <PageHeader
+        title={m.title}
+        action={
+          <Link
+            href="/admin/bookings/new"
+            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.newBooking}
+          </Link>
+        }
+      />
 
       {pending.length > 0 ? (
         <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} m={m} />

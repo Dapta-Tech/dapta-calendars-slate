@@ -6,6 +6,7 @@ import { commonTimeZones, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FormHeader } from '@/components/ui/page-header';
 import { createHostBookingAction } from './actions';
 
 type BookingsMessages = BookingMessages['admin']['bookings'];
@@ -43,11 +44,17 @@ export function HostBookingForm({
   handle,
   eventTypes,
   messages: m,
+  backHref,
+  backLabel,
+  heading,
 }: {
   accountCode: string;
   handle: string;
   eventTypes: EventType[];
   messages: BookingsMessages;
+  backHref: string;
+  backLabel: string;
+  heading: string;
 }) {
   // Only offer bookable (non-hidden) events.
   const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
@@ -117,7 +124,18 @@ export function HostBookingForm({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
+    <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <FormHeader
+        backHref={backHref}
+        backLabel={backLabel}
+        title={heading}
+        actions={
+          <Button type="submit" disabled={pending || !name || !email}>
+            {pending ? m.creating : m.createBooking}
+          </Button>
+        }
+      />
+      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.eventType}</span>
         <select value={slug} onChange={(e) => setSlug(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2">
@@ -205,9 +223,7 @@ export function HostBookingForm({
       {result && !result.ok ? (
         <p className="text-sm text-destructive">{result.status === 409 ? m.slotTaken : result.message}</p>
       ) : null}
-      <Button onClick={submit} disabled={pending || !name || !email} className="self-start">
-        {pending ? m.creating : m.createBooking}
-      </Button>
-    </div>
+      </div>
+    </form>
   );
 }
