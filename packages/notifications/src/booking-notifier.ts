@@ -71,6 +71,37 @@ export class BookingNotifier {
   }
 
   /**
+   * A scheduled REMINDER before the meeting (attendee + host). No new .ics — the
+   * confirmed invite already lives in the calendar; this is just a nudge. The
+   * `payload` carries `reminderLeadMinutes` so the copy can say "starts in X".
+   */
+  sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
+    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const lead = n.reminderLeadMinutes;
+    const inWord =
+      lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
+    const lines = [
+      `Hi ${n.attendee.name},`,
+      ``,
+      `Reminder: "${n.title}" starts ${inWord}.`,
+      `When: ${when}`,
+      n.host.name ? `Host: ${n.host.name}` : '',
+      n.location ? `Where: ${n.location}` : '',
+      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+    ].filter(Boolean);
+    return this.email.send({
+      to: this.recipients(n),
+      subject: `Reminder: ${n.title} — ${when}`,
+      text: lines.join('\n'),
+      html: htmlBody(lines),
+      headers: { 'X-Booking-Uid': n.uid },
+      // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
+      idempotencyKey: `calendar:${n.uid}:reminder:${lead ?? 'x'}`,
+      // No .ics on a reminder.
+    });
+  }
+
+  /**
    * B5: a `requiresConfirmation` booking is PENDING, not confirmed. Tell the
    * attendee we received the request — and DO NOT attach a CONFIRMED invite (no
    * .ics), so their calendar isn't populated with an event the host may decline.

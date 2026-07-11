@@ -58,6 +58,13 @@ export interface EnqueueOutboxInput {
   maxAttempts?: number;
   /** Epoch-ms; injected so callers/tests control the clock. Defaults to Date.now(). */
   now?: number;
+  /**
+   * Epoch-ms at which this row first becomes due. Defaults to `now` (immediate).
+   * Set it in the FUTURE to schedule delivery — e.g. a reminder at `start − lead`.
+   * The worker drains rows with `next_attempt_at <= now`, so a future value stays
+   * dormant until its time.
+   */
+  nextAttemptAt?: number;
 }
 
 /** Default retry ceiling; overridable per row (OUTBOX_MAX_ATTEMPTS at the worker). */
@@ -78,15 +85,32 @@ export function backoffMs(attempts: number): number {
 export async function enqueueOutbox(db: Db, input: EnqueueOutboxInput): Promise<string> {
   const id = randomUUID();
   const now = input.now ?? Date.now();
+  const dueAt = input.nextAttemptAt ?? now;
   await db.run(
     sql`INSERT INTO outbox
           (id, kind, action, booking_uid, account_id, webhook_id, payload,
            status, attempts, max_attempts, next_attempt_at, last_error, created_at, updated_at)
         VALUES (${id}, ${input.kind}, ${input.action}, ${input.bookingUid ?? null},
           ${input.accountId ?? null}, ${input.webhookId ?? null}, ${input.payload ?? null},
-          'pending', 0, ${input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${now}, NULL, ${now}, ${now})`,
+          'pending', 0, ${input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${dueAt}, NULL, ${now}, ${now})`,
   );
   return id;
+}
+
+/**
+ * Delete still-PENDING rows matching a booking + kind + action — used to cancel
+ * scheduled reminders when a booking is cancelled/declined or moved (before they
+ * fire). Never touches rows already `done`/`failed`.
+ */
+export async function deletePendingOutbox(
+  db: Db,
+  filter: { bookingUid: string; kind: OutboxKind; action: string },
+): Promise<void> {
+  await db.run(
+    sql`DELETE FROM outbox
+        WHERE status = 'pending' AND booking_uid = ${filter.bookingUid}
+          AND kind = ${filter.kind} AND action = ${filter.action}`,
+  );
 }
 
 function mapRow(r: Record<string, unknown>): OutboxRow {
