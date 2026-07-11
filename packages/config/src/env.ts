@@ -52,6 +52,14 @@ export const serverEnvSchema = z.object({
   // seeded demo account. Ignored in production (the stub refuses to boot there).
   DEV_LOGIN_EMAIL: z.string().optional(),
 
+  // DEV ONLY — when true, the local stub does NOT fall back to the seeded/
+  // DEV_LOGIN_EMAIL account: a request with no identity (no impersonation
+  // headers, no `x-slate-email`) resolves to 401 UNAUTHENTICATED. This gives
+  // local dev a real "logged out" state so a web login/logout flow can bounce
+  // to the sign-in screen (mirrors the old app). Default false keeps OSS
+  // clone-and-run frictionless (always logged in, zero auth setup).
+  AUTH_LOCAL_STRICT: boolish.optional(),
+
   // Host-session token (validated by the `workos` provider). The dashboard token
   // is an HS256 JWT minted by the upstream identity service (a shared symmetric
   // secret — so the SAME validation runs identically in local dev and remote).

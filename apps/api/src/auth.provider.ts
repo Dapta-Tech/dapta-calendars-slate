@@ -61,14 +61,16 @@ function devCodeFromEmail(email: string): string {
  *      resolve the member with that email, JIT-provisioning a fresh
  *      account+member if none exists (so a developer lands in THEIR workspace,
  *      not the first seeded demo account). Mirrors the workos adapter's JIT.
- *   3. fallback — the FIRST seeded account+member (single-tenant stub).
+ *   3. strict mode — if `AUTH_LOCAL_STRICT` is set and no identity arrived,
+ *      resolve to 401 (a real "logged out" state for local dev) instead of (4).
+ *   4. fallback — the FIRST seeded account+member (single-tenant stub).
  */
 export class LocalAuthProvider implements AuthProvider {
   readonly name = 'local';
 
   constructor(
     private readonly db: Db,
-    private readonly env: Pick<ServerEnv, 'NODE_ENV' | 'DEV_LOGIN_EMAIL'>,
+    private readonly env: Pick<ServerEnv, 'NODE_ENV' | 'DEV_LOGIN_EMAIL' | 'AUTH_LOCAL_STRICT'>,
   ) {}
 
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
@@ -83,7 +85,12 @@ export class LocalAuthProvider implements AuthProvider {
       if (email) return this.resolveByEmail(email);
     }
 
-    // 3. Dev fallback: the first account + its first member (single-tenant stub).
+    // 3. Strict mode: no identity provided → no session (enables logout in dev).
+    if (this.env.AUTH_LOCAL_STRICT) {
+      throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
+    }
+
+    // 4. Dev fallback: the first account + its first member (single-tenant stub).
     const row = await this.db.get<{ account_id: string; member_id: string }>(
       sql`SELECT a.id AS account_id, m.id AS member_id
           FROM account a JOIN member m ON m.account_id = a.id
