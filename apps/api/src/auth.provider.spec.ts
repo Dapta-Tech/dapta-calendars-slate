@@ -117,3 +117,48 @@ describe('LocalAuthProvider — email-aware dev login', () => {
     expect(jit).toBeUndefined();
   });
 });
+
+describe('LocalAuthProvider — strict mode (AUTH_LOCAL_STRICT) enables a logged-out state', () => {
+  let db: Db;
+  let seededAccountId: string;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    seededAccountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
+  });
+
+  it('DEFAULT (non-strict): no identity → falls back to the seeded principal (zero-friction)', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
+    const p = await dev.resolveHost(reqWith({}));
+    expect(p.accountId).toBe(seededAccountId);
+  });
+
+  it('STRICT: no identity → 401 UNAUTHENTICATED (no seeded fallback)', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development', AUTH_LOCAL_STRICT: true });
+    await expect(dev.resolveHost(reqWith({}))).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('STRICT: an email still logs in (resolves/JIT-provisions)', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development', AUTH_LOCAL_STRICT: true });
+    const p = await dev.resolveHost(reqWith({ 'x-slate-email': 'jordan@example.com' }));
+    expect(p.accountId).toBe(seededAccountId);
+  });
+
+  it('STRICT: DEV_LOGIN_EMAIL still logs in (a set default is an identity)', async () => {
+    const dev = new LocalAuthProvider(db, {
+      NODE_ENV: 'development',
+      AUTH_LOCAL_STRICT: true,
+      DEV_LOGIN_EMAIL: 'env@daptatech.com',
+    });
+    const p = await dev.resolveHost(reqWith({}));
+    expect(p.accountId).toBeDefined();
+  });
+
+  it('STRICT: impersonation headers still resolve', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development', AUTH_LOCAL_STRICT: true });
+    const p = await dev.resolveHost(reqWith({ 'x-slate-account': 'A', 'x-slate-member': 'M' }));
+    expect(p).toEqual({ accountId: 'A', memberId: 'M' });
+  });
+});
