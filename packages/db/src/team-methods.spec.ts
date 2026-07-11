@@ -10,7 +10,7 @@ import {
   getTeamAvailability,
   loadBookingNotificationContext,
 } from './parity';
-import { createEventType, createTeam } from './crud';
+import { createEventType, createTeam, getEventTypeById, updateEventType } from './crud';
 
 /**
  * The three FREE team scheduling methods (the layer Calendly/Cal.com paywall):
@@ -233,6 +233,43 @@ describe('team scheduling methods (SQLite in-memory)', () => {
           JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${out.uid}`,
     );
     expect(hostRows.map((r) => r.member_id).sort()).toEqual([alexId, jordanId].sort());
+  });
+
+  // --- Host detail persistence (the editor write path) --------------------
+
+  it('createEventType persists per-host priority/weight/isFixed and reads them back', async () => {
+    const team = await createTeam(db, accountId, { name: 'Detail', slug: 'detail-team' });
+    if (!team.ok) throw new Error('team');
+    const ev = await createEventType(db, accountId, null, {
+      slug: 'detail',
+      title: 'Detail',
+      lengthMinutes: 30,
+      schedulingType: 'fixed_round_robin',
+      teamId: team.value.id,
+      hosts: [
+        { memberId: alexId, priority: 5, weight: 200, isFixed: true },
+        { memberId: jordanId, priority: 0, weight: 100, isFixed: false },
+      ],
+    });
+    expect(ev.ok).toBe(true);
+    if (!ev.ok) return;
+
+    const view = await getEventTypeById(db, accountId, ev.value.id);
+    const alex = view!.hosts.find((h) => h.memberId === alexId)!;
+    const jordan = view!.hosts.find((h) => h.memberId === jordanId)!;
+    expect(alex).toMatchObject({ priority: 5, weight: 200, isFixed: true });
+    expect(jordan).toMatchObject({ priority: 0, weight: 100, isFixed: false });
+
+    // updateEventType replaces host detail (the editor saves the full set).
+    const upd = await updateEventType(db, accountId, ev.value.id, {
+      schedulingType: 'round_robin',
+      hosts: [{ memberId: alexId, priority: 1, weight: 150, isFixed: false }],
+    });
+    expect(upd.ok).toBe(true);
+    const after = await getEventTypeById(db, accountId, ev.value.id);
+    expect(after!.schedulingType).toBe('round_robin');
+    expect(after!.hosts).toHaveLength(1);
+    expect(after!.hosts[0]).toMatchObject({ memberId: alexId, priority: 1, weight: 150 });
   });
 
   it('fixed_round_robin availability requires the fixed host to be free', async () => {

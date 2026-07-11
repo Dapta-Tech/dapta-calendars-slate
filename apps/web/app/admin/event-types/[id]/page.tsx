@@ -17,7 +17,17 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
     adminApi.listSchedules(),
   ]);
   if (!et) notFound();
-  const m = getMessages(await getLocale()).admin.eventTypes;
+  const msgs = getMessages(await getLocale());
+  const m = msgs.admin.eventTypes;
+
+  // Team events get the scheduling-method selector + per-host controls; load the
+  // team's members so their names render in the host list.
+  const teamMembers = et.teamId
+    ? (await adminApi.teamMembers(et.teamId)).map((tm) => ({
+        memberId: tm.member_id,
+        displayName: tm.display_name,
+      }))
+    : undefined;
 
   return (
     <div className="mx-auto max-w-4xl px-8 pb-10">
@@ -25,6 +35,8 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
         initial={et}
         schedules={schedules}
         messages={m}
+        scheduling={et.teamId ? msgs.scheduling : undefined}
+        teamMembers={teamMembers}
         backHref="/admin/event-types"
         backLabel={m.title}
         heading={et.title}

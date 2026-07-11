@@ -163,6 +163,13 @@ export interface BookingMessages {
       saveChanges: string;
       createEventType: string;
       saving: string;
+      /** Team scheduling section (team events only). */
+      schedulingMethod: string;
+      hostsTitle: string;
+      priority: string;
+      weight: string;
+      fixedHost: string;
+      fixedHostHint: string;
     };
     availability: {
       title: string;
@@ -602,6 +609,12 @@ export const en: BookingMessages = {
       saveChanges: 'Save changes',
       createEventType: 'Create event type',
       saving: 'Saving…',
+      schedulingMethod: 'Scheduling method',
+      hostsTitle: 'Hosts',
+      priority: 'Priority',
+      weight: 'Weight',
+      fixedHost: 'Fixed',
+      fixedHostHint: 'Always on every booking',
     },
     availability: {
       title: 'Availability',
@@ -1041,6 +1054,12 @@ export const es: BookingMessages = {
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear tipo de evento',
       saving: 'Guardando…',
+      schedulingMethod: 'Método de programación',
+      hostsTitle: 'Anfitriones',
+      priority: 'Prioridad',
+      weight: 'Peso',
+      fixedHost: 'Fijo',
+      fixedHostHint: 'Siempre en cada reserva',
     },
     availability: {
       title: 'Disponibilidad',
