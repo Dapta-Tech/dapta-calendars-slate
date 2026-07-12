@@ -173,6 +173,24 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/connect/connections?tenantKey=tenant-1&provider=google');
   });
 
+  it('discoverConnections skips not-yet-authorized connection shells (connected:false)', async () => {
+    // Opening a hosted connect screen can create a connection shell before the
+    // user authorizes; it must not surface as a connected account.
+    const { provider } = makeProvider([
+      {
+        json: {
+          connections: [
+            { connectionRef: 'conn-shell', provider: 'google', connected: false },
+            { connectionRef: 'conn-live', provider: 'google', connected: true },
+            { connectionRef: 'conn-legacy', provider: 'google' }, // no flag = assumed live
+          ],
+        },
+      },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found.map((c) => c.connectionRef)).toEqual(['conn-live', 'conn-legacy']);
+  });
+
   it('asConnector narrows the external provider but rejects the disabled default', () => {
     const { provider } = makeProvider([]);
     expect(asConnector(provider)).not.toBeNull();
