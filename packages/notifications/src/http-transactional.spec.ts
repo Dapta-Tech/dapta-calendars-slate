@@ -26,7 +26,7 @@ const readBody = (calls: Array<{ init: RequestInit }>) =>
 const readHeaders = (calls: Array<{ init: RequestInit }>) =>
   (calls[0]!.init.headers ?? {}) as Record<string, string>;
 
-const ENDPOINT = 'https://mail.example.test/v1/send';
+const ENDPOINT = 'https://mail.example.test/api/internal/email/send';
 const SIGNING_SECRET = 'calendar-test-signing-secret-with-32-characters';
 const transactionalOptions = {
   endpoint: ENDPOINT,
@@ -56,6 +56,16 @@ const message: EmailMessage = {
 };
 
 describe('transactional-v1 wire — request contract', () => {
+  it('fails closed when the configured endpoint does not match the signed path', async () => {
+    const provider = new HttpEmailProvider(
+      { ...transactionalOptions, endpoint: 'https://mail.example.test/v1/send' },
+    );
+
+    await expect(provider.send(message)).rejects.toThrow(
+      'transactional email endpoint must use /api/internal/email/send',
+    );
+  });
+
   it('POSTs the managed contract: mode, to[], replyTo, subject, html/text, category, idempotencyKey', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'm1' });
     const provider = new HttpEmailProvider(

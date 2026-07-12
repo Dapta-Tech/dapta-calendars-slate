@@ -15,6 +15,7 @@ export type HttpWireProfile = 'generic' | 'transactional-v1';
 
 /** Default category for the transactional-v1 profile (Req 5). */
 export const DEFAULT_TRANSACTIONAL_CATEGORY = 'lifecycle';
+export const TRANSACTIONAL_EMAIL_PATH = '/api/internal/email/send';
 
 export interface HttpEmailOptions {
   /** The email-service endpoint to POST the message to. */
@@ -58,9 +59,11 @@ export class HttpEmailProvider implements EmailProvider {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     const to = normalizeRecipients(message.to);
-    return this.opts.profile === 'transactional-v1'
-      ? this.sendTransactional(message, to)
-      : this.sendGeneric(message, to);
+    if (this.opts.profile === 'transactional-v1') {
+      assertTransactionalEndpoint(this.opts.endpoint);
+      return this.sendTransactional(message, to);
+    }
+    return this.sendGeneric(message, to);
   }
 
   /** The original generic wire — payload + auth unchanged. */
@@ -165,12 +168,19 @@ export function signTransactionalRequest(
   const canonical = [
     'v1',
     'POST',
-    '/api/internal/email/send',
+    TRANSACTIONAL_EMAIL_PATH,
     timestamp,
     idempotencyKey,
     bodyHash,
   ].join('\n');
   return createHmac('sha256', secret).update(canonical).digest('hex');
+}
+
+function assertTransactionalEndpoint(endpoint: string): void {
+  const url = new URL(endpoint);
+  if (url.pathname !== TRANSACTIONAL_EMAIL_PATH || url.search || url.hash) {
+    throw new Error(`transactional email endpoint must use ${TRANSACTIONAL_EMAIL_PATH}`);
+  }
 }
 
 /** Map an EmailAttachment to the managed transactional attachment object. */
