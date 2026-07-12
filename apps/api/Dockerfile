@@ -44,5 +44,8 @@ USER node
 EXPOSE 4000
 ENV API_PORT=4000
 # Start the API only. tsx is a runtime dependency of @slate/api; the bundle
-# carries the compiled workspace deps under node_modules.
-CMD ["pnpm", "start"]
+# carries the compiled workspace deps under node_modules. Invoke tsx directly —
+# `pnpm start` would make corepack fetch the LATEST pnpm at container start,
+# which requires Node 22+ (the pruned bundle carries no packageManager pin) and
+# crash-loops on node:20. No package manager belongs in the runtime path.
+CMD ["node_modules/.bin/tsx", "src/main.ts"]
