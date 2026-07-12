@@ -7,6 +7,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -81,6 +82,20 @@ export class HostController {
   }
 
   // Host bookings (R29 on-behalf; singular attendee shape).
+  /**
+   * The host's own availability, resolved by the authenticated member — works
+   * before a public handle is set (the public /v1/availability requires one).
+   */
+  @Get('me/availability')
+  async myAvailability(@Req() req: ReqLike, @Query() q: Record<string, string>) {
+    const p = await this.auth.resolveHost(req);
+    if (!q.slug || !q.from || !q.to)
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'slug, from, to required' });
+    const r = await this.admin.myAvailability(p, { slug: q.slug, from: q.from, to: q.to, timeZone: q.timeZone });
+    if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'No such event.' });
+    return r;
+  }
+
   @Get('host/bookings')
   async listBookings(@Req() req: ReqLike, @Query() q: Record<string, string>) {
     const p = await this.auth.resolveHost(req);

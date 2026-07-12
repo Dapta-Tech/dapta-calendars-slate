@@ -240,6 +240,8 @@ export interface BookingMessages {
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
+      noHandleNotice: string;
+      noHandleLink: string;
     };
     teams: {
       title: string;
@@ -735,6 +737,8 @@ export const en: BookingMessages = {
       backToBookings: '← Back to bookings',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
+      noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
+      noHandleLink: 'Set your handle in Booking Page settings',
       slotTaken: 'That time was just taken — pick another slot.',
     },
     teams: {
@@ -1230,6 +1234,8 @@ export const es: BookingMessages = {
       backToBookings: '← Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
+      noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
+      noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
     },
     teams: {
