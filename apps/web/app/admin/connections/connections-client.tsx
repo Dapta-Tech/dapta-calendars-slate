@@ -623,13 +623,17 @@ export function ConnectionsClient({
           />
           <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
         </span>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          {rows.length > 0 ? m.connectAnother : m.connectButton}
-        </button>
+        {/* One-CTA-per-screen (R30): with no rows the empty state below carries
+            the single centered CTA — no top-right duplicate. */}
+        {rows.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.connectAnother}
+          </button>
+        ) : null}
       </div>
 
       {rows.length > 0 ? (

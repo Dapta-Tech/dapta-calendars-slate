@@ -51,6 +51,6 @@ export async function deleteEventTypeAction(id: string): Promise<ActionResult> {
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the event type.' };
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the event.' };
   }
 }
