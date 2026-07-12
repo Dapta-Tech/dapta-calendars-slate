@@ -13,16 +13,16 @@ export const metadata = { title: `Sign in — ${productName}` };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; signedout?: string }>;
 }) {
   const m = getMessages(await getLocale()).admin.login;
   const workos = authProvider() === 'workos';
-  const { error } = await searchParams;
+  const { error, signedout } = await searchParams;
 
   // Dapta builds: no intermediate sign-in card — go straight to the hosted
   // login. The card only renders as an ERROR landing (?error=) so a failed
   // callback doesn't loop root -> /api/auth/login -> /login -> ...
-  if (workos && !error) redirect('/api/auth/login');
+  if (workos && !error && !signedout) redirect('/api/auth/login');
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">

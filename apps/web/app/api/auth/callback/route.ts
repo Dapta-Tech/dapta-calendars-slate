@@ -35,11 +35,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const encoded = url.searchParams.get('session');
   if (!encoded) return NextResponse.redirect(new URL('/login?error=callback', origin));
 
-  let tokens: { access_token?: string; refresh_token?: string } | null = null;
+  let tokens: { access_token?: string; refresh_token?: string; session_id?: string } | null = null;
   try {
     tokens = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8')) as {
       access_token?: string;
       refresh_token?: string;
+      session_id?: string;
     };
   } catch {
     tokens = null;
@@ -48,6 +49,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(new URL('/login?error=callback', origin));
   }
 
-  await setSession({ provider: 'workos', accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
+  await setSession({
+    provider: 'workos',
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    sessionId: tokens.session_id,
+  });
   return NextResponse.redirect(new URL('/admin', origin));
 }
