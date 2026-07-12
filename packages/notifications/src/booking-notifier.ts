@@ -92,6 +92,7 @@ export class BookingNotifier {
       n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       to: this.recipients(n),
       subject: `Reminder: ${n.title} — ${when}`,
       text: lines.join('\n'),

@@ -82,6 +82,7 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
     await effects.deliver('reminder', row.payload!);
     const rem = email.sent.filter((m) => m.subject.startsWith('Reminder:'));
     expect(rem).toHaveLength(1);
+    expect(rem[0]!.accountId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(rem[0]!.attachments ?? []).toHaveLength(0); // no invite on a reminder
     expect(rem[0]!.text).toMatch(/starts/);
   });

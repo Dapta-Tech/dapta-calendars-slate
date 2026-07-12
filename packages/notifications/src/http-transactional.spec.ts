@@ -297,4 +297,15 @@ describe('BookingNotifier → transactional-v1 (end-to-end idempotency + attachm
     expect(key2).toBe('calendar:bk-42:reschedule:2026-08-03T15:00:00.000Z');
     expect(key1).not.toBe(key2);
   });
+
+  it('signs reminder delivery with the booking account context', async () => {
+    const { impl, calls } = stubFetch(202, { status: 'accepted' });
+    const provider = new HttpEmailProvider(transactionalOptions, impl);
+    const notifier = new BookingNotifier(provider);
+
+    await notifier.sendReminder({ ...notification, reminderLeadMinutes: 60 });
+
+    expect(readBody(calls).businessContext).toEqual({ accountId: notification.accountId });
+    expect(readHeaders(calls)['x-dapta-signature']).toMatch(/^[a-f0-9]{64}$/);
+  });
 });
