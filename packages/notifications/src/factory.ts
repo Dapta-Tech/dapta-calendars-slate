@@ -21,8 +21,10 @@ export interface EmailConfig {
     profile?: HttpWireProfile;
     /** Bearer token — `generic` profile. */
     token?: string;
-    /** X-API-Key — `transactional-v1` profile. */
-    apiKey?: string;
+    /** Stable service identity — `transactional-v1` profile. */
+    clientId?: string;
+    /** HMAC signing secret — `transactional-v1` profile. */
+    signingSecret?: string;
     /** Message category — `transactional-v1` profile (defaults to `lifecycle`). */
     category?: string;
   };
@@ -52,11 +54,18 @@ export function createEmailProvider(config: EmailConfig): EmailProvider {
       return new LogOnlyEmailProvider();
     case 'http':
       if (config.http?.endpoint) {
+        if (
+          config.http.profile === 'transactional-v1' &&
+          (!config.http.clientId || !config.http.signingSecret)
+        ) {
+          throw new Error('transactional-v1 requires a client id and signing secret');
+        }
         return new HttpEmailProvider({
           endpoint: config.http.endpoint,
           profile: config.http.profile,
           token: config.http.token,
-          apiKey: config.http.apiKey,
+          clientId: config.http.clientId,
+          signingSecret: config.http.signingSecret,
           category: config.http.category,
           fromEmail: config.fromEmail,
           fromName: config.fromName,

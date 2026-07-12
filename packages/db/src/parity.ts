@@ -848,6 +848,7 @@ export async function declineBooking(
 
 /** Everything the email templates need for a booking, loaded once by uid. */
 export interface BookingNotificationContext {
+  accountId: string;
   uid: string;
   title: string;
   startUtc: string;
@@ -868,6 +869,7 @@ export async function loadBookingNotificationContext(
   uid: string,
 ): Promise<BookingNotificationContext | null> {
   const row = await db.get<{
+    account_id: string;
     uid: string;
     title: string;
     start_ms: number;
@@ -880,7 +882,7 @@ export async function loadBookingNotificationContext(
     att_email: string | null;
     att_tz: string | null;
   }>(
-    sql`SELECT b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
+    sql`SELECT b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                m.display_name AS host_name, m.email AS host_email,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
@@ -890,6 +892,7 @@ export async function loadBookingNotificationContext(
   );
   if (!row || !row.att_email) return null;
   return {
+    accountId: row.account_id,
     uid: row.uid,
     title: row.title,
     startUtc: new Date(Number(row.start_ms)).toISOString(),
