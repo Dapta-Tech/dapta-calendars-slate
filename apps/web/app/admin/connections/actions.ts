@@ -38,14 +38,28 @@ export async function deleteConnectionAction(id: string): Promise<{ ok: boolean;
 export async function toggleConnectionAction(
   id: string,
   patch: { isDestination?: boolean; checkConflicts?: boolean },
-): Promise<void> {
-  await adminApi.updateConnection(id, patch);
-  revalidatePath('/admin/connections');
+): Promise<ActionResult> {
+  try {
+    await adminApi.updateConnection(id, patch);
+    revalidatePath('/admin/connections');
+    return { ok: true };
+  } catch (e) {
+    // Report failure so the client can roll back its optimistic update and
+    // surface the reason instead of silently persisting the wrong state.
+    return { ok: false, message: e instanceof Error ? e.message : 'Update failed.' };
+  }
 }
 
-export async function pingConnectionAction(id: string): Promise<{ enabled: boolean; message: string }> {
-  const r = await adminApi.pingConnection(id);
-  return { enabled: r.enabled, message: r.message };
+export async function pingConnectionAction(
+  id: string,
+): Promise<{ ok: boolean; enabled: boolean; message: string }> {
+  try {
+    const r = await adminApi.pingConnection(id);
+    return { ok: r.ok, enabled: r.enabled, message: r.message };
+  } catch (e) {
+    // Never throw at the boundary: a failed probe is itself a health signal.
+    return { ok: false, enabled: true, message: e instanceof Error ? e.message : 'Health check failed.' };
+  }
 }
 
 export async function connectCalendarAction(

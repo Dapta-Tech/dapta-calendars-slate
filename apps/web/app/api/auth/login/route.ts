@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { authProvider } from '@/lib/auth-session';
+import { requestOrigin } from '@/lib/request-origin';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 
@@ -13,7 +14,7 @@ const OAUTH_STATE_COOKIE = 'slate_oauth_state';
  * OSS / local builds have no IAM → bounce to /login (vendor-clean).
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const origin = new URL(req.url).origin;
+  const origin = requestOrigin(req);
   const iam = process.env.IAM_BASE_URL?.replace(/\/$/, '');
   if (authProvider() !== 'workos' || !iam) {
     return NextResponse.redirect(new URL('/login', origin));

@@ -1,47 +1,49 @@
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { setSession } from '@/lib/auth-session';
+import { requestOrigin } from '@/lib/request-origin';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 
 /**
- * WorkOS callback (AUTH-WEB-CONTRACT §3.2). Verifies the CSRF `state`, then
- * exchanges the one-time `code` for the platform tokens via IAM (a server↔server
- * POST) and stashes them in the httpOnly session cookie — the raw JWT never
- * travels in the query string, referrer, or browser history.
+ * WorkOS callback — REAL IAM contract (verified against dapta-iam-ms
+ * workos-auth.controller.ts @Get('callback'), 2026-07-11):
  *
- * ⚠️ CONFIRM(auth §3.2) — the two IAM specifics still unspecified in the contract:
- *   (a) does WorkOS/IAM echo our `state` back on the redirect (assumed: yes, as
- *       `?state=`), and (b) the exact code→token exchange route + DTO (assumed:
- *       POST {IAM}/auth/exchange { code } → { access_token, refresh_token }).
- * Verify against IAM `workos-auth.controller.ts @Get('callback')` +
- * `create-unified-session`; adjust the exchange call below once confirmed.
+ * WorkOS redirects to IAM's OWN /auth/callback; IAM exchanges the code itself
+ * and 302s back to our `returnTo` carrying the whole session base64-encoded in
+ * a `?session=` query param: { success, access_token, refresh_token, ... }.
+ * There is NO code→token exchange endpoint for us to call, and IAM does not
+ * echo our CSRF `state` back (it only round-trips `returnTo` inside its own
+ * state). So the binding guard here is presence-of-cookie: the login MUST have
+ * started on this browser (the short-lived httpOnly cookie set by /api/auth/
+ * login). The token itself is verified server-side (HS256) by the API on every
+ * request — a forged/foreign `session` blob buys nothing.
+ *
+ * The raw JWT never persists in the URL: we immediately 302 to /admin, so the
+ * `session` param never lands in browser history for the final page.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
-  const origin = url.origin;
-  const iam = process.env.IAM_BASE_URL?.replace(/\/$/, '');
-  if (!iam) return NextResponse.redirect(new URL('/login', origin));
+  const origin = requestOrigin(req);
 
-  // CSRF: the returned state MUST equal the one we set at login start.
+  // The login round-trip must have started here (cookie set by /api/auth/login).
   const jar = await cookies();
-  const expected = jar.get(OAUTH_STATE_COOKIE)?.value;
-  const got = url.searchParams.get('state');
+  const started = jar.get(OAUTH_STATE_COOKIE)?.value;
   jar.delete(OAUTH_STATE_COOKIE);
-  if (!expected || !got || expected !== got) {
-    return NextResponse.redirect(new URL('/login?error=state', origin));
+  if (!started) return NextResponse.redirect(new URL('/login?error=state', origin));
+
+  const encoded = url.searchParams.get('session');
+  if (!encoded) return NextResponse.redirect(new URL('/login?error=callback', origin));
+
+  let tokens: { access_token?: string; refresh_token?: string } | null = null;
+  try {
+    tokens = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8')) as {
+      access_token?: string;
+      refresh_token?: string;
+    };
+  } catch {
+    tokens = null;
   }
-
-  const code = url.searchParams.get('code');
-  if (!code) return NextResponse.redirect(new URL('/login?error=callback', origin));
-
-  const res = await fetch(`${iam}/auth/exchange`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code }),
-    cache: 'no-store',
-  }).catch(() => null);
-  const tokens = res && res.ok ? ((await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string }) : null;
   if (!tokens?.access_token) {
     return NextResponse.redirect(new URL('/login?error=callback', origin));
   }

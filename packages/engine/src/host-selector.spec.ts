@@ -1,4 +1,4 @@
-import { HostCandidate, selectLuckyHost } from './host-selector';
+import { HostCandidate, selectLuckyHost, selectFixedRoundRobinHosts } from './host-selector';
 
 const host = (memberId: string, over: Partial<HostCandidate> = {}): HostCandidate => ({
   memberId,
@@ -55,5 +55,43 @@ describe('selectLuckyHost', () => {
       host('b', { bookingCount: 3, weight: 100 }), // load 0.03
     ]);
     expect(picked?.memberId).toBe('a');
+  });
+});
+
+describe('selectFixedRoundRobinHosts', () => {
+  it('returns null for an empty pool', () => {
+    expect(selectFixedRoundRobinHosts([])).toBeNull();
+  });
+
+  it('keeps every fixed host and adds one RR pick from the rotating rest', () => {
+    const assigned = selectFixedRoundRobinHosts([
+      host('fixed', { isFixed: true, bookingCount: 99 }), // always present despite load
+      host('rot-a', { bookingCount: 5 }),
+      host('rot-b', { bookingCount: 1 }), // least loaded → the RR pick
+    ]);
+    expect(assigned?.map((h) => h.memberId).sort()).toEqual(['fixed', 'rot-b']);
+  });
+
+  it('supports multiple fixed hosts (all attend) plus one rotating pick', () => {
+    const assigned = selectFixedRoundRobinHosts([
+      host('f1', { isFixed: true }),
+      host('f2', { isFixed: true }),
+      host('rot-a', { bookingCount: 2 }),
+      host('rot-b', { bookingCount: 9 }),
+    ]);
+    expect(assigned?.map((h) => h.memberId).sort()).toEqual(['f1', 'f2', 'rot-a']);
+  });
+
+  it('with no fixed hosts behaves like plain round-robin (one pick)', () => {
+    const assigned = selectFixedRoundRobinHosts([
+      host('a', { bookingCount: 4 }),
+      host('b', { bookingCount: 1 }),
+    ]);
+    expect(assigned?.map((h) => h.memberId)).toEqual(['b']);
+  });
+
+  it('with only fixed hosts free returns just the fixed set', () => {
+    const assigned = selectFixedRoundRobinHosts([host('f1', { isFixed: true })]);
+    expect(assigned?.map((h) => h.memberId)).toEqual(['f1']);
   });
 });

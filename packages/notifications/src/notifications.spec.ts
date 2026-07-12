@@ -81,6 +81,32 @@ describe('BookingNotifier', () => {
     expect(msg.text).toContain('Alex Rivera');
   });
 
+  it('collective/fixed-RR: every assigned host is a recipient (attendee + host + co-hosts)', async () => {
+    const sent: Array<{ to: string[] }> = [];
+    const provider = {
+      send: (m: { to: string[] }) => {
+        sent.push(m);
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    const notifier = new BookingNotifier(provider);
+    await notifier.sendConfirmation({
+      uid: 'u3',
+      title: 'Team Demo',
+      startUtc: '2026-08-01T14:00:00.000Z',
+      endUtc: '2026-08-01T14:30:00.000Z',
+      host: { name: 'Alex', email: 'alex@example.com' },
+      coHosts: [
+        { name: 'Jordan', email: 'jordan@example.com' },
+        { name: 'Dana', email: 'dana@example.com' },
+      ],
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    });
+    expect(sent[0]!.to.sort()).toEqual(
+      ['alex@example.com', 'dana@example.com', 'jordan@example.com', 'sam@example.com'].sort(),
+    );
+  });
+
   it('E8 — HTML-escapes attacker-controlled values in the email body (no XSS)', async () => {
     const sent: Array<{ html?: string; text: string }> = [];
     const provider = {

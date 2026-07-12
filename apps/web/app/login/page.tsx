@@ -4,7 +4,10 @@ import { getLocale } from '@/lib/locale';
 import { authProvider } from '@/lib/auth-session';
 import { LoginForm } from './login-form';
 
-export const metadata = { title: 'Sign in — Slate' };
+// Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
+const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
+
+export const metadata = { title: `Sign in — ${productName}` };
 
 export default async function LoginPage({
   searchParams,
@@ -18,8 +21,10 @@ export default async function LoginPage({
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">
       <div className="flex items-center gap-2">
-        <span className="rounded-md bg-primary px-2.5 py-1 text-base font-semibold text-primary-foreground">S</span>
-        <span className="text-2xl font-semibold tracking-tight">Slate</span>
+        <span className="rounded-md bg-primary px-2.5 py-1 text-base font-semibold text-primary-foreground">
+          {productName.charAt(0)}
+        </span>
+        <span className="text-2xl font-semibold tracking-tight">{productName}</span>
       </div>
 
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6">

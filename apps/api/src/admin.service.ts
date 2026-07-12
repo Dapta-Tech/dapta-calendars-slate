@@ -129,6 +129,8 @@ export class AdminService {
       // the "request received" email; the token isn't retrievable here).
       this.calendar.onBookingAccepted(uid);
       void this.email.enqueueConfirmation(uid);
+      // Now that it's confirmed, schedule its pre-meeting reminders.
+      void this.email.enqueueReminders(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.confirmed', { uid }).catch(
         () => undefined,
       );
@@ -142,6 +144,8 @@ export class AdminService {
       // B3: tell the attendee their pending request was declined (previously
       // nobody was notified — they'd show up to a meeting that never was).
       void this.email.enqueueDeclined(uid, { reason: reason ?? null });
+      // Safety: drop any reminders (a declined pending booking usually has none).
+      void this.email.cancelReminders(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,

@@ -15,6 +15,8 @@ export interface BookingNotification {
   startUtc: string;
   endUtc: string;
   host: { name?: string | null; email?: string | null };
+  /** Additional assigned hosts (collective / fixed_round_robin) — also notified. */
+  coHosts?: Array<{ name?: string | null; email?: string | null }>;
   attendee: { name: string; email: string; timeZone?: string | null };
   location?: string | null;
   manageUrl?: string | null;
@@ -38,11 +40,12 @@ export interface BookingNotification {
 export class BookingNotifier {
   constructor(private readonly email: EmailProvider) {}
 
-  /** Attendee + host, deduped, empty entries dropped. */
+  /** Attendee + host + any co-hosts, deduped, empty entries dropped. */
   private recipients(n: BookingNotification): string[] {
     const set = new Set<string>();
     if (n.attendee.email) set.add(n.attendee.email);
     if (n.host.email) set.add(n.host.email);
+    for (const h of n.coHosts ?? []) if (h.email) set.add(h.email);
     return [...set];
   }
 
@@ -66,6 +69,37 @@ export class BookingNotifier {
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: `calendar:${n.uid}:confirmation`,
       attachments: [this.ics(n, 'REQUEST', 0)],
+    });
+  }
+
+  /**
+   * A scheduled REMINDER before the meeting (attendee + host). No new .ics — the
+   * confirmed invite already lives in the calendar; this is just a nudge. The
+   * `payload` carries `reminderLeadMinutes` so the copy can say "starts in X".
+   */
+  sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
+    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const lead = n.reminderLeadMinutes;
+    const inWord =
+      lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
+    const lines = [
+      `Hi ${n.attendee.name},`,
+      ``,
+      `Reminder: "${n.title}" starts ${inWord}.`,
+      `When: ${when}`,
+      n.host.name ? `Host: ${n.host.name}` : '',
+      n.location ? `Where: ${n.location}` : '',
+      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+    ].filter(Boolean);
+    return this.email.send({
+      to: this.recipients(n),
+      subject: `Reminder: ${n.title} — ${when}`,
+      text: lines.join('\n'),
+      html: htmlBody(lines),
+      headers: { 'X-Booking-Uid': n.uid },
+      // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
+      idempotencyKey: `calendar:${n.uid}:reminder:${lead ?? 'x'}`,
+      // No .ics on a reminder.
     });
   }
 

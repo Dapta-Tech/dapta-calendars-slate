@@ -23,6 +23,9 @@ export interface EventTypePayload {
   hidden: boolean;
   scheduleId: string | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean }>;
+  /** Team events: scheduling method + per-host round-robin detail. */
+  schedulingType?: string | null;
+  hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

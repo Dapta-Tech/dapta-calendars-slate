@@ -12,6 +12,8 @@ import { saveEventTypeAction, type ActionResult, type EventTypePayload } from '.
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
 const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
+const SCHEDULING_METHODS = ['round_robin', 'collective', 'fixed_round_robin'] as const;
+type SchedulingMethod = (typeof SCHEDULING_METHODS)[number];
 
 interface IntakeField {
   name: string;
@@ -20,10 +22,24 @@ interface IntakeField {
   required: boolean;
 }
 
+interface HostRow {
+  memberId: string;
+  priority: number | null;
+  weight: number | null;
+  isFixed: boolean;
+}
+
+export interface TeamMemberOption {
+  memberId: string;
+  displayName: string | null;
+}
+
 export function EventTypeForm({
   initial,
   schedules = [],
   messages: m,
+  scheduling,
+  teamMembers,
   redirectOnSuccess,
   backHref,
   backLabel,
@@ -32,6 +48,10 @@ export function EventTypeForm({
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
   messages: EventTypeMessages;
+  /** Scheduling-method names + hints (from the shared `scheduling` catalog). */
+  scheduling?: BookingMessages['scheduling'];
+  /** The team's members — present only when editing a TEAM event type. */
+  teamMembers?: TeamMemberOption[];
   /** When set (the dedicated /new surface), navigate here after a create. */
   redirectOnSuccess?: string;
   /** FormHeader nav + title (the admin screen header system). */
@@ -62,6 +82,26 @@ export function EventTypeForm({
       required: !!f.required,
     })) ?? [],
   );
+  const isTeamEvent = !!initial?.teamId && !!teamMembers && !!scheduling;
+  const [schedulingType, setSchedulingType] = useState<SchedulingMethod>(
+    (SCHEDULING_METHODS as readonly string[]).includes(initial?.schedulingType ?? '')
+      ? (initial!.schedulingType as SchedulingMethod)
+      : 'round_robin',
+  );
+  const [hosts, setHosts] = useState<HostRow[]>(
+    (teamMembers ?? []).map((tm) => {
+      const existing = initial?.hosts?.find((h) => h.memberId === tm.memberId);
+      return {
+        memberId: tm.memberId,
+        priority: existing?.priority ?? 0,
+        weight: existing?.weight ?? 100,
+        isFixed: existing?.isFixed ?? false,
+      };
+    }),
+  );
+  const setHost = (memberId: string, patch: Partial<HostRow>) =>
+    setHosts((hs) => hs.map((h) => (h.memberId === memberId ? { ...h, ...patch } : h)));
+
   const [res, setRes] = useState<ActionResult | null>(null);
   const [pending, start] = useTransition();
 
@@ -88,6 +128,17 @@ export function EventTypeForm({
         requiresConfirmation,
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
+        ...(isTeamEvent
+          ? {
+              schedulingType,
+              hosts: hosts.map((h) => ({
+                memberId: h.memberId,
+                priority: h.priority,
+                weight: h.weight,
+                isFixed: schedulingType === 'fixed_round_robin' ? h.isFixed : false,
+              })),
+            }
+          : {}),
       };
       const r = await saveEventTypeAction(payload);
       setRes(r);
@@ -156,6 +207,75 @@ export function EventTypeForm({
           ))}
         </select>
       </Field>
+
+      {isTeamEvent && scheduling ? (
+        <div className="flex flex-col gap-4 rounded-md border border-border bg-background/40 p-4">
+          <Field label={m.schedulingMethod}>
+            <select
+              value={schedulingType}
+              onChange={(e) => setSchedulingType(e.target.value as SchedulingMethod)}
+              className={inputCls}
+            >
+              {SCHEDULING_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {scheduling[method]}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
+          </Field>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
+            {/* Column header — only the fields the active method actually uses. */}
+            {schedulingType !== 'collective' ? (
+              <div className="flex items-center gap-3 px-1 text-xs text-muted-foreground">
+                <span className="flex-1" />
+                <span className="w-20 text-center">{m.priority}</span>
+                <span className="w-20 text-center">{m.weight}</span>
+                {schedulingType === 'fixed_round_robin' ? (
+                  <span className="w-16 text-center">{m.fixedHost}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {hosts.map((h) => {
+              const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
+              return (
+                <div key={h.memberId} className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                  <span className="flex-1 text-sm">{name}</span>
+                  {schedulingType !== 'collective' ? (
+                    <>
+                      <input
+                        type="number"
+                        aria-label={`${name} — ${m.priority}`}
+                        value={h.priority ?? 0}
+                        onChange={(e) => setHost(h.memberId, { priority: Number(e.target.value) })}
+                        className="w-20 rounded-md border border-input bg-background px-2 py-1 text-center text-sm"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        aria-label={`${name} — ${m.weight}`}
+                        value={h.weight ?? 100}
+                        onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
+                        className="w-20 rounded-md border border-input bg-background px-2 py-1 text-center text-sm"
+                      />
+                      {schedulingType === 'fixed_round_robin' ? (
+                        <label className="flex w-16 cursor-pointer justify-center" title={m.fixedHostHint}>
+                          <Checkbox
+                            checked={h.isFixed}
+                            onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
+                          />
+                        </label>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex gap-6">
         <label className="flex cursor-pointer items-center gap-2 text-sm">

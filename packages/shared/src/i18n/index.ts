@@ -50,6 +50,16 @@ export interface BookingMessages {
     whereLabel: string;
     joinMeeting: string;
   };
+  /** Team scheduling method names (the FREE layer competitors paywall). */
+  scheduling: {
+    round_robin: string;
+    collective: string;
+    fixed_round_robin: string;
+    /** Short one-line descriptions for the event-type editor selector. */
+    round_robin_hint: string;
+    collective_hint: string;
+    fixed_round_robin_hint: string;
+  };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
     nav: {
@@ -119,6 +129,7 @@ export interface BookingMessages {
       general: string;
       bookingPage: string;
       calendars: string;
+      members: string;
       developer: string;
     };
     eventTypes: {
@@ -153,6 +164,13 @@ export interface BookingMessages {
       saveChanges: string;
       createEventType: string;
       saving: string;
+      /** Team scheduling section (team events only). */
+      schedulingMethod: string;
+      hostsTitle: string;
+      priority: string;
+      weight: string;
+      fixedHost: string;
+      fixedHostHint: string;
     };
     availability: {
       title: string;
@@ -286,6 +304,42 @@ export interface BookingMessages {
       bioHelp: string;
       logoHelp: string;
     };
+    /** Members / Staff — the workspace roster (account roles owner/admin/member). */
+    members: {
+      title: string;
+      subtitle: string;
+      rosterLabel: string;
+      invite: string;
+      inviteTitle: string;
+      inviteLead: string;
+      emailLabel: string;
+      emailPlaceholder: string;
+      emailInvalid: string;
+      emailTaken: string;
+      roleLabel: string;
+      roleOwner: string;
+      roleAdmin: string;
+      roleMember: string;
+      sendInvite: string;
+      cancel: string;
+      you: string;
+      noEmail: string;
+      statusActive: string;
+      statusInvited: string;
+      statusDisabled: string;
+      enable: string;
+      disable: string;
+      remove: string;
+      ownerLock: string;
+      lastOwnerTitle: string;
+      roleUpdated: string;
+      statusUpdated: string;
+      memberInvited: string;
+      memberRemoved: string;
+      genericError: string;
+      noAccessTitle: string;
+      noAccessBody: string;
+    };
     connections: {
       pageDesc: string;
       dialogTitle: string;
@@ -300,7 +354,6 @@ export interface BookingMessages {
       syncOffDesc: string;
       syncOffSetPre: string;
       syncOffSetPost: string;
-      connectLink: string;
       connectWaiting: string;
       connectHint: string;
       connectDone: string;
@@ -310,10 +363,8 @@ export interface BookingMessages {
       popupBlocked: string;
       destination: string;
       conflictCheck: string;
-      test: string;
       disconnect: string;
       disconnectError: string;
-      noCalendars: string;
       manualTitle: string;
       manualDesc: string;
       provider: string;
@@ -321,8 +372,25 @@ export interface BookingMessages {
       addConnection: string;
       healthSyncing: string;
       healthRecorded: string;
-      destinationHelp: string;
-      conflictHelp: string;
+      yourCalendars: string;
+      connectAnother: string;
+      addEventsHere: string;
+      addEventsHereHelp: string;
+      checkForConflicts: string;
+      checkForConflictsHelp: string;
+      summaryDestination: string;
+      summaryNoDestination: string;
+      summaryConflictsNone: string;
+      summaryConflictsOne: string;
+      summaryConflictsMany: string;
+      healthChecking: string;
+      healthOk: string;
+      healthError: string;
+      recheck: string;
+      emptyTitle: string;
+      emptyBody: string;
+      emptyConflicts: string;
+      emptyDestination: string;
     };
     login: {
       title: string;
@@ -460,6 +528,14 @@ export const en: BookingMessages = {
     seatsLeft: '{n} left',
     full: 'Full',
   },
+  scheduling: {
+    round_robin: 'Round-robin',
+    collective: 'Collective',
+    fixed_round_robin: 'Fixed round-robin',
+    round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
+    collective_hint: 'Everyone attends — offer only times when all hosts are free.',
+    fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+  },
   manage: {
     title: 'Manage your booking',
     reschedule: 'Reschedule',
@@ -550,6 +626,7 @@ export const en: BookingMessages = {
       general: 'General',
       bookingPage: 'Booking Page',
       calendars: 'Calendars',
+      members: 'Members',
       developer: 'Developer',
     },
     eventTypes: {
@@ -584,6 +661,12 @@ export const en: BookingMessages = {
       saveChanges: 'Save changes',
       createEventType: 'Create event type',
       saving: 'Saving…',
+      schedulingMethod: 'Scheduling method',
+      hostsTitle: 'Hosts',
+      priority: 'Priority',
+      weight: 'Weight',
+      fixedHost: 'Fixed',
+      fixedHostHint: 'Always on every booking',
     },
     availability: {
       title: 'Availability',
@@ -656,8 +739,8 @@ export const en: BookingMessages = {
     },
     teams: {
       title: 'Teams',
-      subtitle: 'Round-robin scheduling across a group of hosts.',
-      emptyList: 'No teams yet — create one below to round-robin bookings across hosts.',
+      subtitle: 'Team scheduling across a group of hosts — round-robin, collective, or fixed round-robin.',
+      emptyList: 'No teams yet — create one below to schedule bookings across hosts.',
       newTeam: 'New team',
       name: 'Name',
       slug: 'Slug',
@@ -717,6 +800,41 @@ export const en: BookingMessages = {
       bioHelp: 'A short line under the team name on the public page.',
       logoHelp: 'Square image works best. Max 1MB.',
     },
+    members: {
+      title: 'Members',
+      subtitle: 'Invite your team and control who can administer this workspace.',
+      rosterLabel: 'Workspace members',
+      invite: 'Invite member',
+      inviteTitle: 'Invite a member',
+      inviteLead: 'They’ll join your workspace with the role you choose.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'name@company.com',
+      emailInvalid: 'Enter a valid email address.',
+      emailTaken: 'A member with that email already exists.',
+      roleLabel: 'Role',
+      roleOwner: 'Owner',
+      roleAdmin: 'Admin',
+      roleMember: 'Member',
+      sendInvite: 'Send invite',
+      cancel: 'Cancel',
+      you: 'You',
+      noEmail: 'No email',
+      statusActive: 'Active',
+      statusInvited: 'Invited',
+      statusDisabled: 'Disabled',
+      enable: 'Enable',
+      disable: 'Disable',
+      remove: 'Remove',
+      ownerLock: 'Owners can’t be removed — change their role first.',
+      lastOwnerTitle: 'A workspace must keep at least one owner',
+      roleUpdated: 'Role updated.',
+      statusUpdated: 'Member updated.',
+      memberInvited: 'Invitation sent.',
+      memberRemoved: 'Member removed.',
+      genericError: 'Something went wrong.',
+      noAccessTitle: 'You don’t have access',
+      noAccessBody: 'This section is available to workspace admins and owners.',
+    },
     connections: {
       pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
       dialogTitle: 'Connect a calendar',
@@ -731,7 +849,6 @@ export const en: BookingMessages = {
       syncOffDesc: 'No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
-      connectLink: 'Connect a calendar →',
       connectWaiting: 'Waiting for you to finish connecting…',
       connectHint: 'Finish signing in and granting access in the popup window, then return here.',
       connectDone: 'I’ve finished connecting',
@@ -741,10 +858,8 @@ export const en: BookingMessages = {
       popupBlocked: 'Your browser blocked the popup. Allow popups for this site and try again.',
       destination: 'Destination',
       conflictCheck: 'Conflict check',
-      test: 'Test',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
-      noCalendars: 'No calendars linked yet.',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
@@ -752,8 +867,25 @@ export const en: BookingMessages = {
       addConnection: 'Add connection',
       healthSyncing: 'Syncing',
       healthRecorded: 'Recorded only',
-      destinationHelp: 'Booked events are written to this calendar.',
-      conflictHelp: 'Busy times here block new bookings.',
+      yourCalendars: 'Your calendars',
+      connectAnother: 'Connect another',
+      addEventsHere: 'Add new events here',
+      addEventsHereHelp: 'Booked events are written to this calendar. Only one calendar can receive events.',
+      checkForConflicts: 'Check for conflicts',
+      checkForConflictsHelp: 'Busy times on this calendar block new bookings. You can check any number of calendars.',
+      summaryDestination: 'New events are added to',
+      summaryNoDestination: 'No calendar is set to receive new events yet.',
+      summaryConflictsNone: 'No calendars checked for conflicts',
+      summaryConflictsOne: '1 calendar checked for conflicts',
+      summaryConflictsMany: '{n} calendars checked for conflicts',
+      healthChecking: 'Checking…',
+      healthOk: 'Connected',
+      healthError: 'Needs attention',
+      recheck: 'Re-check',
+      emptyTitle: 'No calendars connected yet',
+      emptyBody: 'Connect Google or Outlook so Slate can read your busy times and add booked events to your calendar. You can connect more than one account.',
+      emptyConflicts: 'Check for conflicts so busy times block new bookings',
+      emptyDestination: 'Pick one calendar to receive your booked events',
     },
     login: {
       title: 'Sign in',
@@ -891,6 +1023,14 @@ export const es: BookingMessages = {
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
   },
+  scheduling: {
+    round_robin: 'Por turnos',
+    collective: 'Colectiva',
+    fixed_round_robin: 'Turnos con anfitrión fijo',
+    round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
+    collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
+    fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+  },
   manage: {
     title: 'Gestiona tu reserva',
     reschedule: 'Reprogramar',
@@ -981,6 +1121,7 @@ export const es: BookingMessages = {
       general: 'General',
       bookingPage: 'Página de reservas',
       calendars: 'Calendarios',
+      members: 'Miembros',
       developer: 'Desarrollador',
     },
     eventTypes: {
@@ -1015,6 +1156,12 @@ export const es: BookingMessages = {
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear tipo de evento',
       saving: 'Guardando…',
+      schedulingMethod: 'Método de programación',
+      hostsTitle: 'Anfitriones',
+      priority: 'Prioridad',
+      weight: 'Peso',
+      fixedHost: 'Fijo',
+      fixedHostHint: 'Siempre en cada reserva',
     },
     availability: {
       title: 'Disponibilidad',
@@ -1087,8 +1234,8 @@ export const es: BookingMessages = {
     },
     teams: {
       title: 'Equipos',
-      subtitle: 'Programación por turnos entre un grupo de anfitriones.',
-      emptyList: 'Aún no hay equipos — crea uno abajo para repartir reservas por turnos entre anfitriones.',
+      subtitle: 'Programación de equipo entre un grupo de anfitriones — por turnos, colectiva o con anfitrión fijo.',
+      emptyList: 'Aún no hay equipos — crea uno abajo para programar reservas entre anfitriones.',
       newTeam: 'Nuevo equipo',
       name: 'Nombre',
       slug: 'Identificador',
@@ -1148,6 +1295,41 @@ export const es: BookingMessages = {
       bioHelp: 'Una línea breve bajo el nombre del equipo en la página pública.',
       logoHelp: 'Una imagen cuadrada funciona mejor. Máx. 1MB.',
     },
+    members: {
+      title: 'Miembros',
+      subtitle: 'Invita a tu equipo y controla quién puede administrar este espacio.',
+      rosterLabel: 'Miembros del espacio',
+      invite: 'Invitar miembro',
+      inviteTitle: 'Invitar a un miembro',
+      inviteLead: 'Se unirá a tu espacio con el rol que elijas.',
+      emailLabel: 'Correo',
+      emailPlaceholder: 'nombre@empresa.com',
+      emailInvalid: 'Introduce un correo válido.',
+      emailTaken: 'Ya existe un miembro con ese correo.',
+      roleLabel: 'Rol',
+      roleOwner: 'Propietario',
+      roleAdmin: 'Administrador',
+      roleMember: 'Miembro',
+      sendInvite: 'Enviar invitación',
+      cancel: 'Cancelar',
+      you: 'Tú',
+      noEmail: 'Sin correo',
+      statusActive: 'Activo',
+      statusInvited: 'Invitado',
+      statusDisabled: 'Desactivado',
+      enable: 'Activar',
+      disable: 'Desactivar',
+      remove: 'Quitar',
+      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
+      roleUpdated: 'Rol actualizado.',
+      statusUpdated: 'Miembro actualizado.',
+      memberInvited: 'Invitación enviada.',
+      memberRemoved: 'Miembro eliminado.',
+      genericError: 'Algo salió mal.',
+      noAccessTitle: 'No tienes acceso',
+      noAccessBody: 'Esta sección está disponible para administradores y propietarios del espacio.',
+    },
     connections: {
       pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
       dialogTitle: 'Conectar un calendario',
@@ -1162,7 +1344,6 @@ export const es: BookingMessages = {
       syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que Slate aún no lee horas ocupadas ni escribe eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
-      connectLink: 'Conectar un calendario →',
       connectWaiting: 'Esperando a que termines de conectar…',
       connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
       connectDone: 'Ya terminé de conectar',
@@ -1172,10 +1353,8 @@ export const es: BookingMessages = {
       popupBlocked: 'Tu navegador bloqueó la ventana emergente. Permite ventanas emergentes e inténtalo de nuevo.',
       destination: 'Destino',
       conflictCheck: 'Verificar conflictos',
-      test: 'Probar',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
-      noCalendars: 'Aún no hay calendarios vinculados.',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',
@@ -1183,8 +1362,25 @@ export const es: BookingMessages = {
       addConnection: 'Añadir conexión',
       healthSyncing: 'Sincronizando',
       healthRecorded: 'Solo registrado',
-      destinationHelp: 'Las reservas se escriben en este calendario.',
-      conflictHelp: 'Las horas ocupadas aquí bloquean nuevas reservas.',
+      yourCalendars: 'Tus calendarios',
+      connectAnother: 'Conectar otro',
+      addEventsHere: 'Añadir eventos nuevos aquí',
+      addEventsHereHelp: 'Las reservas se escriben en este calendario. Solo un calendario puede recibir eventos.',
+      checkForConflicts: 'Verificar conflictos',
+      checkForConflictsHelp: 'Las horas ocupadas en este calendario bloquean nuevas reservas. Puedes verificar cualquier número de calendarios.',
+      summaryDestination: 'Los eventos nuevos se añaden a',
+      summaryNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
+      summaryConflictsNone: 'Ningún calendario verificado por conflictos',
+      summaryConflictsOne: '1 calendario verificado por conflictos',
+      summaryConflictsMany: '{n} calendarios verificados por conflictos',
+      healthChecking: 'Comprobando…',
+      healthOk: 'Conectado',
+      healthError: 'Requiere atención',
+      recheck: 'Volver a comprobar',
+      emptyTitle: 'Aún no hay calendarios conectados',
+      emptyBody: 'Conecta Google u Outlook para que Slate pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
+      emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
+      emptyDestination: 'Elige un calendario para recibir tus reservas',
     },
     login: {
       title: 'Iniciar sesión',
@@ -1306,4 +1502,20 @@ export function getMessages(locale: string): BookingMessages {
 /** Interpolate `{name}` placeholders in a message string. */
 export function t(template: string, vars: Record<string, string | number> = {}): string {
   return template.replace(/\{(\w+)\}/g, (_, k: string) => (k in vars ? String(vars[k]) : `{${k}}`));
+}
+
+/**
+ * Localized display name for an event type's scheduling_type. Null/personal
+ * events (no team method) fall back to `personal`; unknown values echo through.
+ */
+export function schedulingMethodLabel(
+  m: BookingMessages,
+  type: string | null | undefined,
+  personal = 'Personal',
+): string {
+  if (!type) return personal;
+  if (type === 'round_robin' || type === 'collective' || type === 'fixed_round_robin') {
+    return m.scheduling[type];
+  }
+  return type;
 }

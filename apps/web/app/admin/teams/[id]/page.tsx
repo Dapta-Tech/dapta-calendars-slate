@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getMessages } from '@slate/shared';
+import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { FormHeader } from '@/components/ui/page-header';
@@ -20,7 +20,8 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
     adminApi.teamMembers(id),
     adminApi.teamEventTypes(id),
   ]);
-  const m = getMessages(await getLocale()).admin.teams;
+  const msgs = getMessages(await getLocale());
+  const m = msgs.admin.teams;
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 pb-10">
@@ -39,7 +40,7 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
           ) : undefined
         }
       />
-      <p className="mb-6 -mt-2 text-sm text-muted-foreground">/{team.slug} · {m.roundRobin}</p>
+      <p className="mb-6 -mt-2 text-sm text-muted-foreground">/{team.slug}</p>
 
       <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
         {m.members} <span className="font-normal">({members.length})</span>
@@ -55,7 +56,7 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
             <span className="flex flex-col">
               <span className="font-medium">{et.title}</span>
               <span className="text-sm text-muted-foreground">
-                /{et.slug} · {et.lengthMinutes} min · {et.schedulingType ?? 'personal'}
+                /{et.slug} · {et.lengthMinutes} min · {schedulingMethodLabel(msgs, et.schedulingType)}
               </span>
             </span>
           </li>

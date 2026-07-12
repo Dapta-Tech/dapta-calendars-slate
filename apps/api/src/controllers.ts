@@ -25,7 +25,7 @@ export class HealthController {
   @Get()
   async health() {
     const db = await this.dbState();
-    return { status: db === 'up' ? 'ok' : 'degraded', service: 'slate-api', db, dialect: this.db.dialect };
+    return { status: db === 'up' ? 'ok' : 'degraded', service: 'calendars-api', db, dialect: this.db.dialect };
   }
 
   /**
@@ -49,7 +49,7 @@ export class HealthController {
         outbox = null;
       }
     }
-    const body = { status: db === 'up' ? 'ready' : 'unavailable', service: 'slate-api', db, outbox };
+    const body = { status: db === 'up' ? 'ready' : 'unavailable', service: 'calendars-api', db, outbox };
     if (db !== 'up') throw new HttpException(body, HttpStatus.SERVICE_UNAVAILABLE);
     return body;
   }

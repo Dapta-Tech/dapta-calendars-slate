@@ -355,11 +355,16 @@ export async function loadBusyForHost(
    */
   excludeEventTypeId?: string,
 ): Promise<Interval[]> {
-  const exclude = excludeEventTypeId ? sql` AND event_type_id <> ${excludeEventTypeId}` : sql``;
+  const exclude = excludeEventTypeId ? sql` AND b.event_type_id <> ${excludeEventTypeId}` : sql``;
+  // A member is busy for a booking whether they're the primary host_member_id OR
+  // an assigned co-host (collective / fixed_round_robin) recorded in booking_host.
   const rows = await db.all<{ start_ms: number; end_ms: number }>(
-    sql`SELECT start_ms, end_ms FROM booking
-        WHERE host_member_id = ${hostMemberId} AND status IN ('accepted','pending')
-              AND start_ms < ${toMs} AND end_ms > ${fromMs}${exclude}`,
+    sql`SELECT b.start_ms, b.end_ms FROM booking b
+        WHERE b.status IN ('accepted','pending')
+              AND b.start_ms < ${toMs} AND b.end_ms > ${fromMs}${exclude}
+              AND (b.host_member_id = ${hostMemberId}
+                   OR EXISTS (SELECT 1 FROM booking_host bh
+                              WHERE bh.booking_id = b.id AND bh.member_id = ${hostMemberId}))`,
   );
   return rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) }));
 }

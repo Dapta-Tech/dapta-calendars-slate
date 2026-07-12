@@ -10,8 +10,13 @@
  *      bookingCount / weight (so a weight-200 host absorbs ~2× a weight-100 host);
  *   3. tie-break by least-recently-booked, then memberId (stable).
  *
- * Wave 1 books against a single host; collective multi-host is Wave 2 but the
- * selection seam is shaped now (fixed hosts bypass this — they're always present).
+ * Three team scheduling methods share this seam (all FREE in Dapta — the layer
+ * Calendly/Cal.com paywall):
+ *   - round_robin       → {@link selectLuckyHost}: one fair host from the pool.
+ *   - collective        → every required host attends (assignment is trivially
+ *     "all hosts" — the DB layer verifies all are free; no selector needed).
+ *   - fixed_round_robin → {@link selectFixedRoundRobinHosts}: the fixed host(s)
+ *     always present + one round-robin pick from the rotating rest.
  */
 
 export interface HostCandidate {
@@ -24,6 +29,8 @@ export interface HostCandidate {
   bookingCount: number;
   /** When this host was last booked (recency tie-break). Null = never. */
   lastBookedAt?: Date | null;
+  /** fixed_round_robin: true = always on the booking; false = in the RR rotation. */
+  isFixed?: boolean;
 }
 
 /**
@@ -55,4 +62,21 @@ function isBetter(a: HostCandidate, b: HostCandidate): boolean {
 function weightedLoad(c: HostCandidate): number {
   const weight = c.weight && c.weight > 0 ? c.weight : 100;
   return c.bookingCount / weight;
+}
+
+/**
+ * fixed_round_robin (Cal.com parity): the assigned host set is EVERY fixed host
+ * plus ONE round-robin pick from the rotating (non-fixed) hosts. `freeCandidates`
+ * is the pool of hosts actually free at the slot; the caller (DB layer) has
+ * already verified the fixed hosts are among them (a missing fixed host = the
+ * slot is unbookable). Returns null only for a fully empty pool.
+ */
+export function selectFixedRoundRobinHosts(freeCandidates: HostCandidate[]): HostCandidate[] | null {
+  if (freeCandidates.length === 0) return null;
+  const fixed = freeCandidates.filter(c => c.isFixed);
+  const rotating = freeCandidates.filter(c => !c.isFixed);
+  const lucky = selectLuckyHost(rotating);
+  const assigned = [...fixed];
+  if (lucky) assigned.push(lucky);
+  return assigned.length > 0 ? assigned : null;
 }

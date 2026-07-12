@@ -20,10 +20,10 @@
  */
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Db } from '@slate/db';
+import type { Db, AccountRole } from '@slate/db';
 import { sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
-import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
+import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
 type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE'>;
@@ -53,7 +53,7 @@ export class WorkOsAuthProvider implements AuthProvider {
     this.secret = env.JWT_SECRET;
   }
 
-  async resolveHost(req: ReqLike): Promise<HostPrincipal> {
+  async resolveHost(req: ReqLike): Promise<ResolvedHost> {
     const authHeader = header(req, 'authorization');
     const token =
       authHeader && authHeader.startsWith('Bearer ')
@@ -113,12 +113,38 @@ export class WorkOsAuthProvider implements AuthProvider {
     );
     if (existing) return existing.id;
 
-    const id = randomUUID();
     const email = typeof claims.email === 'string' ? claims.email : null;
     const displayName = typeof claims.name === 'string' ? claims.name : null;
+
+    // Adopt a pending invite: a member invited by email exists with no external_id
+    // yet. Bind this login's `sub` to it (keeping its granted role) and activate,
+    // so invite → first-login lands the user in the role they were granted.
+    if (email) {
+      const invited = await this.db.get<{ id: string }>(
+        sql`SELECT id FROM member
+            WHERE account_id = ${accountId} AND external_id IS NULL AND lower(email) = lower(${email})
+            ORDER BY created_at ASC LIMIT 1`,
+      );
+      if (invited) {
+        await this.db.run(
+          sql`UPDATE member SET external_id = ${sub}, status = 'active',
+                display_name = COALESCE(display_name, ${displayName})
+              WHERE id = ${invited.id}`,
+        );
+        return invited.id;
+      }
+    }
+
+    // The first member of an account is its owner; later JIT members are `member`.
+    const role: AccountRole = (await this.db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE account_id = ${accountId} LIMIT 1`,
+    ))
+      ? 'member'
+      : 'owner';
+    const id = randomUUID();
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, external_id, email, display_name, created_at)
-          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${Date.now()})
+      sql`INSERT INTO member (id, account_id, external_id, email, display_name, role, created_at)
+          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${role}, ${Date.now()})
           ON CONFLICT (account_id, external_id) DO NOTHING`,
     );
     const row = await this.db.get<{ id: string }>(

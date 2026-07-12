@@ -1,6 +1,6 @@
 import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
-import { verifyApiKey } from '@slate/db';
+import { verifyApiKey, getMemberRole } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { AUTH_PROVIDER, DB } from './tokens';
 import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
@@ -26,9 +26,17 @@ export class AuthService {
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
   ) {}
 
-  /** Resolve the authenticated host via the configured provider. Throws 401. */
-  resolveHost(req: ReqLike): Promise<HostPrincipal> {
-    return this.provider.resolveHost(req);
+  /**
+   * Resolve the authenticated host via the configured provider, then enrich it
+   * with the account role (`member.role`) so the permission layer can authorize.
+   * The provider stays role-agnostic; role resolution is centralized here so it
+   * behaves identically across the local and workos providers. Throws 401 if the
+   * provider cannot resolve the host.
+   */
+  async resolveHost(req: ReqLike): Promise<HostPrincipal> {
+    const id = await this.provider.resolveHost(req);
+    const role = (await getMemberRole(this.db, id.accountId, id.memberId)) ?? 'member';
+    return { ...id, role };
   }
 
   /** Resolve a machine principal from an API key and enforce a required scope. */

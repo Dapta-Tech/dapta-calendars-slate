@@ -11,11 +11,24 @@ import { z } from 'zod';
 export const bookingStatus = ['accepted', 'pending', 'cancelled', 'rejected'] as const;
 export type BookingStatus = (typeof bookingStatus)[number];
 
-export const schedulingType = ['round_robin', 'collective'] as const;
+export const schedulingType = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 export type SchedulingType = (typeof schedulingType)[number];
 
 export const membershipRole = ['member', 'admin', 'owner'] as const;
 export type MembershipRole = (typeof membershipRole)[number];
+
+/**
+ * Account-level role (on `member`), distinct from the per-team `membershipRole`
+ * even though the value names line up. `owner` administers the whole workspace
+ * (+ transfer/delete), `admin` manages members and everyone's resources, `member`
+ * is staff scoped to their own resources.
+ */
+export const accountRole = ['owner', 'admin', 'member'] as const;
+export type AccountRole = (typeof accountRole)[number];
+
+/** Member lifecycle within a workspace. */
+export const memberStatus = ['active', 'invited', 'disabled'] as const;
+export type MemberStatus = (typeof memberStatus)[number];
 
 export const apiScope = ['availability:read', 'bookings:read', 'bookings:write'] as const;
 export type ApiScope = (typeof apiScope)[number];
@@ -86,6 +99,8 @@ export const availabilityResponseSchema = z.object({
     lengthMinutes: z.number().int().positive(),
     /** Custom intake fields to render on the booking form. */
     bookingFields: z.array(bookingFieldSchema).default([]),
+    /** Team scheduling method (null for personal events). */
+    schedulingType: z.enum(schedulingType).nullable().default(null),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
@@ -277,8 +292,44 @@ export const meResponseSchema = z.object({
   handle: z.string().nullable(),
   displayName: z.string().nullable(),
   email: z.string().nullable(),
+  /** Account-level role + status — the FE gates admin-only surfaces on these. */
+  role: z.enum(accountRole),
+  status: z.enum(memberStatus),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
+
+// --- Member management (workspace roster) ---------------------------------
+
+/** Invite a member by email. Owner can never be invited (transferred, not granted). */
+export const memberInviteSchema = z.object({
+  email: z.string().email().max(320),
+  role: z.enum(['admin', 'member']).optional(),
+  displayName: z.string().max(200).nullable().optional(),
+});
+export type MemberInvite = z.infer<typeof memberInviteSchema>;
+
+/** Patch a member's role and/or status. At least one field must be present. */
+export const memberPatchSchema = z
+  .object({
+    role: z.enum(accountRole).optional(),
+    status: z.enum(memberStatus).optional(),
+  })
+  .refine((v) => v.role !== undefined || v.status !== undefined, {
+    message: 'Provide a role or status to change.',
+  });
+export type MemberPatch = z.infer<typeof memberPatchSchema>;
+
+export const memberViewSchema = z.object({
+  id: z.string(),
+  email: z.string().nullable(),
+  displayName: z.string().nullable(),
+  handle: z.string().nullable(),
+  avatarUrl: z.string().nullable(),
+  role: z.enum(accountRole),
+  status: z.enum(memberStatus),
+  createdAt: z.number(),
+});
+export type MemberViewDto = z.infer<typeof memberViewSchema>;
 
 // --- Event-type CRUD ------------------------------------------------------
 
@@ -302,6 +353,17 @@ export const eventTypeInputSchema = z.object({
   bookingFields: z.array(bookingFieldSchema).optional(),
   /** For team events: the host member ids (round-robin pool). */
   hostMemberIds: z.array(z.string()).optional(),
+  /** For team events: per-host round-robin detail. Takes precedence over hostMemberIds. */
+  hosts: z
+    .array(
+      z.object({
+        memberId: z.string(),
+        priority: z.number().int().nullable().optional(),
+        weight: z.number().int().positive().nullable().optional(),
+        isFixed: z.boolean().optional(),
+      }),
+    )
+    .optional(),
   teamId: z.string().nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;

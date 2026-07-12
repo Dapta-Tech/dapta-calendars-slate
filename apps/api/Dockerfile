@@ -29,7 +29,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # Build the workspace packages the API imports (@slate/engine, @slate/db, …) to
 # their dist/ outputs, then produce a self-contained production bundle.
 RUN pnpm build:packages
-RUN pnpm --filter @slate/api deploy --prod /prod/api
+# --legacy: pnpm v10 refuses `deploy` without inject-workspace-packages; we build
+# workspace deps to dist/ ourselves, so the legacy copy-based deploy is correct.
+RUN pnpm --filter @slate/api deploy --legacy --prod /prod/api
 
 # ---- run: minimal runtime, only the pruned bundle, non-root ------------------
 FROM base AS run
@@ -42,5 +44,11 @@ USER node
 EXPOSE 4000
 ENV API_PORT=4000
 # Start the API only. tsx is a runtime dependency of @slate/api; the bundle
-# carries the compiled workspace deps under node_modules.
-CMD ["pnpm", "start"]
+# carries the compiled workspace deps under node_modules. Invoke tsx directly —
+# `pnpm start` would make corepack fetch the LATEST pnpm at container start,
+# which requires Node 22+ (the pruned bundle carries no packageManager pin) and
+# crash-loops on node:20. No package manager belongs in the runtime path.
+# --tsconfig tsconfig.runtime.json: the dev tsconfig's extends chain
+# (@slate/config) doesn't resolve inside the pruned bundle and tsx would drop
+# the whole config (losing experimentalDecorators → Nest crash at boot).
+CMD ["node_modules/.bin/tsx", "--tsconfig", "tsconfig.runtime.json", "src/main.ts"]
