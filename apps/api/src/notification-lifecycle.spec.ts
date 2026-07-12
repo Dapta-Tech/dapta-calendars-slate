@@ -109,7 +109,12 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
 
   it('B5: accepted booking sends ONE confirmation with a REQUEST invite', async () => {
     await bookAccepted();
-    await drain();
+    await settle();
+    const queuedEmail = (await listOutbox(db, { kind: 'email' })).find(
+      (row) => row.action === 'confirmation',
+    );
+    expect(queuedEmail?.accountId).toBe(accountId);
+    await worker.drainOnce(Date.now());
     const confirmations = email.sent.filter((m) => m.subject.startsWith('Confirmed:'));
     expect(confirmations).toHaveLength(1);
     expect(String(confirmations[0]!.attachments?.[0]?.content)).toContain('METHOD:REQUEST');

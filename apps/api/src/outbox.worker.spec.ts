@@ -290,6 +290,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     const worker = new OutboxWorker(db, ENV, effects, emailEffects);
 
     const notification = {
+      accountId,
       uid: 'bk-x',
       title: 'Intro',
       startUtc: '2026-08-01T15:00:00.000Z',
@@ -301,6 +302,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
       kind: 'email',
       action: 'confirmation',
       bookingUid: 'bk-x',
+      accountId,
       payload: JSON.stringify(notification),
       now: 0,
     });

@@ -16,6 +16,8 @@ export interface EmailAttachment {
 }
 
 export interface EmailMessage {
+  /** Tenant context asserted by the authenticated backend, never by a browser. */
+  accountId?: string;
   to: string | string[];
   subject: string;
   html?: string;

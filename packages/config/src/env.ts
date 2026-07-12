@@ -41,13 +41,14 @@ export const serverEnvSchema = z.object({
   // HTTP mailer adapter (EMAIL_PROVIDER=http).
   EMAIL_HTTP_ENDPOINT: z.string().url().optional(),
   // Wire/profile: `generic` (default, provider-agnostic body + Bearer auth) or
-  // `transactional-v1` (managed transactional contract + X-API-Key auth).
+  // `transactional-v1` (managed transactional contract + HMAC service auth).
   EMAIL_HTTP_PROFILE: z.enum(['generic', 'transactional-v1']).default('generic'),
   // Bearer token — `generic` profile.
   EMAIL_HTTP_TOKEN: z.string().optional(),
-  // API key sent as `X-API-Key` — `transactional-v1` profile. A secret; set it
-  // in deploy config, never in this schema, and it is never logged.
-  EMAIL_HTTP_API_KEY: z.string().optional(),
+  // Stable non-secret service id and server-only HMAC secret. The secret is
+  // loaded from the deployment secret manager and is never transmitted.
+  EMAIL_HTTP_CLIENT_ID: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional(),
+  EMAIL_HTTP_SIGNING_SECRET: z.string().min(32).optional(),
   // Message category for `transactional-v1` (defaults to `lifecycle`).
   EMAIL_HTTP_CATEGORY: z.string().optional(),
 

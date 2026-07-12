@@ -70,6 +70,7 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
     await settle();
     const rows = await reminders(uid);
     expect(rows).toHaveLength(2);
+    expect(rows.every((row) => typeof row.accountId === 'string')).toBe(true);
     const dueTimes = rows.map((r) => r.nextAttemptAt).sort((a, b) => a - b);
     expect(dueTimes).toEqual([startMs - 24 * 60 * 60_000, startMs - 60 * 60_000]);
   });
@@ -82,8 +83,21 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
     await effects.deliver('reminder', row.payload!);
     const rem = email.sent.filter((m) => m.subject.startsWith('Reminder:'));
     expect(rem).toHaveLength(1);
+    expect(rem[0]!.accountId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(rem[0]!.attachments ?? []).toHaveLength(0); // no invite on a reminder
     expect(rem[0]!.text).toMatch(/starts/);
+  });
+
+  it('recovers account context for a legacy payload before HMAC delivery', async () => {
+    const { uid } = await bookFarOut();
+    await settle();
+    const row = (await reminders(uid))[0]!;
+    const legacyPayload = JSON.parse(row.payload!) as Record<string, unknown>;
+    delete legacyPayload.accountId;
+
+    await effects.deliver('reminder', JSON.stringify(legacyPayload));
+
+    expect(email.sent[0]!.accountId).toBe(row.accountId);
   });
 
   it('cancelling drops the pending reminders', async () => {
