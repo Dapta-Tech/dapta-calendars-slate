@@ -48,4 +48,7 @@ ENV API_PORT=4000
 # `pnpm start` would make corepack fetch the LATEST pnpm at container start,
 # which requires Node 22+ (the pruned bundle carries no packageManager pin) and
 # crash-loops on node:20. No package manager belongs in the runtime path.
-CMD ["node_modules/.bin/tsx", "src/main.ts"]
+# --tsconfig tsconfig.runtime.json: the dev tsconfig's extends chain
+# (@slate/config) doesn't resolve inside the pruned bundle and tsx would drop
+# the whole config (losing experimentalDecorators → Nest crash at boot).
+CMD ["node_modules/.bin/tsx", "--tsconfig", "tsconfig.runtime.json", "src/main.ts"]
