@@ -208,12 +208,27 @@ export class AdminService {
     let firstNew = !haveDestination;
     for (const conn of discovered) {
       if (await connectionExists(this.db, p.memberId, conn.connectionRef)) continue;
+      // Old-app parity: when discovery doesn't carry the account email, derive
+      // it from the provider's primary calendar (its id IS the account email).
+      // Best-effort — a label-less connection is still a working connection.
+      let primaryEmail = conn.primaryEmail ?? null;
+      if (!primaryEmail) {
+        try {
+          const calendars = await this.provider.listCalendars(conn.connectionRef);
+          primaryEmail =
+            calendars.find((c) => c.isPrimary)?.primaryEmail ??
+            calendars.find((c) => c.primaryEmail)?.primaryEmail ??
+            null;
+        } catch {
+          /* keep null */
+        }
+      }
       await createConnection(this.db, {
         accountId: p.accountId,
         memberId: p.memberId,
         provider: conn.provider || provider,
         externalId: conn.connectionRef,
-        primaryEmail: conn.primaryEmail ?? undefined,
+        primaryEmail: primaryEmail ?? undefined,
         // First calendar the host connects becomes the default destination.
         isDestination: firstNew,
         checkConflicts: true,
