@@ -9,6 +9,7 @@ function htmlBody(lines: string[]): string {
 
 /** Everything a booking notification needs to render, provider-agnostic. */
 export interface BookingNotification {
+  accountId: string;
   uid: string;
   title: string;
   startUtc: string;
@@ -60,6 +61,7 @@ export class BookingNotifier {
       n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       to: this.recipients(n),
       subject: `Confirmed: ${n.title} — ${when}`,
       text: lines.join('\n'),
@@ -90,6 +92,7 @@ export class BookingNotifier {
       n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       to: this.recipients(n),
       subject: `Reminder: ${n.title} — ${when}`,
       text: lines.join('\n'),
@@ -119,6 +122,7 @@ export class BookingNotifier {
       n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       // Host is copied too — a pending request is the host's cue to confirm/decline.
       to: this.recipients(n),
       subject: `Request received: ${n.title} — ${when}`,
@@ -140,6 +144,7 @@ export class BookingNotifier {
       n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       // Host is copied too — confirms to the host that the request was declined.
       to: this.recipients(n),
       subject: `Not accepted: ${n.title} — ${when}`,
@@ -165,6 +170,7 @@ export class BookingNotifier {
       n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       to: this.recipients(n),
       subject: `Rescheduled: ${n.title} — ${when}`,
       text: lines.join('\n'),
@@ -186,6 +192,7 @@ export class BookingNotifier {
       n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
     ].filter(Boolean);
     return this.email.send({
+      accountId: n.accountId,
       to: this.recipients(n),
       subject: `Cancelled: ${n.title} — ${when}`,
       text: lines.join('\n'),

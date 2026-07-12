@@ -12,6 +12,7 @@ class RecordingEmailProvider implements EmailProvider {
 }
 
 const base: BookingNotification = {
+  accountId: '11111111-1111-4111-8111-111111111111',
   uid: 'bk-123',
   title: 'Intro Call',
   startUtc: '2026-08-01T15:00:00.000Z',
@@ -38,7 +39,9 @@ describe('notification matrix', () => {
 
   const only = () => {
     expect(email.sent).toHaveLength(1);
-    return email.sent[0]!;
+    const message = email.sent[0]!;
+    expect(message.accountId).toBe(base.accountId);
+    return message;
   };
   const ics = (m: EmailMessage) => String(m.attachments?.[0]?.content ?? '');
   const recipients = (m: EmailMessage) => (Array.isArray(m.to) ? m.to : [m.to]);
