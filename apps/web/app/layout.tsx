@@ -13,9 +13,15 @@ const poppins = Poppins({
   display: 'swap',
 });
 
+// Customer-facing name comes from the deployment (NEXT_PUBLIC_PRODUCT_NAME,
+// inlined at build time) — "Dapta Calendars" in Dapta's builds, "Calendars"
+// for a bare fork. "Slate" is the internal/repo identifier only and must
+// never surface in the UI.
+const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
+
 export const metadata: Metadata = {
-  title: 'Slate — open-source scheduling',
-  description: 'Slate is open-source scheduling by Dapta. Clone, run, and book — anywhere.',
+  title: `${productName} — open-source scheduling`,
+  description: `${productName} is open-source scheduling. Clone, run, and book — anywhere.`,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
