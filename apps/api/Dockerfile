@@ -29,7 +29,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # Build the workspace packages the API imports (@slate/engine, @slate/db, …) to
 # their dist/ outputs, then produce a self-contained production bundle.
 RUN pnpm build:packages
-RUN pnpm --filter @slate/api deploy --prod /prod/api
+# --legacy: pnpm v10 refuses `deploy` without inject-workspace-packages; we build
+# workspace deps to dist/ ourselves, so the legacy copy-based deploy is correct.
+RUN pnpm --filter @slate/api deploy --legacy --prod /prod/api
 
 # ---- run: minimal runtime, only the pruned bundle, non-root ------------------
 FROM base AS run
