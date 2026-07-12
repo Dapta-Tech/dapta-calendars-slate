@@ -15,7 +15,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
  */
 export type Session =
   | { provider: 'local'; email: string }
-  | { provider: 'workos'; accessToken: string; refreshToken?: string };
+  | { provider: 'workos'; accessToken: string; refreshToken?: string; sessionId?: string };
 
 export const authProvider = (): 'local' | 'workos' =>
   process.env.AUTH_PROVIDER === 'workos' ? 'workos' : 'local';
