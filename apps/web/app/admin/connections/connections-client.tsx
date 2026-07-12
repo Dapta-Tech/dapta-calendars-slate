@@ -602,7 +602,9 @@ export function ConnectionsClient({
   return (
     <div className="flex flex-col gap-5">
       {/* Header: honest sync status on the left, primary Connect at top-right
-          (R30 list/create pattern — creation happens in the dialog surface). */}
+          (R30 list/create pattern — creation happens in the dialog surface).
+          One CTA per screen: the top-right Connect renders ONLY when calendars
+          exist; on the empty state the centered CTA below is the sole one. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="flex items-center gap-2 text-sm">
           <span
@@ -611,13 +613,15 @@ export function ConnectionsClient({
           />
           <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
         </span>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-        >
-          {rows.length > 0 ? m.connectAnother : m.connectButton}
-        </button>
+        {rows.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.connectAnother}
+          </button>
+        ) : null}
       </div>
 
       {rows.length > 0 ? (

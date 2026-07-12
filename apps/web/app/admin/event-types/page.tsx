@@ -14,15 +14,20 @@ export default async function EventTypesPage() {
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
+      {/* One CTA per screen: the top-right Create shows ONLY when the list has
+          rows. On the empty state the centered CTA below is the sole create
+          affordance (never both at once). */}
       <PageHeader
         title={m.title}
         action={
-          <Link
-            href="/admin/event-types/new"
-            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
-            {m.newEventType}
-          </Link>
+          eventTypes.length > 0 ? (
+            <Link
+              href="/admin/event-types/new"
+              className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            >
+              {m.newEventType}
+            </Link>
+          ) : undefined
         }
       />
 
