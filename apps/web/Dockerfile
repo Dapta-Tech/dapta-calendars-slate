@@ -26,6 +26,13 @@ WORKDIR /repo
 # Baked into the client bundle — pass per environment at build time.
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Brand + growth-loop link — also NEXT_PUBLIC (inlined at build). Vendor-neutral
+# defaults keep the OSS build generic; Dapta's CI passes "Dapta Calendars" + the
+# platform URL. (Deploy-enabling change per ECR-CI-PLAN §3.)
+ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
+ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
+ARG NEXT_PUBLIC_PLATFORM_URL=
+ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
@@ -35,6 +42,15 @@ RUN pnpm --filter @slate/web build
 # ---- run: standalone server, non-root ----------------------------------------
 FROM base AS run
 ENV NODE_ENV=production
+# Server components read NEXT_PUBLIC_* from the RUNTIME env (inlining only
+# covers client bundles) — re-declare in the run stage so SSR'd metadata (tab
+# title, switcher) carries the brand too. Same values CI passes to build.
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
+ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
+ARG NEXT_PUBLIC_PLATFORM_URL=
+ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
 WORKDIR /app
 # Next standalone bundles the server + its minimal node_modules.
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
