@@ -58,11 +58,14 @@ describe('isNavItemActive (admin shell)', () => {
     expect(isNavItemActive('/admin/bookings/new', '/admin/bookings')).toBe(true);
     expect(isNavItemActive('/admin/event-types', '/admin/bookings')).toBe(false);
   });
-  it('honours extra matches (Settings owns /admin/connections)', () => {
-    const m = ['/admin/settings', '/admin/connections'];
+  it('honours extra matches', () => {
+    const m = ['/admin/settings'];
     expect(isNavItemActive('/admin/settings/general', '/admin/settings', m)).toBe(true);
-    expect(isNavItemActive('/admin/connections', '/admin/settings', m)).toBe(true);
     expect(isNavItemActive('/admin/teams', '/admin/settings', m)).toBe(false);
+  });
+  it('Calendars is a top-level item owning /admin/connections (not Settings)', () => {
+    expect(isNavItemActive('/admin/connections', '/admin/connections')).toBe(true);
+    expect(isNavItemActive('/admin/connections', '/admin/settings', ['/admin/settings'])).toBe(false);
   });
 });
 

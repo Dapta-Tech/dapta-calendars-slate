@@ -68,6 +68,7 @@ export interface BookingMessages {
       availability: string;
       eventTypes: string;
       teams: string;
+      calendars: string;
       settings: string;
       bookingPage: string;
     };
@@ -128,7 +129,6 @@ export interface BookingMessages {
       subtitle: string;
       general: string;
       bookingPage: string;
-      calendars: string;
       members: string;
       developer: string;
     };
@@ -523,7 +523,7 @@ export const en: BookingMessages = {
     holdExpired: 'Your hold expired',
     pickAnother: 'Pick another time',
     retry: 'Try again',
-    poweredBy: 'Powered by Slate',
+    poweredBy: 'Powered by Dapta Calendars',
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
@@ -565,6 +565,7 @@ export const en: BookingMessages = {
       availability: 'Availability',
       eventTypes: 'Event types',
       teams: 'Teams',
+      calendars: 'Calendars',
       settings: 'Settings',
       bookingPage: 'Booking page',
     },
@@ -625,7 +626,6 @@ export const en: BookingMessages = {
       subtitle: 'Manage your account and preferences.',
       general: 'General',
       bookingPage: 'Booking Page',
-      calendars: 'Calendars',
       members: 'Members',
       developer: 'Developer',
     },
@@ -836,7 +836,7 @@ export const en: BookingMessages = {
       noAccessBody: 'This section is available to workspace admins and owners.',
     },
     connections: {
-      pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
+      pageDesc: 'Connect a calendar to check conflicts (busy times) and write your booked events to it.',
       dialogTitle: 'Connect a calendar',
       dialogSubtitle: 'Choose a provider to link.',
       close: 'Close',
@@ -846,7 +846,7 @@ export const en: BookingMessages = {
       syncOnDesc: 'Connect Google or Outlook to check conflicts and write events.',
       connectButton: 'Connect a calendar',
       syncOffTitle: 'Calendar sync is off in this build',
-      syncOffDesc: 'No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet. Connections you add below are recorded but not synced.',
+      syncOffDesc: 'No external calendar provider is configured, so busy times aren’t being read and events aren’t being written yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
       connectWaiting: 'Waiting for you to finish connecting…',
@@ -883,7 +883,7 @@ export const en: BookingMessages = {
       healthError: 'Needs attention',
       recheck: 'Re-check',
       emptyTitle: 'No calendars connected yet',
-      emptyBody: 'Connect Google or Outlook so Slate can read your busy times and add booked events to your calendar. You can connect more than one account.',
+      emptyBody: 'Connect Google or Outlook to read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
       emptyDestination: 'Pick one calendar to receive your booked events',
     },
@@ -1018,7 +1018,7 @@ export const es: BookingMessages = {
     holdExpired: 'Tu reserva temporal expiró',
     pickAnother: 'Elige otro horario',
     retry: 'Reintentar',
-    poweredBy: 'Con la tecnología de Slate',
+    poweredBy: 'Con la tecnología de Dapta Calendars',
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
@@ -1060,6 +1060,7 @@ export const es: BookingMessages = {
       availability: 'Disponibilidad',
       eventTypes: 'Tipos de evento',
       teams: 'Equipos',
+      calendars: 'Calendarios',
       settings: 'Ajustes',
       bookingPage: 'Página de reservas',
     },
@@ -1120,7 +1121,6 @@ export const es: BookingMessages = {
       subtitle: 'Gestiona tu cuenta y preferencias.',
       general: 'General',
       bookingPage: 'Página de reservas',
-      calendars: 'Calendarios',
       members: 'Miembros',
       developer: 'Desarrollador',
     },
@@ -1331,7 +1331,7 @@ export const es: BookingMessages = {
       noAccessBody: 'Esta sección está disponible para administradores y propietarios del espacio.',
     },
     connections: {
-      pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
+      pageDesc: 'Conecta un calendario para verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
       dialogTitle: 'Conectar un calendario',
       dialogSubtitle: 'Elige un proveedor para vincular.',
       close: 'Cerrar',
@@ -1341,7 +1341,7 @@ export const es: BookingMessages = {
       syncOnDesc: 'Conecta Google u Outlook para verificar conflictos y escribir eventos.',
       connectButton: 'Conectar un calendario',
       syncOffTitle: 'La sincronización de calendario está desactivada en esta versión',
-      syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que Slate aún no lee horas ocupadas ni escribe eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
+      syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que aún no se leen horas ocupadas ni se escriben eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
       connectWaiting: 'Esperando a que termines de conectar…',
@@ -1378,7 +1378,7 @@ export const es: BookingMessages = {
       healthError: 'Requiere atención',
       recheck: 'Volver a comprobar',
       emptyTitle: 'Aún no hay calendarios conectados',
-      emptyBody: 'Conecta Google u Outlook para que Slate pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
+      emptyBody: 'Conecta Google u Outlook para leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
       emptyDestination: 'Elige un calendario para recibir tus reservas',
     },
