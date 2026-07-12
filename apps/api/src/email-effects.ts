@@ -85,6 +85,7 @@ export class EmailEffects {
           kind: 'email',
           action: 'reminder',
           bookingUid: uid,
+          accountId: ctx.accountId,
           payload: JSON.stringify({ ...base, reminderLeadMinutes: lead }),
           nextAttemptAt: fireAt,
         });
@@ -130,6 +131,7 @@ export class EmailEffects {
         kind: 'email',
         action: kind,
         bookingUid: uid,
+        accountId: ctx.accountId,
         payload: JSON.stringify(notification),
       });
     } catch (err) {
@@ -164,8 +166,14 @@ export class EmailEffects {
    * from the payload and sends it via the notifier; a THROWN transport error
    * propagates so the worker retries. `delivered:false` (log-only) is success.
    */
-  async deliver(kind: string, payloadJson: string): Promise<void> {
+  async deliver(kind: string, payloadJson: string, outboxAccountId?: string | null): Promise<void> {
     const n = JSON.parse(payloadJson) as BookingNotification;
+    if (!n.accountId && outboxAccountId) n.accountId = outboxAccountId;
+    if (!n.accountId && n.uid) {
+      const current = await loadBookingNotificationContext(this.db, n.uid);
+      if (current) n.accountId = current.accountId;
+    }
+    if (!n.accountId) throw new Error('email outbox row missing account context');
     switch (kind) {
       case 'confirmation':
         await this.notifier.sendConfirmation(n);

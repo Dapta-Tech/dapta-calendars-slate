@@ -57,11 +57,9 @@ const message: EmailMessage = {
 
 describe('transactional-v1 wire — request contract', () => {
   it('fails closed when the configured endpoint does not match the signed path', async () => {
-    const provider = new HttpEmailProvider(
+    expect(() => new HttpEmailProvider(
       { ...transactionalOptions, endpoint: 'https://mail.example.test/v1/send' },
-    );
-
-    await expect(provider.send(message)).rejects.toThrow(
+    )).toThrow(
       'transactional email endpoint must use /api/internal/email/send',
     );
   });

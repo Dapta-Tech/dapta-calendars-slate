@@ -55,14 +55,15 @@ export class HttpEmailProvider implements EmailProvider {
   constructor(
     private readonly opts: HttpEmailOptions,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    if (opts.profile === 'transactional-v1') {
+      assertTransactionalEndpoint(opts.endpoint);
+    }
+  }
 
   async send(message: EmailMessage): Promise<EmailResult> {
     const to = normalizeRecipients(message.to);
-    if (this.opts.profile === 'transactional-v1') {
-      assertTransactionalEndpoint(this.opts.endpoint);
-      return this.sendTransactional(message, to);
-    }
+    if (this.opts.profile === 'transactional-v1') return this.sendTransactional(message, to);
     return this.sendGeneric(message, to);
   }
 

@@ -135,7 +135,7 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     }
     if (row.kind === 'email') {
       if (row.payload == null) throw new Error('email outbox row missing payload');
-      await this.email.deliver(row.action, row.payload);
+      await this.email.deliver(row.action, row.payload, row.accountId);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);
