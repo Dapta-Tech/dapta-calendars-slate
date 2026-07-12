@@ -16,7 +16,7 @@ async function bootstrap() {
   app.enableCors({ origin: origins, credentials: true });
   console.log(`[api] CORS allowlist: ${origins.join(', ')}`);
   await app.listen(env.API_PORT);
-  console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL})`);
+  console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL.replace(/\/\/([^:@/]+):[^@]+@/, '//$1:***@')})`);
 }
 
 bootstrap().catch((err) => {
