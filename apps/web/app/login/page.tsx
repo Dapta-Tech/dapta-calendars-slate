@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { authProvider } from '@/lib/auth-session';
@@ -17,6 +18,11 @@ export default async function LoginPage({
   const m = getMessages(await getLocale()).admin.login;
   const workos = authProvider() === 'workos';
   const { error } = await searchParams;
+
+  // Dapta builds: no intermediate sign-in card — go straight to the hosted
+  // login. The card only renders as an ERROR landing (?error=) so a failed
+  // callback doesn't loop root -> /api/auth/login -> /login -> ...
+  if (workos && !error) redirect('/api/auth/login');
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">

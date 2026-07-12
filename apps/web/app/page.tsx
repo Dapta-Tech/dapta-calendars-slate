@@ -1,9 +1,23 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { authProvider, getSession } from '@/lib/auth-session';
 
 // Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
 const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
-export default function HomePage() {
+/**
+ * Root behavior depends on the deployment flavor:
+ *  - workos (Dapta production): the root is an APP entry, never a marketing
+ *    page — logged-in users land on /admin, anonymous users go STRAIGHT to the
+ *    hosted login (no intermediate sign-in card).
+ *  - local/OSS fork: keep the clone-and-run landing with the demo booking page.
+ */
+export default async function HomePage() {
+  if (authProvider() === 'workos') {
+    const session = await getSession();
+    redirect(session ? '/admin' : '/api/auth/login');
+  }
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col items-center justify-center gap-8 px-6 py-16 text-center">
       <div className="flex flex-col items-center gap-3">
