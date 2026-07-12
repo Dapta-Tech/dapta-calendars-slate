@@ -6,7 +6,7 @@ import { requestOrigin } from '@/lib/request-origin';
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 
 /**
- * WorkOS callback — REAL IAM contract (verified against dapta-iam-ms
+ * WorkOS callback — REAL IAM contract (verified against the IAM service's
  * workos-auth.controller.ts @Get('callback'), 2026-07-11):
  *
  * WorkOS redirects to IAM's OWN /auth/callback; IAM exchanges the code itself

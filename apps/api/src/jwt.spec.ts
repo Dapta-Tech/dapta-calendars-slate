@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { verifyJwtHs256, signJwtHs256, JwtError, b64url } from './jwt';
 
 const SECRET = 'test-shared-secret-minimum-length-ok';
-const ISS = 'dapta-iam-ms';
+const ISS = 'test-iam-issuer';
 const AUD = 'dapta-platform';
 const NOW = 1_800_000_000_000; // fixed epoch ms
 const nowSec = Math.floor(NOW / 1000);

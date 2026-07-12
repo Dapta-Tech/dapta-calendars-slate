@@ -6,7 +6,7 @@ import { WorkOsAuthProvider } from './auth.provider.workos';
 import { signJwtHs256 } from './jwt';
 
 const SECRET = 'workos-provider-test-secret';
-const ISS = 'dapta-iam-ms';
+const ISS = 'test-iam-issuer';
 const AUD = 'dapta-platform';
 
 function bearer(token: string): ReqLike {
