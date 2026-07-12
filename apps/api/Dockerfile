@@ -15,7 +15,7 @@
 # scaling to N replicas never races N migrators.
 
 # ---- base: pnpm via corepack -------------------------------------------------
-FROM node:20-slim AS base
+FROM node:22-trixie-slim@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -34,21 +34,20 @@ RUN pnpm build:packages
 RUN pnpm --filter @slate/api deploy --legacy --prod /prod/api
 
 # ---- run: minimal runtime, only the pruned bundle, non-root ------------------
-FROM base AS run
+FROM gcr.io/distroless/nodejs22-debian12:nonroot@sha256:13593b7570658e8477de39e2f4a1dd25db2f836d68a0ba771251572d23bb4f8e AS run
 ENV NODE_ENV=production
-# Non-root (mirrors calendar-ms: runAsNonRoot / uid 1001). node:20-slim ships a
-# `node` user; use it and own the app dir.
+# Distroless has no shell or package manager and defaults to its non-root user.
+# Kubernetes may enforce a different non-root uid; application files are
+# root-owned but world-readable and the API writes no runtime state under /app.
 WORKDIR /app
-COPY --from=build --chown=node:node /prod/api ./
-USER node
+COPY --from=build /prod/api ./
 EXPOSE 4000
 ENV API_PORT=4000
 # Start the API only. tsx is a runtime dependency of @slate/api; the bundle
-# carries the compiled workspace deps under node_modules. Invoke tsx directly —
-# `pnpm start` would make corepack fetch the LATEST pnpm at container start,
-# which requires Node 22+ (the pruned bundle carries no packageManager pin) and
-# crash-loops on node:20. No package manager belongs in the runtime path.
+# carries the compiled workspace deps under node_modules. The distroless Node
+# entrypoint executes the JavaScript CLI directly, without `/usr/bin/env`, a
+# shell, or a package manager.
 # --tsconfig tsconfig.runtime.json: the dev tsconfig's extends chain
 # (@slate/config) doesn't resolve inside the pruned bundle and tsx would drop
 # the whole config (losing experimentalDecorators → Nest crash at boot).
-CMD ["node_modules/.bin/tsx", "--tsconfig", "tsconfig.runtime.json", "src/main.ts"]
+CMD ["node_modules/tsx/dist/cli.mjs", "--tsconfig", "tsconfig.runtime.json", "src/main.ts"]
