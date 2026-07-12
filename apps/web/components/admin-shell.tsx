@@ -39,6 +39,8 @@ const NAV: NavItem[] = [
 ];
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
+// Customer-facing name (build-time inlined); 'Slate' never surfaces in the UI.
+const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
 // Dapta's icon system is PrimeIcons (pi pi-*) — the same set the production
 // Angular admin panel uses. Nav glyphs map 1:1 to their pi names; sized at the
@@ -167,8 +169,8 @@ export function AdminShell({
 
   const brand = (
     <div className={`flex items-center gap-2 ${railCollapsed ? 'flex-col px-0' : 'px-2'}`}>
-      <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
-      {!railCollapsed ? <span className="text-sm font-semibold text-foreground">Slate</span> : null}
+      <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+      {!railCollapsed ? <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span> : null}
       <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
           rail is force-collapsed for canvas. */}
@@ -255,8 +257,8 @@ export function AdminShell({
         >
           <i aria-hidden className="pi pi-bars" style={{ fontSize: 20 }} />
         </button>
-        <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
-        <span className="text-sm font-semibold">Slate</span>
+        <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+        <span className="text-sm font-semibold">{PRODUCT_NAME}</span>
       </header>
 
       {/* Desktop sidebar — flush, bordered, collapsible rail */}
@@ -293,8 +295,8 @@ export function AdminShell({
         inert={!drawerOpen || undefined}
       >
         <div className="flex items-center gap-2 px-2">
-          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">S</span>
-          <span className="text-sm font-semibold text-foreground">Slate</span>
+          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+          <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
           <AppSwitcher messages={c.switcher} />
         </div>
         <nav>
