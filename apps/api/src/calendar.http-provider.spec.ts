@@ -34,13 +34,17 @@ function stubFetch(responses: Array<{ status?: number; json?: unknown; text?: st
   return { fetchImpl, calls };
 }
 
-function makeProvider(responses: Parameters<typeof stubFetch>[0]) {
+function makeProvider(
+  responses: Parameters<typeof stubFetch>[0],
+  extra: Partial<ConstructorParameters<typeof ExternalCalendarProvider>[0]> = {},
+) {
   const { fetchImpl, calls } = stubFetch(responses);
   const provider = new ExternalCalendarProvider({
     baseUrl: 'https://cal.example.test/',
     tokenSource: new StaticTokenSource('tok-123'),
     wire: new GenericRestWire(),
     fetchImpl,
+    ...extra,
   });
   return { provider, calls };
 }
@@ -152,6 +156,17 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
         attendeeEmails: [],
       }),
     ).rejects.toBeInstanceOf(CalendarHttpError);
+  });
+
+  it('startConnect uses the backend override when provided (headless OAuth handshake)', async () => {
+    const { provider } = makeProvider([], {
+      startConnect: async (provider_, tenantKey) => ({
+        token: `tok-${tenantKey}`,
+        connectUrl: `https://consent.example.test/oauth?p=${provider_}`,
+      }),
+    });
+    const start = await provider.startConnect('google', 'tenant-1');
+    expect(start).toEqual({ token: 'tok-tenant-1', connectUrl: 'https://consent.example.test/oauth?p=google' });
   });
 
   it('startConnect mints an admin token and returns the connect URL', async () => {
