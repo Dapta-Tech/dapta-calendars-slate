@@ -5,6 +5,11 @@ import { authProvider, getSession } from '@/lib/auth-session';
 // Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
 const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
+// Per-request render: the workos-vs-local branch reads RUNTIME env + cookies.
+// Without this, next build (no AUTH_PROVIDER in the builder) bakes the OSS
+// landing statically and production serves it to anonymous users.
+export const dynamic = 'force-dynamic';
+
 /**
  * Root behavior depends on the deployment flavor:
  *  - workos (Dapta production): the root is an APP entry, never a marketing
