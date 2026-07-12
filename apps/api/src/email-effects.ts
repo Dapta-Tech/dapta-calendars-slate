@@ -142,6 +142,7 @@ export class EmailEffects {
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
   ): BookingNotification {
     return {
+      accountId: ctx.accountId,
       uid: ctx.uid,
       title: ctx.title,
       startUtc: ctx.startUtc,
