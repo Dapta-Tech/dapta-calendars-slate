@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { setSession } from '@/lib/auth-session';
+import { requestOrigin } from '@/lib/request-origin';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 
@@ -23,7 +24,7 @@ const OAUTH_STATE_COOKIE = 'slate_oauth_state';
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
-  const origin = url.origin;
+  const origin = requestOrigin(req);
 
   // The login round-trip must have started here (cookie set by /api/auth/login).
   const jar = await cookies();

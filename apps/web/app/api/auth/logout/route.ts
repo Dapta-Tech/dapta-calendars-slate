@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { clearSession } from '@/lib/auth-session';
+import { requestOrigin } from '@/lib/request-origin';
 
 /**
  * WorkOS logout (AUTH-WEB-CONTRACT §3.5). A cookie-only clear leaves the WorkOS
@@ -12,7 +13,7 @@ import { clearSession } from '@/lib/auth-session';
  * assumed shape.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const origin = new URL(req.url).origin;
+  const origin = requestOrigin(req);
   await clearSession();
   const iam = process.env.IAM_BASE_URL?.replace(/\/$/, '');
   if (!iam) return NextResponse.redirect(new URL('/login', origin));
