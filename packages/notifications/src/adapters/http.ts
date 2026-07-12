@@ -1,3 +1,4 @@
+import { createHash, createHmac } from 'node:crypto';
 import type { EmailAttachment, EmailMessage, EmailProvider, EmailResult } from '../email.port';
 import { normalizeRecipients } from '../util';
 
@@ -8,7 +9,7 @@ import { normalizeRecipients } from '../util';
  *     working exactly as before.
  *   - `transactional-v1`: the managed transactional-email contract (mode,
  *     to[], replyTo, subject, html/text, category, idempotencyKey, and
- *     base64 attachments), authenticated with `X-API-Key`.
+ *     base64 attachments), authenticated with a timestamped HMAC signature.
  */
 export type HttpWireProfile = 'generic' | 'transactional-v1';
 
@@ -22,8 +23,10 @@ export interface HttpEmailOptions {
   profile?: HttpWireProfile;
   /** Optional Bearer token — `generic` profile only. */
   token?: string;
-  /** API key sent as `X-API-Key` — `transactional-v1` profile only. Never logged. */
-  apiKey?: string;
+  /** Stable service identity used for scoped authorization. */
+  clientId?: string;
+  /** HMAC secret loaded only from the runtime secret manager. Never transmitted or logged. */
+  signingSecret?: string;
   /** Message category for `transactional-v1` (defaults to `lifecycle`). */
   category?: string;
   fromEmail: string;
@@ -102,6 +105,9 @@ export class HttpEmailProvider implements EmailProvider {
    * and reads the JSON response to decide dispatched-vs-throw.
    */
   private async sendTransactional(message: EmailMessage, to: string[]): Promise<EmailResult> {
+    if (!message.accountId) {
+      throw new Error('transactional email requires an authenticated account context');
+    }
     const hasHtml = typeof message.html === 'string' && message.html.length > 0;
     const payload: Record<string, unknown> = {
       mode: hasHtml ? 'html' : 'text',
@@ -110,10 +116,23 @@ export class HttpEmailProvider implements EmailProvider {
       subject: message.subject,
       category: this.opts.category ?? DEFAULT_TRANSACTIONAL_CATEGORY,
       idempotencyKey: message.idempotencyKey,
+      businessContext: { accountId: message.accountId },
       attachments: message.attachments?.map(toTransactionalAttachment),
     };
     if (hasHtml) payload.html = message.html;
     if (typeof message.text === 'string' && message.text.length > 0) payload.text = message.text;
+
+    if (!this.opts.clientId || !this.opts.signingSecret) {
+      throw new Error('transactional email service authentication is not configured');
+    }
+    const requestBody = JSON.stringify(payload);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = signTransactionalRequest(
+      requestBody,
+      timestamp,
+      message.idempotencyKey ?? '',
+      this.opts.signingSecret,
+    );
 
     let res: Response;
     try {
@@ -121,10 +140,11 @@ export class HttpEmailProvider implements EmailProvider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          // X-API-Key auth. Kept out of every log/throw path below.
-          ...(this.opts.apiKey ? { 'x-api-key': this.opts.apiKey } : {}),
+          'x-dapta-client-id': this.opts.clientId,
+          'x-dapta-timestamp': timestamp,
+          'x-dapta-signature': signature,
         },
-        body: JSON.stringify(payload),
+        body: requestBody,
       });
     } catch (err) {
       // Network/transport error — surface so the outbox worker retries.
@@ -133,6 +153,24 @@ export class HttpEmailProvider implements EmailProvider {
     const body = await res.json().catch(() => null);
     return interpretTransactionalResponse(res.status, body);
   }
+}
+
+export function signTransactionalRequest(
+  body: string,
+  timestamp: string,
+  idempotencyKey: string,
+  secret: string,
+): string {
+  const bodyHash = createHash('sha256').update(body).digest('hex');
+  const canonical = [
+    'v1',
+    'POST',
+    '/api/internal/email/send',
+    timestamp,
+    idempotencyKey,
+    bodyHash,
+  ].join('\n');
+  return createHmac('sha256', secret).update(canonical).digest('hex');
 }
 
 /** Map an EmailAttachment to the managed transactional attachment object. */

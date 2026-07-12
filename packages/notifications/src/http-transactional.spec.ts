@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   HttpEmailProvider,
   interpretTransactionalResponse,
+  signTransactionalRequest,
 } from './adapters/http';
 import { BookingNotifier, type BookingNotification } from './booking-notifier';
 import { icsContentType } from './ics';
@@ -26,8 +27,17 @@ const readHeaders = (calls: Array<{ init: RequestInit }>) =>
   (calls[0]!.init.headers ?? {}) as Record<string, string>;
 
 const ENDPOINT = 'https://mail.example.test/v1/send';
+const SIGNING_SECRET = 'calendar-test-signing-secret-with-32-characters';
+const transactionalOptions = {
+  endpoint: ENDPOINT,
+  profile: 'transactional-v1' as const,
+  clientId: 'calendars',
+  signingSecret: SIGNING_SECRET,
+  fromEmail: 'x@example.com',
+};
 
 const message: EmailMessage = {
+  accountId: '11111111-1111-4111-8111-111111111111',
   to: ['sam@example.com', 'alex@example.com'],
   replyTo: 'alex@example.com',
   subject: 'Confirmed: Intro Call',
@@ -49,7 +59,7 @@ describe('transactional-v1 wire — request contract', () => {
   it('POSTs the managed contract: mode, to[], replyTo, subject, html/text, category, idempotencyKey', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'm1' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'secret-key', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
 
@@ -70,7 +80,7 @@ describe('transactional-v1 wire — request contract', () => {
   it('sends `mode:text` and no html field when only text is present', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     await provider.send({ ...message, html: undefined });
@@ -83,7 +93,7 @@ describe('transactional-v1 wire — request contract', () => {
   it('does NOT send unsupported from / fromName / headers fields', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com', fromName: 'Calendars' },
+      { ...transactionalOptions, fromName: 'Calendars' },
       impl,
     );
     await provider.send(message);
@@ -96,7 +106,7 @@ describe('transactional-v1 wire — request contract', () => {
   it('maps ICS attachment to {filename, contentType (full MIME), contentBase64, disposition:"attachment"} (plural `attachments`)', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     await provider.send(message);
@@ -116,23 +126,35 @@ describe('transactional-v1 wire — request contract', () => {
     );
   });
 
-  it('authenticates with X-API-Key and never puts the key in the body or a Bearer header', async () => {
+  it('authenticates with a timestamped body signature and never transmits the secret', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'super-secret', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     await provider.send(message);
     const headers = readHeaders(calls);
-    expect(headers['x-api-key']).toBe('super-secret');
+    expect(headers['x-dapta-client-id']).toBe('calendars');
+    expect(headers['x-dapta-timestamp']).toMatch(/^\d+$/);
+    expect(headers['x-dapta-signature']).toMatch(/^[a-f0-9]{64}$/);
+    expect(headers['x-dapta-signature']).toBe(
+      signTransactionalRequest(
+        String(calls[0]!.init.body),
+        headers['x-dapta-timestamp']!,
+        message.idempotencyKey!,
+        SIGNING_SECRET,
+      ),
+    );
     expect(headers).not.toHaveProperty('authorization');
-    expect(String(calls[0]!.init.body)).not.toContain('super-secret');
+    expect(headers).not.toHaveProperty('x-api-key');
+    expect(JSON.stringify(headers)).not.toContain(SIGNING_SECRET);
+    expect(String(calls[0]!.init.body)).not.toContain(SIGNING_SECRET);
   });
 
   it('honors a configured category override', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', category: 'reminders', fromEmail: 'x@example.com' },
+      { ...transactionalOptions, category: 'reminders' },
       impl,
     );
     await provider.send(message);
@@ -184,7 +206,7 @@ describe('transactional-v1 wire — response interpretation', () => {
   it('provider.send throws on a blocked response so the outbox retries/records it', async () => {
     const { impl } = stubFetch(200, { status: 'blocked_by_policy', blockedReason: 'bounced' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     await expect(provider.send(message)).rejects.toThrow(/blocked by policy: bounced/);
@@ -229,6 +251,7 @@ describe('generic wire — backwards compatibility (default profile)', () => {
 
 describe('BookingNotifier → transactional-v1 (end-to-end idempotency + attachment)', () => {
   const notification: BookingNotification = {
+    accountId: '11111111-1111-4111-8111-111111111111',
     uid: 'bk-42',
     title: 'Intro Call',
     startUtc: '2026-08-01T15:00:00.000Z',
@@ -243,7 +266,7 @@ describe('BookingNotifier → transactional-v1 (end-to-end idempotency + attachm
   it('confirmation carries the namespaced key and a base64 ICS through the wire', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'c1' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     const notifier = new BookingNotifier(provider);
@@ -260,7 +283,7 @@ describe('BookingNotifier → transactional-v1 (end-to-end idempotency + attachm
   it('two distinct reschedules produce two distinct idempotency keys', async () => {
     const { impl, calls } = stubFetch(202, { status: 'accepted' });
     const provider = new HttpEmailProvider(
-      { endpoint: ENDPOINT, profile: 'transactional-v1', apiKey: 'k', fromEmail: 'x@example.com' },
+      transactionalOptions,
       impl,
     );
     const notifier = new BookingNotifier(provider);

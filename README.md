@@ -63,7 +63,7 @@ SQLite-dev path documents where it degrades.
   to the log; wire any provider by config. The `http` adapter speaks two wires,
   selected by `EMAIL_HTTP_PROFILE`: a `generic` provider-agnostic body (default)
   or a managed `transactional-v1` contract (mode/category/idempotencyKey +
-  base64 attachments, `X-API-Key` auth). Lifecycle emails carry stable,
+  base64 attachments, timestamped HMAC service authentication). Lifecycle emails carry stable,
   namespaced idempotency keys so retries de-duplicate at the provider.
 
 ## Architecture
