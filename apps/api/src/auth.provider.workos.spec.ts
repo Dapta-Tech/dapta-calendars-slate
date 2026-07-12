@@ -6,8 +6,8 @@ import { WorkOsAuthProvider } from './auth.provider.workos';
 import { signJwtHs256 } from './jwt';
 
 const SECRET = 'workos-provider-test-secret';
-const ISS = 'test-iam-issuer';
-const AUD = 'dapta-platform';
+const ISS = 'example-identity-service';
+const AUD = 'calendar-platform';
 
 function bearer(token: string): ReqLike {
   return { headers: { authorization: `Bearer ${token}` } };

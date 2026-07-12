@@ -18,11 +18,11 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: slate
-      POSTGRES_PASSWORD: slate
-      POSTGRES_DB: slate
+      POSTGRES_USER: ${POSTGRES_USER:-slate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-slate}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U slate -d slate']
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-slate}" -d "$${POSTGRES_DB:-slate}"']
       interval: 5s
       timeout: 5s
       retries: 12
@@ -43,7 +43,7 @@ services:
     command:
       ['node_modules/.bin/tsx', 'node_modules/@slate/db/src/cli/migrate.ts']
     environment:
-      DATABASE_URL: postgres://slate:slate@db:5432/slate
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     depends_on:
       db:
         condition: service_healthy
@@ -56,7 +56,7 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: '4000'
-      DATABASE_URL: postgres://slate:slate@db:5432/slate
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       # Community-safe default: no external email, no Dapta coupling.
       EMAIL_PROVIDER: log-only
     ports:
