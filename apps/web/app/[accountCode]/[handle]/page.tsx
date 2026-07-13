@@ -1,8 +1,35 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, permanentRedirect, redirect } from 'next/navigation';
-import { clampAccent, monogram, onAccent } from '@slate/shared';
+import { clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
+import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
+import { MadeWithBadge } from '@/components/made-with-badge';
+
+// Per-page SEO/OG from host data (R11 audit). getProfile is request-cached, so
+// this shares the page's fetch. Only public profile fields are used.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ accountCode: string; handle: string }>;
+}): Promise<Metadata> {
+  const { accountCode, handle } = await params;
+  const profile = await getProfile(accountCode, handle);
+  if (!profile) return {};
+  const name = profile.member.displayName ?? profile.member.handle;
+  const bio = (profile.member.style as { bio?: string } | null)?.bio;
+  const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
+  const title = `${name} — ${profile.account.name}`;
+  const avatar = profile.member.avatarUrl;
+  const images = avatar && /^https?:\/\//i.test(avatar) ? [avatar] : undefined;
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: 'profile', images },
+    twitter: { card: 'summary', title, description, images },
+  };
+}
 
 export default async function ProfilePage({
   params,
@@ -10,7 +37,7 @@ export default async function ProfilePage({
   params: Promise<{ accountCode: string; handle: string }>;
 }) {
   const { accountCode, handle } = await params;
-  const profile = await getProfile(accountCode, handle);
+  const [profile, locale] = await Promise.all([getProfile(accountCode, handle), publicLocale()]);
   if (!profile) notFound();
 
   // Canonical-code guard (short-links §4): the API resolves legacy/alias codes
@@ -90,6 +117,7 @@ export default async function ProfilePage({
           ) : null}
         </ul>
       </main>
+      <MadeWithBadge locale={locale} accountCode={accountCode} />
     </BrandedShell>
   );
 }

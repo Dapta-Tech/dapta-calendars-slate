@@ -1,8 +1,46 @@
+import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import Link from 'next/link';
+import { getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
+import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
+import { MadeWithBadge } from '@/components/made-with-badge';
+
+// Per-page SEO/OG from event + host data (R11 audit). getProfile is
+// request-cached (shared with the page render); the event's public listing
+// carries everything the tags need — no availability call here.
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ accountCode: string; handle: string; slug: string }>;
+  searchParams: Promise<{ lang?: string }>;
+}): Promise<Metadata> {
+  const { accountCode, handle, slug } = await params;
+  const { lang } = await searchParams;
+  const profile = await getProfile(accountCode, handle);
+  const event = profile?.eventTypes.find((e) => e.slug === slug);
+  if (!profile || !event) return {};
+  const name = profile.member.displayName ?? profile.member.handle;
+  const title = `${event.title} — ${name}`;
+  const description =
+    event.description ||
+    t(getMessages(await publicLocale(lang)).growth.seoEvent, {
+      event: event.title,
+      name,
+      minutes: event.lengthMinutes,
+    });
+  const avatar = profile.member.avatarUrl;
+  const images = avatar && /^https?:\/\//i.test(avatar) ? [avatar] : undefined;
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: 'website', images },
+    twitter: { card: 'summary', title, description, images },
+  };
+}
 
 // Public booking page. A Server Component fetches slots (free SEO + streaming);
 // the interactive slot picker + form is a client island (BookingFlow).
@@ -15,7 +53,7 @@ export default async function BookingPage({
 }) {
   const { accountCode, handle, slug } = await params;
   const { lang } = await searchParams;
-  const locale = lang?.startsWith('es') ? 'es' : 'en';
+  const locale = await publicLocale(lang);
 
   const now = new Date();
   const from = now.toISOString();
@@ -62,6 +100,7 @@ export default async function BookingPage({
           locale={locale}
         />
       </main>
+      <MadeWithBadge locale={locale} accountCode={accountCode} />
     </BrandedShell>
   );
 }

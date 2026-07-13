@@ -1,10 +1,41 @@
+import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import { headers } from 'next/headers';
 import Link from 'next/link';
-import { getMessages, schedulingMethodLabel } from '@slate/shared';
+import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
+import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
+import { MadeWithBadge } from '@/components/made-with-badge';
+
+// Per-page SEO/OG from team + event data (R11 audit); getTeamProfile is
+// request-cached, so this shares the page's fetch.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ accountCode: string; teamSlug: string; slug: string }>;
+}): Promise<Metadata> {
+  const { accountCode, teamSlug, slug } = await params;
+  const team = await getTeamProfile(accountCode, teamSlug);
+  const event = team?.eventTypes.find((e) => e.slug === slug);
+  if (!team || !event) return {};
+  const title = `${event.title} — ${team.team.name}`;
+  const description =
+    event.description ||
+    t(getMessages(await publicLocale()).growth.seoEvent, {
+      event: event.title,
+      name: team.team.name,
+      minutes: event.lengthMinutes,
+    });
+  const logo = team.team.logoUrl;
+  const images = logo && /^https?:\/\//i.test(logo) ? [logo] : undefined;
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: 'website', images },
+    twitter: { card: 'summary', title, description, images },
+  };
+}
 
 export default async function TeamBookingPage({
   params,
@@ -12,8 +43,8 @@ export default async function TeamBookingPage({
   params: Promise<{ accountCode: string; teamSlug: string; slug: string }>;
 }) {
   const { accountCode, teamSlug, slug } = await params;
-  const lang = (await headers()).get('accept-language') ?? '';
-  const messages = getMessages(lang.startsWith('es') ? 'es' : 'en');
+  const locale = await publicLocale();
+  const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
   const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
@@ -51,8 +82,10 @@ export default async function TeamBookingPage({
           emptyReason={availability.emptyReason}
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
+          locale={locale}
         />
       </main>
+      <MadeWithBadge locale={locale} accountCode={accountCode} />
     </BrandedShell>
   );
 }
