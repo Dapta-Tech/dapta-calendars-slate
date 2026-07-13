@@ -14,12 +14,33 @@ import { pgTable, text, bigint, integer, jsonb } from 'drizzle-orm/pg-core';
 
 export const account = pgTable('account', {
   id: text('id').primaryKey(),
+  // The canonical public code: a 6-char unambiguous short code for new
+  // accounts (see @slate/engine short-links); legacy `acct-…`/`dev-…` codes
+  // are re-coded by the migrate() data fixup and kept alive in account_alias.
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   // Stable id of this account in an upstream identity service, used by the
   // `workos` auth provider to project the external tenant onto a local account.
   // Nullable + unique (NULLs distinct): seeded/local accounts have none.
   externalId: text('external_id'),
+  // Premium vanity slug (globally unique, [a-z0-9-]{3,30}); when set it is the
+  // canonical public code and `code` stays as a permanent alias.
+  vanitySlug: text('vanity_slug'),
+  // Cached IAM verdict ('paid' | 'free'; NULL = never checked) + check time.
+  // IAM is the source of truth — this is never a Calendars-side billing state.
+  daptaEntitlement: text('dapta_entitlement'),
+  entitlementCheckedAt: bigint('entitlement_checked_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+/**
+ * Retired public codes (legacy `acct-…`/`dev-…`, re-coded short codes): each
+ * alias permanently resolves to its account so no shared link ever breaks —
+ * the web layer 308-redirects alias URLs to the canonical code.
+ */
+export const accountAlias = pgTable('account_alias', {
+  alias: text('alias').primaryKey(),
+  accountId: text('account_id').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

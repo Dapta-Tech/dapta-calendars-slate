@@ -68,11 +68,58 @@ fi
 
 echo
 echo "== publish-gate: trufflehog =="
-# --exclude-paths: documented placeholders (see the exclude file's header) that
-# the runner can't verify (no DB/DNS egress) and would fail as "unknown".
+# Scans EVERY repo file — including .env.example and the docker-compose files,
+# exactly where credentials get pasted by mistake. The exclude file skips only
+# vendored/build infrastructure (node_modules, dist, …), never repo content.
+# A documented placeholder that false-positives is allowlisted BY FINDING
+# (detector + file + line) in publish-gate-allowlist.txt — never by whole file.
 if command -v trufflehog >/dev/null 2>&1; then
-  trufflehog filesystem --no-update --fail --results=verified,unknown \
-    --exclude-paths scripts/publish-gate-exclude.txt . || FAIL=1
+  ALLOW="scripts/publish-gate-allowlist.txt"
+  # A missing allowlist is broken gate config, not a clean scan — fail loudly
+  # rather than let the filter degrade (every finding would read as new, or a
+  # zero-finding run would mask the drift entirely).
+  if [ ! -f "$ALLOW" ]; then
+    echo "FAIL: $ALLOW is missing — the finding-level allowlist must exist (may be all comments)."
+    FAIL=1
+  fi
+  TH_JSON=$(mktemp) TH_ERR=$(mktemp)
+  trufflehog filesystem --no-update --results=verified,unknown --json \
+    --exclude-paths scripts/publish-gate-exclude.txt . >"$TH_JSON" 2>"$TH_ERR"
+  TH_EXIT=$?
+  if [ "$TH_EXIT" -ne 0 ]; then
+    # A crashed scanner is a FAILED gate, never a silent pass: no scan happened.
+    echo "FAIL: trufflehog exited $TH_EXIT — the scan did not complete:"
+    tail -5 "$TH_ERR"
+    FAIL=1
+  else
+    # One key per finding: DetectorName:path:line (path relative to the root).
+    FOUND=$(node -e '
+      const rl = require("node:readline").createInterface({ input: process.stdin });
+      rl.on("line", (l) => {
+        try {
+          const f = JSON.parse(l);
+          if (!f.DetectorName) return;
+          const meta = f.SourceMetadata?.Data?.Filesystem ?? {};
+          const file = String(meta.file ?? "").replace(/^(\.\/)+/, "");
+          console.log(`${f.DetectorName}:${file}:${meta.line ?? 0}`);
+        } catch { /* non-JSON log line — ignore */ }
+      });' <"$TH_JSON")
+    NEW=""
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      grep -qxF "$key" "$ALLOW" 2>/dev/null || NEW="${NEW}${key}"$'\n'
+    done <<<"$FOUND"
+    if [ -n "$NEW" ]; then
+      echo "FAIL: trufflehog findings not in the allowlist (DetectorName:file:line):"
+      printf '%s' "$NEW"
+      echo "A real credential must be rotated + removed. Only a DOCUMENTED placeholder"
+      echo "may be added to $ALLOW (one line per finding)."
+      FAIL=1
+    else
+      echo "OK: trufflehog clean (no unallowlisted findings)."
+    fi
+  fi
+  rm -f "$TH_JSON" "$TH_ERR"
 else
   echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
 fi

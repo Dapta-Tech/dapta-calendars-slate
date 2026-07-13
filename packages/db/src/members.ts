@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Db } from './client';
 import type { CrudResult } from './crud';
+import { deriveUniqueHandle } from './short-links';
 
 /** Account-level roles, most-privileged first. */
 export const ACCOUNT_ROLES = ['owner', 'admin', 'member'] as const;
@@ -130,10 +131,13 @@ export async function inviteMember(
     return { ok: false, reason: 'EMAIL_TAKEN', message: 'A member with that email already exists.' };
 
   const id = randomUUID();
+  // Auto-handle at creation (short-links §3): invited members are bookable the
+  // moment they accept — no "set a handle" step, freely renameable later.
+  const handle = await deriveUniqueHandle(db, accountId, input.displayName, email);
   await db.run(
-    sql`INSERT INTO member (id, account_id, email, display_name, role, status, created_at)
+    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, created_at)
         VALUES (${id}, ${accountId}, ${email}, ${input.displayName ?? EMAIL_LOCAL(email)},
-          ${role}, ${'invited'}, ${Date.now()})`,
+          ${handle}, ${role}, ${'invited'}, ${Date.now()})`,
   );
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
 }

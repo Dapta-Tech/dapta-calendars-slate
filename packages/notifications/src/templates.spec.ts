@@ -62,6 +62,23 @@ describe('renderTemplate — safety and substitution', () => {
     expect(r.text).toContain('<script>alert(1)</script>');
   });
 
+  it('{{constructor}}/{{__proto__}} resolve EMPTY — no prototype lookup leaks', () => {
+    const vars = templateVars(base);
+    const r = renderTemplate(
+      {
+        subject: 'S {{constructor}}{{__proto__}}{{has_own_property}}',
+        body: 'Line: {{constructor}}\nKeep: {{attendee_name}} {{__proto__}}',
+      },
+      vars,
+    );
+    expect(r.subject).toBe('S');
+    // A line whose only tokens are prototype names counts as all-empty → dropped.
+    expect(r.text).not.toContain('Line:');
+    expect(r.text).toContain('Keep: Sam Guest');
+    expect(r.text).not.toMatch(/function|object Object/i);
+    expect(r.html).not.toMatch(/function|object Object/i);
+  });
+
   it('unknown tokens resolve empty and are reported by unknownTokens()', () => {
     const r = renderTemplate(
       { subject: 'x {{nope}}', body: 'Hi {{attendee_name}} {{also_nope}} end' },

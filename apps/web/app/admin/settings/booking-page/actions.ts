@@ -5,7 +5,7 @@ import { unstable_rethrow } from 'next/navigation';
 import { adminApi } from '@/lib/admin-api';
 import { hostFetch } from '@/lib/auth-session';
 
-export type SaveResult = { ok: boolean; message?: string; field?: 'handle' | 'branding' };
+export type SaveResult = { ok: boolean; message?: string; field?: 'handle' | 'vanity' | 'branding' };
 
 /**
  * Handle-availability check (server action) — `/v1/handle-available` is
@@ -39,6 +39,8 @@ export async function toggleEventHiddenAction(id: string, hidden: boolean): Prom
 
 export interface StudioPayload {
   handle?: string;
+  /** Vanity slug change: a string claims/changes it, null clears it, undefined = untouched. */
+  vanitySlug?: string | null;
   displayName?: string | null;
   avatarUrl?: string | null;
   coverUrl?: string | null;
@@ -63,6 +65,18 @@ export async function saveStudioAction(payload: StudioPayload): Promise<SaveResu
         return { ok: false, field: 'handle', message: `Handle unavailable (${j.message ?? 'taken'}).` };
       }
       if (!res.ok) return { ok: false, field: 'handle', message: 'Could not update handle.' };
+    }
+
+    if (payload.vanitySlug !== undefined) {
+      const res = await hostFetch(`/v1/account/vanity`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ vanitySlug: payload.vanitySlug }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { message?: string };
+        return { ok: false, field: 'vanity', message: j.message ?? 'Could not update the link.' };
+      }
     }
 
     await adminApi.updateBranding({

@@ -49,8 +49,21 @@ export const serverEnvSchema = z.object({
   // loaded from the deployment secret manager and is never transmitted.
   EMAIL_HTTP_CLIENT_ID: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional(),
   EMAIL_HTTP_SIGNING_SECRET: z.string().min(32).optional(),
+  // DEPRECATED: pre-HMAC static service key. Still read (never-break-env-vars)
+  // as a Bearer fallback on the transactional wire; migrate to the pair above.
+  EMAIL_HTTP_API_KEY: z.string().optional(),
   // Message category for `transactional-v1` (defaults to `lifecycle`).
   EMAIL_HTTP_CATEGORY: z.string().optional(),
+
+  // Premium features (vanity slug + future perks). Calendars is ALWAYS free —
+  // `locked` gates premium on the customer's Dapta AI subscription via the
+  // entitlement service below; `open` (default) unlocks everything, so a bare
+  // OSS fork gets every feature with no upstream wired.
+  PREMIUM_FEATURES: z.enum(['open', 'locked']).default('open'),
+  // Upstream entitlement service (cloud only): base URL + service key. Unset
+  // selects the disabled provider (OSS default).
+  ENTITLEMENTS_API_URL: z.string().url().optional(),
+  ENTITLEMENTS_API_KEY: z.string().optional(),
 
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),

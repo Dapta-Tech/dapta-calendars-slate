@@ -14,7 +14,13 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { sql } from 'drizzle-orm';
 import { createBooking, getAvailability } from './repository';
-import { createTeamBooking, getTeamAvailability, listConnections, recordConnectionHealth } from './parity';
+import {
+  createTeamBooking,
+  getTeamAvailability,
+  listConnections,
+  recordConnectionHealth,
+  rescheduleBooking,
+} from './parity';
 import { deleteSchedule } from './crud';
 
 /** Enabled provider whose busy-fetch always fails (vendor outage / revoked auth). */
@@ -149,6 +155,54 @@ describe('error visibility (SQLite in-memory)', () => {
     expect(await book(busyProvider)).toEqual({ ok: false, reason: 'SLOT_TAKEN' });
     // Healthy path still books.
     expect((await book(new DisabledCalendarProvider())).ok).toBe(true);
+  });
+
+  it('reschedule is fail-closed like create: busy calendar rejects the target, unreadable blocks the move', async () => {
+    const free = await getAvailability(db, ARGS());
+    const startUtc = free!.slots[0]!.startUtc;
+    const targetUtc = free!.slots[8]!.startUtc;
+    const targetMs = new Date(targetUtc).getTime();
+    const created = await createBooking(
+      db,
+      {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startMs: new Date(startUtc).getTime(),
+        attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+        answers: { company: 'Acme' },
+      },
+      new DisabledCalendarProvider(),
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const { uid } = created.booking;
+    const token = created.manageToken;
+    const move = (calendar: CalendarProvider) =>
+      rescheduleBooking(db, { uid, newStartMs: targetMs, manageToken: token }, calendar);
+
+    await connectConflictCalendar();
+
+    // Unreadable external calendar → the move is blocked VISIBLY, never applied blind.
+    expect(await move(new FailingCalendarProvider())).toEqual({
+      ok: false,
+      reason: 'CALENDAR_UNAVAILABLE',
+    });
+
+    // External conflict at the target slot → rejected as taken (double-booking averted).
+    const busyProvider = new InMemoryCalendarProvider();
+    busyProvider.seedBusy(CAL_REF, [
+      { startUtc: targetUtc, endUtc: new Date(targetMs + 30 * 60_000).toISOString() },
+    ]);
+    expect(await move(busyProvider)).toEqual({ ok: false, reason: 'SLOT_TAKEN' });
+
+    // Both rejections left the booking at its ORIGINAL time.
+    const row = await db.get<{ start_ms: number }>(sql`SELECT start_ms FROM booking WHERE uid = ${uid}`);
+    expect(Number(row!.start_ms)).toBe(new Date(startUtc).getTime());
+
+    // A readable, conflict-free calendar lets the same move through.
+    const moved = await move(new InMemoryCalendarProvider());
+    expect(moved.ok).toBe(true);
   });
 
   // --- Failure mode 6: genuine emptiness stays reason-less --------------------

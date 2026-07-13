@@ -28,6 +28,12 @@ export interface HttpEmailOptions {
   clientId?: string;
   /** HMAC secret loaded only from the runtime secret manager. Never transmitted or logged. */
   signingSecret?: string;
+  /**
+   * DEPRECATED static service key — Bearer fallback for the transactional wire
+   * when the HMAC pair is not configured, so legacy deployments keep sending
+   * after an upgrade. Remove once every environment carries clientId+secret.
+   */
+  apiKey?: string;
   /** Message category for `transactional-v1` (defaults to `lifecycle`). */
   category?: string;
   fromEmail: string;
@@ -52,12 +58,19 @@ export interface HttpEmailOptions {
  * `delivered:false`, which would look like success and silently drop the mail.
  */
 export class HttpEmailProvider implements EmailProvider {
+  /** The signed wire scopes messages by tenant — deliveries need an accountId. */
+  readonly requiresAccountContext: boolean;
+
   constructor(
     private readonly opts: HttpEmailOptions,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
+    this.requiresAccountContext = opts.profile === 'transactional-v1';
     if (opts.profile === 'transactional-v1') {
-      assertTransactionalEndpoint(opts.endpoint);
+      // A surprising endpoint path is a config smell worth a WARN — but config
+      // detail must never crash-loop the API (the deployment may front the
+      // service with a gateway prefix or a rewrite).
+      warnOnNonCanonicalEndpoint(opts.endpoint);
     }
   }
 
@@ -126,17 +139,28 @@ export class HttpEmailProvider implements EmailProvider {
     if (hasHtml) payload.html = message.html;
     if (typeof message.text === 'string' && message.text.length > 0) payload.text = message.text;
 
-    if (!this.opts.clientId || !this.opts.signingSecret) {
+    const requestBody = JSON.stringify(payload);
+    let authHeaders: Record<string, string>;
+    if (this.opts.clientId && this.opts.signingSecret) {
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      authHeaders = {
+        'x-dapta-client-id': this.opts.clientId,
+        'x-dapta-timestamp': timestamp,
+        'x-dapta-signature': signTransactionalRequest(
+          requestBody,
+          timestamp,
+          message.idempotencyKey ?? '',
+          this.opts.signingSecret,
+        ),
+      };
+    } else if (this.opts.apiKey || this.opts.token) {
+      // DEPRECATED legacy fallback: static service key as Bearer, so a
+      // deployment upgraded before rotating to the HMAC pair keeps sending.
+      authHeaders = { authorization: `Bearer ${this.opts.apiKey || this.opts.token}` };
+    } else {
+      // A SEND-time failure the outbox records and retries — never a boot throw.
       throw new Error('transactional email service authentication is not configured');
     }
-    const requestBody = JSON.stringify(payload);
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = signTransactionalRequest(
-      requestBody,
-      timestamp,
-      message.idempotencyKey ?? '',
-      this.opts.signingSecret,
-    );
 
     let res: Response;
     try {
@@ -144,9 +168,7 @@ export class HttpEmailProvider implements EmailProvider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-dapta-client-id': this.opts.clientId,
-          'x-dapta-timestamp': timestamp,
-          'x-dapta-signature': signature,
+          ...authHeaders,
         },
         body: requestBody,
       });
@@ -159,6 +181,16 @@ export class HttpEmailProvider implements EmailProvider {
   }
 }
 
+/**
+ * The canonical string deliberately pins the LOGICAL path constant, NOT the
+ * actual request path. The dapta-email verifier builds its canonical string
+ * the same way — a hardcoded `SIGNED_PATH = "/api/internal/email/send"`
+ * (email-service-auth.service.ts, `buildEmailServiceSignaturePayload`) — so
+ * both sides stay in agreement no matter what gateway prefix or rewrite the
+ * transport applies to the URL. Signing the observed request path would BREAK
+ * verification behind any prefixing proxy, which is exactly the deployment
+ * shape the endpoint WARN (vs the old assert) now permits.
+ */
 export function signTransactionalRequest(
   body: string,
   timestamp: string,
@@ -177,10 +209,17 @@ export function signTransactionalRequest(
   return createHmac('sha256', secret).update(canonical).digest('hex');
 }
 
-function assertTransactionalEndpoint(endpoint: string): void {
-  const url = new URL(endpoint);
-  if (url.pathname !== TRANSACTIONAL_EMAIL_PATH || url.search || url.hash) {
-    throw new Error(`transactional email endpoint must use ${TRANSACTIONAL_EMAIL_PATH}`);
+function warnOnNonCanonicalEndpoint(endpoint: string): void {
+  try {
+    const url = new URL(endpoint);
+    if (!url.pathname.endsWith(TRANSACTIONAL_EMAIL_PATH) || url.search || url.hash) {
+      console.warn(
+        `[email:http] transactional endpoint "${url.pathname}${url.search}${url.hash}" does not ` +
+          `end with the canonical ${TRANSACTIONAL_EMAIL_PATH} — sending anyway; verify the config.`,
+      );
+    }
+  } catch {
+    console.warn(`[email:http] transactional endpoint is not a valid URL — sends will fail until fixed.`);
   }
 }
 

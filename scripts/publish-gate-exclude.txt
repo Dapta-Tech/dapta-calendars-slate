@@ -1,11 +1,15 @@
-# Paths excluded from the trufflehog layer of scripts/publish-gate.sh (regex, one
-# per line). ONLY documented placeholders / compose-internal dev defaults belong
-# here — never a path that could carry a real credential.
+# Paths excluded from the trufflehog layer of scripts/publish-gate.sh (regex,
+# one per line). ONLY vendored/build/runtime infrastructure belongs here — the
+# directories that are gitignored and never part of the published tree.
 #
-# .env.example documents the DATABASE_URL shape with a placeholder URL; the
-# compose files carry the well-known local dev credentials that the same files
-# define themselves. TruffleHog can't verify them on the CI runner (no DB/DNS),
-# so they land in the "unknown" bucket and fail the gate as false positives.
-\.env\.example$
-docker-compose\.yml$
-docker-compose\.prod\.yml$
+# NEVER exclude a repo file by path — especially not .env.example or the
+# docker-compose files: those are exactly where credentials get pasted by
+# mistake, so the gate must always scan them. If a documented placeholder
+# false-positives, allowlist that single FINDING (detector + file + line) in
+# publish-gate-allowlist.txt instead.
+/node_modules/
+/\.git/
+/dist/
+/\.next/
+/\.turbo/
+/\.data/
