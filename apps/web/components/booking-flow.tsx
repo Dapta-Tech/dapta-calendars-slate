@@ -14,7 +14,7 @@ import {
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
-import { showBadge, signupHref } from '@/lib/growth';
+import { signupHref } from '@/lib/growth';
 
 interface Props {
   accountCode: string;
@@ -97,6 +97,7 @@ export function BookingFlow({
     const b = result.booking;
     const isPending = b.status === 'pending';
     const g = getMessages(locale).growth;
+    const ctaHref = signupHref('confirmation', accountCode);
     return (
       <div>
         <section className="bp-card border border-border bg-card p-6 text-card-foreground">
@@ -120,11 +121,11 @@ export function BookingFlow({
         </section>
         {/* Growth loop (R11): a quiet secondary line — a link, never a second
             primary CTA (R30) — gated by the same open-core badge switch. */}
-        {showBadge ? (
+        {ctaHref ? (
           <p className="mt-4 text-sm text-muted-foreground">
             {g.ctaQuestion}{' '}
             <a
-              href={signupHref('confirmation', accountCode)}
+              href={ctaHref}
               target="_blank"
               rel="noopener noreferrer"
               className="font-medium text-primary underline underline-offset-4 hover:opacity-80"
