@@ -36,12 +36,18 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     # The api image is a PRUNED single-package bundle (no monorepo root, so no
-    # root `db:migrate` script). Run the @slate/db migrate CLI directly via the
-    # tsx that ships as an @slate/api runtime dep. (Confirm the db `migrations/`
-    # dir is present in the pruned bundle during the docker smoke test; fallback
-    # = run migrations from the build stage — see deploy/DEPLOY-INTERNAL.md §6.)
+    # root `db:migrate` script). Run the @slate/db migrate CLI via the tsx JS
+    # entrypoint EXACTLY like the API's CMD: the distroless image has no shell,
+    # so its node entrypoint cannot exec the node_modules/.bin/tsx shell shim —
+    # only a .mjs/.js file. (--tsconfig mirrors the CMD; the dev tsconfig's
+    # extends chain doesn't resolve inside the pruned bundle.)
     command:
-      ['node_modules/.bin/tsx', 'node_modules/@slate/db/src/cli/migrate.ts']
+      [
+        'node_modules/tsx/dist/cli.mjs',
+        '--tsconfig',
+        'tsconfig.runtime.json',
+        'node_modules/@slate/db/src/cli/migrate.ts',
+      ]
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
     depends_on:
@@ -54,7 +60,14 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      NODE_ENV: production
+      # The committed build ships two auth providers: `local` (an
+      # unauthenticated DEV STUB) and `workos` (needs the private overlay).
+      # The API deliberately REFUSES the stub under NODE_ENV=production, so
+      # this smoke-test stack runs NODE_ENV=development by default — override
+      # both vars together for a real deployment with a real provider:
+      #   NODE_ENV=production AUTH_PROVIDER=workos (+ its JWT_SECRET etc.)
+      NODE_ENV: ${NODE_ENV:-development}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
       API_PORT: '4000'
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       # Community-safe default: no external email, no Dapta coupling.
