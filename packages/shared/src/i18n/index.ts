@@ -69,6 +69,15 @@ export interface BookingMessages {
     whereLabel: string;
     joinMeeting: string;
   };
+  /** Growth loop — public-page attribution badge + confirmation signup CTA. */
+  growth: {
+    madeWith: string;
+    ctaQuestion: string;
+    ctaAction: string;
+    /** SEO/OG meta descriptions for the public pages (host/event data only). */
+    seoProfile: string;
+    seoEvent: string;
+  };
   /** Team scheduling method names (the FREE layer competitors paywall). */
   scheduling: {
     round_robin: string;
@@ -629,6 +638,13 @@ export const en: BookingMessages = {
     noOpenTimes: 'No open times in the next 3 weeks.',
     whereLabel: 'Where',
     joinMeeting: 'Join the meeting',
+  },
+  growth: {
+    madeWith: 'Made with Dapta Calendars',
+    ctaQuestion: 'Want your own booking page?',
+    ctaAction: 'Get Dapta Calendars — free',
+    seoProfile: 'Book time with {name} online.',
+    seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
   },
   admin: {
     nav: {
@@ -1200,6 +1216,13 @@ export const es: BookingMessages = {
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     whereLabel: 'Dónde',
     joinMeeting: 'Unirse a la reunión',
+  },
+  growth: {
+    madeWith: 'Hecho con Dapta Calendars',
+    ctaQuestion: '¿Quieres tu propia página de reservas?',
+    ctaAction: 'Consigue Dapta Calendars — gratis',
+    seoProfile: 'Reserva un horario con {name} en línea.',
+    seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
   },
   admin: {
     nav: {
