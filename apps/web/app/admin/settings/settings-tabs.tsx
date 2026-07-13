@@ -16,6 +16,7 @@ const TABS: {
 }[] = [
   { key: 'general', href: '/admin/settings/general' },
   { key: 'bookingPage', href: '/admin/settings/booking-page' },
+  { key: 'notifications', href: '/admin/settings/notifications', adminOnly: true },
   { key: 'members', href: '/admin/settings/members', adminOnly: true },
   { key: 'developer', href: '/admin/settings/developer', adminOnly: true },
 ];
