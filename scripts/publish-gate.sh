@@ -75,10 +75,18 @@ echo "== publish-gate: trufflehog =="
 # (detector + file + line) in publish-gate-allowlist.txt — never by whole file.
 if command -v trufflehog >/dev/null 2>&1; then
   ALLOW="scripts/publish-gate-allowlist.txt"
-  # One key per finding: DetectorName:path:line (path relative to the root).
-  FOUND=$(trufflehog filesystem --no-update --results=verified,unknown --json \
-    --exclude-paths scripts/publish-gate-exclude.txt . 2>/dev/null |
-    node -e '
+  TH_JSON=$(mktemp) TH_ERR=$(mktemp)
+  trufflehog filesystem --no-update --results=verified,unknown --json \
+    --exclude-paths scripts/publish-gate-exclude.txt . >"$TH_JSON" 2>"$TH_ERR"
+  TH_EXIT=$?
+  if [ "$TH_EXIT" -ne 0 ]; then
+    # A crashed scanner is a FAILED gate, never a silent pass: no scan happened.
+    echo "FAIL: trufflehog exited $TH_EXIT — the scan did not complete:"
+    tail -5 "$TH_ERR"
+    FAIL=1
+  else
+    # One key per finding: DetectorName:path:line (path relative to the root).
+    FOUND=$(node -e '
       const rl = require("node:readline").createInterface({ input: process.stdin });
       rl.on("line", (l) => {
         try {
@@ -88,21 +96,23 @@ if command -v trufflehog >/dev/null 2>&1; then
           const file = String(meta.file ?? "").replace(/^(\.\/)+/, "");
           console.log(`${f.DetectorName}:${file}:${meta.line ?? 0}`);
         } catch { /* non-JSON log line — ignore */ }
-      });')
-  NEW=""
-  while IFS= read -r key; do
-    [ -n "$key" ] || continue
-    grep -qxF "$key" "$ALLOW" 2>/dev/null || NEW="${NEW}${key}"$'\n'
-  done <<<"$FOUND"
-  if [ -n "$NEW" ]; then
-    echo "FAIL: trufflehog findings not in the allowlist (DetectorName:file:line):"
-    printf '%s' "$NEW"
-    echo "A real credential must be rotated + removed. Only a DOCUMENTED placeholder"
-    echo "may be added to $ALLOW (one line per finding)."
-    FAIL=1
-  else
-    echo "OK: trufflehog clean (no unallowlisted findings)."
+      });' <"$TH_JSON")
+    NEW=""
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      grep -qxF "$key" "$ALLOW" 2>/dev/null || NEW="${NEW}${key}"$'\n'
+    done <<<"$FOUND"
+    if [ -n "$NEW" ]; then
+      echo "FAIL: trufflehog findings not in the allowlist (DetectorName:file:line):"
+      printf '%s' "$NEW"
+      echo "A real credential must be rotated + removed. Only a DOCUMENTED placeholder"
+      echo "may be added to $ALLOW (one line per finding)."
+      FAIL=1
+    else
+      echo "OK: trufflehog clean (no unallowlisted findings)."
+    fi
   fi
+  rm -f "$TH_JSON" "$TH_ERR"
 else
   echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
 fi
