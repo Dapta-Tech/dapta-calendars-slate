@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Body,
   Controller,
   Delete,
@@ -56,6 +57,38 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     await this.admin.updateSettings(p, body);
     return { ok: true };
+  }
+
+  // --- Vanity account slug (premium — included with the Dapta AI subscription).
+  @Get('account/vanity')
+  async vanityStatus(@Req() req: ReqLike) {
+    return this.admin.vanityStatus(await this.auth.resolveHost(req));
+  }
+
+  @Patch('account/vanity')
+  async setVanity(@Req() req: ReqLike, @Body() body: { vanitySlug?: string | null }) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (body?.vanitySlug !== null && typeof body?.vanitySlug !== 'string')
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'vanitySlug (string or null) required' });
+    const out = await this.admin.setVanity(p, body.vanitySlug);
+    if (!out.ok) {
+      if (out.reason === 'NOT_ENTITLED')
+        throw new ForbiddenException({
+          error: 'DAPTA_SUBSCRIPTION_REQUIRED',
+          message: 'Vanity links are included with your Dapta AI subscription.',
+        });
+      if (out.reason === 'taken')
+        throw new ConflictException({ error: 'VANITY_TAKEN', message: 'That link is already in use.' });
+      throw new BadRequestException({
+        error: out.reason === 'reserved' ? 'VANITY_RESERVED' : 'VANITY_INVALID',
+        message:
+          out.reason === 'reserved'
+            ? 'That word is reserved.'
+            : 'Use 3-30 lowercase letters, numbers, or hyphens.',
+      });
+    }
+    return { ok: true, vanitySlug: out.vanitySlug };
   }
 
   @Patch('me/handle')

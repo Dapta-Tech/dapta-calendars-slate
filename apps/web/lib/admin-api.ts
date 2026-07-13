@@ -59,7 +59,11 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export interface Me {
   accountId: string;
+  /** The CANONICAL public code (vanity slug when claimed, else the short code). */
   accountCode: string;
+  /** The immutable short code — a permanent alias while a vanity is set. */
+  accountShortCode: string;
+  vanitySlug: string | null;
   memberId: string;
   handle: string | null;
   displayName: string | null;
@@ -90,6 +94,12 @@ export interface AccountMember {
 export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || role === 'admin';
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
+  // Vanity account slug (premium — included with the Dapta AI subscription).
+  vanityStatus: () =>
+    req<{ vanitySlug: string | null; shortCode: string; canClaim: boolean }>(
+      'GET',
+      '/v1/account/vanity',
+    ),
   handleAvailable: (handle: string) =>
     req<{ handle: string; available: boolean; reason: string | null; suggestion?: string }>(
       'GET',

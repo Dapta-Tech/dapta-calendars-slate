@@ -7,10 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const [profile, adminEvents, locale] = await Promise.all([
+  const [profile, adminEvents, locale, vanity] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
     adminApi.listEventTypes(),
     getLocale(),
+    adminApi.vanityStatus().catch(() => ({ vanitySlug: null, shortCode: '', canClaim: false })),
   ]);
   const t = getMessages(locale).admin;
 
@@ -37,6 +38,8 @@ export default async function BookingPageSettings() {
       <Studio
         messages={t.studio}
         accountCode={me?.accountCode ?? ''}
+        vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
+        subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}
         displayName={displayName}
         handle={me?.handle ?? ''}
         bio={(style.bio as string) ?? ''}

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import Link from 'next/link';
 import { getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
@@ -66,12 +66,18 @@ export default async function BookingPage({
 
   if (!profile || !availability) notFound();
 
+  // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
+  const code = profile!.account.code;
+  if (accountCode !== code) {
+    permanentRedirect(`/${code}/${handle}/${slug}${lang ? `?lang=${lang}` : ''}`);
+  }
+
   return (
     <BrandedShell brandColor={profile.member.brandColor} style={profile.member.style}>
       <main className="mx-auto max-w-4xl px-6 py-12">
         <header className="mb-8 flex flex-col gap-1">
         <Link
-          href={`/${accountCode}/${handle}`}
+          href={`/${code}/${handle}`}
           className="text-sm text-muted-foreground hover:text-foreground"
         >
           ← {profile.member.displayName ?? profile.member.handle}

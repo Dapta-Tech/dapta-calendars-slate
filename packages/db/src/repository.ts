@@ -21,6 +21,7 @@ import {
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import { canonicalPublicCode } from './short-links';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -47,8 +48,11 @@ export function jsonParam(db: Db, value: unknown) {
 
 export interface AccountRow {
   id: string;
+  /** The canonical short code (or a legacy pretty code like the seeded `acme`). */
   code: string;
   name: string;
+  /** Premium vanity slug; when set it is the canonical PUBLIC code. */
+  vanity_slug: string | null;
 }
 export interface MemberRow {
   id: string;
@@ -137,8 +141,25 @@ export function validateIntakeAnswers(
 
 // --- Resolvers ------------------------------------------------------------
 
+/**
+ * THE public-code resolver (one place, mission short-links §4): a URL segment
+ * may be the canonical short code, a claimed vanity slug, or a retired legacy
+ * code kept alive in account_alias — all resolve to the same account. Callers
+ * that emit links must use `canonicalPublicCode(account)` (vanity ?? code);
+ * the web layer 308-redirects non-canonical segments.
+ */
 export async function getAccountByCode(db: Db, code: string): Promise<AccountRow | undefined> {
-  return db.get<AccountRow>(sql`SELECT id, code, name FROM account WHERE code = ${code} LIMIT 1`);
+  const c = code.toLowerCase();
+  const cols = sql`id, code, name, vanity_slug`;
+  const direct = await db.get<AccountRow>(
+    sql`SELECT ${cols} FROM account WHERE code = ${c} OR vanity_slug = ${c} LIMIT 1`,
+  );
+  if (direct) return direct;
+  return db.get<AccountRow>(
+    sql`SELECT a.id, a.code, a.name, a.vanity_slug FROM account a
+        JOIN account_alias al ON al.account_id = a.id
+        WHERE al.alias = ${c} LIMIT 1`,
+  );
 }
 
 export async function getMember(
@@ -297,7 +318,9 @@ export async function getPublicProfile(
         ORDER BY length_minutes ASC`,
   );
   return {
-    account: { code: account.code, name: account.name },
+    // Public responses always carry the CANONICAL code (vanity ?? short) so
+    // clients build/redirect to canonical links even when queried by an alias.
+    account: { code: canonicalPublicCode(account), name: account.name },
     member: {
       handle: member.handle,
       displayName: member.display_name,

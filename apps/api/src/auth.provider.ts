@@ -15,7 +15,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { sql } from '@slate/db';
+import { deriveUniqueHandle, getAccountByCode, insertAccountWithShortCode, sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 // The concrete `workos` adapter. The cycle (adapter imports the port/`header`
 // from here) is safe: each side references the other only inside function
@@ -54,8 +54,18 @@ export interface AuthProvider {
   resolveHost(req: ReqLike): Promise<ResolvedHost>;
 }
 
-/** DEV-only account code derived from an email; stable + unique per email. */
-function devCodeFromEmail(email: string): string {
+/**
+ * DEV-only stable identity anchor for a JIT account (unique per email). Used as
+ * account.external_id so concurrent/reseeded logins stay idempotent while the
+ * public `code` is a proper short code (legacy `dev-…` CODES were re-coded by
+ * the short-links backfill and live on as aliases).
+ */
+function devExternalIdFromEmail(email: string): string {
+  return `dev:${email.toLowerCase()}`;
+}
+
+/** The legacy dev code shape — still resolvable via account_alias after re-coding. */
+function legacyDevCodeFromEmail(email: string): string {
   const slug = email.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   return `dev-${slug || 'user'}`;
 }
@@ -119,18 +129,21 @@ export class LocalAuthProvider implements AuthProvider {
     );
     if (existing) return { accountId: existing.account_id, memberId: existing.member_id };
 
-    // JIT: a fresh isolated account+member for this email. Reuse the account if
-    // its derived code already exists (idempotent across reseeds/races).
-    const code = devCodeFromEmail(email);
-    let account = await this.db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = ${code}`);
+    // JIT: a fresh isolated account+member for this email, idempotent across
+    // reseeds/races via external_id (`dev:<email>`). Pre-short-links accounts
+    // are found by their legacy `dev-…` code (now an account_alias).
+    const extId = devExternalIdFromEmail(email);
+    const legacyCode = legacyDevCodeFromEmail(email);
+    let account = await this.db.get<{ id: string }>(
+      sql`SELECT id FROM account WHERE external_id = ${extId} LIMIT 1`,
+    );
+    if (!account) account = await getAccountByCode(this.db, legacyCode);
     if (!account) {
-      const id = randomUUID();
-      await this.db.run(
-        sql`INSERT INTO account (id, code, name, created_at)
-            VALUES (${id}, ${code}, ${email}, ${Date.now()})
-            ON CONFLICT (code) DO NOTHING`,
+      // Race-safe JIT: idempotent on external_id; a code collision regenerates.
+      await insertAccountWithShortCode(this.db, { name: email, externalId: extId });
+      account = await this.db.get<{ id: string }>(
+        sql`SELECT id FROM account WHERE external_id = ${extId} LIMIT 1`,
       );
-      account = await this.db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = ${code}`);
     }
     if (!account) throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'No session.' });
 
@@ -142,9 +155,11 @@ export class LocalAuthProvider implements AuthProvider {
       ? 'member'
       : 'owner';
     const memberId = randomUUID();
+    // Auto-handle at creation (short-links §3) — the "no handle" state is dead.
+    const handle = await deriveUniqueHandle(this.db, account.id, null, email);
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, email, display_name, role, created_at)
-          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${role}, ${Date.now()})`,
+      sql`INSERT INTO member (id, account_id, email, display_name, handle, role, created_at)
+          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${handle}, ${role}, ${Date.now()})`,
     );
     return { accountId: account.id, memberId };
   }
