@@ -49,6 +49,9 @@ export const serverEnvSchema = z.object({
   // loaded from the deployment secret manager and is never transmitted.
   EMAIL_HTTP_CLIENT_ID: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional(),
   EMAIL_HTTP_SIGNING_SECRET: z.string().min(32).optional(),
+  // DEPRECATED: pre-HMAC static service key. Still read (never-break-env-vars)
+  // as a Bearer fallback on the transactional wire; migrate to the pair above.
+  EMAIL_HTTP_API_KEY: z.string().optional(),
   // Message category for `transactional-v1` (defaults to `lifecycle`).
   EMAIL_HTTP_CATEGORY: z.string().optional(),
 

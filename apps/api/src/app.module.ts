@@ -51,6 +51,7 @@ import { AdminCrudController } from './admin-crud.controller';
             token: env.EMAIL_HTTP_TOKEN,
             clientId: env.EMAIL_HTTP_CLIENT_ID,
             signingSecret: env.EMAIL_HTTP_SIGNING_SECRET,
+            apiKey: env.EMAIL_HTTP_API_KEY,
             category: env.EMAIL_HTTP_CATEGORY,
           },
         }),
