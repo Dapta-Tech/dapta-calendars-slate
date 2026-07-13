@@ -3,6 +3,7 @@
  * Fully unit-tested; portable across SQLite and Postgres deployments.
  */
 export * from './slots';
+export * from './empty-reason';
 export * from './tz.util';
 export * from './host-selector';
 export * from './manage-token';

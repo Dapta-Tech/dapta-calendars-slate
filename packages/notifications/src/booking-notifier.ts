@@ -1,6 +1,14 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
 import { escapeHtml } from './util';
+import {
+  renderTemplate,
+  templateVars,
+  type EmailTemplate,
+  type RenderedEmail,
+  type TemplateLocale,
+  formatWhen,
+} from './templates';
 
 /** Render plaintext lines to a safe HTML body — every line HTML-escaped (E8). */
 function htmlBody(lines: string[]): string {
@@ -24,6 +32,23 @@ export interface BookingNotification {
   previousStartUtc?: string | null;
   /** DTSTAMP for the .ics (injected for determinism). Defaults to startUtc. */
   stamp?: string;
+  /**
+   * Which side this message is for: `attendee` → attendee only; `host` → host +
+   * co-hosts (deduped, `:host`-suffixed idempotency key). ABSENT = legacy: one
+   * message to everyone with the attendee copy — pre-toggle callers and forks
+   * that construct notifications directly keep today's behavior.
+   */
+  audience?: 'attendee' | 'host';
+  /**
+   * Resolved template to render (per-account custom or shipped default). The
+   * enqueue side snapshots it into the outbox payload so a later template edit
+   * never rewrites already-queued mail. Absent = built-in copy.
+   */
+  template?: EmailTemplate | null;
+  /** Locale for template variable formatting (`en` default). */
+  templateLocale?: string | null;
+  /** True while the booking awaits host confirmation (drives {{pending_note}}). */
+  pending?: boolean;
 }
 
 /**
@@ -32,74 +57,101 @@ export interface BookingNotification {
  * stable UID). The app only ever calls these methods; the transport is whatever
  * adapter is wired.
  *
- * Recipients: confirmation/reschedule/cancellation go to the attendee AND the
- * host (deduped) — parity with the old service, which mailed both. The
- * pending-request and declined mails are attendee-only (the host drives those
- * from the dashboard).
+ * Recipients: without an `audience`, confirmation/reschedule/cancellation go to
+ * the attendee AND the host (deduped) — parity with the old service. With an
+ * `audience` (the toggle-aware enqueue path) each side gets its own message so
+ * per-side notification settings can silence one without the other.
  */
 export class BookingNotifier {
   constructor(private readonly email: EmailProvider) {}
 
-  /** Attendee + host + any co-hosts, deduped, empty entries dropped. */
+  /** Recipient set for the notification's audience, deduped, empties dropped. */
   private recipients(n: BookingNotification): string[] {
     const set = new Set<string>();
-    if (n.attendee.email) set.add(n.attendee.email);
-    if (n.host.email) set.add(n.host.email);
-    for (const h of n.coHosts ?? []) if (h.email) set.add(h.email);
+    if (n.audience !== 'host' && n.attendee.email) set.add(n.attendee.email);
+    if (n.audience !== 'attendee') {
+      if (n.host.email) set.add(n.host.email);
+      for (const h of n.coHosts ?? []) if (h.email) set.add(h.email);
+    }
     return [...set];
+  }
+
+  /** Host-side messages get their own dedupe key; attendee keeps the legacy key. */
+  private idem(n: BookingNotification, base: string): string {
+    return n.audience === 'host' ? `${base}:host` : base;
+  }
+
+  /** Template copy when one is resolved; otherwise the built-in legacy copy. */
+  private copy(
+    n: BookingNotification & { reminderLeadMinutes?: number },
+    legacy: () => { subject: string; lines: string[] },
+  ): RenderedEmail {
+    if (n.template) {
+      const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
+      return renderTemplate(n.template, templateVars(n, locale));
+    }
+    const { subject, lines } = legacy();
+    const kept = lines.filter(Boolean);
+    return { subject, text: kept.join('\n'), html: htmlBody(kept) };
   }
 
   sendConfirmation(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `Your booking "${n.title}" is confirmed.`,
-      `When: ${when}`,
-      n.host.name ? `Host: ${n.host.name}` : '',
-      n.location ? `Where: ${n.location}` : '',
-      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Confirmed: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Your booking "${n.title}" is confirmed.`,
+        `When: ${when}`,
+        n.host.name ? `Host: ${n.host.name}` : '',
+        n.location ? `Where: ${n.location}` : '',
+        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
-      subject: `Confirmed: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
-      idempotencyKey: `calendar:${n.uid}:confirmation`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:confirmation`),
       attachments: [this.ics(n, 'REQUEST', 0)],
     });
   }
 
   /**
-   * A scheduled REMINDER before the meeting (attendee + host). No new .ics — the
-   * confirmed invite already lives in the calendar; this is just a nudge. The
-   * `payload` carries `reminderLeadMinutes` so the copy can say "starts in X".
+   * A scheduled REMINDER before the meeting. No new .ics — the confirmed invite
+   * already lives in the calendar; this is just a nudge. The `payload` carries
+   * `reminderLeadMinutes` so the copy can say "starts in X".
    */
   sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
     const lead = n.reminderLeadMinutes;
     const inWord =
       lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `Reminder: "${n.title}" starts ${inWord}.`,
-      `When: ${when}`,
-      n.host.name ? `Host: ${n.host.name}` : '',
-      n.location ? `Where: ${n.location}` : '',
-      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Reminder: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Reminder: "${n.title}" starts ${inWord}.`,
+        `When: ${when}`,
+        n.host.name ? `Host: ${n.host.name}` : '',
+        n.location ? `Where: ${n.location}` : '',
+        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
-      subject: `Reminder: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
       // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
-      idempotencyKey: `calendar:${n.uid}:reminder:${lead ?? 'x'}`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:reminder:${lead ?? 'x'}`),
       // No .ics on a reminder.
     });
   }
@@ -111,25 +163,28 @@ export class BookingNotifier {
    */
   sendPendingRequest(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `We received your request to book "${n.title}".`,
-      `When: ${when}`,
-      n.host.name ? `Host: ${n.host.name}` : '',
-      `This is pending confirmation${n.host.name ? ` by ${n.host.name}` : ''}. ` +
-        `You'll get another email once it's confirmed.`,
-      n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Request received: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `We received your request to book "${n.title}".`,
+        `When: ${when}`,
+        n.host.name ? `Host: ${n.host.name}` : '',
+        `This is pending confirmation${n.host.name ? ` by ${n.host.name}` : ''}. ` +
+          `You'll get another email once it's confirmed.`,
+        n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
-      // Host is copied too — a pending request is the host's cue to confirm/decline.
+      // Without an audience the host is copied too — the cue to confirm/decline.
       to: this.recipients(n),
-      subject: `Request received: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
-      idempotencyKey: `calendar:${n.uid}:pending`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:pending`),
       // No .ics on purpose — nothing is confirmed yet.
     });
   }
@@ -137,21 +192,24 @@ export class BookingNotifier {
   /** B3: the host declined a pending request — tell the attendee it's off. */
   sendDeclined(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `Unfortunately your request to book "${n.title}" (${when}) was not accepted.`,
-      n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Not accepted: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Unfortunately your request to book "${n.title}" (${when}) was not accepted.`,
+        n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
-      // Host is copied too — confirms to the host that the request was declined.
+      // Without an audience the host is copied too — confirms the decline landed.
       to: this.recipients(n),
-      subject: `Not accepted: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
-      idempotencyKey: `calendar:${n.uid}:declined`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:declined`),
       // No .ics — the pending request never produced a confirmed event.
     });
   }
@@ -159,46 +217,52 @@ export class BookingNotifier {
   sendReschedule(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
     const prev = n.previousStartUtc ? formatWhen(n.previousStartUtc, n.attendee.timeZone ?? 'UTC') : null;
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `Your booking "${n.title}" has been rescheduled.`,
-      prev ? `Was: ${prev}` : '',
-      `Now: ${when}`,
-      n.host.name ? `Host: ${n.host.name}` : '',
-      n.location ? `Where: ${n.location}` : '',
-      n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Rescheduled: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Your booking "${n.title}" has been rescheduled.`,
+        prev ? `Was: ${prev}` : '',
+        `Now: ${when}`,
+        n.host.name ? `Host: ${n.host.name}` : '',
+        n.location ? `Where: ${n.location}` : '',
+        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
-      subject: `Rescheduled: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
       // Keyed by the TARGET start: a retry of the same reschedule is de-duped,
       // but a second reschedule to a different time is a distinct message.
-      idempotencyKey: `calendar:${n.uid}:reschedule:${n.startUtc}`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:reschedule:${n.startUtc}`),
       attachments: [this.ics(n, 'REQUEST', 1)],
     });
   }
 
   sendCancellation(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const lines = [
-      `Hi ${n.attendee.name},`,
-      ``,
-      `Your booking "${n.title}" (${when}) has been cancelled.`,
-      n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
-    ].filter(Boolean);
+    const rendered = this.copy(n, () => ({
+      subject: `Cancelled: ${n.title} — ${when}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Your booking "${n.title}" (${when}) has been cancelled.`,
+        n.cancellationReason ? `Reason: ${n.cancellationReason}` : '',
+      ],
+    }));
     return this.email.send({
       accountId: n.accountId,
       to: this.recipients(n),
-      subject: `Cancelled: ${n.title} — ${when}`,
-      text: lines.join('\n'),
-      html: htmlBody(lines),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
       headers: { 'X-Booking-Uid': n.uid },
-      idempotencyKey: `calendar:${n.uid}:cancellation`,
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:cancellation`),
       attachments: [this.ics(n, 'CANCEL', 2)],
     });
   }
@@ -223,18 +287,3 @@ export class BookingNotifier {
   }
 }
 
-function formatWhen(iso: string, tz: string): string {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}

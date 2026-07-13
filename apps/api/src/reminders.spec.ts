@@ -68,11 +68,14 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
   it('accepting a booking schedules 24h + 1h reminders at start − lead', async () => {
     const { uid, startMs } = await bookFarOut();
     await settle();
+    // One row per side (attendee + host) per lead (24h + 1h) = 4.
     const rows = await reminders(uid);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(4);
     expect(rows.every((row) => typeof row.accountId === 'string')).toBe(true);
-    const dueTimes = rows.map((r) => r.nextAttemptAt).sort((a, b) => a - b);
+    const dueTimes = [...new Set(rows.map((r) => r.nextAttemptAt))].sort((a, b) => a - b);
     expect(dueTimes).toEqual([startMs - 24 * 60 * 60_000, startMs - 60 * 60_000]);
+    const audiences = rows.map((r) => (JSON.parse(r.payload!) as { audience?: string }).audience).sort();
+    expect(audiences).toEqual(['attendee', 'attendee', 'host', 'host']);
   });
 
   it('a due reminder sends a "Reminder:" email (no ICS), reused email kind', async () => {

@@ -2,6 +2,19 @@
 
 export type Locale = 'en' | 'es';
 
+/** The notification-email catalog (mirrors @slate/notifications EMAIL_TEMPLATE_KEYS). */
+export type NotificationEmailKey =
+  | 'attendee_confirmation'
+  | 'attendee_pending'
+  | 'attendee_declined'
+  | 'attendee_reschedule'
+  | 'attendee_cancellation'
+  | 'attendee_reminder'
+  | 'host_booked'
+  | 'host_rescheduled'
+  | 'host_cancelled'
+  | 'host_reminder';
+
 export interface BookingMessages {
   booking: {
     selectTime: string;
@@ -9,6 +22,12 @@ export interface BookingMessages {
     timezoneLabel: string;
     timezone: string;
     noSlots: string;
+    /** Config-error emptiness (public-safe: never names internals). */
+    noTimesNow: string;
+    /** External calendar unreachable (public-safe). */
+    timesUnavailable: string;
+    calendarUnavailableTitle: string;
+    calendarUnavailableBody: string;
     book: string;
     confirm: string;
     confirming: string;
@@ -131,6 +150,7 @@ export interface BookingMessages {
       bookingPage: string;
       members: string;
       developer: string;
+      notifications: string;
     };
     eventTypes: {
       title: string;
@@ -242,6 +262,16 @@ export interface BookingMessages {
       slotTaken: string;
       noHandleNotice: string;
       noHandleLink: string;
+      /** Actionable config-error notices (admin-only detail; one link each). */
+      scheduleMissingNotice: string;
+      scheduleMissingLink: string;
+      noHoursNotice: string;
+      noScheduleNotice: string;
+      availabilityLink: string;
+      calendarUnavailableNotice: string;
+      calendarUnavailableLink: string;
+      calendarUnavailableBooking: string;
+      slotsLoadError: string;
     };
     teams: {
       title: string;
@@ -389,6 +419,9 @@ export interface BookingMessages {
       healthOk: string;
       healthError: string;
       recheck: string;
+      /** Persisted-health caption: {time} interpolates the last probe time. */
+      lastChecked: string;
+      neverChecked: string;
       emptyTitle: string;
       emptyBody: string;
       emptyConflicts: string;
@@ -414,6 +447,38 @@ export interface BookingMessages {
       saved: string;
       save: string;
       saving: string;
+    };
+    notifications: {
+      title: string;
+      subtitle: string;
+      attendeeSection: string;
+      attendeeSectionDesc: string;
+      hostSection: string;
+      hostSectionDesc: string;
+      labels: Record<NotificationEmailKey, string>;
+      descriptions: Record<NotificationEmailKey, string>;
+      customizedBadge: string;
+      editTemplate: string;
+      updated: string;
+      updateFailed: string;
+      reminderLeads: string;
+      reminderLeadsHint: string;
+      reminderLeadsInvalid: string;
+      editorSubject: string;
+      editorBody: string;
+      variables: string;
+      variablesHint: string;
+      unknownTokensWarn: string;
+      preview: string;
+      usingDefault: string;
+      usingCustom: string;
+      reset: string;
+      resetDone: string;
+      save: string;
+      saving: string;
+      saved: string;
+      saveFailed: string;
+      back: string;
     };
     developer: {
       apiKeys: string;
@@ -511,6 +576,11 @@ export const en: BookingMessages = {
     timezoneLabel: 'Times shown in {timeZone}',
     timezone: 'Timezone',
     noSlots: 'No available times in this range.',
+    noTimesNow: 'No times are available right now. Please check back soon.',
+    timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
+    calendarUnavailableTitle: 'This time could not be confirmed',
+    calendarUnavailableBody:
+      'We could not confirm this time right now. Please try again in a few minutes.',
     book: 'Book',
     confirm: 'Confirm booking',
     confirming: 'Confirming…',
@@ -630,6 +700,7 @@ export const en: BookingMessages = {
       bookingPage: 'Booking Page',
       members: 'Members',
       developer: 'Developer',
+      notifications: 'Notifications',
     },
     eventTypes: {
       title: 'Events',
@@ -740,6 +811,17 @@ export const en: BookingMessages = {
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
       noHandleLink: 'Set your handle in Booking Page settings',
       slotTaken: 'That time was just taken — pick another slot.',
+      scheduleMissingNotice: 'This event’s schedule is missing — pick a schedule in the event settings.',
+      scheduleMissingLink: 'Open event settings',
+      noHoursNotice: 'No working hours configured for this event’s schedule.',
+      noScheduleNotice: 'You don’t have a schedule yet — create one with your working hours.',
+      availabilityLink: 'Open Availability',
+      calendarUnavailableNotice:
+        'Couldn’t reach the connected calendar — times are hidden to prevent double-bookings.',
+      calendarUnavailableLink: 'Check Calendars',
+      calendarUnavailableBooking:
+        'Couldn’t reach the connected calendar — the booking was blocked to prevent a double-booking. Check Calendars and retry.',
+      slotsLoadError: 'Couldn’t load times. Try again in a moment.',
     },
     teams: {
       title: 'Teams',
@@ -886,6 +968,8 @@ export const en: BookingMessages = {
       healthOk: 'Connected',
       healthError: 'Needs attention',
       recheck: 'Re-check',
+      lastChecked: 'Checked {time}',
+      neverChecked: 'Not checked yet',
       emptyTitle: 'No calendars connected yet',
       emptyBody: 'Connect Google or Outlook so {product} can read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
@@ -911,6 +995,60 @@ export const en: BookingMessages = {
       saved: 'Saved.',
       save: 'Save',
       saving: 'Saving…',
+    },
+    notifications: {
+      title: 'Notifications',
+      subtitle: 'Choose which booking emails go out and edit their templates.',
+      attendeeSection: 'Attendee emails',
+      attendeeSectionDesc: 'Sent to the person who booked.',
+      hostSection: 'Host emails',
+      hostSectionDesc: 'Sent to you and any co-hosts.',
+      labels: {
+        attendee_confirmation: 'Booking confirmed',
+        attendee_pending: 'Request received',
+        attendee_declined: 'Request declined',
+        attendee_reschedule: 'Booking rescheduled',
+        attendee_cancellation: 'Booking cancelled',
+        attendee_reminder: 'Reminders',
+        host_booked: 'New booking',
+        host_rescheduled: 'Booking rescheduled',
+        host_cancelled: 'Booking cancelled',
+        host_reminder: 'Reminders',
+      },
+      descriptions: {
+        attendee_confirmation: 'Confirmation with calendar invite when a booking is accepted.',
+        attendee_pending: 'Acknowledgement when a booking still needs your approval.',
+        attendee_declined: 'Notice when you decline a pending request.',
+        attendee_reschedule: 'Updated invite when the time changes.',
+        attendee_cancellation: 'Cancellation notice with the calendar removal.',
+        attendee_reminder: 'Nudges before the meeting starts.',
+        host_booked: 'A new booking or booking request came in.',
+        host_rescheduled: 'A booking of yours moved to a new time.',
+        host_cancelled: 'A booking of yours was cancelled.',
+        host_reminder: 'Your own nudge before the meeting starts.',
+      },
+      customizedBadge: 'Customized',
+      editTemplate: 'Edit template',
+      updated: 'Updated.',
+      updateFailed: 'Could not update — try again.',
+      reminderLeads: 'Send reminders before start',
+      reminderLeadsHint: 'Minutes before start, comma-separated (e.g. 1440, 60). Up to 5.',
+      reminderLeadsInvalid: 'Whole minutes between 5 and 40320, up to 5 values.',
+      editorSubject: 'Subject',
+      editorBody: 'Body',
+      variables: 'Variables',
+      variablesHint: 'Click to insert. Lines whose variables are all empty are left out of the email.',
+      unknownTokensWarn: 'Unknown variables render empty:',
+      preview: 'Preview',
+      usingDefault: 'Using the default template',
+      usingCustom: 'Using a custom template',
+      reset: 'Reset to default',
+      resetDone: 'Template reset to default.',
+      save: 'Save',
+      saving: 'Saving…',
+      saved: 'Saved.',
+      saveFailed: 'Save failed.',
+      back: 'Back to notifications',
     },
     developer: {
       apiKeys: 'API keys',
@@ -1008,6 +1146,12 @@ export const es: BookingMessages = {
     timezoneLabel: 'Horarios en {timeZone}',
     timezone: 'Zona horaria',
     noSlots: 'No hay horarios disponibles en este rango.',
+    noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
+    timesUnavailable:
+      'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
+    calendarUnavailableTitle: 'No se pudo confirmar este horario',
+    calendarUnavailableBody:
+      'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',
     book: 'Reservar',
     confirm: 'Confirmar reserva',
     confirming: 'Confirmando…',
@@ -1127,6 +1271,7 @@ export const es: BookingMessages = {
       bookingPage: 'Página de reservas',
       members: 'Miembros',
       developer: 'Desarrollador',
+      notifications: 'Notificaciones',
     },
     eventTypes: {
       title: 'Eventos',
@@ -1237,6 +1382,18 @@ export const es: BookingMessages = {
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
       noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
+      scheduleMissingNotice:
+        'Falta el horario de este evento — elige un horario en la configuración del evento.',
+      scheduleMissingLink: 'Abrir configuración del evento',
+      noHoursNotice: 'No hay horas de trabajo configuradas para el horario de este evento.',
+      noScheduleNotice: 'Aún no tienes un horario — crea uno con tus horas de trabajo.',
+      availabilityLink: 'Abrir Disponibilidad',
+      calendarUnavailableNotice:
+        'No se pudo acceder al calendario conectado — los horarios se ocultan para evitar dobles reservas.',
+      calendarUnavailableLink: 'Revisar Calendarios',
+      calendarUnavailableBooking:
+        'No se pudo acceder al calendario conectado — la reserva se bloqueó para evitar una doble reserva. Revisa Calendarios y reintenta.',
+      slotsLoadError: 'No se pudieron cargar los horarios. Inténtalo de nuevo en un momento.',
     },
     teams: {
       title: 'Equipos',
@@ -1383,6 +1540,8 @@ export const es: BookingMessages = {
       healthOk: 'Conectado',
       healthError: 'Requiere atención',
       recheck: 'Volver a comprobar',
+      lastChecked: 'Comprobado {time}',
+      neverChecked: 'Sin comprobar todavía',
       emptyTitle: 'Aún no hay calendarios conectados',
       emptyBody: 'Conecta Google u Outlook para que {product} pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
@@ -1408,6 +1567,60 @@ export const es: BookingMessages = {
       saved: 'Guardado.',
       save: 'Guardar',
       saving: 'Guardando…',
+    },
+    notifications: {
+      title: 'Notificaciones',
+      subtitle: 'Elige qué correos de reservas se envían y edita sus plantillas.',
+      attendeeSection: 'Correos al asistente',
+      attendeeSectionDesc: 'Enviados a la persona que reservó.',
+      hostSection: 'Correos al anfitrión',
+      hostSectionDesc: 'Enviados a ti y a los co-anfitriones.',
+      labels: {
+        attendee_confirmation: 'Reserva confirmada',
+        attendee_pending: 'Solicitud recibida',
+        attendee_declined: 'Solicitud rechazada',
+        attendee_reschedule: 'Reserva reprogramada',
+        attendee_cancellation: 'Reserva cancelada',
+        attendee_reminder: 'Recordatorios',
+        host_booked: 'Nueva reserva',
+        host_rescheduled: 'Reserva reprogramada',
+        host_cancelled: 'Reserva cancelada',
+        host_reminder: 'Recordatorios',
+      },
+      descriptions: {
+        attendee_confirmation: 'Confirmación con invitación de calendario al aceptar la reserva.',
+        attendee_pending: 'Acuse de recibo cuando la reserva requiere tu aprobación.',
+        attendee_declined: 'Aviso cuando rechazas una solicitud pendiente.',
+        attendee_reschedule: 'Invitación actualizada cuando cambia la hora.',
+        attendee_cancellation: 'Aviso de cancelación con la eliminación del calendario.',
+        attendee_reminder: 'Avisos antes de que empiece la reunión.',
+        host_booked: 'Entró una nueva reserva o solicitud de reserva.',
+        host_rescheduled: 'Una de tus reservas cambió de hora.',
+        host_cancelled: 'Una de tus reservas fue cancelada.',
+        host_reminder: 'Tu propio aviso antes de que empiece la reunión.',
+      },
+      customizedBadge: 'Personalizada',
+      editTemplate: 'Editar plantilla',
+      updated: 'Actualizado.',
+      updateFailed: 'No se pudo actualizar — inténtalo de nuevo.',
+      reminderLeads: 'Enviar recordatorios antes del inicio',
+      reminderLeadsHint: 'Minutos antes del inicio, separados por comas (p. ej. 1440, 60). Hasta 5.',
+      reminderLeadsInvalid: 'Minutos enteros entre 5 y 40320, hasta 5 valores.',
+      editorSubject: 'Asunto',
+      editorBody: 'Cuerpo',
+      variables: 'Variables',
+      variablesHint: 'Haz clic para insertar. Las líneas cuyas variables queden vacías se omiten del correo.',
+      unknownTokensWarn: 'Variables desconocidas se muestran vacías:',
+      preview: 'Vista previa',
+      usingDefault: 'Usando la plantilla predeterminada',
+      usingCustom: 'Usando una plantilla personalizada',
+      reset: 'Restablecer predeterminada',
+      resetDone: 'Plantilla restablecida.',
+      save: 'Guardar',
+      saving: 'Guardando…',
+      saved: 'Guardado.',
+      saveFailed: 'Error al guardar.',
+      back: 'Volver a notificaciones',
     },
     developer: {
       apiKeys: 'Claves API',

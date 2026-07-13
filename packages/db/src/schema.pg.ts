@@ -198,6 +198,10 @@ export const connectedCalendar = pgTable('connected_calendar', {
   isDestination: integer('is_destination').notNull().default(0),
   checkConflicts: integer('check_conflicts').notNull().default(1),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  /** Persisted health (last explicit probe): NULL last_check_at = never checked. */
+  lastCheckAt: bigint('last_check_at', { mode: 'number' }),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
 });
 
 export const apiKey = pgTable('api_key', {
@@ -258,6 +262,23 @@ export const outbox = pgTable('outbox', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * Per-account notification controls (toggles + template overrides). Absent row
+ * = shipped default (enabled, stock template); subject/body NULL = stock
+ * template; reminder_lead_minutes = TEXT JSON array (reminder key only).
+ */
+export const notificationSetting = pgTable('notification_setting', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  emailKey: text('email_key').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  subject: text('subject'),
+  body: text('body'),
+  reminderLeadMinutes: text('reminder_lead_minutes'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -276,4 +297,5 @@ export const pgSchema = {
   webhook,
   bookingReference,
   outbox,
+  notificationSetting,
 };

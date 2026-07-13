@@ -9,10 +9,12 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import {
+  classifyEmptyReason,
   computeSlots,
   generateManageToken,
   isExclusionViolation,
   isUniqueViolation,
+  type AvailabilityEmptyReason,
   type AvailabilityRule,
   type Interval,
 } from '@slate/engine';
@@ -85,7 +87,7 @@ export interface EventTypeRow {
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' }
+  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' | 'CALENDAR_UNAVAILABLE' }
   | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
@@ -225,10 +227,18 @@ export async function isSlotBookable(
         WHERE host_member_id = ${args.hostMemberId} AND status IN ('accepted','pending')
               AND start_ms < ${endMs} AND end_ms > ${args.startMs}${exclude}`,
   );
+  // Fail-closed: an unreachable external calendar makes the target slot NOT
+  // bookable (never move a meeting onto a conflict we couldn't see).
+  let externalBusy: Interval[];
+  try {
+    externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs);
+  } catch {
+    return false;
+  }
   const busy: Interval[] = [
     ...rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) })),
     ...(await loadReservationBusy(db, args.hostMemberId, args.startMs, endMs, args.now?.getTime())),
-    ...(await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs)),
+    ...externalBusy,
   ];
 
   const slots = computeSlots({
@@ -328,6 +338,12 @@ export interface AvailabilityResult {
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
   slots: Array<{ startUtc: string; spotsLeft?: number; capacity?: number }>;
+  /**
+   * Present only when `slots` is empty because of a CONFIGURATION error
+   * (missing schedule, no hours, unreachable external calendar) — never for
+   * genuine fully-booked / out-of-range emptiness.
+   */
+  emptyReason?: AvailabilityEmptyReason;
 }
 
 export async function loadAvailabilityRules(db: Db, scheduleId: string): Promise<AvailabilityRule[]> {
@@ -436,22 +452,59 @@ export async function getAvailability(
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return undefined;
 
-  const schedule =
-    (await resolveScheduleTimeZone(db, eventType.schedule_id)) ??
-    (await resolveScheduleTimeZone(db, member.default_schedule_id));
+  const referenced = await resolveScheduleTimeZone(db, eventType.schedule_id);
+  const fallback = referenced
+    ? undefined
+    : await resolveScheduleTimeZone(db, member.default_schedule_id);
+  const schedule = referenced ?? fallback;
   const scheduleTimeZone = schedule?.timeZone ?? member.time_zone;
 
   let rules: AvailabilityRule[] = [];
   if (schedule) rules = await loadAvailabilityRules(db, schedule.id);
 
+  const eventTypeOut = {
+    slug: eventType.slug,
+    title: eventType.title,
+    lengthMinutes: eventType.length_minutes,
+    bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
+  };
+  const displayTz = args.displayTimeZone ?? scheduleTimeZone;
+
+  // Config errors (dangling schedule ref / no schedule / no hours) must be
+  // RECOGNIZABLE, not a silent empty array — classify before computing.
+  const configReason = classifyEmptyReason({
+    referencedScheduleId: eventType.schedule_id,
+    referencedScheduleExists: !!referenced,
+    fallbackScheduleExists: !!fallback,
+    ruleCount: rules.length,
+  });
+  if (configReason) {
+    return { eventType: eventTypeOut, timeZone: displayTz, slots: [], emptyReason: configReason };
+  }
+
   const capacity = eventType.seats_per_time_slot ?? 1;
   const isGroup = capacity > 1;
+
+  // External busy is FAIL-CLOSED: if the connected calendar can't be read we
+  // withhold slots (with a visible reason) rather than offer times that may
+  // double-book — and rather than 500 on the whole request.
+  let externalBusy: Interval[];
+  try {
+    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs);
+  } catch {
+    return {
+      eventType: eventTypeOut,
+      timeZone: displayTz,
+      slots: [],
+      emptyReason: 'CALENDAR_UNAVAILABLE',
+    };
+  }
 
   const busy = [
     // Group events don't self-block: their own bookings stay offered until full.
     ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs, isGroup ? eventType.id : undefined)),
     ...(await loadReservationBusy(db, member.id, args.fromMs, args.toMs, args.now?.getTime())),
-    ...(await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs)),
+    ...externalBusy,
   ];
 
   const slots = computeSlots({
@@ -483,16 +536,7 @@ export async function getAvailability(
     outSlots = slots.map((d) => ({ startUtc: d.toISOString() }));
   }
 
-  return {
-    eventType: {
-      slug: eventType.slug,
-      title: eventType.title,
-      lengthMinutes: eventType.length_minutes,
-      bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
-    },
-    timeZone: args.displayTimeZone ?? scheduleTimeZone,
-    slots: outSlots,
-  };
+  return { eventType: eventTypeOut, timeZone: displayTz, slots: outSlots };
 }
 
 /**
@@ -526,7 +570,16 @@ function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: num
   return !!row;
 }
 
-export async function createBooking(db: Db, args: CreateBookingArgs): Promise<BookingOutcome> {
+export async function createBooking(
+  db: Db,
+  args: CreateBookingArgs,
+  /**
+   * Wired CalendarProvider: the create path re-checks the host's external busy
+   * over the booking window (fail-closed). Undefined/disabled ⇒ local-only,
+   * exactly the pre-existing clone-and-run behavior.
+   */
+  calendar?: CalendarProvider,
+): Promise<BookingOutcome> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const member = args.memberId
@@ -607,6 +660,21 @@ export async function createBooking(db: Db, args: CreateBookingArgs): Promise<Bo
       // the first booker (per-seat manage tokens are a follow-up).
       return { ok: true, booking: rec, manageToken: '' };
     }
+  }
+
+  // External-calendar conflict check at CREATE time (error-visibility §5).
+  // Availability reads already subtract external busy, but the create path
+  // previously trusted the read blindly — a slot gone busy on the connected
+  // calendar between read and book was silently double-booked. Policy:
+  // fail-closed — a conflict rejects the slot, and an UNREADABLE calendar
+  // blocks the booking visibly instead of booking blind.
+  try {
+    const externalBusy = await loadExternalBusy(db, calendar, member.id, startMs, endMs);
+    if (externalBusy.some((b) => b.start.getTime() < endMs && b.end.getTime() > startMs)) {
+      return { ok: false, reason: 'SLOT_TAKEN' };
+    }
+  } catch {
+    return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
   }
 
   const now = Date.now();

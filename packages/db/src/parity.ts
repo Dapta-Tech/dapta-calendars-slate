@@ -8,6 +8,7 @@
  */
 import { randomUUID, createHash, randomBytes, createHmac } from 'node:crypto';
 import {
+  classifyEmptyReason,
   computeSlots,
   generateManageToken,
   intersectInstants,
@@ -15,6 +16,7 @@ import {
   selectLuckyHost,
   unionInstants,
   verifyManageToken,
+  type AvailabilityEmptyReason,
   type AvailabilityRule,
   type HostCandidate,
   type Interval,
@@ -364,7 +366,12 @@ async function getEventHosts(db: Db, eventTypeId: string): Promise<EventHostRow[
   );
 }
 
-/** Free slot instants (ms) for one host of a team event, over the window. */
+/**
+ * Free slot instants (ms) for one host of a team event, over the window —
+ * plus the config-error reason when the host can offer nothing because of
+ * broken configuration (dangling/missing schedule, no hours, unreadable
+ * external calendar), so team availability can surface WHY it's empty.
+ */
 async function hostFreeSlotMs(
   db: Db,
   host: EventHostRow,
@@ -373,21 +380,40 @@ async function hostFreeSlotMs(
   toMs: number,
   now: Date,
   calendar?: CalendarProvider,
-): Promise<Set<number>> {
+): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
   const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
     sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
   );
-  if (!member) return new Set();
-  const schedule =
-    (await resolveScheduleTimeZone(db, host.schedule_id)) ??
-    (await resolveScheduleTimeZone(db, member.default_schedule_id));
+  if (!member) return { free: new Set(), reason: 'NO_SCHEDULE' };
+  const referenced = await resolveScheduleTimeZone(db, host.schedule_id);
+  const fallback = referenced
+    ? undefined
+    : await resolveScheduleTimeZone(db, member.default_schedule_id);
+  const schedule = referenced ?? fallback;
   const tz = schedule?.timeZone ?? member.time_zone;
   let rules: AvailabilityRule[] = [];
   if (schedule) rules = await loadAvailabilityRules(db, schedule.id);
+
+  const configReason = classifyEmptyReason({
+    referencedScheduleId: host.schedule_id,
+    referencedScheduleExists: !!referenced,
+    fallbackScheduleExists: !!fallback,
+    ruleCount: rules.length,
+  });
+  if (configReason) return { free: new Set(), reason: configReason };
+
+  // Fail-closed: an unreadable external calendar contributes NO free slots
+  // (never offer times we couldn't conflict-check) and reports why.
+  let externalBusy: Interval[];
+  try {
+    externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
+  } catch {
+    return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
+  }
   const busy: Interval[] = [
     ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
     ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
-    ...(await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs)),
+    ...externalBusy,
   ];
   const slots = computeSlots({
     fromUtc: new Date(fromMs),
@@ -402,7 +428,7 @@ async function hostFreeSlotMs(
     minimumBookingNoticeMin: et.minimum_booking_notice,
     now,
   });
-  return new Set(slots.map((d) => d.getTime()));
+  return { free: new Set(slots.map((d) => d.getTime())), reason: null };
 }
 
 export interface TeamAvailabilityResult {
@@ -415,6 +441,8 @@ export interface TeamAvailabilityResult {
   };
   timeZone: string;
   slots: string[];
+  /** Present only when `slots` is empty because of a configuration error. */
+  emptyReason?: AvailabilityEmptyReason;
 }
 
 /** The three FREE team scheduling methods; null/unknown → round_robin. */
@@ -480,10 +508,10 @@ export async function getTeamAvailability(
   const now = args.now ?? new Date();
   const method = normalizeSchedulingMethod(et.scheduling_type);
 
-  const hostSets: Array<{ isFixed: boolean; free: Set<number> }> = [];
+  const hostSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
   for (const host of hosts) {
-    const free = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
-    hostSets.push({ isFixed: host.is_fixed === 1, free });
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
+    hostSets.push({ isFixed: host.is_fixed === 1, free, reason });
   }
   const slots = combineTeamSlots(method, hostSets).map((ms) => new Date(ms).toISOString());
   return {
@@ -496,12 +524,42 @@ export async function getTeamAvailability(
     },
     timeZone: args.displayTimeZone ?? team.time_zone,
     slots,
+    emptyReason: slots.length === 0 ? teamEmptyReason(method, hosts.length, hostSets) : undefined,
   };
+}
+
+/**
+ * Attribute an empty team window to configuration when the method makes the
+ * broken host(s) decisive:
+ *   - any host failing CALENDAR_UNAVAILABLE ⇒ we failed closed, report it;
+ *   - collective (and the fixed set of fixed_round_robin): ONE broken host
+ *     empties the intersection ⇒ report that host's reason;
+ *   - round_robin (union): only when EVERY host is broken is emptiness a
+ *     config error — otherwise a healthy host was genuinely busy.
+ */
+function teamEmptyReason(
+  method: TeamSchedulingMethod,
+  hostCount: number,
+  hostSets: Array<{ isFixed: boolean; reason: AvailabilityEmptyReason | null }>,
+): AvailabilityEmptyReason | undefined {
+  if (hostCount === 0) return 'NO_HOSTS';
+  const precedence: AvailabilityEmptyReason[] = ['SCHEDULE_MISSING', 'NO_SCHEDULE', 'NO_HOURS'];
+  const pick = (reasons: Array<AvailabilityEmptyReason | null>): AvailabilityEmptyReason | undefined =>
+    precedence.find((r) => reasons.includes(r));
+  const all = hostSets.map((h) => h.reason);
+  if (all.includes('CALENDAR_UNAVAILABLE')) return 'CALENDAR_UNAVAILABLE';
+  if (method === 'collective') return pick(all);
+  if (method === 'fixed_round_robin') {
+    const fixedReasons = hostSets.filter((h) => h.isFixed).map((h) => h.reason);
+    const fromFixed = pick(fixedReasons);
+    if (fromFixed) return fromFixed;
+  }
+  return all.every((r) => r !== null) ? pick(all) : undefined;
 }
 
 export type TeamBookingOutcome =
   | { ok: true; uid: string; hostMemberId: string; manageToken: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID'; message?: string };
+  | { ok: false; reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID' | 'CALENDAR_UNAVAILABLE'; message?: string };
 
 /** True (as a 1-row SELECT) if `memberId` already holds an overlapping booking —
  * whether as the primary host_member_id OR an assigned co-host (booking_host). */
@@ -546,6 +604,9 @@ export async function createTeamBooking(
     attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
     answers?: Record<string, unknown>;
   },
+  /** Wired CalendarProvider — candidate hosts are conflict-checked against
+   *  their external calendars, fail-closed (see createBooking). */
+  calendar?: CalendarProvider,
 ): Promise<TeamBookingOutcome> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
@@ -563,9 +624,21 @@ export async function createTeamBooking(
 
   // Which hosts are actually free at this instant (busy whether primary or co-host)?
   const candidates: HostCandidate[] = [];
+  let sawCalendarFailure = false;
   for (const host of hosts) {
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
+    // External-calendar conflict check at CREATE time, fail-closed per host: a
+    // busy external calendar disqualifies the host, and so does an UNREADABLE
+    // one (never assign a host we couldn't verify). If NO verifiable host
+    // remains because of fetch failures, the outcome says so visibly.
+    try {
+      const externalBusy = await loadExternalBusy(db, calendar, host.member_id, args.startMs, endMs);
+      if (externalBusy.some((b) => b.start.getTime() < endMs && b.end.getTime() > args.startMs)) continue;
+    } catch {
+      sawCalendarFailure = true;
+      continue;
+    }
     const counts = await db.get<{ n: number; last: number | null }>(
       sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
           WHERE b.status = 'accepted'
@@ -584,7 +657,8 @@ export async function createTeamBooking(
 
   // Resolve the assigned host set for the method.
   const assigned = resolveAssignment(method, hosts, candidates);
-  if (!assigned || assigned.length === 0) return { ok: false, reason: 'SLOT_TAKEN' };
+  if (!assigned || assigned.length === 0)
+    return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
 
   const organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
   const assignedIds = assigned.map((h) => h.memberId);
@@ -990,6 +1064,8 @@ export interface BookingNotificationContext {
   attendee: { name: string; email: string; timeZone: string };
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
   coHosts: Array<{ name: string | null; email: string | null }>;
+  /** Host member's UI locale — picks the default-template language (EN/ES). */
+  hostLocale: string | null;
 }
 
 /**
@@ -1018,9 +1094,11 @@ export async function loadBookingNotificationContext(
     att_name: string | null;
     att_email: string | null;
     att_tz: string | null;
+    host_locale: string | null;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+               m.locale AS host_locale,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -1050,6 +1128,7 @@ export async function loadBookingNotificationContext(
       timeZone: row.att_tz ?? 'UTC',
     },
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
+    hostLocale: row.host_locale,
   };
 }
 
@@ -1165,6 +1244,10 @@ export interface ConnectionView {
   primaryEmail: string | null;
   isDestination: boolean;
   checkConflicts: boolean;
+  /** Persisted health from the last probe; null lastCheckAt = never checked. */
+  lastCheckAt: number | null;
+  lastCheckOk: boolean | null;
+  lastCheckDetail: string | null;
 }
 
 export async function listConnections(db: Db, memberId: string): Promise<ConnectionView[]> {
@@ -1175,8 +1258,12 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     primary_email: string | null;
     is_destination: number;
     check_conflicts: number;
+    last_check_at: number | null;
+    last_check_ok: number | null;
+    last_check_detail: string | null;
   }>(
-    sql`SELECT id, provider, external_id, primary_email, is_destination, check_conflicts
+    sql`SELECT id, provider, external_id, primary_email, is_destination, check_conflicts,
+               last_check_at, last_check_ok, last_check_detail
         FROM connected_calendar WHERE member_id = ${memberId}`,
   );
   return rows.map((r) => ({
@@ -1186,7 +1273,25 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     primaryEmail: r.primary_email,
     isDestination: !!r.is_destination,
     checkConflicts: !!r.check_conflicts,
+    lastCheckAt: r.last_check_at == null ? null : Number(r.last_check_at),
+    lastCheckOk: r.last_check_ok == null ? null : !!r.last_check_ok,
+    lastCheckDetail: r.last_check_detail,
   }));
+}
+
+/** Persist the outcome of a health probe so the UI can show it with last-checked info. */
+export async function recordConnectionHealth(
+  db: Db,
+  memberId: string,
+  id: string,
+  health: { ok: boolean; detail?: string | null },
+): Promise<void> {
+  await db.run(
+    sql`UPDATE connected_calendar
+        SET last_check_at = ${Date.now()}, last_check_ok = ${health.ok ? 1 : 0},
+            last_check_detail = ${health.detail ?? null}
+        WHERE id = ${id} AND member_id = ${memberId}`,
+  );
 }
 
 export async function createConnection(

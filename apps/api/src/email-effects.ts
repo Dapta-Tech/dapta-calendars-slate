@@ -2,11 +2,19 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   enqueueOutbox,
   deletePendingOutbox,
+  getNotificationSettings,
   loadBookingNotificationContext,
+  defaultNotificationSetting,
   type BookingNotificationContext,
+  type NotificationSetting,
   type Db,
 } from '@slate/db';
-import { BookingNotifier, type BookingNotification } from '@slate/notifications';
+import {
+  BookingNotifier,
+  resolveTemplate,
+  type BookingNotification,
+  type EmailTemplateKey,
+} from '@slate/notifications';
 import { DB, NOTIFIER } from './tokens';
 
 /** The booking emails the outbox can carry. */
@@ -16,18 +24,62 @@ export type EmailKind = 'confirmation' | 'pending' | 'cancellation' | 'reschedul
 export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
 
 /**
+ * Which per-account notification keys a lifecycle event fans out to. Each side
+ * is its own message (own toggle, own template, own outbox row) so a host can
+ * silence their copies without touching attendee mail — the Zoho model.
+ * `declined` deliberately has no host side: the host performed the decline.
+ */
+const KIND_SIDES: Record<EmailKind, Array<{ key: EmailTemplateKey; audience: 'attendee' | 'host' }>> = {
+  confirmation: [
+    { key: 'attendee_confirmation', audience: 'attendee' },
+    { key: 'host_booked', audience: 'host' },
+  ],
+  pending: [
+    { key: 'attendee_pending', audience: 'attendee' },
+    { key: 'host_booked', audience: 'host' },
+  ],
+  declined: [{ key: 'attendee_declined', audience: 'attendee' }],
+  cancellation: [
+    { key: 'attendee_cancellation', audience: 'attendee' },
+    { key: 'host_cancelled', audience: 'host' },
+  ],
+  reschedule: [
+    { key: 'attendee_reschedule', audience: 'attendee' },
+    { key: 'host_rescheduled', audience: 'host' },
+  ],
+  reminder: [
+    { key: 'attendee_reminder', audience: 'attendee' },
+    { key: 'host_reminder', audience: 'host' },
+  ],
+};
+
+/** The notification key a queued email row was enqueued under (deliver-time gate). */
+export function emailKeyFor(kind: EmailKind, audience: 'attendee' | 'host'): EmailTemplateKey {
+  const side = KIND_SIDES[kind].find((s) => s.audience === audience);
+  return (side ?? KIND_SIDES[kind][0]!).key;
+}
+
+/**
  * Durable booking emails (B1 / audit DM1). Every lifecycle email is ENQUEUED as
  * an `outbox` row (kind `email`) instead of a fire-and-forget
  * `void notifier.send().catch(()=>undefined)`; the OutboxWorker drains it with
  * retry+backoff, so an SMTP blip or a process restart never silently drops a
  * booking email — it retries and leaves a delivery-log record.
  *
- * The payload snapshots the fully-rendered `BookingNotification` at enqueue time
- * (correct semantics: an email about "booking created" should reflect the
+ * Notification settings (Settings → Notifications) are applied HERE:
+ *   - Each lifecycle event fans out per side (attendee / host); a side whose
+ *     toggle is OFF is not enqueued at all (no misleading delivery-log rows).
+ *   - The payload snapshots the resolved template (per-account custom or
+ *     shipped default in the host's locale) at enqueue time, so a later
+ *     template edit never rewrites queued mail.
+ *   - Reminder lead times come from the account's reminder setting; reminders
+ *     are ALSO gated at deliver time (long-lived rows — flipping the toggle
+ *     OFF must silence already-scheduled reminders).
+ *
+ * The payload snapshots the fully-resolved `BookingNotification` at enqueue
+ * time (correct semantics: an email about "booking created" should reflect the
  * booking as it was then), plus it carries the plaintext manage URL which the
- * caller has but the DB does not (only the token HASH is stored). All other
- * fields are loaded from the DB by uid so callers that only have a uid
- * (host cancel/decline/confirm) can enqueue without re-assembling context.
+ * caller has but the DB does not (only the token HASH is stored).
  *
  * Delivery success = `notifier.sendX` RESOLVES. The OSS-default `log-only`
  * provider resolves `{delivered:false}` (a no-op log) — that is still success,
@@ -63,9 +115,11 @@ export class EmailEffects {
 
   /**
    * Schedule REMINDER emails for a confirmed booking — one `email`/`reminder`
-   * outbox row per lead time, each due at `start − lead` (a FUTURE next_attempt_at
-   * so the worker leaves it dormant until then). Leads whose fire time is already
-   * in the past are skipped (never send a stale reminder). Never rejects.
+   * outbox row per ENABLED side per lead time, each due at `start − lead` (a
+   * FUTURE next_attempt_at so the worker leaves it dormant until then). Lead
+   * times come from the account's reminder setting (default 24h + 1h). Leads
+   * whose fire time is already in the past are skipped (never send a stale
+   * reminder). Never rejects.
    */
   async enqueueReminders(
     uid: string,
@@ -74,21 +128,28 @@ export class EmailEffects {
     try {
       const ctx = await loadBookingNotificationContext(this.db, uid);
       if (!ctx) return;
+      const settings = await getNotificationSettings(this.db, ctx.accountId);
       const now = opts.now ?? Date.now();
       const startMs = new Date(ctx.startUtc).getTime();
-      const leads = opts.leadMinutes ?? DEFAULT_REMINDER_LEAD_MINUTES;
-      const base = this.toNotification(ctx, { manageUrl: opts.manageUrl });
-      for (const lead of leads) {
-        const fireAt = startMs - lead * 60_000;
-        if (fireAt <= now) continue; // too late for this lead — skip, don't spam
-        await enqueueOutbox(this.db, {
-          kind: 'email',
-          action: 'reminder',
-          bookingUid: uid,
-          accountId: ctx.accountId,
-          payload: JSON.stringify({ ...base, reminderLeadMinutes: lead }),
-          nextAttemptAt: fireAt,
-        });
+      const leads =
+        opts.leadMinutes ??
+        settings.get('attendee_reminder')?.reminderLeadMinutes ??
+        DEFAULT_REMINDER_LEAD_MINUTES;
+      for (const side of KIND_SIDES.reminder) {
+        const n = this.sideNotification('reminder', ctx, side, settings, { manageUrl: opts.manageUrl });
+        if (!n) continue;
+        for (const lead of leads) {
+          const fireAt = startMs - lead * 60_000;
+          if (fireAt <= now) continue; // too late for this lead — skip, don't spam
+          await enqueueOutbox(this.db, {
+            kind: 'email',
+            action: 'reminder',
+            bookingUid: uid,
+            accountId: ctx.accountId,
+            payload: JSON.stringify({ ...n, reminderLeadMinutes: lead }),
+            nextAttemptAt: fireAt,
+          });
+        }
       }
     } catch (err) {
       this.log.error(`failed to schedule reminders for ${uid}: ${String(err)}`);
@@ -111,12 +172,13 @@ export class EmailEffects {
   }
 
   /**
-   * Build the notification snapshot from the DB + caller overrides and enqueue a
-   * durable email row. Never throws — a failure to enqueue is logged, so the
-   * caller's `void`-ed fire-and-forget never blocks or rejects the booking.
+   * Build the notification snapshots from the DB + caller overrides and enqueue
+   * one durable email row per ENABLED side. Never throws — a failure to enqueue
+   * is logged, so the caller's `void`-ed fire-and-forget never blocks or
+   * rejects the booking.
    */
   private async enqueue(
-    kind: EmailKind,
+    kind: Exclude<EmailKind, 'reminder'>,
     uid: string,
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
   ): Promise<void> {
@@ -126,17 +188,49 @@ export class EmailEffects {
         this.log.warn(`skip ${kind} email — no notification context for booking ${uid}`);
         return;
       }
-      const notification = this.toNotification(ctx, extra);
-      await enqueueOutbox(this.db, {
-        kind: 'email',
-        action: kind,
-        bookingUid: uid,
-        accountId: ctx.accountId,
-        payload: JSON.stringify(notification),
-      });
+      const settings = await getNotificationSettings(this.db, ctx.accountId);
+      for (const side of KIND_SIDES[kind]) {
+        const n = this.sideNotification(kind, ctx, side, settings, extra);
+        if (!n) continue;
+        await enqueueOutbox(this.db, {
+          kind: 'email',
+          action: kind,
+          bookingUid: uid,
+          accountId: ctx.accountId,
+          payload: JSON.stringify(n),
+        });
+      }
     } catch (err) {
       this.log.error(`failed to enqueue ${kind} email for ${uid}: ${String(err)}`);
     }
+  }
+
+  /**
+   * One side's notification snapshot, or null when it should not be sent:
+   * toggle OFF, or the side has no recipient (e.g. a host-less booking).
+   */
+  private sideNotification(
+    kind: EmailKind,
+    ctx: BookingNotificationContext,
+    side: { key: EmailTemplateKey; audience: 'attendee' | 'host' },
+    settings: Map<string, NotificationSetting>,
+    extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+  ): BookingNotification | null {
+    const setting = settings.get(side.key) ?? defaultNotificationSetting(side.key);
+    if (!setting.enabled) {
+      this.log.log(`skip ${kind}/${side.key} for ${ctx.uid} — disabled by account settings`);
+      return null;
+    }
+    if (side.audience === 'host' && !ctx.host.email && !ctx.coHosts.some((h) => h.email)) {
+      return null; // nobody to notify on the host side
+    }
+    return {
+      ...this.toNotification(ctx, extra),
+      audience: side.audience,
+      template: resolveTemplate(side.key, setting, ctx.hostLocale),
+      templateLocale: ctx.hostLocale,
+      pending: kind === 'pending',
+    };
   }
 
   private toNotification(
@@ -165,15 +259,28 @@ export class EmailEffects {
    * The worker's executor for an `email` outbox row. Rebuilds the notification
    * from the payload and sends it via the notifier; a THROWN transport error
    * propagates so the worker retries. `delivered:false` (log-only) is success.
+   *
+   * Reminders are re-gated here: their rows can sit for days, so a toggle
+   * flipped OFF after scheduling must still silence them (skip = success, the
+   * row is marked done — not an error to retry).
    */
   async deliver(kind: string, payloadJson: string, outboxAccountId?: string | null): Promise<void> {
-    const n = JSON.parse(payloadJson) as BookingNotification;
+    const n = JSON.parse(payloadJson) as BookingNotification & { reminderLeadMinutes?: number };
     if (!n.accountId && outboxAccountId) n.accountId = outboxAccountId;
     if (!n.accountId && n.uid) {
       const current = await loadBookingNotificationContext(this.db, n.uid);
       if (current) n.accountId = current.accountId;
     }
     if (!n.accountId) throw new Error('email outbox row missing account context');
+    if (kind === 'reminder') {
+      const key = emailKeyFor('reminder', n.audience ?? 'attendee');
+      const settings = await getNotificationSettings(this.db, n.accountId);
+      const setting = settings.get(key);
+      if (setting && !setting.enabled) {
+        this.log.log(`skip queued reminder (${key}) for ${n.uid} — disabled by account settings`);
+        return;
+      }
+    }
     switch (kind) {
       case 'confirmation':
         await this.notifier.sendConfirmation(n);
@@ -191,7 +298,7 @@ export class EmailEffects {
         await this.notifier.sendDeclined(n);
         return;
       case 'reminder':
-        await this.notifier.sendReminder(n as BookingNotification & { reminderLeadMinutes?: number });
+        await this.notifier.sendReminder(n);
         return;
       default:
         throw new Error(`unknown email kind: ${kind}`);

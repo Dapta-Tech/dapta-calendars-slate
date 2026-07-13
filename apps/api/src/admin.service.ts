@@ -22,16 +22,32 @@ import {
   listBookings,
   listConnections,
   listWebhooks,
+  recordConnectionHealth,
   revokeApiKey,
   updateBranding,
   updateHandle,
   updateMemberSettings,
   cancelBooking,
+  defaultNotificationSetting,
+  getNotificationSettings,
+  resetNotificationTemplate,
+  upsertNotificationSetting,
 } from '@slate/db';
+import {
+  EMAIL_TEMPLATE_KEYS,
+  TEMPLATE_VARIABLES,
+  defaultTemplate,
+  renderTemplate,
+  resolveTemplate,
+  templateVars,
+  unknownTokens,
+  type BookingNotification,
+  type EmailTemplateKey,
+} from '@slate/notifications';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { asConnector } from './calendar.http-provider';
-import { EmailEffects } from './email-effects';
+import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES } from './email-effects';
 import { DB } from './tokens';
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
@@ -90,18 +106,23 @@ export class AdminService {
     },
     accountCode: string,
   ) {
-    const outcome = await createBooking(this.db, {
-      accountCode,
-      // Hosts can create manual bookings before setting a public handle: fall
-      // back to their own member id when no handle is on the payload.
-      handle: body.handle || undefined,
-      memberId: body.handle ? undefined : p.memberId,
-      slug: body.slug,
-      startMs: new Date(body.startUtc).getTime(),
-      attendee: body.attendee,
-      answers: body.answers,
-      onBehalf: true,
-    });
+    const outcome = await createBooking(
+      this.db,
+      {
+        accountCode,
+        // Hosts can create manual bookings before setting a public handle: fall
+        // back to their own member id when no handle is on the payload.
+        handle: body.handle || undefined,
+        memberId: body.handle ? undefined : p.memberId,
+        slug: body.slug,
+        startMs: new Date(body.startUtc).getTime(),
+        attendee: body.attendee,
+        answers: body.answers,
+        onBehalf: true,
+      },
+      // Fail-closed external conflict check at create time (no-op when disabled).
+      this.calendar.provider,
+    );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
     if (outcome.ok && outcome.booking.status === 'accepted')
       this.calendar.onBookingAccepted(outcome.booking.uid);
@@ -117,6 +138,9 @@ export class AdminService {
     if (out.ok && !out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: reason ?? null });
+      // The booking is off — its still-pending reminders must never fire.
+      // (The public cancel path already did this; the host path missed it.)
+      void this.email.cancelReminders(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,
@@ -261,6 +285,9 @@ export class AdminService {
     const ref = await getConnectionRef(this.db, p.memberId, id);
     if (!ref) return { ok: false, enabled: true, message: 'Connection not found.' };
     const health = await this.provider.checkConnection(ref.externalId);
+    // Persist the outcome so the Calendars page can show health with
+    // last-checked info even before the next live probe.
+    await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
     return { ok: health.ok, enabled: true, message: health.detail };
   }
 
@@ -317,6 +344,98 @@ export class AdminService {
       this.calendar.provider,
     );
     if (!result) return null;
-    return { eventType: result.eventType, timeZone: result.timeZone, slots: result.slots };
+    return {
+      eventType: result.eventType,
+      timeZone: result.timeZone,
+      slots: result.slots,
+      // Config-error reason (admin surface renders the actionable copy).
+      emptyReason: result.emptyReason,
+    };
+  }
+
+  // --- Notification settings (Settings → Notifications; admin-gated) --------
+
+  /**
+   * The full catalog for the settings screen: every email key with its toggle,
+   * custom template (or null), the shipped default in the caller's locale, and
+   * the effective reminder lead times. Absent rows read as the defaults.
+   */
+  async listNotificationSettings(p: HostPrincipal) {
+    const me = await getMe(this.db, p.accountId, p.memberId);
+    const locale = me?.locale === 'es' ? 'es' : 'en';
+    const stored = await getNotificationSettings(this.db, p.accountId);
+    return {
+      variables: [...TEMPLATE_VARIABLES],
+      defaultReminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+      settings: EMAIL_TEMPLATE_KEYS.map((key) => {
+        const s = stored.get(key) ?? defaultNotificationSetting(key);
+        const def = defaultTemplate(key, locale);
+        return {
+          key,
+          enabled: s.enabled,
+          subject: s.subject,
+          body: s.body,
+          defaultSubject: def.subject,
+          defaultBody: def.body,
+          customized: s.subject != null || s.body != null,
+          reminderLeadMinutes:
+            key === 'attendee_reminder'
+              ? (s.reminderLeadMinutes ?? DEFAULT_REMINDER_LEAD_MINUTES)
+              : undefined,
+        };
+      }),
+    };
+  }
+
+  updateNotificationSetting(
+    p: HostPrincipal,
+    key: string,
+    patch: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
+  ) {
+    return upsertNotificationSetting(this.db, p.accountId, key, patch);
+  }
+
+  resetNotificationTemplate(p: HostPrincipal, key: string) {
+    return resetNotificationTemplate(this.db, p.accountId, key);
+  }
+
+  /**
+   * Server-side preview: render the (possibly still-unsaved) template against
+   * fixed sample data — the same renderer the outbox uses, so preview ===
+   * reality. Also reports tokens outside the whitelist so the editor can flag
+   * them before saving.
+   */
+  async previewNotificationTemplate(
+    p: HostPrincipal,
+    key: EmailTemplateKey,
+    draft: { subject?: string | null; body?: string | null },
+  ) {
+    const me = await getMe(this.db, p.accountId, p.memberId);
+    const locale = me?.locale === 'es' ? 'es' : 'en';
+    const template = resolveTemplate(key, draft, locale);
+    const sample: BookingNotification & { reminderLeadMinutes?: number } = {
+      accountId: p.accountId,
+      uid: 'sample-uid',
+      title: locale === 'es' ? 'Llamada de presentación' : 'Intro Call',
+      startUtc: new Date(Date.now() + 26 * 3_600_000).toISOString(),
+      endUtc: new Date(Date.now() + 26 * 3_600_000 + 30 * 60_000).toISOString(),
+      host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com' },
+      attendee: {
+        name: locale === 'es' ? 'Ana García' : 'Sam Guest',
+        email: 'guest@example.com',
+        timeZone: me?.timeZone ?? 'UTC',
+      },
+      location: 'Google Meet',
+      manageUrl: 'https://example.com/manage/sample',
+      cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
+      previousStartUtc: new Date(Date.now() + 2 * 3_600_000).toISOString(),
+      pending: key === 'host_booked',
+      reminderLeadMinutes: 60,
+    };
+    const rendered = renderTemplate(template, templateVars(sample, locale));
+    return {
+      ...rendered,
+      unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
+    };
   }
 }

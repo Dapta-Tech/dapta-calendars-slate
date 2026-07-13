@@ -37,6 +37,53 @@ function wallClockToUtc(local: string, tz: string): string {
   return new Date(ms).toISOString();
 }
 
+/**
+ * The slot list's empty state. A configuration error (reason code from the
+ * API) renders an actionable notice with ONE inline link to where it's fixed
+ * — never the misleading bare "No slots in range." a genuinely empty window
+ * gets. Detail like this is admin-only; public pages stay generic.
+ */
+function EmptySlotsNotice({
+  issue,
+  eventId,
+  m,
+}: {
+  issue: string | null;
+  eventId?: string;
+  m: BookingsMessages;
+}) {
+  if (!issue) {
+    return <span className="col-span-full text-sm text-muted-foreground">{m.noSlotsRange}</span>;
+  }
+  const byIssue: Record<string, { text: string; href: string; link: string }> = {
+    SCHEDULE_MISSING: {
+      text: m.scheduleMissingNotice,
+      href: eventId ? `/admin/event-types/${eventId}` : '/admin/event-types',
+      link: m.scheduleMissingLink,
+    },
+    NO_HOURS: { text: m.noHoursNotice, href: '/admin/availability', link: m.availabilityLink },
+    NO_SCHEDULE: { text: m.noScheduleNotice, href: '/admin/availability', link: m.availabilityLink },
+    CALENDAR_UNAVAILABLE: {
+      text: m.calendarUnavailableNotice,
+      href: '/admin/connections',
+      link: m.calendarUnavailableLink,
+    },
+  };
+  const notice = byIssue[issue];
+  if (!notice) {
+    // LOAD_FAILED or an unknown future code: an honest error, not "no slots".
+    return <span className="col-span-full text-sm text-destructive">{m.slotsLoadError}</span>;
+  }
+  return (
+    <span className="col-span-full flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+      <span>{notice.text}</span>
+      <Link href={notice.href} className="w-fit font-medium underline underline-offset-4">
+        {notice.link}
+      </Link>
+    </span>
+  );
+}
+
 export function HostBookingForm({
   handle,
   eventTypes,
@@ -63,13 +110,16 @@ export function HostBookingForm({
   const [slug, setSlug] = useState(bookable[0]?.slug ?? '');
   const [mode, setMode] = useState<'slots' | 'any'>('slots');
   const [slots, setSlots] = useState<string[]>([]);
+  // Why the slot list is empty: a config-error reason code from the API, or
+  // 'LOAD_FAILED' when the request itself failed — each gets distinct copy.
+  const [slotsIssue, setSlotsIssue] = useState<string | null>(null);
   const [startUtc, setStartUtc] = useState('');
   const [customLocal, setCustomLocal] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [tz, setTz] = useState('America/New_York');
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<{ ok: boolean; uid?: string; message?: string; status?: number } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; uid?: string; message?: string; status?: number; error?: string } | null>(null);
   const [pending, startT] = useTransition();
 
   const event = bookable.find((e) => e.slug === slug);
@@ -87,8 +137,14 @@ export function HostBookingForm({
     const from = new Date().toISOString();
     const to = new Date(Date.now() + 21 * 86_400_000).toISOString();
     loadHostSlotsAction(slug, from, to)
-      .then((r) => setSlots(r.slots))
-      .catch(() => setSlots([]));
+      .then((r) => {
+        setSlots(r.slots);
+        setSlotsIssue(r.ok ? (r.emptyReason ?? null) : 'LOAD_FAILED');
+      })
+      .catch(() => {
+        setSlots([]);
+        setSlotsIssue('LOAD_FAILED');
+      });
     setStartUtc('');
   }, [mode, slug, reloadKey]);
 
@@ -174,7 +230,9 @@ export function HostBookingForm({
               {new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: tz }).format(new Date(s))}
             </button>
           ))}
-          {slots.length === 0 ? <span className="col-span-full text-sm text-muted-foreground">{m.noSlotsRange}</span> : null}
+          {slots.length === 0 ? (
+            <EmptySlotsNotice issue={slotsIssue} eventId={event?.id} m={m} />
+          ) : null}
         </div>
       ) : (
         <label className="flex flex-col gap-1 text-sm">
@@ -223,7 +281,13 @@ export function HostBookingForm({
       ))}
 
       {result && !result.ok ? (
-        <p className="text-sm text-destructive">{result.status === 409 ? m.slotTaken : result.message}</p>
+        <p className="text-sm text-destructive">
+          {result.error === 'CALENDAR_UNAVAILABLE'
+            ? m.calendarUnavailableBooking
+            : result.status === 409
+              ? m.slotTaken
+              : result.message}
+        </p>
       ) : null}
       </div>
     </form>

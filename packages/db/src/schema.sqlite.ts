@@ -198,6 +198,10 @@ export const connectedCalendar = sqliteTable('connected_calendar', {
   isDestination: integer('is_destination').notNull().default(0),
   checkConflicts: integer('check_conflicts').notNull().default(1),
   createdAt: integer('created_at').notNull(),
+  /** Persisted health (last explicit probe): NULL last_check_at = never checked. */
+  lastCheckAt: integer('last_check_at'),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
 });
 
 export const apiKey = sqliteTable('api_key', {
@@ -258,6 +262,23 @@ export const outbox = sqliteTable('outbox', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+/**
+ * Per-account notification controls (toggles + template overrides). Absent row
+ * = shipped default (enabled, stock template); subject/body NULL = stock
+ * template; reminder_lead_minutes = TEXT JSON array (reminder key only).
+ */
+export const notificationSetting = sqliteTable('notification_setting', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  emailKey: text('email_key').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  subject: text('subject'),
+  body: text('body'),
+  reminderLeadMinutes: text('reminder_lead_minutes'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const sqliteSchema = {
   account,
   member,
@@ -276,4 +297,5 @@ export const sqliteSchema = {
   webhook,
   bookingReference,
   outbox,
+  notificationSetting,
 };
