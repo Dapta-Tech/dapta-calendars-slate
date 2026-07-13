@@ -75,6 +75,13 @@ echo "== publish-gate: trufflehog =="
 # (detector + file + line) in publish-gate-allowlist.txt — never by whole file.
 if command -v trufflehog >/dev/null 2>&1; then
   ALLOW="scripts/publish-gate-allowlist.txt"
+  # A missing allowlist is broken gate config, not a clean scan — fail loudly
+  # rather than let the filter degrade (every finding would read as new, or a
+  # zero-finding run would mask the drift entirely).
+  if [ ! -f "$ALLOW" ]; then
+    echo "FAIL: $ALLOW is missing — the finding-level allowlist must exist (may be all comments)."
+    FAIL=1
+  fi
   TH_JSON=$(mktemp) TH_ERR=$(mktemp)
   trufflehog filesystem --no-update --results=verified,unknown --json \
     --exclude-paths scripts/publish-gate-exclude.txt . >"$TH_JSON" 2>"$TH_ERR"
