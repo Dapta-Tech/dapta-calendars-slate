@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import type { Locale } from '@slate/shared';
 
 /** Persisted admin-UI language choice (F8 parity with the old app's toggle). */
@@ -11,4 +11,14 @@ export const LOCALE_COOKIE = 'slate_locale';
 export async function getLocale(): Promise<Locale> {
   const jar = await cookies();
   return jar.get(LOCALE_COOKIE)?.value === 'es' ? 'es' : 'en';
+}
+
+/**
+ * Public-surface locale (no admin cookie there): an explicit ?lang= wins,
+ * otherwise the browser's Accept-Language decides. Defaults to English.
+ */
+export async function publicLocale(lang?: string): Promise<Locale> {
+  const pick = (v: string) => (v.trim().toLowerCase().startsWith('es') ? 'es' : 'en') as Locale;
+  if (lang) return pick(lang);
+  return pick((await headers()).get('accept-language') ?? '');
 }

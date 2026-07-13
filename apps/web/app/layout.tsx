@@ -19,7 +19,18 @@ const poppins = Poppins({
 // never surface in the UI.
 const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
+// Absolute base for OG/twitter URLs (PUBLIC_APP_URL is the deployment's public
+// web origin — already in .env for manage/booking links). Bad value → localhost.
+function appBaseUrl(): URL {
+  try {
+    return new URL(process.env.PUBLIC_APP_URL || 'http://localhost:3000');
+  } catch {
+    return new URL('http://localhost:3000');
+  }
+}
+
 export const metadata: Metadata = {
+  metadataBase: appBaseUrl(),
   title: `${productName} — open-source scheduling`,
   description: `${productName} is open-source scheduling. Clone, run, and book — anywhere.`,
 };

@@ -14,6 +14,7 @@ import {
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
+import { showBadge, signupHref } from '@/lib/growth';
 
 interface Props {
   accountCode: string;
@@ -95,26 +96,44 @@ export function BookingFlow({
   if (result?.ok && result.booking) {
     const b = result.booking;
     const isPending = b.status === 'pending';
+    const g = getMessages(locale).growth;
     return (
-      <section className="bp-card border border-border bg-card p-6 text-card-foreground">
-        <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
-        <p className="text-muted-foreground">
-          {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {isPending
-            ? t(m.awaitingConfirmation, { email: b.attendee.email })
-            : `A confirmation was sent to ${b.attendee.email}.`}
-        </p>
-        {b.manageUrl ? (
-          <a
-            href={b.manageUrl}
-            className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
-          >
-            {getMessages(locale).manage.title} →
-          </a>
+      <div>
+        <section className="bp-card border border-border bg-card p-6 text-card-foreground">
+          <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
+          <p className="text-muted-foreground">
+            {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isPending
+              ? t(m.awaitingConfirmation, { email: b.attendee.email })
+              : `A confirmation was sent to ${b.attendee.email}.`}
+          </p>
+          {b.manageUrl ? (
+            <a
+              href={b.manageUrl}
+              className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
+            >
+              {getMessages(locale).manage.title} →
+            </a>
+          ) : null}
+        </section>
+        {/* Growth loop (R11): a quiet secondary line — a link, never a second
+            primary CTA (R30) — gated by the same open-core badge switch. */}
+        {showBadge ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            {g.ctaQuestion}{' '}
+            <a
+              href={signupHref('confirmation', accountCode)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline underline-offset-4 hover:opacity-80"
+            >
+              {g.ctaAction}
+            </a>
+          </p>
         ) : null}
-      </section>
+      </div>
     );
   }
 
