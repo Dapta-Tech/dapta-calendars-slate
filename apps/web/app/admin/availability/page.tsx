@@ -17,7 +17,13 @@ export default async function AvailabilityPage() {
 
   return (
     <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <PageHeader title={m.title} subtitle={m.subtitle} action={newButton} />
+      {/* One CTA per screen: top-right Create only with rows; the empty state
+          below owns the sole centered CTA. */}
+      <PageHeader
+        title={m.title}
+        subtitle={m.subtitle}
+        action={schedules.length > 0 ? newButton : undefined}
+      />
 
       {schedules.length > 0 ? (
         <ul className="flex flex-col gap-2">

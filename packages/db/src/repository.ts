@@ -101,7 +101,11 @@ export interface BookingRecord {
 
 export interface CreateBookingArgs {
   accountCode: string;
-  handle: string;
+  /** Public lookup: the member's public handle. */
+  handle?: string;
+  /** Host lookup: resolve the member by id (host on-behalf bookings work even
+   *  before the member sets a public handle). */
+  memberId?: string;
   slug: string;
   startMs: number;
   attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
@@ -400,7 +404,19 @@ export async function resolveScheduleTimeZone(
 
 export async function getAvailability(
   db: Db,
-  args: { accountCode: string; handle: string; slug: string; fromMs: number; toMs: number; displayTimeZone?: string; now?: Date },
+  args: {
+    accountCode: string;
+    /** Public lookup: the member's public handle. */
+    handle?: string;
+    /** Host lookup: resolve the member by id — works for members with no handle
+     *  yet (the authenticated host booking their own manual slots). */
+    memberId?: string;
+    slug: string;
+    fromMs: number;
+    toMs: number;
+    displayTimeZone?: string;
+    now?: Date;
+  },
   /**
    * The wired CalendarProvider. When enabled, the host's external busy times are
    * subtracted from the offered slots. Undefined / disabled ⇒ local busy only
@@ -410,8 +426,13 @@ export async function getAvailability(
 ): Promise<AvailabilityResult | undefined> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return undefined;
-  const member = await getMember(db, account.id, args.handle);
-  if (!member) return undefined;
+  const member = args.memberId
+    ? await getMemberById(db, args.memberId)
+    : args.handle
+      ? await getMember(db, account.id, args.handle)
+      : undefined;
+  // The by-id path must stay account-scoped (tenant isolation).
+  if (!member || member.account_id !== account.id) return undefined;
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return undefined;
 
@@ -508,8 +529,13 @@ function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: num
 export async function createBooking(db: Db, args: CreateBookingArgs): Promise<BookingOutcome> {
   const account = await getAccountByCode(db, args.accountCode);
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
-  const member = await getMember(db, account.id, args.handle);
-  if (!member) return { ok: false, reason: 'NOT_FOUND' };
+  const member = args.memberId
+    ? await getMemberById(db, args.memberId)
+    : args.handle
+      ? await getMember(db, account.id, args.handle)
+      : undefined;
+  // The by-id path must stay account-scoped (tenant isolation).
+  if (!member || member.account_id !== account.id) return { ok: false, reason: 'NOT_FOUND' };
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 

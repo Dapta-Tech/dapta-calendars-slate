@@ -1,17 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { commonTimeZones, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FormHeader } from '@/components/ui/page-header';
-import { createHostBookingAction } from './actions';
+import { createHostBookingAction, loadHostSlotsAction } from './actions';
 
 type BookingsMessages = BookingMessages['admin']['bookings'];
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /** Interpret a `datetime-local` wall-clock in a SPECIFIC timezone (the attendee's),
  *  not the host browser's — DST-safe two-pass. */
@@ -40,21 +38,25 @@ function wallClockToUtc(local: string, tz: string): string {
 }
 
 export function HostBookingForm({
-  accountCode,
   handle,
   eventTypes,
   messages: m,
   backHref,
   backLabel,
   heading,
+  notice,
 }: {
-  accountCode: string;
-  handle: string;
+  /** The member's public handle, if set. Manual bookings work without one —
+   *  slots and booking go through the authenticated host surface. */
+  handle?: string;
   eventTypes: EventType[];
   messages: BookingsMessages;
   backHref: string;
   backLabel: string;
   heading: string;
+  /** Optional banner rendered between the header and the form (e.g. the
+   *  no-public-handle notice). */
+  notice?: ReactNode;
 }) {
   // Only offer bookable (non-hidden) events.
   const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
@@ -77,26 +79,25 @@ export function HostBookingForm({
   // just taken) so the stale/taken time drops out and the user can really retry.
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Load available slots for the chosen event (slots mode).
+  // Load available slots for the chosen event (slots mode) via the
+  // authenticated host surface — resolves the member by id, so this works
+  // before a public handle is set (the public endpoint 400s without one).
   useEffect(() => {
     if (mode !== 'slots' || !slug) return;
     const from = new Date().toISOString();
     const to = new Date(Date.now() + 21 * 86_400_000).toISOString();
-    fetch(`${API}/v1/availability?accountCode=${accountCode}&handle=${handle}&slug=${slug}&from=${from}&to=${to}`, {
-      cache: 'no-store',
-    })
-      .then((r) => (r.ok ? r.json() : { slots: [] }))
-      .then((j: { slots?: { startUtc: string }[] }) => setSlots((j.slots ?? []).map((s) => s.startUtc)))
+    loadHostSlotsAction(slug, from, to)
+      .then((r) => setSlots(r.slots))
       .catch(() => setSlots([]));
     setStartUtc('');
-  }, [mode, slug, accountCode, handle, reloadKey]);
+  }, [mode, slug, reloadKey]);
 
   const submit = () =>
     startT(async () => {
       const start = mode === 'any' ? (customLocal ? wallClockToUtc(customLocal, tz) : '') : startUtc;
       if (!start) return setResult({ ok: false, message: m.pickTime });
       const r = await createHostBookingAction({
-        handle,
+        handle: handle || undefined,
         slug,
         startUtc: start,
         attendee: { name, email, timeZone: tz },
@@ -135,6 +136,7 @@ export function HostBookingForm({
           </Button>
         }
       />
+      {notice}
       <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.eventType}</span>

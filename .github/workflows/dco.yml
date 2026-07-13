@@ -1,7 +1,8 @@
 name: DCO
 
 # Enforce a Developer Certificate of Origin sign-off on every PR commit.
-# Contributors sign with `git commit -s`.
+# Contributors sign with `git commit -s`. Merge commits are exempt — GitHub's
+# own "Merge pull request" commits carry no sign-off by design.
 
 on:
   pull_request:
@@ -18,7 +19,7 @@ jobs:
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
           missing=0
-          for sha in $(git rev-list "$base".."$head"); do
+          for sha in $(git rev-list --no-merges "$base".."$head"); do
             if ! git show -s --format=%B "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
               echo "::error::Commit $sha is missing a Signed-off-by line (use 'git commit -s')."
               missing=1

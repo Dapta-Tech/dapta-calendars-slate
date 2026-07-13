@@ -19,8 +19,8 @@ export function DeleteButton({ id }: { id: string }) {
             start(async () => {
               const r = await deleteEventTypeAction(id);
               setConfirming(false);
-              if (r.ok) success('Event type deleted.');
-              else error(r.message ?? 'Could not delete the event type.');
+              if (r.ok) success('Event deleted.');
+              else error(r.message ?? 'Could not delete the event.');
             })
           }
           className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"

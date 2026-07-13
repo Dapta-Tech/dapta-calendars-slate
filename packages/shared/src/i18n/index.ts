@@ -68,6 +68,7 @@ export interface BookingMessages {
       availability: string;
       eventTypes: string;
       teams: string;
+      calendars: string;
       settings: string;
       bookingPage: string;
     };
@@ -128,7 +129,6 @@ export interface BookingMessages {
       subtitle: string;
       general: string;
       bookingPage: string;
-      calendars: string;
       members: string;
       developer: string;
     };
@@ -240,6 +240,8 @@ export interface BookingMessages {
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
+      noHandleNotice: string;
+      noHandleLink: string;
     };
     teams: {
       title: string;
@@ -523,7 +525,7 @@ export const en: BookingMessages = {
     holdExpired: 'Your hold expired',
     pickAnother: 'Pick another time',
     retry: 'Try again',
-    poweredBy: 'Powered by Slate',
+    poweredBy: 'Powered by Dapta Calendars',
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
@@ -563,8 +565,9 @@ export const en: BookingMessages = {
       home: 'Home',
       bookings: 'Bookings',
       availability: 'Availability',
-      eventTypes: 'Event types',
+      eventTypes: 'Events',
       teams: 'Teams',
+      calendars: 'Calendars',
       settings: 'Settings',
       bookingPage: 'Booking page',
     },
@@ -608,10 +611,10 @@ export const en: BookingMessages = {
       setHandlePre: 'Set a handle in',
       setHandleLink: 'your booking page',
       setHandlePost: 'to get a shareable link.',
-      statEventTypes: 'Event types',
+      statEventTypes: 'Events',
       statUpcoming: 'Upcoming bookings',
       statTeams: 'Teams',
-      createEvent: 'Create an event type',
+      createEvent: 'Create an event',
       createEventDesc: 'Define a bookable meeting.',
       setAvailability: 'Set your availability',
       setAvailabilityDesc: 'Weekly hours + date overrides.',
@@ -625,14 +628,13 @@ export const en: BookingMessages = {
       subtitle: 'Manage your account and preferences.',
       general: 'General',
       bookingPage: 'Booking Page',
-      calendars: 'Calendars',
       members: 'Members',
       developer: 'Developer',
     },
     eventTypes: {
-      title: 'Event Types',
-      newEventType: 'New event type',
-      emptyList: 'No event types yet — create one below.',
+      title: 'Events',
+      newEventType: 'New event',
+      emptyList: 'No events yet — create one below.',
       hidden: 'hidden',
       needsConfirmation: 'needs confirmation',
       minSuffix: 'min',
@@ -659,7 +661,7 @@ export const en: BookingMessages = {
       addQuestion: '+ Add question',
       saved: 'Saved.',
       saveChanges: 'Save changes',
-      createEventType: 'Create event type',
+      createEventType: 'Create event',
       saving: 'Saving…',
       schedulingMethod: 'Scheduling method',
       hostsTitle: 'Hosts',
@@ -719,7 +721,7 @@ export const en: BookingMessages = {
       statusCancelled: 'cancelled',
       statusRejected: 'rejected',
       newTitle: 'New booking',
-      eventType: 'Event type',
+      eventType: 'Event',
       fromSlots: 'From available slots',
       anyTime: 'Any time (outside availability)',
       noSlotsRange: 'No slots in range.',
@@ -734,7 +736,9 @@ export const en: BookingMessages = {
       createdNote: 'The attendee has been notified.',
       backToBookings: '← Back to bookings',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
-      createEventFirst: 'Create an event type first.',
+      createEventFirst: 'Create an event first.',
+      noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
+      noHandleLink: 'Set your handle in Booking Page settings',
       slotTaken: 'That time was just taken — pick another slot.',
     },
     teams: {
@@ -771,8 +775,8 @@ export const en: BookingMessages = {
       viewPublicTeam: 'View public team page →',
       roundRobin: 'round-robin scheduling',
       members: 'Members',
-      teamEventTypes: 'Team event types',
-      noTeamEventTypes: 'No team event types yet.',
+      teamEventTypes: 'Team events',
+      noTeamEventTypes: 'No team events yet.',
       inviteTitle: 'Add a member',
       inviteLead: 'Invite someone from your account to this team by email.',
       emailLabel: 'Email',
@@ -836,7 +840,7 @@ export const en: BookingMessages = {
       noAccessBody: 'This section is available to workspace admins and owners.',
     },
     connections: {
-      pageDesc: 'Connect a calendar so Slate can check conflicts (busy times) and write your booked events to it.',
+      pageDesc: 'Connect a calendar so {product} can check conflicts (busy times) and write your booked events to it.',
       dialogTitle: 'Connect a calendar',
       dialogSubtitle: 'Choose a provider to link.',
       close: 'Close',
@@ -846,7 +850,7 @@ export const en: BookingMessages = {
       syncOnDesc: 'Connect Google or Outlook to check conflicts and write events.',
       connectButton: 'Connect a calendar',
       syncOffTitle: 'Calendar sync is off in this build',
-      syncOffDesc: 'No external calendar provider is configured, so Slate isn’t reading busy times or writing events yet. Connections you add below are recorded but not synced.',
+      syncOffDesc: 'No external calendar provider is configured, so busy times aren’t being read and events aren’t being written yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
       connectWaiting: 'Waiting for you to finish connecting…',
@@ -883,7 +887,7 @@ export const en: BookingMessages = {
       healthError: 'Needs attention',
       recheck: 'Re-check',
       emptyTitle: 'No calendars connected yet',
-      emptyBody: 'Connect Google or Outlook so Slate can read your busy times and add booked events to your calendar. You can connect more than one account.',
+      emptyBody: 'Connect Google or Outlook so {product} can read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
       emptyDestination: 'Pick one calendar to receive your booked events',
     },
@@ -967,7 +971,7 @@ export const en: BookingMessages = {
       hide: 'Hide',
       noEvents: 'No events yet.',
       orderVisibilityNote: 'Order + visibility apply to your public page.',
-      configureEventTypes: 'Configure event types →',
+      configureEventTypes: 'Configure events →',
       showLandingPage: 'Show the landing page (list of events)',
       sendVisitorsTo: 'Send visitors directly to',
       chooseEvent: 'Choose an event…',
@@ -1018,7 +1022,7 @@ export const es: BookingMessages = {
     holdExpired: 'Tu reserva temporal expiró',
     pickAnother: 'Elige otro horario',
     retry: 'Reintentar',
-    poweredBy: 'Con la tecnología de Slate',
+    poweredBy: 'Con la tecnología de Dapta Calendars',
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
@@ -1058,8 +1062,9 @@ export const es: BookingMessages = {
       home: 'Inicio',
       bookings: 'Reservas',
       availability: 'Disponibilidad',
-      eventTypes: 'Tipos de evento',
+      eventTypes: 'Eventos',
       teams: 'Equipos',
+      calendars: 'Calendarios',
       settings: 'Ajustes',
       bookingPage: 'Página de reservas',
     },
@@ -1103,10 +1108,10 @@ export const es: BookingMessages = {
       setHandlePre: 'Configura un identificador en',
       setHandleLink: 'tu página de reservas',
       setHandlePost: 'para obtener un enlace para compartir.',
-      statEventTypes: 'Tipos de evento',
+      statEventTypes: 'Eventos',
       statUpcoming: 'Próximas reservas',
       statTeams: 'Equipos',
-      createEvent: 'Crear un tipo de evento',
+      createEvent: 'Crear un evento',
       createEventDesc: 'Define una reunión reservable.',
       setAvailability: 'Configura tu disponibilidad',
       setAvailabilityDesc: 'Horas semanales + excepciones por fecha.',
@@ -1120,14 +1125,13 @@ export const es: BookingMessages = {
       subtitle: 'Gestiona tu cuenta y preferencias.',
       general: 'General',
       bookingPage: 'Página de reservas',
-      calendars: 'Calendarios',
       members: 'Miembros',
       developer: 'Desarrollador',
     },
     eventTypes: {
-      title: 'Tipos de evento',
-      newEventType: 'Nuevo tipo de evento',
-      emptyList: 'Aún no hay tipos de evento — crea uno abajo.',
+      title: 'Eventos',
+      newEventType: 'Nuevo evento',
+      emptyList: 'Aún no hay eventos — crea uno abajo.',
       hidden: 'oculto',
       needsConfirmation: 'requiere confirmación',
       minSuffix: 'min',
@@ -1154,7 +1158,7 @@ export const es: BookingMessages = {
       addQuestion: '+ Añadir pregunta',
       saved: 'Guardado.',
       saveChanges: 'Guardar cambios',
-      createEventType: 'Crear tipo de evento',
+      createEventType: 'Crear evento',
       saving: 'Guardando…',
       schedulingMethod: 'Método de programación',
       hostsTitle: 'Anfitriones',
@@ -1214,7 +1218,7 @@ export const es: BookingMessages = {
       statusCancelled: 'cancelada',
       statusRejected: 'rechazada',
       newTitle: 'Nueva reserva',
-      eventType: 'Tipo de evento',
+      eventType: 'Evento',
       fromSlots: 'Desde horarios disponibles',
       anyTime: 'Cualquier hora (fuera de disponibilidad)',
       noSlotsRange: 'No hay horarios en el rango.',
@@ -1229,7 +1233,9 @@ export const es: BookingMessages = {
       createdNote: 'Se ha notificado al invitado.',
       backToBookings: '← Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
-      createEventFirst: 'Primero crea un tipo de evento.',
+      createEventFirst: 'Primero crea un evento.',
+      noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
+      noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
     },
     teams: {
@@ -1266,8 +1272,8 @@ export const es: BookingMessages = {
       viewPublicTeam: 'Ver página pública del equipo →',
       roundRobin: 'programación por turnos',
       members: 'Miembros',
-      teamEventTypes: 'Tipos de evento del equipo',
-      noTeamEventTypes: 'Aún no hay tipos de evento del equipo.',
+      teamEventTypes: 'Eventos del equipo',
+      noTeamEventTypes: 'Aún no hay eventos del equipo.',
       inviteTitle: 'Añadir un miembro',
       inviteLead: 'Invita por correo a alguien de tu cuenta a este equipo.',
       emailLabel: 'Correo',
@@ -1331,7 +1337,7 @@ export const es: BookingMessages = {
       noAccessBody: 'Esta sección está disponible para administradores y propietarios del espacio.',
     },
     connections: {
-      pageDesc: 'Conecta un calendario para que Slate pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
+      pageDesc: 'Conecta un calendario para que {product} pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',
       dialogTitle: 'Conectar un calendario',
       dialogSubtitle: 'Elige un proveedor para vincular.',
       close: 'Cerrar',
@@ -1341,7 +1347,7 @@ export const es: BookingMessages = {
       syncOnDesc: 'Conecta Google u Outlook para verificar conflictos y escribir eventos.',
       connectButton: 'Conectar un calendario',
       syncOffTitle: 'La sincronización de calendario está desactivada en esta versión',
-      syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que Slate aún no lee horas ocupadas ni escribe eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
+      syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que aún no se leen horas ocupadas ni se escriben eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
       connectWaiting: 'Esperando a que termines de conectar…',
@@ -1378,7 +1384,7 @@ export const es: BookingMessages = {
       healthError: 'Requiere atención',
       recheck: 'Volver a comprobar',
       emptyTitle: 'Aún no hay calendarios conectados',
-      emptyBody: 'Conecta Google u Outlook para que Slate pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
+      emptyBody: 'Conecta Google u Outlook para que {product} pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
       emptyDestination: 'Elige un calendario para recibir tus reservas',
     },
@@ -1462,7 +1468,7 @@ export const es: BookingMessages = {
       hide: 'Ocultar',
       noEvents: 'Aún no hay eventos.',
       orderVisibilityNote: 'El orden y la visibilidad se aplican a tu página pública.',
-      configureEventTypes: 'Configurar tipos de evento →',
+      configureEventTypes: 'Configurar eventos →',
       showLandingPage: 'Mostrar la página de inicio (lista de eventos)',
       sendVisitorsTo: 'Enviar a los visitantes directamente a',
       chooseEvent: 'Elige un evento…',
