@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { getMessages, schedulingMethodLabel } from '@slate/shared';
@@ -24,11 +24,15 @@ export default async function TeamBookingPage({
   ]);
   if (!team || !availability) notFound();
 
+  // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
+  const code = team!.account.code;
+  if (accountCode !== code) permanentRedirect(`/${code}/team/${teamSlug}/${slug}`);
+
   return (
     <BrandedShell brandColor={null} style={null}>
       <main className="mx-auto max-w-3xl px-6 py-12">
         <header className="mb-8 flex flex-col gap-1">
-          <Link href={`/${accountCode}/team/${teamSlug}`} className="text-sm text-muted-foreground hover:text-foreground">
+          <Link href={`/${code}/team/${teamSlug}`} className="text-sm text-muted-foreground hover:text-foreground">
             ← {team.team.name}
           </Link>
           <h1 className="text-3xl font-semibold tracking-tight">{availability.eventType.title}</h1>

@@ -19,6 +19,7 @@ import {
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
+import { CopyLink } from '@/components/copy-link';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
@@ -75,6 +76,8 @@ function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok
 
 export interface StudioInit {
   accountCode: string;
+  /** Vanity claim state: the shareable-link section renders from this. */
+  vanity: { vanitySlug: string | null; shortCode: string; canClaim: boolean };
   displayName: string;
   handle: string;
   bio: string;
@@ -96,6 +99,7 @@ export function Studio(init: StudioInit) {
   const m = init.messages;
   const [displayName, setDisplayName] = useState(init.displayName);
   const [handle, setHandle] = useState(init.handle);
+  const [vanity, setVanity] = useState(init.vanity.vanitySlug ?? '');
   const [bio, setBio] = useState(init.bio);
   const [avatarUrl, setAvatarUrl] = useState(init.avatarUrl);
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
@@ -142,8 +146,8 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder }),
-    [displayName, handle, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder],
+    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder }),
+    [displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
@@ -202,8 +206,12 @@ export function Studio(init: StudioInit) {
 
   const save = () =>
     start(async () => {
+      const vanityTrim = vanity.trim().toLowerCase();
+      const vanityChanged = init.vanity.canClaim && vanityTrim !== (init.vanity.vanitySlug ?? '');
       const r = await saveStudioAction({
         handle: handle !== init.handle ? handle : undefined,
+        // One Save persists everything (R30): the vanity change rides along.
+        vanitySlug: vanityChanged ? vanityTrim || null : undefined,
         displayName,
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
@@ -264,14 +272,11 @@ export function Studio(init: StudioInit) {
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} />
             </Field>
             <Field label={m.publicHandle}>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">/{init.accountCode}/</span>
-                <input
-                  value={handle}
-                  onChange={(e) => setHandle(e.target.value.toLowerCase())}
-                  className={`${inputCls} flex-1`}
-                />
-              </div>
+              <input
+                value={handle}
+                onChange={(e) => setHandle(e.target.value.toLowerCase())}
+                className={inputCls}
+              />
               <HandleHint state={handleState} m={m} />
               {handleState === 'taken' && handleSuggestion ? (
                 <button
@@ -283,6 +288,38 @@ export function Studio(init: StudioInit) {
                 </button>
               ) : null}
             </Field>
+            {/* The shareable link as ONE compact copyable unit (no raw hex —
+                short-links §5). Live preview: edits to the handle/vanity above
+                update the path immediately. */}
+            <Field label={m.yourLink}>
+              <CopyLink
+                path={`/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`}
+                labels={{ copy: m.linkCopy, copied: m.linkCopied, open: m.linkOpen }}
+              />
+            </Field>
+            {init.vanity.canClaim ? (
+              <Field label={m.vanityLabel}>
+                <input
+                  value={vanity}
+                  onChange={(e) => setVanity(e.target.value.toLowerCase())}
+                  placeholder={init.vanity.shortCode}
+                  className={inputCls}
+                />
+                <span className="text-xs text-muted-foreground">{m.vanityHint}</span>
+              </Field>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {m.vanityIncluded}{' '}
+                <a
+                  href="https://app.dapta.ai"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  app.dapta.ai
+                </a>
+              </p>
+            )}
             <Field label={m.bio}>
               <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} className={inputCls} />
             </Field>

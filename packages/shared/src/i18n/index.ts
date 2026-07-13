@@ -128,9 +128,10 @@ export interface BookingMessages {
       welcomeNamed: string;
       subtitle: string;
       bookingLink: string;
-      setHandlePre: string;
-      setHandleLink: string;
-      setHandlePost: string;
+      /** CopyLink button labels (booking-link card). */
+      copy: string;
+      copied: string;
+      open: string;
       statEventTypes: string;
       statUpcoming: string;
       statTeams: string;
@@ -517,6 +518,14 @@ export interface BookingMessages {
       meetings: string;
       displayName: string;
       publicHandle: string;
+      /** The compact shareable-link unit + vanity slug claim (short-links §5). */
+      yourLink: string;
+      linkCopy: string;
+      linkCopied: string;
+      linkOpen: string;
+      vanityLabel: string;
+      vanityHint: string;
+      vanityIncluded: string;
       bio: string;
       tryHandle: string;
       accent: string;
@@ -678,9 +687,9 @@ export const en: BookingMessages = {
       welcomeNamed: 'Welcome, {name}',
       subtitle: 'Your scheduling at a glance.',
       bookingLink: 'Your booking link',
-      setHandlePre: 'Set a handle in',
-      setHandleLink: 'your booking page',
-      setHandlePost: 'to get a shareable link.',
+      copy: 'Copy',
+      copied: 'Copied ✓',
+      open: 'Open',
       statEventTypes: 'Events',
       statUpcoming: 'Upcoming bookings',
       statTeams: 'Teams',
@@ -1087,6 +1096,13 @@ export const en: BookingMessages = {
       meetings: 'Meetings',
       displayName: 'Display name',
       publicHandle: 'Public handle',
+      yourLink: 'Your booking link',
+      linkCopy: 'Copy',
+      linkCopied: 'Copied \u2713',
+      linkOpen: 'Open',
+      vanityLabel: 'Custom link (vanity)',
+      vanityHint: 'Included with your Dapta AI subscription. 3\u201330 lowercase letters, numbers, or hyphens; your short code keeps working.',
+      vanityIncluded: 'Custom links are included with your Dapta AI subscription \u2014',
       bio: 'Bio',
       tryHandle: 'Try {handle} →',
       accent: 'Accent',
@@ -1249,9 +1265,9 @@ export const es: BookingMessages = {
       welcomeNamed: 'Bienvenido, {name}',
       subtitle: 'Tu agenda de un vistazo.',
       bookingLink: 'Tu enlace de reservas',
-      setHandlePre: 'Configura un identificador en',
-      setHandleLink: 'tu página de reservas',
-      setHandlePost: 'para obtener un enlace para compartir.',
+      copy: 'Copiar',
+      copied: 'Copiado ✓',
+      open: 'Abrir',
       statEventTypes: 'Eventos',
       statUpcoming: 'Próximas reservas',
       statTeams: 'Equipos',
@@ -1659,6 +1675,13 @@ export const es: BookingMessages = {
       meetings: 'Reuniones',
       displayName: 'Nombre visible',
       publicHandle: 'Identificador público',
+      yourLink: 'Tu enlace de reservas',
+      linkCopy: 'Copiar',
+      linkCopied: 'Copiado \u2713',
+      linkOpen: 'Abrir',
+      vanityLabel: 'Enlace personalizado (vanity)',
+      vanityHint: 'Incluido con tu suscripción de Dapta AI. De 3 a 30 letras minúsculas, números o guiones; tu código corto sigue funcionando.',
+      vanityIncluded: 'Los enlaces personalizados están incluidos con tu suscripción de Dapta AI \u2014',
       bio: 'Biografía',
       tryHandle: 'Prueba {handle} →',
       accent: 'Color de acento',

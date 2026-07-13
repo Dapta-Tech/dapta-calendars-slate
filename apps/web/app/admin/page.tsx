@@ -27,20 +27,14 @@ export default async function AdminHome() {
       </h1>
       <p className="mb-8 text-muted-foreground">{h.subtitle}</p>
 
+      {/* Every member has an auto-assigned handle (short-links §3), so the
+          shareable link always exists — the old "set a handle" nag is gone. */}
       {publicUrl ? (
         <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
           <span className="text-sm text-muted-foreground">{h.bookingLink}</span>
-          <CopyLink path={publicUrl} />
+          <CopyLink path={publicUrl} labels={{ copy: h.copy, copied: h.copied, open: h.open }} />
         </div>
-      ) : (
-        <div className="mb-8 rounded-md border border-dashed border-border p-5 text-sm text-muted-foreground">
-          {h.setHandlePre}{' '}
-          <Link href="/admin/settings/booking-page" className="text-primary hover:underline">
-            {h.setHandleLink}
-          </Link>{' '}
-          {h.setHandlePost}
-        </div>
-      )}
+      ) : null}
 
       <div className="mb-8 grid grid-cols-3 gap-4">
         <Stat label={h.statEventTypes} value={eventTypes.length} href="/admin/event-types" />
