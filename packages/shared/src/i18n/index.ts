@@ -2,6 +2,19 @@
 
 export type Locale = 'en' | 'es';
 
+/** The notification-email catalog (mirrors @slate/notifications EMAIL_TEMPLATE_KEYS). */
+export type NotificationEmailKey =
+  | 'attendee_confirmation'
+  | 'attendee_pending'
+  | 'attendee_declined'
+  | 'attendee_reschedule'
+  | 'attendee_cancellation'
+  | 'attendee_reminder'
+  | 'host_booked'
+  | 'host_rescheduled'
+  | 'host_cancelled'
+  | 'host_reminder';
+
 export interface BookingMessages {
   booking: {
     selectTime: string;
@@ -131,6 +144,7 @@ export interface BookingMessages {
       bookingPage: string;
       members: string;
       developer: string;
+      notifications: string;
     };
     eventTypes: {
       title: string;
@@ -415,6 +429,38 @@ export interface BookingMessages {
       save: string;
       saving: string;
     };
+    notifications: {
+      title: string;
+      subtitle: string;
+      attendeeSection: string;
+      attendeeSectionDesc: string;
+      hostSection: string;
+      hostSectionDesc: string;
+      labels: Record<NotificationEmailKey, string>;
+      descriptions: Record<NotificationEmailKey, string>;
+      customizedBadge: string;
+      editTemplate: string;
+      updated: string;
+      updateFailed: string;
+      reminderLeads: string;
+      reminderLeadsHint: string;
+      reminderLeadsInvalid: string;
+      editorSubject: string;
+      editorBody: string;
+      variables: string;
+      variablesHint: string;
+      unknownTokensWarn: string;
+      preview: string;
+      usingDefault: string;
+      usingCustom: string;
+      reset: string;
+      resetDone: string;
+      save: string;
+      saving: string;
+      saved: string;
+      saveFailed: string;
+      back: string;
+    };
     developer: {
       apiKeys: string;
       noKeys: string;
@@ -630,6 +676,7 @@ export const en: BookingMessages = {
       bookingPage: 'Booking Page',
       members: 'Members',
       developer: 'Developer',
+      notifications: 'Notifications',
     },
     eventTypes: {
       title: 'Events',
@@ -912,6 +959,60 @@ export const en: BookingMessages = {
       save: 'Save',
       saving: 'Saving…',
     },
+    notifications: {
+      title: 'Notifications',
+      subtitle: 'Choose which booking emails go out and edit their templates.',
+      attendeeSection: 'Attendee emails',
+      attendeeSectionDesc: 'Sent to the person who booked.',
+      hostSection: 'Host emails',
+      hostSectionDesc: 'Sent to you and any co-hosts.',
+      labels: {
+        attendee_confirmation: 'Booking confirmed',
+        attendee_pending: 'Request received',
+        attendee_declined: 'Request declined',
+        attendee_reschedule: 'Booking rescheduled',
+        attendee_cancellation: 'Booking cancelled',
+        attendee_reminder: 'Reminders',
+        host_booked: 'New booking',
+        host_rescheduled: 'Booking rescheduled',
+        host_cancelled: 'Booking cancelled',
+        host_reminder: 'Reminders',
+      },
+      descriptions: {
+        attendee_confirmation: 'Confirmation with calendar invite when a booking is accepted.',
+        attendee_pending: 'Acknowledgement when a booking still needs your approval.',
+        attendee_declined: 'Notice when you decline a pending request.',
+        attendee_reschedule: 'Updated invite when the time changes.',
+        attendee_cancellation: 'Cancellation notice with the calendar removal.',
+        attendee_reminder: 'Nudges before the meeting starts.',
+        host_booked: 'A new booking or booking request came in.',
+        host_rescheduled: 'A booking of yours moved to a new time.',
+        host_cancelled: 'A booking of yours was cancelled.',
+        host_reminder: 'Your own nudge before the meeting starts.',
+      },
+      customizedBadge: 'Customized',
+      editTemplate: 'Edit template',
+      updated: 'Updated.',
+      updateFailed: 'Could not update — try again.',
+      reminderLeads: 'Send reminders before start',
+      reminderLeadsHint: 'Minutes before start, comma-separated (e.g. 1440, 60). Up to 5.',
+      reminderLeadsInvalid: 'Whole minutes between 5 and 40320, up to 5 values.',
+      editorSubject: 'Subject',
+      editorBody: 'Body',
+      variables: 'Variables',
+      variablesHint: 'Click to insert. Lines whose variables are all empty are left out of the email.',
+      unknownTokensWarn: 'Unknown variables render empty:',
+      preview: 'Preview',
+      usingDefault: 'Using the default template',
+      usingCustom: 'Using a custom template',
+      reset: 'Reset to default',
+      resetDone: 'Template reset to default.',
+      save: 'Save',
+      saving: 'Saving…',
+      saved: 'Saved.',
+      saveFailed: 'Save failed.',
+      back: 'Back to notifications',
+    },
     developer: {
       apiKeys: 'API keys',
       noKeys: 'No API keys.',
@@ -1127,6 +1228,7 @@ export const es: BookingMessages = {
       bookingPage: 'Página de reservas',
       members: 'Miembros',
       developer: 'Desarrollador',
+      notifications: 'Notificaciones',
     },
     eventTypes: {
       title: 'Eventos',
@@ -1408,6 +1510,60 @@ export const es: BookingMessages = {
       saved: 'Guardado.',
       save: 'Guardar',
       saving: 'Guardando…',
+    },
+    notifications: {
+      title: 'Notificaciones',
+      subtitle: 'Elige qué correos de reservas se envían y edita sus plantillas.',
+      attendeeSection: 'Correos al asistente',
+      attendeeSectionDesc: 'Enviados a la persona que reservó.',
+      hostSection: 'Correos al anfitrión',
+      hostSectionDesc: 'Enviados a ti y a los co-anfitriones.',
+      labels: {
+        attendee_confirmation: 'Reserva confirmada',
+        attendee_pending: 'Solicitud recibida',
+        attendee_declined: 'Solicitud rechazada',
+        attendee_reschedule: 'Reserva reprogramada',
+        attendee_cancellation: 'Reserva cancelada',
+        attendee_reminder: 'Recordatorios',
+        host_booked: 'Nueva reserva',
+        host_rescheduled: 'Reserva reprogramada',
+        host_cancelled: 'Reserva cancelada',
+        host_reminder: 'Recordatorios',
+      },
+      descriptions: {
+        attendee_confirmation: 'Confirmación con invitación de calendario al aceptar la reserva.',
+        attendee_pending: 'Acuse de recibo cuando la reserva requiere tu aprobación.',
+        attendee_declined: 'Aviso cuando rechazas una solicitud pendiente.',
+        attendee_reschedule: 'Invitación actualizada cuando cambia la hora.',
+        attendee_cancellation: 'Aviso de cancelación con la eliminación del calendario.',
+        attendee_reminder: 'Avisos antes de que empiece la reunión.',
+        host_booked: 'Entró una nueva reserva o solicitud de reserva.',
+        host_rescheduled: 'Una de tus reservas cambió de hora.',
+        host_cancelled: 'Una de tus reservas fue cancelada.',
+        host_reminder: 'Tu propio aviso antes de que empiece la reunión.',
+      },
+      customizedBadge: 'Personalizada',
+      editTemplate: 'Editar plantilla',
+      updated: 'Actualizado.',
+      updateFailed: 'No se pudo actualizar — inténtalo de nuevo.',
+      reminderLeads: 'Enviar recordatorios antes del inicio',
+      reminderLeadsHint: 'Minutos antes del inicio, separados por comas (p. ej. 1440, 60). Hasta 5.',
+      reminderLeadsInvalid: 'Minutos enteros entre 5 y 40320, hasta 5 valores.',
+      editorSubject: 'Asunto',
+      editorBody: 'Cuerpo',
+      variables: 'Variables',
+      variablesHint: 'Haz clic para insertar. Las líneas cuyas variables queden vacías se omiten del correo.',
+      unknownTokensWarn: 'Variables desconocidas se muestran vacías:',
+      preview: 'Vista previa',
+      usingDefault: 'Usando la plantilla predeterminada',
+      usingCustom: 'Usando una plantilla personalizada',
+      reset: 'Restablecer predeterminada',
+      resetDone: 'Plantilla restablecida.',
+      save: 'Guardar',
+      saving: 'Guardando…',
+      saved: 'Guardado.',
+      saveFailed: 'Error al guardar.',
+      back: 'Volver a notificaciones',
     },
     developer: {
       apiKeys: 'Claves API',
