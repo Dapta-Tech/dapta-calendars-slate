@@ -842,7 +842,10 @@ export type MutationOutcome =
        */
       alreadyApplied?: boolean;
     }
-  | { ok: false; reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' };
+  | {
+      ok: false;
+      reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' | 'CALENDAR_UNAVAILABLE';
+    };
 
 export async function rescheduleBooking(
   db: Db,
@@ -855,6 +858,9 @@ export async function rescheduleBooking(
     now?: Date;
     idempotencyKey?: string;
   },
+  /** Wired CalendarProvider — the reschedule target is conflict-checked against
+   *  the host's external calendars, fail-closed (same policy as createBooking). */
+  calendar?: CalendarProvider,
 ): Promise<MutationOutcome> {
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
@@ -894,6 +900,29 @@ export async function rescheduleBooking(
 
   const duration = Number(b.end_ms) - Number(b.start_ms);
   const newEndMs = args.newStartMs + duration;
+
+  // External-calendar conflict check at RESCHEDULE time — the exact policy the
+  // create path enforces (error-visibility §5): a conflict on the connected
+  // calendar rejects the move, and an UNREADABLE calendar blocks it visibly
+  // instead of moving the meeting onto a conflict we couldn't see (fail-closed).
+  // This path previously skipped the check entirely, so a reschedule could
+  // double-book the host over an external event.
+  if (b.host_member_id) {
+    try {
+      const externalBusy = await loadExternalBusy(
+        db,
+        calendar,
+        b.host_member_id,
+        args.newStartMs,
+        newEndMs,
+      );
+      if (externalBusy.some((x) => x.start.getTime() < newEndMs && x.end.getTime() > args.newStartMs)) {
+        return { ok: false, reason: 'SLOT_TAKEN' };
+      }
+    } catch {
+      return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
+    }
+  }
   const previousStartUtc = new Date(Number(b.start_ms)).toISOString();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
