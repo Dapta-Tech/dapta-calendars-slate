@@ -280,6 +280,9 @@ importers:
 
   packages/types:
     dependencies:
+      '@slate/engine':
+        specifier: workspace:*
+        version: link:../engine
       zod:
         specifier: ^3.24.1
         version: 3.25.76

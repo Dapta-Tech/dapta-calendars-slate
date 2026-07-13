@@ -9,6 +9,12 @@ export interface BookingMessages {
     timezoneLabel: string;
     timezone: string;
     noSlots: string;
+    /** Config-error emptiness (public-safe: never names internals). */
+    noTimesNow: string;
+    /** External calendar unreachable (public-safe). */
+    timesUnavailable: string;
+    calendarUnavailableTitle: string;
+    calendarUnavailableBody: string;
     book: string;
     confirm: string;
     confirming: string;
@@ -242,6 +248,16 @@ export interface BookingMessages {
       slotTaken: string;
       noHandleNotice: string;
       noHandleLink: string;
+      /** Actionable config-error notices (admin-only detail; one link each). */
+      scheduleMissingNotice: string;
+      scheduleMissingLink: string;
+      noHoursNotice: string;
+      noScheduleNotice: string;
+      availabilityLink: string;
+      calendarUnavailableNotice: string;
+      calendarUnavailableLink: string;
+      calendarUnavailableBooking: string;
+      slotsLoadError: string;
     };
     teams: {
       title: string;
@@ -389,6 +405,9 @@ export interface BookingMessages {
       healthOk: string;
       healthError: string;
       recheck: string;
+      /** Persisted-health caption: {time} interpolates the last probe time. */
+      lastChecked: string;
+      neverChecked: string;
       emptyTitle: string;
       emptyBody: string;
       emptyConflicts: string;
@@ -511,6 +530,11 @@ export const en: BookingMessages = {
     timezoneLabel: 'Times shown in {timeZone}',
     timezone: 'Timezone',
     noSlots: 'No available times in this range.',
+    noTimesNow: 'No times are available right now. Please check back soon.',
+    timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
+    calendarUnavailableTitle: 'This time could not be confirmed',
+    calendarUnavailableBody:
+      'We could not confirm this time right now. Please try again in a few minutes.',
     book: 'Book',
     confirm: 'Confirm booking',
     confirming: 'Confirming…',
@@ -740,6 +764,17 @@ export const en: BookingMessages = {
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
       noHandleLink: 'Set your handle in Booking Page settings',
       slotTaken: 'That time was just taken — pick another slot.',
+      scheduleMissingNotice: 'This event’s schedule is missing — pick a schedule in the event settings.',
+      scheduleMissingLink: 'Open event settings',
+      noHoursNotice: 'No working hours configured for this event’s schedule.',
+      noScheduleNotice: 'You don’t have a schedule yet — create one with your working hours.',
+      availabilityLink: 'Open Availability',
+      calendarUnavailableNotice:
+        'Couldn’t reach the connected calendar — times are hidden to prevent double-bookings.',
+      calendarUnavailableLink: 'Check Calendars',
+      calendarUnavailableBooking:
+        'Couldn’t reach the connected calendar — the booking was blocked to prevent a double-booking. Check Calendars and retry.',
+      slotsLoadError: 'Couldn’t load times. Try again in a moment.',
     },
     teams: {
       title: 'Teams',
@@ -886,6 +921,8 @@ export const en: BookingMessages = {
       healthOk: 'Connected',
       healthError: 'Needs attention',
       recheck: 'Re-check',
+      lastChecked: 'Checked {time}',
+      neverChecked: 'Not checked yet',
       emptyTitle: 'No calendars connected yet',
       emptyBody: 'Connect Google or Outlook so {product} can read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
@@ -1008,6 +1045,12 @@ export const es: BookingMessages = {
     timezoneLabel: 'Horarios en {timeZone}',
     timezone: 'Zona horaria',
     noSlots: 'No hay horarios disponibles en este rango.',
+    noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
+    timesUnavailable:
+      'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
+    calendarUnavailableTitle: 'No se pudo confirmar este horario',
+    calendarUnavailableBody:
+      'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',
     book: 'Reservar',
     confirm: 'Confirmar reserva',
     confirming: 'Confirmando…',
@@ -1237,6 +1280,18 @@ export const es: BookingMessages = {
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
       noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
+      scheduleMissingNotice:
+        'Falta el horario de este evento — elige un horario en la configuración del evento.',
+      scheduleMissingLink: 'Abrir configuración del evento',
+      noHoursNotice: 'No hay horas de trabajo configuradas para el horario de este evento.',
+      noScheduleNotice: 'Aún no tienes un horario — crea uno con tus horas de trabajo.',
+      availabilityLink: 'Abrir Disponibilidad',
+      calendarUnavailableNotice:
+        'No se pudo acceder al calendario conectado — los horarios se ocultan para evitar dobles reservas.',
+      calendarUnavailableLink: 'Revisar Calendarios',
+      calendarUnavailableBooking:
+        'No se pudo acceder al calendario conectado — la reserva se bloqueó para evitar una doble reserva. Revisa Calendarios y reintenta.',
+      slotsLoadError: 'No se pudieron cargar los horarios. Inténtalo de nuevo en un momento.',
     },
     teams: {
       title: 'Equipos',
@@ -1383,6 +1438,8 @@ export const es: BookingMessages = {
       healthOk: 'Conectado',
       healthError: 'Requiere atención',
       recheck: 'Volver a comprobar',
+      lastChecked: 'Comprobado {time}',
+      neverChecked: 'Sin comprobar todavía',
       emptyTitle: 'Aún no hay calendarios conectados',
       emptyBody: 'Conecta Google u Outlook para que {product} pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',

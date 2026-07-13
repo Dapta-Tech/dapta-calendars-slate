@@ -198,6 +198,10 @@ export const connectedCalendar = pgTable('connected_calendar', {
   isDestination: integer('is_destination').notNull().default(0),
   checkConflicts: integer('check_conflicts').notNull().default(1),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  /** Persisted health (last explicit probe): NULL last_check_at = never checked. */
+  lastCheckAt: bigint('last_check_at', { mode: 'number' }),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
 });
 
 export const apiKey = pgTable('api_key', {

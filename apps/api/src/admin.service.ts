@@ -22,6 +22,7 @@ import {
   listBookings,
   listConnections,
   listWebhooks,
+  recordConnectionHealth,
   revokeApiKey,
   updateBranding,
   updateHandle,
@@ -90,18 +91,23 @@ export class AdminService {
     },
     accountCode: string,
   ) {
-    const outcome = await createBooking(this.db, {
-      accountCode,
-      // Hosts can create manual bookings before setting a public handle: fall
-      // back to their own member id when no handle is on the payload.
-      handle: body.handle || undefined,
-      memberId: body.handle ? undefined : p.memberId,
-      slug: body.slug,
-      startMs: new Date(body.startUtc).getTime(),
-      attendee: body.attendee,
-      answers: body.answers,
-      onBehalf: true,
-    });
+    const outcome = await createBooking(
+      this.db,
+      {
+        accountCode,
+        // Hosts can create manual bookings before setting a public handle: fall
+        // back to their own member id when no handle is on the payload.
+        handle: body.handle || undefined,
+        memberId: body.handle ? undefined : p.memberId,
+        slug: body.slug,
+        startMs: new Date(body.startUtc).getTime(),
+        attendee: body.attendee,
+        answers: body.answers,
+        onBehalf: true,
+      },
+      // Fail-closed external conflict check at create time (no-op when disabled).
+      this.calendar.provider,
+    );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
     if (outcome.ok && outcome.booking.status === 'accepted')
       this.calendar.onBookingAccepted(outcome.booking.uid);
@@ -261,6 +267,9 @@ export class AdminService {
     const ref = await getConnectionRef(this.db, p.memberId, id);
     if (!ref) return { ok: false, enabled: true, message: 'Connection not found.' };
     const health = await this.provider.checkConnection(ref.externalId);
+    // Persist the outcome so the Calendars page can show health with
+    // last-checked info even before the next live probe.
+    await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
     return { ok: health.ok, enabled: true, message: health.detail };
   }
 
@@ -317,6 +326,12 @@ export class AdminService {
       this.calendar.provider,
     );
     if (!result) return null;
-    return { eventType: result.eventType, timeZone: result.timeZone, slots: result.slots };
+    return {
+      eventType: result.eventType,
+      timeZone: result.timeZone,
+      slots: result.slots,
+      // Config-error reason (admin surface renders the actionable copy).
+      emptyReason: result.emptyReason,
+    };
   }
 }

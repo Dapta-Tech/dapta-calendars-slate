@@ -10,6 +10,15 @@ export interface HostBookingResult {
   message?: string;
   /** HTTP status of the failed attempt (409 = the slot was just taken). */
   status?: number;
+  /** Machine-readable API error code (e.g. CALENDAR_UNAVAILABLE, SLOT_TAKEN). */
+  error?: string;
+}
+
+export interface HostSlotsResult {
+  ok: boolean;
+  slots: string[];
+  /** Config-error reason when the API returned an empty list on purpose. */
+  emptyReason?: string;
 }
 
 /**
@@ -21,13 +30,19 @@ export async function loadHostSlotsAction(
   slug: string,
   from: string,
   to: string,
-): Promise<{ ok: boolean; slots: string[] }> {
+): Promise<HostSlotsResult> {
   try {
     const qs = `slug=${encodeURIComponent(slug)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
     const res = await hostFetch(`/v1/me/availability?${qs}`);
     if (!res.ok) return { ok: false, slots: [] };
-    const j = (await res.json().catch(() => ({}))) as { slots?: { startUtc: string }[] };
-    return { ok: true, slots: (j.slots ?? []).map((s) => s.startUtc) };
+    const j = (await res.json().catch(() => ({}))) as {
+      slots?: { startUtc: string }[];
+      emptyReason?: string;
+    };
+    // emptyReason distinguishes a CONFIG error (missing schedule, no hours,
+    // unreachable calendar) from a genuinely empty range — the form renders
+    // an actionable notice instead of a bare "No slots in range."
+    return { ok: true, slots: (j.slots ?? []).map((s) => s.startUtc), emptyReason: j.emptyReason };
   } catch (e) {
     unstable_rethrow(e);
     return { ok: false, slots: [] };
@@ -57,7 +72,12 @@ export async function createHostBookingAction(payload: {
       revalidatePath('/admin/bookings');
       return { ok: true, uid: j.uid as string };
     }
-    return { ok: false, status: res.status, message: (j.message as string) ?? 'Could not create the booking.' };
+    return {
+      ok: false,
+      status: res.status,
+      error: j.error as string | undefined,
+      message: (j.message as string) ?? 'Could not create the booking.',
+    };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };

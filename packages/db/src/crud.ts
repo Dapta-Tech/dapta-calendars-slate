@@ -375,6 +375,30 @@ export async function setScheduleRules(
 }
 
 export async function deleteSchedule(db: Db, accountId: string, id: string): Promise<void> {
+  // Ownership check first — it also gates the reference re-pointing below so a
+  // cross-tenant id can never touch another account's rows.
+  const sched = await db.get<{ member_id: string }>(
+    sql`SELECT member_id FROM schedule WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+  );
+  if (!sched) return;
+
+  // Never leave a dangling schedule reference (the silent "slots: []" bug):
+  // events fall back to the member default (NULL = default at read time), and a
+  // member default that pointed here re-points to their oldest other schedule.
+  await db.run(
+    sql`UPDATE event_type SET schedule_id = NULL
+        WHERE account_id = ${accountId} AND schedule_id = ${id}`,
+  );
+  await db.run(sql`UPDATE event_type_host SET schedule_id = NULL WHERE schedule_id = ${id}`);
+  const fallback = await db.get<{ id: string }>(
+    sql`SELECT id FROM schedule WHERE member_id = ${sched.member_id} AND id <> ${id}
+        ORDER BY created_at ASC, id ASC LIMIT 1`,
+  );
+  await db.run(
+    sql`UPDATE member SET default_schedule_id = ${fallback?.id ?? null}
+        WHERE default_schedule_id = ${id}`,
+  );
+
   await db.run(sql`DELETE FROM availability WHERE schedule_id = ${id}`);
   await db.run(sql`DELETE FROM schedule WHERE account_id = ${accountId} AND id = ${id}`);
 }

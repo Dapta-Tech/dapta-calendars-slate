@@ -117,6 +117,11 @@ export class HostController {
     if (!out.ok) {
       if (out.reason === 'NOT_FOUND') throw new BadRequestException({ error: 'NOT_FOUND', message: 'No such event.' });
       if (out.reason === 'INVALID') throw new BadRequestException({ error: 'INTAKE_INVALID', message: out.message });
+      if (out.reason === 'CALENDAR_UNAVAILABLE')
+        throw new ConflictException({
+          error: 'CALENDAR_UNAVAILABLE',
+          message: 'Could not reach the connected calendar — booking blocked to avoid a double-booking. Check the Calendars page and retry.',
+        });
       throw new BadRequestException({ error: 'SLOT_TAKEN', message: 'That time is taken.' });
     }
     return { uid: out.booking.uid, status: out.booking.status };

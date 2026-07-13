@@ -21,6 +21,12 @@ interface Props {
   ownerSlug: string;
   slug: string;
   slots: Slot[];
+  /**
+   * Why `slots` is empty, when it's a config error (API reason code). Public
+   * pages map every code to GENERIC copy — internals are never named here;
+   * the actionable detail lives on the admin surfaces.
+   */
+  emptyReason?: string;
   bookingFields: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
@@ -45,6 +51,7 @@ export function BookingFlow({
   ownerSlug,
   slug,
   slots,
+  emptyReason,
   bookingFields,
   initialTimeZone,
   mode = 'personal',
@@ -115,13 +122,18 @@ export function BookingFlow({
   const intakeError = result && !result.ok && !dismissed && result.status === 400;
 
   // --- Conflict (409/410): R22 error + retry ------------------------------
+  // CALENDAR_UNAVAILABLE (booking blocked fail-closed) gets its own localized
+  // copy — a generic "try again shortly", never internals.
   if (conflict) {
+    const calUnavailable = result!.error === 'CALENDAR_UNAVAILABLE';
     return (
       <section className="bp-card border border-destructive bg-card p-6">
         <h2 className="mb-1 text-lg font-semibold">
-          {result!.status === 410 ? m.holdExpired : m.slotTaken}
+          {calUnavailable ? m.calendarUnavailableTitle : result!.status === 410 ? m.holdExpired : m.slotTaken}
         </h2>
-        <p className="mb-4 text-sm text-muted-foreground">{result!.message}</p>
+        <p className="mb-4 text-sm text-muted-foreground">
+          {calUnavailable ? m.calendarUnavailableBody : result!.message}
+        </p>
         <button
           type="button"
           onClick={retry}
@@ -157,7 +169,13 @@ export function BookingFlow({
         </div>
 
         {days.length === 0 ? (
-          <p className="text-muted-foreground">{m.noSlots}</p>
+          <p className="text-muted-foreground">
+            {emptyReason === 'CALENDAR_UNAVAILABLE'
+              ? m.timesUnavailable
+              : emptyReason
+                ? m.noTimesNow
+                : m.noSlots}
+          </p>
         ) : (
           // Page-scroll, no inner scroll region (Design Quality Bar §2): the list
           // flows in the page so there's no native scrollbar or mid-row cut, and

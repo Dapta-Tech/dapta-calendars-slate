@@ -5,6 +5,7 @@
  * from the same schema (never trust the client; validate on both sides).
  */
 import { z } from 'zod';
+import { AVAILABILITY_EMPTY_REASONS } from '@slate/engine';
 
 // --- Enums (string unions — portable across SQLite & Postgres) -------------
 
@@ -92,6 +93,15 @@ export const slotSchema = z.object({
 });
 export type Slot = z.infer<typeof slotSchema>;
 
+/**
+ * Why `slots` came back empty for a CONFIGURATION reason. Absent on a sound
+ * config (empty then means genuinely fully-booked / out of range). Codes are
+ * safe to expose publicly; human copy is the client's job (admin gets
+ * actionable detail, public pages get generic wording).
+ */
+export const availabilityEmptyReasonSchema = z.enum(AVAILABILITY_EMPTY_REASONS);
+export type AvailabilityEmptyReason = z.infer<typeof availabilityEmptyReasonSchema>;
+
 export const availabilityResponseSchema = z.object({
   eventType: z.object({
     slug: z.string(),
@@ -104,6 +114,8 @@ export const availabilityResponseSchema = z.object({
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
+  /** Present only when slots is empty because of a configuration error. */
+  emptyReason: availabilityEmptyReasonSchema.optional(),
 });
 export type AvailabilityResponse = z.infer<typeof availabilityResponseSchema>;
 

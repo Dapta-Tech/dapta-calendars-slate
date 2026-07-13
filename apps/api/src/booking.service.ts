@@ -78,6 +78,9 @@ export class BookingService {
       timeZone: result.timeZone,
       // result.slots are already {startUtc, spotsLeft?, capacity?} (group-aware).
       slots: result.slots,
+      // Machine-readable config-error reason (only when slots is empty). The
+      // code is public-safe; clients own the copy (admin actionable, public generic).
+      emptyReason: result.emptyReason,
     });
   }
 
@@ -102,17 +105,22 @@ export class BookingService {
 
   async book(raw: unknown, onBehalf = false): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
-    const outcome = await createBooking(this.db, {
-      accountCode: input.accountCode,
-      handle: input.handle,
-      slug: input.slug,
-      startMs: new Date(input.startUtc).getTime(),
-      attendee: input.attendee,
-      answers: input.answers,
-      reservationUid: input.reservationUid,
-      idempotencyKey: input.idempotencyKey,
-      onBehalf,
-    });
+    const outcome = await createBooking(
+      this.db,
+      {
+        accountCode: input.accountCode,
+        handle: input.handle,
+        slug: input.slug,
+        startMs: new Date(input.startUtc).getTime(),
+        attendee: input.attendee,
+        answers: input.answers,
+        reservationUid: input.reservationUid,
+        idempotencyKey: input.idempotencyKey,
+        onBehalf,
+      },
+      // Fail-closed external conflict check at create time (no-op when disabled).
+      this.calendar.provider,
+    );
 
     if (!outcome.ok) {
       if (outcome.reason === 'NOT_FOUND')
@@ -121,6 +129,12 @@ export class BookingService {
         return { error: 'INTAKE_INVALID', message: outcome.message, status: 400 };
       if (outcome.reason === 'RESERVATION_EXPIRED')
         return { error: 'RESERVATION_EXPIRED', message: 'Your hold on this time expired. Please pick a time again.', status: 410 };
+      if (outcome.reason === 'CALENDAR_UNAVAILABLE')
+        return {
+          error: 'CALENDAR_UNAVAILABLE',
+          message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
+        };
       return { error: 'SLOT_TAKEN', message: 'That time was just booked. Pick another slot.', status: 409 };
     }
 
@@ -352,6 +366,7 @@ export class BookingService {
       eventType: result.eventType,
       timeZone: result.timeZone,
       slots: result.slots.map((startUtc) => ({ startUtc })),
+      emptyReason: result.emptyReason,
     });
   }
 
@@ -360,18 +375,28 @@ export class BookingService {
     teamSlug: string,
     body: { slug: string; startUtc: string; attendee: BookingView['attendee']; answers?: Record<string, unknown> },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
-    const out = await createTeamBooking(this.db, {
-      accountCode,
-      teamSlug,
-      slug: body.slug,
-      startMs: new Date(body.startUtc).getTime(),
-      attendee: body.attendee,
-      answers: body.answers,
-    });
+    const out = await createTeamBooking(
+      this.db,
+      {
+        accountCode,
+        teamSlug,
+        slug: body.slug,
+        startMs: new Date(body.startUtc).getTime(),
+        attendee: body.attendee,
+        answers: body.answers,
+      },
+      this.calendar.provider,
+    );
     if (!out.ok) {
       if (out.reason === 'NOT_FOUND') return { error: 'NOT_FOUND', message: 'Not found.', status: 404 };
       if (out.reason === 'INVALID')
         return { error: 'INTAKE_INVALID', message: out.message ?? 'Invalid.', status: 400 };
+      if (out.reason === 'CALENDAR_UNAVAILABLE')
+        return {
+          error: 'CALENDAR_UNAVAILABLE',
+          message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
+        };
       return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
     }
     // B4: a team booking is created `accepted`. It was silently unmanageable
