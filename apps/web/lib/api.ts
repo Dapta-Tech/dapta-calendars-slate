@@ -2,6 +2,7 @@
  * Server-side API client. The web app talks to the Slate API over HTTP (never
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
+import { cache } from 'react';
 import type { AvailabilityResponse, BookingView, PublicProfile } from '@slate/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
@@ -13,11 +14,13 @@ async function getJson<T>(path: string): Promise<T | null> {
   return (await res.json()) as T;
 }
 
-export function getProfile(accountCode: string, handle: string): Promise<PublicProfile | null> {
-  return getJson<PublicProfile>(
-    `/v1/profiles/${encodeURIComponent(accountCode)}/${encodeURIComponent(handle)}`,
-  );
-}
+// cache(): generateMetadata and the page share one profile fetch per request.
+export const getProfile = cache(
+  (accountCode: string, handle: string): Promise<PublicProfile | null> =>
+    getJson<PublicProfile>(
+      `/v1/profiles/${encodeURIComponent(accountCode)}/${encodeURIComponent(handle)}`,
+    ),
+);
 
 export interface TeamProfile {
   account: { code: string; name: string };
@@ -25,11 +28,13 @@ export interface TeamProfile {
   eventTypes: Array<{ slug: string; title: string; description: string | null; lengthMinutes: number }>;
 }
 
-export function getTeamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
-  return getJson<TeamProfile>(
-    `/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}`,
-  );
-}
+// cache(): generateMetadata and the page share one team-profile fetch per request.
+export const getTeamProfile = cache(
+  (accountCode: string, teamSlug: string): Promise<TeamProfile | null> =>
+    getJson<TeamProfile>(
+      `/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}`,
+    ),
+);
 
 export function getTeamAvailability(params: {
   accountCode: string;

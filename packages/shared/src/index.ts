@@ -8,4 +8,5 @@ export * from './booking-fields';
 export * from './availability';
 export * from './handle';
 export * from './branding';
+export * from './growth';
 export * from './i18n';

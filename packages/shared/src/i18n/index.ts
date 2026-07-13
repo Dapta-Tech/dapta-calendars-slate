@@ -34,6 +34,7 @@ export interface BookingMessages {
     confirmed: string;
     requested: string;
     awaitingConfirmation: string;
+    confirmationSentTo: string;
     yourName: string;
     yourEmail: string;
     notes: string;
@@ -68,6 +69,15 @@ export interface BookingMessages {
     noOpenTimes: string;
     whereLabel: string;
     joinMeeting: string;
+  };
+  /** Growth loop — public-page attribution badge + confirmation signup CTA. */
+  growth: {
+    madeWith: string;
+    ctaQuestion: string;
+    ctaAction: string;
+    /** SEO/OG meta descriptions for the public pages (host/event data only). */
+    seoProfile: string;
+    seoEvent: string;
   };
   /** Team scheduling method names (the FREE layer competitors paywall). */
   scheduling: {
@@ -587,6 +597,7 @@ export const en: BookingMessages = {
     confirmed: 'Booking confirmed',
     requested: 'Booking requested',
     awaitingConfirmation: 'Awaiting the host’s confirmation. We’ll email {email} once it’s confirmed.',
+    confirmationSentTo: 'A confirmation was sent to {email}.',
     yourName: 'Your name',
     yourEmail: 'Your email',
     notes: 'Notes (optional)',
@@ -629,6 +640,13 @@ export const en: BookingMessages = {
     noOpenTimes: 'No open times in the next 3 weeks.',
     whereLabel: 'Where',
     joinMeeting: 'Join the meeting',
+  },
+  growth: {
+    madeWith: 'Made with Dapta Calendars',
+    ctaQuestion: 'Want your own booking page?',
+    ctaAction: 'Get Dapta Calendars — free',
+    seoProfile: 'Book time with {name} online.',
+    seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
   },
   admin: {
     nav: {
@@ -1158,6 +1176,7 @@ export const es: BookingMessages = {
     confirmed: 'Reserva confirmada',
     requested: 'Reserva solicitada',
     awaitingConfirmation: 'Esperando la confirmación del anfitrión. Te escribiremos a {email} cuando se confirme.',
+    confirmationSentTo: 'Enviamos una confirmación a {email}.',
     yourName: 'Tu nombre',
     yourEmail: 'Tu correo',
     notes: 'Notas (opcional)',
@@ -1200,6 +1219,13 @@ export const es: BookingMessages = {
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     whereLabel: 'Dónde',
     joinMeeting: 'Unirse a la reunión',
+  },
+  growth: {
+    madeWith: 'Hecho con Dapta Calendars',
+    ctaQuestion: '¿Quieres tu propia página de reservas?',
+    ctaAction: 'Consigue Dapta Calendars — gratis',
+    seoProfile: 'Reserva un horario con {name} en línea.',
+    seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
   },
   admin: {
     nav: {
