@@ -21,7 +21,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { deriveUniqueHandle, generateUniqueShortCode, sql } from '@slate/db';
+import { deriveUniqueHandle, insertAccountWithShortCode, sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
@@ -89,15 +89,11 @@ export class WorkOsAuthProvider implements AuthProvider {
     );
     if (existing) return existing.id;
 
-    const id = randomUUID();
     const name = typeof claims.name === 'string' && claims.name ? claims.name : 'Account';
-    // ON CONFLICT DO NOTHING makes concurrent first-logins race-safe: the unique
-    // external_id index means at most one row wins; the loser re-selects it.
-    await this.db.run(
-      sql`INSERT INTO account (id, code, name, external_id, created_at)
-          VALUES (${id}, ${await generateUniqueShortCode(this.db)}, ${name}, ${externalId}, ${Date.now()})
-          ON CONFLICT (external_id) DO NOTHING`,
-    );
+    // Race-safe JIT: idempotent on external_id, and a (vanishingly rare) short
+    // CODE collision with a concurrent creation regenerates + retries instead
+    // of failing the login. The loser of the external_id race re-selects below.
+    await insertAccountWithShortCode(this.db, { name, externalId });
     const row = await this.db.get<{ id: string }>(
       sql`SELECT id FROM account WHERE external_id = ${externalId} LIMIT 1`,
     );

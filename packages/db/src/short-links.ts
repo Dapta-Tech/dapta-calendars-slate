@@ -59,6 +59,38 @@ export async function generateUniqueShortCode(
   throw new Error('short-code generation exhausted retries (50) — check the alias/code tables');
 }
 
+/**
+ * JIT-create an account with a fresh short code, race-safely. Idempotency is
+ * anchored on `external_id` (ON CONFLICT DO NOTHING), but that clause does not
+ * cover the 1-in-a-billion CODE collision two concurrent creations can hit —
+ * so a code-conflict INSERT failure regenerates and retries instead of
+ * bubbling a 500 into the login path. Callers re-select by external_id after.
+ */
+export async function insertAccountWithShortCode(
+  db: Db,
+  args: { name: string; externalId: string },
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const code = await generateUniqueShortCode(db);
+    try {
+      await db.run(
+        sql`INSERT INTO account (id, code, name, external_id, created_at)
+            VALUES (${randomUUID()}, ${code}, ${args.name}, ${args.externalId}, ${Date.now()})
+            ON CONFLICT (external_id) DO NOTHING`,
+      );
+      return;
+    } catch {
+      // A concurrent creation either won on external_id (we're done — the
+      // caller's re-select finds it) or stole this code (regenerate + retry).
+      const winner = await db.get<{ id: string }>(
+        sql`SELECT id FROM account WHERE external_id = ${args.externalId} LIMIT 1`,
+      );
+      if (winner) return;
+    }
+  }
+  throw new Error('account creation exhausted short-code retries');
+}
+
 /** Record a retired public code so it resolves (and 308s) forever. Idempotent. */
 export async function addAccountAlias(db: Db, accountId: string, alias: string): Promise<void> {
   try {
@@ -110,7 +142,14 @@ export async function setVanitySlug(
   // If this account itself held `s` as an alias (re-claiming an old vanity),
   // drop the alias row — it's canonical again.
   await db.run(sql`DELETE FROM account_alias WHERE alias = ${s} AND account_id = ${accountId}`);
-  await db.run(sql`UPDATE account SET vanity_slug = ${s} WHERE id = ${accountId}`);
+  try {
+    await db.run(sql`UPDATE account SET vanity_slug = ${s} WHERE id = ${accountId}`);
+  } catch {
+    // Concurrent claim of the same slug lost the race to the UNIQUE index
+    // (account_vanity_slug_uq): the check-then-act above can't see it, the
+    // index does. Same taken outcome as the pre-check, never a 500.
+    return { ok: false, reason: 'taken' };
+  }
   return { ok: true, vanitySlug: s };
 }
 

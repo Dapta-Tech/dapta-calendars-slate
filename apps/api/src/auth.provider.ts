@@ -15,7 +15,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { deriveUniqueHandle, generateUniqueShortCode, getAccountByCode, sql } from '@slate/db';
+import { deriveUniqueHandle, getAccountByCode, insertAccountWithShortCode, sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 // The concrete `workos` adapter. The cycle (adapter imports the port/`header`
 // from here) is safe: each side references the other only inside function
@@ -139,12 +139,8 @@ export class LocalAuthProvider implements AuthProvider {
     );
     if (!account) account = await getAccountByCode(this.db, legacyCode);
     if (!account) {
-      const id = randomUUID();
-      await this.db.run(
-        sql`INSERT INTO account (id, code, name, external_id, created_at)
-            VALUES (${id}, ${await generateUniqueShortCode(this.db)}, ${email}, ${extId}, ${Date.now()})
-            ON CONFLICT (external_id) DO NOTHING`,
-      );
+      // Race-safe JIT: idempotent on external_id; a code collision regenerates.
+      await insertAccountWithShortCode(this.db, { name: email, externalId: extId });
       account = await this.db.get<{ id: string }>(
         sql`SELECT id FROM account WHERE external_id = ${extId} LIMIT 1`,
       );
