@@ -19,6 +19,9 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (javascript-typescript)
+    # Code scanning upload requires GitHub Code Security, which private repos only
+    # get with Advanced Security. Skip until the repo flips public (where it is free).
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
