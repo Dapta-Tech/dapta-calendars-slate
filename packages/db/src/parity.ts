@@ -1139,7 +1139,7 @@ export async function loadBookingNotificationContext(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.host_member_id, m.display_name AS host_name, m.email AS host_email,
                m.locale AS host_locale, m.handle AS host_handle,
-               acc.code AS account_code, et.slug AS event_slug,
+               COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
