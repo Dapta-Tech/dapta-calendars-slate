@@ -420,10 +420,10 @@ function parseNotificationPatch(
   if (body?.body !== undefined)
     patch.body = cleanTemplateField(body.body as string | null, MAX_BODY);
   if (body?.reminderLeadMinutes !== undefined) {
-    if (key !== 'attendee_reminder')
+    if (key !== 'attendee_reminder' && key !== 'follow_up')
       throw new BadRequestException({
         error: 'BAD_REQUEST',
-        message: 'Reminder lead times are set on the attendee_reminder key.',
+        message: 'Lead times are set on the attendee_reminder or follow_up keys.',
       });
     if (body.reminderLeadMinutes === null) {
       patch.reminderLeadMinutes = null;

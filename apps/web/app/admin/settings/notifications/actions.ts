@@ -47,9 +47,9 @@ export async function saveTemplateAction(
   return patchSetting(key, { subject, body });
 }
 
-/** Save reminder lead times (minutes before start) on the reminder setting. */
-export async function saveLeadsAction(leads: number[]): Promise<ActionResult> {
-  return patchSetting('attendee_reminder', { reminderLeadMinutes: leads });
+/** Save lead times (reminders: minutes before start; follow_up: after end). */
+export async function saveLeadsAction(key: string, leads: number[]): Promise<ActionResult> {
+  return patchSetting(key, { reminderLeadMinutes: leads });
 }
 
 /** Reset a template to the shipped default (toggle untouched). */

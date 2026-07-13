@@ -75,7 +75,9 @@ function ToggleList({
   m: Messages;
   onEdit: (key: NotificationEmailKey) => void;
 }) {
-  const attendee = data.settings.filter((s) => s.key.startsWith('attendee_'));
+  // Attendee section = every non-host key (incl. follow_up, whose key carries
+  // no attendee_ prefix by product decision).
+  const attendee = data.settings.filter((s) => !s.key.startsWith('host_'));
   const host = data.settings.filter((s) => s.key.startsWith('host_'));
   return (
     <div className="flex flex-col gap-4">
@@ -153,15 +155,17 @@ function Row({
         >
           {m.editTemplate}
         </button>
-        {s.key === 'attendee_reminder' ? <LeadsField s={s} m={m} /> : null}
+        {s.key === 'attendee_reminder' || s.key === 'follow_up' ? <LeadsField s={s} m={m} /> : null}
       </div>
       <Switch checked={enabled} disabled={pending} onCheckedChange={toggle} aria-label={m.labels[s.key]} />
     </li>
   );
 }
 
-/** Reminder lead times — comma list, saved on blur/Enter when valid + changed. */
+/** Lead times (reminders: before start; follow-up: after end) — comma list,
+ *  saved on blur/Enter when valid + changed. */
 function LeadsField({ s, m }: { s: NotificationSettingView; m: Messages }) {
+  const isFollowUp = s.key === 'follow_up';
   const saved = (s.reminderLeadMinutes ?? []).join(', ');
   const [value, setValue] = useState(saved);
   const [invalid, setInvalid] = useState(false);
@@ -178,7 +182,7 @@ function LeadsField({ s, m }: { s: NotificationSettingView; m: Messages }) {
     }
     setInvalid(false);
     start(async () => {
-      const r = await saveLeadsAction(leads);
+      const r = await saveLeadsAction(s.key, leads);
       if (r.ok) {
         setValue(leads.join(', '));
         toast.success(m.updated);
@@ -191,11 +195,11 @@ function LeadsField({ s, m }: { s: NotificationSettingView; m: Messages }) {
 
   return (
     <div className="mt-2 flex max-w-xs flex-col gap-1">
-      <label className="text-xs text-muted-foreground" htmlFor="reminder-leads">
-        {m.reminderLeads}
+      <label className="text-xs text-muted-foreground" htmlFor={`${s.key}-leads`}>
+        {isFollowUp ? m.followUpLead : m.reminderLeads}
       </label>
       <input
-        id="reminder-leads"
+        id={`${s.key}-leads`}
         value={value}
         disabled={pending}
         onChange={(e) => {
@@ -209,7 +213,7 @@ function LeadsField({ s, m }: { s: NotificationSettingView; m: Messages }) {
         className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
       />
       <span className={`text-xs ${invalid ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {invalid ? m.reminderLeadsInvalid : m.reminderLeadsHint}
+        {invalid ? m.reminderLeadsInvalid : isFollowUp ? m.followUpLeadHint : m.reminderLeadsHint}
       </span>
     </div>
   );

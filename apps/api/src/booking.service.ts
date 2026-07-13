@@ -156,6 +156,7 @@ export class BookingService {
         void this.email.enqueueConfirmation(b.uid, { manageUrl });
         // Schedule the pre-meeting reminders (24h + 1h) — dormant outbox rows.
         void this.email.enqueueReminders(b.uid, { manageUrl });
+        void this.email.enqueueFollowUps(b.uid, { manageUrl });
       } else if (b.status === 'pending') {
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
@@ -263,6 +264,7 @@ export class BookingService {
       void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
       // Drop any scheduled reminders — don't remind about a cancelled meeting.
       void this.email.cancelReminders(uid);
+      void this.email.cancelFollowUps(uid);
       this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
     }
     return { uid: out.uid, status: 'cancelled' };
@@ -299,6 +301,7 @@ export class BookingService {
         });
         // Move the reminders to the new time (drop old, re-schedule).
         void this.email.repointReminders(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
+        void this.email.repointFollowUps(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
       }
       this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
     }
@@ -421,6 +424,7 @@ export class BookingService {
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });
+    void this.email.enqueueFollowUps(out.uid, { manageUrl });
     this.fireWebhook(out.uid, 'booking.created', {
       uid: out.uid,
       status: 'accepted',

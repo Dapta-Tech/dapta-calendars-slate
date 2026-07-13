@@ -28,11 +28,21 @@ export const EMAIL_TEMPLATE_KEYS = [
   'host_cancelled',
   'host_declined',
   'host_reminder',
+  'follow_up',
 ] as const;
 export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
 
 export function isEmailTemplateKey(v: string): v is EmailTemplateKey {
   return (EMAIL_TEMPLATE_KEYS as readonly string[]).includes(v);
+}
+
+/**
+ * Whether a key sends with NO stored setting. Lifecycle mail defaults ON
+ * (parity with the pre-toggle product); the post-meeting follow-up is
+ * marketing-ish, so it is strictly opt-in.
+ */
+export function defaultEnabledFor(key: EmailTemplateKey): boolean {
+  return key !== 'follow_up';
 }
 
 export type TemplateLocale = 'en' | 'es';
@@ -58,6 +68,7 @@ export const TEMPLATE_VARIABLES = [
   'previous_start_time',
   'reminder_lead',
   'pending_note',
+  'booking_link',
 ] as const;
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
 
@@ -138,6 +149,7 @@ export function templateVars(
     previous_start_time: n.previousStartUtc ? formatWhen(n.previousStartUtc, tz, locale) : '',
     reminder_lead: formatLead(n.reminderLeadMinutes, locale),
     pending_note: pendingNote,
+    booking_link: n.bookingLink ?? '',
   };
 }
 
@@ -293,6 +305,13 @@ Reminder: "{{event_title}}" with {{attendee_name}} starts {{reminder_lead}}.
 When: {{start_time}}
 Where: {{location}}`,
   },
+  follow_up: {
+    subject: 'Thanks for meeting — {{event_title}}',
+    body: `Hi {{attendee_name}},
+
+Thanks for taking the time for "{{event_title}}" — we hope it was useful.
+Want to talk again? Book another slot: {{booking_link}}`,
+  },
 };
 
 const ES: Record<EmailTemplateKey, EmailTemplate> = {
@@ -390,6 +409,13 @@ Motivo: {{cancellation_reason}}`,
 Recordatorio: "{{event_title}}" con {{attendee_name}} comienza {{reminder_lead}}.
 Cuándo: {{start_time}}
 Dónde: {{location}}`,
+  },
+  follow_up: {
+    subject: 'Gracias por la reunión — {{event_title}}',
+    body: `Hola {{attendee_name}},
+
+Gracias por tu tiempo en "{{event_title}}" — esperamos que haya sido útil.
+¿Quieres volver a hablar? Reserva otro espacio: {{booking_link}}`,
   },
 };
 

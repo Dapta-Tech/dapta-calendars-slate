@@ -11,12 +11,14 @@ import {
 } from '@slate/db';
 import {
   BookingNotifier,
+  defaultEnabledFor,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { DB, EMAIL, NOTIFIER } from './tokens';
+import type { ServerEnv } from '@slate/config/env';
+import { DB, EMAIL, ENV, NOTIFIER } from './tokens';
 
 /**
  * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
@@ -26,10 +28,20 @@ import { DB, EMAIL, NOTIFIER } from './tokens';
 export class OutboxSkipError extends Error {}
 
 /** The booking emails the outbox can carry. */
-export type EmailKind = 'confirmation' | 'pending' | 'cancellation' | 'reschedule' | 'declined' | 'reminder';
+export type EmailKind =
+  | 'confirmation'
+  | 'pending'
+  | 'cancellation'
+  | 'reschedule'
+  | 'declined'
+  | 'reminder'
+  | 'follow_up';
 
 /** Default reminder lead times (minutes before start): 24h and 1h. */
 export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
+
+/** Default follow-up lead (minutes AFTER the meeting ends): 1h. */
+export const DEFAULT_FOLLOW_UP_LEAD_MINUTES = [60];
 
 /**
  * Which per-account notification keys a lifecycle event fans out to. Each side
@@ -64,6 +76,8 @@ const KIND_SIDES: Record<EmailKind, Array<{ key: EmailTemplateKey; audience: 'at
     { key: 'attendee_reminder', audience: 'attendee' },
     { key: 'host_reminder', audience: 'host' },
   ],
+  // Post-meeting thank-you — attendee only, strictly opt-in (default OFF).
+  follow_up: [{ key: 'follow_up', audience: 'attendee' }],
 };
 
 /** The notification key a queued email row was enqueued under (deliver-time gate). */
@@ -109,6 +123,8 @@ export class EmailEffects {
     // Optional so existing direct constructions (tests, scripts) keep working;
     // absent = a transport that can send without tenant context.
     @Inject(EMAIL) private readonly provider?: EmailProvider,
+    // Optional: only needed to compose the public {{booking_link}} URL.
+    @Inject(ENV) private readonly env?: ServerEnv,
   ) {}
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
@@ -188,6 +204,63 @@ export class EmailEffects {
   }
 
   /**
+   * Schedule the post-meeting FOLLOW-UP — one `email`/`follow_up` outbox row
+   * per lead time, each due at `end + lead` (future next_attempt_at, worker
+   * leaves it dormant). Mirrors the reminders pattern exactly, except the
+   * toggle defaults OFF (opt-in) and it is attendee-side only. Fire times
+   * already in the past are skipped. Never rejects.
+   */
+  async enqueueFollowUps(
+    uid: string,
+    opts: { manageUrl?: string; leadMinutes?: number[]; now?: number } = {},
+  ): Promise<void> {
+    try {
+      const ctx = await loadBookingNotificationContext(this.db, uid);
+      if (!ctx) return;
+      const settings = await getNotificationSettings(this.db, ctx.accountId);
+      const now = opts.now ?? Date.now();
+      const endMs = new Date(ctx.endUtc).getTime();
+      const leads =
+        opts.leadMinutes ??
+        settings.get('follow_up')?.reminderLeadMinutes ??
+        DEFAULT_FOLLOW_UP_LEAD_MINUTES;
+      for (const side of KIND_SIDES.follow_up) {
+        const n = this.sideNotification('follow_up', ctx, side, settings, { manageUrl: opts.manageUrl });
+        if (!n) continue;
+        for (const lead of leads) {
+          const fireAt = endMs + lead * 60_000;
+          if (fireAt <= now) continue; // meeting long over — never send stale thanks
+          await enqueueOutbox(this.db, {
+            kind: 'email',
+            action: 'follow_up',
+            bookingUid: uid,
+            accountId: ctx.accountId,
+            payload: JSON.stringify({ ...n, reminderLeadMinutes: lead }),
+            nextAttemptAt: fireAt,
+          });
+        }
+      }
+    } catch (err) {
+      this.log.error(`failed to schedule follow-up for ${uid}: ${String(err)}`);
+    }
+  }
+
+  /** Drop any still-pending follow-ups for a booking (on cancel/decline). */
+  async cancelFollowUps(uid: string): Promise<void> {
+    try {
+      await deletePendingOutbox(this.db, { bookingUid: uid, kind: 'email', action: 'follow_up' });
+    } catch (err) {
+      this.log.error(`failed to cancel follow-up for ${uid}: ${String(err)}`);
+    }
+  }
+
+  /** Reschedule moved the booking → re-point the follow-up at the new end time. */
+  async repointFollowUps(uid: string, opts: { manageUrl?: string; now?: number } = {}): Promise<void> {
+    await this.cancelFollowUps(uid);
+    await this.enqueueFollowUps(uid, opts);
+  }
+
+  /**
    * Build the notification snapshots from the DB + caller overrides and enqueue
    * one durable email row per ENABLED side. Never throws — a failure to enqueue
    * is logged, so the caller's `void`-ed fire-and-forget never blocks or
@@ -232,7 +305,9 @@ export class EmailEffects {
     settings: Map<string, NotificationSetting>,
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
   ): BookingNotification | null {
-    const setting = settings.get(side.key) ?? defaultNotificationSetting(side.key);
+    const setting =
+      settings.get(side.key) ??
+      { ...defaultNotificationSetting(side.key), enabled: defaultEnabledFor(side.key) };
     if (!setting.enabled) {
       this.log.log(`skip ${kind}/${side.key} for ${ctx.uid} — disabled by account settings`);
       return null;
@@ -266,6 +341,10 @@ export class EmailEffects {
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
+      bookingLink:
+        ctx.bookAgain && this.env
+          ? `${this.env.PUBLIC_APP_URL}/${ctx.bookAgain.accountCode}/${ctx.bookAgain.handle}/${ctx.bookAgain.slug}`
+          : null,
       // DTSTAMP = the moment the notification was assembled (not the event start).
       stamp: new Date().toISOString(),
     };
@@ -294,6 +373,16 @@ export class EmailEffects {
       throw new OutboxSkipError(
         'email outbox row missing account context — skipped (signed transport requires a tenant)',
       );
+    }
+    if (kind === 'follow_up' && n.accountId) {
+      // Long-lived opt-in row: re-check the toggle at deliver time; absent
+      // setting = the key's default (OFF for follow_up).
+      const settings = await getNotificationSettings(this.db, n.accountId);
+      const enabled = settings.get('follow_up')?.enabled ?? defaultEnabledFor('follow_up');
+      if (!enabled) {
+        this.log.log(`skip queued follow-up for ${n.uid} — disabled by account settings`);
+        return;
+      }
     }
     if (kind === 'reminder' && n.accountId) {
       const settings = await getNotificationSettings(this.db, n.accountId);
@@ -330,6 +419,9 @@ export class EmailEffects {
         return;
       case 'reminder':
         await this.notifier.sendReminder(n);
+        return;
+      case 'follow_up':
+        await this.notifier.sendFollowUp(n);
         return;
       default:
         throw new Error(`unknown email kind: ${kind}`);
