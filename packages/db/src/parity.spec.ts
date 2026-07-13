@@ -285,7 +285,19 @@ describe('parity (SQLite in-memory)', () => {
     const bad = await rescheduleBooking(db, { uid: created.booking.uid, newStartMs: startMs + 3 * 86_400_000, manageToken: 'nope' });
     expect(bad.ok).toBe(false);
 
-    const newStart = startMs + 3 * 86_400_000 + 60 * 60_000;
+    // Pick a REAL available slot ≥2 days out instead of startMs+3d+1h — the
+    // arithmetic target drifts outside the seeded 9-17 window when the first
+    // slot is late in the day (time-of-day-dependent flake).
+    const later = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 2 * 86_400_000,
+      toMs: Date.now() + 8 * 86_400_000,
+    });
+    const newStart = new Date(
+      later!.slots.find((s) => new Date(s.startUtc).getTime() !== startMs)!.startUtc,
+    ).getTime();
     const moved = await rescheduleBooking(db, { uid: created.booking.uid, newStartMs: newStart, manageToken: token });
     expect(moved.ok).toBe(true);
     if (moved.ok) {
