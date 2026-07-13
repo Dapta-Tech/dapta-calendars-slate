@@ -13,6 +13,7 @@ export type NotificationEmailKey =
   | 'host_booked'
   | 'host_rescheduled'
   | 'host_cancelled'
+  | 'host_declined'
   | 'host_reminder';
 
 export interface BookingMessages {
@@ -1031,6 +1032,7 @@ export const en: BookingMessages = {
         host_booked: 'New booking',
         host_rescheduled: 'Booking rescheduled',
         host_cancelled: 'Booking cancelled',
+        host_declined: 'Request declined',
         host_reminder: 'Reminders',
       },
       descriptions: {
@@ -1043,6 +1045,7 @@ export const en: BookingMessages = {
         host_booked: 'A new booking or booking request came in.',
         host_rescheduled: 'A booking of yours moved to a new time.',
         host_cancelled: 'A booking of yours was cancelled.',
+        host_declined: 'Confirmation that a pending request was declined.',
         host_reminder: 'Your own nudge before the meeting starts.',
       },
       customizedBadge: 'Customized',
@@ -1611,6 +1614,7 @@ export const es: BookingMessages = {
         host_booked: 'Nueva reserva',
         host_rescheduled: 'Reserva reprogramada',
         host_cancelled: 'Reserva cancelada',
+        host_declined: 'Solicitud rechazada',
         host_reminder: 'Recordatorios',
       },
       descriptions: {
@@ -1623,6 +1627,7 @@ export const es: BookingMessages = {
         host_booked: 'Entró una nueva reserva o solicitud de reserva.',
         host_rescheduled: 'Una de tus reservas cambió de hora.',
         host_cancelled: 'Una de tus reservas fue cancelada.',
+        host_declined: 'Confirmación de que una solicitud pendiente fue rechazada.',
         host_reminder: 'Tu propio aviso antes de que empiece la reunión.',
       },
       customizedBadge: 'Personalizada',
