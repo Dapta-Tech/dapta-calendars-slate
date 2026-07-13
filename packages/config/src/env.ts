@@ -55,6 +55,16 @@ export const serverEnvSchema = z.object({
   // Message category for `transactional-v1` (defaults to `lifecycle`).
   EMAIL_HTTP_CATEGORY: z.string().optional(),
 
+  // Premium features (vanity slug + future perks). Calendars is ALWAYS free —
+  // `locked` gates premium on the customer's Dapta AI subscription via the
+  // entitlement service below; `open` (default) unlocks everything, so a bare
+  // OSS fork gets every feature with no upstream wired.
+  PREMIUM_FEATURES: z.enum(['open', 'locked']).default('open'),
+  // Upstream entitlement service (cloud only): base URL + service key. Unset
+  // selects the disabled provider (OSS default).
+  ENTITLEMENTS_API_URL: z.string().url().optional(),
+  ENTITLEMENTS_API_KEY: z.string().optional(),
+
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 

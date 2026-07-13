@@ -9,7 +9,14 @@ const stripProtocol = (u: string) => u.replace(/^https?:\/\//, '');
  *  The displayed text starts as the server-stable `path` so SSR and the first
  *  client render match (no hydration mismatch), then upgrades to the absolute
  *  origin after mount. */
-export function CopyLink({ path }: { path: string }) {
+export function CopyLink({
+  path,
+  labels,
+}: {
+  path: string;
+  /** i18n'd button labels; English fallbacks keep old call sites working. */
+  labels?: { copy: string; copied: string; open: string };
+}) {
   const [copied, setCopied] = useState(false);
   const [display, setDisplay] = useState(() => stripProtocol(path));
 
@@ -35,10 +42,10 @@ export function CopyLink({ path }: { path: string }) {
         onClick={copy}
         className="rounded-md border border-border px-3 py-1 text-sm transition-transform hover:border-primary active:scale-[0.98]"
       >
-        {copied ? 'Copied ✓' : 'Copy'}
+        {copied ? (labels?.copied ?? 'Copied ✓') : (labels?.copy ?? 'Copy')}
       </button>
       <a href={path} className="text-sm text-primary hover:underline">
-        Open →
+        {labels?.open ?? 'Open'} →
       </a>
     </div>
   );

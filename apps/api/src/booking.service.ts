@@ -216,7 +216,9 @@ export class BookingService {
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
     const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
-      sql`SELECT a.code AS code, m.handle AS handle, et.slug AS slug
+      // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
+      // page's reschedule link never resurrects a legacy alias.
+      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
@@ -270,13 +272,19 @@ export class BookingService {
     uid: string,
     opts: { newStartUtc: string; token?: string; byHost?: boolean; idempotencyKey?: string },
   ): Promise<{ uid: string; startUtc: string; endUtc: string; manageUrl?: string } | ServiceError> {
-    const out = await rescheduleBooking(this.db, {
-      uid,
-      newStartMs: new Date(opts.newStartUtc).getTime(),
-      manageToken: opts.token,
-      byHost: opts.byHost,
-      idempotencyKey: opts.idempotencyKey,
-    });
+    const out = await rescheduleBooking(
+      this.db,
+      {
+        uid,
+        newStartMs: new Date(opts.newStartUtc).getTime(),
+        manageToken: opts.token,
+        byHost: opts.byHost,
+        idempotencyKey: opts.idempotencyKey,
+      },
+      // Fail-closed external conflict check on the target slot — the same
+      // policy as create (no-op when the provider is disabled).
+      this.calendar.provider,
+    );
     if (!out.ok) return this.mapMutation(out.reason);
     // Idempotent retry (same Idempotency-Key): the booking was NOT moved again,
     // so skip all side-effects (no duplicate calendar move / email / webhook).
@@ -315,7 +323,7 @@ export class BookingService {
   }
 
   private mapMutation(
-    reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT',
+    reason: 'NOT_FOUND' | 'FORBIDDEN' | 'SLOT_TAKEN' | 'GONE' | 'INVALID_SLOT' | 'CALENDAR_UNAVAILABLE',
   ): ServiceError {
     switch (reason) {
       case 'NOT_FOUND':
@@ -326,6 +334,12 @@ export class BookingService {
         return { error: 'GONE', message: 'Booking is no longer active.', status: 410 };
       case 'SLOT_TAKEN':
         return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+      case 'CALENDAR_UNAVAILABLE':
+        return {
+          error: 'CALENDAR_UNAVAILABLE',
+          message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
+        };
       case 'INVALID_SLOT':
         return {
           error: 'INVALID_SLOT',

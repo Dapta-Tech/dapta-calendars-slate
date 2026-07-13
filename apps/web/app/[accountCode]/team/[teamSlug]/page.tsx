@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, t } from '@slate/shared';
 import { getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
@@ -38,6 +38,10 @@ export default async function TeamPage({
   const [team, locale] = await Promise.all([getTeamProfile(accountCode, teamSlug), publicLocale()]);
   if (!team) notFound();
 
+  // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
+  const code = team!.account.code;
+  if (accountCode !== code) permanentRedirect(`/${code}/team/${teamSlug}`);
+
   return (
     <>
       <main className="mx-auto max-w-2xl px-6 py-16">
@@ -51,7 +55,7 @@ export default async function TeamPage({
           {team.eventTypes.map((et) => (
             <li key={et.slug}>
               <Link
-                href={`/${accountCode}/team/${teamSlug}/${et.slug}`}
+                href={`/${code}/team/${teamSlug}/${et.slug}`}
                 className="flex items-center justify-between rounded-md border border-border bg-card p-4 transition-transform hover:border-primary active:scale-[0.99]"
               >
                 <span className="flex flex-col">
@@ -71,7 +75,7 @@ export default async function TeamPage({
           ) : null}
         </ul>
       </main>
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+      <MadeWithBadge locale={locale} accountCode={code} />
     </>
   );
 }

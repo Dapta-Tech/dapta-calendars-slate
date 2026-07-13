@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENV, NOTIFIER, RATE_LIMITER } from './tokens';
+import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE, RATE_LIMITER } from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
 import { AuthService } from './auth.service';
@@ -11,6 +11,7 @@ import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
+import { resolveEntitlementsProvider } from './entitlements.provider';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
@@ -66,6 +67,11 @@ import { AdminCrudController } from './admin-crud.controller';
     // `disabled` (no external calendar); a private overlay ships the `external`
     // adapter. See calendar.provider.ts.
     { provide: CALENDAR, useFactory: (env: ServerEnv) => createCalendarProviderAsync(env), inject: [ENV] },
+    // Premium entitlements (vanity slug…): Calendars is always free — the gate
+    // is the customer's Dapta AI subscription via the upstream service. OSS
+    // default: disabled provider + PREMIUM_FEATURES=open (everything unlocked).
+    { provide: ENTITLEMENTS, useFactory: (env: ServerEnv) => resolveEntitlementsProvider(env), inject: [ENV] },
+    { provide: PREMIUM_MODE, useFactory: (env: ServerEnv) => env.PREMIUM_FEATURES, inject: [ENV] },
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,

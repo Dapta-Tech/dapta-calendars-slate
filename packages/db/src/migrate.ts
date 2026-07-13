@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import type { Db } from './client';
+import { applyShortLinkFixups } from './short-links';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/ at runtime (tsx) or dist/ after build — migrations live one level up.
@@ -34,5 +35,11 @@ export async function migrate(db: Db, migrationsRoot = MIGRATIONS_ROOT): Promise
     await db.run(sql`INSERT INTO _migrations (name, applied_at) VALUES (${file}, ${Date.now()})`);
     applied.push(file);
   }
+
+  // Data fixups that portable SQL can't express (random short-code generation,
+  // handle derivation). Idempotent + cheap no-ops once applied, so they run
+  // unconditionally after the SQL migrations on both dialects.
+  await applyShortLinkFixups(db);
+
   return applied;
 }

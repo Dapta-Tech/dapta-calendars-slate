@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound, redirect } from 'next/navigation';
+import { notFound, permanentRedirect, redirect } from 'next/navigation';
 import { clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
@@ -40,6 +40,12 @@ export default async function ProfilePage({
   const [profile, locale] = await Promise.all([getProfile(accountCode, handle), publicLocale()]);
   if (!profile) notFound();
 
+  // Canonical-code guard (short-links §4): the API resolves legacy/alias codes
+  // but responds with the CANONICAL code — a visit on an alias 308s to it, so
+  // old shared links keep working and search engines converge on one URL.
+  const code = profile!.account.code;
+  if (accountCode !== code) permanentRedirect(`/${code}/${handle}`);
+
   const m = profile.member;
 
   // R25 optional landing (G6): when the host disabled the landing page and set a
@@ -47,7 +53,7 @@ export default async function ProfilePage({
   const landing = m.style as { landingEnabled?: boolean; defaultEventSlug?: string | null } | null;
   const defaultSlug = landing?.defaultEventSlug;
   if (landing?.landingEnabled === false && defaultSlug && profile.eventTypes.some((e) => e.slug === defaultSlug)) {
-    redirect(`/${accountCode}/${handle}/${defaultSlug}`);
+    redirect(`/${code}/${handle}/${defaultSlug}`);
   }
   const accent = clampAccent(m.brandColor ?? '#cbe84f');
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
@@ -91,7 +97,7 @@ export default async function ProfilePage({
           {eventTypes.map((et) => (
             <li key={et.slug}>
               <Link
-                href={`/${accountCode}/${handle}/${et.slug}`}
+                href={`/${code}/${handle}/${et.slug}`}
                 className="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]"
               >
                 <span className="flex flex-col">

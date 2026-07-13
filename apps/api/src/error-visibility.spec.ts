@@ -8,7 +8,7 @@ import type {
   ConnectionHealth,
   CreatedEvent,
 } from '@slate/calendar';
-import { DisabledCalendarProvider } from '@slate/calendar';
+import { DisabledCalendarProvider, InMemoryCalendarProvider } from '@slate/calendar';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import { loadServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
@@ -155,6 +155,60 @@ describe('error visibility — API reason codes', () => {
       'acme',
     );
     expect(hostOut).toEqual({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
+  });
+
+  it('reschedule fails CLOSED on the external calendar: busy target → 409 SLOT_TAKEN, unreadable → 409 CALENDAR_UNAVAILABLE', async () => {
+    const CAL_REF = 'cal-ext-1';
+    await db.run(
+      sql`INSERT INTO connected_calendar
+            (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+          VALUES (${randomUUID()}, ${principal.accountId}, ${principal.memberId}, ${'google'}, ${CAL_REF}, 0, 1, ${Date.now()})`,
+    );
+    const healthy = services(new DisabledCalendarProvider());
+    const slots = (await healthy.booking.availability({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      ...WINDOW(),
+    }))!.slots;
+    const created = await healthy.booking.book({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startUtc: slots[0]!.startUtc,
+      attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(created).toMatchObject({ status: 'accepted' });
+    const uid = (created as { uid: string }).uid;
+    const targetUtc = slots[8]!.startUtc;
+
+    // Unreadable calendar → 409 CALENDAR_UNAVAILABLE (blocked visibly, not moved blind).
+    const failing = services(new FailingCalendarProvider());
+    expect(await failing.booking.reschedule(uid, { newStartUtc: targetUtc, byHost: true })).toMatchObject({
+      error: 'CALENDAR_UNAVAILABLE',
+      status: 409,
+    });
+
+    // External busy at the target slot → 409 SLOT_TAKEN (double-booking averted).
+    const busyProvider = new InMemoryCalendarProvider();
+    busyProvider.seedBusy(CAL_REF, [
+      {
+        startUtc: targetUtc,
+        endUtc: new Date(new Date(targetUtc).getTime() + 30 * 60_000).toISOString(),
+      },
+    ]);
+    expect(await services(busyProvider).booking.reschedule(uid, { newStartUtc: targetUtc, byHost: true })).toMatchObject({
+      error: 'SLOT_TAKEN',
+      status: 409,
+    });
+
+    // Conflict-free readable calendar → the same move succeeds.
+    const moved = await services(new InMemoryCalendarProvider()).booking.reschedule(uid, {
+      newStartUtc: targetUtc,
+      byHost: true,
+    });
+    expect(moved).toMatchObject({ uid, startUtc: targetUtc });
   });
 
   it('genuinely fully-booked / out-of-range stays a plain empty list (no reason)', async () => {
