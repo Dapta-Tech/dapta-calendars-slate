@@ -1,18 +1,23 @@
-# Slate
+# Dapta Calendars
 
-**Open-source scheduling by Dapta.** Slate is a booking platform — availability,
-timezones, and double-booking-safe reservations. **Postgres is the source of
-truth** (CI and production run Postgres); **SQLite is a zero-infra dev
-accelerator** so you can clone-and-run in 30 seconds. Deploys anywhere (any
-Node/Docker host or Vercel).
+[![CI](https://github.com/Dapta-Tech/dapta-calendars-slate/actions/workflows/ci.yml/badge.svg)](https://github.com/Dapta-Tech/dapta-calendars-slate/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-a3e635.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-> Slate is the friendly name for the **Calendars** product. This repository is
-> the open-source monorepo that merges the booking backend and the web frontend.
+**Open-source scheduling by [Dapta](https://dapta.ai).** Availability, bookings,
+teams (round-robin & collective), calendar sync, notifications with editable
+templates, and short shareable links — double-booking-safe by construction.
+**Postgres is the source of truth** (CI and production run Postgres); **SQLite
+is a zero-infra dev accelerator** so you can clone-and-run in 60 seconds.
+Self-host anywhere Node or Docker runs.
+
+> Package scope note: internal packages use the `@slate/*` scope — the
+> project's original codename. The product is **Dapta Calendars**.
 
 ## 60-second quickstart
 
 ```bash
-git clone <this-repo> slate && cd slate
+git clone https://github.com/Dapta-Tech/dapta-calendars-slate.git calendars && cd calendars
 pnpm install          # Node >= 20, pnpm >= 10
 pnpm dev              # builds packages, creates + seeds a SQLite DB, starts both apps
 ```
