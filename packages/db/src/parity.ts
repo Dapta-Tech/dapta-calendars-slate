@@ -8,6 +8,7 @@
  */
 import { randomUUID, createHash, randomBytes, createHmac } from 'node:crypto';
 import {
+  RESERVED_PUBLIC_SLUGS,
   classifyEmptyReason,
   computeSlots,
   generateManageToken,
@@ -38,6 +39,7 @@ import {
   type BookingFieldDef,
 } from './repository';
 import { loadExternalBusy } from './calendar-refs';
+import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
 import { enqueueOutbox } from './outbox';
 
@@ -115,7 +117,11 @@ export async function reserveSlot(
 
 export interface MeView {
   accountId: string;
+  /** The CANONICAL public code (vanity slug when claimed, else the short code). */
   accountCode: string;
+  /** The immutable short code — stays a permanent alias while a vanity is set. */
+  accountShortCode: string;
+  vanitySlug: string | null;
   memberId: string;
   handle: string | null;
   displayName: string | null;
@@ -133,8 +139,8 @@ export async function getMe(
   accountId: string,
   memberId?: string,
 ): Promise<MeView | null> {
-  const account = await db.get<{ id: string; code: string }>(
-    sql`SELECT id, code FROM account WHERE id = ${accountId} LIMIT 1`,
+  const account = await db.get<{ id: string; code: string; vanity_slug: string | null }>(
+    sql`SELECT id, code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`,
   );
   if (!account) return null;
   const member = await db.get<{
@@ -154,7 +160,9 @@ export async function getMe(
   if (!member) return null;
   return {
     accountId: account.id,
-    accountCode: account.code,
+    accountCode: canonicalPublicCode(account),
+    accountShortCode: account.code,
+    vanitySlug: account.vanity_slug,
     memberId: member.id,
     handle: member.handle,
     displayName: member.display_name,
@@ -166,12 +174,9 @@ export async function getMe(
   };
 }
 
-const RESERVED_HANDLES = new Set([
-  'team', 'teams', 'api', 'v1', 'public', 'health', 'me', 'login', 'logout', 'signin', 'signup',
-  'auth', 'home', 'settings', 'availability', 'event-types', 'events', 'connections', 'admin',
-  'app', 'www', 'about', 'help', 'support', 'docs', 'terms', 'privacy', 'pricing', 'demo', 'test',
-  'assets', 'favicon', 'robots', 'sitemap', 'calendar', 'calendars', 'null', 'undefined',
-]);
+// Unified with the vanity-slug blocklist (@slate/engine) so a handle can never
+// shadow an app route the vanity rules protect — one server source of truth.
+const RESERVED_HANDLES = RESERVED_PUBLIC_SLUGS;
 
 export interface HandleAvailability {
   handle: string;
@@ -312,7 +317,8 @@ export async function getTeamProfile(
         ORDER BY length_minutes ASC`,
   );
   return {
-    account: { code: account.code, name: account.name },
+    // Canonical code always (vanity ?? short) — clients redirect aliases to it.
+    account: { code: canonicalPublicCode(account), name: account.name },
     team: { slug: team.slug, name: team.name, logoUrl: team.logo_url, timeZone: team.time_zone },
     eventTypes: rows.map((r) => ({
       slug: r.slug,

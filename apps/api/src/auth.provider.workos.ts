@@ -21,7 +21,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { sql } from '@slate/db';
+import { deriveUniqueHandle, generateUniqueShortCode, sql } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
@@ -32,11 +32,10 @@ function unauthenticated(message: string): UnauthorizedException {
   return new UnauthorizedException({ error: 'UNAUTHENTICATED', message });
 }
 
-/** Deterministic, unique-by-construction placeholder account code for a JIT tenant. */
-function deriveAccountCode(externalId: string): string {
-  const slug = externalId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24).toLowerCase();
-  return `acct-${slug || 'ext'}`;
-}
+// Account codes are 6-char short codes from @slate/db (generateUniqueShortCode)
+// — the old `acct-<hex>` derivation leaked machine garbage into every public
+// URL. Idempotency across concurrent first-logins is anchored on external_id
+// (ON CONFLICT), so the code no longer needs to be deterministic.
 
 export class WorkOsAuthProvider implements AuthProvider {
   readonly name = 'workos';
@@ -96,7 +95,7 @@ export class WorkOsAuthProvider implements AuthProvider {
     // external_id index means at most one row wins; the loser re-selects it.
     await this.db.run(
       sql`INSERT INTO account (id, code, name, external_id, created_at)
-          VALUES (${id}, ${deriveAccountCode(externalId)}, ${name}, ${externalId}, ${Date.now()})
+          VALUES (${id}, ${await generateUniqueShortCode(this.db)}, ${name}, ${externalId}, ${Date.now()})
           ON CONFLICT (external_id) DO NOTHING`,
     );
     const row = await this.db.get<{ id: string }>(
@@ -142,9 +141,12 @@ export class WorkOsAuthProvider implements AuthProvider {
       ? 'member'
       : 'owner';
     const id = randomUUID();
+    // Auto-handle at creation (short-links §3): the "no handle" state is dead —
+    // every member gets `fgomez` (collision → `fgomez2`…) and can rename later.
+    const handle = await deriveUniqueHandle(this.db, accountId, displayName, email);
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, external_id, email, display_name, role, created_at)
-          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${role}, ${Date.now()})
+      sql`INSERT INTO member (id, account_id, external_id, email, display_name, handle, role, created_at)
+          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${handle}, ${role}, ${Date.now()})
           ON CONFLICT (account_id, external_id) DO NOTHING`,
     );
     const row = await this.db.get<{ id: string }>(

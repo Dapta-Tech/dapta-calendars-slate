@@ -216,7 +216,9 @@ export class BookingService {
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
     const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
-      sql`SELECT a.code AS code, m.handle AS handle, et.slug AS slug
+      // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
+      // page's reschedule link never resurrects a legacy alias.
+      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
