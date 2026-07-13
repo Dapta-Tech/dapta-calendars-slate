@@ -92,6 +92,21 @@ export const slotSchema = z.object({
 });
 export type Slot = z.infer<typeof slotSchema>;
 
+/**
+ * Why `slots` came back empty for a CONFIGURATION reason. Absent on a sound
+ * config (empty then means genuinely fully-booked / out of range). Codes are
+ * safe to expose publicly; human copy is the client's job (admin gets
+ * actionable detail, public pages get generic wording).
+ */
+export const availabilityEmptyReasonSchema = z.enum([
+  'SCHEDULE_MISSING',
+  'NO_SCHEDULE',
+  'NO_HOURS',
+  'CALENDAR_UNAVAILABLE',
+  'NO_HOSTS',
+]);
+export type AvailabilityEmptyReason = z.infer<typeof availabilityEmptyReasonSchema>;
+
 export const availabilityResponseSchema = z.object({
   eventType: z.object({
     slug: z.string(),
@@ -104,6 +119,8 @@ export const availabilityResponseSchema = z.object({
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
+  /** Present only when slots is empty because of a configuration error. */
+  emptyReason: availabilityEmptyReasonSchema.optional(),
 });
 export type AvailabilityResponse = z.infer<typeof availabilityResponseSchema>;
 
