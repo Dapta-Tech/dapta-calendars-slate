@@ -32,13 +32,22 @@ RUN pnpm build:packages
 # --legacy: pnpm v10 refuses `deploy` without inject-workspace-packages; we build
 # workspace deps to dist/ ourselves, so the legacy copy-based deploy is correct.
 RUN pnpm --filter @slate/api deploy --legacy --prod /prod/api
+# Zero-infra default: with no DATABASE_URL the API opens SQLite at ./.data under
+# its own cwd (/app). Distroless has no shell to mkdir at runtime and its
+# nonroot user (uid 65532) cannot create directories in the root-owned /app —
+# so pre-create the data dir here, owned by that user. `docker run` with no env
+# must boot (clone-and-run contract). For persistence across containers, mount
+# a volume at /app/.data or point DATABASE_URL at Postgres/an absolute path.
+RUN mkdir -p /prod/api/.data && chown 65532:65532 /prod/api/.data
 
 # ---- run: minimal runtime, only the pruned bundle, non-root ------------------
 FROM gcr.io/distroless/nodejs22-debian12:nonroot@sha256:13593b7570658e8477de39e2f4a1dd25db2f836d68a0ba771251572d23bb4f8e AS run
 ENV NODE_ENV=production
 # Distroless has no shell or package manager and defaults to its non-root user.
 # Kubernetes may enforce a different non-root uid; application files are
-# root-owned but world-readable and the API writes no runtime state under /app.
+# root-owned but world-readable. The ONLY writable runtime path is /app/.data
+# (owned by the default nonroot uid 65532 for the SQLite zero-infra default —
+# created in the build stage; COPY --from preserves ownership).
 WORKDIR /app
 COPY --from=build /prod/api ./
 EXPOSE 4000
