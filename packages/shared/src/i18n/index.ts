@@ -536,6 +536,7 @@ export interface BookingMessages {
       vanityLabel: string;
       vanityHint: string;
       vanityIncluded: string;
+      vanityIncludedLink: string;
       bio: string;
       tryHandle: string;
       accent: string;
@@ -1120,7 +1121,8 @@ export const en: BookingMessages = {
       linkOpen: 'Open',
       vanityLabel: 'Custom link (vanity)',
       vanityHint: 'Included with your Dapta AI subscription. 3\u201330 lowercase letters, numbers, or hyphens; your short code keeps working.',
-      vanityIncluded: 'Custom links are included with your Dapta AI subscription \u2014',
+      vanityIncluded: 'Custom links are included with your Dapta AI subscription.',
+      vanityIncludedLink: 'Learn more',
       bio: 'Bio',
       tryHandle: 'Try {handle} →',
       accent: 'Accent',
@@ -1707,7 +1709,8 @@ export const es: BookingMessages = {
       linkOpen: 'Abrir',
       vanityLabel: 'Enlace personalizado (vanity)',
       vanityHint: 'Incluido con tu suscripción de Dapta AI. De 3 a 30 letras minúsculas, números o guiones; tu código corto sigue funcionando.',
-      vanityIncluded: 'Los enlaces personalizados están incluidos con tu suscripción de Dapta AI \u2014',
+      vanityIncluded: 'Los enlaces personalizados están incluidos con tu suscripción de Dapta AI.',
+      vanityIncludedLink: 'Saber más',
       bio: 'Biografía',
       tryHandle: 'Prueba {handle} →',
       accent: 'Color de acento',

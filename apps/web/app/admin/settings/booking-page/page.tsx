@@ -39,6 +39,7 @@ export default async function BookingPageSettings() {
         messages={t.studio}
         accountCode={me?.accountCode ?? ''}
         vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
+        subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}
         displayName={displayName}
         handle={me?.handle ?? ''}
         bio={(style.bio as string) ?? ''}

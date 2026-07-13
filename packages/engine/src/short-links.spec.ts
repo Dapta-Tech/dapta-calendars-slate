@@ -71,7 +71,7 @@ describe('short-links (pure rules)', () => {
 
   describe('auto-handle derivation', () => {
     it('first initial + last name', () => {
-      expect(deriveHandleBase('Felipe Gomez', 'felipe@daptatech.com')).toBe('fgomez');
+      expect(deriveHandleBase('Felipe Gomez', 'felipe.gomez@example.com')).toBe('fgomez');
       expect(deriveHandleBase('Alex Rivera', null)).toBe('arivera');
       expect(deriveHandleBase('Ana María de la Cruz', null)).toBe('acruz');
     });

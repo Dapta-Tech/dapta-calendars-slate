@@ -87,13 +87,13 @@ describe('short links (SQLite in-memory)', () => {
     const devId = randomUUID();
     await db.run(
       sql`INSERT INTO account (id, code, name, created_at)
-          VALUES (${devId}, ${'dev-felipe-daptatech-com'}, ${'Dev'}, ${Date.now()})`,
+          VALUES (${devId}, ${'dev-taylor-example-com'}, ${'Dev'}, ${Date.now()})`,
     );
     await backfillAccountShortCodes(db);
 
     for (const [id, legacy] of [
       [legacyId, 'acct-d3466b0b3ef84267a053'],
-      [devId, 'dev-felipe-daptatech-com'],
+      [devId, 'dev-taylor-example-com'],
     ] as const) {
       const acc = await db.get<{ code: string }>(sql`SELECT code FROM account WHERE id = ${id}`);
       expect(isShortCode(acc!.code)).toBe(true);

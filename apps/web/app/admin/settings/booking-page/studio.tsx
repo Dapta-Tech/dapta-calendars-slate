@@ -78,6 +78,9 @@ export interface StudioInit {
   accountCode: string;
   /** Vanity claim state: the shareable-link section renders from this. */
   vanity: { vanitySlug: string | null; shortCode: string; canClaim: boolean };
+  /** Where "included with your Dapta AI subscription" links (deploy-config
+   *  destination, same switch as the growth badge; null = plain text). */
+  subscriptionUrl: string | null;
   displayName: string;
   handle: string;
   bio: string;
@@ -309,15 +312,20 @@ export function Studio(init: StudioInit) {
               </Field>
             ) : (
               <p className="text-xs text-muted-foreground">
-                {m.vanityIncluded}{' '}
-                <a
-                  href="https://app.dapta.ai"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  app.dapta.ai
-                </a>
+                {m.vanityIncluded}
+                {init.subscriptionUrl ? (
+                  <>
+                    {' '}
+                    <a
+                      href={init.subscriptionUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {m.vanityIncludedLink}
+                    </a>
+                  </>
+                ) : null}
               </p>
             )}
             <Field label={m.bio}>
