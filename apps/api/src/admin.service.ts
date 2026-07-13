@@ -132,6 +132,9 @@ export class AdminService {
     if (out.ok && !out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: reason ?? null });
+      // The booking is off — its still-pending reminders must never fire.
+      // (The public cancel path already did this; the host path missed it.)
+      void this.email.cancelReminders(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,

@@ -147,6 +147,16 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(0);
   });
 
+  it('host-dashboard cancel drops the still-pending reminders', async () => {
+    const uid = await book();
+    await settle();
+    const pending = (await emailRows(uid, 'reminder')).filter((r) => r.status === 'pending');
+    expect(pending.length).toBeGreaterThan(0);
+    await admin.hostCancel(principal, uid, 'host is out');
+    await settle();
+    expect((await emailRows(uid, 'reminder')).filter((r) => r.status === 'pending')).toHaveLength(0);
+  });
+
   it('declined has no host side', async () => {
     // Direct enqueue: decline fans out to the attendee only.
     const uid = await book();
