@@ -11,12 +11,13 @@ import {
   markOutboxDone,
   markOutboxFailed,
   markOutboxRetry,
+  markOutboxSkipped,
   type Db,
   type OutboxRow,
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
-import { EmailEffects } from './email-effects';
+import { EmailEffects, OutboxSkipError } from './email-effects';
 import { DB, ENV } from './tokens';
 
 /**
@@ -100,6 +101,13 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
       await this.execute(row);
       await markOutboxDone(this.db, row.id, now);
     } catch (err) {
+      if (err instanceof OutboxSkipError) {
+        // A decision, not a failure: record the reason ONCE and stop — waiting
+        // and retrying cannot change the outcome.
+        await markOutboxSkipped(this.db, row.id, { reason: err.message, now });
+        this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
+        return;
+      }
       const attempts = row.attempts + 1;
       const message = err instanceof Error ? err.message : String(err);
       if (attempts >= row.maxAttempts) {

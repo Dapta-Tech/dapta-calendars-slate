@@ -6,6 +6,7 @@ import {
   sql,
   getAvailability,
   listOutbox,
+  enqueueOutbox,
   upsertNotificationSetting,
   type Db,
 } from '@slate/db';
@@ -15,7 +16,8 @@ import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notificati
 import { loadServerEnv } from '@slate/config/env';
 import { AdminService } from './admin.service';
 import { CalendarEffects } from './calendar-effects';
-import { EmailEffects } from './email-effects';
+import { EmailEffects, OutboxSkipError } from './email-effects';
+import { OutboxWorker } from './outbox.worker';
 import { BookingService } from './booking.service';
 import type { HostPrincipal } from './auth.service';
 
@@ -157,14 +159,93 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect((await emailRows(uid, 'reminder')).filter((r) => r.status === 'pending')).toHaveLength(0);
   });
 
-  it('declined has no host side', async () => {
-    // Direct enqueue: decline fans out to the attendee only.
+  it('declined fans out to BOTH sides; host_declined toggle silences only the host copy', async () => {
     const uid = await book();
     await settle();
     await effects.enqueueDeclined(uid, { reason: 'nope' });
     const rows = await emailRows(uid, 'declined');
-    expect(rows).toHaveLength(1);
-    expect((JSON.parse(rows[0]!.payload!) as { audience: string }).audience).toBe('attendee');
+    expect(rows).toHaveLength(2);
+    const payloads = rows.map((r) => JSON.parse(r.payload!) as { audience: string; template?: { subject: string } });
+    expect(payloads.map((p) => p.audience).sort()).toEqual(['attendee', 'host']);
+    const host = payloads.find((p) => p.audience === 'host')!;
+    expect(host.template?.subject).toContain('Declined:');
+
+    // host_declined OFF → attendee copy only.
+    await upsertNotificationSetting(db, accountId, 'host_declined', { enabled: false });
+    const uid2 = await book();
+    await settle();
+    await effects.enqueueDeclined(uid2, { reason: 'nope' });
+    const rows2 = await emailRows(uid2, 'declined');
+    expect(rows2).toHaveLength(1);
+    expect((JSON.parse(rows2[0]!.payload!) as { audience: string }).audience).toBe('attendee');
+  });
+
+  it('legacy audience-less reminder rows send while EITHER reminder toggle is ON', async () => {
+    const uid = await book();
+    await settle();
+    const row = (await emailRows(uid, 'reminder'))[0]!;
+    const legacy = JSON.parse(row.payload!) as Record<string, unknown>;
+    delete legacy.audience; // pre-split rows mailed attendee+host combined
+    delete legacy.template;
+
+    // attendee OFF but host ON → the combined mail still goes (host must not
+    // be silenced by the attendee toggle).
+    await upsertNotificationSetting(db, accountId, 'attendee_reminder', { enabled: false });
+    await effects.deliver('reminder', JSON.stringify(legacy), row.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(1);
+
+    // BOTH off → skipped.
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+    await effects.deliver('reminder', JSON.stringify(legacy), row.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(1);
+  });
+
+  it('legacy row without recoverable accountId: delivered on plain transports, skipped-once on the signed wire', async () => {
+    const uid = await book();
+    await settle();
+    const row = (await emailRows(uid, 'confirmation')).find(
+      (r) => (JSON.parse(r.payload!) as { audience: string }).audience === 'attendee',
+    )!;
+    const orphan = JSON.parse(row.payload!) as Record<string, unknown>;
+    delete orphan.accountId;
+    delete orphan.uid; // booking gone too — context unrecoverable
+
+    // Plain transport (no requiresAccountContext): deliver anyway.
+    await effects.deliver('confirmation', JSON.stringify(orphan), null);
+    expect(email.sent.length).toBeGreaterThan(0);
+
+    // Signed transport: OutboxSkipError → worker marks the row skipped ONCE
+    // with the reason; the retry schedule is never burned.
+    const signedProvider: EmailProvider = {
+      requiresAccountContext: true,
+      send: () => Promise.resolve({ delivered: true, driver: 'http' as const }),
+    };
+    const signedEffects = new EmailEffects(new BookingNotifier(signedProvider), db, signedProvider);
+    await expect(signedEffects.deliver('confirmation', JSON.stringify(orphan), null)).rejects.toThrow(
+      OutboxSkipError,
+    );
+
+    const rowId = await enqueueOutbox(db, {
+      kind: 'email',
+      action: 'confirmation',
+      accountId: null,
+      payload: JSON.stringify(orphan),
+      now: 1000,
+    });
+    const worker = new OutboxWorker(
+      db,
+      ENV,
+      new CalendarEffects(new DisabledCalendarProvider(), db),
+      signedEffects,
+    );
+    await worker.drainOnce(2000);
+    const after = (await listOutbox(db, { kind: 'email' })).find((r) => r.id === rowId)!;
+    expect(after.status).toBe('skipped');
+    expect(after.attempts).toBe(0); // decision, not a failure — no retries burned
+    expect(after.lastError).toContain('missing account context');
+    // A later drain does not resurrect it.
+    await worker.drainOnce(3000);
+    expect(((await listOutbox(db, { kind: 'email' })).find((r) => r.id === rowId))!.status).toBe('skipped');
   });
 
   it('listNotificationSettings returns the full catalog with defaults + overrides', async () => {
@@ -173,7 +254,7 @@ describe('notification settings — toggles + templates through the outbox', () 
       subject: 'Bye',
     });
     const out = await admin.listNotificationSettings(principal);
-    expect(out.settings).toHaveLength(10);
+    expect(out.settings).toHaveLength(11);
     expect(out.variables).toContain('attendee_name');
     const cancel = out.settings.find((s) => s.key === 'attendee_cancellation')!;
     expect(cancel.enabled).toBe(false);

@@ -13,9 +13,17 @@ import {
   BookingNotifier,
   resolveTemplate,
   type BookingNotification,
+  type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { DB, NOTIFIER } from './tokens';
+import { DB, EMAIL, NOTIFIER } from './tokens';
+
+/**
+ * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
+ * context unrecoverable on a transport that requires it). The worker marks the
+ * row `skipped` ONCE with this reason — it never burns the retry schedule.
+ */
+export class OutboxSkipError extends Error {}
 
 /** The booking emails the outbox can carry. */
 export type EmailKind = 'confirmation' | 'pending' | 'cancellation' | 'reschedule' | 'declined' | 'reminder';
@@ -27,7 +35,9 @@ export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
  * Which per-account notification keys a lifecycle event fans out to. Each side
  * is its own message (own toggle, own template, own outbox row) so a host can
  * silence their copies without touching attendee mail — the Zoho model.
- * `declined` deliberately has no host side: the host performed the decline.
+ * `declined` keeps a host copy (pre-split parity: the host was CC'd the
+ * "Not accepted" mail — a decline done by one team member must still be
+ * visible to the organizer's inbox), separately toggleable via host_declined.
  */
 const KIND_SIDES: Record<EmailKind, Array<{ key: EmailTemplateKey; audience: 'attendee' | 'host' }>> = {
   confirmation: [
@@ -38,7 +48,10 @@ const KIND_SIDES: Record<EmailKind, Array<{ key: EmailTemplateKey; audience: 'at
     { key: 'attendee_pending', audience: 'attendee' },
     { key: 'host_booked', audience: 'host' },
   ],
-  declined: [{ key: 'attendee_declined', audience: 'attendee' }],
+  declined: [
+    { key: 'attendee_declined', audience: 'attendee' },
+    { key: 'host_declined', audience: 'host' },
+  ],
   cancellation: [
     { key: 'attendee_cancellation', audience: 'attendee' },
     { key: 'host_cancelled', audience: 'host' },
@@ -93,6 +106,9 @@ export class EmailEffects {
   constructor(
     @Inject(NOTIFIER) private readonly notifier: BookingNotifier,
     @Inject(DB) private readonly db: Db,
+    // Optional so existing direct constructions (tests, scripts) keep working;
+    // absent = a transport that can send without tenant context.
+    @Inject(EMAIL) private readonly provider?: EmailProvider,
   ) {}
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
@@ -271,13 +287,28 @@ export class EmailEffects {
       const current = await loadBookingNotificationContext(this.db, n.uid);
       if (current) n.accountId = current.accountId;
     }
-    if (!n.accountId) throw new Error('email outbox row missing account context');
-    if (kind === 'reminder') {
-      const key = emailKeyFor('reminder', n.audience ?? 'attendee');
+    if (!n.accountId && this.provider?.requiresAccountContext) {
+      // Only the signed http wire actually needs a tenant. Skipping is a
+      // DECISION, not a failure — recorded once, never retried (a legacy row
+      // can never grow an accountId by waiting).
+      throw new OutboxSkipError(
+        'email outbox row missing account context — skipped (signed transport requires a tenant)',
+      );
+    }
+    if (kind === 'reminder' && n.accountId) {
       const settings = await getNotificationSettings(this.db, n.accountId);
-      const setting = settings.get(key);
-      if (setting && !setting.enabled) {
-        this.log.log(`skip queued reminder (${key}) for ${n.uid} — disabled by account settings`);
+      const enabledFor = (audience: 'attendee' | 'host') =>
+        settings.get(emailKeyFor('reminder', audience))?.enabled ?? true;
+      // Legacy audience-less rows mail attendee+host COMBINED: send while
+      // EITHER side wants reminders — the attendee toggle must never silence
+      // the host (and vice versa). Sided rows check only their own toggle.
+      const wanted = n.audience
+        ? enabledFor(n.audience)
+        : enabledFor('attendee') || enabledFor('host');
+      if (!wanted) {
+        this.log.log(
+          `skip queued reminder (${n.audience ?? 'legacy combined'}) for ${n.uid} — disabled by account settings`,
+        );
         return;
       }
     }

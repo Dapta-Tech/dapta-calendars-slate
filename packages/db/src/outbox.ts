@@ -28,7 +28,12 @@ import { sql } from 'drizzle-orm';
 import type { Db } from './client';
 
 export type OutboxKind = 'calendar' | 'webhook' | 'email';
-export type OutboxStatus = 'pending' | 'done' | 'failed';
+/**
+ * `skipped` = deliberately not performed (e.g. a legacy email row whose tenant
+ * context is unrecoverable on a transport that requires it) — recorded ONCE
+ * with a reason, never retried. Distinct from `failed` (exhausted retries).
+ */
+export type OutboxStatus = 'pending' | 'done' | 'failed' | 'skipped';
 
 export interface OutboxRow {
   id: string;
@@ -166,6 +171,23 @@ export async function markOutboxRetry(
     sql`UPDATE outbox
         SET attempts = ${args.attempts}, next_attempt_at = ${nextAt},
             last_error = ${args.error.slice(0, 1000)}, updated_at = ${now}
+        WHERE id = ${id}`,
+  );
+}
+
+/**
+ * Deliberately not performed — terminal on the FIRST decision (no retry
+ * schedule burned), with the reason kept as the log record.
+ */
+export async function markOutboxSkipped(
+  db: Db,
+  id: string,
+  args: { reason: string; now?: number },
+): Promise<void> {
+  const now = args.now ?? Date.now();
+  await db.run(
+    sql`UPDATE outbox
+        SET status = 'skipped', last_error = ${args.reason.slice(0, 1000)}, updated_at = ${now}
         WHERE id = ${id}`,
   );
 }
