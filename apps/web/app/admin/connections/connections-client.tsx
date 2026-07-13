@@ -317,39 +317,51 @@ function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => 
   );
 }
 
-/** Live per-connection health, probed once on mount and re-checkable on click.
+/** Per-connection health: seeded from the PERSISTED last probe (so the badge
+ *  is meaningful on first paint), refreshed silently on mount, re-checkable on
+ *  click. Every probe also persists its outcome server-side (last-checked).
  *  When no provider is wired (OSS default) the record is stored but never synced
  *  — we say so plainly instead of showing a misleading green light. */
 type Health = 'off' | 'checking' | 'ok' | 'error';
 
-function HealthPill({ id, enabled, m }: { id: string; enabled: boolean; m: ConnectionsMessages }) {
-  const [state, setState] = useState<Health>(enabled ? 'checking' : 'off');
-  const [detail, setDetail] = useState<string | null>(null);
+function HealthPill({ c, enabled, m }: { c: Connection; enabled: boolean; m: ConnectionsMessages }) {
+  const [state, setState] = useState<Health>(
+    !enabled ? 'off' : c.lastCheckOk == null ? 'checking' : c.lastCheckOk ? 'ok' : 'error',
+  );
+  const [detail, setDetail] = useState<string | null>(c.lastCheckDetail);
+  const [lastCheckAt, setLastCheckAt] = useState<number | null>(c.lastCheckAt);
   const [pending, start] = useTransition();
 
-  const probe = useCallback(() => {
-    if (!enabled) return;
-    setState('checking');
-    start(async () => {
-      try {
-        const r = await pingConnectionAction(id);
-        setDetail(r.message);
-        setState(!r.enabled ? 'off' : r.ok ? 'ok' : 'error');
-      } catch {
-        // A thrown probe must not leave the pill spinning forever.
-        setDetail(m.healthError);
-        setState('error');
-      }
-    });
-  }, [enabled, id, m.healthError]);
+  const probe = useCallback(
+    (silent = false) => {
+      if (!enabled) return;
+      // Silent mount-refresh keeps the persisted state on screen instead of a
+      // spinner flash; the explicit re-check click shows progress.
+      if (!silent) setState('checking');
+      start(async () => {
+        try {
+          const r = await pingConnectionAction(c.id);
+          setDetail(r.message);
+          setState(!r.enabled ? 'off' : r.ok ? 'ok' : 'error');
+          setLastCheckAt(Date.now());
+        } catch {
+          // A thrown probe must not leave the pill spinning forever.
+          setDetail(m.healthError);
+          setState('error');
+        }
+      });
+    },
+    [enabled, c.id, m.healthError],
+  );
 
   // Probe once when this row mounts (only when a provider is actually wired).
+  // Silent when persisted health exists — the badge already shows real state.
   const ran = useRef(false);
   useEffect(() => {
     if (!enabled || ran.current) return;
     ran.current = true;
-    probe();
-  }, [enabled, probe]);
+    probe(c.lastCheckOk != null);
+  }, [enabled, probe, c.lastCheckOk]);
 
   const dot =
     state === 'ok'
@@ -368,11 +380,25 @@ function HealthPill({ id, enabled, m }: { id: string; enabled: boolean; m: Conne
           ? m.healthChecking
           : m.healthRecorded;
 
+  const checkedCaption = !enabled
+    ? null
+    : lastCheckAt
+      ? m.lastChecked.replace(
+          '{time}',
+          new Intl.DateTimeFormat(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          }).format(new Date(lastCheckAt)),
+        )
+      : m.neverChecked;
+
   return (
     <span className="flex flex-col items-end gap-1">
       <button
         type="button"
-        onClick={probe}
+        onClick={() => probe()}
         disabled={!enabled || pending}
         title={detail ?? (enabled ? m.recheck : m.syncOffTitle)}
         // Detail is in the accessible name too, so screen-reader / touch users
@@ -389,6 +415,9 @@ function HealthPill({ id, enabled, m }: { id: string; enabled: boolean; m: Conne
       </button>
       {state === 'error' && detail ? (
         <span className="max-w-[220px] text-right text-[11px] leading-tight text-destructive">{detail}</span>
+      ) : null}
+      {checkedCaption ? (
+        <span className="text-[11px] leading-tight text-muted-foreground">{checkedCaption}</span>
       ) : null}
     </span>
   );
@@ -443,7 +472,7 @@ function ConnectionRow({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <HealthPill id={c.id} enabled={enabled} m={m} />
+          <HealthPill c={c} enabled={enabled} m={m} />
           <button
             type="button"
             disabled={busy}

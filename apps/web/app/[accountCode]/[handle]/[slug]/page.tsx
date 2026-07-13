@@ -50,6 +50,7 @@ export default async function BookingPage({
           ownerSlug={handle}
           slug={slug}
           slots={availability.slots}
+          emptyReason={availability.emptyReason}
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
           locale={locale}

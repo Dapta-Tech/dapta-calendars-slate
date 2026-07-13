@@ -44,6 +44,7 @@ export default async function TeamBookingPage({
           slug={slug}
           mode="team"
           slots={availability.slots}
+          emptyReason={availability.emptyReason}
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
         />

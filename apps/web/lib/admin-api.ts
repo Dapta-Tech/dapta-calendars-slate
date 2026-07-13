@@ -224,6 +224,10 @@ export interface Connection {
   primaryEmail: string | null;
   isDestination: boolean;
   checkConflicts: boolean;
+  /** Persisted health from the last probe; null lastCheckAt = never checked. */
+  lastCheckAt: number | null;
+  lastCheckOk: boolean | null;
+  lastCheckDetail: string | null;
 }
 export interface CalendarSummary {
   id: string;
