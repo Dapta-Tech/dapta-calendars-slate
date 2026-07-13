@@ -7,6 +7,7 @@ import {
   type EmailTemplate,
   type RenderedEmail,
   type TemplateLocale,
+  formatWhen,
 } from './templates';
 
 /** Render plaintext lines to a safe HTML body — every line HTML-escaped (E8). */
@@ -286,18 +287,3 @@ export class BookingNotifier {
   }
 }
 
-function formatWhen(iso: string, tz: string): string {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
