@@ -25,6 +25,12 @@ export interface EmailConfig {
     clientId?: string;
     /** HMAC signing secret — `transactional-v1` profile. */
     signingSecret?: string;
+    /**
+     * DEPRECATED: pre-HMAC static service key (EMAIL_HTTP_API_KEY). Accepted as
+     * a Bearer fallback on the transactional wire so existing deployments keep
+     * sending after an upgrade (never-break-env-vars). Prefer clientId+secret.
+     */
+    apiKey?: string;
     /** Message category — `transactional-v1` profile (defaults to `lifecycle`). */
     category?: string;
   };
@@ -58,7 +64,25 @@ export function createEmailProvider(config: EmailConfig): EmailProvider {
           config.http.profile === 'transactional-v1' &&
           (!config.http.clientId || !config.http.signingSecret)
         ) {
-          throw new Error('transactional-v1 requires a client id and signing secret');
+          // Config gaps must NEVER crash the API at boot (never-break-env-vars):
+          // an upgraded deployment that still carries only the legacy static key
+          // keeps sending (deprecated Bearer fallback); with no credential at
+          // all we degrade to log-only and say so loudly — bookings never block
+          // on mail config.
+          const legacyKey = config.http.apiKey || config.http.token;
+          if (!legacyKey) {
+            console.warn(
+              '[email:http] transactional-v1 selected but EMAIL_HTTP_CLIENT_ID/EMAIL_HTTP_SIGNING_SECRET ' +
+                'are missing and no legacy EMAIL_HTTP_API_KEY is set — falling back to log-only. ' +
+                'No real mail will be sent until the HMAC credentials are configured.',
+            );
+            return new LogOnlyEmailProvider();
+          }
+          console.warn(
+            '[email:http] transactional-v1 running on the DEPRECATED static API key ' +
+              '(EMAIL_HTTP_API_KEY) — configure EMAIL_HTTP_CLIENT_ID + EMAIL_HTTP_SIGNING_SECRET ' +
+              'to switch to signed requests.',
+          );
         }
         return new HttpEmailProvider({
           endpoint: config.http.endpoint,
@@ -66,6 +90,7 @@ export function createEmailProvider(config: EmailConfig): EmailProvider {
           token: config.http.token,
           clientId: config.http.clientId,
           signingSecret: config.http.signingSecret,
+          apiKey: config.http.apiKey,
           category: config.http.category,
           fromEmail: config.fromEmail,
           fromName: config.fromName,

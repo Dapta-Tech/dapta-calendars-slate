@@ -52,4 +52,11 @@ export interface EmailProvider {
    * email failure — the caller decides whether to retry.
    */
   send(message: EmailMessage): Promise<EmailResult>;
+  /**
+   * True when the transport cannot deliver without a tenant (`accountId`) —
+   * only the signed transactional wire today. Callers use this to decide
+   * whether a legacy queue row missing its account context can still be sent
+   * (smtp/log-only/noop: yes) or must be skipped. Absent = false.
+   */
+  readonly requiresAccountContext?: boolean;
 }

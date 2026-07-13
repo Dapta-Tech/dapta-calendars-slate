@@ -26,6 +26,7 @@ export const EMAIL_TEMPLATE_KEYS = [
   'host_booked',
   'host_rescheduled',
   'host_cancelled',
+  'host_declined',
   'host_reminder',
 ] as const;
 export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
@@ -146,12 +147,18 @@ export interface RenderedEmail {
   html: string;
 }
 
+/** Own-property lookup only — `{{constructor}}`/`{{__proto__}}` must resolve
+ *  empty, never reach into Object.prototype and stringify a function. */
+function varValue(vars: Record<string, string>, name: string): string {
+  return Object.hasOwn(vars, name) ? (vars[name] ?? '') : '';
+}
+
 function substituteLine(line: string, vars: Record<string, string>): string | null {
   let sawToken = false;
   let sawValue = false;
   const out = line.replace(TOKEN_RE, (_, name: string) => {
     sawToken = true;
-    const v = vars[name] ?? '';
+    const v = varValue(vars, name);
     if (v !== '') sawValue = true;
     return v;
   });
@@ -172,7 +179,7 @@ export function renderTemplate(
   vars: Record<string, string>,
 ): RenderedEmail {
   const subject = template.subject
-    .replace(TOKEN_RE, (_, name: string) => vars[name] ?? '')
+    .replace(TOKEN_RE, (_, name: string) => varValue(vars, name))
     .replace(/\s+/g, ' ')
     .trim();
   const lines = template.body
@@ -271,6 +278,13 @@ Where: {{location}}`,
 The booking "{{event_title}}" ({{start_time}}) with {{attendee_name}} has been cancelled.
 Reason: {{cancellation_reason}}`,
   },
+  host_declined: {
+    subject: 'Declined: {{event_title}} — {{start_time}}',
+    body: `Hi {{host_name}},
+
+The booking request from {{attendee_name}} ({{attendee_email}}) for "{{event_title}}" ({{start_time}}) was declined.
+Reason: {{cancellation_reason}}`,
+  },
   host_reminder: {
     subject: 'Reminder: {{event_title}} — {{start_time}}',
     body: `Hi {{host_name}},
@@ -360,6 +374,13 @@ Dónde: {{location}}`,
     body: `Hola {{host_name}},
 
 La reserva "{{event_title}}" ({{start_time}}) con {{attendee_name}} ha sido cancelada.
+Motivo: {{cancellation_reason}}`,
+  },
+  host_declined: {
+    subject: 'Rechazada: {{event_title}} — {{start_time}}',
+    body: `Hola {{host_name}},
+
+La solicitud de reserva de {{attendee_name}} ({{attendee_email}}) para "{{event_title}}" ({{start_time}}) fue rechazada.
 Motivo: {{cancellation_reason}}`,
   },
   host_reminder: {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   HttpEmailProvider,
   interpretTransactionalResponse,
@@ -56,12 +56,74 @@ const message: EmailMessage = {
 };
 
 describe('transactional-v1 wire — request contract', () => {
-  it('fails closed when the configured endpoint does not match the signed path', async () => {
-    expect(() => new HttpEmailProvider(
-      { ...transactionalOptions, endpoint: 'https://mail.example.test/v1/send' },
-    )).toThrow(
-      'transactional email endpoint must use /api/internal/email/send',
+  it('a non-canonical endpoint path WARNS but never throws (no crash-loop on config)', async () => {
+    const warns: string[] = [];
+    const spy = vi.spyOn(console, 'warn').mockImplementation((m: unknown) => {
+      warns.push(String(m));
+    });
+    try {
+      // Odd path: warns, still constructs, still sends.
+      const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'm1' });
+      const provider = new HttpEmailProvider(
+        { ...transactionalOptions, endpoint: 'https://mail.example.test/v1/send' },
+        impl,
+      );
+      expect(warns.join('\n')).toContain('/api/internal/email/send');
+      const result = await provider.send(message);
+      expect(result.delivered).toBe(true);
+      expect(calls).toHaveLength(1);
+      // Canonical path (possibly behind a gateway prefix): silent.
+      warns.length = 0;
+      void new HttpEmailProvider(
+        { ...transactionalOptions, endpoint: 'https://gw.example.test/mail/api/internal/email/send' },
+        impl,
+      );
+      expect(warns).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('DEPRECATED legacy key: no HMAC pair → Bearer auth on the transactional wire', async () => {
+    const { impl, calls } = stubFetch(202, { status: 'accepted', messageId: 'm2' });
+    const provider = new HttpEmailProvider(
+      {
+        endpoint: ENDPOINT,
+        profile: 'transactional-v1' as const,
+        apiKey: 'legacy-static-service-key',
+        fromEmail: 'x@example.com',
+      },
+      impl,
     );
+    const result = await provider.send(message);
+    expect(result.delivered).toBe(true);
+    const headers = readHeaders(calls);
+    expect(headers.authorization).toBe('Bearer legacy-static-service-key');
+    expect(headers['x-dapta-signature']).toBeUndefined();
+    // The body is still the full transactional contract.
+    const body = readBody(calls);
+    expect(body.mode).toBe('html');
+    expect(body.idempotencyKey).toBe('calendar:bk-1:confirmation');
+  });
+
+  it('no credentials at all → the SEND throws (outbox records it); construction never does', async () => {
+    const provider = new HttpEmailProvider(
+      { endpoint: ENDPOINT, profile: 'transactional-v1' as const, fromEmail: 'x@example.com' },
+      stubFetch(202, { status: 'accepted' }).impl,
+    );
+    await expect(provider.send(message)).rejects.toThrow(
+      'transactional email service authentication is not configured',
+    );
+  });
+
+  it('exposes requiresAccountContext only on the signed transactional wire', () => {
+    const t = new HttpEmailProvider(transactionalOptions, stubFetch(202, {}).impl);
+    expect(t.requiresAccountContext).toBe(true);
+    const g = new HttpEmailProvider(
+      { endpoint: 'https://mail.example.test/send', fromEmail: 'x@example.com' },
+      stubFetch(202, {}).impl,
+    );
+    expect(g.requiresAccountContext).toBe(false);
   });
 
   it('POSTs the managed contract: mode, to[], replyTo, subject, html/text, category, idempotencyKey', async () => {
