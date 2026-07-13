@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, type Db } from './client';
+import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability, getPublicProfile } from './repository';
@@ -75,6 +75,55 @@ describe('repository (SQLite in-memory)', () => {
     });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.reason).toBe('SLOT_TAKEN');
+  });
+
+  it('resolves availability and booking by memberId for a member with NO handle', async () => {
+    // The authenticated host surface books manual slots before a public handle
+    // exists — the handle-based public lookup rightly fails, the by-id host
+    // lookup must not (this silently emptied /admin/bookings/new).
+    const memberId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    await db.run(sql`UPDATE member SET handle=NULL WHERE id=${memberId}`);
+
+    const fromMs = Date.now();
+    const toMs = fromMs + 10 * 86_400_000;
+    const byHandle = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs,
+      toMs,
+    });
+    expect(byHandle).toBeUndefined();
+
+    const byId = await getAvailability(db, {
+      accountCode: 'acme',
+      memberId,
+      slug: 'intro-call',
+      fromMs,
+      toMs,
+    });
+    expect(byId).toBeDefined();
+    expect(byId!.slots.length).toBeGreaterThan(0);
+
+    const booked = await createBooking(db, {
+      accountCode: 'acme',
+      memberId,
+      slug: 'intro-call',
+      startMs: new Date(byId!.slots[0]!.startUtc).getTime(),
+      attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(booked.ok).toBe(true);
+
+    // Tenant isolation: the by-id path never crosses accounts.
+    const crossAccount = await getAvailability(db, {
+      accountCode: 'other-account',
+      memberId,
+      slug: 'intro-call',
+      fromMs,
+      toMs,
+    });
+    expect(crossAccount).toBeUndefined();
   });
 
   it('is idempotent on a repeated idempotency key', async () => {

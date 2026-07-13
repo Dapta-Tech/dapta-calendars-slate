@@ -6,9 +6,9 @@ import type { BookingMessages } from '@slate/shared';
 
 type SettingsMessages = BookingMessages['admin']['settings'];
 
-// Second-level settings nav (mirrors the old app's Settings sub-nav):
-// General · Booking Page · Calendars · Members · Developer. Labels resolve
-// per-locale. Members + Developer are admin/owner-only (`adminOnly`).
+// Second-level settings nav: General · Booking Page · Members · Developer.
+// (Calendars is a top-level nav item at /admin/connections, not a settings
+// tab.) Labels resolve per-locale. Members + Developer are admin/owner-only.
 const TABS: {
   key: keyof Omit<SettingsMessages, 'title' | 'subtitle'>;
   href: string;
@@ -16,7 +16,6 @@ const TABS: {
 }[] = [
   { key: 'general', href: '/admin/settings/general' },
   { key: 'bookingPage', href: '/admin/settings/booking-page' },
-  { key: 'calendars', href: '/admin/connections' },
   { key: 'members', href: '/admin/settings/members', adminOnly: true },
   { key: 'developer', href: '/admin/settings/developer', adminOnly: true },
 ];

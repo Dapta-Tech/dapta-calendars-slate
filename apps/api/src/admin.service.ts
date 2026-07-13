@@ -16,6 +16,7 @@ import {
   deleteConnection,
   deleteWebhook,
   enqueueWebhookDeliveries,
+  getAvailability,
   getMe,
   listApiKeys,
   listBookings,
@@ -81,7 +82,7 @@ export class AdminService {
   async hostCreate(
     p: HostPrincipal,
     body: {
-      handle: string;
+      handle?: string;
       slug: string;
       startUtc: string;
       attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
@@ -91,7 +92,10 @@ export class AdminService {
   ) {
     const outcome = await createBooking(this.db, {
       accountCode,
-      handle: body.handle,
+      // Hosts can create manual bookings before setting a public handle: fall
+      // back to their own member id when no handle is on the payload.
+      handle: body.handle || undefined,
+      memberId: body.handle ? undefined : p.memberId,
       slug: body.slug,
       startMs: new Date(body.startUtc).getTime(),
       attendee: body.attendee,
@@ -208,12 +212,27 @@ export class AdminService {
     let firstNew = !haveDestination;
     for (const conn of discovered) {
       if (await connectionExists(this.db, p.memberId, conn.connectionRef)) continue;
+      // Old-app parity: when discovery doesn't carry the account email, derive
+      // it from the provider's primary calendar (its id IS the account email).
+      // Best-effort — a label-less connection is still a working connection.
+      let primaryEmail = conn.primaryEmail ?? null;
+      if (!primaryEmail) {
+        try {
+          const calendars = await this.provider.listCalendars(conn.connectionRef);
+          primaryEmail =
+            calendars.find((c) => c.isPrimary)?.primaryEmail ??
+            calendars.find((c) => c.primaryEmail)?.primaryEmail ??
+            null;
+        } catch {
+          /* keep null */
+        }
+      }
       await createConnection(this.db, {
         accountId: p.accountId,
         memberId: p.memberId,
         provider: conn.provider || provider,
         externalId: conn.connectionRef,
-        primaryEmail: conn.primaryEmail ?? undefined,
+        primaryEmail: primaryEmail ?? undefined,
         // First calendar the host connects becomes the default destination.
         isDestination: firstNew,
         checkConflicts: true,
@@ -277,5 +296,27 @@ export class AdminService {
   async accountCode(p: HostPrincipal): Promise<string | null> {
     const me = await getMe(this.db, p.accountId, p.memberId);
     return me?.accountCode ?? null;
+  }
+
+  /**
+   * The authenticated host's own availability for one of their events — resolved
+   * by member id, so it works before the member sets a public handle (the
+   * public /v1/availability requires one). Powers /admin/bookings/new.
+   */
+  async myAvailability(p: HostPrincipal, q: { slug: string; from: string; to: string; timeZone?: string }) {
+    const accountCode = await this.accountCode(p);
+    if (!accountCode) return null;
+    const fromMs = new Date(q.from).getTime();
+    if (!Number.isFinite(fromMs)) return null;
+    // Same 60-day window cap as the public endpoint (contract §Engine).
+    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
+    if (!Number.isFinite(toMs)) return null;
+    const result = await getAvailability(
+      this.db,
+      { accountCode, memberId: p.memberId, slug: q.slug, fromMs, toMs, displayTimeZone: q.timeZone },
+      this.calendar.provider,
+    );
+    if (!result) return null;
+    return { eventType: result.eventType, timeZone: result.timeZone, slots: result.slots };
   }
 }

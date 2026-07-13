@@ -26,6 +26,7 @@ import {
   ExternalCalendarProvider,
   type CalendarTokenSource,
   type CalendarWire,
+  type ConnectStart,
 } from './calendar.http-provider';
 
 /** What a private backend overlay module's default export must return. */
@@ -33,6 +34,12 @@ export interface CalendarBackend {
   baseUrl: string;
   tokenSource: CalendarTokenSource;
   wire: CalendarWire;
+  /**
+   * Optional custom connect handshake (see ExternalCalendarOptions.startConnect):
+   * lets a backend resolve the end provider's OAuth URL itself so users skip any
+   * intermediate hosted screen.
+   */
+  startConnect?: (provider: string, tenantKey: string) => Promise<ConnectStart>;
 }
 export type CalendarBackendFactory = (env: ServerEnv) => CalendarBackend | Promise<CalendarBackend>;
 
@@ -89,6 +96,7 @@ export async function createCalendarProviderAsync(env: ServerEnv): Promise<Calen
       baseUrl: backend.baseUrl,
       tokenSource: backend.tokenSource,
       wire: backend.wire,
+      startConnect: backend.startConnect,
       timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
     });
   }

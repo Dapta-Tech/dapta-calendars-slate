@@ -15,7 +15,7 @@ type AdminMessages = BookingMessages['admin'];
  *  (localStorage-persisted), and a <768px off-canvas drawer with a hamburger
  *  top bar. Tokens only (no raw hex); R22 press/hover feedback; R27/R28. */
 
-type IconName = 'home' | 'calendar' | 'clock' | 'ticket' | 'users' | 'cog';
+type IconName = 'home' | 'calendar' | 'clock' | 'ticket' | 'users' | 'calendarPlus' | 'cog';
 
 interface NavItem {
   key: keyof AdminMessages['nav'];
@@ -25,17 +25,18 @@ interface NavItem {
   match?: string[];
 }
 
-// Same information architecture + order as the old app: Home, Bookings,
-// Availability, Event Types, Teams, Settings (Settings is a single item with
-// its own sub-nav; Calendars lives under it at /admin/connections). Labels are
-// resolved from the active locale's catalog (F8).
+// Same information architecture + order as the old app — Home, Bookings,
+// Availability, Event Types, Teams, Calendars, Settings. Calendars is a
+// top-level item (route /admin/connections), no longer a Settings sub-tab.
+// Labels are resolved from the active locale's catalog (F8).
 const NAV: NavItem[] = [
   { key: 'home', href: '/admin', icon: 'home' },
   { key: 'bookings', href: '/admin/bookings', icon: 'calendar' },
   { key: 'availability', href: '/admin/availability', icon: 'clock' },
   { key: 'eventTypes', href: '/admin/event-types', icon: 'ticket' },
   { key: 'teams', href: '/admin/teams', icon: 'users' },
-  { key: 'settings', href: '/admin/settings', icon: 'cog', match: ['/admin/settings', '/admin/connections'] },
+  { key: 'calendars', href: '/admin/connections', icon: 'calendarPlus' },
+  { key: 'settings', href: '/admin/settings', icon: 'cog' },
 ];
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
@@ -51,6 +52,7 @@ const PI_BY_NAME: Record<IconName, string> = {
   clock: 'pi-clock',
   ticket: 'pi-ticket',
   users: 'pi-users',
+  calendarPlus: 'pi-calendar-plus',
   cog: 'pi-cog',
 };
 

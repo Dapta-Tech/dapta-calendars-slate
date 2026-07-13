@@ -127,6 +127,14 @@ export interface ExternalCalendarOptions {
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Optional custom connect handshake. Some backends need a multi-step dance
+   * (create a request, resolve the end-provider's OAuth URL, …) that the
+   * single-request wire contract can't express; when present this replaces
+   * `wire.startConnect` so the user lands STRAIGHT on the end provider's
+   * consent screen instead of an intermediate hosted page.
+   */
+  startConnect?: (provider: string, tenantKey: string) => Promise<ConnectStart>;
 }
 
 export class ExternalCalendarProvider implements CalendarProvider {
@@ -136,6 +144,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
   private readonly wire: CalendarWire;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly startConnectOverride?: ExternalCalendarOptions['startConnect'];
 
   constructor(opts: ExternalCalendarOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
@@ -143,6 +152,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.wire = opts.wire;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.startConnectOverride = opts.startConnect;
   }
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
@@ -191,6 +201,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
 
   /** Start a connect flow (used by the connections API, not the booking engine). */
   async startConnect(provider: string, tenantKey: string): Promise<ConnectStart> {
+    if (this.startConnectOverride) return this.startConnectOverride(provider, tenantKey);
     const req = this.wire.startConnect(provider, tenantKey);
     const token = await this.tokens.mint(req.scope, req.subject);
     const raw = await this.send('startConnect', req, token);

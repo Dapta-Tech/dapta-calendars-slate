@@ -13,11 +13,34 @@ export interface HostBookingResult {
 }
 
 /**
+ * The host's own slots for an event, via the authenticated host surface —
+ * works even before the member sets a public handle (the public availability
+ * endpoint requires one; that gap silently emptied this form's slot list).
+ */
+export async function loadHostSlotsAction(
+  slug: string,
+  from: string,
+  to: string,
+): Promise<{ ok: boolean; slots: string[] }> {
+  try {
+    const qs = `slug=${encodeURIComponent(slug)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const res = await hostFetch(`/v1/me/availability?${qs}`);
+    if (!res.ok) return { ok: false, slots: [] };
+    const j = (await res.json().catch(() => ({}))) as { slots?: { startUtc: string }[] };
+    return { ok: true, slots: (j.slots ?? []).map((s) => s.startUtc) };
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, slots: [] };
+  }
+}
+
+/**
  * R29 host on-behalf booking. Posts to the host surface (singular `attendee`
  * shape — the deliberate path-split from the machine `attendees[]` surface).
+ * `handle` is optional: without it the API books the authenticated member.
  */
 export async function createHostBookingAction(payload: {
-  handle: string;
+  handle?: string;
   slug: string;
   startUtc: string;
   attendee: { name: string; email: string; timeZone: string; notes?: string };

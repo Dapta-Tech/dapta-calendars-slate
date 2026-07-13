@@ -68,8 +68,11 @@ fi
 
 echo
 echo "== publish-gate: trufflehog =="
+# --exclude-paths: documented placeholders (see the exclude file's header) that
+# the runner can't verify (no DB/DNS egress) and would fail as "unknown".
 if command -v trufflehog >/dev/null 2>&1; then
-  trufflehog filesystem --no-update --fail --results=verified,unknown . || FAIL=1
+  trufflehog filesystem --no-update --fail --results=verified,unknown \
+    --exclude-paths scripts/publish-gate-exclude.txt . || FAIL=1
 else
   echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
 fi

@@ -149,6 +149,11 @@ export class GenericRestWire implements CalendarWire {
     return conns
       .map((c) => asRecord(c))
       .filter((c) => typeof c['connectionRef'] === 'string')
+      // Hosted connect screens may create a connection shell BEFORE the user
+      // authorizes. If the backend reports a connected flag, only accept
+      // fully-authorized connections — otherwise list-and-diff would record a
+      // never-authorized account as connected. Absent flag = assumed live.
+      .filter((c) => c['connected'] !== false)
       .map((c) => ({
         connectionRef: String(c['connectionRef']),
         provider: typeof c['provider'] === 'string' ? c['provider'] : 'unknown',

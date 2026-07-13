@@ -1,31 +1,40 @@
 import { getMessages } from '@slate/shared';
-import { adminApi, isAdminRole } from '@/lib/admin-api';
+import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
-import { SettingsChrome } from '../settings/settings-chrome';
+import { PageHeader } from '@/components/ui/page-header';
 import { ConnectionsClient } from './connections-client';
 
 export const dynamic = 'force-dynamic';
 
+// Customer-facing name comes from the deployment (same rule as the wordmark);
+// 'Slate' never surfaces in the UI.
+const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
+
 export default async function ConnectionsPage() {
-  const [me, connections, token] = await Promise.all([
-    adminApi.me(),
+  const [connections, token] = await Promise.all([
     adminApi.listConnections(),
     // Provider status: enabled only when an external calendar adapter is wired.
     adminApi.connectionToken().catch(() => ({ enabled: false, message: 'Calendar sync unavailable.' })),
   ]);
   const admin = getMessages(await getLocale()).admin;
-  // Calendars lives under Settings — reuse SettingsChrome (header + sub-nav) so
-  // it reads as a settings tab even though its route is /admin/connections.
+  const messages = {
+    ...admin.connections,
+    pageDesc: admin.connections.pageDesc.replace('{product}', PRODUCT_NAME),
+    emptyBody: admin.connections.emptyBody.replace('{product}', PRODUCT_NAME),
+  };
+  // Calendars is a top-level admin surface (rail item), styled like the other
+  // list pages: PageHeader + content column. The primary Connect action lives
+  // inside ConnectionsClient's header row (R30 list/create pattern).
   return (
-    <SettingsChrome messages={admin.settings} isAdmin={isAdminRole(me.role)}>
+    <div className="mx-auto max-w-5xl px-8 py-10">
+      <PageHeader title={admin.nav.calendars} subtitle={messages.pageDesc} />
       <div className="max-w-3xl">
-        <p className="mb-6 text-muted-foreground">{admin.connections.pageDesc}</p>
         <ConnectionsClient
           connections={connections}
           status={{ enabled: token.enabled, message: token.message }}
-          messages={admin.connections}
+          messages={messages}
         />
       </div>
-    </SettingsChrome>
+    </div>
   );
 }

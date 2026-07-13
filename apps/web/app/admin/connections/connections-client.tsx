@@ -75,6 +75,18 @@ function providerLabel(provider: string, m: ConnectionsMessages): string {
   }
 }
 
+/** Human label for a connection: account email first, else a readable manual
+ *  calendar id; NEVER the opaque connection ref (an OAuth-discovered
+ *  connection's externalId is an unreadable token). */
+function connectionLabel(
+  c: { primaryEmail: string | null; externalId: string; provider: string },
+  m: ConnectionsMessages,
+): string {
+  if (c.primaryEmail) return c.primaryEmail;
+  if (c.externalId.includes('@')) return c.externalId;
+  return providerLabel(c.provider, m);
+}
+
 /**
  * The connect flow. Popup-blocker-safe: the popup is opened SYNCHRONOUSLY inside
  * the click gesture (to about:blank), then redirected to the minted connect URL
@@ -417,7 +429,7 @@ function ConnectionRow({
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-2">
-              <span className="truncate font-medium text-foreground">{c.primaryEmail ?? c.externalId}</span>
+              <span className="truncate font-medium text-foreground">{connectionLabel(c, m)}</span>
               {c.isDestination ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
                   <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -499,7 +511,7 @@ function SummaryStrip({ connections, m }: { connections: Connection[]; m: Connec
         {destination ? (
           <span className="text-muted-foreground">
             {m.summaryDestination}{' '}
-            <span className="font-medium text-foreground">{destination.primaryEmail ?? destination.externalId}</span>
+            <span className="font-medium text-foreground">{connectionLabel(destination, m)}</span>
           </span>
         ) : (
           <span className="text-muted-foreground">{m.summaryNoDestination}</span>
@@ -602,9 +614,7 @@ export function ConnectionsClient({
   return (
     <div className="flex flex-col gap-5">
       {/* Header: honest sync status on the left, primary Connect at top-right
-          (R30 list/create pattern — creation happens in the dialog surface).
-          One CTA per screen: the top-right Connect renders ONLY when calendars
-          exist; on the empty state the centered CTA below is the sole one. */}
+          (R30 list/create pattern — creation happens in the dialog surface). */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="flex items-center gap-2 text-sm">
           <span
@@ -613,6 +623,8 @@ export function ConnectionsClient({
           />
           <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
         </span>
+        {/* One-CTA-per-screen (R30): with no rows the empty state below carries
+            the single centered CTA — no top-right duplicate. */}
         {rows.length > 0 ? (
           <button
             type="button"
