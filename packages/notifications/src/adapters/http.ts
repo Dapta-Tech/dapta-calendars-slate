@@ -181,6 +181,16 @@ export class HttpEmailProvider implements EmailProvider {
   }
 }
 
+/**
+ * The canonical string deliberately pins the LOGICAL path constant, NOT the
+ * actual request path. The dapta-email verifier builds its canonical string
+ * the same way — a hardcoded `SIGNED_PATH = "/api/internal/email/send"`
+ * (email-service-auth.service.ts, `buildEmailServiceSignaturePayload`) — so
+ * both sides stay in agreement no matter what gateway prefix or rewrite the
+ * transport applies to the URL. Signing the observed request path would BREAK
+ * verification behind any prefixing proxy, which is exactly the deployment
+ * shape the endpoint WARN (vs the old assert) now permits.
+ */
 export function signTransactionalRequest(
   body: string,
   timestamp: string,
