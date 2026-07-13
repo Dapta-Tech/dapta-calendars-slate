@@ -14,7 +14,8 @@ export type NotificationEmailKey =
   | 'host_rescheduled'
   | 'host_cancelled'
   | 'host_declined'
-  | 'host_reminder';
+  | 'host_reminder'
+  | 'follow_up';
 
 export interface BookingMessages {
   booking: {
@@ -476,6 +477,8 @@ export interface BookingMessages {
       reminderLeads: string;
       reminderLeadsHint: string;
       reminderLeadsInvalid: string;
+      followUpLead: string;
+      followUpLeadHint: string;
       editorSubject: string;
       editorBody: string;
       variables: string;
@@ -1043,6 +1046,7 @@ export const en: BookingMessages = {
         host_rescheduled: 'Booking rescheduled',
         host_cancelled: 'Booking cancelled',
         host_declined: 'Request declined',
+        follow_up: 'Follow-up after the meeting',
         host_reminder: 'Reminders',
       },
       descriptions: {
@@ -1056,6 +1060,7 @@ export const en: BookingMessages = {
         host_rescheduled: 'A booking of yours moved to a new time.',
         host_cancelled: 'A booking of yours was cancelled.',
         host_declined: 'Confirmation that a pending request was declined.',
+        follow_up: 'Thank-you note with a book-again link, sent after the meeting ends. Off by default.',
         host_reminder: 'Your own nudge before the meeting starts.',
       },
       customizedBadge: 'Customized',
@@ -1065,6 +1070,8 @@ export const en: BookingMessages = {
       reminderLeads: 'Send reminders before start',
       reminderLeadsHint: 'Minutes before start, comma-separated (e.g. 1440, 60). Up to 5.',
       reminderLeadsInvalid: 'Whole minutes between 5 and 40320, up to 5 values.',
+      followUpLead: 'Send after the meeting ends',
+      followUpLeadHint: 'Minutes after the end time, comma-separated (e.g. 60). Up to 5.',
       editorSubject: 'Subject',
       editorBody: 'Body',
       variables: 'Variables',
@@ -1633,6 +1640,7 @@ export const es: BookingMessages = {
         host_rescheduled: 'Reserva reprogramada',
         host_cancelled: 'Reserva cancelada',
         host_declined: 'Solicitud rechazada',
+        follow_up: 'Seguimiento tras la reunión',
         host_reminder: 'Recordatorios',
       },
       descriptions: {
@@ -1646,6 +1654,7 @@ export const es: BookingMessages = {
         host_rescheduled: 'Una de tus reservas cambió de hora.',
         host_cancelled: 'Una de tus reservas fue cancelada.',
         host_declined: 'Confirmación de que una solicitud pendiente fue rechazada.',
+        follow_up: 'Nota de agradecimiento con enlace para reservar de nuevo, enviada al terminar la reunión. Desactivada por defecto.',
         host_reminder: 'Tu propio aviso antes de que empiece la reunión.',
       },
       customizedBadge: 'Personalizada',
@@ -1655,6 +1664,8 @@ export const es: BookingMessages = {
       reminderLeads: 'Enviar recordatorios antes del inicio',
       reminderLeadsHint: 'Minutos antes del inicio, separados por comas (p. ej. 1440, 60). Hasta 5.',
       reminderLeadsInvalid: 'Minutos enteros entre 5 y 40320, hasta 5 valores.',
+      followUpLead: 'Enviar después de que termine la reunión',
+      followUpLeadHint: 'Minutos después de la hora de fin, separados por comas (p. ej. 60). Hasta 5.',
       editorSubject: 'Asunto',
       editorBody: 'Cuerpo',
       variables: 'Variables',

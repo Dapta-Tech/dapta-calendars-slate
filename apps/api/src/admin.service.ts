@@ -40,6 +40,7 @@ import {
 import {
   EMAIL_TEMPLATE_KEYS,
   TEMPLATE_VARIABLES,
+  defaultEnabledFor,
   defaultTemplate,
   renderTemplate,
   resolveTemplate,
@@ -52,7 +53,7 @@ import { canClaimVanitySlug } from '@slate/engine';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { asConnector } from './calendar.http-provider';
-import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES } from './email-effects';
+import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES, DEFAULT_FOLLOW_UP_LEAD_MINUTES } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { DB, ENTITLEMENTS, PREMIUM_MODE } from './tokens';
 
@@ -154,6 +155,7 @@ export class AdminService {
       // The booking is off — its still-pending reminders must never fire.
       // (The public cancel path already did this; the host path missed it.)
       void this.email.cancelReminders(uid);
+      void this.email.cancelFollowUps(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,
@@ -172,6 +174,7 @@ export class AdminService {
       void this.email.enqueueConfirmation(uid);
       // Now that it's confirmed, schedule its pre-meeting reminders.
       void this.email.enqueueReminders(uid);
+      void this.email.enqueueFollowUps(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.confirmed', { uid }).catch(
         () => undefined,
       );
@@ -187,6 +190,7 @@ export class AdminService {
       void this.email.enqueueDeclined(uid, { reason: reason ?? null });
       // Safety: drop any reminders (a declined pending booking usually has none).
       void this.email.cancelReminders(uid);
+      void this.email.cancelFollowUps(uid);
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.cancelled', {
         uid,
         reason: reason ?? null,
@@ -443,7 +447,9 @@ export class AdminService {
       variables: [...TEMPLATE_VARIABLES],
       defaultReminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
       settings: EMAIL_TEMPLATE_KEYS.map((key) => {
-        const s = stored.get(key) ?? defaultNotificationSetting(key);
+        const s =
+          stored.get(key) ??
+          { ...defaultNotificationSetting(key), enabled: defaultEnabledFor(key) };
         const def = defaultTemplate(key, locale);
         return {
           key,
@@ -456,7 +462,9 @@ export class AdminService {
           reminderLeadMinutes:
             key === 'attendee_reminder'
               ? (s.reminderLeadMinutes ?? DEFAULT_REMINDER_LEAD_MINUTES)
-              : undefined,
+              : key === 'follow_up'
+                ? (s.reminderLeadMinutes ?? DEFAULT_FOLLOW_UP_LEAD_MINUTES)
+                : undefined,
         };
       }),
     };
@@ -502,6 +510,7 @@ export class AdminService {
       },
       location: 'Google Meet',
       manageUrl: 'https://example.com/manage/sample',
+      bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
       cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
       previousStartUtc: new Date(Date.now() + 2 * 3_600_000).toISOString(),
       pending: key === 'host_booked',
