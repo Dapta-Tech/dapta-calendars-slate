@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { brandingSchema } from '@slate/types';
 import { checkWebhookUrl } from '@slate/db';
+import { isEmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
 import { AuthService, type ReqLike } from './auth.service';
@@ -293,4 +294,115 @@ export class HostController {
     assertAdmin(p);
     await this.admin.deleteWebhook(p, id);
   }
+
+  // Notification settings (Settings → Notifications) — admin/owner only.
+  @Get('notification-settings')
+  async listNotificationSettings(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.listNotificationSettings(p);
+  }
+
+  @Patch('notification-settings/:key')
+  async updateNotificationSetting(
+    @Req() req: ReqLike,
+    @Param('key') key: string,
+    @Body() body: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
+  ) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (!isEmailTemplateKey(key))
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    const patch = parseNotificationPatch(key, body);
+    return this.admin.updateNotificationSetting(p, key, patch);
+  }
+
+  /** Render a (possibly unsaved) template against sample data — preview === reality. */
+  @Post('notification-settings/:key/preview')
+  @HttpCode(200)
+  async previewNotificationTemplate(
+    @Req() req: ReqLike,
+    @Param('key') key: string,
+    @Body() body: { subject?: string | null; body?: string | null },
+  ) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (!isEmailTemplateKey(key))
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    return this.admin.previewNotificationTemplate(p, key, {
+      subject: cleanTemplateField(body?.subject, MAX_SUBJECT),
+      body: cleanTemplateField(body?.body, MAX_BODY),
+    });
+  }
+
+  /** Reset to the shipped default template (toggle untouched). */
+  @Delete('notification-settings/:key/template')
+  @HttpCode(200)
+  async resetNotificationTemplate(@Req() req: ReqLike, @Param('key') key: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (!isEmailTemplateKey(key))
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    return this.admin.resetNotificationTemplate(p, key);
+  }
+}
+
+const MAX_SUBJECT = 200;
+const MAX_BODY = 5000;
+/** Reminder leads: 5 minutes … 28 days, at most 5 per account. */
+const MAX_LEADS = 5;
+const MIN_LEAD_MINUTES = 5;
+const MAX_LEAD_MINUTES = 28 * 24 * 60;
+
+/** Empty/whitespace template fields mean "back to default" (NULL). */
+function cleanTemplateField(v: string | null | undefined, max: number): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v !== 'string')
+    throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Template fields must be strings.' });
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > max)
+    throw new BadRequestException({ error: 'BAD_REQUEST', message: `Template field too long (max ${max}).` });
+  return trimmed;
+}
+
+function parseNotificationPatch(
+  key: string,
+  body: { enabled?: unknown; subject?: unknown; body?: unknown; reminderLeadMinutes?: unknown },
+): { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null } {
+  const patch: ReturnType<typeof parseNotificationPatch> = {};
+  if (body?.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean')
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'enabled must be a boolean.' });
+    patch.enabled = body.enabled;
+  }
+  if (body?.subject !== undefined)
+    patch.subject = cleanTemplateField(body.subject as string | null, MAX_SUBJECT);
+  if (body?.body !== undefined)
+    patch.body = cleanTemplateField(body.body as string | null, MAX_BODY);
+  if (body?.reminderLeadMinutes !== undefined) {
+    if (key !== 'attendee_reminder')
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: 'Reminder lead times are set on the attendee_reminder key.',
+      });
+    if (body.reminderLeadMinutes === null) {
+      patch.reminderLeadMinutes = null;
+    } else {
+      if (!Array.isArray(body.reminderLeadMinutes) || body.reminderLeadMinutes.length === 0)
+        throw new BadRequestException({ error: 'BAD_REQUEST', message: 'reminderLeadMinutes must be a non-empty array.' });
+      const leads = [...new Set(body.reminderLeadMinutes.map(Number))];
+      if (
+        leads.length > MAX_LEADS ||
+        leads.some((n) => !Number.isInteger(n) || n < MIN_LEAD_MINUTES || n > MAX_LEAD_MINUTES)
+      )
+        throw new BadRequestException({
+          error: 'BAD_REQUEST',
+          message: `Lead times: up to ${MAX_LEADS} whole minutes between ${MIN_LEAD_MINUTES} and ${MAX_LEAD_MINUTES}.`,
+        });
+      patch.reminderLeadMinutes = leads.sort((a, b) => b - a);
+    }
+  }
+  return patch;
 }

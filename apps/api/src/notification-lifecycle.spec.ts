@@ -186,10 +186,12 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     await settle();
     expect((await listOutbox(db, { kind: 'webhook' })).length).toBeGreaterThanOrEqual(1);
     await worker.drainOnce(Date.now());
+    // Per-side messages: the attendee and the host each get their own copy
+    // (separately toggleable in Settings → Notifications).
     const cancels = email.sent.filter((m) => m.subject.startsWith('Cancelled:'));
-    expect(cancels).toHaveLength(1);
-    const to = Array.isArray(cancels[0]!.to) ? cancels[0]!.to : [cancels[0]!.to];
-    expect(to.sort()).toEqual(['alex@dapta.test', 'sam@example.com']);
+    expect(cancels).toHaveLength(2);
+    const allTo = cancels.flatMap((m) => (Array.isArray(m.to) ? m.to : [m.to]));
+    expect(allTo.sort()).toEqual(['alex@dapta.test', 'sam@example.com']);
   });
 
   it('B4: team booking returns a manage link AND sends a confirmation email', async () => {
@@ -247,11 +249,12 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     email.sent.length = 0;
     expect((await admin.hostCancel(principal, uid, 'x')).ok).toBe(true);
     await drain();
-    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(1);
+    // One attendee copy + one host copy.
+    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(2);
     // Retry — succeeds (not 410) and enqueues NO second email.
     expect((await admin.hostCancel(principal, uid, 'x')).ok).toBe(true);
     await drain();
-    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(1);
+    expect(email.sent.filter((m) => m.subject.startsWith('Cancelled:'))).toHaveLength(2);
   });
 
   it('P1-2: a reschedule retried with the same Idempotency-Key sends no second email', async () => {
@@ -266,10 +269,11 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     email.sent.length = 0;
     await booking.reschedule(uid, { newStartUtc: target, byHost: true, idempotencyKey: 'RK' });
     await drain();
-    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(1);
+    // One attendee copy + one host copy.
+    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(2);
     // Replay with the same key → dedup, no second reschedule email.
     await booking.reschedule(uid, { newStartUtc: target, byHost: true, idempotencyKey: 'RK' });
     await drain();
-    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(1);
+    expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(2);
   });
 });

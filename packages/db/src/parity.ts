@@ -990,6 +990,8 @@ export interface BookingNotificationContext {
   attendee: { name: string; email: string; timeZone: string };
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
   coHosts: Array<{ name: string | null; email: string | null }>;
+  /** Host member's UI locale — picks the default-template language (EN/ES). */
+  hostLocale: string | null;
 }
 
 /**
@@ -1018,9 +1020,11 @@ export async function loadBookingNotificationContext(
     att_name: string | null;
     att_email: string | null;
     att_tz: string | null;
+    host_locale: string | null;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+               m.locale AS host_locale,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -1050,6 +1054,7 @@ export async function loadBookingNotificationContext(
       timeZone: row.att_tz ?? 'UTC',
     },
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
+    hostLocale: row.host_locale,
   };
 }
 
