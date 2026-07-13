@@ -49,6 +49,8 @@ export interface BookingNotification {
   templateLocale?: string | null;
   /** True while the booking awaits host confirmation (drives {{pending_note}}). */
   pending?: boolean;
+  /** Public book-again URL for this event type (drives {{booking_link}}). */
+  bookingLink?: string | null;
 }
 
 /**
@@ -153,6 +155,36 @@ export class BookingNotifier {
       // Distinct per lead so two reminders (24h, 1h) aren't de-duped as one.
       idempotencyKey: this.idem(n, `calendar:${n.uid}:reminder:${lead ?? 'x'}`),
       // No .ics on a reminder.
+    });
+  }
+
+  /**
+   * Post-meeting FOLLOW-UP (thank-you) — scheduled at end + lead, attendee
+   * side, strictly opt-in (default OFF). No .ics: the meeting already
+   * happened; this is a courtesy note with a book-again link.
+   */
+  sendFollowUp(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
+    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const rendered = this.copy(n, () => ({
+      subject: `Thanks for meeting — ${n.title}`,
+      lines: [
+        `Hi ${n.attendee.name},`,
+        ``,
+        `Thanks for taking the time for "${n.title}" (${when}) — we hope it was useful.`,
+        n.bookingLink ? `Want to talk again? Book another slot: ${n.bookingLink}` : '',
+      ],
+    }));
+    return this.email.send({
+      accountId: n.accountId,
+      to: this.recipients(n),
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
+      headers: { 'X-Booking-Uid': n.uid },
+      // Keyed per lead, mirroring reminders — a re-pointed follow-up at the
+      // same lead after reschedule replaces, not duplicates.
+      idempotencyKey: this.idem(n, `calendar:${n.uid}:follow_up:${n.reminderLeadMinutes ?? 'x'}`),
+      // No .ics on a follow-up.
     });
   }
 

@@ -1101,6 +1101,8 @@ export interface BookingNotificationContext {
   coHosts: Array<{ name: string | null; email: string | null }>;
   /** Host member's UI locale — picks the default-template language (EN/ES). */
   hostLocale: string | null;
+  /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
+  bookAgain: { accountCode: string; handle: string; slug: string } | null;
 }
 
 /**
@@ -1130,13 +1132,19 @@ export async function loadBookingNotificationContext(
     att_email: string | null;
     att_tz: string | null;
     host_locale: string | null;
+    host_handle: string | null;
+    account_code: string | null;
+    event_slug: string | null;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.host_member_id, m.display_name AS host_name, m.email AS host_email,
-               m.locale AS host_locale,
+               m.locale AS host_locale, m.handle AS host_handle,
+               acc.code AS account_code, et.slug AS event_slug,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
+        LEFT JOIN account acc ON acc.id = b.account_id
+        LEFT JOIN event_type et ON et.id = b.event_type_id
         LEFT JOIN booking_attendee a ON a.booking_id = b.id
         WHERE b.uid = ${uid} LIMIT 1`,
   );
@@ -1164,6 +1172,10 @@ export async function loadBookingNotificationContext(
     },
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
     hostLocale: row.host_locale,
+    bookAgain:
+      row.account_code && row.host_handle && row.event_slug
+        ? { accountCode: row.account_code, handle: row.host_handle, slug: row.event_slug }
+        : null,
   };
 }
 

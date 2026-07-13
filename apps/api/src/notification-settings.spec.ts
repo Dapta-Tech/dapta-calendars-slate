@@ -7,6 +7,7 @@ import {
   getAvailability,
   listOutbox,
   enqueueOutbox,
+  loadBookingNotificationContext,
   upsertNotificationSetting,
   type Db,
 } from '@slate/db';
@@ -59,7 +60,7 @@ describe('notification settings — toggles + templates through the outbox', () 
     accountId = member.account_id;
     principal = { accountId, memberId: member.id, role: 'owner' };
     email = new RecordingEmailProvider();
-    effects = new EmailEffects(new BookingNotifier(email), db);
+    effects = new EmailEffects(new BookingNotifier(email), db, undefined, ENV);
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     booking = new BookingService(db, ENV, calendar, effects);
     admin = new AdminService(db, calendar, effects);
@@ -254,7 +255,12 @@ describe('notification settings — toggles + templates through the outbox', () 
       subject: 'Bye',
     });
     const out = await admin.listNotificationSettings(principal);
-    expect(out.settings).toHaveLength(11);
+    expect(out.settings).toHaveLength(12);
+    // follow_up is the one OPT-IN key: absent row reads back DISABLED, with
+    // its own default lead (after end) exposed for the editor.
+    const followUp = out.settings.find((s) => s.key === 'follow_up')!;
+    expect(followUp.enabled).toBe(false);
+    expect(followUp.reminderLeadMinutes).toEqual([60]);
     expect(out.variables).toContain('attendee_name');
     const cancel = out.settings.find((s) => s.key === 'attendee_cancellation')!;
     expect(cancel.enabled).toBe(false);
@@ -266,6 +272,101 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(conf.customized).toBe(false);
     const rem = out.settings.find((s) => s.key === 'attendee_reminder')!;
     expect(rem.reminderLeadMinutes).toEqual([1440, 60]);
+  });
+
+  // --- Post-meeting follow-up (v1.5) — mirrors the reminders pattern -------
+
+  it('follow-up is OPT-IN: no rows by default; enabling schedules end + lead', async () => {
+    const uid = await book();
+    await settle();
+    expect(await emailRows(uid, 'follow_up')).toHaveLength(0); // default OFF
+    expect((await emailRows(uid, 'reminder')).length).toBeGreaterThan(0); // reminders unaffected
+
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    const uid2 = await book();
+    await settle();
+    const rows = await emailRows(uid2, 'follow_up');
+    expect(rows).toHaveLength(1);
+    const endMs = new Date(
+      (await loadBookingNotificationContext(db, uid2))!.endUtc,
+    ).getTime();
+    expect(rows[0]!.nextAttemptAt).toBe(endMs + 60 * 60_000); // default +1h after end
+    const payload = JSON.parse(rows[0]!.payload!) as {
+      audience: string;
+      bookingLink?: string;
+      template?: { subject: string };
+      reminderLeadMinutes: number;
+    };
+    expect(payload.audience).toBe('attendee');
+    expect(payload.reminderLeadMinutes).toBe(60);
+    expect(payload.template?.subject).toContain('Thanks for meeting');
+    expect(payload.bookingLink).toContain('/acme/alex-rivera/intro-call');
+  });
+
+  it('follow-up lead is editable (like reminders) and drives next_attempt_at', async () => {
+    await upsertNotificationSetting(db, accountId, 'follow_up', {
+      enabled: true,
+      reminderLeadMinutes: [120],
+    });
+    const uid = await book();
+    await settle();
+    const rows = await emailRows(uid, 'follow_up');
+    expect(rows).toHaveLength(1);
+    const endMs = new Date((await loadBookingNotificationContext(db, uid))!.endUtc).getTime();
+    expect(rows[0]!.nextAttemptAt).toBe(endMs + 120 * 60_000);
+  });
+
+  it('reschedule re-points the follow-up to the new end time', async () => {
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    const uid = await book();
+    await settle();
+    const before = (await emailRows(uid, 'follow_up'))[0]!;
+
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 4 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const target = a!.slots[5]!.startUtc;
+    const out = await booking.reschedule(uid, { newStartUtc: target, byHost: true });
+    expect('error' in out).toBe(false);
+    await settle();
+    const after = (await emailRows(uid, 'follow_up')).filter((r) => r.status === 'pending');
+    expect(after).toHaveLength(1);
+    const newEndMs = new Date((await loadBookingNotificationContext(db, uid))!.endUtc).getTime();
+    expect(after[0]!.nextAttemptAt).toBe(newEndMs + 60 * 60_000);
+    expect(after[0]!.nextAttemptAt).not.toBe(before.nextAttemptAt);
+  });
+
+  it('cancel deletes the pending follow-up', async () => {
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    const uid = await book();
+    await settle();
+    expect((await emailRows(uid, 'follow_up')).filter((r) => r.status === 'pending')).toHaveLength(1);
+    await admin.hostCancel(principal, uid, 'gone');
+    await settle();
+    expect((await emailRows(uid, 'follow_up')).filter((r) => r.status === 'pending')).toHaveLength(0);
+  });
+
+  it('a queued follow-up is re-gated at deliver time (toggle OFF after scheduling)', async () => {
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    const uid = await book();
+    await settle();
+    const row = (await emailRows(uid, 'follow_up'))[0]!;
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: false });
+    await effects.deliver('follow_up', row.payload!, row.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Thanks for meeting'))).toHaveLength(0);
+
+    // Re-enable → the (still pending) payload delivers with the book-again link.
+    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    await effects.deliver('follow_up', row.payload!, row.accountId);
+    const sent = email.sent.filter((m) => m.subject.startsWith('Thanks for meeting'));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toEqual(['sam@example.com']);
+    expect(sent[0]!.text).toContain('/acme/alex-rivera/intro-call');
+    expect(sent[0]!.attachments ?? []).toHaveLength(0); // no invite on a follow-up
   });
 
   it('preview renders sample data and flags unknown tokens; reset restores defaults', async () => {
