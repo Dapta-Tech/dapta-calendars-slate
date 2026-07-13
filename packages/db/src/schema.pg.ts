@@ -258,6 +258,23 @@ export const outbox = pgTable('outbox', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * Per-account notification controls (toggles + template overrides). Absent row
+ * = shipped default (enabled, stock template); subject/body NULL = stock
+ * template; reminder_lead_minutes = TEXT JSON array (reminder key only).
+ */
+export const notificationSetting = pgTable('notification_setting', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  emailKey: text('email_key').notNull(),
+  enabled: integer('enabled').notNull().default(1),
+  subject: text('subject'),
+  body: text('body'),
+  reminderLeadMinutes: text('reminder_lead_minutes'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -276,4 +293,5 @@ export const pgSchema = {
   webhook,
   bookingReference,
   outbox,
+  notificationSetting,
 };

@@ -11,6 +11,7 @@ export * from './members';
 export * from './calendar-refs';
 export * from './webhook-url';
 export * from './outbox';
+export * from './notification-settings';
 export { migrate } from './migrate';
 export { seed, type SeedResult } from './seed';
 export { sqliteSchema } from './schema.sqlite';
