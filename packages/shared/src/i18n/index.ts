@@ -34,6 +34,7 @@ export interface BookingMessages {
     confirmed: string;
     requested: string;
     awaitingConfirmation: string;
+    confirmationSentTo: string;
     yourName: string;
     yourEmail: string;
     notes: string;
@@ -596,6 +597,7 @@ export const en: BookingMessages = {
     confirmed: 'Booking confirmed',
     requested: 'Booking requested',
     awaitingConfirmation: 'Awaiting the host’s confirmation. We’ll email {email} once it’s confirmed.',
+    confirmationSentTo: 'A confirmation was sent to {email}.',
     yourName: 'Your name',
     yourEmail: 'Your email',
     notes: 'Notes (optional)',
@@ -1174,6 +1176,7 @@ export const es: BookingMessages = {
     confirmed: 'Reserva confirmada',
     requested: 'Reserva solicitada',
     awaitingConfirmation: 'Esperando la confirmación del anfitrión. Te escribiremos a {email} cuando se confirme.',
+    confirmationSentTo: 'Enviamos una confirmación a {email}.',
     yourName: 'Tu nombre',
     yourEmail: 'Tu correo',
     notes: 'Notas (opcional)',

@@ -107,7 +107,7 @@ export function BookingFlow({
           <p className="mt-1 text-sm text-muted-foreground">
             {isPending
               ? t(m.awaitingConfirmation, { email: b.attendee.email })
-              : `A confirmation was sent to ${b.attendee.email}.`}
+              : t(m.confirmationSentTo, { email: b.attendee.email })}
           </p>
           {b.manageUrl ? (
             <a
