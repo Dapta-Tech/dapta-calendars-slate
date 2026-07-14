@@ -280,6 +280,7 @@ export interface BookingMessages {
       scheduleMissingLink: string;
       noHoursNotice: string;
       noScheduleNotice: string;
+      eventQuestions: string;
       availabilityLink: string;
       calendarUnavailableNotice: string;
       calendarUnavailableLink: string;
@@ -331,6 +332,7 @@ export interface BookingMessages {
       ownerLock: string;
       memberPending: string;
       noAccountMember: string;
+      inviteFromMembers: string;
       createTitle: string;
       createSubtitle: string;
       bioLabel: string;
@@ -847,6 +849,7 @@ export const en: BookingMessages = {
       scheduleMissingLink: 'Open event settings',
       noHoursNotice: 'No working hours configured for this event’s schedule.',
       noScheduleNotice: 'You don’t have a schedule yet — create one with your working hours.',
+      eventQuestions: 'Event questions',
       availabilityLink: 'Open Availability',
       calendarUnavailableNotice:
         'Couldn’t reach the connected calendar — times are hidden to prevent double-bookings.',
@@ -874,13 +877,16 @@ export const en: BookingMessages = {
       addMember: 'Add member',
       chooseSomeone: 'Choose someone…',
       role: 'Role',
-      roleOwner: 'Owner',
+      // Team-LEVEL role. Named "Team admin" (not "Owner") so it can't be
+      // confused with the ACCOUNT owner role — they are separate systems
+      // (account: owner/admin/member; team: admin/member). QA fix 5.
+      roleOwner: 'Team admin',
       roleMember: 'Member',
       add: 'Add',
       allOnTeam: 'All account members are on this team.',
       remove: 'Remove',
-      lastOwner: 'Last owner',
-      lastOwnerTitle: 'A team must keep at least one owner',
+      lastOwner: 'Last team admin',
+      lastOwnerTitle: 'A team must keep at least one team admin',
       roleUpdated: 'Role updated.',
       memberRemoved: 'Member removed.',
       memberAdded: 'Member added.',
@@ -897,9 +903,10 @@ export const en: BookingMessages = {
       emailPlaceholder: 'name@company.com',
       emailInvalid: 'Enter a valid email address.',
       sendInvite: 'Add member',
-      ownerLock: 'Owners can’t be removed — change their role first.',
+      ownerLock: 'Team admins can’t be removed — change their role first.',
       memberPending: 'Pending',
       noAccountMember: 'No account member with that email — they need to sign up first.',
+      inviteFromMembers: 'Invite them from Settings → Members',
       createTitle: 'New team',
       createSubtitle: 'Round-robin bookings across a group of hosts. You can add members after creating.',
       bioLabel: 'Bio',
@@ -943,7 +950,7 @@ export const en: BookingMessages = {
       enable: 'Enable',
       disable: 'Disable',
       remove: 'Remove',
-      ownerLock: 'Owners can’t be removed — change their role first.',
+      ownerLock: 'Team admins can’t be removed — change their role first.',
       lastOwnerTitle: 'A workspace must keep at least one owner',
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
@@ -1441,6 +1448,7 @@ export const es: BookingMessages = {
       scheduleMissingLink: 'Abrir configuración del evento',
       noHoursNotice: 'No hay horas de trabajo configuradas para el horario de este evento.',
       noScheduleNotice: 'Aún no tienes un horario — crea uno con tus horas de trabajo.',
+      eventQuestions: 'Preguntas del evento',
       availabilityLink: 'Abrir Disponibilidad',
       calendarUnavailableNotice:
         'No se pudo acceder al calendario conectado — los horarios se ocultan para evitar dobles reservas.',
@@ -1468,13 +1476,13 @@ export const es: BookingMessages = {
       addMember: 'Añadir miembro',
       chooseSomeone: 'Elige a alguien…',
       role: 'Rol',
-      roleOwner: 'Propietario',
+      roleOwner: 'Admin del equipo',
       roleMember: 'Miembro',
       add: 'Añadir',
       allOnTeam: 'Todos los miembros de la cuenta están en este equipo.',
       remove: 'Quitar',
-      lastOwner: 'Último propietario',
-      lastOwnerTitle: 'Un equipo debe conservar al menos un propietario',
+      lastOwner: 'Último admin del equipo',
+      lastOwnerTitle: 'Un equipo debe conservar al menos un admin del equipo',
       roleUpdated: 'Rol actualizado.',
       memberRemoved: 'Miembro eliminado.',
       memberAdded: 'Miembro añadido.',
@@ -1491,9 +1499,10 @@ export const es: BookingMessages = {
       emailPlaceholder: 'nombre@empresa.com',
       emailInvalid: 'Introduce un correo válido.',
       sendInvite: 'Añadir miembro',
-      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       memberPending: 'Pendiente',
       noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
+      inviteFromMembers: 'Invítalo desde Configuración → Miembros',
       createTitle: 'Nuevo equipo',
       createSubtitle: 'Reparte reservas por turnos entre un grupo de anfitriones. Puedes añadir miembros después de crearlo.',
       bioLabel: 'Biografía',
@@ -1537,7 +1546,7 @@ export const es: BookingMessages = {
       enable: 'Activar',
       disable: 'Desactivar',
       remove: 'Quitar',
-      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',

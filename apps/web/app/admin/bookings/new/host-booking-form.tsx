@@ -266,6 +266,16 @@ export function HostBookingForm({
         </select>
       </label>
 
+      {/* Intake answers are the EVENT's custom questions — visually separated
+          from the attendee identity above so a question named "email" can't be
+          mistaken for the attendee's real email (QA fix 6). */}
+      {fields.length > 0 ? (
+        <div className="mt-2 border-t border-border pt-4">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {m.eventQuestions}
+          </span>
+        </div>
+      ) : null}
       {fields.map((f) => (
         <label key={f.name} className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">
