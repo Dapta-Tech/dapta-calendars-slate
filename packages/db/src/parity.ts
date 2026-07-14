@@ -775,6 +775,10 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
   const fields = parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []);
   for (const f of fields) {
     if (!f.required) continue;
+    // Reserved names are the fixed attendee fields the forms collect
+    // themselves — legacy duplicates are filtered from render (QA3 fix 3),
+    // so requiring an answer here would 400 every booking on such an event.
+    if (['name', 'email', 'notes'].includes(f.name.trim().toLowerCase())) continue;
     const v = answers?.[f.name];
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0) || v === false)
       return `Missing required field: ${f.label}`;

@@ -124,6 +124,15 @@ export interface CreateBookingArgs {
   onBehalf?: boolean;
 }
 
+/**
+ * Names the booking page always collects as fixed attendee fields — kept in
+ * sync with RESERVED_FIELD_NAMES in @slate/shared (db stays dependency-free
+ * of shared). Legacy custom questions reusing them are no longer rendered by
+ * the forms (QA3 fix 3), so requiring an answer here would 400 every booking
+ * on such an event.
+ */
+const RESERVED_INTAKE_NAMES = new Set(['name', 'email', 'notes']);
+
 /** Validate submitted intake answers against a set of field definitions. */
 export function validateIntakeAnswers(
   fields: BookingFieldDef[],
@@ -131,6 +140,7 @@ export function validateIntakeAnswers(
 ): string | null {
   for (const f of fields) {
     if (!f.required) continue;
+    if (RESERVED_INTAKE_NAMES.has(f.name.trim().toLowerCase())) continue;
     const v = answers?.[f.name];
     const missing =
       v == null || v === '' || (Array.isArray(v) && v.length === 0) || v === false;
