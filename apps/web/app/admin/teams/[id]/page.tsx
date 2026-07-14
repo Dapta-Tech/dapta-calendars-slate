@@ -4,6 +4,7 @@ import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { FormHeader } from '@/components/ui/page-header';
+import { EventRowActions } from '@/app/admin/event-types/event-row-actions';
 import { TeamMembersPanel } from '../team-members-panel';
 
 export const dynamic = 'force-dynamic';
@@ -62,18 +63,33 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
       </div>
       <ul className="flex flex-col gap-2">
         {eventTypes.map((et) => (
-          <li key={et.id}>
+          <li
+            key={et.id}
+            className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
+          >
+            {/* Edit links carry ?from=team:<id> so the editor's back affordance
+                returns HERE, not to the personal Events list (QA3 fix 4b). */}
             <Link
-              href={`/admin/event-types/${et.id}`}
-              className="flex items-center justify-between rounded-md border border-border bg-card p-4 transition-colors hover:border-primary"
+              href={`/admin/event-types/${et.id}?from=team:${team.id}`}
+              className="flex min-w-0 flex-1 flex-col transition-colors hover:text-primary"
             >
-              <span className="flex flex-col">
-                <span className="font-medium">{et.title}</span>
-                <span className="text-sm text-muted-foreground">
-                  /{et.slug} · {et.lengthMinutes} min · {schedulingMethodLabel(msgs, et.schedulingType)}
-                </span>
+              <span className="font-medium">{et.title}</span>
+              <span className="text-sm text-muted-foreground">
+                /{et.slug} · {et.lengthMinutes} min · {schedulingMethodLabel(msgs, et.schedulingType)}
               </span>
             </Link>
+            <span className="shrink-0">
+              <EventRowActions
+                id={et.id}
+                hidden={et.hidden}
+                publicPath={
+                  me?.accountCode && team.slug
+                    ? `/${me.accountCode}/team/${team.slug}/${et.slug}`
+                    : null
+                }
+                messages={msgs.admin.eventTypes}
+              />
+            </span>
           </li>
         ))}
         {eventTypes.length === 0 ? (

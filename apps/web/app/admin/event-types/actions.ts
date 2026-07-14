@@ -46,6 +46,21 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
   }
 }
 
+/** Quick visibility toggle from the list rows (QA3 fix 4c) — flips only
+ *  `hidden` and refreshes every surface that renders the row. */
+export async function toggleEventTypeHiddenAction(id: string, hidden: boolean): Promise<ActionResult> {
+  try {
+    await adminApi.updateEventType(id, { hidden });
+    revalidatePath('/admin/event-types');
+    revalidatePath('/admin/teams');
+    revalidatePath('/admin/teams/[id]', 'page');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
 export async function deleteEventTypeAction(id: string): Promise<ActionResult> {
   try {
     await adminApi.deleteEventType(id);
