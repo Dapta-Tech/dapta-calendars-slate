@@ -77,7 +77,32 @@ export function BookingFlow({
   const [notes, setNotes] = useState('');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
+
+  /** Full client-side gate, replacing native validation (noValidate): native
+   *  bubbles doubled up with the inline errors and can't be themed. Returns
+   *  true when the form may submit. */
+  function validateAll(): boolean {
+    let ok = true;
+    if (!name.trim()) {
+      setNameError(m.requiredField);
+      ok = false;
+    }
+    if (!EMAIL_RE.test(email.trim())) {
+      setEmailError(email.trim() ? m.invalidEmail : m.requiredField);
+      ok = false;
+    }
+    const nextFieldErrors: Record<string, string | null> = {};
+    for (const f of bookingFields) {
+      const v = (answers[f.name] ?? '').trim();
+      const err = f.required && !v ? m.requiredField : v ? validateBookingFieldValue(f.type, v) : null;
+      nextFieldErrors[f.name] = err;
+      if (err) ok = false;
+    }
+    setFieldErrors((e) => ({ ...e, ...nextFieldErrors }));
+    return ok;
+  }
 
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
 
@@ -245,13 +270,11 @@ export function BookingFlow({
         {selected ? (
           <form
             action={formAction}
-            // Client-side email gate: block the submit (and the field wipe it
-            // used to cause) instead of round-tripping a guaranteed 400.
+            noValidate
+            // Client-side gate: block the submit (and the field wipe it used
+            // to cause) instead of round-tripping a guaranteed 400.
             onSubmit={(e) => {
-              if (!EMAIL_RE.test(email.trim())) {
-                e.preventDefault();
-                setEmailError(m.invalidEmail);
-              }
+              if (!validateAll()) e.preventDefault();
             }}
             className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
           >
@@ -280,9 +303,20 @@ export function BookingFlow({
                 name="name"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-2"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (nameError) setNameError(null);
+                }}
+                aria-invalid={!!nameError}
+                className={`rounded-md border bg-background px-3 py-2 ${
+                  nameError ? 'border-destructive' : 'border-input'
+                }`}
               />
+              {nameError ? (
+                <span role="alert" className="text-xs text-destructive">
+                  {nameError}
+                </span>
+              ) : null}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.yourEmail} <span className="text-destructive">*</span></span>

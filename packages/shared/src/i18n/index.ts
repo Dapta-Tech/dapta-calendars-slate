@@ -40,6 +40,7 @@ export interface BookingMessages {
     yourName: string;
     yourEmail: string;
     invalidEmail: string;
+    requiredField: string;
     notes: string;
     heldUntil: string;
     slotTaken: string;
@@ -649,6 +650,7 @@ export const en: BookingMessages = {
     yourName: 'Your name',
     yourEmail: 'Your email',
     invalidEmail: 'Enter a valid email.',
+    requiredField: 'This field is required.',
     notes: 'Notes (optional)',
     heldUntil: 'Held until {time}',
     slotTaken: 'That time was just taken.',
@@ -1276,6 +1278,7 @@ export const es: BookingMessages = {
     yourName: 'Tu nombre',
     yourEmail: 'Tu correo',
     invalidEmail: 'Ingresa un correo válido.',
+    requiredField: 'Este campo es obligatorio.',
     notes: 'Notas (opcional)',
     heldUntil: 'Reservado hasta las {time}',
     slotTaken: 'Ese horario acaba de ocuparse.',
