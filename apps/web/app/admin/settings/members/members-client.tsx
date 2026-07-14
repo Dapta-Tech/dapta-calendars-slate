@@ -9,6 +9,7 @@ import {
   removeMemberAction,
   setMemberRoleAction,
   setMemberStatusAction,
+  transferOwnershipAction,
 } from './actions';
 
 type Messages = BookingMessages['admin']['members'];
@@ -35,6 +36,7 @@ export function MembersClient({
 }) {
   const [pending, start] = useTransition();
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [confirmTransfer, setConfirmTransfer] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
@@ -64,6 +66,7 @@ export function MembersClient({
       if (r.ok) {
         success(ok);
         setConfirmRemove(null);
+        setConfirmTransfer(null);
       } else {
         error(r.message ?? m.genericError);
       }
@@ -111,7 +114,10 @@ export function MembersClient({
         {members.map((member) => {
           const isSelf = member.id === callerId;
           const isOwner = member.role === 'owner';
-          const isLastOwner = isOwner && activeOwners <= 1;
+          // Last-owner lock applies to the last ACTIVE owner only — an invited
+          // owner isn't in activeOwners, so locking it made an accidental
+          // promotion permanent (QA2 fix 6a).
+          const isLastOwner = isOwner && member.status === 'active' && activeOwners <= 1;
           // Admins may not act on owners; only an owner can. Never act on yourself
           // here (you can't lock yourself out of your own workspace).
           const canManage = !isSelf && (isOwnerCaller || !isOwner);
@@ -119,9 +125,12 @@ export function MembersClient({
           // Owners are removed by demoting first (mirrors the team owner-lock).
           const canRemove = canManage && !isOwner;
           const canToggleStatus = canManage && !isOwner;
+          // Single-owner model (QA2 fix 6b): ownership moves only via this
+          // explicit action — owner-only, to an active non-owner member.
+          const canTransfer = isOwnerCaller && !isSelf && !isOwner && member.status === 'active';
 
           return (
-            <li key={member.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <li key={member.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-4">
               <span
                 aria-hidden
                 className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background bg-cover bg-center text-xs font-semibold text-muted-foreground"
@@ -174,9 +183,43 @@ export function MembersClient({
               >
                 <option value="member">{m.roleMember}</option>
                 <option value="admin">{m.roleAdmin}</option>
-                {/* Ownership is owner-granted only; keep the current owner value selectable. */}
-                {isOwnerCaller || isOwner ? <option value="owner">{m.roleOwner}</option> : null}
+                {/* The dropdown can DEMOTE an owner (legacy multi-owner states)
+                    but never mint one — promotion is the transfer flow only. */}
+                {isOwner ? <option value="owner">{m.roleOwner}</option> : null}
               </select>
+
+              {/* Transfer ownership — explicit two-step, mirrors the remove confirm. */}
+              {canTransfer ? (
+                confirmTransfer === member.id ? (
+                  <span className="flex items-center gap-1 text-sm">
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => run(transferOwnershipAction(member.id), m.ownershipTransferred)}
+                      className="inline-flex min-h-[44px] items-center rounded-md border border-primary px-3 py-2 text-primary disabled:opacity-60"
+                    >
+                      {m.transferConfirm}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmTransfer(null)}
+                      className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2"
+                    >
+                      {m.cancel}
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => setConfirmTransfer(member.id)}
+                    aria-label={`${m.transferOwnership} · ${member.displayName ?? member.email ?? ''}`}
+                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-60"
+                  >
+                    {m.transferOwnership}
+                  </button>
+                )
+              ) : null}
 
               {/* Enable / disable (soft access revocation). */}
               {canToggleStatus ? (

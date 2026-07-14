@@ -52,6 +52,18 @@ export async function setMemberStatusAction(id: string, status: MemberStatus): P
   }
 }
 
+/** Hand the workspace to another member — target becomes owner, caller becomes admin. */
+export async function transferOwnershipAction(id: string): Promise<ActionResult> {
+  try {
+    await adminApi.transferOwnership(id);
+    revalidatePath('/admin/settings/members');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, message: e instanceof Error ? e.message : undefined };
+  }
+}
+
 /** Remove a member from the workspace (BE guards the last owner). */
 export async function removeMemberAction(id: string): Promise<ActionResult> {
   try {

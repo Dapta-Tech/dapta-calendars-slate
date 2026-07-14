@@ -144,6 +144,7 @@ export const adminApi = {
   updateMember: (id: string, b: { role?: AccountRole; status?: MemberStatus }) =>
     req<AccountMember>('PATCH', `/v1/members/${id}`, b),
   removeMember: (id: string) => req<{ ok: boolean }>('DELETE', `/v1/members/${id}`),
+  transferOwnership: (id: string) => req<AccountMember>('POST', `/v1/members/${id}/transfer-ownership`),
 
   // Bookings (host)
   listBookings: (q = '') =>
