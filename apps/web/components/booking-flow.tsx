@@ -5,6 +5,7 @@ import {
   groupSlotsByDay,
   formatSlotDateTime,
   getMessages,
+  isReservedFieldName,
   t,
   validateBookingFieldValue,
   type DisplaySlot,
@@ -19,6 +20,7 @@ import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 
 interface Props {
   accountCode: string;
@@ -63,6 +65,14 @@ export function BookingFlow({
   locale = 'en',
 }: Props) {
   const m = getMessages(locale).booking;
+  const pm = getMessages(locale).phonePicker;
+  // Reserved names (name/email/notes) are fixed attendee fields this form
+  // always asks by itself — a legacy custom question reusing one would ask
+  // the attendee twice (QA3 fix 3).
+  const visibleFields = useMemo(
+    () => bookingFields.filter((f) => !isReservedFieldName(f.name)),
+    [bookingFields],
+  );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
@@ -94,9 +104,20 @@ export function BookingFlow({
       ok = false;
     }
     const nextFieldErrors: Record<string, string | null> = {};
-    for (const f of bookingFields) {
+    for (const f of visibleFields) {
       const v = (answers[f.name] ?? '').trim();
-      const err = f.required && !v ? m.requiredField : v ? validateBookingFieldValue(f.type, v) : null;
+      // Phone values are E.164 from PhoneField — gate on the SAME too-short
+      // rule the field flags inline, so a submit never blocks invisibly.
+      const err =
+        f.required && !v
+          ? m.requiredField
+          : f.type === 'phone'
+            ? isPhoneValueTooShort(v)
+              ? pm.invalid
+              : null
+            : v
+              ? validateBookingFieldValue(f.type, v)
+              : null;
       nextFieldErrors[f.name] = err;
       if (err) ok = false;
     }
@@ -346,7 +367,7 @@ export function BookingFlow({
               ) : null}
             </label>
 
-            {bookingFields.map((f) => {
+            {visibleFields.map((f) => {
               const validate = (v: string) =>
                 setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
               const setAnswer = (v: string) => setAnswers((a) => ({ ...a, [f.name]: v }));
@@ -359,7 +380,24 @@ export function BookingFlow({
                     {f.label}
                     {f.required ? <span className="text-destructive"> *</span> : null}
                   </span>
-                  {isMulti ? (
+                  {f.type === 'phone' ? (
+                    <PhoneField
+                      value={value}
+                      onChange={(v) => {
+                        setAnswer(v);
+                        // PhoneField flags too-short numbers inline itself —
+                        // just keep the submit gate in step with what it shows.
+                        setFieldErrors((e) => ({
+                          ...e,
+                          [f.name]: isPhoneValueTooShort(v) ? pm.invalid : null,
+                        }));
+                      }}
+                      locale={locale}
+                      name={`answer_${f.name}`}
+                      required={f.required}
+                      ariaLabel={f.label}
+                    />
+                  ) : isMulti ? (
                     <textarea
                       name={`answer_${f.name}`}
                       required={f.required}
@@ -373,7 +411,7 @@ export function BookingFlow({
                   ) : (
                     <input
                       name={`answer_${f.name}`}
-                      type={f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : f.type === 'number' ? 'number' : 'text'}
+                      type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
                       required={f.required}
                       placeholder={f.placeholder}
                       value={value}
@@ -382,7 +420,9 @@ export function BookingFlow({
                       className="rounded-md border border-input bg-background px-3 py-2"
                     />
                   )}
-                  {fieldErrors[f.name] ? (
+                  {/* Phone shows its own inline error for typed-but-short
+                      numbers — only the required-empty case renders here. */}
+                  {fieldErrors[f.name] && (f.type !== 'phone' || !value.trim()) ? (
                     <span className="text-xs text-destructive">{fieldErrors[f.name]}</span>
                   ) : null}
                 </label>
