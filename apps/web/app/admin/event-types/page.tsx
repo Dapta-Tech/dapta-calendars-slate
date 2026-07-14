@@ -4,11 +4,12 @@ import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
 import { DeleteButton } from './delete-button';
+import { EventRowActions } from './event-row-actions';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EventTypesPage() {
-  const eventTypes = await adminApi.listEventTypes();
+  const [eventTypes, me] = await Promise.all([adminApi.listEventTypes(), adminApi.me()]);
   const admin = getMessages(await getLocale()).admin;
   const m = admin.eventTypes;
 
@@ -35,9 +36,9 @@ export default async function EventTypesPage() {
         {eventTypes.map((et) => (
           <li
             key={et.id}
-            className="flex items-center justify-between rounded-md border border-border bg-card p-4"
+            className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
           >
-            <span className="flex flex-col">
+            <span className="flex min-w-0 flex-col">
               <span className="font-medium">
                 {et.title}
                 {et.hidden ? <span className="ml-2 text-xs text-muted-foreground">({m.hidden})</span> : null}
@@ -47,7 +48,13 @@ export default async function EventTypesPage() {
                 {et.requiresConfirmation ? ` · ${m.needsConfirmation}` : ''}
               </span>
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
+              <EventRowActions
+                id={et.id}
+                hidden={et.hidden}
+                publicPath={me.handle ? `/${me.accountCode}/${me.handle}/${et.slug}` : null}
+                messages={m}
+              />
               <Link
                 href={`/admin/event-types/${et.id}`}
                 className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
