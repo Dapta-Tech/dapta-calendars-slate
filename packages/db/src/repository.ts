@@ -252,7 +252,7 @@ export async function isSlotBookable(
   // bookable (never move a meeting onto a conflict we couldn't see).
   let externalBusy: Interval[];
   try {
-    externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs);
+    externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs, eventType.id);
   } catch {
     return false;
   }
@@ -513,7 +513,7 @@ export async function getAvailability(
   // double-book — and rather than 500 on the whole request.
   let externalBusy: Interval[];
   try {
-    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs);
+    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs, eventType.id);
   } catch {
     return {
       eventType: eventTypeOut,
@@ -692,7 +692,7 @@ export async function createBooking(
   // fail-closed — a conflict rejects the slot, and an UNREADABLE calendar
   // blocks the booking visibly instead of booking blind.
   try {
-    const externalBusy = await loadExternalBusy(db, calendar, member.id, startMs, endMs);
+    const externalBusy = await loadExternalBusy(db, calendar, member.id, startMs, endMs, eventType.id);
     if (externalBusy.some((b) => b.start.getTime() < endMs && b.end.getTime() > startMs)) {
       return { ok: false, reason: 'SLOT_TAKEN' };
     }

@@ -26,6 +26,9 @@ export interface EventTypePayload {
   /** Team events: scheduling method + per-host round-robin detail. */
   schedulingType?: string | null;
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
+  /** PHASE 2 — per-event calendar selection (personal events only). */
+  conflictCalendarIds?: string[];
+  destinationCalendarId?: string | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

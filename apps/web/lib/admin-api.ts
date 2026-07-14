@@ -216,6 +216,12 @@ export interface EventType {
   hostMemberIds: string[];
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;
+  /** PHASE 2 — per-event calendar selection (personal events only). Empty ⇒
+   *  falls back to the host's member-level check_conflicts calendars. */
+  conflictCalendarIds: string[];
+  /** PHASE 2 — the connected_calendar this event writes to; null ⇒ falls back
+   *  to the host's member-level destination calendar. */
+  destinationCalendarId: string | null;
 }
 export interface Schedule {
   id: string;
@@ -266,46 +272,18 @@ export interface Connection {
   lastActiveAt?: string | null;
 }
 
-/** Human label for a connection: account email first, else a readable manual
- *  calendar id, else the end-provider name (Google/Outlook — R15-safe: these
- *  are end-provider names, not the integration vendor). Mirrors the client-side
- *  `connectionLabel` in connections-client.tsx; kept here too since the event
- *  form's calendar-link line is rendered server-side. */
-export function connectionDisplayLabel(c: Connection): string {
-  if (c.primaryEmail) return c.primaryEmail;
-  if (c.externalId.includes('@')) return c.externalId;
-  const p = c.provider.toLowerCase();
-  if (p.includes('google')) return 'Google Calendar';
-  if (p.includes('outlook') || p.includes('microsoft')) return 'Outlook / Microsoft 365';
-  return c.provider.charAt(0).toUpperCase() + c.provider.slice(1);
-}
+/** Human label for a connection — moved to `./connection-label` (a pure,
+ *  server-import-free module) so CLIENT components can use it without pulling
+ *  this file's `next/headers`-dependent `auth-session` graph into the browser
+ *  bundle. Re-exported here for any server-side caller that prefers this
+ *  module's surface. */
+export { connectionDisplayLabel } from './connection-label';
 
-/**
- * Summarizes how a (single-host, personal) event is linked to the host's
- * connected calendar(s) — for the read-only line on the event form (Felipe:
- * "cómo está el calendario conectado al evento, esto no hace sentido"). This
- * product has no per-event calendar picker: EVERY personal event implicitly
- * uses the host's `is_destination` connection for write-out and every
- * `check_conflicts` connection for availability.
- */
-export interface EventCalendarLink {
-  hasAnyConnection: boolean;
-  destinationLabel: string | null;
-  conflictCheckedCount: number;
-  /** True when the SAME connection both writes out and is conflict-checked
-   *  (the common, simple case — one calendar doing both jobs). */
-  destinationIsConflictChecked: boolean;
-}
-export function describeCalendarLink(connections: Connection[]): EventCalendarLink {
-  const destination = connections.find((c) => c.isDestination) ?? null;
-  const conflictChecked = connections.filter((c) => c.checkConflicts);
-  return {
-    hasAnyConnection: connections.length > 0,
-    destinationLabel: destination ? connectionDisplayLabel(destination) : null,
-    conflictCheckedCount: conflictChecked.length,
-    destinationIsConflictChecked: !!destination?.checkConflicts && conflictChecked.length === 1,
-  };
-}
+// NOTE: the old read-only "which calendar is this linked to" summary
+// (EventCalendarLink / describeCalendarLink) is superseded by the PHASE 2
+// per-event editable "Calendars for this event" section — see
+// `EventType.conflictCalendarIds` / `EventType.destinationCalendarId` above
+// and `CalendarsForEventSection` in event-type-form.tsx.
 
 /** Result of the "Test / Run check" self-test — proof the pipeline actually
  *  read live busy events, not just that the connection is reachable. */

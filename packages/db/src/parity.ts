@@ -915,6 +915,7 @@ export async function rescheduleBooking(
         b.host_member_id,
         args.newStartMs,
         newEndMs,
+        b.event_type_id,
       );
       if (externalBusy.some((x) => x.start.getTime() < newEndMs && x.end.getTime() > args.newStartMs)) {
         return { ok: false, reason: 'SLOT_TAKEN' };
@@ -1400,8 +1401,17 @@ export async function createConnection(
  * `loadExternalBusy` returns `[]` and calendar write-out is a no-op with no
  * destination — so there is nothing left to guard here. Idempotent (deleting
  * an already-gone id still reports success).
+ *
+ * PHASE 2 (per-event calendars): cascade the disconnect app-level (this schema
+ * has no DB FKs — same convention as event_type_host/booking_host) — drop any
+ * `event_type_conflict_calendar` rows that named this calendar, and null out
+ * `event_type.destination_calendar_id` where it pointed here. Both already
+ * degrade cleanly (calendar-refs.ts falls back to the member-level default),
+ * this just keeps no dangling references around.
  */
 export async function deleteConnection(db: Db, memberId: string, id: string): Promise<{ ok: true }> {
+  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE connected_calendar_id = ${id}`);
+  await db.run(sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`);
   await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
   return { ok: true };
 }

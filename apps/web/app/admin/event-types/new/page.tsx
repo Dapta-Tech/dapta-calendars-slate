@@ -1,5 +1,5 @@
 import { getMessages } from '@slate/shared';
-import { adminApi, describeCalendarLink } from '@/lib/admin-api';
+import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from '../event-type-form';
 
@@ -13,16 +13,15 @@ export default async function NewEventType() {
   ]);
   const m = getMessages(locale).admin.eventTypes;
   // A brand-new event has no teamId yet — it starts as a personal event, so
-  // the calendar-link line is always relevant here (team assignment happens
-  // after creation on the edit screen, where the line is hidden for team events).
-  const calendarLink = describeCalendarLink(connections);
+  // the calendars section is always relevant here (team assignment happens
+  // after creation on the edit screen, where it's hidden for team events).
 
   return (
     <div className="mx-auto max-w-4xl px-8 pb-10">
       <EventTypeForm
         schedules={schedules}
         messages={m}
-        calendarLink={calendarLink}
+        connections={connections}
         redirectOnSuccess="/admin/event-types"
         backHref="/admin/event-types"
         backLabel={m.title}
