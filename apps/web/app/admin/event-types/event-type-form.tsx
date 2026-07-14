@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
@@ -132,13 +132,20 @@ export function EventTypeForm({
   const [pending, start] = useTransition();
   const { success } = useToast();
 
-  // Country options for phone questions, alphabetical by (EN) name — computed
-  // once, only rendered on rows with type=phone.
-  const [countryOptions] = useState(() =>
-    [...COUNTRIES]
-      .map((c) => ({ ...c, name: countryName(c.code) }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
-  );
+  // Country options for phone questions, alphabetical by (EN) name. Filled
+  // AFTER mount (QA4-B1): Intl.DisplayNames region names differ between
+  // Node's ICU and the browser's (e.g. "Falkland Islands" vs "… (Islas
+  // Malvinas)"), so naming them during SSR guarantees a hydration mismatch.
+  const [countryOptions, setCountryOptions] = useState<
+    Array<{ code: string; dial: string; flag: string; name: string }>
+  >([]);
+  useEffect(() => {
+    setCountryOptions(
+      [...COUNTRIES]
+        .map((c) => ({ ...c, name: countryName(c.code) }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }, []);
 
   const onTitle = (v: string) => {
     setTitle(v);
@@ -400,11 +407,18 @@ export function EventTypeForm({
                   title={m.defaultCountryLabel}
                   className="w-36 rounded-md border border-input bg-background px-2 py-1 text-sm"
                 >
-                  {countryOptions.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.flag} {c.name} {c.dial}
-                    </option>
-                  ))}
+                  {countryOptions.length === 0 ? (
+                    // SSR/first paint: a bare-code option so the select's value
+                    // resolves identically on server and client (QA4-B1); the
+                    // named list replaces it right after mount.
+                    <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
+                  ) : (
+                    countryOptions.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.flag} {c.name} {c.dial}
+                      </option>
+                    ))
+                  )}
                 </select>
               ) : null}
               <label className="flex cursor-pointer items-center gap-1 text-sm">
