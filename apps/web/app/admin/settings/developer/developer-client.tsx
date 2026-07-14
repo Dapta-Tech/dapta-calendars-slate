@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
 import {
   createApiKeyAction,
@@ -26,6 +27,7 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
   const [scopes, setScopes] = useState<string[]>(['availability:read']);
   const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const { success, error } = useToast();
 
   const submit = () =>
     start(async () => {
@@ -65,8 +67,15 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
             {!k.revoked_at_ms ? (
               <button
                 type="button"
-                onClick={() => start(() => revokeApiKeyAction(k.id))}
-                className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const r = await revokeApiKeyAction(k.id);
+                    if (r.ok) success(m.revokedToast);
+                    else error(r.error ?? m.genericError);
+                  })
+                }
+                className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
               >
                 {m.revoke}
               </button>
@@ -118,11 +127,12 @@ function WebhookItem({
   m,
 }: {
   w: WebhookRow;
-  start: (fn: () => void) => void;
+  start: (fn: () => void | Promise<void>) => void;
   pending: boolean;
   m: DevMessages;
 }) {
   const [ping, setPing] = useState<string | null>(null);
+  const { success, error } = useToast();
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-3">
@@ -133,7 +143,13 @@ function WebhookItem({
               type="checkbox"
               checked={w.active === 1}
               disabled={pending}
-              onChange={(e) => start(() => toggleWebhookAction(w.id, e.target.checked))}
+              onChange={(e) =>
+                start(async () => {
+                  const r = await toggleWebhookAction(w.id, e.target.checked);
+                  if (r.ok) success(m.toggledToast);
+                  else error(r.error ?? m.genericError);
+                })
+              }
             />
             {m.active}
           </label>
@@ -141,14 +157,21 @@ function WebhookItem({
             type="button"
             disabled={pending}
             onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}
-            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary disabled:opacity-60"
           >
             {m.ping}
           </button>
           <button
             type="button"
-            onClick={() => start(() => deleteWebhookAction(w.id))}
-            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                const r = await deleteWebhookAction(w.id);
+                if (r.ok) success(m.deletedToast);
+                else error(r.error ?? m.genericError);
+              })
+            }
+            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
           >
             {m.delete}
           </button>

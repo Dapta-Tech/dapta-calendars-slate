@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, type Connection } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
 
@@ -70,18 +70,20 @@ export async function connectCalendarAction(
 }
 
 /**
- * Called after the OAuth popup completes: persist the tenant's just-connected
- * account(s) and return how many connections are now on record so the client can
- * detect that the connect finished.
+ * Called after the OAuth popup completes (and polled while it's open): persist
+ * the tenant's just-connected account(s) and return the FULL up-to-date
+ * connections list so the client can diff it against its pre-connect snapshot
+ * by id (never by a naive count — a provider that was already connected before
+ * the dialog opened has a stable count even after a fresh connect completes).
  */
 export async function discoverConnectionsAction(
   provider: string,
-): Promise<{ ok: boolean; count: number; message?: string }> {
+): Promise<{ ok: boolean; connections: Connection[]; message?: string }> {
   try {
     const conns = await adminApi.discoverConnections(provider);
     revalidatePath('/admin/connections');
-    return { ok: true, count: conns.length };
+    return { ok: true, connections: conns };
   } catch (e) {
-    return { ok: false, count: 0, message: e instanceof Error ? e.message : 'Discovery failed' };
+    return { ok: false, connections: [], message: e instanceof Error ? e.message : 'Discovery failed' };
   }
 }

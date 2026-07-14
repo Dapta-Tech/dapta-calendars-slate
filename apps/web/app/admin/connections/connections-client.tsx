@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import type { Connection } from '@/lib/admin-api';
 import { FieldHelp } from '@/components/field-help';
+import { PageHeader } from '@/components/ui/page-header';
 import {
   connectCalendarAction,
   createConnectionAction,
@@ -94,17 +95,34 @@ function connectionLabel(
  * After the popup, we poll `discover` (server-side detection; no vendor SDK in
  * the browser — R15) until the new connection appears, then refresh.
  */
+/** Signal channel the `/admin/connections/connected` popup landing page posts
+ *  to so the opener modal closes IMMEDIATELY instead of waiting on the next
+ *  poll tick or a window-focus event. BroadcastChannel with a localStorage
+ *  fallback (Safari popups can be a separate process where BC is flaky). */
+const CONNECT_SIGNAL_CHANNEL = 'slate-connect-signal';
+const CONNECT_SIGNAL_STORAGE_KEY = 'slate-connect-signal-at';
+
+/** Clock-skew tolerance for the "did this connection just get (re)connected"
+ *  timestamp comparison (client open-time vs. the vendor's own updatedAt). */
+const CONNECT_CLOCK_SKEW_GRACE_MS = 10_000;
+
+function parseTimestamp(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 function ConnectDialog({
   open,
   onClose,
   enabled,
-  baselineCount,
+  connections,
   m,
 }: {
   open: boolean;
   onClose: () => void;
   enabled: boolean;
-  baselineCount: number;
+  connections: Connection[];
   m: ConnectionsMessages;
 }) {
   const router = useRouter();
@@ -116,6 +134,18 @@ function ConnectDialog({
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeProvider = useRef<string>('google');
+  // The moment the connect popup opened, MINUS a clock-skew grace window —
+  // completion is "a row of the active provider kind whose vendor-reported
+  // updatedAt/lastActiveAt is at or after this moment", never a raw count NOR
+  // "is this row's id new". A RECONNECT of an already-linked account reuses
+  // the SAME row (same externalId/connectionId), so neither a count nor an
+  // id-diff can ever see it complete — that was the "stuck on Waiting…" bug
+  // AND the "says connected but won't reconnect" bug, together.
+  const connectOpenedAtRef = useRef<number>(0);
+  // Fallback: ids present for the active provider kind before the popup
+  // opened — a brand-new connection with no timestamp fields at all (an older
+  // wire) still gets caught as "an id that wasn't here before".
+  const baselineIdsRef = useRef<Set<string>>(new Set());
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -140,19 +170,39 @@ function ConnectDialog({
     [reset, onClose, router],
   );
 
-  // Poll for the just-connected account; success when the connection count grows.
+  // Poll for the just-(re)connected account. Success is EITHER: a row of the
+  // active provider kind whose updatedAt/lastActiveAt lands at/after the
+  // moment the popup opened (catches a RECONNECT of an existing account, the
+  // real fix for "already connected but reconnect hangs"), OR a row whose id
+  // wasn't present before the popup opened (catches a brand-new connection on
+  // a wire that doesn't report timestamps).
   const checkForNew = useCallback(() => {
     void discoverConnectionsAction(activeProvider.current).then((r) => {
-      if (r.ok && r.count > baselineCount) {
+      if (!r.ok) return;
+      const kind = providerKind(activeProvider.current);
+      const openedAt = connectOpenedAtRef.current;
+      const match = r.connections.find((c) => {
+        if (providerKind(c.provider) !== kind) return false;
+        if (!baselineIdsRef.current.has(c.id)) return true;
+        const updated = parseTimestamp(c.updatedAt);
+        const active = parseTimestamp(c.lastActiveAt);
+        return (updated != null && updated >= openedAt) || (active != null && active >= openedAt);
+      });
+      if (match) {
         setMsg(m.connectSuccess);
         finish(true);
       }
     });
-  }, [baselineCount, finish, m.connectSuccess]);
+  }, [finish, m.connectSuccess]);
 
   const beginConnect = (provider: string) => {
     setErr(null);
     activeProvider.current = provider;
+    const kind = providerKind(provider);
+    baselineIdsRef.current = new Set(
+      connections.filter((c) => providerKind(c.provider) === kind).map((c) => c.id),
+    );
+    connectOpenedAtRef.current = Date.now() - CONNECT_CLOCK_SKEW_GRACE_MS;
     // Open the popup NOW, in the gesture, so it is not blocked.
     const popup = window.open('about:blank', 'slate-connect', 'width=520,height=720');
     if (!popup) {
@@ -192,6 +242,57 @@ function ConnectDialog({
     };
   }, [open, stage, checkForNew, finish]);
 
+  // A FAILED OAuth attempt: stop waiting (the popup already closed itself or
+  // is showing its own dead end), go back to the picker, and show the reason
+  // — instead of polling forever against a discover call that will never see
+  // a new/updated connection because nothing actually connected.
+  const failNow = useCallback(
+    (message: string | null) => {
+      stopPolling();
+      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      popupRef.current = null;
+      setStage('choose');
+      setErr(message || m.connectFailed);
+    },
+    [stopPolling, m.connectFailed],
+  );
+
+  // Instant completion signal from `/admin/connections/connected` (the OAuth
+  // popup's landing page) — checks right away instead of waiting up to 2.5s
+  // for the next poll tick or for the user to refocus this window. Carries
+  // the ACTUAL outcome (ok/message), so a failed attempt surfaces its reason
+  // immediately instead of leaving the dialog waiting on a poll that will
+  // never succeed.
+  useEffect(() => {
+    if (!open || stage !== 'waiting') return;
+    const onSignal = (raw: unknown) => {
+      let parsed: { ok?: boolean; message?: string | null } | null = null;
+      if (raw && typeof raw === 'object') parsed = raw as { ok?: boolean; message?: string | null };
+      else if (typeof raw === 'string') {
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = null;
+        }
+      }
+      if (parsed && parsed.ok === false) failNow(parsed.message ?? null);
+      else checkForNew();
+    };
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel(CONNECT_SIGNAL_CHANNEL);
+      bc.onmessage = (e) => onSignal(e.data);
+    }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === CONNECT_SIGNAL_STORAGE_KEY) onSignal(e.newValue);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      bc?.close();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [open, stage, checkForNew, failNow]);
+
   // Clean up timers/popup if the dialog unmounts.
   useEffect(() => () => reset(), [reset]);
 
@@ -206,21 +307,36 @@ function ConnectDialog({
 
         {stage === 'choose' ? (
           <div className="flex flex-col gap-2">
-            {PROVIDERS.map(({ key, labelKey }) => (
-              <button
-                key={key}
-                type="button"
-                disabled={pending}
-                onClick={() => beginConnect(key)}
-                className="flex items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
-                  <ProviderIcon provider={key} />
-                </span>
-                <span className="flex-1 text-left font-medium">{m[labelKey]}</span>
-                <span aria-hidden className="text-muted-foreground">→</span>
-              </button>
-            ))}
+            {PROVIDERS.map(({ key, labelKey }) => {
+              // Bug B: an existing connection for this provider must be stated
+              // plainly (with the account, when known) — never silently imply
+              // the user has to connect again from a blank slate.
+              const existing = connections.find((c) => providerKind(c.provider) === key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={pending}
+                  onClick={() => beginConnect(key)}
+                  className="flex items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                    <ProviderIcon provider={key} />
+                  </span>
+                  <span className="flex-1 text-left">
+                    <span className="block font-medium">{m[labelKey]}</span>
+                    {existing ? (
+                      <span className="block text-xs text-primary">
+                        {existing.primaryEmail
+                          ? m.alreadyConnectedWithEmail.replace('{email}', existing.primaryEmail)
+                          : m.alreadyConnectedNoEmail}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span aria-hidden className="text-muted-foreground">→</span>
+                </button>
+              );
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 rounded-md border border-border bg-muted/30 p-5 text-center">
@@ -563,10 +679,14 @@ export interface ProviderStatus {
 }
 
 export function ConnectionsClient({
+  title,
+  subtitle,
   connections,
   status,
   messages: m,
 }: {
+  title: string;
+  subtitle: string;
   connections: Connection[];
   status: ProviderStatus;
   messages: ConnectionsMessages;
@@ -642,88 +762,98 @@ export function ConnectionsClient({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Header: honest sync status on the left, primary Connect at top-right
-          (R30 list/create pattern — creation happens in the dialog surface). */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="flex items-center gap-2 text-sm">
-          <span
-            className={`flex h-2.5 w-2.5 rounded-full ${status.enabled ? 'bg-primary' : 'bg-muted-foreground/60'}`}
-            aria-hidden
-          />
-          <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
-        </span>
-        {/* One-CTA-per-screen (R30): with no rows the empty state below carries
-            the single centered CTA — no top-right duplicate. */}
-        {rows.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
-            {m.connectAnother}
-          </button>
-        ) : null}
-      </div>
+      {/* Same header system as every other admin list page (Bookings' "+ New
+          booking", etc.): title left, primary action top-right. One-CTA-per-
+          screen (R30): with no rows the empty state below carries the single
+          centered CTA — no top-right duplicate there. */}
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        action={
+          rows.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            >
+              {m.connectAnother}
+            </button>
+          ) : undefined
+        }
+      />
 
-      {rows.length > 0 ? (
-        <>
-          <SummaryStrip connections={rows} m={m} />
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold text-muted-foreground">{m.yourCalendars}</h2>
-            <ul className="flex flex-col gap-2">
-              {rows.map((c) => (
-                <ConnectionRow
-                  key={c.id}
-                  c={c}
-                  m={m}
-                  enabled={status.enabled}
-                  busy={pendingId === c.id}
-                  error={rowError?.id === c.id ? rowError.message : null}
-                  onSetDestination={setDestination}
-                  onToggleConflicts={toggleConflicts}
-                  onDisconnect={disconnect}
-                />
+      {/* Sync status is informational, not the primary action — its own row,
+          styled as a quiet status line (never solid/button-like — see the
+          bookings status-pill fix for why that matters). */}
+      <span className="flex items-center gap-2 text-sm">
+        <span
+          className={`flex h-2.5 w-2.5 rounded-full ${status.enabled ? 'bg-primary' : 'bg-muted-foreground/60'}`}
+          aria-hidden
+        />
+        <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
+      </span>
+
+      <div className="max-w-3xl">
+        {rows.length > 0 ? (
+          <div className="flex flex-col gap-5">
+            <SummaryStrip connections={rows} m={m} />
+            <div className="flex flex-col gap-1">
+              <h2 className="text-sm font-semibold text-muted-foreground">{m.yourCalendars}</h2>
+              <ul className="flex flex-col gap-2">
+                {rows.map((c) => (
+                  <ConnectionRow
+                    key={c.id}
+                    c={c}
+                    m={m}
+                    enabled={status.enabled}
+                    busy={pendingId === c.id}
+                    error={rowError?.id === c.id ? rowError.message : null}
+                    onSetDestination={setDestination}
+                    onToggleConflicts={toggleConflicts}
+                    onDisconnect={disconnect}
+                  />
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border p-10 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
+              <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
+                <rect x="3" y="4.5" width="18" height="16" rx="2" />
+                <path d="M3 9h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4" />
+              </svg>
+            </span>
+            <div className="flex flex-col gap-1">
+              <p className="text-base font-semibold text-foreground">{m.emptyTitle}</p>
+              <p className="mx-auto max-w-sm text-sm text-muted-foreground">{m.emptyBody}</p>
+            </div>
+            <ul className="mx-auto flex max-w-sm flex-col gap-2 text-left text-sm text-muted-foreground">
+              {[m.emptyConflicts, m.emptyDestination].map((t) => (
+                <li key={t} className="flex items-start gap-2">
+                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary" aria-hidden>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  <span>{t}</span>
+                </li>
               ))}
             </ul>
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className="mt-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            >
+              {m.connectButton}
+            </button>
           </div>
-        </>
-      ) : (
-        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border p-10 text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
-            <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
-              <rect x="3" y="4.5" width="18" height="16" rx="2" />
-              <path d="M3 9h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4" />
-            </svg>
-          </span>
-          <div className="flex flex-col gap-1">
-            <p className="text-base font-semibold text-foreground">{m.emptyTitle}</p>
-            <p className="mx-auto max-w-sm text-sm text-muted-foreground">{m.emptyBody}</p>
-          </div>
-          <ul className="mx-auto flex max-w-sm flex-col gap-2 text-left text-sm text-muted-foreground">
-            {[m.emptyConflicts, m.emptyDestination].map((t) => (
-              <li key={t} className="flex items-start gap-2">
-                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary" aria-hidden>
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="mt-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
-            {m.connectButton}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <ConnectDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         enabled={status.enabled}
-        baselineCount={rows.length}
+        connections={rows}
         m={m}
       />
     </div>

@@ -280,7 +280,27 @@ export class AdminService {
       });
       firstNew = false;
     }
-    return listConnections(this.db, p.memberId);
+    const persisted = await listConnections(this.db, p.memberId);
+    // Merge in the raw discover metadata (connectionId/connected/state/
+    // updatedAt/lastActiveAt) for rows THIS call actually reported — ephemeral,
+    // not persisted (our schema has no such columns). This is what lets the
+    // frontend detect a completed RECONNECT of an already-linked account: a
+    // reconnect reuses the same externalId/connectionRef, so "is this row new"
+    // can never see it complete; "did updatedAt/lastActiveAt just advance" can.
+    const byRef = new Map(discovered.map((d) => [d.connectionRef, d]));
+    return persisted.map((c) => {
+      const d = byRef.get(c.externalId);
+      return d
+        ? {
+            ...c,
+            connectionId: d.connectionId ?? d.connectionRef,
+            connected: d.connected,
+            state: d.state,
+            updatedAt: d.updatedAt ?? null,
+            lastActiveAt: d.lastActiveAt ?? null,
+          }
+        : c;
+    });
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */

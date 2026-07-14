@@ -439,6 +439,14 @@ export interface BookingMessages {
       emptyBody: string;
       emptyConflicts: string;
       emptyDestination: string;
+      /** {email} interpolates the already-connected account for that provider. */
+      alreadyConnectedWithEmail: string;
+      alreadyConnectedNoEmail: string;
+      connectedPageTitle: string;
+      connectedPageBody: string;
+      connectedPageClose: string;
+      connectedPageErrorTitle: string;
+      connectedPageErrorBody: string;
     };
     login: {
       title: string;
@@ -513,6 +521,10 @@ export interface BookingMessages {
       delete: string;
       active: string;
       cancel: string;
+      genericError: string;
+      revokedToast: string;
+      deletedToast: string;
+      toggledToast: string;
     };
     bookingPageHeader: {
       title: string;
@@ -1006,6 +1018,13 @@ export const en: BookingMessages = {
       emptyBody: 'Connect Google or Outlook so {product} can read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
       emptyDestination: 'Pick one calendar to receive your booked events',
+      alreadyConnectedWithEmail: 'Already connected as {email}. You can connect another account below.',
+      alreadyConnectedNoEmail: 'Already connected. You can connect another account below.',
+      connectedPageTitle: 'Connected',
+      connectedPageBody: 'Your calendar is linked. You can close this window.',
+      connectedPageClose: 'Close window',
+      connectedPageErrorTitle: 'Could not connect',
+      connectedPageErrorBody: 'Close this window and try again from the calendars page.',
     },
     login: {
       title: 'Sign in',
@@ -1106,6 +1125,10 @@ export const en: BookingMessages = {
       delete: 'Delete',
       active: 'active',
       cancel: 'Cancel',
+      genericError: 'Something went wrong.',
+      revokedToast: 'Key revoked.',
+      deletedToast: 'Webhook deleted.',
+      toggledToast: 'Webhook updated.',
     },
     bookingPageHeader: {
       title: 'Booking Page',
@@ -1600,6 +1623,13 @@ export const es: BookingMessages = {
       emptyBody: 'Conecta Google u Outlook para que {product} pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
       emptyDestination: 'Elige un calendario para recibir tus reservas',
+      alreadyConnectedWithEmail: 'Ya conectado como {email}. Puedes conectar otra cuenta abajo.',
+      alreadyConnectedNoEmail: 'Ya conectado. Puedes conectar otra cuenta abajo.',
+      connectedPageTitle: 'Conectado',
+      connectedPageBody: 'Tu calendario está vinculado. Puedes cerrar esta ventana.',
+      connectedPageClose: 'Cerrar ventana',
+      connectedPageErrorTitle: 'No se pudo conectar',
+      connectedPageErrorBody: 'Cierra esta ventana e inténtalo de nuevo desde la página de calendarios.',
     },
     login: {
       title: 'Iniciar sesión',
@@ -1700,6 +1730,10 @@ export const es: BookingMessages = {
       delete: 'Eliminar',
       active: 'activo',
       cancel: 'Cancelar',
+      genericError: 'Algo salió mal.',
+      revokedToast: 'Clave revocada.',
+      deletedToast: 'Webhook eliminado.',
+      toggledToast: 'Webhook actualizado.',
     },
     bookingPageHeader: {
       title: 'Página de reservas',

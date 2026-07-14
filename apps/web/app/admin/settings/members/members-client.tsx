@@ -159,7 +159,7 @@ export function MembersClient({
               {/* Role pill + inline change select (owner-only options gated). */}
               <span
                 className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
-                  isOwner ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                 }`}
               >
                 {roleLabel(m, member.role)}

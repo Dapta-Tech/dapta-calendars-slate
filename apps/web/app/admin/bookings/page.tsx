@@ -115,14 +115,26 @@ function Section({
               <div className="flex items-center gap-3">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
                 {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
+                {/* A status pill, NOT a button — a solid background paired with
+                    a foreground text color is reserved for real actions
+                    (Accept/Cancel above use exactly that fill). A same-styled
+                    "accepted" pill next to a real Cancel button reads as a
+                    second, broken button — that was the reported "Accept
+                    doesn't work" bug: there was no pending booking to show real
+                    Accept/Decline controls, only this pill on an
+                    already-accepted booking, styled like one. A soft tint fill
+                    (10 percent background opacity, colored text) keeps the
+                    status legible and color-coded while being visually
+                    unmistakable as non-interactive (same convention as the
+                    member and role pills elsewhere in admin). */}
                 <span
-                  className={`rounded-sm px-2 py-1 text-xs ${
+                  className={`rounded-sm px-2 py-1 text-xs font-medium ${
                     b.status === 'accepted'
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary/10 text-primary'
                       : b.status === 'pending'
-                        ? 'bg-secondary text-secondary-foreground'
+                        ? 'bg-secondary/10 text-secondary'
                         : b.status === 'cancelled' || b.status === 'rejected'
-                          ? 'bg-destructive text-destructive-foreground'
+                          ? 'bg-destructive/10 text-destructive'
                           : 'bg-muted text-muted-foreground'
                   }`}
                 >
