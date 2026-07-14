@@ -98,6 +98,13 @@ export interface BookingMessages {
     search: string;
     noResults: string;
   };
+  /** Phone field with country selector (QA3 fix 2). */
+  phonePicker: {
+    search: string;
+    noResults: string;
+    invalid: string;
+    countryLabel: string;
+  };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
     nav: {
@@ -196,6 +203,18 @@ export interface BookingMessages {
       requiresConfirmation: string;
       hiddenLabel: string;
       intakeQuestions: string;
+      /** Reorder + reserved-name hard block (QA3 fixes 3, 6). */
+      moveUp: string;
+      moveDown: string;
+      reservedBlocked: string;
+      /** Per-row quick actions + team section on the Events list (QA3 fix 4). */
+      openPublic: string;
+      copyLink: string;
+      linkCopied: string;
+      toggleVisible: string;
+      eventShown: string;
+      eventHidden: string;
+      teamEventsSection: string;
       /** Built-in booking-page fields shown locked in the intake editor (QA2 fix 7). */
       fixedFieldsHint: string;
       fixedName: string;
@@ -287,6 +306,8 @@ export interface BookingMessages {
       pickDateTime: string;
       /** "Times shown in {tz}" lead on the bookings list (QA2 fix 8c). */
       timesShownIn: string;
+      /** Unified questions block on the manual-booking form (QA3 fix 6a). */
+      questionsTitle: string;
       creating: string;
       createBooking: string;
       createdTitle: string;
@@ -379,6 +400,10 @@ export interface BookingMessages {
       title: string;
       subtitle: string;
       rosterLabel: string;
+      /** What each role can do (QA3 fix 5) — one line per role under the title. */
+      rolesHintOwner: string;
+      rolesHintAdmin: string;
+      rolesHintMember: string;
       invite: string;
       inviteTitle: string;
       inviteLead: string;
@@ -674,6 +699,12 @@ export const en: BookingMessages = {
     search: 'Search timezone…',
     noResults: 'No matching timezone.',
   },
+  phonePicker: {
+    search: 'Search country…',
+    noResults: 'No matching country.',
+    invalid: 'Enter a valid phone number.',
+    countryLabel: 'Country code',
+  },
   manage: {
     title: 'Manage your booking',
     reschedule: 'Reschedule',
@@ -799,6 +830,16 @@ export const en: BookingMessages = {
       requiresConfirmation: 'Requires confirmation',
       hiddenLabel: 'Hidden',
       intakeQuestions: 'Intake questions',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      reservedBlocked: 'Rename the highlighted question — "name", "email" and "notes" are always asked automatically.',
+      openPublic: 'Open booking page',
+      copyLink: 'Copy link',
+      linkCopied: 'Link copied.',
+      toggleVisible: 'Visible on the booking page',
+      eventShown: 'Event is now visible.',
+      eventHidden: 'Event hidden from the booking page.',
+      teamEventsSection: 'Team events',
       fixedFieldsHint: 'The booking page always asks these — no need to add them below.',
       fixedName: 'Your name',
       fixedEmail: 'Your email',
@@ -886,6 +927,7 @@ export const en: BookingMessages = {
       pickerMissing: 'not picked yet',
       pickDateTime: 'Pick a date and a time.',
       timesShownIn: 'Times shown in {tz}',
+      questionsTitle: 'Questions',
       creating: 'Creating…',
       createBooking: 'Create booking',
       createdTitle: 'Booking created',
@@ -981,6 +1023,9 @@ export const en: BookingMessages = {
       title: 'Members',
       subtitle: 'Invite your team and control who can administer this workspace.',
       rosterLabel: 'Workspace members',
+      rolesHintOwner: 'Owner — everything an admin can, plus transferring or deleting the workspace. One per workspace: the legal/billing owner.',
+      rolesHintAdmin: 'Admin — manages members (except owners), everyone’s events, schedules, bookings and workspace settings.',
+      rolesHintMember: 'Member — manages only their own events, schedules and bookings.',
       invite: 'Invite member',
       inviteTitle: 'Invite a member',
       inviteLead: 'They’ll join your workspace with the role you choose.',
@@ -1302,6 +1347,12 @@ export const es: BookingMessages = {
     search: 'Buscar zona horaria…',
     noResults: 'No hay zonas que coincidan.',
   },
+  phonePicker: {
+    search: 'Buscar país…',
+    noResults: 'No hay países que coincidan.',
+    invalid: 'Ingresa un número de teléfono válido.',
+    countryLabel: 'Código de país',
+  },
   manage: {
     title: 'Gestiona tu reserva',
     reschedule: 'Reprogramar',
@@ -1427,6 +1478,16 @@ export const es: BookingMessages = {
       requiresConfirmation: 'Requiere confirmación',
       hiddenLabel: 'Oculto',
       intakeQuestions: 'Preguntas del formulario',
+      moveUp: 'Subir',
+      moveDown: 'Bajar',
+      reservedBlocked: 'Renombra la pregunta marcada — "name", "email" y "notes" siempre se preguntan automáticamente.',
+      openPublic: 'Abrir página de reservas',
+      copyLink: 'Copiar enlace',
+      linkCopied: 'Enlace copiado.',
+      toggleVisible: 'Visible en la página de reservas',
+      eventShown: 'El evento ya es visible.',
+      eventHidden: 'Evento oculto de la página de reservas.',
+      teamEventsSection: 'Eventos de equipo',
       fixedFieldsHint: 'La página de reservas siempre pregunta esto — no hace falta añadirlas abajo.',
       fixedName: 'Tu nombre',
       fixedEmail: 'Tu correo',
@@ -1514,6 +1575,7 @@ export const es: BookingMessages = {
       pickerMissing: 'sin elegir',
       pickDateTime: 'Elige una fecha y una hora.',
       timesShownIn: 'Horas en {tz}',
+      questionsTitle: 'Preguntas',
       creating: 'Creando…',
       createBooking: 'Crear reserva',
       createdTitle: 'Reserva creada',
@@ -1607,6 +1669,9 @@ export const es: BookingMessages = {
       title: 'Miembros',
       subtitle: 'Invita a tu equipo y controla quién puede administrar este espacio.',
       rosterLabel: 'Miembros del espacio',
+      rolesHintOwner: 'Propietario — todo lo de un admin, más transferir o borrar el espacio. Uno por espacio: el dueño legal/facturable.',
+      rolesHintAdmin: 'Administrador — gestiona miembros (excepto propietarios), y los eventos, horarios, reservas y ajustes de todos.',
+      rolesHintMember: 'Miembro — gestiona solo sus propios eventos, horarios y reservas.',
       invite: 'Invitar miembro',
       inviteTitle: 'Invitar a un miembro',
       inviteLead: 'Se unirá a tu espacio con el rol que elijas.',
