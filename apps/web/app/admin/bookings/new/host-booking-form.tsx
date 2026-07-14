@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import type { BookingMessages, Locale } from '@slate/shared';
+import { isReservedFieldName, type BookingMessages, type Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
+import { PhoneField } from '@/components/ui/phone-field';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
@@ -134,7 +135,11 @@ export function HostBookingForm({
   const [pending, startT] = useTransition();
 
   const event = bookable.find((e) => e.slug === slug);
-  const fields = (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>;
+  // Reserved names (name/email/notes) are the fixed attendee fields below —
+  // legacy custom questions reusing them would ask twice (QA3 fix 3).
+  const fields = (
+    (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>
+  ).filter((f) => !isReservedFieldName(f.name));
 
   // `reloadKey` bumps to force a slots refetch after a 409 (the picked slot was
   // just taken) so the stale/taken time drops out and the user can really retry.
@@ -277,6 +282,21 @@ export function HostBookingForm({
         </div>
       )}
 
+      {/* Timezone stays glued to the calendar it reinterprets; everything the
+          attendee answers — identity AND the event's custom questions — lives
+          in ONE "Questions" block below (QA3 fix 6a). Reserved-name questions
+          are filtered above, so a question named "email" can't shadow the
+          attendee's real email. */}
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="text-muted-foreground">{m.attendeeTimezone}</span>
+        <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.attendeeTimezone} />
+      </div>
+
+      <div className="mt-2 border-t border-border pt-4">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {m.questionsTitle}
+        </span>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.attendeeName}</span>
@@ -287,32 +307,27 @@ export function HostBookingForm({
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
       </div>
-      <div className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">{m.attendeeTimezone}</span>
-        <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.attendeeTimezone} />
-      </div>
-
-      {/* Intake answers are the EVENT's custom questions — visually separated
-          from the attendee identity above so a question named "email" can't be
-          mistaken for the attendee's real email (QA fix 6). */}
-      {fields.length > 0 ? (
-        <div className="mt-2 border-t border-border pt-4">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {m.eventQuestions}
-          </span>
-        </div>
-      ) : null}
       {fields.map((f) => (
         <label key={f.name} className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">
             {f.label}
             {f.required ? ' *' : ''}
           </span>
-          <Input
-            required={f.required}
-            value={answers[f.name] ?? ''}
-            onChange={(e) => setAnswers((a) => ({ ...a, [f.name]: e.target.value }))}
-          />
+          {f.type === 'phone' ? (
+            <PhoneField
+              value={answers[f.name] ?? ''}
+              onChange={(v) => setAnswers((a) => ({ ...a, [f.name]: v }))}
+              locale={locale}
+              required={f.required}
+              ariaLabel={f.label}
+            />
+          ) : (
+            <Input
+              required={f.required}
+              value={answers[f.name] ?? ''}
+              onChange={(e) => setAnswers((a) => ({ ...a, [f.name]: e.target.value }))}
+            />
+          )}
         </label>
       ))}
 
