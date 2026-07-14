@@ -12,7 +12,8 @@ export default async function NewHostBooking() {
     adminApi.me(),
     adminApi.listEventTypes(),
   ]);
-  const m = getMessages(await getLocale()).admin.bookings;
+  const locale = await getLocale();
+  const m = getMessages(locale).admin.bookings;
 
   return (
     <div className="mx-auto max-w-2xl px-8 pb-10">
@@ -21,6 +22,7 @@ export default async function NewHostBooking() {
           handle={me?.handle ?? undefined}
           eventTypes={eventTypes}
           messages={m}
+          locale={locale}
           backHref="/admin/bookings"
           backLabel={m.title}
           heading={m.newTitle}

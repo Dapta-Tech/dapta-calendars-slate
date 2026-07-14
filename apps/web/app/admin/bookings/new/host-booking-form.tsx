@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import { commonTimeZones, type BookingMessages } from '@slate/shared';
+import { commonTimeZones, type BookingMessages, type Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
+import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
 import { FormHeader } from '@/components/ui/page-header';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
@@ -92,6 +93,7 @@ export function HostBookingForm({
   backLabel,
   heading,
   notice,
+  locale,
 }: {
   /** The member's public handle, if set. Manual bookings work without one —
    *  slots and booking go through the authenticated host surface. */
@@ -104,6 +106,9 @@ export function HostBookingForm({
   /** Optional banner rendered between the header and the form (e.g. the
    *  no-public-handle notice). */
   notice?: ReactNode;
+  /** Active admin locale — the date picker's month/weekday names come from
+   *  Intl, so it needs the locale itself, not just translated messages. */
+  locale?: Locale;
 }) {
   // Only offer bookable (non-hidden) events.
   const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
@@ -244,10 +249,18 @@ export function HostBookingForm({
           ) : null}
         </div>
       ) : (
-        <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.dateTimeHost}</span>
-          <Input type="datetime-local" value={customLocal} onChange={(e) => setCustomLocal(e.target.value)} />
-        </label>
+          {/* Emits the same wall-clock 'YYYY-MM-DDTHH:mm' string the native
+              datetime-local input did, so wallClockToUtc at submit — which
+              interprets it in the attendee's tz — stays untouched (QA fix 9). */}
+          <DateTimePicker
+            value={customLocal}
+            onChange={setCustomLocal}
+            locale={locale}
+            timeLabel={m.pickTime}
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
