@@ -442,6 +442,9 @@ export interface BookingMessages {
       conflictCheck: string;
       disconnect: string;
       disconnectError: string;
+      /** Muted fallback label when a connection's account email couldn't be
+       *  determined (never repeats the provider name — see connectionLabel). */
+      accountUnknown: string;
       manualTitle: string;
       manualDesc: string;
       provider: string;
@@ -1058,6 +1061,7 @@ export const en: BookingMessages = {
       conflictCheck: 'Conflict check',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
+      accountUnknown: 'Account unknown',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
@@ -1696,6 +1700,7 @@ export const es: BookingMessages = {
       conflictCheck: 'Verificar conflictos',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
+      accountUnknown: 'Cuenta desconocida',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',
