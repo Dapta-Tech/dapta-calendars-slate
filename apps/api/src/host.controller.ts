@@ -252,6 +252,19 @@ export class HostController {
     return this.admin.pingConnection(p, id);
   }
 
+  /**
+   * "Test / Run check" — the trust-building self-test. Unlike `/ping`, this
+   * actually reads real busy events for the next 14 days (the exact call the
+   * booking engine makes) so the host sees proof the pipeline works, not
+   * just a health dot.
+   */
+  @Post('connections/:id/test')
+  @HttpCode(200)
+  async testConnection(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.testConnection(p, id);
+  }
+
   @Delete('connections/:id')
   async deleteConnection(@Req() req: ReqLike, @Param('id') id: string) {
     const out = await this.admin.deleteConnection(await this.auth.resolveHost(req), id);

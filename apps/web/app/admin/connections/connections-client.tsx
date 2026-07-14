@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import type { BookingMessages } from '@slate/shared';
-import type { Connection } from '@/lib/admin-api';
+import { t, type BookingMessages } from '@slate/shared';
+import type { Connection, ConnectionTestResult } from '@/lib/admin-api';
 import { FieldHelp } from '@/components/field-help';
 import { PageHeader } from '@/components/ui/page-header';
 import {
@@ -12,6 +12,7 @@ import {
   deleteConnectionAction,
   discoverConnectionsAction,
   pingConnectionAction,
+  testConnectionAction,
   toggleConnectionAction,
 } from './actions';
 
@@ -539,6 +540,66 @@ function HealthPill({ c, enabled, m }: { c: Connection; enabled: boolean; m: Con
   );
 }
 
+/**
+ * The "Test / Run check" self-test result, rendered as an unmistakable
+ * green/red banner (never a subtle inline caption) — this is the control
+ * that makes a host TRUST conflict-checking actually works, so the result
+ * has to read as obviously as the health pill reads as subtly.
+ */
+function TestResultBanner({
+  result,
+  m,
+  onReconnect,
+}: {
+  result: ConnectionTestResult;
+  m: ConnectionsMessages;
+  onReconnect: () => void;
+}) {
+  if (result.ok) {
+    return (
+      <p
+        role="status"
+        className="flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 p-3 text-sm text-primary"
+      >
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0" aria-hidden>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+        <span>
+          {t(result.conflictCheckEnabled ? m.testOkConflictsOn : m.testOkConflictsOff, {
+            n: result.busyCount ?? 0,
+          })}
+        </span>
+      </p>
+    );
+  }
+  const reason =
+    result.reason === 'DISCONNECTED'
+      ? m.testFailDisconnected
+      : result.reason === 'NOT_READY'
+        ? m.testFailNotReady
+        : m.testFailReadFailed;
+  return (
+    <p role="alert" className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+      <span className="flex items-start gap-2">
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0" aria-hidden>
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+        <span>
+          {reason}
+          {result.healthDetail && result.healthDetail !== reason ? ` (${result.healthDetail})` : ''}
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onReconnect}
+        className="shrink-0 rounded-md border border-destructive px-2.5 py-1 text-xs font-medium transition-colors hover:bg-destructive/10"
+      >
+        {m.testReconnect}
+      </button>
+    </p>
+  );
+}
+
 function ConnectionRow({
   c,
   m,
@@ -548,6 +609,7 @@ function ConnectionRow({
   onSetDestination,
   onToggleConflicts,
   onDisconnect,
+  onReconnect,
 }: {
   c: Connection;
   m: ConnectionsMessages;
@@ -559,7 +621,15 @@ function ConnectionRow({
   onSetDestination: (id: string) => void;
   onToggleConflicts: (id: string, value: boolean) => void;
   onDisconnect: (id: string) => void;
+  onReconnect: () => void;
 }) {
+  const [pending, start] = useTransition();
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  const runTest = () =>
+    start(async () => {
+      setTestResult(await testConnectionAction(c.id));
+    });
+
   return (
     <li
       className={`flex flex-col gap-4 rounded-lg border p-4 transition-colors ${
@@ -589,6 +659,16 @@ function ConnectionRow({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <HealthPill c={c} enabled={enabled} m={m} />
+          {/* "Test / Run check" — the trust-building self-test (R22: instant
+              loading label, never a spinner-only dead state). */}
+          <button
+            type="button"
+            disabled={busy || pending || !enabled}
+            onClick={runTest}
+            className="rounded-md border border-border px-3 py-1 text-sm transition-colors hover:border-primary disabled:opacity-60"
+          >
+            {pending ? m.testRunning : m.testButton}
+          </button>
           <button
             type="button"
             disabled={busy}
@@ -599,6 +679,8 @@ function ConnectionRow({
           </button>
         </div>
       </div>
+
+      {testResult ? <TestResultBanner result={testResult} m={m} onReconnect={onReconnect} /> : null}
 
       {/* Per-calendar controls: destination is radio-exclusive (R20), conflicts
           is an independent checkbox. Labels match the mission wording. */}
@@ -811,6 +893,7 @@ export function ConnectionsClient({
                     onSetDestination={setDestination}
                     onToggleConflicts={toggleConflicts}
                     onDisconnect={disconnect}
+                    onReconnect={() => setDialogOpen(true)}
                   />
                 ))}
               </ul>

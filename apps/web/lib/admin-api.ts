@@ -165,6 +165,10 @@ export const adminApi = {
   updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),
   pingConnection: (id: string) =>
     req<{ ok: boolean; enabled: boolean; message: string }>('POST', `/v1/connections/${id}/ping`, {}),
+  /** The "Test / Run check" self-test: actually reads busy events (not just
+   *  a reachability ping) so the host sees proof conflict-checking works. */
+  testConnection: (id: string) =>
+    req<ConnectionTestResult>('POST', `/v1/connections/${id}/test`, {}),
   deleteConnection: (id: string) => req<void>('DELETE', `/v1/connections/${id}`),
 
   // API keys
@@ -250,6 +254,58 @@ export interface Connection {
   state?: string;
   updatedAt?: string | null;
   lastActiveAt?: string | null;
+}
+
+/** Human label for a connection: account email first, else a readable manual
+ *  calendar id, else the end-provider name (Google/Outlook — R15-safe: these
+ *  are end-provider names, not the integration vendor). Mirrors the client-side
+ *  `connectionLabel` in connections-client.tsx; kept here too since the event
+ *  form's calendar-link line is rendered server-side. */
+export function connectionDisplayLabel(c: Connection): string {
+  if (c.primaryEmail) return c.primaryEmail;
+  if (c.externalId.includes('@')) return c.externalId;
+  const p = c.provider.toLowerCase();
+  if (p.includes('google')) return 'Google Calendar';
+  if (p.includes('outlook') || p.includes('microsoft')) return 'Outlook / Microsoft 365';
+  return c.provider.charAt(0).toUpperCase() + c.provider.slice(1);
+}
+
+/**
+ * Summarizes how a (single-host, personal) event is linked to the host's
+ * connected calendar(s) — for the read-only line on the event form (Felipe:
+ * "cómo está el calendario conectado al evento, esto no hace sentido"). This
+ * product has no per-event calendar picker: EVERY personal event implicitly
+ * uses the host's `is_destination` connection for write-out and every
+ * `check_conflicts` connection for availability.
+ */
+export interface EventCalendarLink {
+  hasAnyConnection: boolean;
+  destinationLabel: string | null;
+  conflictCheckedCount: number;
+  /** True when the SAME connection both writes out and is conflict-checked
+   *  (the common, simple case — one calendar doing both jobs). */
+  destinationIsConflictChecked: boolean;
+}
+export function describeCalendarLink(connections: Connection[]): EventCalendarLink {
+  const destination = connections.find((c) => c.isDestination) ?? null;
+  const conflictChecked = connections.filter((c) => c.checkConflicts);
+  return {
+    hasAnyConnection: connections.length > 0,
+    destinationLabel: destination ? connectionDisplayLabel(destination) : null,
+    conflictCheckedCount: conflictChecked.length,
+    destinationIsConflictChecked: !!destination?.checkConflicts && conflictChecked.length === 1,
+  };
+}
+
+/** Result of the "Test / Run check" self-test — proof the pipeline actually
+ *  read live busy events, not just that the connection is reachable. */
+export interface ConnectionTestResult {
+  ok: boolean;
+  healthDetail: string;
+  busyCount: number | null;
+  conflictCheckEnabled: boolean;
+  checkedAt: number;
+  reason?: 'DISCONNECTED' | 'NOT_READY' | 'READ_FAILED';
 }
 export interface CalendarSummary {
   id: string;

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { adminApi, type Connection } from '@/lib/admin-api';
+import { adminApi, type Connection, type ConnectionTestResult } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
 
@@ -59,6 +59,27 @@ export async function pingConnectionAction(
   } catch (e) {
     // Never throw at the boundary: a failed probe is itself a health signal.
     return { ok: false, enabled: true, message: e instanceof Error ? e.message : 'Health check failed.' };
+  }
+}
+
+/**
+ * The "Test / Run check" self-test — reads real busy events (not just a
+ * reachability ping) so the host SEES proof conflict-checking works, instead
+ * of trusting a health dot. Also persists the health outcome (same as ping).
+ */
+export async function testConnectionAction(id: string): Promise<ConnectionTestResult> {
+  try {
+    return await adminApi.testConnection(id);
+  } catch (e) {
+    // Never throw at the boundary: a failed self-test IS the result.
+    return {
+      ok: false,
+      healthDetail: e instanceof Error ? e.message : 'Could not run the check.',
+      busyCount: null,
+      conflictCheckEnabled: false,
+      checkedAt: Date.now(),
+      reason: 'READ_FAILED',
+    };
   }
 }
 
