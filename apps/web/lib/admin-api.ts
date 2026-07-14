@@ -92,8 +92,18 @@ export interface AccountMember {
 
 /** True when the role may administer the workspace (manage members, settings). */
 export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || role === 'admin';
+export interface SetupStatus {
+  hasConnectedCalendar: boolean;
+  hasWorkingHours: boolean;
+  hasBookingLink: boolean;
+}
+
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
+  // Home "Get bookable" checklist — real data, not a static nag (see AdminService.setupStatus).
+  setupStatus: () => req<SetupStatus>('GET', '/v1/me/setup-status'),
+  // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
+  syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   // Vanity account slug (premium — included with the Dapta AI subscription).
   vanityStatus: () =>
     req<{ vanitySlug: string | null; shortCode: string; canClaim: boolean }>(

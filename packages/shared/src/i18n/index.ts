@@ -155,6 +155,18 @@ export interface BookingMessages {
       stylePageDesc: string;
       apiKeys: string;
       apiKeysDesc: string;
+      /** "Get bookable" first-run checklist (F1 §2 — driven by real setup status). */
+      setupTitle: string;
+      setupSubtitle: string;
+      setupConnectTitle: string;
+      setupConnectDesc: string;
+      setupConnectAction: string;
+      setupHoursTitle: string;
+      setupHoursDesc: string;
+      setupHoursAction: string;
+      setupLinkTitle: string;
+      setupLinkDesc: string;
+      setupDone: string;
     };
     settings: {
       title: string;
@@ -292,6 +304,9 @@ export interface BookingMessages {
       noHoursNotice: string;
       noScheduleNotice: string;
       availabilityLink: string;
+      /** One-click fix for NO_SCHEDULE — creates + links working hours inline. */
+      createWorkingHours: string;
+      creatingWorkingHours: string;
       calendarUnavailableNotice: string;
       calendarUnavailableLink: string;
       calendarUnavailableBooking: string;
@@ -758,6 +773,17 @@ export const en: BookingMessages = {
       stylePageDesc: 'Brand + 9-axis studio.',
       apiKeys: 'API keys & webhooks',
       apiKeysDesc: 'Integrate agents & automations.',
+      setupTitle: 'Get bookable',
+      setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
+      setupConnectTitle: 'Connect a calendar',
+      setupConnectDesc: 'So Dapta Calendars checks real conflicts and writes the event.',
+      setupConnectAction: 'Connect',
+      setupHoursTitle: 'Set your working hours',
+      setupHoursDesc: 'Defines the window your booking link offers.',
+      setupHoursAction: 'Create default working hours (Mon–Fri 9–5)',
+      setupLinkTitle: 'Share your booking link',
+      setupLinkDesc: 'Send it to anyone — no account needed on their end.',
+      setupDone: 'Done',
     },
     settings: {
       title: 'Settings',
@@ -889,6 +915,8 @@ export const en: BookingMessages = {
       noHoursNotice: 'No working hours configured for this event’s schedule.',
       noScheduleNotice: 'You don’t have a schedule yet — create one with your working hours.',
       availabilityLink: 'Open Availability',
+      createWorkingHours: 'Create default working hours (Mon–Fri 9–5)',
+      creatingWorkingHours: 'Creating…',
       calendarUnavailableNotice:
         'Couldn’t reach the connected calendar — times are hidden to prevent double-bookings.',
       calendarUnavailableLink: 'Check Calendars',
@@ -1377,6 +1405,17 @@ export const es: BookingMessages = {
       stylePageDesc: 'Marca + estudio de 9 ejes.',
       apiKeys: 'Claves API y webhooks',
       apiKeysDesc: 'Integra agentes y automatizaciones.',
+      setupTitle: 'Queda lista para reservas',
+      setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
+      setupConnectTitle: 'Conecta un calendario',
+      setupConnectDesc: 'Así Dapta Calendars revisa conflictos reales y escribe el evento.',
+      setupConnectAction: 'Conectar',
+      setupHoursTitle: 'Define tus horas de trabajo',
+      setupHoursDesc: 'Define la ventana que ofrece tu enlace de reservas.',
+      setupHoursAction: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
+      setupLinkTitle: 'Comparte tu enlace de reservas',
+      setupLinkDesc: 'Envíalo a cualquier persona — no necesita cuenta.',
+      setupDone: 'Listo',
     },
     settings: {
       title: 'Ajustes',
@@ -1509,6 +1548,8 @@ export const es: BookingMessages = {
       noHoursNotice: 'No hay horas de trabajo configuradas para el horario de este evento.',
       noScheduleNotice: 'Aún no tienes un horario — crea uno con tus horas de trabajo.',
       availabilityLink: 'Abrir Disponibilidad',
+      createWorkingHours: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
+      creatingWorkingHours: 'Creando…',
       calendarUnavailableNotice:
         'No se pudo acceder al calendario conectado — los horarios se ocultan para evitar dobles reservas.',
       calendarUnavailableLink: 'Revisar Calendarios',

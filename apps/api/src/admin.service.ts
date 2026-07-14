@@ -15,18 +15,22 @@ import {
   pingWebhook,
   deleteConnection,
   deleteWebhook,
+  ensureDefaultSchedule,
   enqueueWebhookDeliveries,
   getAvailability,
   getMe,
+  getSchedule,
   listApiKeys,
   listBookings,
   listConnections,
+  listSchedules,
   listWebhooks,
   recordConnectionHealth,
   revokeApiKey,
   updateBranding,
   updateHandle,
   updateMemberSettings,
+  updateSchedule,
   cancelBooking,
   cacheEntitlement,
   setVanitySlug,
@@ -73,8 +77,67 @@ export class AdminService {
     @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
   ) {}
 
-  me(p: HostPrincipal) {
+  async me(p: HostPrincipal) {
+    // Hard invariant: a host must never resolve to NO_SCHEDULE — see
+    // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
     return getMe(this.db, p.accountId, p.memberId);
+  }
+
+  /**
+   * One-time browser-timezone catch-up (Home first-run guide / admin layout,
+   * fired once on mount). Only takes effect while the member is still on the
+   * raw schema default ('UTC', never explicitly chosen) — a member who has
+   * explicitly picked a timezone in Settings → General is never silently
+   * overridden. Also re-times the auto-created default schedule so "Working
+   * hours" isn't stuck on UTC once the real timezone is known.
+   */
+  async syncClientTimeZone(p: HostPrincipal, timeZone: string): Promise<{ ok: boolean }> {
+    if (!timeZone || timeZone === 'UTC') return { ok: false };
+    const member = await this.db.get<{ time_zone: string; default_schedule_id: string | null }>(
+      sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${p.memberId} LIMIT 1`,
+    );
+    if (!member || member.time_zone !== 'UTC') return { ok: false }; // already explicit — never override
+    await updateMemberSettings(this.db, p.memberId, { timeZone });
+    if (member.default_schedule_id) {
+      const sched = await getSchedule(this.db, p.accountId, member.default_schedule_id);
+      if (sched && sched.timeZone === 'UTC') {
+        await updateSchedule(this.db, p.accountId, member.default_schedule_id, { timeZone });
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The Home "Get bookable" checklist (R22: real data, not a static nag) —
+   * three steps: a connected calendar, working hours (a default schedule with
+   * ≥1 rule), and a shareable booking link (always true — every member gets an
+   * auto-handle at creation, short-links §3).
+   */
+  async setupStatus(p: HostPrincipal): Promise<{
+    hasConnectedCalendar: boolean;
+    hasWorkingHours: boolean;
+    hasBookingLink: boolean;
+  }> {
+    const [connections, schedules, me] = await Promise.all([
+      listConnections(this.db, p.memberId),
+      listSchedules(this.db, p.memberId),
+      getMe(this.db, p.accountId, p.memberId),
+    ]);
+    let hasWorkingHours = false;
+    if (schedules.length > 0) {
+      const rule = await this.db.get<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM availability WHERE schedule_id IN (
+              SELECT id FROM schedule WHERE member_id = ${p.memberId}
+            )`,
+      );
+      hasWorkingHours = Number(rule?.n ?? 0) > 0;
+    }
+    return {
+      hasConnectedCalendar: connections.length > 0,
+      hasWorkingHours,
+      hasBookingLink: !!me?.handle,
+    };
   }
 
   handleAvailable(p: HostPrincipal, handle: string) {
