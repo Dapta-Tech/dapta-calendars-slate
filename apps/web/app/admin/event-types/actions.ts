@@ -22,7 +22,7 @@ export interface EventTypePayload {
   requiresConfirmation: boolean;
   hidden: boolean;
   scheduleId: string | null;
-  bookingFields: Array<{ name: string; label: string; type: string; required: boolean }>;
+  bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;
   /** Team events: scheduling method + per-host round-robin detail. */
   schedulingType?: string | null;
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;

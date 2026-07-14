@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { isReservedFieldName, type BookingMessages } from '@slate/shared';
+import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormHeader } from '@/components/ui/page-header';
+import { useToast } from '@/components/toast';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
@@ -20,6 +21,8 @@ interface IntakeField {
   label: string;
   type: string;
   required: boolean;
+  /** Phone questions: country the selector starts on (QA4 fix 1b). */
+  defaultCountry?: string;
 }
 
 interface HostRow {
@@ -45,6 +48,7 @@ export function EventTypeForm({
   backHref,
   backLabel,
   heading,
+  headerExtras,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
@@ -62,6 +66,9 @@ export function EventTypeForm({
   backHref: string;
   backLabel: string;
   heading: string;
+  /** Rendered in the header next to Save — the edit surface mounts the
+   *  open-public/copy-link quick actions here (QA4 fix 3). */
+  headerExtras?: ReactNode;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
@@ -88,6 +95,7 @@ export function EventTypeForm({
       label: f.label,
       type: f.type,
       required: !!f.required,
+      defaultCountry: f.defaultCountry,
     })) ?? [],
   );
   const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
@@ -122,6 +130,15 @@ export function EventTypeForm({
 
   const [res, setRes] = useState<ActionResult | null>(null);
   const [pending, start] = useTransition();
+  const { success } = useToast();
+
+  // Country options for phone questions, alphabetical by (EN) name — computed
+  // once, only rendered on rows with type=phone.
+  const [countryOptions] = useState(() =>
+    [...COUNTRIES]
+      .map((c) => ({ ...c, name: countryName(c.code) }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
 
   const onTitle = (v: string) => {
     setTitle(v);
@@ -169,6 +186,9 @@ export function EventTypeForm({
       };
       const r = await saveEventTypeAction(payload);
       setRes(r);
+      // Success is a TOAST, not a quiet line below the fold — the old inline
+      // "Saved." was easy to miss (QA4 fix 2). Errors stay inline (persistent).
+      if (r.ok) success(m.saved);
       // Create on a dedicated /new surface → return to the list on success.
       if (r.ok && !initial && redirectOnSuccess) router.push(redirectOnSuccess);
     });
@@ -181,9 +201,12 @@ export function EventTypeForm({
         backLabel={backLabel}
         title={heading}
         actions={
-          <Button type="submit" disabled={pending || !title || !slug}>
-            {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
-          </Button>
+          <span className="flex items-center gap-3">
+            {headerExtras}
+            <Button type="submit" disabled={pending || !title || !slug}>
+              {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
+            </Button>
+          </span>
         }
       />
       <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
@@ -367,6 +390,23 @@ export function EventTypeForm({
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
+              {f.type === 'phone' ? (
+                // Which country the phone selector starts on for attendees
+                // (QA4 fix 1b) — stored inside the question definition.
+                <select
+                  value={f.defaultCountry ?? 'US'}
+                  onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
+                  aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
+                  title={m.defaultCountryLabel}
+                  className="w-36 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                >
+                  {countryOptions.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.flag} {c.name} {c.dial}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <label className="flex cursor-pointer items-center gap-1 text-sm">
                 <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
                 {m.req}
@@ -408,7 +448,6 @@ export function EventTypeForm({
       </div>
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
-      {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
       </div>
     </form>
   );

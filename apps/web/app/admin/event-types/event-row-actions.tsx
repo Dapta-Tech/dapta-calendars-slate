@@ -22,11 +22,15 @@ export function EventRowActions({
   hidden,
   publicPath,
   messages: m,
+  hideToggle,
 }: {
   id: string;
   hidden: boolean;
   publicPath: string | null;
   messages: EventTypesMessages;
+  /** The editor header reuses open/copy but keeps visibility on its own
+   *  "Hidden" checkbox — no second toggle (QA4 fix 3). */
+  hideToggle?: boolean;
 }) {
   const [pending, start] = useTransition();
   // Optimistic: flip instantly, revert if the server action fails. On success
@@ -58,13 +62,15 @@ export function EventRowActions({
 
   return (
     <span className="flex items-center gap-1.5">
-      <Switch
-        checked={visible}
-        onCheckedChange={onToggle}
-        disabled={pending}
-        aria-label={m.toggleVisible}
-        className="mr-1"
-      />
+      {!hideToggle ? (
+        <Switch
+          checked={visible}
+          onCheckedChange={onToggle}
+          disabled={pending}
+          aria-label={m.toggleVisible}
+          className="mr-1"
+        />
+      ) : null}
       {publicPath ? (
         <>
           <a
