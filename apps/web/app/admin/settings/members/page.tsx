@@ -23,6 +23,25 @@ export default async function MembersSettings() {
         <h2 className="text-lg font-semibold">{m.title}</h2>
         <p className="text-sm text-muted-foreground">{m.subtitle}</p>
       </div>
+      {/* Role matrix — what each role can do, visible before anyone assigns one (QA3 fix 5). */}
+      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+        {[m.rolesHintOwner, m.rolesHintAdmin, m.rolesHintMember].map((hint) => {
+          // "Role — capabilities": set just the role name in medium weight.
+          const cut = hint.indexOf(' — ');
+          return (
+            <li key={hint}>
+              {cut > 0 ? (
+                <>
+                  <span className="font-medium text-foreground">{hint.slice(0, cut)}</span>
+                  {hint.slice(cut)}
+                </>
+              ) : (
+                hint
+              )}
+            </li>
+          );
+        })}
+      </ul>
       <MembersClient members={members} callerId={me.memberId} callerRole={me.role} messages={m} />
     </div>
   );
