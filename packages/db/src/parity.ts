@@ -24,7 +24,7 @@ import {
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import { sql, type Db } from './client';
-import {
+import { bookingStartOutOfRange,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -624,6 +624,10 @@ export async function createTeamBooking(
   const invalid = validateTeamIntake(et, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
 
+  // Start-instant sanity (QA fix 8) — same range policy as createBooking.
+  const rangeErr = bookingStartOutOfRange(args.startMs);
+  if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
   const endMs = args.startMs + et.length_minutes * 60_000;
   const hosts = await getEventHosts(db, et.id);
   const method = normalizeSchedulingMethod(et.scheduling_type);
@@ -867,6 +871,12 @@ export async function rescheduleBooking(
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
+
+  // Start-instant sanity (QA fix 8): explicit guard so a wildly out-of-range
+  // target fails fast with the surface's existing INVALID_SLOT contract
+  // (same 400 the slot-math path returns for past/off-hours targets).
+  if (bookingStartOutOfRange(args.newStartMs, args.now?.getTime()))
+    return { ok: false, reason: 'INVALID_SLOT' };
 
   // P1-2: honor the Idempotency-Key. A retry with the same key returns the
   // already-applied state WITHOUT moving again or re-rotating the manage token

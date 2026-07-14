@@ -593,6 +593,22 @@ function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: num
   return !!row;
 }
 
+
+/**
+ * Sanity range for any booking start instant (QA fix 8): the server stored a
+ * 1905 booking that arrived through the host "Any time" form. Small grace for
+ * clock skew / in-flight slots; 2 years matches the furthest any scheduling
+ * UI here can navigate.
+ */
+export const BOOKING_PAST_GRACE_MS = 5 * 60_000;
+export const BOOKING_MAX_FUTURE_MS = 2 * 366 * 86_400_000;
+export function bookingStartOutOfRange(startMs: number, now = Date.now()): string | null {
+  if (!Number.isFinite(startMs)) return 'Invalid start time.';
+  if (startMs < now - BOOKING_PAST_GRACE_MS) return 'Start time is in the past.';
+  if (startMs > now + BOOKING_MAX_FUTURE_MS) return 'Start time is too far in the future (max 2 years).';
+  return null;
+}
+
 export async function createBooking(
   db: Db,
   args: CreateBookingArgs,
@@ -614,6 +630,11 @@ export async function createBooking(
   if (!member || member.account_id !== account.id) return { ok: false, reason: 'NOT_FOUND' };
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
+
+  // Start-instant sanity (QA fix 8) — applies to every surface, including the
+  // host "Any time (outside availability)" path that let a 1905 date through.
+  const rangeErr = bookingStartOutOfRange(args.startMs);
+  if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
 
   // Required-intake validation (server-side; never trust the client).
   const fields = parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []);
