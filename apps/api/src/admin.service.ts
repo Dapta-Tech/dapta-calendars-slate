@@ -201,8 +201,16 @@ export class AdminService {
       this.calendar.provider,
     );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
-    if (outcome.ok && outcome.booking.status === 'accepted')
+    // LOCAL FIX (2026-07-13, uncommitted proof branch): a host-created booking
+    // that comes out already `accepted` never enqueued a confirmation email —
+    // only the public booking path and the pending→confirm transition did.
+    // Mirror those call sites so the attendee (and host) actually get mailed.
+    if (outcome.ok && outcome.booking.status === 'accepted') {
       this.calendar.onBookingAccepted(outcome.booking.uid);
+      void this.email.enqueueConfirmation(outcome.booking.uid);
+      void this.email.enqueueReminders(outcome.booking.uid);
+      void this.email.enqueueFollowUps(outcome.booking.uid);
+    }
     return outcome;
   }
 
