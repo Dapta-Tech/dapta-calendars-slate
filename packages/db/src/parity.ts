@@ -386,6 +386,10 @@ async function hostFreeSlotMs(
   toMs: number,
   now: Date,
   calendar?: CalendarProvider,
+  /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
+   *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
+   *  fail-closed semantics stay the single owner of those outcomes. */
+  rulesOnly = false,
 ): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
   const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
     sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
@@ -410,17 +414,20 @@ async function hostFreeSlotMs(
 
   // Fail-closed: an unreadable external calendar contributes NO free slots
   // (never offer times we couldn't conflict-check) and reports why.
-  let externalBusy: Interval[];
-  try {
-    externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
-  } catch {
-    return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
+  let busy: Interval[] = [];
+  if (!rulesOnly) {
+    let externalBusy: Interval[];
+    try {
+      externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
+    } catch {
+      return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
+    }
+    busy = [
+      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
+      ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
+      ...externalBusy,
+    ];
   }
-  const busy: Interval[] = [
-    ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
-    ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
-    ...externalBusy,
-  ];
   const slots = computeSlots({
     fromUtc: new Date(fromMs),
     toUtc: new Date(toMs),
@@ -627,6 +634,26 @@ export async function createTeamBooking(
   // Start-instant sanity (QA fix 8) — same range policy as createBooking.
   const rangeErr = bookingStartOutOfRange(args.startMs);
   if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
+  // QA fix 13 (team surface): the public team-booking path must land on a
+  // slot the team's CONFIGURATION offers (per-host rules combined by the
+  // scheduling method) — same hole as the personal path: a caller skipping
+  // the availability window could book any instant. Rules-only per host;
+  // busy/conflict handling stays downstream (SLOT_TAKEN / fail-closed).
+  {
+    const now = new Date();
+    const endMsProbe = args.startMs + et.length_minutes * 60_000;
+    const ruleSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+    for (const host of await getEventHosts(db, et.id)) {
+      const { free, reason } = await hostFreeSlotMs(
+        db, host, et, args.startMs, endMsProbe, now, undefined, true,
+      );
+      ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
+    }
+    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets)
+      .includes(args.startMs);
+    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+  }
 
   const endMs = args.startMs + et.length_minutes * 60_000;
   const hosts = await getEventHosts(db, et.id);

@@ -3,6 +3,7 @@ import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
+import { createTeamBooking, getTeamAvailability } from './parity';
 
 /**
  * QA fix 13 (found by the adversarial QA pass on the fix batch): the public
@@ -61,6 +62,36 @@ describe('public bookings respect availability (QA fix 13)', () => {
 
   it('host/agent on-behalf booking outside availability stays allowed (the "Any time" feature)', async () => {
     const out = await createBooking(db, { ...base, startMs: nextSaturdayMs(), onBehalf: true });
+    expect(out.ok).toBe(true);
+  });
+
+  it('TEAM booking outside availability is rejected too (same hole, team surface)', async () => {
+    const out = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-demo',
+      startMs: nextSaturdayMs(),
+      attendee: { name: 'T', email: 't@example.com', timeZone: 'UTC' },
+    });
+    expect(out.ok).toBe(false);
+  });
+
+  it('TEAM booking on a real offered slot still works', async () => {
+    const a = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-demo',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    expect(a!.slots.length).toBeGreaterThan(0);
+    const out = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-demo',
+      startMs: new Date(a!.slots[0]!).getTime(),
+      attendee: { name: 'T', email: 't@example.com', timeZone: 'UTC' },
+    });
     expect(out.ok).toBe(true);
   });
 });
