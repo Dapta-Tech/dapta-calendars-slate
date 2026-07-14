@@ -238,6 +238,18 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /**
+   * Only present on the RESPONSE of a `discoverConnections` call (never
+   * persisted — the vendor's own bookkeeping for this connection). Lets the
+   * connect dialog detect a completed RECONNECT of an already-linked account
+   * (same `externalId`, `updatedAt`/`lastActiveAt` advanced) — a naive "is
+   * this row new" check can never see a reconnect complete.
+   */
+  connectionId?: string;
+  connected?: boolean;
+  state?: string;
+  updatedAt?: string | null;
+  lastActiveAt?: string | null;
 }
 export interface CalendarSummary {
   id: string;

@@ -46,12 +46,27 @@ export interface ConnectStart {
  * A connection the backend reports for a tenant after an OAuth popup completes.
  * `connectionRef` is opaque — it is stored verbatim and later round-tripped to
  * `listCalendars`/`checkConnection`.
+ *
+ * The last five fields are the vendor's own bookkeeping for THIS connection
+ * (not persisted in our schema — merged in per-discover-call only). They exist
+ * so the frontend can detect a completed RECONNECT of an ALREADY-linked
+ * account: a reconnect reuses the same `connectionRef`/`connectionId`, so a
+ * naive "is this connectionRef new" check can never see it complete. Comparing
+ * `updatedAt`/`lastActiveAt` against a timestamp captured when the connect
+ * popup opened is what actually detects it.
  */
 export interface DiscoveredConnection {
   connectionRef: string;
   provider: string;
   primaryEmail?: string | null;
   name?: string | null;
+  /** The vendor's own connection id (may equal connectionRef; kept distinct
+   *  in case a wire ever needs to encode connectionRef differently). */
+  connectionId?: string;
+  connected?: boolean;
+  state?: string;
+  updatedAt?: string | null;
+  lastActiveAt?: string | null;
 }
 
 /** A single HTTP call the adapter should make on the wire's behalf. */
