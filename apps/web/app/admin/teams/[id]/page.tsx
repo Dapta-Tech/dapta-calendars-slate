@@ -49,16 +49,31 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
         <TeamMembersPanel teamId={team.id} members={members} messages={m} />
       </div>
 
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{m.teamEventTypes}</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-muted-foreground">{m.teamEventTypes}</h2>
+        {/* The only way to CREATE a team event — the list alone was a dead end
+            (QA2 fix 5). */}
+        <Link
+          href={`/admin/event-types/new?teamId=${team.id}`}
+          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+        >
+          {m.newTeamEvent}
+        </Link>
+      </div>
       <ul className="flex flex-col gap-2">
         {eventTypes.map((et) => (
-          <li key={et.id} className="flex items-center justify-between rounded-md border border-border bg-card p-4">
-            <span className="flex flex-col">
-              <span className="font-medium">{et.title}</span>
-              <span className="text-sm text-muted-foreground">
-                /{et.slug} · {et.lengthMinutes} min · {schedulingMethodLabel(msgs, et.schedulingType)}
+          <li key={et.id}>
+            <Link
+              href={`/admin/event-types/${et.id}`}
+              className="flex items-center justify-between rounded-md border border-border bg-card p-4 transition-colors hover:border-primary"
+            >
+              <span className="flex flex-col">
+                <span className="font-medium">{et.title}</span>
+                <span className="text-sm text-muted-foreground">
+                  /{et.slug} · {et.lengthMinutes} min · {schedulingMethodLabel(msgs, et.schedulingType)}
+                </span>
               </span>
-            </span>
+            </Link>
           </li>
         ))}
         {eventTypes.length === 0 ? (

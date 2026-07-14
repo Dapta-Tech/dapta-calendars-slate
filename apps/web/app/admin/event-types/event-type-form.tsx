@@ -43,6 +43,7 @@ export function EventTypeForm({
   messages: m,
   scheduling,
   teamMembers,
+  teamId,
   redirectOnSuccess,
   backHref,
   backLabel,
@@ -53,8 +54,11 @@ export function EventTypeForm({
   messages: EventTypeMessages;
   /** Scheduling-method names + hints (from the shared `scheduling` catalog). */
   scheduling?: BookingMessages['scheduling'];
-  /** The team's members — present only when editing a TEAM event type. */
+  /** The team's members — present only for TEAM event types (edit or create). */
   teamMembers?: TeamMemberOption[];
+  /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
+   *  path to team events at all; editing derives the team from `initial`. */
+  teamId?: string;
   /** When set (the dedicated /new surface), navigate here after a create. */
   redirectOnSuccess?: string;
   /** FormHeader nav + title (the admin screen header system). */
@@ -89,7 +93,7 @@ export function EventTypeForm({
       required: !!f.required,
     })) ?? [],
   );
-  const isTeamEvent = !!initial?.teamId && !!teamMembers && !!scheduling;
+  const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
   const [schedulingType, setSchedulingType] = useState<SchedulingMethod>(
     (SCHEDULING_METHODS as readonly string[]).includes(initial?.schedulingType ?? '')
       ? (initial!.schedulingType as SchedulingMethod)
@@ -137,6 +141,9 @@ export function EventTypeForm({
         bookingFields: fields.filter((f) => f.name && f.label),
         ...(isTeamEvent
           ? {
+              // teamId travels on CREATE only — an existing event never
+              // changes teams from this form.
+              ...(initial ? {} : { teamId }),
               schedulingType,
               hosts: hosts.map((h) => ({
                 memberId: h.memberId,

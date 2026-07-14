@@ -344,6 +344,7 @@ export interface BookingMessages {
       members: string;
       teamEventTypes: string;
       noTeamEventTypes: string;
+      newTeamEvent: string;
       inviteTitle: string;
       inviteLead: string;
       emailLabel: string;
@@ -400,6 +401,10 @@ export interface BookingMessages {
       remove: string;
       ownerLock: string;
       lastOwnerTitle: string;
+      /** Single-owner model (QA2 fix 6b): explicit transfer flow. */
+      transferOwnership: string;
+      transferConfirm: string;
+      ownershipTransferred: string;
       roleUpdated: string;
       statusUpdated: string;
       memberInvited: string;
@@ -941,6 +946,7 @@ export const en: BookingMessages = {
       members: 'Members',
       teamEventTypes: 'Team events',
       noTeamEventTypes: 'No team events yet.',
+      newTeamEvent: 'New team event',
       inviteTitle: 'Add a member',
       inviteLead: 'Invite someone from your account to this team by email.',
       emailLabel: 'Email',
@@ -996,6 +1002,9 @@ export const en: BookingMessages = {
       remove: 'Remove',
       ownerLock: 'Team admins can’t be removed — change their role first.',
       lastOwnerTitle: 'A workspace must keep at least one owner',
+      transferOwnership: 'Transfer ownership',
+      transferConfirm: 'Yes, transfer — I become an admin',
+      ownershipTransferred: 'Ownership transferred.',
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
       memberInvited: 'Invitation sent.',
@@ -1562,6 +1571,7 @@ export const es: BookingMessages = {
       members: 'Miembros',
       teamEventTypes: 'Eventos del equipo',
       noTeamEventTypes: 'Aún no hay eventos del equipo.',
+      newTeamEvent: 'Nuevo evento de equipo',
       inviteTitle: 'Añadir un miembro',
       inviteLead: 'Invita por correo a alguien de tu cuenta a este equipo.',
       emailLabel: 'Correo',
@@ -1617,6 +1627,9 @@ export const es: BookingMessages = {
       remove: 'Quitar',
       ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
+      transferOwnership: 'Transferir propiedad',
+      transferConfirm: 'Sí, transferir — yo paso a admin',
+      ownershipTransferred: 'Propiedad transferida.',
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
       memberInvited: 'Invitación enviada.',

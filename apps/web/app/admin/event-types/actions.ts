@@ -26,6 +26,8 @@ export interface EventTypePayload {
   /** Team events: scheduling method + per-host round-robin detail. */
   schedulingType?: string | null;
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
+  /** Team events: set on CREATE only (QA2 fix 5). */
+  teamId?: string;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {
