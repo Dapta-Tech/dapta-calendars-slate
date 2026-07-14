@@ -119,8 +119,10 @@ export function HostBookingForm({
   // 'LOAD_FAILED' when the request itself failed — each gets distinct copy.
   const [slotsIssue, setSlotsIssue] = useState<string | null>(null);
   // In-flight fetch: render a loading state, never a premature "No slots in
-  // range." that reads as truth on slow connections (QA fix 12).
-  const [slotsLoading, setSlotsLoading] = useState(false);
+  // range." that reads as truth on slow connections (QA fix 12). Starts TRUE
+  // when the initial mode fetches, so even the server-rendered first paint
+  // shows the loading copy instead of the empty state.
+  const [slotsLoading, setSlotsLoading] = useState(() => bookable.length > 0);
   const [startUtc, setStartUtc] = useState('');
   const [customLocal, setCustomLocal] = useState('');
   const [name, setName] = useState('');
@@ -141,7 +143,10 @@ export function HostBookingForm({
   // authenticated host surface — resolves the member by id, so this works
   // before a public handle is set (the public endpoint 400s without one).
   useEffect(() => {
-    if (mode !== 'slots' || !slug) return;
+    if (mode !== 'slots' || !slug) {
+      setSlotsLoading(false);
+      return;
+    }
     const from = new Date().toISOString();
     const to = new Date(Date.now() + 21 * 86_400_000).toISOString();
     setSlotsLoading(true);
