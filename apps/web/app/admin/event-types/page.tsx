@@ -95,8 +95,9 @@ export default async function EventTypesPage() {
       ) : null}
 
       {/* Team events (QA3 fix 4a): grouped per team below the personal list.
-          Edit links carry ?from=team:<id> so the editor's back affordance
-          returns to the team page (QA3 fix 4b). */}
+          Back navigation is contextual to the ORIGIN (QA3 fix 4b): links here
+          carry no ?from, so the editor returns to THIS page — only the team
+          page's own links inject from=team. */}
       {teamEventGroups.length > 0 ? (
         <div className="mt-10">
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{m.teamEventsSection}</h2>
@@ -130,7 +131,7 @@ export default async function EventTypesPage() {
                           messages={m}
                         />
                         <Link
-                          href={`/admin/event-types/${et.id}?from=team:${team.id}`}
+                          href={`/admin/event-types/${et.id}`}
                           className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
                         >
                           {admin.common.edit}
