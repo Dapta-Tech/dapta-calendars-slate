@@ -28,6 +28,7 @@ import {
   listWebhooks,
   recordConnectionHealth,
   revokeApiKey,
+  setConnectionPrimaryEmail,
   updateBranding,
   updateHandle,
   updateMemberSettings,
@@ -272,8 +273,39 @@ export class AdminService {
   }
 
   // Connections (behind the CalendarProvider port — generic).
-  listConnections(p: HostPrincipal) {
-    return listConnections(this.db, p.memberId);
+  /**
+   * List connections, best-effort backfilling any missing `primaryEmail` so
+   * the UI can always show WHICH account a row is (critical once a member has
+   * more than one calendar). Older/seeded rows can predate the "which
+   * account?" email step, or a discovery run whose provider response omitted
+   * it — derive it the same way `discoverConnections` does (the provider's
+   * primary calendar id IS the account email) and persist it once so future
+   * reads are free. Never blocks or fails the read: an unreachable provider
+   * just leaves the row as-is (the UI falls back to "account unknown").
+   */
+  async listConnections(p: HostPrincipal) {
+    const rows = await listConnections(this.db, p.memberId);
+    if (!this.provider.enabled) return rows;
+    await Promise.all(
+      rows
+        .filter((c) => !c.primaryEmail)
+        .map(async (c) => {
+          try {
+            const calendars = await this.provider.listCalendars(c.externalId);
+            const email =
+              calendars.find((cal) => cal.isPrimary)?.primaryEmail ??
+              calendars.find((cal) => cal.primaryEmail)?.primaryEmail ??
+              null;
+            if (email) {
+              await setConnectionPrimaryEmail(this.db, p.memberId, c.id, email);
+              c.primaryEmail = email;
+            }
+          } catch {
+            /* best-effort — leave null */
+          }
+        }),
+    );
+    return rows;
   }
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
     return createConnection(this.db, { accountId: p.accountId, memberId: p.memberId, ...body });

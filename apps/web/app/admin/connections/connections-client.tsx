@@ -79,14 +79,23 @@ function providerLabel(provider: string, m: ConnectionsMessages): string {
 
 /** Human label for a connection: account email first, else a readable manual
  *  calendar id; NEVER the opaque connection ref (an OAuth-discovered
- *  connection's externalId is an unreadable token). */
+ *  connection's externalId is an unreadable token) — that case falls back to
+ *  a muted "account unknown" (see `connectionAccountUnknown`) rather than
+ *  repeating the provider name, so a stack of same-provider rows never reads
+ *  as duplicated. */
 function connectionLabel(
-  c: { primaryEmail: string | null; externalId: string; provider: string },
+  c: { primaryEmail: string | null; externalId: string },
   m: ConnectionsMessages,
 ): string {
   if (c.primaryEmail) return c.primaryEmail;
   if (c.externalId.includes('@')) return c.externalId;
-  return providerLabel(c.provider, m);
+  return m.accountUnknown;
+}
+
+/** True when `connectionLabel` fell all the way back to "account unknown" —
+ *  drives the muted styling so that fallback never looks like a real label. */
+function connectionAccountUnknown(c: { primaryEmail: string | null; externalId: string }): boolean {
+  return !c.primaryEmail && !c.externalId.includes('@');
 }
 
 /**
@@ -711,7 +720,13 @@ function ConnectionRow({
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-2">
-              <span className="truncate font-medium text-foreground">{connectionLabel(c, m)}</span>
+              <span
+                className={`truncate font-medium ${
+                  connectionAccountUnknown(c) ? 'italic text-muted-foreground' : 'text-foreground'
+                }`}
+              >
+                {connectionLabel(c, m)}
+              </span>
               {c.isDestination ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
                   <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -908,8 +923,10 @@ export function ConnectionsClient({
     [run],
   );
 
-  // No optimistic removal: the row disappears on revalidation; on failure
-  // (e.g. R20 last-destination guard) the row stays and shows the reason.
+  // No optimistic removal: the row disappears on revalidation. Disconnecting
+  // the sole/destination calendar is allowed — the list can legitimately go to
+  // zero rows, which renders the empty "connect a calendar" state below
+  // (availability-only fallback, no error).
   const disconnect = useCallback((id: string) => run(id, null, () => deleteConnectionAction(id)), [run]);
 
   return (

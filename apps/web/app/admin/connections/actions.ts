@@ -26,11 +26,13 @@ export async function createConnectionAction(
 
 export async function deleteConnectionAction(id: string): Promise<{ ok: boolean; message?: string }> {
   try {
+    // Disconnecting the sole/destination calendar is allowed — the API always
+    // succeeds (idempotent); with zero connections left the page falls back
+    // to the empty/"connect a calendar" state (availability-only).
     await adminApi.deleteConnection(id);
     revalidatePath('/admin/connections');
     return { ok: true };
   } catch (e) {
-    // Surfaces LAST_DESTINATION_REQUIRED (409) and any other API error.
     return { ok: false, message: e instanceof Error ? e.message : 'Could not disconnect.' };
   }
 }

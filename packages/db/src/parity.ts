@@ -1392,26 +1392,32 @@ export async function createConnection(
   return { id };
 }
 
-export async function deleteConnection(
+/**
+ * Disconnect any calendar — including the sole/destination one. A host is
+ * always allowed to walk down to zero connections: with no connections left,
+ * the availability engine already degrades cleanly to availability-only
+ * (working hours minus local Slate bookings, no external busy-subtract) —
+ * `loadExternalBusy` returns `[]` and calendar write-out is a no-op with no
+ * destination — so there is nothing left to guard here. Idempotent (deleting
+ * an already-gone id still reports success).
+ */
+export async function deleteConnection(db: Db, memberId: string, id: string): Promise<{ ok: true }> {
+  await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
+  return { ok: true };
+}
+
+/** Persist a derived/backfilled account email for a connection (best-effort
+ *  read-time backfill — see AdminService#listConnections). */
+export async function setConnectionPrimaryEmail(
   db: Db,
   memberId: string,
   id: string,
-): Promise<{ ok: boolean; reason?: 'LAST_DESTINATION_REQUIRED' }> {
-  const conn = await db.get<{ is_destination: number }>(
-    sql`SELECT is_destination FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
+  primaryEmail: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE connected_calendar SET primary_email = ${primaryEmail}
+        WHERE id = ${id} AND member_id = ${memberId}`,
   );
-  if (!conn) return { ok: true }; // already gone — idempotent
-  // R20 guard: don't strand bookings with nowhere to write — a host that has a
-  // destination calendar must keep at least one. Unset `isDestination` first.
-  if (conn.is_destination) {
-    const others = await db.get<{ n: number }>(
-      sql`SELECT COUNT(*) AS n FROM connected_calendar
-          WHERE member_id = ${memberId} AND is_destination = 1 AND id <> ${id}`,
-    );
-    if (Number(others?.n ?? 0) === 0) return { ok: false, reason: 'LAST_DESTINATION_REQUIRED' };
-  }
-  await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
-  return { ok: true };
 }
 
 /**

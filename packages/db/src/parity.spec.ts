@@ -11,13 +11,13 @@ import {
   createApiKey,
   createConnection,
   deleteConnection,
-  updateConnection,
   createTeamBooking,
   createWebhook,
   dispatchWebhooks,
   getTeamAvailability,
   getTeamProfile,
   listBookings,
+  listConnections,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
@@ -245,7 +245,7 @@ describe('parity (SQLite in-memory)', () => {
     if (!overflow.ok) expect(overflow.reason).toBe('SLOT_TAKEN');
   });
 
-  it('deleteConnection guards the LAST destination (must keep one)', async () => {
+  it('deleteConnection allows disconnecting the LAST/destination calendar (falls back to availability-only)', async () => {
     const memberId = (await db.get<{ id: string }>(
       (await import('drizzle-orm')).sql`SELECT id FROM member WHERE handle='alex-rivera'`,
     ))!.id;
@@ -257,14 +257,16 @@ describe('parity (SQLite in-memory)', () => {
       isDestination: true,
       checkConflicts: true,
     });
-    // The sole destination cannot be deleted.
-    const blocked = await deleteConnection(db, memberId, only.id);
-    expect(blocked.ok).toBe(false);
-    expect(blocked.reason).toBe('LAST_DESTINATION_REQUIRED');
-    // Unset it as a destination → now deletable.
-    await updateConnection(db, memberId, only.id, { isDestination: false });
+    // Deleting the sole destination calendar SUCCEEDS — no external calendar
+    // left means availability falls back to working-hours-minus-local-bookings
+    // (loadExternalBusy returns [] with zero connections; write-out is a no-op).
     const ok = await deleteConnection(db, memberId, only.id);
     expect(ok.ok).toBe(true);
+    const remaining = await listConnections(db, memberId);
+    expect(remaining).toHaveLength(0);
+    // Idempotent: deleting an already-gone id still reports success.
+    const again = await deleteConnection(db, memberId, only.id);
+    expect(again.ok).toBe(true);
   });
 
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
