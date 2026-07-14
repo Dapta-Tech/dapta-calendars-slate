@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import { commonTimeZones, type BookingMessages, type Locale } from '@slate/shared';
+import type { BookingMessages, Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
 
@@ -286,20 +287,10 @@ export function HostBookingForm({
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
       </div>
-      <label className="flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.attendeeTimezone}</span>
-        <select
-          value={tz}
-          onChange={(e) => setTz(e.target.value)}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-        >
-          {commonTimeZones(tz).map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </select>
-      </label>
+        <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.attendeeTimezone} />
+      </div>
 
       {/* Intake answers are the EVENT's custom questions — visually separated
           from the attendee identity above so a question named "email" can't be

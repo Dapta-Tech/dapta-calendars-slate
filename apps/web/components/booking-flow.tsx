@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
-import { commonTimeZones,
+import {
   groupSlotsByDay,
   formatSlotDateTime,
   getMessages,
@@ -14,6 +14,7 @@ import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
 
 interface Props {
   accountCode: string;
@@ -171,20 +172,16 @@ export function BookingFlow({
           <label htmlFor="tz" className="text-sm text-muted-foreground">
             {m.timezone}
           </label>
-          <select
+          {/* Themed combobox, not the native <select>: the OS popup for ~400
+              zones is un-brandable and covers the screen (QA2 fix 1). */}
+          <TimeZoneSelect
             id="tz"
             value={timeZone}
-            onChange={(e) => setTimeZone(e.target.value)}
-            className="rounded-md border border-input bg-card px-2 py-1 text-sm"
-          >
-            {/* Full IANA list (was: host zone + detected + UTC only) — a
-                visitor anywhere in the world can pick their real zone (QA fix 1). */}
-            {commonTimeZones(timeZone).map((tz) => (
-              <option key={tz} value={tz}>
-                {tz.replaceAll('_', ' ')}
-              </option>
-            ))}
-          </select>
+            onChange={setTimeZone}
+            locale={locale}
+            ariaLabel={m.timezone}
+            className="w-64 max-w-full"
+          />
         </div>
 
         {days.length === 0 ? (

@@ -91,6 +91,11 @@ export interface BookingMessages {
     collective_hint: string;
     fixed_round_robin_hint: string;
   };
+  /** Themed timezone combobox (QA2 fix 1) — shared by public + admin surfaces. */
+  tzPicker: {
+    search: string;
+    noResults: string;
+  };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
     nav: {
@@ -655,6 +660,10 @@ export const en: BookingMessages = {
     round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
     collective_hint: 'Everyone attends — offer only times when all hosts are free.',
     fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+  },
+  tzPicker: {
+    search: 'Search timezone…',
+    noResults: 'No matching timezone.',
   },
   manage: {
     title: 'Manage your booking',
@@ -1273,6 +1282,10 @@ export const es: BookingMessages = {
     round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
     collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
     fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+  },
+  tzPicker: {
+    search: 'Buscar zona horaria…',
+    noResults: 'No hay zonas que coincidan.',
   },
   manage: {
     title: 'Gestiona tu reserva',
