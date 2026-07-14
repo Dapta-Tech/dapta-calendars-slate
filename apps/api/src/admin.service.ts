@@ -51,12 +51,13 @@ import {
   type EmailTemplateKey,
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
+import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { asConnector } from './calendar.http-provider';
 import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES, DEFAULT_FOLLOW_UP_LEAD_MINUTES } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
-import { DB, ENTITLEMENTS, PREMIUM_MODE } from './tokens';
+import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
 /** How long a cached Dapta AI entitlement verdict stays fresh before re-asking upstream. */
 const ENTITLEMENT_TTL_MS = 6 * 3600_000;
@@ -72,6 +73,9 @@ export class AdminService {
     // no upstream + `open` premium mode (fork-friendly).
     @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
     @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // Optional (specs construct this service directly): only used to build the
+    // attendee manage link on host-created bookings.
+    @Optional() @Inject(ENV) private readonly env?: ServerEnv,
   ) {}
 
   me(p: HostPrincipal) {
@@ -141,6 +145,31 @@ export class AdminService {
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
     if (outcome.ok && outcome.booking.status === 'accepted')
       this.calendar.onBookingAccepted(outcome.booking.uid);
+    // QA2 BUG-1: this path created the booking but notified NOBODY — no
+    // attendee email, no reminders, no booking.created webhook — while the UI
+    // claimed "the attendee has been notified". Mirror the public path's
+    // side-effects, gated on manageToken so an idempotent replay re-sends
+    // nothing. (accountId is on the principal — no code lookup needed.)
+    if (outcome.ok && outcome.manageToken) {
+      const b = outcome.booking;
+      const manageUrl = this.env
+        ? `${this.env.PUBLIC_APP_URL}/manage/${b.uid}?token=${outcome.manageToken}`
+        : undefined;
+      if (b.status === 'accepted') {
+        void this.email.enqueueConfirmation(b.uid, { manageUrl });
+        void this.email.enqueueReminders(b.uid, { manageUrl });
+        void this.email.enqueueFollowUps(b.uid, { manageUrl });
+      } else if (b.status === 'pending') {
+        void this.email.enqueuePending(b.uid, { manageUrl });
+      }
+      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.created', {
+        uid: b.uid,
+        status: b.status,
+        startUtc: new Date(b.startMs).toISOString(),
+        endUtc: new Date(b.endMs).toISOString(),
+        title: b.title,
+      }).catch(() => undefined);
+    }
     return outcome;
   }
 
