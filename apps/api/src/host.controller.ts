@@ -230,9 +230,9 @@ export class HostController {
    */
   @Post('connections/token')
   @HttpCode(200)
-  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.connectionToken(p, body?.provider ?? 'google');
+    return this.admin.connectionToken(p, body?.provider ?? 'google', body?.email);
   }
 
   /**

@@ -9,6 +9,7 @@ import {
   updateConnection,
   connectionExists,
   getConnectionRef,
+  getMemberIdentity,
   declineBooking,
   createWebhook,
   updateWebhook,
@@ -293,10 +294,27 @@ export class AdminService {
    * Start a connect flow: mint the connect token/URL from the provider. Returns
    * an honest disabled status when no external provider is wired (OSS default),
    * so the UI can say so instead of silently failing.
+   *
+   * The connect subject is keyed by the Dapta-platform identity behind this
+   * member (`getMemberIdentity` — the upstream IAM user id), not the member's
+   * own local id: the rest of Dapta (adminpanel/flow-runner) keys the SAME
+   * external credential broker with `${iamUserId}-${accountEmail}` (a distinct
+   * subject per connected account — this is how a Dapta user already connects
+   * more than one Google account today, verified live against real accounts
+   * with 2-5 calendar connections each). Matching that scheme is what makes an
+   * account connected in the main Dapta app show up here automatically (and
+   * vice versa), and what lets a member add a 2nd/3rd calendar here: each
+   * `email` is a DIFFERENT subject, so the "one connection per subject" rule
+   * upstream never collides across accounts. `email` is the account the host
+   * is ABOUT to connect (collected by the caller before this call, mirroring
+   * adminpanel's own "which account?" prompt) — omitted only for the cheap
+   * enabled/disabled probe (`ConnectionsPage`), which never uses the resulting
+   * connectUrl.
    */
   async connectionToken(
     p: HostPrincipal,
     provider: string,
+    email?: string,
   ): Promise<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }> {
     const connector = asConnector(this.provider);
     if (!connector) {
@@ -307,7 +325,10 @@ export class AdminService {
         message: 'No external calendar provider configured (OSS default). Add a connection manually.',
       };
     }
-    const start = await connector.startConnect(provider, p.memberId);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const subject = email ? `${iamUserId}-${email}` : iamUserId;
+    const start = await connector.startConnect(provider, subject);
     return { enabled: true, token: start.token, connectUrl: start.connectUrl, message: 'Connect started.' };
   }
 
@@ -315,11 +336,20 @@ export class AdminService {
    * After the OAuth popup completes, discover the tenant's connection(s) for the
    * provider and persist any not already stored (first destination wins R20).
    * Returns the connections now on record.
+   *
+   * Discovery is keyed by the PLAIN Dapta iamUserId (no email suffix) so it
+   * enumerates EVERY account subject this member owns
+   * (`${iamUserId}-<email1>`, `${iamUserId}-<email2>`, …) — including accounts
+   * connected from the main Dapta app before this member ever opened
+   * Calendars, and every prior connection of this member's own (legacy plain
+   * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
    */
   async discoverConnections(p: HostPrincipal, provider: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
-    const discovered = await connector.discoverConnections(p.memberId, provider);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const discovered = await connector.discoverConnections(iamUserId, provider);
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {

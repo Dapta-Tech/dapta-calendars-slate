@@ -425,6 +425,12 @@ export interface BookingMessages {
       syncOffDesc: string;
       syncOffSetPre: string;
       syncOffSetPost: string;
+      /** The "which account?" step shown before starting the OAuth popup. */
+      emailStepTitle: string;
+      emailStepLabel: string;
+      emailStepHelp: string;
+      emailStepContinue: string;
+      emailStepBack: string;
       connectWaiting: string;
       connectHint: string;
       connectDone: string;
@@ -1036,6 +1042,11 @@ export const en: BookingMessages = {
       syncOffDesc: 'No external calendar provider is configured, so busy times aren’t being read and events aren’t being written yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
+      emailStepTitle: 'Which account are you connecting?',
+      emailStepLabel: 'Account email',
+      emailStepHelp: 'This keeps the new connection separate from any others, and matches it up with the same account if it’s already connected elsewhere in Dapta.',
+      emailStepContinue: 'Continue',
+      emailStepBack: 'Back',
       connectWaiting: 'Waiting for you to finish connecting…',
       connectHint: 'Finish signing in and granting access in the popup window, then return here.',
       connectDone: 'I’ve finished connecting',
@@ -1669,6 +1680,11 @@ export const es: BookingMessages = {
       syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que aún no se leen horas ocupadas ni se escriben eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
+      emailStepTitle: '¿Qué cuenta vas a conectar?',
+      emailStepLabel: 'Correo de la cuenta',
+      emailStepHelp: 'Esto mantiene la nueva conexión separada de las demás y la vincula con la misma cuenta si ya está conectada en otra parte de Dapta.',
+      emailStepContinue: 'Continuar',
+      emailStepBack: 'Atrás',
       connectWaiting: 'Esperando a que termines de conectar…',
       connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
       connectDone: 'Ya terminé de conectar',

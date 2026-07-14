@@ -1284,6 +1284,34 @@ function decodeBookingCursor(cursor?: string): { startMs: number; uid: string } 
 
 // --- Connections (behind the CalendarProvider port — generic, no vendor) --
 
+/**
+ * The Dapta-platform identity behind a member, used to key connections in the
+ * external credential broker so this app shares connections with the rest of
+ * Dapta instead of siloing its own (a member who already connected a calendar
+ * in the main Dapta app must see it here, and vice versa).
+ *
+ * `iamUserId` is `member.external_id` — the upstream identity service's `sub`
+ * claim (see `auth.provider.workos.ts`), i.e. the SAME user id the rest of the
+ * Dapta platform uses. Local/dev members (the `local` auth stub) have an empty
+ * `external_id`, so this falls back to the member's own row id — a stable
+ * per-member value that keeps local dev self-consistent; it is superseded
+ * automatically the moment a deployment switches to the real `workos` auth
+ * provider, with no code change here.
+ */
+export interface MemberIdentity {
+  iamUserId: string;
+  email: string | null;
+}
+
+export async function getMemberIdentity(db: Db, memberId: string): Promise<MemberIdentity | null> {
+  const row = await db.get<{ external_id: string | null; email: string | null }>(
+    sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`,
+  );
+  if (!row) return null;
+  const iamUserId = row.external_id && row.external_id.length > 0 ? row.external_id : memberId;
+  return { iamUserId, email: row.email };
+}
+
 export interface ConnectionView {
   id: string;
   provider: string;
