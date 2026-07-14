@@ -441,7 +441,13 @@ function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => 
  *  — we say so plainly instead of showing a misleading green light. */
 type Health = 'off' | 'checking' | 'ok' | 'error';
 
-function HealthPill({ c, enabled, m }: { c: Connection; enabled: boolean; m: ConnectionsMessages }) {
+/** State + probing logic only — no markup. Split out from the pill button so
+ *  the row can lay out the pill, "Test", and "Disconnect" as ONE clean control
+ *  row (matching heights, one baseline) with the "Checked …" timestamp as its
+ *  own line underneath, instead of the timestamp living *inside* the pill's
+ *  own flex column and skewing the row's vertical centering against the
+ *  buttons next to it. */
+function useConnectionHealth(c: Connection, enabled: boolean, m: ConnectionsMessages) {
   const [state, setState] = useState<Health>(
     !enabled ? 'off' : c.lastCheckOk == null ? 'checking' : c.lastCheckOk ? 'ok' : 'error',
   );
@@ -480,14 +486,6 @@ function HealthPill({ c, enabled, m }: { c: Connection; enabled: boolean; m: Con
     probe(c.lastCheckOk != null);
   }, [enabled, probe, c.lastCheckOk]);
 
-  const dot =
-    state === 'ok'
-      ? 'bg-primary'
-      : state === 'error'
-        ? 'bg-destructive'
-        : state === 'checking'
-          ? 'bg-muted-foreground/60'
-          : 'bg-muted-foreground/40';
   const label =
     state === 'ok'
       ? m.healthOk
@@ -511,32 +509,50 @@ function HealthPill({ c, enabled, m }: { c: Connection; enabled: boolean; m: Con
         )
       : m.neverChecked;
 
+  return { state, detail, pending, label, checkedCaption, probe };
+}
+
+/** The pill button ONLY (no caption underneath) — sized to the SAME control
+ *  height as "Test"/"Disconnect" next to it: text-xs + py-1.5 (16px line +
+ *  12px padding) equals text-sm + py-1 (20px line + 8px padding), both 28px
+ *  content boxes (+1px border), so the three sit on one clean baseline
+ *  instead of the pill reading shorter/taller than its neighbors. */
+function HealthPillButton({
+  health,
+  enabled,
+  m,
+}: {
+  health: ReturnType<typeof useConnectionHealth>;
+  enabled: boolean;
+  m: ConnectionsMessages;
+}) {
+  const { state, detail, pending, label, probe } = health;
+  const dot =
+    state === 'ok'
+      ? 'bg-primary'
+      : state === 'error'
+        ? 'bg-destructive'
+        : state === 'checking'
+          ? 'bg-muted-foreground/60'
+          : 'bg-muted-foreground/40';
   return (
-    <span className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={() => probe()}
-        disabled={!enabled || pending}
-        title={detail ?? (enabled ? m.recheck : m.syncOffTitle)}
-        // Detail is in the accessible name too, so screen-reader / touch users
-        // get the reason without a hover-only tooltip.
-        aria-label={`${label}${detail ? `: ${detail}` : ''}${enabled ? ` — ${m.recheck}` : ''}`}
-        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition-colors enabled:hover:border-primary disabled:cursor-default"
-      >
-        {state === 'checking' ? (
-          <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary" aria-hidden />
-        ) : (
-          <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
-        )}
-        <span>{label}</span>
-      </button>
-      {state === 'error' && detail ? (
-        <span className="max-w-[220px] text-right text-[11px] leading-tight text-destructive">{detail}</span>
-      ) : null}
-      {checkedCaption ? (
-        <span className="text-[11px] leading-tight text-muted-foreground">{checkedCaption}</span>
-      ) : null}
-    </span>
+    <button
+      type="button"
+      onClick={() => probe()}
+      disabled={!enabled || pending}
+      title={detail ?? (enabled ? m.recheck : m.syncOffTitle)}
+      // Detail is in the accessible name too, so screen-reader / touch users
+      // get the reason without a hover-only tooltip.
+      aria-label={`${label}${detail ? `: ${detail}` : ''}${enabled ? ` — ${m.recheck}` : ''}`}
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground transition-colors enabled:hover:border-primary disabled:cursor-default"
+    >
+      {state === 'checking' ? (
+        <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary" aria-hidden />
+      ) : (
+        <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
+      )}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -629,6 +645,7 @@ function ConnectionRow({
     start(async () => {
       setTestResult(await testConnectionAction(c.id));
     });
+  const health = useConnectionHealth(c, enabled, m);
 
   return (
     <li
@@ -657,26 +674,45 @@ function ConnectionRow({
             <span className="truncate text-sm text-muted-foreground">{providerLabel(c.provider, m)}</span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <HealthPill c={c} enabled={enabled} m={m} />
-          {/* "Test / Run check" — the trust-building self-test (R22: instant
-              loading label, never a spinner-only dead state). */}
-          <button
-            type="button"
-            disabled={busy || pending || !enabled}
-            onClick={runTest}
-            className="rounded-md border border-border px-3 py-1 text-sm transition-colors hover:border-primary disabled:opacity-60"
-          >
-            {pending ? m.testRunning : m.testButton}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDisconnect(c.id)}
-            className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
-          >
-            {m.disconnect}
-          </button>
+
+        {/* One clean right-aligned control cluster: the pill + "Test" +
+            "Disconnect" share a single row (same height, one baseline, even
+            gap — items-center now works because all three resolve to the
+            same ~28px content box, see HealthPillButton). The "Checked …"
+            timestamp is its OWN line underneath, right-aligned, so it never
+            stretches the control row's cross-axis height or pulls "Test"/
+            "Disconnect" out of vertical center the way it did when it lived
+            inside the pill's own flex column. flex-wrap + justify-end lets
+            the cluster wrap gracefully (pill first, buttons below) instead of
+            overflowing at 360px. */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <HealthPillButton health={health} enabled={enabled} m={m} />
+            {/* "Test / Run check" — the trust-building self-test (R22: instant
+                loading label, never a spinner-only dead state). */}
+            <button
+              type="button"
+              disabled={busy || pending || !enabled}
+              onClick={runTest}
+              className="rounded-md border border-border px-3 py-1 text-sm transition-colors hover:border-primary disabled:opacity-60"
+            >
+              {pending ? m.testRunning : m.testButton}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDisconnect(c.id)}
+              className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
+            >
+              {m.disconnect}
+            </button>
+          </div>
+          {health.state === 'error' && health.detail ? (
+            <span className="max-w-[220px] text-right text-[11px] leading-tight text-destructive">{health.detail}</span>
+          ) : null}
+          {health.checkedCaption ? (
+            <span className="text-[11px] leading-tight text-muted-foreground">{health.checkedCaption}</span>
+          ) : null}
         </div>
       </div>
 
@@ -875,62 +911,67 @@ export function ConnectionsClient({
         <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>
       </span>
 
-      <div className="max-w-3xl">
-        {rows.length > 0 ? (
-          <div className="flex flex-col gap-5">
-            <SummaryStrip connections={rows} m={m} />
-            <div className="flex flex-col gap-1">
-              <h2 className="text-sm font-semibold text-muted-foreground">{m.yourCalendars}</h2>
-              <ul className="flex flex-col gap-2">
-                {rows.map((c) => (
-                  <ConnectionRow
-                    key={c.id}
-                    c={c}
-                    m={m}
-                    enabled={status.enabled}
-                    busy={pendingId === c.id}
-                    error={rowError?.id === c.id ? rowError.message : null}
-                    onSetDestination={setDestination}
-                    onToggleConflicts={toggleConflicts}
-                    onDisconnect={disconnect}
-                    onReconnect={() => setDialogOpen(true)}
-                  />
-                ))}
-              </ul>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border p-10 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
-              <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
-                <rect x="3" y="4.5" width="18" height="16" rx="2" />
-                <path d="M3 9h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4" />
-              </svg>
-            </span>
-            <div className="flex flex-col gap-1">
-              <p className="text-base font-semibold text-foreground">{m.emptyTitle}</p>
-              <p className="mx-auto max-w-sm text-sm text-muted-foreground">{m.emptyBody}</p>
-            </div>
-            <ul className="mx-auto flex max-w-sm flex-col gap-2 text-left text-sm text-muted-foreground">
-              {[m.emptyConflicts, m.emptyDestination].map((t) => (
-                <li key={t} className="flex items-start gap-2">
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary" aria-hidden>
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                  <span>{t}</span>
-                </li>
+      {/* No nested max-w wrapper here — the body flows at the SAME
+          max-w-[1520px] container width as the PageHeader above (set by the
+          page.tsx shell), exactly like every other admin list page (Bookings/
+          Event types/Teams), so the "Your calendars" card's right edge lines
+          up under "Connect another" instead of stopping short in an empty
+          gutter. Cards themselves stay readable via max-w-3xl per-card, not a
+          column-wide constraint. */}
+      {rows.length > 0 ? (
+        <div className="flex flex-col gap-5">
+          <SummaryStrip connections={rows} m={m} />
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-semibold text-muted-foreground">{m.yourCalendars}</h2>
+            <ul className="flex flex-col gap-2">
+              {rows.map((c) => (
+                <ConnectionRow
+                  key={c.id}
+                  c={c}
+                  m={m}
+                  enabled={status.enabled}
+                  busy={pendingId === c.id}
+                  error={rowError?.id === c.id ? rowError.message : null}
+                  onSetDestination={setDestination}
+                  onToggleConflicts={toggleConflicts}
+                  onDisconnect={disconnect}
+                  onReconnect={() => setDialogOpen(true)}
+                />
               ))}
             </ul>
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              className="mt-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-            >
-              {m.connectButton}
-            </button>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border p-10 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
+            <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
+              <rect x="3" y="4.5" width="18" height="16" rx="2" />
+              <path d="M3 9h18M8 2.5v4M16 2.5v4M12 13v4M10 15h4" />
+            </svg>
+          </span>
+          <div className="flex flex-col gap-1">
+            <p className="text-base font-semibold text-foreground">{m.emptyTitle}</p>
+            <p className="mx-auto max-w-sm text-sm text-muted-foreground">{m.emptyBody}</p>
+          </div>
+          <ul className="mx-auto flex max-w-sm flex-col gap-2 text-left text-sm text-muted-foreground">
+            {[m.emptyConflicts, m.emptyDestination].map((t) => (
+              <li key={t} className="flex items-start gap-2">
+                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-primary" aria-hidden>
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="mt-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          >
+            {m.connectButton}
+          </button>
+        </div>
+      )}
 
       <ConnectDialog
         open={dialogOpen}
