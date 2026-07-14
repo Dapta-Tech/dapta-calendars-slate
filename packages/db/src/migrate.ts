@@ -41,5 +41,19 @@ export async function migrate(db: Db, migrationsRoot = MIGRATIONS_ROOT): Promise
   // unconditionally after the SQL migrations on both dialects.
   await applyShortLinkFixups(db);
 
+  // Self-heal: members with schedules but no default (QA fix 2). The 0008
+  // backfill migration runs once, so anything created in a
+  // migrated-but-stale-code window would stay stranded forever without this.
+  // Idempotent + cheap no-op when nothing matches, so it runs every boot.
+  await db.run(sql`
+    UPDATE member SET default_schedule_id = (
+      SELECT s.id FROM schedule s
+      WHERE s.member_id = member.id
+      ORDER BY s.created_at ASC, s.id ASC
+      LIMIT 1
+    )
+    WHERE default_schedule_id IS NULL
+      AND EXISTS (SELECT 1 FROM schedule s2 WHERE s2.member_id = member.id)`);
+
   return applied;
 }
