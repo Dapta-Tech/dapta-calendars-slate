@@ -641,6 +641,44 @@ export async function createBooking(
   const invalid = validateIntakeAnswers(fields, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
 
+  // QA fix 13: a PUBLIC booking that isn't consuming a hold must land on a
+  // genuinely offered slot — before this, an unauthenticated caller could
+  // skip the reservation step and book a host at 3 AM Sunday. The check uses
+  // the same seat-aware availability engine the booking page renders from
+  // (group events keep filling seats on a shared slot), WITHOUT the external
+  // calendar: the fail-closed busy/unreachable handling stays downstream so
+  // its CALENDAR_UNAVAILABLE / SLOT_TAKEN semantics are unchanged. On-behalf
+  // host/agent bookings intentionally may book outside availability — the
+  // "Any time" feature.
+  if (!args.onBehalf && !args.reservationUid) {
+    // Rules-only projection (busy deliberately empty): whether the host's
+    // configuration OFFERS this instant at all — working hours, slot
+    // interval, min-notice. Busy/seat/full handling stays downstream so its
+    // SLOT_TAKEN / group-seat semantics are untouched.
+    const referenced = await resolveScheduleTimeZone(db, eventType.schedule_id);
+    const fallback = referenced
+      ? undefined
+      : await resolveScheduleTimeZone(db, member.default_schedule_id);
+    const schedule = referenced ?? fallback;
+    const rules = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
+    const offered =
+      rules.length > 0 &&
+      computeSlots({
+        fromUtc: new Date(args.startMs),
+        toUtc: new Date(args.startMs + eventType.length_minutes * 60_000),
+        timeZone: schedule?.timeZone ?? member.time_zone,
+        availability: rules,
+        durationMin: eventType.length_minutes,
+        slotIntervalMin: eventType.slot_interval,
+        busy: [],
+        beforeBufferMin: eventType.before_event_buffer,
+        afterBufferMin: eventType.after_event_buffer,
+        minimumBookingNoticeMin: eventType.minimum_booking_notice,
+        now: new Date(),
+      }).some((d) => d.getTime() === args.startMs);
+    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+  }
+
   // Idempotency: return the prior booking for a repeated key.
   if (args.idempotencyKey) {
     const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
