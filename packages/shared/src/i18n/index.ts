@@ -207,6 +207,8 @@ export interface BookingMessages {
       moveUp: string;
       moveDown: string;
       reservedBlocked: string;
+      /** Phone questions: which country the selector starts on (QA4 fix 1b). */
+      defaultCountryLabel: string;
       /** Per-row quick actions + team section on the Events list (QA3 fix 4). */
       openPublic: string;
       copyLink: string;
@@ -833,6 +835,7 @@ export const en: BookingMessages = {
       moveUp: 'Move up',
       moveDown: 'Move down',
       reservedBlocked: 'Rename the highlighted question — "name", "email" and "notes" are always asked automatically.',
+      defaultCountryLabel: 'Default country',
       openPublic: 'Open booking page',
       copyLink: 'Copy link',
       linkCopied: 'Link copied.',
@@ -850,7 +853,7 @@ export const en: BookingMessages = {
       labelPlaceholder: 'Label',
       req: 'req',
       addQuestion: '+ Add question',
-      saved: 'Saved.',
+      saved: 'Saved successfully.',
       saveChanges: 'Save changes',
       createEventType: 'Create event',
       saving: 'Saving…',
@@ -1481,6 +1484,7 @@ export const es: BookingMessages = {
       moveUp: 'Subir',
       moveDown: 'Bajar',
       reservedBlocked: 'Renombra la pregunta marcada — "name", "email" y "notes" siempre se preguntan automáticamente.',
+      defaultCountryLabel: 'País por defecto',
       openPublic: 'Abrir página de reservas',
       copyLink: 'Copiar enlace',
       linkCopied: 'Enlace copiado.',
@@ -1498,7 +1502,7 @@ export const es: BookingMessages = {
       labelPlaceholder: 'Etiqueta',
       req: 'obl.',
       addQuestion: '+ Añadir pregunta',
-      saved: 'Guardado.',
+      saved: 'Guardado correctamente.',
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear evento',
       saving: 'Guardando…',

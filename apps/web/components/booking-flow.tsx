@@ -396,6 +396,7 @@ export function BookingFlow({
                       name={`answer_${f.name}`}
                       required={f.required}
                       ariaLabel={f.label}
+                      defaultCountry={f.defaultCountry}
                     />
                   ) : isMulti ? (
                     <textarea

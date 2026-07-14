@@ -138,7 +138,7 @@ export function HostBookingForm({
   // Reserved names (name/email/notes) are the fixed attendee fields below —
   // legacy custom questions reusing them would ask twice (QA3 fix 3).
   const fields = (
-    (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>
+    (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>
   ).filter((f) => !isReservedFieldName(f.name));
 
   // `reloadKey` bumps to force a slots refetch after a 409 (the picked slot was
@@ -320,6 +320,7 @@ export function HostBookingForm({
               locale={locale}
               required={f.required}
               ariaLabel={f.label}
+              defaultCountry={f.defaultCountry}
             />
           ) : (
             <Input

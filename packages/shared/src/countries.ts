@@ -86,3 +86,53 @@ export const COUNTRIES: readonly Country[] = RAW.map(([code, dial]) => ({
   dial,
   flag: countryFlag(code),
 }));
+
+// --- National significant number lengths + display grouping (QA4 fix 1a) ---
+
+/**
+ * Typical national-number digit counts for common destinations. E.164 caps the
+ * WHOLE number at 15 digits; this narrows the cap to what the chosen country
+ * actually issues so a field can stop input (and validate) per country. Not
+ * exhaustive — anything absent falls back to a permissive [6, cap] range.
+ * NANP members (+1) are always exactly 10.
+ */
+const NSN_RANGES: Record<string, readonly [number, number]> = {
+  AR: [10, 10], AU: [9, 9], BO: [8, 8], BR: [10, 11], CH: [9, 9], CL: [9, 9],
+  CN: [11, 11], CO: [10, 10], CR: [8, 8], CU: [8, 8], DE: [7, 11], DK: [8, 8],
+  EC: [9, 9], ES: [9, 9], FR: [9, 9], GB: [9, 10], GT: [8, 8], HN: [8, 8],
+  ID: [8, 12], IE: [9, 9], IL: [9, 9], IN: [10, 10], IT: [9, 11], JP: [9, 10],
+  KR: [9, 10], MX: [10, 10], NI: [8, 8], NL: [9, 9], NO: [8, 8], NZ: [8, 10],
+  PA: [8, 8], PE: [9, 9], PH: [10, 10], PL: [9, 9], PT: [9, 9], PY: [9, 9],
+  RU: [10, 10], SE: [7, 10], SG: [8, 8], SV: [8, 8], TR: [10, 10], UA: [9, 9],
+  UY: [8, 9], VE: [10, 10], ZA: [9, 9],
+};
+
+/** [min, max] national digits for a country — E.164's 15-digit total is the hard cap. */
+export function phoneNsnRange(iso2: string, dial: string): readonly [number, number] {
+  const cap = 15 - dial.replace(/\D/g, '').length;
+  if (dial === '+1') return [10, Math.min(10, cap)];
+  const known = NSN_RANGES[iso2.toUpperCase()];
+  if (known) return [known[0], Math.min(known[1], cap)];
+  return [6, Math.min(12, cap)];
+}
+
+/**
+ * Display grouping for a national number while typing — visual only, the
+ * stored/webhook value stays bare E.164 (`+15106005675`). NANP gets the
+ * familiar (XXX) XXX-XXXX; everything else groups in readable chunks.
+ */
+export function formatPhoneDigits(dial: string, digits: string): string {
+  if (!digits) return '';
+  if (dial === '+1') {
+    const a = digits.slice(0, 3);
+    const b = digits.slice(3, 6);
+    const c = digits.slice(6, 10);
+    if (digits.length <= 3) return `(${a}`;
+    if (digits.length <= 6) return `(${a}) ${b}`;
+    return `(${a}) ${b}-${c}`;
+  }
+  // Generic: groups of 2–3–3–…, front-loaded (e.g. 55 123 456 78).
+  const groups: string[] = [digits.slice(0, 2)];
+  for (let i = 2; i < digits.length; i += 3) groups.push(digits.slice(i, i + 3));
+  return groups.filter(Boolean).join(' ');
+}

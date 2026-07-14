@@ -78,6 +78,12 @@ export const bookingFieldSchema = z.object({
   placeholder: z.string().max(200).optional(),
   /** Options for select/checkbox fields. */
   options: z.array(z.string()).optional(),
+  /** Phone fields: ISO 3166-1 alpha-2 the country selector starts on (QA4 fix 1b). */
+  defaultCountry: z
+    .string()
+    .regex(/^[A-Za-z]{2}$/)
+    .transform((v) => v.toUpperCase())
+    .optional(),
 });
 export type BookingField = z.infer<typeof bookingFieldSchema>;
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { COUNTRIES, countryName, getMessages, type Country } from '@slate/shared';
+import { COUNTRIES, countryName, formatPhoneDigits, getMessages, phoneNsnRange, type Country } from '@slate/shared';
 import { cn } from '@/lib/cn';
 
 /**
@@ -36,11 +36,16 @@ export function phoneSubscriberDigits(value: string): string {
   return (dial ? value.slice(dial.length) : value).replace(/\D/g, '');
 }
 
-/** True when a value has SOME digits but too few (<4) to be a number — the
- *  same rule the field flags inline, exported so form gates stay in sync. */
+/** True when a value has SOME digits but fewer than the dialing country
+ *  issues (QA4 fix 1a) — the same rule the field flags inline, exported so
+ *  form gates stay in sync. Shared dials (+1) share the same range. */
 export function isPhoneValueTooShort(value: string): boolean {
   const d = phoneSubscriberDigits(value);
-  return d.length > 0 && d.length < 4;
+  if (d.length === 0) return false;
+  const dial = longestDialPrefix(value);
+  const c = COUNTRIES.find((x) => x.dial === dial);
+  const [min] = c ? phoneNsnRange(c.code, c.dial) : [4, 14];
+  return d.length < min;
 }
 
 /** Country a value implies. Shared dials (+1 is US/CA/…) are ambiguous:
@@ -61,6 +66,7 @@ export function PhoneField({
   ariaLabel,
   name,
   required,
+  defaultCountry,
 }: {
   /** Full number including dial code ('+525512345678'), or ''. */
   value: string;
@@ -72,19 +78,29 @@ export function PhoneField({
   /** When set, a hidden input carries the full value into FormData submits. */
   name?: string;
   required?: boolean;
+  /** ISO alpha-2 the selector starts on — the event's configured default
+   *  country (QA4 fix 1b). Falls back to US when absent/unknown. */
+  defaultCountry?: string;
 }) {
   const m = getMessages(locale).phonePicker;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const [pickedCode, setPickedCode] = useState('US');
+  const [pickedCode, setPickedCode] = useState(() => {
+    const dc = defaultCountry?.toUpperCase();
+    return dc && COUNTRIES.some((c) => c.code === dc) ? dc : 'US';
+  });
   const rootRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
   const country = useMemo(() => deriveCountry(value, pickedCode), [value, pickedCode]);
   const digits = useMemo(() => phoneSubscriberDigits(value), [value]);
-  const tooShort = digits.length > 0 && digits.length < 4;
+  // Per-country issue lengths (QA4 fix 1a): input stops at max, inline error
+  // under min. The stored/submitted value stays bare E.164 regardless of the
+  // grouped display below.
+  const [minLen, maxLen] = phoneNsnRange(country.code, country.dial);
+  const tooShort = digits.length > 0 && digits.length < minLen;
 
   // Localized names once per locale; the list sorts by them so attendees scan
   // alphabetically in their own language, not by ISO code.
@@ -139,8 +155,10 @@ export function PhoneField({
 
   const pick = (c: Country) => {
     setPickedCode(c.code);
-    // Re-prefix the kept subscriber digits with the new dial code.
-    onChange(digits ? `${c.dial}${digits}` : '');
+    // Re-prefix the kept subscriber digits with the new dial code, re-capped
+    // to what the new country issues.
+    const kept = digits.slice(0, phoneNsnRange(c.code, c.dial)[1]);
+    onChange(kept ? `${c.dial}${kept}` : '');
     setOpen(false);
   };
 
@@ -196,10 +214,11 @@ export function PhoneField({
           inputMode="tel"
           autoComplete="tel-national"
           required={required}
-          value={digits}
+          value={formatPhoneDigits(country.dial, digits)}
           onChange={(e) => {
-            // Digits only, capped at the E.164 subscriber maximum.
-            const d = e.target.value.replace(/\D/g, '').slice(0, 14);
+            // Digits only, capped at what the selected country issues; the
+            // grouped display above is visual-only.
+            const d = e.target.value.replace(/\D/g, '').slice(0, maxLen);
             onChange(d ? `${country.dial}${d}` : '');
           }}
           aria-invalid={tooShort || undefined}
