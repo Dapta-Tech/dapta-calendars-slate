@@ -9,6 +9,7 @@ import {
   createWebhookAction,
   deleteWebhookAction,
   pingWebhookAction,
+  webhookDeliveriesAction,
   toggleWebhookAction,
   revokeApiKeyAction,
 } from './actions';
@@ -123,6 +124,12 @@ function WebhookItem({
   m: DevMessages;
 }) {
   const [ping, setPing] = useState<string | null>(null);
+  // Delivery history (QA fix 10): fetched lazily on expand — proof that real
+  // deliveries are landing, beyond the manual test ping.
+  const [deliveries, setDeliveries] = useState<
+    Array<{ id: string; event: string; ok: boolean; statusCode: number | null; error: string | null; createdAt: number }> | null
+  >(null);
+  const [showDeliveries, setShowDeliveries] = useState(false);
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-3">
@@ -147,6 +154,20 @@ function WebhookItem({
           </button>
           <button
             type="button"
+            disabled={pending}
+            onClick={() => {
+              const next = !showDeliveries;
+              setShowDeliveries(next);
+              if (next && deliveries === null)
+                start(async () => setDeliveries((await webhookDeliveriesAction(w.id)).items));
+            }}
+            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+            aria-expanded={showDeliveries}
+          >
+            {m.deliveries}
+          </button>
+          <button
+            type="button"
             onClick={() => start(() => deleteWebhookAction(w.id))}
             className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
           >
@@ -155,6 +176,28 @@ function WebhookItem({
         </span>
       </div>
       {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+      {showDeliveries ? (
+        deliveries === null ? (
+          <span className="text-xs text-muted-foreground">…</span>
+        ) : deliveries.length === 0 ? (
+          <span className="text-xs text-muted-foreground">{m.noDeliveries}</span>
+        ) : (
+          <ul className="flex flex-col gap-1 border-t border-border pt-2">
+            {deliveries.map((d) => (
+              <li key={d.id} className="flex items-center gap-2 text-xs">
+                <span className={d.ok ? 'text-primary' : 'text-destructive'}>{d.ok ? '✓' : '✗'}</span>
+                <code>{d.event}</code>
+                <span className="text-muted-foreground">
+                  {d.statusCode ? `HTTP ${d.statusCode}` : (d.error ?? '')}
+                </span>
+                <span className="ml-auto text-muted-foreground">
+                  {new Date(d.createdAt).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
     </li>
   );
 }

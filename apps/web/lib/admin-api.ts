@@ -178,6 +178,8 @@ export const adminApi = {
   updateWebhook: (id: string, active: boolean) => req('PATCH', `/v1/webhooks/${id}`, { active }),
   pingWebhook: (id: string) =>
     req<{ ok: boolean; status?: number; message?: string }>('POST', `/v1/webhooks/${id}/ping`, {}),
+  webhookDeliveries: (id: string) =>
+    req<{ items: WebhookDeliveryRow[] }>('GET', `/v1/webhooks/${id}/deliveries`),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
   // Branding
@@ -252,6 +254,15 @@ export interface ApiKeyRow {
   last4: string;
   revoked_at_ms: number | null;
 }
+export interface WebhookDeliveryRow {
+  id: string;
+  event: string;
+  ok: boolean;
+  statusCode: number | null;
+  error: string | null;
+  createdAt: number;
+}
+
 export interface WebhookRow {
   id: string;
   subscriber_url: string;

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
+  listWebhookDeliveries,
   checkHandleAvailable,
   confirmBooking,
   createApiKey,
@@ -322,6 +323,10 @@ export class AdminService {
   // Webhooks.
   listWebhooks(p: HostPrincipal) {
     return listWebhooks(this.db, p.accountId);
+  }
+
+  listWebhookDeliveries(p: HostPrincipal, webhookId: string) {
+    return listWebhookDeliveries(this.db, p.accountId, webhookId);
   }
   createWebhook(p: HostPrincipal, body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
     return createWebhook(this.db, { accountId: p.accountId, ...body });

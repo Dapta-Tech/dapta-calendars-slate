@@ -513,6 +513,8 @@ export interface BookingMessages {
       events: string;
       addWebhook: string;
       ping: string;
+      deliveries: string;
+      noDeliveries: string;
       delete: string;
       active: string;
       cancel: string;
@@ -1112,6 +1114,8 @@ export const en: BookingMessages = {
       events: 'Events',
       addWebhook: 'Add webhook',
       ping: 'Ping',
+      deliveries: 'Deliveries',
+      noDeliveries: 'No deliveries yet — they appear when a real booking event fires this webhook.',
       delete: 'Delete',
       active: 'active',
       cancel: 'Cancel',
@@ -1709,6 +1713,8 @@ export const es: BookingMessages = {
       events: 'Eventos',
       addWebhook: 'Añadir webhook',
       ping: 'Probar',
+      deliveries: 'Entregas',
+      noDeliveries: 'Aún no hay entregas — aparecerán cuando un evento real de reserva dispare este webhook.',
       delete: 'Eliminar',
       active: 'activo',
       cancel: 'Cancelar',

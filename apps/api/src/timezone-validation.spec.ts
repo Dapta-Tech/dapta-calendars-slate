@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from '@slate/db';
+import { DisabledCalendarProvider } from '@slate/calendar';
+import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
+import { CalendarEffects } from './calendar-effects';
+import { EmailEffects } from './email-effects';
 import { HostController } from './host.controller';
 import { AdminService } from './admin.service';
 import type { AuthService, ReqLike } from './auth.service';
@@ -30,7 +34,9 @@ describe('timezone validation (QA fix 1)', () => {
         role: 'owner' as const,
       }),
     } as unknown as AuthService;
-    ctrl = new HostController(new AdminService(db), auth);
+    const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
+    const email = new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db);
+    ctrl = new HostController(new AdminService(db, calendar, email), auth);
   });
 
   const req = {} as ReqLike;

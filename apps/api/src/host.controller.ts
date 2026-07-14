@@ -334,6 +334,15 @@ export class HostController {
     return this.admin.pingWebhook(p, id);
   }
 
+  /** Latest real delivery attempts (QA fix 10) — the dashboard's proof that a
+   *  webhook is landing, beyond the manual test ping. */
+  @Get('webhooks/:id/deliveries')
+  async webhookDeliveries(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return { items: await this.admin.listWebhookDeliveries(p, id) };
+  }
+
   @Delete('webhooks/:id')
   @HttpCode(204)
   async deleteWebhook(@Req() req: ReqLike, @Param('id') id: string) {
