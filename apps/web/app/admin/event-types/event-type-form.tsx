@@ -12,6 +12,9 @@ import { saveEventTypeAction, type ActionResult, type EventTypePayload } from '.
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
 const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
+/** The public booking page always asks these itself — a custom question with
+ *  the same name would ask the attendee twice (QA2 fix 7). */
+const RESERVED_FIELD_NAMES = new Set(['name', 'email', 'notes']);
 const SCHEDULING_METHODS = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 type SchedulingMethod = (typeof SCHEDULING_METHODS)[number];
 
@@ -66,10 +69,14 @@ export function EventTypeForm({
   const [description, setDescription] = useState(initial?.description ?? '');
   const [location, setLocation] = useState(initial?.location ?? '');
   const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
-  const [minNotice, setMinNotice] = useState(120);
-  const [slotInterval, setSlotInterval] = useState<number | ''>(initial?.lengthMinutes ?? 30);
-  const [beforeBuf, setBeforeBuf] = useState(0);
-  const [afterBuf, setAfterBuf] = useState(0);
+  // Hydrate from the stored event — these used to default silently, so EDITING
+  // an event reset its notice/interval/buffers on save (QA2 fix 2).
+  const [minNotice, setMinNotice] = useState(initial?.minimumBookingNotice ?? 120);
+  const [slotInterval, setSlotInterval] = useState<number | ''>(
+    initial?.slotInterval ?? initial?.lengthMinutes ?? 30,
+  );
+  const [beforeBuf, setBeforeBuf] = useState(initial?.beforeEventBuffer ?? 0);
+  const [afterBuf, setAfterBuf] = useState(initial?.afterEventBuffer ?? 0);
   const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
   const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
@@ -291,34 +298,65 @@ export function EventTypeForm({
       {/* Intake questions */}
       <div className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
+        {/* Built-in fields the public booking page ALWAYS asks — shown locked so
+            nobody re-creates "name"/"email" as custom questions and the attendee
+            gets asked twice (QA2 fix 7). */}
+        <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
+        {[
+          { label: m.fixedName, required: true },
+          { label: m.fixedEmail, required: true },
+          { label: m.fixedNotes, required: false },
+        ].map((bf) => (
+          <div
+            key={bf.label}
+            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-background/40 px-3 py-1.5 text-sm text-muted-foreground"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+              <rect x="5" y="11" width="14" height="9" rx="2" />
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+            </svg>
+            <span className="flex-1">
+              {bf.label}
+              {bf.required ? ' *' : ''}
+            </span>
+            <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
+          </div>
+        ))}
         {fields.map((f, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <input
-              placeholder={m.namePlaceholder}
-              value={f.name}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
-              className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-            <input
-              placeholder={m.labelPlaceholder}
-              value={f.label}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-            <select
-              value={f.type}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
-              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
-            >
-              {FIELD_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-            <label className="flex cursor-pointer items-center gap-1 text-sm">
-              <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
-              {m.req}
-            </label>
-            <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+          <div key={i} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <input
+                placeholder={m.namePlaceholder}
+                value={f.name}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
+                className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+              <input
+                placeholder={m.labelPlaceholder}
+                value={f.label}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+              <select
+                value={f.type}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              >
+                {FIELD_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <label className="flex cursor-pointer items-center gap-1 text-sm">
+                <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+                {m.req}
+              </label>
+              <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+            </div>
+            {RESERVED_FIELD_NAMES.has(f.name.toLowerCase()) ? (
+              <p className="text-xs text-destructive" role="alert">
+                {m.reservedWarning}
+              </p>
+            ) : null}
           </div>
         ))}
         <button
