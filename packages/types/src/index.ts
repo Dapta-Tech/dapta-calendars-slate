@@ -47,8 +47,27 @@ export const bookingFieldType = [
 ] as const;
 export type BookingFieldType = (typeof bookingFieldType)[number];
 
-/** IANA time zone string (light validation; the engine trusts the platform DB). */
-export const timeZoneSchema = z.string().min(1).max(64);
+/**
+ * IANA time zone string, verified against the platform's own Intl database
+ * (aliases like `US/Eastern` pass; garbage like `UT}fg` is rejected). Every
+ * INPUT that persists a zone flows through this schema — the engine and the
+ * render paths downstream assume a stored zone always formats.
+ */
+export const timeZoneSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (tz) => {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City)' },
+  );
 
 /** A per-event custom intake field definition (declared early — referenced widely). */
 export const bookingFieldSchema = z.object({

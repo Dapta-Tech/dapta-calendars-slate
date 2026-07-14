@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { commonTimeZones, type BookingMessages } from '@slate/shared';
 import { saveGeneralAction, type ActionResult } from './actions';
 
 export function GeneralForm({
@@ -35,7 +35,15 @@ export function GeneralForm({
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
-        <input name="timeZone" defaultValue={timeZone} className={cls} />
+        {/* Full IANA list, never free text: an invalid zone used to reach the
+            DB and crash every page that formats times (QA fix 1). */}
+        <select name="timeZone" defaultValue={timeZone} className={cls}>
+          {commonTimeZones(timeZone).map((z) => (
+            <option key={z} value={z}>
+              {z.replaceAll('_', ' ')}
+            </option>
+          ))}
+        </select>
       </label>
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}

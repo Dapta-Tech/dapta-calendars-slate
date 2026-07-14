@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages, type BookingMessages } from '@slate/shared';
+import { getMessages, type BookingMessages, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
@@ -31,7 +31,8 @@ export default async function BookingsPage() {
     adminApi.listBookings('limit=200'),
     adminApi.me(),
   ]);
-  const tz = me?.timeZone ?? 'UTC';
+  // safeTimeZone: a corrupt stored zone must never crash the whole page (QA fix 1).
+  const tz = safeTimeZone(me?.timeZone);
   const m = getMessages(await getLocale()).admin.bookings;
   const now = Date.now();
   const pending = items.filter((b) => b.status === 'pending');

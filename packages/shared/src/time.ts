@@ -85,6 +85,32 @@ export function formatDayHeading(utcIso: string, timeZone: string, locale = 'en-
   }).format(new Date(utcIso));
 }
 
+/**
+ * Whether `tz` is a usable IANA timezone on this runtime. The probe is the
+ * platform's own `Intl` database (not `supportedValuesOf`, which omits
+ * aliases like `US/Eastern` that format perfectly well) — if a formatter can
+ * be constructed, every render/engine path can use the zone safely.
+ */
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || tz.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A timezone that is always safe to hand to `Intl.DateTimeFormat`: the stored
+ * value when valid, `UTC` otherwise. Render paths use this so one corrupt row
+ * can never crash a whole page (write paths reject invalid zones, but the DB
+ * may already hold bad data from before validation existed).
+ */
+export function safeTimeZone(tz: unknown): string {
+  return isValidTimeZone(tz) ? tz : 'UTC';
+}
+
 /** A curated, deduplicated list of common IANA zones, always including `includeZone`. */
 export function commonTimeZones(includeZone?: string): string[] {
   const withValues = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };

@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState, useMemo, useState } from 'react';
-import {
+import { commonTimeZones,
   groupSlotsByDay,
   detectTimeZone,
   formatSlotDateTime,
@@ -178,13 +178,13 @@ export function BookingFlow({
             onChange={(e) => setTimeZone(e.target.value)}
             className="rounded-md border border-input bg-card px-2 py-1 text-sm"
           >
-            {[timeZone, detectTimeZone(), 'UTC']
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
+            {/* Full IANA list (was: host zone + detected + UTC only) — a
+                visitor anywhere in the world can pick their real zone (QA fix 1). */}
+            {commonTimeZones(timeZone).map((tz) => (
+              <option key={tz} value={tz}>
+                {tz.replaceAll('_', ' ')}
+              </option>
+            ))}
           </select>
         </div>
 
