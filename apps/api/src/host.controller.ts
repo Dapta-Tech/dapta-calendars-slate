@@ -42,6 +42,25 @@ export class HostController {
     return this.admin.me(p);
   }
 
+  /**
+   * Called once by the browser on first admin mount to report its real IANA
+   * timezone (the server never knows this). No-op once the member has an
+   * explicit (non-'UTC') timezone — see AdminService.syncClientTimeZone.
+   */
+  @Post('me/timezone-sync')
+  @HttpCode(200)
+  async syncTimeZone(@Req() req: ReqLike, @Body() body: { timeZone?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.syncClientTimeZone(p, body?.timeZone ?? '');
+  }
+
+  /** The Home "Get bookable" checklist status (real data, not a static nag). */
+  @Get('me/setup-status')
+  async setupStatus(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.setupStatus(p);
+  }
+
   @Get('handle-available')
   async handleAvailable(@Req() req: ReqLike, @Query('handle') handle: string) {
     const p = await this.auth.resolveHost(req);

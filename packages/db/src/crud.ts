@@ -337,7 +337,51 @@ export async function createSchedule(
         VALUES (${id}, ${accountId}, ${memberId}, ${input.name}, ${input.timeZone}, ${Date.now()})`,
   );
   if (input.rules) await setScheduleRules(db, id, input.rules);
+  // A member's FIRST schedule becomes their default automatically — a member
+  // must never resolve to NO_SCHEDULE just because nothing was ever linked.
+  // The WHERE guard means this never clobbers an already-chosen default (safe
+  // to call from provisioning, the editor's "new schedule" action, or both).
+  await db.run(
+    sql`UPDATE member SET default_schedule_id = ${id} WHERE id = ${memberId} AND default_schedule_id IS NULL`,
+  );
   return (await getSchedule(db, accountId, id))!;
+}
+
+/** Mon–Fri 09:00–17:00 — the sensible starter schedule (matches Cal.com/Calendly). */
+export const DEFAULT_WORKING_HOURS_RULES: Array<{
+  days: number[] | null;
+  startTime: string;
+  endTime: string;
+  date: string | null;
+}> = [{ days: [1, 2, 3, 4, 5], startTime: '09:00', endTime: '17:00', date: null }];
+
+/**
+ * The hard invariant: a member must never be left with `default_schedule_id =
+ * NULL` (the root cause of the NO_SCHEDULE dead end for brand-new hosts). Idempotent
+ * and safe to call on every read — a member who already has a default is a
+ * single indexed SELECT and a no-op. Only members with NO default get a fresh
+ * "Working hours" schedule (Mon-Fri 9-5) in their real timezone (falling back to
+ * whatever `member.time_zone` currently holds, 'UTC' if truly unknown).
+ */
+export async function ensureDefaultSchedule(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  timeZone?: string,
+): Promise<{ created: boolean; scheduleId: string }> {
+  const member = await db.get<{ default_schedule_id: string | null; time_zone: string }>(
+    sql`SELECT default_schedule_id, time_zone FROM member WHERE id = ${memberId} LIMIT 1`,
+  );
+  if (member?.default_schedule_id) {
+    return { created: false, scheduleId: member.default_schedule_id };
+  }
+  const tz = timeZone || member?.time_zone || 'UTC';
+  const created = await createSchedule(db, accountId, memberId, {
+    name: 'Working hours',
+    timeZone: tz,
+    rules: DEFAULT_WORKING_HOURS_RULES,
+  });
+  return { created: true, scheduleId: created.id };
 }
 
 export async function updateSchedule(
