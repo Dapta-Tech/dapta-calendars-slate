@@ -41,12 +41,14 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
 
   return (
     <section className="mb-10">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
         <button type="button" onClick={() => setOpen(true)} className={createBtn}>
           {m.createKey}
         </button>
       </div>
+      {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
+      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
         <div className="mb-4 rounded-md border border-primary bg-card p-3">
@@ -218,12 +220,13 @@ export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; me
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{m.webhooks}</h2>
         <button type="button" onClick={() => setOpen(true)} className={createBtn}>
           {m.addWebhook}
         </button>
       </div>
+      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
       <ul className="flex flex-col gap-2">
         {webhooks.map((w) => (
           <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} />
