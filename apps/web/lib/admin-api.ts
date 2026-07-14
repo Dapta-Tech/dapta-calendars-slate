@@ -162,11 +162,11 @@ export const adminApi = {
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
-  connectionToken: (provider?: string) =>
+  connectionToken: (provider?: string, email?: string) =>
     req<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }>(
       'POST',
       '/v1/connections/token',
-      { provider },
+      { provider, email },
     ),
   discoverConnections: (provider: string) =>
     req<Connection[]>('POST', '/v1/connections/discover', { provider }),

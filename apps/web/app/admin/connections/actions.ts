@@ -83,10 +83,19 @@ export async function testConnectionAction(id: string): Promise<ConnectionTestRe
   }
 }
 
+/**
+ * `email` is the account the host is about to connect (collected by the
+ * connect dialog's "which account?" step). It becomes part of the Membrane
+ * subject (`${iamUserId}-${email}`) so this connection lines up with the SAME
+ * scheme the main Dapta app uses — a distinct subject per connected account is
+ * what lets a member connect more than one calendar, and what makes an
+ * account connected elsewhere in Dapta show up here automatically.
+ */
 export async function connectCalendarAction(
   provider: string,
+  email: string,
 ): Promise<{ enabled: boolean; connectUrl: string | null; message: string }> {
-  const r = await adminApi.connectionToken(provider);
+  const r = await adminApi.connectionToken(provider, email);
   return { enabled: r.enabled, connectUrl: r.connectUrl, message: r.message };
 }
 

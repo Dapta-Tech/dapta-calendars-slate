@@ -10,10 +10,14 @@ export const dynamic = 'force-dynamic';
 const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
 export default async function ConnectionsPage() {
-  const [connections, token] = await Promise.all([
+  const [connections, token, me] = await Promise.all([
     adminApi.listConnections(),
     // Provider status: enabled only when an external calendar adapter is wired.
     adminApi.connectionToken().catch(() => ({ enabled: false, message: 'Calendar sync unavailable.' })),
+    // Best-effort default for the connect dialog's "which account?" prompt —
+    // most hosts connect their own Dapta login email, so pre-filling it (still
+    // editable) saves a step; never required for the flow to work.
+    adminApi.me().catch(() => null),
   ]);
   const admin = getMessages(await getLocale()).admin;
   const messages = {
@@ -35,6 +39,7 @@ export default async function ConnectionsPage() {
         connections={connections}
         status={{ enabled: token.enabled, message: token.message }}
         messages={messages}
+        defaultEmail={me?.email ?? null}
       />
     </div>
   );
