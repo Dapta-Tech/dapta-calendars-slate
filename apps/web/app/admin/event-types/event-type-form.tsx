@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import type { BookingMessages } from '@slate/shared';
+import { isReservedFieldName, type BookingMessages } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -12,9 +12,6 @@ import { saveEventTypeAction, type ActionResult, type EventTypePayload } from '.
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
 const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
-/** The public booking page always asks these itself — a custom question with
- *  the same name would ask the attendee twice (QA2 fix 7). */
-const RESERVED_FIELD_NAMES = new Set(['name', 'email', 'notes']);
 const SCHEDULING_METHODS = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 type SchedulingMethod = (typeof SCHEDULING_METHODS)[number];
 
@@ -131,7 +128,13 @@ export function EventTypeForm({
     if (!slugTouched) setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
   };
 
-  const save = () =>
+  const save = () => {
+    // Reserved names are a hard stop, not just the inline warning — saving one
+    // would make the public page ask the attendee twice (QA3 fix 3).
+    if (fields.some((f) => f.name && isReservedFieldName(f.name))) {
+      setRes({ ok: false, message: m.reservedBlocked });
+      return;
+    }
     start(async () => {
       const payload: EventTypePayload = {
         id: initial?.id,
@@ -169,6 +172,7 @@ export function EventTypeForm({
       // Create on a dedicated /new surface → return to the list on success.
       if (r.ok && !initial && redirectOnSuccess) router.push(redirectOnSuccess);
     });
+  };
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
@@ -387,7 +391,7 @@ export function EventTypeForm({
               </button>
               <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
             </div>
-            {RESERVED_FIELD_NAMES.has(f.name.toLowerCase()) ? (
+            {isReservedFieldName(f.name) ? (
               <p className="text-xs text-destructive" role="alert">
                 {m.reservedWarning}
               </p>
