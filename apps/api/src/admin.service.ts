@@ -280,7 +280,27 @@ export class AdminService {
       });
       firstNew = false;
     }
-    return listConnections(this.db, p.memberId);
+    const persisted = await listConnections(this.db, p.memberId);
+    // Merge in the raw discover metadata (connectionId/connected/state/
+    // updatedAt/lastActiveAt) for rows THIS call actually reported — ephemeral,
+    // not persisted (our schema has no such columns). This is what lets the
+    // frontend detect a completed RECONNECT of an already-linked account: a
+    // reconnect reuses the same externalId/connectionRef, so "is this row new"
+    // can never see it complete; "did updatedAt/lastActiveAt just advance" can.
+    const byRef = new Map(discovered.map((d) => [d.connectionRef, d]));
+    return persisted.map((c) => {
+      const d = byRef.get(c.externalId);
+      return d
+        ? {
+            ...c,
+            connectionId: d.connectionId ?? d.connectionRef,
+            connected: d.connected,
+            state: d.state,
+            updatedAt: d.updatedAt ?? null,
+            lastActiveAt: d.lastActiveAt ?? null,
+          }
+        : c;
+    });
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */
@@ -306,6 +326,84 @@ export class AdminService {
     // last-checked info even before the next live probe.
     await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
     return { ok: health.ok, enabled: true, message: health.detail };
+  }
+
+  /**
+   * The "Test / Run check" self-test (the trust-building button — health
+   * alone was never enough: hosts don't believe a green dot means their
+   * REAL calendar is actually feeding conflict-checking). Exercises the
+   * EXACT two calls the booking engine depends on: `checkConnection` (same
+   * as ping) AND a real `listBusy` over the next 14 days — so a green result
+   * means the pipeline demonstrably read live events, not just that the
+   * token is valid. Never throws; every failure path returns a specific
+   * `reason` so the UI can show what to do next (e.g. Reconnect).
+   */
+  async testConnection(
+    p: HostPrincipal,
+    id: string,
+  ): Promise<{
+    ok: boolean;
+    healthDetail: string;
+    busyCount: number | null;
+    conflictCheckEnabled: boolean;
+    checkedAt: number;
+    reason?: 'DISCONNECTED' | 'NOT_READY' | 'READ_FAILED';
+  }> {
+    const checkedAt = Date.now();
+    if (!this.provider.enabled) {
+      return {
+        ok: false,
+        healthDetail: 'No external calendar provider configured (OSS default).',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const row = (await listConnections(this.db, p.memberId)).find((c) => c.id === id);
+    if (!row) {
+      return {
+        ok: false,
+        healthDetail: 'Connection not found.',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const health = await this.provider.checkConnection(row.externalId);
+    await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
+    if (!health.ok) {
+      return {
+        ok: false,
+        healthDetail: health.detail,
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'NOT_READY',
+      };
+    }
+    try {
+      const fromUtc = new Date(checkedAt).toISOString();
+      const toUtc = new Date(checkedAt + 14 * 24 * 3600_000).toISOString();
+      const busy = await this.provider.listBusy({ connectionRefs: [row.externalId], fromUtc, toUtc });
+      return {
+        ok: true,
+        healthDetail: health.detail,
+        busyCount: busy.length,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        healthDetail: e instanceof Error ? e.message : 'Could not read events.',
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'READ_FAILED',
+      };
+    }
   }
 
   // API keys.

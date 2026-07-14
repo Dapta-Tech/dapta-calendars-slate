@@ -127,7 +127,7 @@ export function TeamMembersPanel({
                     owner's role is locked so the team can't be left ownerless. */}
                 <span
                   className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
-                    isOwner ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                   }`}
                 >
                   {isOwner ? m.roleOwner : m.roleMember}
