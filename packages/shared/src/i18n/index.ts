@@ -39,6 +39,7 @@ export interface BookingMessages {
     confirmationSentTo: string;
     yourName: string;
     yourEmail: string;
+    invalidEmail: string;
     notes: string;
     heldUntil: string;
     slotTaken: string;
@@ -642,6 +643,7 @@ export const en: BookingMessages = {
     confirmationSentTo: 'A confirmation was sent to {email}.',
     yourName: 'Your name',
     yourEmail: 'Your email',
+    invalidEmail: 'Enter a valid email.',
     notes: 'Notes (optional)',
     heldUntil: 'Held until {time}',
     slotTaken: 'That time was just taken.',
@@ -1264,6 +1266,7 @@ export const es: BookingMessages = {
     confirmationSentTo: 'Enviamos una confirmación a {email}.',
     yourName: 'Tu nombre',
     yourEmail: 'Tu correo',
+    invalidEmail: 'Ingresa un correo válido.',
     notes: 'Notas (opcional)',
     heldUntil: 'Reservado hasta las {time}',
     slotTaken: 'Ese horario acaba de ocuparse.',

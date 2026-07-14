@@ -10,6 +10,10 @@ import {
   type DisplaySlot,
   type Slot,
 } from '@slate/shared';
+
+/** Mirror of the server's attendee-email rule — catches the 400 before a
+ *  round-trip, so a typo never costs the visitor their filled-in form. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
@@ -65,6 +69,14 @@ export function BookingFlow({
   const [holdError, setHoldError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
+  // CONTROLLED values for every visible input: React 19 resets uncontrolled
+  // form fields when the action returns, so a server-side 400 used to wipe
+  // everything the visitor had typed (QA2 fix 3).
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [notes, setNotes] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
 
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
@@ -231,7 +243,18 @@ export function BookingFlow({
 
       <aside aria-label="Your details" className="md:sticky md:top-6 md:self-start">
         {selected ? (
-          <form action={formAction} className="bp-card flex flex-col gap-3 border border-border bg-card p-4">
+          <form
+            action={formAction}
+            // Client-side email gate: block the submit (and the field wipe it
+            // used to cause) instead of round-tripping a guaranteed 400.
+            onSubmit={(e) => {
+              if (!EMAIL_RE.test(email.trim())) {
+                e.preventDefault();
+                setEmailError(m.invalidEmail);
+              }
+            }}
+            className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
+          >
             <input type="hidden" name="accountCode" value={accountCode} />
             <input type="hidden" name="ownerSlug" value={ownerSlug} />
             <input type="hidden" name="kind" value={mode} />
@@ -253,16 +276,47 @@ export function BookingFlow({
 
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.yourName} <span className="text-destructive">*</span></span>
-              <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
+              <input
+                name="name"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2"
+              />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.yourEmail} <span className="text-destructive">*</span></span>
-              <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
+              <input
+                name="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (emailError) setEmailError(null);
+                }}
+                onBlur={() =>
+                  setEmailError(
+                    email.trim() && !EMAIL_RE.test(email.trim()) ? m.invalidEmail : null,
+                  )
+                }
+                aria-invalid={!!emailError}
+                className={`rounded-md border bg-background px-3 py-2 ${
+                  emailError ? 'border-destructive' : 'border-input'
+                }`}
+              />
+              {emailError ? (
+                <span role="alert" className="text-xs text-destructive">
+                  {emailError}
+                </span>
+              ) : null}
             </label>
 
             {bookingFields.map((f) => {
               const validate = (v: string) =>
                 setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
+              const setAnswer = (v: string) => setAnswers((a) => ({ ...a, [f.name]: v }));
+              const value = answers[f.name] ?? '';
               const isMulti = f.type === 'textarea' || f.type === 'guests';
               return (
                 <label key={f.name} className="flex flex-col gap-1 text-sm">
@@ -277,6 +331,8 @@ export function BookingFlow({
                       required={f.required}
                       rows={2}
                       placeholder={f.type === 'guests' ? 'guest1@example.com, guest2@example.com' : f.placeholder}
+                      value={value}
+                      onChange={(e) => setAnswer(e.target.value)}
                       onBlur={(e) => validate(e.target.value)}
                       className="rounded-md border border-input bg-background px-3 py-2"
                     />
@@ -286,6 +342,8 @@ export function BookingFlow({
                       type={f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : f.type === 'number' ? 'number' : 'text'}
                       required={f.required}
                       placeholder={f.placeholder}
+                      value={value}
+                      onChange={(e) => setAnswer(e.target.value)}
                       onBlur={(e) => validate(e.target.value)}
                       className="rounded-md border border-input bg-background px-3 py-2"
                     />
@@ -299,7 +357,13 @@ export function BookingFlow({
 
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.notes}</span>
-              <textarea name="notes" rows={2} className="rounded-md border border-input bg-background px-3 py-2" />
+              <textarea
+                name="notes"
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2"
+              />
             </label>
 
             {intakeError ? <p className="text-sm text-destructive">{result!.message}</p> : null}
