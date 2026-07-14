@@ -8,8 +8,9 @@ import { cn } from '@/lib/cn';
  * DateTimePicker — a token-driven replacement for <input type="datetime-local">.
  * The native control renders an un-themeable browser popup (white surface,
  * browser-blue selection) that fails the Design Quality Bar on the dark theme
- * — same rationale as TimeField. This is a month calendar grid + a 30-min-step
- * time list, both styled like the slot-grid buttons in host-booking-form.
+ * — same rationale as TimeField. This is a month calendar grid + a time list
+ * (stepMinutes granularity — the event type's slot interval, QA2 fix 2), both
+ * styled like the slot-grid buttons in host-booking-form.
  *
  * Value in/out is the same wall-clock 'YYYY-MM-DDTHH:mm' string the native
  * input produced (no timezone attached), so callers keep owning the timezone
@@ -20,17 +21,15 @@ import { cn } from '@/lib/cn';
  * needed for calendar vocabulary.
  */
 
-const TIME_STEP_MIN = 30;
-
-const TIME_OPTIONS: string[] = (() => {
+function buildTimeOptions(stepMin: number): string[] {
+  // Guard nonsense steps (0, negative, >1 day) back to the 30-min default.
+  const step = Number.isFinite(stepMin) && stepMin >= 1 && stepMin <= 720 ? Math.round(stepMin) : 30;
   const out: string[] = [];
-  for (let h = 0; h < 24; h += 1) {
-    for (let mi = 0; mi < 60; mi += TIME_STEP_MIN) {
-      out.push(`${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`);
-    }
+  for (let t = 0; t < 24 * 60; t += step) {
+    out.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
   }
   return out;
-})();
+}
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const dateKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -65,6 +64,10 @@ export function DateTimePicker({
   maxDate,
   locale = 'en',
   timeLabel,
+  stepMinutes = 30,
+  dateStatusLabel,
+  timeStatusLabel,
+  missingLabel,
 }: {
   /** Wall-clock 'YYYY-MM-DDTHH:mm' string, or '' when nothing is picked yet. */
   value: string;
@@ -76,6 +79,14 @@ export function DateTimePicker({
   locale?: Locale;
   /** Accessible label for the time list (pass an i18n string). */
   timeLabel?: string;
+  /** Time-list granularity — pass the event type's slot interval (QA2 fix 2). */
+  stepMinutes?: number;
+  /** Status-bar labels (i18n): "Date" / "Time" / "not picked yet". When
+   *  provided, a summary bar shows both halves and flags the missing one, so
+   *  "Pick a time" errors stop reading as a contradiction (QA2 fix 8a). */
+  dateStatusLabel?: string;
+  timeStatusLabel?: string;
+  missingLabel?: string;
 }) {
   const parsed = parseValue(value);
   // Date and time are picked independently; onChange only fires once both
@@ -116,8 +127,14 @@ export function DateTimePicker({
   const leadingBlanks = (new Date(y, mo, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(y, mo + 1, 0).getDate();
 
+  const timeOptions = useMemo(() => buildTimeOptions(stepMinutes), [stepMinutes]);
+
   const monthFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }),
+    [locale],
+  );
+  const pickedDateFmt = useMemo(
+    () => new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'short', day: 'numeric' }),
     [locale],
   );
   const weekdays = useMemo(() => {
@@ -139,8 +156,38 @@ export function DateTimePicker({
     if (date) onChange(`${date}T${t}`);
   };
 
+  // Selection summary: both halves at a glance, the missing one flagged —
+  // date and time are picked independently, so without this the "Pick a time"
+  // error contradicts what the user sees selected (QA2 fix 8a).
+  const statusBar =
+    dateStatusLabel && timeStatusLabel ? (
+      <div className="flex flex-wrap gap-2 border-b border-border pb-2 text-xs" aria-live="polite">
+        <span
+          className={cn(
+            'rounded-sm px-2 py-1',
+            date ? 'bg-primary/10 font-medium text-primary' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          {dateStatusLabel}:{' '}
+          {date
+            ? pickedDateFmt.format(new Date(`${date}T00:00`))
+            : `— ${missingLabel ?? ''}`.trim()}
+        </span>
+        <span
+          className={cn(
+            'rounded-sm px-2 py-1',
+            time ? 'bg-primary/10 font-medium text-primary' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          {timeStatusLabel}: {time || `— ${missingLabel ?? ''}`.trim()}
+        </span>
+      </div>
+    ) : null;
+
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-3 sm:flex-row">
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-3">
+      {statusBar}
+      <div className="flex flex-col gap-3 sm:flex-row">
       {/* Month calendar */}
       <div className="flex-1">
         <div className="mb-2 flex items-center justify-between">
@@ -195,9 +242,11 @@ export function DateTimePicker({
                   selected
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-border bg-background hover:border-primary',
-                  // Current day stays visually anchored without stealing the
-                  // selected treatment.
-                  isToday && !selected && 'border-primary/60 font-semibold text-primary',
+                  // Today gets a dot UNDER the number, never a primary border —
+                  // a bordered today reads as a second selection (QA2 fix 8b).
+                  isToday &&
+                    !selected &&
+                    "relative font-semibold after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary after:content-['']",
                   disabled && 'cursor-not-allowed opacity-40 hover:border-border',
                 )}
               >
@@ -208,13 +257,13 @@ export function DateTimePicker({
         </div>
       </div>
 
-      {/* Time of day — 30-min steps, scrolls like the slot grid */}
+      {/* Time of day — stepMinutes granularity, scrolls like the slot grid */}
       <div
         role="group"
         aria-label={timeLabel}
         className="grid max-h-64 grid-cols-4 content-start gap-1 overflow-y-auto sm:w-44 sm:grid-cols-2"
       >
-        {TIME_OPTIONS.map((t) => {
+        {timeOptions.map((t) => {
           const selected = t === time;
           return (
             <button
@@ -233,6 +282,7 @@ export function DateTimePicker({
             </button>
           );
         })}
+      </div>
       </div>
     </div>
   );

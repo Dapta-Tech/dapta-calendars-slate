@@ -189,6 +189,13 @@ export interface BookingMessages {
       requiresConfirmation: string;
       hiddenLabel: string;
       intakeQuestions: string;
+      /** Built-in booking-page fields shown locked in the intake editor (QA2 fix 7). */
+      fixedFieldsHint: string;
+      fixedName: string;
+      fixedEmail: string;
+      fixedNotes: string;
+      alwaysAsked: string;
+      reservedWarning: string;
       namePlaceholder: string;
       labelPlaceholder: string;
       req: string;
@@ -266,6 +273,13 @@ export interface BookingMessages {
       attendeeEmail: string;
       attendeeTimezone: string;
       pickTime: string;
+      /** DateTimePicker status bar (QA2 fix 8): both halves shown, missing one flagged. */
+      pickerDate: string;
+      pickerTime: string;
+      pickerMissing: string;
+      pickDateTime: string;
+      /** "Times shown in {tz}" lead on the bookings list (QA2 fix 8c). */
+      timesShownIn: string;
       creating: string;
       createBooking: string;
       createdTitle: string;
@@ -499,6 +513,10 @@ export interface BookingMessages {
       back: string;
     };
     developer: {
+      /** What this page is FOR (QA2 fix 4) — plain-language leads per section. */
+      pageLead: string;
+      apiKeysLead: string;
+      webhooksLead: string;
       apiKeys: string;
       noKeys: string;
       revoke: string;
@@ -763,6 +781,12 @@ export const en: BookingMessages = {
       requiresConfirmation: 'Requires confirmation',
       hiddenLabel: 'Hidden',
       intakeQuestions: 'Intake questions',
+      fixedFieldsHint: 'The booking page always asks these — no need to add them below.',
+      fixedName: 'Your name',
+      fixedEmail: 'Your email',
+      fixedNotes: 'Notes',
+      alwaysAsked: 'built-in',
+      reservedWarning: 'Already asked automatically — attendees would answer this twice.',
       namePlaceholder: 'name',
       labelPlaceholder: 'Label',
       req: 'req',
@@ -839,6 +863,11 @@ export const en: BookingMessages = {
       attendeeEmail: 'Attendee email',
       attendeeTimezone: 'Attendee timezone',
       pickTime: 'Pick a time.',
+      pickerDate: 'Date',
+      pickerTime: 'Time',
+      pickerMissing: 'not picked yet',
+      pickDateTime: 'Pick a date and a time.',
+      timesShownIn: 'Times shown in {tz}',
       creating: 'Creating…',
       createBooking: 'Create booking',
       createdTitle: 'Booking created',
@@ -1100,6 +1129,12 @@ export const en: BookingMessages = {
       back: 'Back to notifications',
     },
     developer: {
+      pageLead:
+        'Tools for connecting external systems to your scheduling. If you only book through this dashboard, you don’t need anything here.',
+      apiKeysLead:
+        'Let another system (an AI agent, a CRM, your own app) check availability and create bookings through the API without using this dashboard. Each key is a password for that system — scopes limit what it can do.',
+      webhooksLead:
+        'Notify an external URL the moment something happens here (a booking is created, rescheduled, or cancelled) so other systems can react automatically — e.g. update a CRM or send a Slack message.',
       apiKeys: 'API keys',
       noKeys: 'No API keys.',
       revoke: 'Revoke',
@@ -1364,6 +1399,12 @@ export const es: BookingMessages = {
       requiresConfirmation: 'Requiere confirmación',
       hiddenLabel: 'Oculto',
       intakeQuestions: 'Preguntas del formulario',
+      fixedFieldsHint: 'La página de reservas siempre pregunta esto — no hace falta añadirlas abajo.',
+      fixedName: 'Tu nombre',
+      fixedEmail: 'Tu correo',
+      fixedNotes: 'Notas',
+      alwaysAsked: 'fija',
+      reservedWarning: 'Ya se pregunta automáticamente — el invitado respondería dos veces.',
       namePlaceholder: 'nombre',
       labelPlaceholder: 'Etiqueta',
       req: 'obl.',
@@ -1440,6 +1481,11 @@ export const es: BookingMessages = {
       attendeeEmail: 'Correo del invitado',
       attendeeTimezone: 'Zona horaria del invitado',
       pickTime: 'Elige una hora.',
+      pickerDate: 'Fecha',
+      pickerTime: 'Hora',
+      pickerMissing: 'sin elegir',
+      pickDateTime: 'Elige una fecha y una hora.',
+      timesShownIn: 'Horas en {tz}',
       creating: 'Creando…',
       createBooking: 'Crear reserva',
       createdTitle: 'Reserva creada',
@@ -1699,6 +1745,12 @@ export const es: BookingMessages = {
       back: 'Volver a notificaciones',
     },
     developer: {
+      pageLead:
+        'Herramientas para conectar sistemas externos con tu agenda. Si solo reservas desde este panel, no necesitas nada de esta página.',
+      apiKeysLead:
+        'Permiten que otro sistema (un agente de IA, un CRM, tu propia app) consulte disponibilidad y cree reservas por API sin usar este panel. Cada clave es una contraseña para ese sistema — los permisos limitan qué puede hacer.',
+      webhooksLead:
+        'Avisan a una URL externa en el momento en que algo pasa aquí (se crea, reagenda o cancela una reserva) para que otros sistemas reaccionen automáticamente — p. ej. actualizar un CRM o mandar un mensaje a Slack.',
       apiKeys: 'Claves API',
       noKeys: 'No hay claves API.',
       revoke: 'Revocar',

@@ -166,7 +166,9 @@ export function HostBookingForm({
   const submit = () =>
     startT(async () => {
       const start = mode === 'any' ? (customLocal ? wallClockToUtc(customLocal, tz) : '') : startUtc;
-      if (!start) return setResult({ ok: false, message: m.pickTime });
+      // 'any' mode needs BOTH halves picked — say so, "Pick a time" alone
+      // contradicts a visibly selected time when the date is missing (QA2 fix 8a).
+      if (!start) return setResult({ ok: false, message: mode === 'any' ? m.pickDateTime : m.pickTime });
       const r = await createHostBookingAction({
         handle: handle || undefined,
         slug,
@@ -264,6 +266,12 @@ export function HostBookingForm({
             onChange={setCustomLocal}
             locale={locale}
             timeLabel={m.pickTime}
+            // The event type's own slot granularity — a 15-min event offers
+            // 15-min steps here, not a hardcoded 30 (QA2 fix 2).
+            stepMinutes={event?.slotInterval ?? event?.lengthMinutes ?? 30}
+            dateStatusLabel={m.pickerDate}
+            timeStatusLabel={m.pickerTime}
+            missingLabel={m.pickerMissing}
           />
         </div>
       )}

@@ -197,6 +197,10 @@ export interface EventType {
   lengthMinutes: number;
   location: string | null;
   hidden: boolean;
+  minimumBookingNotice: number;
+  beforeEventBuffer: number;
+  afterEventBuffer: number;
+  slotInterval: number | null;
   schedulingType: string | null;
   requiresConfirmation: boolean;
   seatsPerTimeSlot: number | null;
