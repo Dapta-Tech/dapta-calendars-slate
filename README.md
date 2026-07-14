@@ -87,7 +87,9 @@ packages/
 ```
 
 The web app talks to the API over HTTP — it never imports the database or engine
-directly, so the two deploy independently.
+directly, so the two deploy independently. See [`ARCHITECTURE.md`](ARCHITECTURE.md)
+for the request flows, the package dependency direction, and the four
+ports/adapters seams (auth, calendar, email, entitlements).
 
 ### Double-booking safety (dual enforcement)
 
@@ -129,12 +131,17 @@ Everything has a safe default (see [`.env.example`](.env.example)). Copy it to
 
 ## Deploy
 
-Slate is **deployment-agnostic** (Node runtime, no host-only APIs).
+Dapta Calendars is **deployment-agnostic** (Node runtime, no host-only APIs).
+See **[`SELF-HOSTING.md`](SELF-HOSTING.md)** for the full production guide —
+Docker Compose quickstart, building the two images, the complete environment
+reference, reverse-proxy/TLS, auth & email options, connecting an external
+calendar backend, and upgrades/rollback.
 
-- **Vercel** (web): import the repo, set the project root to `apps/web`, set
-  `NEXT_PUBLIC_API_URL` to your API URL. Deploy the API separately (below).
-- **Docker / any Node host**: `apps/web/Dockerfile` (Next standalone) and
-  `apps/api/Dockerfile` (Node runtime). Point `DATABASE_URL` at Postgres.
+- **Docker / any Node host**: `docker-compose.prod.yml` is the reference wiring;
+  `apps/web/Dockerfile` (Next standalone) and `apps/api/Dockerfile` (Node runtime)
+  build the two images. Point `DATABASE_URL` at Postgres.
+- **Vercel** (web) + separate API host: import the repo, set the project root to
+  `apps/web`, and set `NEXT_PUBLIC_API_URL` (build-time) to your API URL.
 
 ## Contributing
 
