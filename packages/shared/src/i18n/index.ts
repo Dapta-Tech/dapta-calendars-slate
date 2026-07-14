@@ -204,6 +204,17 @@ export interface BookingMessages {
       weight: string;
       fixedHost: string;
       fixedHostHint: string;
+      /** The read-only "which calendar is this linked to" line (Felipe:
+       *  "cómo está el calendario conectado al evento, esto no hace sentido"). */
+      calendarLinkManage: string;
+      /** {calendar} interpolates the connection label (e.g. an email). */
+      calendarLinkBoth: string;
+      calendarLinkWriteOnly: string;
+      /** {n} interpolates the conflict-checked calendar count. */
+      calendarLinkConflictsOnly: string;
+      calendarLinkNoDestination: string;
+      calendarLinkNone: string;
+      calendarLinkConnect: string;
     };
     availability: {
       title: string;
@@ -447,6 +458,17 @@ export interface BookingMessages {
       connectedPageClose: string;
       connectedPageErrorTitle: string;
       connectedPageErrorBody: string;
+      /** The "Test / Run check" self-test — the trust-building proof that
+       *  conflict-checking actually reads the host's real calendar. */
+      testButton: string;
+      testRunning: string;
+      /** {n} interpolates the busy-event count read in the next 14 days. */
+      testOkConflictsOn: string;
+      testOkConflictsOff: string;
+      testFailDisconnected: string;
+      testFailNotReady: string;
+      testFailReadFailed: string;
+      testReconnect: string;
     };
     login: {
       title: string;
@@ -784,6 +806,13 @@ export const en: BookingMessages = {
       weight: 'Weight',
       fixedHost: 'Fixed',
       fixedHostHint: 'Always on every booking',
+      calendarLinkManage: 'Manage in Calendars',
+      calendarLinkBoth: 'Conflicts checked against & new events added to: {calendar}',
+      calendarLinkWriteOnly: 'New events added to: {calendar}. Checked against {n} calendar(s) for conflicts.',
+      calendarLinkConflictsOnly: 'Checked against {n} calendar(s) for conflicts. No calendar is set to receive new events.',
+      calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
+      calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
+      calendarLinkConnect: 'Connect one',
     },
     availability: {
       title: 'Availability',
@@ -1025,6 +1054,14 @@ export const en: BookingMessages = {
       connectedPageClose: 'Close window',
       connectedPageErrorTitle: 'Could not connect',
       connectedPageErrorBody: 'Close this window and try again from the calendars page.',
+      testButton: 'Test',
+      testRunning: 'Testing…',
+      testOkConflictsOn: 'Working — read {n} events from your calendar in the next 14 days; conflict-checking is ON for this calendar.',
+      testOkConflictsOff: 'Working — read {n} events from your calendar in the next 14 days, but conflict-checking is OFF for this calendar. Turn on "Check for conflicts" above.',
+      testFailDisconnected: 'Not connected — this calendar isn’t linked yet.',
+      testFailNotReady: 'Could not reach your calendar — reauthorization may be required.',
+      testFailReadFailed: 'Connected, but reading your events failed.',
+      testReconnect: 'Reconnect',
     },
     login: {
       title: 'Sign in',
@@ -1388,6 +1425,13 @@ export const es: BookingMessages = {
       weight: 'Peso',
       fixedHost: 'Fijo',
       fixedHostHint: 'Siempre en cada reserva',
+      calendarLinkManage: 'Administrar en Calendarios',
+      calendarLinkBoth: 'Conflictos verificados contra y eventos nuevos añadidos a: {calendar}',
+      calendarLinkWriteOnly: 'Eventos nuevos añadidos a: {calendar}. Verificado contra {n} calendario(s) para conflictos.',
+      calendarLinkConflictsOnly: 'Verificado contra {n} calendario(s) para conflictos. Ningún calendario está configurado para recibir eventos nuevos.',
+      calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
+      calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
+      calendarLinkConnect: 'Conectar uno',
     },
     availability: {
       title: 'Disponibilidad',
@@ -1630,6 +1674,14 @@ export const es: BookingMessages = {
       connectedPageClose: 'Cerrar ventana',
       connectedPageErrorTitle: 'No se pudo conectar',
       connectedPageErrorBody: 'Cierra esta ventana e inténtalo de nuevo desde la página de calendarios.',
+      testButton: 'Probar',
+      testRunning: 'Probando…',
+      testOkConflictsOn: 'Funciona — se leyeron {n} eventos de tu calendario en los próximos 14 días; la verificación de conflictos está ACTIVADA para este calendario.',
+      testOkConflictsOff: 'Funciona — se leyeron {n} eventos de tu calendario en los próximos 14 días, pero la verificación de conflictos está DESACTIVADA para este calendario. Activa "Verificar conflictos" arriba.',
+      testFailDisconnected: 'No conectado — este calendario aún no está vinculado.',
+      testFailNotReady: 'No se pudo contactar tu calendario — puede requerir reautorización.',
+      testFailReadFailed: 'Conectado, pero no se pudieron leer tus eventos.',
+      testReconnect: 'Reconectar',
     },
     login: {
       title: 'Iniciar sesión',
