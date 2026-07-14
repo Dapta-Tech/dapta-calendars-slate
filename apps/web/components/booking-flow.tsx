@@ -3,7 +3,6 @@
 import { useActionState, useMemo, useState } from 'react';
 import { commonTimeZones,
   groupSlotsByDay,
-  detectTimeZone,
   formatSlotDateTime,
   getMessages,
   t,
