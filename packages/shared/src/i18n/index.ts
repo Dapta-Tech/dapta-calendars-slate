@@ -260,6 +260,7 @@ export interface BookingMessages {
       fromSlots: string;
       anyTime: string;
       noSlotsRange: string;
+      loadingSlots: string;
       dateTimeHost: string;
       attendeeName: string;
       attendeeEmail: string;
@@ -830,6 +831,7 @@ export const en: BookingMessages = {
       fromSlots: 'From available slots',
       anyTime: 'Any time (outside availability)',
       noSlotsRange: 'No slots in range.',
+      loadingSlots: 'Loading available times…',
       dateTimeHost: 'Date & time (host timezone)',
       attendeeName: 'Attendee name',
       attendeeEmail: 'Attendee email',
@@ -1428,6 +1430,7 @@ export const es: BookingMessages = {
       fromSlots: 'Desde horarios disponibles',
       anyTime: 'Cualquier hora (fuera de disponibilidad)',
       noSlotsRange: 'No hay horarios en el rango.',
+      loadingSlots: 'Cargando horarios disponibles…',
       dateTimeHost: 'Fecha y hora (zona del anfitrión)',
       attendeeName: 'Nombre del invitado',
       attendeeEmail: 'Correo del invitado',

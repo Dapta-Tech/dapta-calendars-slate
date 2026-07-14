@@ -113,6 +113,9 @@ export function HostBookingForm({
   // Why the slot list is empty: a config-error reason code from the API, or
   // 'LOAD_FAILED' when the request itself failed — each gets distinct copy.
   const [slotsIssue, setSlotsIssue] = useState<string | null>(null);
+  // In-flight fetch: render a loading state, never a premature "No slots in
+  // range." that reads as truth on slow connections (QA fix 12).
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [startUtc, setStartUtc] = useState('');
   const [customLocal, setCustomLocal] = useState('');
   const [name, setName] = useState('');
@@ -136,6 +139,7 @@ export function HostBookingForm({
     if (mode !== 'slots' || !slug) return;
     const from = new Date().toISOString();
     const to = new Date(Date.now() + 21 * 86_400_000).toISOString();
+    setSlotsLoading(true);
     loadHostSlotsAction(slug, from, to)
       .then((r) => {
         setSlots(r.slots);
@@ -144,7 +148,8 @@ export function HostBookingForm({
       .catch(() => {
         setSlots([]);
         setSlotsIssue('LOAD_FAILED');
-      });
+      })
+      .finally(() => setSlotsLoading(false));
     setStartUtc('');
   }, [mode, slug, reloadKey]);
 
@@ -231,7 +236,11 @@ export function HostBookingForm({
             </button>
           ))}
           {slots.length === 0 ? (
-            <EmptySlotsNotice issue={slotsIssue} eventId={event?.id} m={m} />
+            slotsLoading ? (
+              <span className="col-span-full text-sm text-muted-foreground">{m.loadingSlots}</span>
+            ) : (
+              <EmptySlotsNotice issue={slotsIssue} eventId={event?.id} m={m} />
+            )
           ) : null}
         </div>
       ) : (
