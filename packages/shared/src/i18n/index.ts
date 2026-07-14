@@ -227,6 +227,13 @@ export interface BookingMessages {
       calendarLinkNoDestination: string;
       calendarLinkNone: string;
       calendarLinkConnect: string;
+      /** PHASE 2 — the editable "Calendars for this event" section (personal
+       *  events only; replaces the old read-only calendarLink* notice above). */
+      calendarsSectionTitle: string;
+      calendarsSectionHint: string;
+      calendarsCheckConflicts: string;
+      calendarsAddEventsHere: string;
+      calendarsManageLink: string;
     };
     availability: {
       title: string;
@@ -848,6 +855,11 @@ export const en: BookingMessages = {
       calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
       calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
       calendarLinkConnect: 'Connect one',
+      calendarsSectionTitle: 'Calendars for this event',
+      calendarsSectionHint: 'Choose which connected calendars this event checks for conflicts, and where booked events are added.',
+      calendarsCheckConflicts: 'Check for conflicts',
+      calendarsAddEventsHere: 'Add events here',
+      calendarsManageLink: 'Manage calendars',
     },
     availability: {
       title: 'Availability',
@@ -1486,6 +1498,11 @@ export const es: BookingMessages = {
       calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
       calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
       calendarLinkConnect: 'Conectar uno',
+      calendarsSectionTitle: 'Calendarios para este evento',
+      calendarsSectionHint: 'Elige qué calendarios conectados verifica este evento para conflictos, y dónde se añaden los eventos reservados.',
+      calendarsCheckConflicts: 'Verificar conflictos',
+      calendarsAddEventsHere: 'Añadir eventos aquí',
+      calendarsManageLink: 'Administrar calendarios',
     },
     availability: {
       title: 'Disponibilidad',

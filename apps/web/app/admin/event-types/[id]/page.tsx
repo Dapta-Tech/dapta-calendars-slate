@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getMessages } from '@slate/shared';
-import { adminApi, ApiError, describeCalendarLink } from '@/lib/admin-api';
+import { adminApi, ApiError } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from '../event-type-form';
 
@@ -18,7 +18,6 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
     adminApi.listConnections(),
   ]);
   if (!et) notFound();
-  const calendarLink = describeCalendarLink(connections);
   const msgs = getMessages(await getLocale());
   const m = msgs.admin.eventTypes;
 
@@ -39,7 +38,7 @@ export default async function EditEventType({ params }: { params: Promise<{ id: 
         messages={m}
         scheduling={et.teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
-        calendarLink={et.teamId ? undefined : calendarLink}
+        connections={et.teamId ? undefined : connections}
         backHref="/admin/event-types"
         backLabel={m.title}
         heading={et.title}
