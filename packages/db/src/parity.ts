@@ -1002,10 +1002,12 @@ export async function cancelBooking(
   const nowIso = { startUtc: new Date(Number(b.start_ms)).toISOString(), endUtc: new Date(Number(b.end_ms)).toISOString() };
   // P1-1: cancel is IDEMPOTENT. A retried cancel of an already-cancelled booking
   // returns success (was 410 GONE, which broke agent retry loops that treat
-  // non-2xx as failure). Only a truly non-cancellable state (pending/rejected)
-  // is GONE.
+  // non-2xx as failure). Only a truly non-cancellable state (rejected) is GONE.
+  // QA fix 3: PENDING is cancellable too — an agent that booked a
+  // requires-confirmation event via the machine API must be able to retract
+  // it without waiting for a human to decline from the dashboard.
   if (b.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
-  if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
+  if (b.status !== 'accepted' && b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
   await db.run(
     sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${args.reason ?? null},
