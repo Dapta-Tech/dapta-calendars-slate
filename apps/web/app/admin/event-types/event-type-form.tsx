@@ -112,6 +112,16 @@ export function EventTypeForm({
   );
   const setHost = (memberId: string, patch: Partial<HostRow>) =>
     setHosts((hs) => hs.map((h) => (h.memberId === memberId ? { ...h, ...patch } : h)));
+  /** Swap a question with its neighbour — bookingFields is an ordered array and
+   *  every render already respects it; this is the only reorder UI (QA3 fix 6b). */
+  const moveField = (i: number, dir: -1 | 1) =>
+    setFields((fs) => {
+      const j = i + dir;
+      if (j < 0 || j >= fs.length) return fs;
+      const next = [...fs];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
 
   const [res, setRes] = useState<ActionResult | null>(null);
   const [pending, start] = useTransition();
@@ -357,6 +367,24 @@ export function EventTypeForm({
                 <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
                 {m.req}
               </label>
+              <button
+                type="button"
+                disabled={i === 0}
+                onClick={() => moveField(i, -1)}
+                aria-label={`${m.moveUp} — ${f.label || f.name}`}
+                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+              >
+                <ChevronIcon direction="up" />
+              </button>
+              <button
+                type="button"
+                disabled={i === fields.length - 1}
+                onClick={() => moveField(i, 1)}
+                aria-label={`${m.moveDown} — ${f.label || f.name}`}
+                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+              >
+                <ChevronIcon direction="down" />
+              </button>
               <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
             </div>
             {RESERVED_FIELD_NAMES.has(f.name.toLowerCase()) ? (
@@ -391,5 +419,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Same inline chevron style as the DateTimePicker's month arrows. */
+function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      {direction === 'up' ? <path d="M18 15l-6-6-6 6" /> : <path d="M6 9l6 6 6-6" />}
+    </svg>
   );
 }
