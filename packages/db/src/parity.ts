@@ -956,6 +956,7 @@ export async function rescheduleBooking(
         b.host_member_id,
         args.newStartMs,
         newEndMs,
+        b.event_type_id,
       );
       if (externalBusy.some((x) => x.start.getTime() < newEndMs && x.end.getTime() > args.newStartMs)) {
         return { ok: false, reason: 'SLOT_TAKEN' };
@@ -1327,6 +1328,34 @@ function decodeBookingCursor(cursor?: string): { startMs: number; uid: string } 
 
 // --- Connections (behind the CalendarProvider port — generic, no vendor) --
 
+/**
+ * The Dapta-platform identity behind a member, used to key connections in the
+ * external credential broker so this app shares connections with the rest of
+ * Dapta instead of siloing its own (a member who already connected a calendar
+ * in the main Dapta app must see it here, and vice versa).
+ *
+ * `iamUserId` is `member.external_id` — the upstream identity service's `sub`
+ * claim (see `auth.provider.workos.ts`), i.e. the SAME user id the rest of the
+ * Dapta platform uses. Local/dev members (the `local` auth stub) have an empty
+ * `external_id`, so this falls back to the member's own row id — a stable
+ * per-member value that keeps local dev self-consistent; it is superseded
+ * automatically the moment a deployment switches to the real `workos` auth
+ * provider, with no code change here.
+ */
+export interface MemberIdentity {
+  iamUserId: string;
+  email: string | null;
+}
+
+export async function getMemberIdentity(db: Db, memberId: string): Promise<MemberIdentity | null> {
+  const row = await db.get<{ external_id: string | null; email: string | null }>(
+    sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`,
+  );
+  if (!row) return null;
+  const iamUserId = row.external_id && row.external_id.length > 0 ? row.external_id : memberId;
+  return { iamUserId, email: row.email };
+}
+
 export interface ConnectionView {
   id: string;
   provider: string;
@@ -1407,26 +1436,41 @@ export async function createConnection(
   return { id };
 }
 
-export async function deleteConnection(
+/**
+ * Disconnect any calendar — including the sole/destination one. A host is
+ * always allowed to walk down to zero connections: with no connections left,
+ * the availability engine already degrades cleanly to availability-only
+ * (working hours minus local Slate bookings, no external busy-subtract) —
+ * `loadExternalBusy` returns `[]` and calendar write-out is a no-op with no
+ * destination — so there is nothing left to guard here. Idempotent (deleting
+ * an already-gone id still reports success).
+ *
+ * PHASE 2 (per-event calendars): cascade the disconnect app-level (this schema
+ * has no DB FKs — same convention as event_type_host/booking_host) — drop any
+ * `event_type_conflict_calendar` rows that named this calendar, and null out
+ * `event_type.destination_calendar_id` where it pointed here. Both already
+ * degrade cleanly (calendar-refs.ts falls back to the member-level default),
+ * this just keeps no dangling references around.
+ */
+export async function deleteConnection(db: Db, memberId: string, id: string): Promise<{ ok: true }> {
+  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE connected_calendar_id = ${id}`);
+  await db.run(sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`);
+  await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
+  return { ok: true };
+}
+
+/** Persist a derived/backfilled account email for a connection (best-effort
+ *  read-time backfill — see AdminService#listConnections). */
+export async function setConnectionPrimaryEmail(
   db: Db,
   memberId: string,
   id: string,
-): Promise<{ ok: boolean; reason?: 'LAST_DESTINATION_REQUIRED' }> {
-  const conn = await db.get<{ is_destination: number }>(
-    sql`SELECT is_destination FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
+  primaryEmail: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE connected_calendar SET primary_email = ${primaryEmail}
+        WHERE id = ${id} AND member_id = ${memberId}`,
   );
-  if (!conn) return { ok: true }; // already gone — idempotent
-  // R20 guard: don't strand bookings with nowhere to write — a host that has a
-  // destination calendar must keep at least one. Unset `isDestination` first.
-  if (conn.is_destination) {
-    const others = await db.get<{ n: number }>(
-      sql`SELECT COUNT(*) AS n FROM connected_calendar
-          WHERE member_id = ${memberId} AND is_destination = 1 AND id <> ${id}`,
-    );
-    if (Number(others?.n ?? 0) === 0) return { ok: false, reason: 'LAST_DESTINATION_REQUIRED' };
-  }
-  await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
-  return { ok: true };
 }
 
 /**

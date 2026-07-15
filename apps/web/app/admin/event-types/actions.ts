@@ -28,6 +28,9 @@ export interface EventTypePayload {
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   /** Team events: set on CREATE only (QA2 fix 5). */
   teamId?: string;
+  /** PHASE 2 — per-event calendar selection (personal events only). */
+  conflictCalendarIds?: string[];
+  destinationCalendarId?: string | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

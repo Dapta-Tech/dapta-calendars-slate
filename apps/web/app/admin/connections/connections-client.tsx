@@ -79,14 +79,23 @@ function providerLabel(provider: string, m: ConnectionsMessages): string {
 
 /** Human label for a connection: account email first, else a readable manual
  *  calendar id; NEVER the opaque connection ref (an OAuth-discovered
- *  connection's externalId is an unreadable token). */
+ *  connection's externalId is an unreadable token) — that case falls back to
+ *  a muted "account unknown" (see `connectionAccountUnknown`) rather than
+ *  repeating the provider name, so a stack of same-provider rows never reads
+ *  as duplicated. */
 function connectionLabel(
-  c: { primaryEmail: string | null; externalId: string; provider: string },
+  c: { primaryEmail: string | null; externalId: string },
   m: ConnectionsMessages,
 ): string {
   if (c.primaryEmail) return c.primaryEmail;
   if (c.externalId.includes('@')) return c.externalId;
-  return providerLabel(c.provider, m);
+  return m.accountUnknown;
+}
+
+/** True when `connectionLabel` fell all the way back to "account unknown" —
+ *  drives the muted styling so that fallback never looks like a real label. */
+function connectionAccountUnknown(c: { primaryEmail: string | null; externalId: string }): boolean {
+  return !c.primaryEmail && !c.externalId.includes('@');
 }
 
 /**
@@ -119,19 +128,28 @@ function ConnectDialog({
   enabled,
   connections,
   m,
+  defaultEmail,
 }: {
   open: boolean;
   onClose: () => void;
   enabled: boolean;
   connections: Connection[];
   m: ConnectionsMessages;
+  defaultEmail?: string | null;
 }) {
   const router = useRouter();
-  const [stage, setStage] = useState<'choose' | 'waiting'>('choose');
+  // 'email' collects WHICH account is about to be connected before starting
+  // the OAuth popup — the Membrane subject is `${iamUserId}-${email}` (see
+  // `connectCalendarAction`), a distinct subject per connected account. This
+  // is what lets a host connect more than one calendar, and is the SAME "which
+  // account?" step the main Dapta app already asks before a calendar connect.
+  const [stage, setStage] = useState<'choose' | 'email' | 'waiting'>('choose');
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [pendingProvider, setPendingProvider] = useState<string | null>(null);
+  const [emailInput, setEmailInput] = useState('');
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeProvider = useRef<string>('google');
@@ -160,6 +178,8 @@ function ConnectDialog({
     setStage('choose');
     setMsg(null);
     setErr(null);
+    setPendingProvider(null);
+    setEmailInput('');
   }, [stopPolling]);
 
   const finish = useCallback(
@@ -196,7 +216,21 @@ function ConnectDialog({
     });
   }, [finish, m.connectSuccess]);
 
-  const beginConnect = (provider: string) => {
+  // Step 1 of 2: pick a provider, then ask which account (the email step) —
+  // never opens the popup yet, so no gesture is spent here.
+  const selectProvider = (provider: string) => {
+    setErr(null);
+    setPendingProvider(provider);
+    setEmailInput(defaultEmail ?? '');
+    setStage('email');
+  };
+
+  // Step 2: with an account email in hand, actually start the OAuth popup.
+  // Called directly from the email form's submit handler, so `window.open`
+  // still runs SYNCHRONOUSLY inside a user gesture (the "Continue" click) —
+  // popup blockers only trip on programmatic opens outside a gesture, and a
+  // later click is just as much a gesture as the very first one.
+  const beginConnect = (provider: string, email: string) => {
     setErr(null);
     activeProvider.current = provider;
     const kind = providerKind(provider);
@@ -214,7 +248,7 @@ function ConnectDialog({
     setStage('waiting');
     setMsg(m.connectHint);
     start(async () => {
-      const r = await connectCalendarAction(provider);
+      const r = await connectCalendarAction(provider, email);
       if (!r.enabled || !r.connectUrl) {
         if (!popup.closed) popup.close();
         setErr(r.message || m.connectFailed);
@@ -318,7 +352,7 @@ function ConnectDialog({
                   key={key}
                   type="button"
                   disabled={pending}
-                  onClick={() => beginConnect(key)}
+                  onClick={() => selectProvider(key)}
                   className="flex items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
                 >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
@@ -339,6 +373,48 @@ function ConnectDialog({
               );
             })}
           </div>
+        ) : stage === 'email' ? (
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!pendingProvider) return;
+              const trimmed = emailInput.trim();
+              if (!trimmed) return;
+              beginConnect(pendingProvider, trimmed);
+            }}
+          >
+            <p className="text-sm font-medium text-foreground">{m.emailStepTitle}</p>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">{m.emailStepLabel}</span>
+              <input
+                type="email"
+                required
+                autoFocus
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2"
+                placeholder="name@example.com"
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">{m.emailStepHelp}</p>
+            <div className="mt-1 flex justify-between">
+              <button
+                type="button"
+                onClick={() => setStage('choose')}
+                className="rounded-md border border-border px-4 py-2 text-sm"
+              >
+                {m.emailStepBack}
+              </button>
+              <button
+                type="submit"
+                disabled={pending || !emailInput.trim()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {m.emailStepContinue}
+              </button>
+            </div>
+          </form>
         ) : (
           <div className="flex flex-col items-center gap-3 rounded-md border border-border bg-muted/30 p-5 text-center">
             <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" aria-hidden />
@@ -644,7 +720,13 @@ function ConnectionRow({
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-2">
-              <span className="truncate font-medium text-foreground">{connectionLabel(c, m)}</span>
+              <span
+                className={`truncate font-medium ${
+                  connectionAccountUnknown(c) ? 'italic text-muted-foreground' : 'text-foreground'
+                }`}
+              >
+                {connectionLabel(c, m)}
+              </span>
               {c.isDestination ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
                   <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -766,12 +848,15 @@ export function ConnectionsClient({
   connections,
   status,
   messages: m,
+  defaultEmail,
 }: {
   title: string;
   subtitle: string;
   connections: Connection[];
   status: ProviderStatus;
   messages: ConnectionsMessages;
+  /** Best-effort prefill for the connect dialog's "which account?" prompt. */
+  defaultEmail?: string | null;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Optimistic mirror of the server list so the destination radio and conflict
@@ -838,8 +923,10 @@ export function ConnectionsClient({
     [run],
   );
 
-  // No optimistic removal: the row disappears on revalidation; on failure
-  // (e.g. R20 last-destination guard) the row stays and shows the reason.
+  // No optimistic removal: the row disappears on revalidation. Disconnecting
+  // the sole/destination calendar is allowed — the list can legitimately go to
+  // zero rows, which renders the empty "connect a calendar" state below
+  // (availability-only fallback, no error).
   const disconnect = useCallback((id: string) => run(id, null, () => deleteConnectionAction(id)), [run]);
 
   return (
@@ -938,6 +1025,7 @@ export function ConnectionsClient({
         enabled={status.enabled}
         connections={rows}
         m={m}
+        defaultEmail={defaultEmail}
       />
     </div>
   );

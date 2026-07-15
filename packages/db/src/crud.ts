@@ -47,6 +47,14 @@ export interface EventTypeView {
   hostMemberIds: string[];
   /** Per-host priority/weight/fixed (team events); empty for personal events. */
   hosts: HostDetail[];
+  /**
+   * PHASE 2 — per-event calendar selection (personal events only). Empty ⇒ the
+   * event falls back to the host's member-level `check_conflicts` calendars.
+   */
+  conflictCalendarIds: string[];
+  /** PHASE 2 — the connected_calendar this event writes booked events to; null
+   *  ⇒ falls back to the host's member-level `is_destination` calendar. */
+  destinationCalendarId: string | null;
 }
 
 interface EventTypeDbRow {
@@ -68,15 +76,20 @@ interface EventTypeDbRow {
   requires_confirmation: number;
   seats_per_time_slot: number | null;
   booking_fields: unknown;
+  destination_calendar_id: string | null;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
-  after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields`;
+  after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields,
+  destination_calendar_id`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
     sql`SELECT member_id, is_fixed, priority, weight FROM event_type_host WHERE event_type_id = ${r.id}`,
+  );
+  const conflictCalendars = await db.all<{ connected_calendar_id: string }>(
+    sql`SELECT connected_calendar_id FROM event_type_conflict_calendar WHERE event_type_id = ${r.id}`,
   );
   return {
     id: r.id,
@@ -104,7 +117,55 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
       weight: h.weight,
       isFixed: h.is_fixed === 1,
     })),
+    conflictCalendarIds: conflictCalendars.map((c) => c.connected_calendar_id),
+    destinationCalendarId: r.destination_calendar_id,
   };
+}
+
+/** Keep only ids that are `connected_calendar` rows owned by `memberId` —
+ *  cross-member/cross-account ids are silently dropped (same discipline as
+ *  `setEventTypeHostsDetailed`'s cross-tenant member filter). */
+async function ownedCalendarIds(db: Db, memberId: string, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const rows = await db.all<{ id: string }>(sql`SELECT id FROM connected_calendar WHERE member_id = ${memberId}`);
+  const owned = new Set(rows.map((r) => r.id));
+  return ids.filter((id) => owned.has(id));
+}
+
+/** Validate a destination-calendar id belongs to `memberId`; missing/foreign → null
+ *  (never silently point an event at someone else's calendar). */
+async function ownedDestinationCalendarId(
+  db: Db,
+  memberId: string,
+  id: string | null | undefined,
+): Promise<string | null> {
+  if (!id) return null;
+  const row = await db.get<{ id: string }>(
+    sql`SELECT id FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
+  );
+  return row ? id : null;
+}
+
+/**
+ * Replace the per-event conflict-calendar override for `eventTypeId` with
+ * `connectedCalendarIds` (only ids owned by `memberId` are kept). An empty
+ * array clears the override — the event falls back to the member default.
+ */
+export async function setEventTypeConflictCalendars(
+  db: Db,
+  eventTypeId: string,
+  memberId: string,
+  connectedCalendarIds: string[],
+): Promise<void> {
+  const owned = await ownedCalendarIds(db, memberId, connectedCalendarIds);
+  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${eventTypeId}`);
+  const now = Date.now();
+  for (const connectedCalendarId of owned) {
+    await db.run(
+      sql`INSERT INTO event_type_conflict_calendar (event_type_id, connected_calendar_id, created_at)
+          VALUES (${eventTypeId}, ${connectedCalendarId}, ${now})`,
+    );
+  }
 }
 
 export async function listEventTypes(
@@ -153,6 +214,14 @@ export interface EventTypeInputRepo {
   /** Per-host detail (priority/weight/fixed). Takes precedence over hostMemberIds. */
   hosts?: HostDetailInput[];
   teamId?: string | null;
+  /**
+   * PHASE 2 — per-event calendar selection (personal events only; ignored for
+   * team events — Phase 3). Empty array clears the override.
+   */
+  conflictCalendarIds?: string[];
+  /** PHASE 2 — the connected_calendar this event writes to; null clears the
+   *  override (falls back to the host's member-level destination). */
+  destinationCalendarId?: string | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -179,21 +248,31 @@ export async function createEventType(
 
   const id = randomUUID();
   const now = Date.now();
+  // PHASE 2 (personal events only — team events keep no per-event calendar
+  // config, Phase 3): validate the destination against the OWNER member's own
+  // connected calendars before it ever reaches the row.
+  const ownerMemberId = input.teamId ? null : memberId;
+  const destinationCalendarId = ownerMemberId
+    ? await ownedDestinationCalendarId(db, ownerMemberId, input.destinationCalendarId)
+    : null;
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
-          requires_confirmation, seats_per_time_slot, created_at)
-        VALUES (${id}, ${accountId}, ${input.teamId ? null : memberId}, ${input.teamId ?? null},
+          requires_confirmation, seats_per_time_slot, destination_calendar_id, created_at)
+        VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, input.location ?? null)}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
           ${input.schedulingType ?? null},
           ${jsonParam(db, input.bookingFields ?? null)}, ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
-          ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${now})`,
+          ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  if (ownerMemberId && input.conflictCalendarIds) {
+    await setEventTypeConflictCalendars(db, id, ownerMemberId, input.conflictCalendarIds);
+  }
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
 }
@@ -225,18 +304,31 @@ export async function updateEventType(
   if (input.seatsPerTimeSlot !== undefined) set('seats_per_time_slot', sql`${input.seatsPerTimeSlot ?? null}`);
   if (input.bookingFields !== undefined) set('booking_fields', jsonParam(db, input.bookingFields ?? null));
 
+  // PHASE 2 (personal events only — team events, `existing.teamId` set, keep no
+  // per-event calendar config, Phase 3): validate against the OWNER member's
+  // (existing.memberId) own connected calendars, never the caller's.
+  const isPersonal = !existing.teamId && !!existing.memberId;
+  if (isPersonal && input.destinationCalendarId !== undefined) {
+    const validated = await ownedDestinationCalendarId(db, existing.memberId!, input.destinationCalendarId);
+    set('destination_calendar_id', sql`${validated}`);
+  }
+
   if (sets.length > 0) {
     const assign = sets.reduce((a, c, i) => (i === 0 ? c : sql`${a}, ${c}`));
     await db.run(sql`UPDATE event_type SET ${assign} WHERE account_id = ${accountId} AND id = ${id}`);
   }
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
+  if (isPersonal && input.conflictCalendarIds !== undefined) {
+    await setEventTypeConflictCalendars(db, id, existing.memberId!, input.conflictCalendarIds);
+  }
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
 }
 
 export async function deleteEventType(db: Db, accountId: string, id: string): Promise<boolean> {
   await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`);
+  await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`);
   await db.run(sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`);
   return true;
 }

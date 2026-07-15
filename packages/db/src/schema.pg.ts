@@ -135,6 +135,20 @@ export const eventType = pgTable('event_type', {
   slotInterval: integer('slot_interval'),
   requiresConfirmation: integer('requires_confirmation').notNull().default(0),
   seatsPerTimeSlot: integer('seats_per_time_slot'),
+  /** Per-event calendar write destination override; NULL = fall back to the
+   *  host's member-level `is_destination` calendar (calendar-refs.ts). */
+  destinationCalendarId: text('destination_calendar_id'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+/**
+ * Per-event conflict-calendar override: the set of `connected_calendar` rows
+ * THIS event checks for conflicts. Empty for an event = fall back to the
+ * host's member-level `check_conflicts` calendars (calendar-refs.ts).
+ */
+export const eventTypeConflictCalendar = pgTable('event_type_conflict_calendar', {
+  eventTypeId: text('event_type_id').notNull(),
+  connectedCalendarId: text('connected_calendar_id').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -309,6 +323,7 @@ export const pgSchema = {
   teamMembership,
   eventType,
   eventTypeHost,
+  eventTypeConflictCalendar,
   booking,
   bookingAttendee,
   bookingHost,

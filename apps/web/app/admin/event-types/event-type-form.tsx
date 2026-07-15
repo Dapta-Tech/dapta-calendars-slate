@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { COUNTRIES, countryName, isReservedFieldName, t, type BookingMessages } from '@slate/shared';
-import type { EventCalendarLink, EventType } from '@/lib/admin-api';
+import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
+import type { Connection, EventType } from '@/lib/admin-api';
+import { connectionDisplayLabel } from '@/lib/connection-label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Radio } from '@/components/ui/radio';
 import { FormHeader } from '@/components/ui/page-header';
 import { useToast } from '@/components/toast';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
@@ -39,13 +41,31 @@ export interface TeamMemberOption {
 }
 
 /**
- * The read-only "which calendar is this actually linked to" line (Felipe:
- * "cómo está el calendario conectado al evento, esto no hace sentido"). This
- * product has no per-event calendar picker — every PERSONAL event implicitly
- * uses the host's connected calendar(s), which was invisible on this screen.
+ * PHASE 2 — the EDITABLE "Calendars for this event" section (personal events
+ * only; team events keep no per-event calendar config — Phase 3, each host
+ * has their own connection and a single line here would be misleading).
+ * Replaces the old read-only calendar-link notice (Felipe: "cómo está el
+ * calendario conectado al evento, esto no hace sentido") with per-connection
+ * "check for conflicts" + a single "add events here" destination choice.
+ * Gracefully degrades: 0 connections → the connect-a-calendar hint; 1
+ * connection → shown alone (both toggles default on, same as before).
  */
-function CalendarLinkNotice({ link, m }: { link: EventCalendarLink; m: EventTypeMessages }) {
-  if (!link.hasAnyConnection) {
+function CalendarsForEventSection({
+  connections,
+  conflictIds,
+  destinationId,
+  onToggleConflict,
+  onSetDestination,
+  m,
+}: {
+  connections: Connection[];
+  conflictIds: Set<string>;
+  destinationId: string | null;
+  onToggleConflict: (id: string) => void;
+  onSetDestination: (id: string) => void;
+  m: EventTypeMessages;
+}) {
+  if (connections.length === 0) {
     return (
       <p className="rounded-md border border-dashed border-border bg-background/60 p-3 text-sm text-muted-foreground">
         {m.calendarLinkNone}{' '}
@@ -55,20 +75,55 @@ function CalendarLinkNotice({ link, m }: { link: EventCalendarLink; m: EventType
       </p>
     );
   }
-  const body = link.destinationLabel
-    ? link.destinationIsConflictChecked
-      ? t(m.calendarLinkBoth, { calendar: link.destinationLabel })
-      : t(m.calendarLinkWriteOnly, { calendar: link.destinationLabel, n: link.conflictCheckedCount })
-    : link.conflictCheckedCount > 0
-      ? t(m.calendarLinkConflictsOnly, { n: link.conflictCheckedCount })
-      : m.calendarLinkNoDestination;
   return (
-    <p className="rounded-md border border-border bg-background/60 p-3 text-sm text-muted-foreground">
-      {body}{' '}
-      <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
-        {m.calendarLinkManage} →
-      </Link>
-    </p>
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-background/40 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-muted-foreground">{m.calendarsSectionTitle}</span>
+        <Link
+          href="/admin/connections"
+          className="shrink-0 text-xs font-medium text-primary underline underline-offset-4"
+        >
+          {m.calendarsManageLink} →
+        </Link>
+      </div>
+      <p className="text-xs text-muted-foreground">{m.calendarsSectionHint}</p>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-3 px-1 text-xs text-muted-foreground">
+          <span className="flex-1" />
+          <span className="w-28 text-center sm:w-32">{m.calendarsCheckConflicts}</span>
+          <span className="w-28 text-center sm:w-32">{m.calendarsAddEventsHere}</span>
+        </div>
+        {connections.map((c) => {
+          const label = connectionDisplayLabel(c);
+          return (
+            <div
+              key={c.id}
+              className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm" title={label}>
+                {label}
+              </span>
+              <label
+                className="flex w-28 cursor-pointer justify-center sm:w-32"
+                aria-label={`${label} — ${m.calendarsCheckConflicts}`}
+              >
+                <Checkbox checked={conflictIds.has(c.id)} onChange={() => onToggleConflict(c.id)} />
+              </label>
+              <label
+                className="flex w-28 cursor-pointer justify-center sm:w-32"
+                aria-label={`${label} — ${m.calendarsAddEventsHere}`}
+              >
+                <Radio
+                  name="destinationCalendarId"
+                  checked={destinationId === c.id}
+                  onChange={() => onSetDestination(c.id)}
+                />
+              </label>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -79,7 +134,7 @@ export function EventTypeForm({
   scheduling,
   teamMembers,
   teamId,
-  calendarLink,
+  connections,
   redirectOnSuccess,
   backHref,
   backLabel,
@@ -96,10 +151,10 @@ export function EventTypeForm({
   /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
    *  path to team events at all; editing derives the team from `initial`. */
   teamId?: string;
-  /** Which of the host's connected calendars this event checks/writes to —
-   *  omitted for TEAM events (each host has their own connection; a single
-   *  line here would be misleading). */
-  calendarLink?: EventCalendarLink;
+  /** The host's connected calendars, for the editable "Calendars for this
+   *  event" section (PHASE 2) — omitted for TEAM events (each host has their
+   *  own connection; a single per-event picker here would be misleading). */
+  connections?: Connection[];
   /** When set (the dedicated /new surface), navigate here after a create. */
   redirectOnSuccess?: string;
   /** FormHeader nav + title (the admin screen header system). */
@@ -139,6 +194,28 @@ export function EventTypeForm({
     })) ?? [],
   );
   const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
+  // PHASE 2 — per-event calendar selection (personal events only). Prefill
+  // from the event's own configured set when non-empty; otherwise default to
+  // the host's CURRENT member-level settings (all check_conflicts calendars +
+  // the member's is_destination calendar) — identical to today's behavior.
+  const [conflictIds, setConflictIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        initial?.conflictCalendarIds && initial.conflictCalendarIds.length > 0
+          ? initial.conflictCalendarIds
+          : (connections ?? []).filter((c) => c.checkConflicts).map((c) => c.id),
+      ),
+  );
+  const [destinationId, setDestinationId] = useState<string | null>(
+    initial?.destinationCalendarId ?? (connections ?? []).find((c) => c.isDestination)?.id ?? null,
+  );
+  const toggleConflict = (id: string) =>
+    setConflictIds((ids) => {
+      const next = new Set(ids);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [schedulingType, setSchedulingType] = useState<SchedulingMethod>(
     (SCHEDULING_METHODS as readonly string[]).includes(initial?.schedulingType ?? '')
       ? (initial!.schedulingType as SchedulingMethod)
@@ -229,7 +306,14 @@ export function EventTypeForm({
                 isFixed: schedulingType === 'fixed_round_robin' ? h.isFixed : false,
               })),
             }
-          : {}),
+          : connections
+            ? {
+                // PHASE 2 — personal events only; team events send no calendar
+                // config (the API ignores it for team events regardless).
+                conflictCalendarIds: [...conflictIds],
+                destinationCalendarId: destinationId,
+              }
+            : {}),
       };
       const r = await saveEventTypeAction(payload);
       setRes(r);
@@ -306,7 +390,16 @@ export function EventTypeForm({
         </select>
       </Field>
 
-      {calendarLink ? <CalendarLinkNotice link={calendarLink} m={m} /> : null}
+      {connections ? (
+        <CalendarsForEventSection
+          connections={connections}
+          conflictIds={conflictIds}
+          destinationId={destinationId}
+          onToggleConflict={toggleConflict}
+          onSetDestination={setDestinationId}
+          m={m}
+        />
+      ) : null}
 
       {isTeamEvent && scheduling ? (
         <div className="flex flex-col gap-4 rounded-md border border-border bg-background/40 p-4">
