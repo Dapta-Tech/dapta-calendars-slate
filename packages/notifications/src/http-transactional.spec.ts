@@ -188,7 +188,8 @@ describe('transactional-v1 wire — request contract', () => {
     const att = (body.attachments as Array<Record<string, unknown>>)[0]!;
     expect(att.filename).toBe('invite.ics');
     // Full ICS MIME value is forwarded verbatim (backend commit 0e737f1).
-    expect(att.contentType).toBe('text/calendar; method=REQUEST; charset=utf-8');
+    // No charset param: the managed service's attachment handler 500s on it.
+    expect(att.contentType).toBe('text/calendar; method=REQUEST');
     expect(att.disposition).toBe('attachment');
     // contentBase64 is the base64 of the ICS text.
     expect(Buffer.from(String(att.contentBase64), 'base64').toString('utf8')).toBe(
@@ -244,6 +245,16 @@ describe('transactional-v1 wire — response interpretation', () => {
       messageId: 'b',
       driver: 'http',
     });
+  });
+
+  it('in-flight provider states (deferred/queued/processed) count as dispatched — the provider owns delivery + retries', () => {
+    for (const status of ['deferred', 'queued', 'processed']) {
+      expect(interpretTransactionalResponse(201, { status, messageId: 'm' })).toEqual({
+        delivered: true,
+        messageId: 'm',
+        driver: 'http',
+      });
+    }
   });
 
   it('a valid idempotent duplicate (accepted + duplicate:true) counts as dispatched', () => {

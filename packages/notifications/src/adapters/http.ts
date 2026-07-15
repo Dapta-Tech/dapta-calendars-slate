@@ -252,9 +252,11 @@ interface TransactionalResponseBody {
  * the durable outbox retries / records the failure — never a silent drop (Req 6).
  *
  * A non-2xx response is a failure REGARDLESS of body (enforced first). On a 2xx:
- *   - `accepted` / `delivered`          → dispatched (a valid idempotent
- *                                          duplicate arrives as accepted/delivered
- *                                          with `duplicate:true` — still dispatched)
+ *   - `accepted`/`delivered`/`deferred`/ → dispatched (provider owns delivery +
+ *     `queued`/`processed`                 its own retries; deferred = greylisted/
+ *                                          rate-limited, retried up to 72h). A valid
+ *                                          idempotent duplicate arrives with
+ *                                          `duplicate:true` — still dispatched.
  *   - `blocked_by_policy`               → throw (a real, non-retryable refusal,
  *                                          surfaced so it lands in the outbox log)
  *   - any other / missing status        → throw (malformed — do not assume
@@ -275,9 +277,16 @@ export function interpretTransactionalResponse(
   const status = typeof b.status === 'string' ? b.status : undefined;
   const messageId = b.messageId ?? b.id;
 
-  // accepted/delivered is the sole success criterion (idempotent duplicates come
-  // through here with `duplicate:true` — still a real dispatch).
-  if (status === 'accepted' || status === 'delivered') {
+  // A DISPATCH is any state where the email service has taken ownership and the
+  // provider will deliver (now or on its own retry). `deferred`/`queued`/
+  // `processed` are SendGrid in-flight states — the provider accepted the mail
+  // and retries delivery itself (deferred = recipient MTA greylisted/rate-limited,
+  // retried for up to 72h). Treating them as failures made our outbox retry with
+  // the SAME idempotencyKey, which the service replays from its idempotency cache
+  // as the same `deferred` forever → the mail is stuck "pending" on our side even
+  // though the provider is delivering it. Idempotent duplicates arrive here too.
+  const DISPATCHED = new Set(['accepted', 'delivered', 'deferred', 'queued', 'processed']);
+  if (status && DISPATCHED.has(status)) {
     return { delivered: true, messageId, driver: 'http' };
   }
   if (status === 'blocked_by_policy') {
