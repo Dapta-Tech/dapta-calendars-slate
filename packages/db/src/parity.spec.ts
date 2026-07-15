@@ -269,6 +269,55 @@ describe('parity (SQLite in-memory)', () => {
     expect(again.ok).toBe(true);
   });
 
+  it('deleteConnection is a no-op (never cascades) against a calendar owned by ANOTHER member (optibot #32 IDOR fix)', async () => {
+    const { sql } = await import('drizzle-orm');
+    const alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    const jordanId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='jordan-lee'`))!.id;
+    const alexCal = await createConnection(db, {
+      accountId,
+      memberId: alexId,
+      provider: 'google',
+      externalId: 'alex@example.com',
+      isDestination: true,
+      checkConflicts: true,
+    });
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, {
+      conflictCalendarIds: [alexCal.id],
+      destinationCalendarId: alexCal.id,
+    });
+
+    // jordan-lee (a different member) submits alex's connection id — the
+    // cascade must not touch alex's connection OR alex's event-type config.
+    const out = await deleteConnection(db, jordanId, alexCal.id);
+    expect(out.ok).toBe(true); // idempotent no-op, not an error
+
+    const stillThere = await listConnections(db, alexId);
+    expect(stillThere.map((c) => c.id)).toContain(alexCal.id);
+    const view = await (await import('./crud')).getEventTypeById(db, accountId, et.id);
+    expect(view!.conflictCalendarIds).toEqual([alexCal.id]);
+    expect(view!.destinationCalendarId).toBe(alexCal.id);
+  });
+
+  it('setEventTypeConflictCalendars tolerates a duplicate id in conflictCalendarIds (optibot #32 dedup fix)', async () => {
+    const { sql } = await import('drizzle-orm');
+    const alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    const cal = await createConnection(db, {
+      accountId,
+      memberId: alexId,
+      provider: 'google',
+      externalId: 'alex2@example.com',
+    });
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    // The client re-submitting the same connected-calendar id twice must not
+    // throw a PRIMARY KEY constraint violation (500) — it must dedupe.
+    await expect(
+      updateEventType(db, accountId, et.id, { conflictCalendarIds: [cal.id, cal.id] }),
+    ).resolves.toMatchObject({ ok: true });
+    const view = await (await import('./crud')).getEventTypeById(db, accountId, et.id);
+    expect(view!.conflictCalendarIds).toEqual([cal.id]);
+  });
+
   it('reschedule verifies the manage token, moves the booking, and rotates the token', async () => {
     const startMs = await firstSlotMs(db);
     const created = await createBooking(db, {

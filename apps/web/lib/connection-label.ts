@@ -9,6 +9,15 @@
  * server-only graph into the browser bundle and fails to compile. Client
  * components (e.g. the per-event calendar picker) must import this function
  * from HERE, not from `admin-api.ts`.
+ *
+ * NOT the same fallback as the Connections page's own `connectionLabel` in
+ * `connections-client.tsx`, which — once no email/id is derivable — shows a
+ * localized, muted "account unknown" caption instead of the provider name
+ * (that page needs to visually distinguish an unresolved account from a
+ * legitimate label). This module intentionally stays import-free (no i18n
+ * messages object available here), so it falls back to the plain provider
+ * name instead; this call site (the per-event calendar picker, a secondary
+ * read-only list) doesn't need the same "unknown" affordance.
  */
 export interface ConnectionLabelInput {
   primaryEmail: string | null;

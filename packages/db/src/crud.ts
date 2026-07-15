@@ -124,12 +124,17 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
 
 /** Keep only ids that are `connected_calendar` rows owned by `memberId` —
  *  cross-member/cross-account ids are silently dropped (same discipline as
- *  `setEventTypeHostsDetailed`'s cross-tenant member filter). */
+ *  `setEventTypeHostsDetailed`'s cross-tenant member filter). Deduplicated
+ *  (optibot #32 fix): `conflictCalendarIds` is a bare `z.array(z.string())`
+ *  with no uniqueness constraint, so a client resubmitting the same id twice
+ *  would otherwise reach `setEventTypeConflictCalendars`'s INSERT loop twice
+ *  for the same `(event_type_id, connected_calendar_id)` PRIMARY KEY pair —
+ *  an unhandled constraint violation (500), not a validation error. */
 async function ownedCalendarIds(db: Db, memberId: string, ids: string[]): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await db.all<{ id: string }>(sql`SELECT id FROM connected_calendar WHERE member_id = ${memberId}`);
   const owned = new Set(rows.map((r) => r.id));
-  return ids.filter((id) => owned.has(id));
+  return [...new Set(ids)].filter((id) => owned.has(id));
 }
 
 /** Validate a destination-calendar id belongs to `memberId`; missing/foreign → null

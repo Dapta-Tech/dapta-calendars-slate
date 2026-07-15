@@ -1453,6 +1453,18 @@ export async function createConnection(
  * this just keeps no dangling references around.
  */
 export async function deleteConnection(db: Db, memberId: string, id: string): Promise<{ ok: true }> {
+  // Ownership check FIRST (optibot #32 fix): the cascade below is a write to
+  // event_type_conflict_calendar/event_type keyed only on `id`, with no
+  // member scoping of its own — running it unconditionally would let an
+  // authenticated member wipe another member's per-event calendar config by
+  // guessing/learning a connected_calendar UUID that isn't theirs, even
+  // though the final DELETE below (correctly memberId-scoped) would leave
+  // that other member's connection row untouched. `id` not owned by
+  // `memberId` = idempotent no-op, matching every other mutator in this file.
+  const owned = await db.get<{ id: string }>(
+    sql`SELECT id FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId} LIMIT 1`,
+  );
+  if (!owned) return { ok: true };
   await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE connected_calendar_id = ${id}`);
   await db.run(sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`);
   await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);

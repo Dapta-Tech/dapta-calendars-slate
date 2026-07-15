@@ -279,12 +279,12 @@ export interface Connection {
   lastActiveAt?: string | null;
 }
 
-/** Human label for a connection — moved to `./connection-label` (a pure,
- *  server-import-free module) so CLIENT components can use it without pulling
- *  this file's `next/headers`-dependent `auth-session` graph into the browser
- *  bundle. Re-exported here for any server-side caller that prefers this
- *  module's surface. */
-export { connectionDisplayLabel } from './connection-label';
+// Human label for a connection lives in `./connection-label` (a pure,
+// server-import-free module) so CLIENT components — the per-event calendar
+// picker (event-type-form.tsx) — can use it without pulling this file's
+// `next/headers`-dependent `auth-session` graph into the browser bundle.
+// (optibot #32: dropped the re-export here — its sole caller already imports
+// directly from `./connection-label`, so this file has no reason to surface it.)
 
 // NOTE: the old read-only "which calendar is this linked to" summary
 // (EventCalendarLink / describeCalendarLink) is superseded by the PHASE 2

@@ -310,10 +310,18 @@ export class AdminService {
   async listConnections(p: HostPrincipal) {
     const rows = await listConnections(this.db, p.memberId);
     if (!this.provider.enabled) return rows;
-    await Promise.all(
-      rows
-        .filter((c) => !c.primaryEmail)
-        .map(async (c) => {
+    // Backfill missing primaryEmail in small batches (optibot #32 fix): an
+    // unbounded Promise.all here would fan out one provider call PER
+    // un-backfilled row on a single page load — fine for the handful a member
+    // normally has, but with many stale rows it can hammer the provider's own
+    // rate limit. A page load is not latency-sensitive enough to need full
+    // parallelism; a small concurrency cap keeps the win (no serial N-deep
+    // wait) without the fan-out risk.
+    const BACKFILL_CONCURRENCY = 4;
+    const toBackfill = rows.filter((c) => !c.primaryEmail);
+    for (let i = 0; i < toBackfill.length; i += BACKFILL_CONCURRENCY) {
+      await Promise.all(
+        toBackfill.slice(i, i + BACKFILL_CONCURRENCY).map(async (c) => {
           try {
             const calendars = await this.provider.listCalendars(c.externalId);
             const email =
@@ -328,7 +336,8 @@ export class AdminService {
             /* best-effort — leave null */
           }
         }),
-    );
+      );
+    }
     return rows;
   }
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
