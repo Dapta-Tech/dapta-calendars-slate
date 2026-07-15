@@ -92,8 +92,18 @@ export interface AccountMember {
 
 /** True when the role may administer the workspace (manage members, settings). */
 export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || role === 'admin';
+export interface SetupStatus {
+  hasConnectedCalendar: boolean;
+  hasWorkingHours: boolean;
+  hasBookingLink: boolean;
+}
+
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
+  // Home "Get bookable" checklist — real data, not a static nag (see AdminService.setupStatus).
+  setupStatus: () => req<SetupStatus>('GET', '/v1/me/setup-status'),
+  // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
+  syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   // Vanity account slug (premium — included with the Dapta AI subscription).
   vanityStatus: () =>
     req<{ vanitySlug: string | null; shortCode: string; canClaim: boolean }>(
@@ -144,6 +154,7 @@ export const adminApi = {
   updateMember: (id: string, b: { role?: AccountRole; status?: MemberStatus }) =>
     req<AccountMember>('PATCH', `/v1/members/${id}`, b),
   removeMember: (id: string) => req<{ ok: boolean }>('DELETE', `/v1/members/${id}`),
+  transferOwnership: (id: string) => req<AccountMember>('POST', `/v1/members/${id}/transfer-ownership`),
 
   // Bookings (host)
   listBookings: (q = '') =>
@@ -152,11 +163,11 @@ export const adminApi = {
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
-  connectionToken: (provider?: string) =>
+  connectionToken: (provider?: string, email?: string) =>
     req<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }>(
       'POST',
       '/v1/connections/token',
-      { provider },
+      { provider, email },
     ),
   discoverConnections: (provider: string) =>
     req<Connection[]>('POST', '/v1/connections/discover', { provider }),
@@ -165,6 +176,10 @@ export const adminApi = {
   updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),
   pingConnection: (id: string) =>
     req<{ ok: boolean; enabled: boolean; message: string }>('POST', `/v1/connections/${id}/ping`, {}),
+  /** The "Test / Run check" self-test: actually reads busy events (not just
+   *  a reachability ping) so the host sees proof conflict-checking works. */
+  testConnection: (id: string) =>
+    req<ConnectionTestResult>('POST', `/v1/connections/${id}/test`, {}),
   deleteConnection: (id: string) => req<void>('DELETE', `/v1/connections/${id}`),
 
   // API keys
@@ -178,6 +193,8 @@ export const adminApi = {
   updateWebhook: (id: string, active: boolean) => req('PATCH', `/v1/webhooks/${id}`, { active }),
   pingWebhook: (id: string) =>
     req<{ ok: boolean; status?: number; message?: string }>('POST', `/v1/webhooks/${id}/ping`, {}),
+  webhookDeliveries: (id: string) =>
+    req<{ items: WebhookDeliveryRow[] }>('GET', `/v1/webhooks/${id}/deliveries`),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
   // Branding
@@ -195,6 +212,10 @@ export interface EventType {
   lengthMinutes: number;
   location: string | null;
   hidden: boolean;
+  minimumBookingNotice: number;
+  beforeEventBuffer: number;
+  afterEventBuffer: number;
+  slotInterval: number | null;
   schedulingType: string | null;
   requiresConfirmation: boolean;
   seatsPerTimeSlot: number | null;
@@ -202,6 +223,12 @@ export interface EventType {
   hostMemberIds: string[];
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;
+  /** PHASE 2 — per-event calendar selection (personal events only). Empty ⇒
+   *  falls back to the host's member-level check_conflicts calendars. */
+  conflictCalendarIds: string[];
+  /** PHASE 2 — the connected_calendar this event writes to; null ⇒ falls back
+   *  to the host's member-level destination calendar. */
+  destinationCalendarId: string | null;
 }
 export interface Schedule {
   id: string;
@@ -238,6 +265,42 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /**
+   * Only present on the RESPONSE of a `discoverConnections` call (never
+   * persisted — the vendor's own bookkeeping for this connection). Lets the
+   * connect dialog detect a completed RECONNECT of an already-linked account
+   * (same `externalId`, `updatedAt`/`lastActiveAt` advanced) — a naive "is
+   * this row new" check can never see a reconnect complete.
+   */
+  connectionId?: string;
+  connected?: boolean;
+  state?: string;
+  updatedAt?: string | null;
+  lastActiveAt?: string | null;
+}
+
+// Human label for a connection lives in `./connection-label` (a pure,
+// server-import-free module) so CLIENT components — the per-event calendar
+// picker (event-type-form.tsx) — can use it without pulling this file's
+// `next/headers`-dependent `auth-session` graph into the browser bundle.
+// (optibot #32: dropped the re-export here — its sole caller already imports
+// directly from `./connection-label`, so this file has no reason to surface it.)
+
+// NOTE: the old read-only "which calendar is this linked to" summary
+// (EventCalendarLink / describeCalendarLink) is superseded by the PHASE 2
+// per-event editable "Calendars for this event" section — see
+// `EventType.conflictCalendarIds` / `EventType.destinationCalendarId` above
+// and `CalendarsForEventSection` in event-type-form.tsx.
+
+/** Result of the "Test / Run check" self-test — proof the pipeline actually
+ *  read live busy events, not just that the connection is reachable. */
+export interface ConnectionTestResult {
+  ok: boolean;
+  healthDetail: string;
+  busyCount: number | null;
+  conflictCheckEnabled: boolean;
+  checkedAt: number;
+  reason?: 'DISCONNECTED' | 'NOT_READY' | 'READ_FAILED';
 }
 export interface CalendarSummary {
   id: string;
@@ -252,6 +315,15 @@ export interface ApiKeyRow {
   last4: string;
   revoked_at_ms: number | null;
 }
+export interface WebhookDeliveryRow {
+  id: string;
+  event: string;
+  ok: boolean;
+  statusCode: number | null;
+  error: string | null;
+  createdAt: number;
+}
+
 export interface WebhookRow {
   id: string;
   subscriber_url: string;

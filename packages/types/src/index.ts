@@ -47,8 +47,27 @@ export const bookingFieldType = [
 ] as const;
 export type BookingFieldType = (typeof bookingFieldType)[number];
 
-/** IANA time zone string (light validation; the engine trusts the platform DB). */
-export const timeZoneSchema = z.string().min(1).max(64);
+/**
+ * IANA time zone string, verified against the platform's own Intl database
+ * (aliases like `US/Eastern` pass; garbage like `UT}fg` is rejected). Every
+ * INPUT that persists a zone flows through this schema — the engine and the
+ * render paths downstream assume a stored zone always formats.
+ */
+export const timeZoneSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (tz) => {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City)' },
+  );
 
 /** A per-event custom intake field definition (declared early — referenced widely). */
 export const bookingFieldSchema = z.object({
@@ -59,6 +78,12 @@ export const bookingFieldSchema = z.object({
   placeholder: z.string().max(200).optional(),
   /** Options for select/checkbox fields. */
   options: z.array(z.string()).optional(),
+  /** Phone fields: ISO 3166-1 alpha-2 the country selector starts on (QA4 fix 1b). */
+  defaultCountry: z
+    .string()
+    .regex(/^[A-Za-z]{2}$/)
+    .transform((v) => v.toUpperCase())
+    .optional(),
 });
 export type BookingField = z.infer<typeof bookingFieldSchema>;
 
@@ -377,6 +402,13 @@ export const eventTypeInputSchema = z.object({
     )
     .optional(),
   teamId: z.string().nullable().optional(),
+  /** PHASE 2 — per-event calendar selection (personal events only; ignored for
+   *  team events — Phase 3). The set of connected_calendar ids this event
+   *  checks for conflicts; empty clears the override. */
+  conflictCalendarIds: z.array(z.string()).optional(),
+  /** PHASE 2 — the connected_calendar id this event writes booked events to;
+   *  null clears the override (falls back to the member-level destination). */
+  destinationCalendarId: z.string().nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

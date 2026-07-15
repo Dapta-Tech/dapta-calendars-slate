@@ -596,9 +596,13 @@ function BookingPreview({ accent: _accent, m }: { accent: string; m: StudioMessa
         <div className="font-medium">{m.introCall}</div>
         <div className="text-sm text-muted-foreground">30 {m.minSuffix}</div>
       </div>
-      <div className="bp-slots">
+      {/* Decorative theme preview only — these sample times aren't real
+          availability and never will be (no onClick). Excluded from the tab
+          order / a11y tree so keyboard and screen-reader users don't land on
+          a button that visually invites a click but can never do anything. */}
+      <div className="bp-slots" aria-hidden="true">
         {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-          <button key={s} type="button" aria-pressed={i === 0} className="bp-slot text-sm">
+          <button key={s} type="button" tabIndex={-1} aria-pressed={i === 0} className="bp-slot text-sm">
             {s}
           </button>
         ))}

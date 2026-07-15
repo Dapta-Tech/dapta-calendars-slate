@@ -5,6 +5,7 @@ import { getMessages } from '@slate/shared';
 import { adminApi, ApiError } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
 import { ToastProvider } from '@/components/toast';
+import { TimeZoneSync } from '@/components/timezone-sync';
 import { getLocale } from '@/lib/locale';
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
@@ -29,6 +30,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <ToastProvider>
+      <TimeZoneSync currentTimeZone={me.timeZone} />
       <AdminShell
         initialCollapsed={initialCollapsed}
         messages={messages}

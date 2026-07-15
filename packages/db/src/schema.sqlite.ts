@@ -134,6 +134,20 @@ export const eventType = sqliteTable('event_type', {
   slotInterval: integer('slot_interval'),
   requiresConfirmation: integer('requires_confirmation').notNull().default(0),
   seatsPerTimeSlot: integer('seats_per_time_slot'),
+  /** Per-event calendar write destination override; NULL = fall back to the
+   *  host's member-level `is_destination` calendar (calendar-refs.ts). */
+  destinationCalendarId: text('destination_calendar_id'),
+  createdAt: integer('created_at').notNull(),
+});
+
+/**
+ * Per-event conflict-calendar override: the set of `connected_calendar` rows
+ * THIS event checks for conflicts. Empty for an event = fall back to the
+ * host's member-level `check_conflicts` calendars (calendar-refs.ts).
+ */
+export const eventTypeConflictCalendar = sqliteTable('event_type_conflict_calendar', {
+  eventTypeId: text('event_type_id').notNull(),
+  connectedCalendarId: text('connected_calendar_id').notNull(),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -309,6 +323,7 @@ export const sqliteSchema = {
   teamMembership,
   eventType,
   eventTypeHost,
+  eventTypeConflictCalendar,
   booking,
   bookingAttendee,
   bookingHost,

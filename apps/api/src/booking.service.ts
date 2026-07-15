@@ -17,6 +17,7 @@ import {
   sql,
 } from '@slate/db';
 import { verifyManageToken } from '@slate/engine';
+import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
@@ -75,7 +76,9 @@ export class BookingService {
     if (!result) return null;
     return availabilityResponseSchema.parse({
       eventType: result.eventType,
-      timeZone: result.timeZone,
+      // A corrupt stored zone degrades to UTC here instead of 500ing the
+      // endpoint or leaking garbage to integrations (QA fix 1).
+      timeZone: safeTimeZone(result.timeZone),
       // result.slots are already {startUtc, spotsLeft?, capacity?} (group-aware).
       slots: result.slots,
       // Machine-readable config-error reason (only when slots is empty). The
@@ -381,7 +384,7 @@ export class BookingService {
     if (!result) return null;
     return availabilityResponseSchema.parse({
       eventType: result.eventType,
-      timeZone: result.timeZone,
+      timeZone: safeTimeZone(result.timeZone),
       slots: result.slots.map((startUtc) => ({ startUtc })),
       emptyReason: result.emptyReason,
     });

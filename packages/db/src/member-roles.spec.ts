@@ -11,6 +11,7 @@ import {
   changeMemberRole,
   setMemberStatus,
   removeMember,
+  transferOwnership,
 } from './members';
 import { getMe } from './parity';
 
@@ -134,6 +135,40 @@ describe('account roles + member management (owner/admin/member)', () => {
     expect(Number(schedAfter!.n)).toBe(0);
     // Removing an already-gone member is idempotent.
     expect((await removeMember(db, accountId, jordan)).ok).toBe(true);
+  });
+
+  it('an accidentally-promoted INVITED owner can be demoted (QA2 fix 6a)', async () => {
+    // Invite someone, promote them to owner while still invited.
+    const inv = await inviteMember(db, accountId, { email: 'guest@example.com' });
+    if (!inv.ok) throw new Error('invite failed');
+    await changeMemberRole(db, accountId, inv.value.id, 'owner');
+
+    // Alex (active owner) remains — demoting the invited owner must succeed:
+    // the last-owner guard counts ACTIVE owners only.
+    const demote = await changeMemberRole(db, accountId, inv.value.id, 'member');
+    expect(demote.ok).toBe(true);
+    expect(await getMemberRole(db, accountId, inv.value.id)).toBe('member');
+  });
+
+  it('transfers ownership atomically: target becomes owner, caller becomes admin (QA2 fix 6b)', async () => {
+    const r = await transferOwnership(db, accountId, alex, jordan);
+    expect(r.ok).toBe(true);
+    expect(await getMemberRole(db, accountId, jordan)).toBe('owner');
+    expect(await getMemberRole(db, accountId, alex)).toBe('admin');
+
+    // Self-transfer and non-active targets are refused.
+    const self = await transferOwnership(db, accountId, jordan, jordan);
+    expect(self.ok).toBe(false);
+    const inv = await inviteMember(db, accountId, { email: 'pending@example.com' });
+    if (!inv.ok) throw new Error('invite failed');
+    const toInvited = await transferOwnership(db, accountId, jordan, inv.value.id);
+    expect(toInvited.ok).toBe(false);
+    if (!toInvited.ok) expect(toInvited.reason).toBe('CONFLICT');
+
+    // Unknown target → NOT_FOUND.
+    const missing = await transferOwnership(db, accountId, jordan, 'nope');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.reason).toBe('NOT_FOUND');
   });
 
   it('scopes every op to the account (foreign member is invisible)', async () => {

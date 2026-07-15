@@ -32,8 +32,14 @@
   --font-sans: var(--font-poppins), 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-* {
-  border-color: var(--border);
+/* Default border color for everything. MUST live in @layer base: un-layered
+   CSS beats every Tailwind v4 layer, so outside a layer this universal rule
+   silently overrode border-destructive/border-primary utilities everywhere
+   (QA2 BUG-2 — danger buttons and invalid fields rendered gray borders). */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 html,

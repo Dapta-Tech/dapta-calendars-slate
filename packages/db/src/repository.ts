@@ -124,6 +124,15 @@ export interface CreateBookingArgs {
   onBehalf?: boolean;
 }
 
+/**
+ * Names the booking page always collects as fixed attendee fields — kept in
+ * sync with RESERVED_FIELD_NAMES in @slate/shared (db stays dependency-free
+ * of shared). Legacy custom questions reusing them are no longer rendered by
+ * the forms (QA3 fix 3), so requiring an answer here would 400 every booking
+ * on such an event.
+ */
+const RESERVED_INTAKE_NAMES = new Set(['name', 'email', 'notes']);
+
 /** Validate submitted intake answers against a set of field definitions. */
 export function validateIntakeAnswers(
   fields: BookingFieldDef[],
@@ -131,6 +140,7 @@ export function validateIntakeAnswers(
 ): string | null {
   for (const f of fields) {
     if (!f.required) continue;
+    if (RESERVED_INTAKE_NAMES.has(f.name.trim().toLowerCase())) continue;
     const v = answers?.[f.name];
     const missing =
       v == null || v === '' || (Array.isArray(v) && v.length === 0) || v === false;
@@ -252,7 +262,7 @@ export async function isSlotBookable(
   // bookable (never move a meeting onto a conflict we couldn't see).
   let externalBusy: Interval[];
   try {
-    externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs);
+    externalBusy = await loadExternalBusy(db, args.calendar, args.hostMemberId, args.startMs, endMs, eventType.id);
   } catch {
     return false;
   }
@@ -513,7 +523,7 @@ export async function getAvailability(
   // double-book — and rather than 500 on the whole request.
   let externalBusy: Interval[];
   try {
-    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs);
+    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs, eventType.id);
   } catch {
     return {
       eventType: eventTypeOut,
@@ -593,6 +603,22 @@ function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: num
   return !!row;
 }
 
+
+/**
+ * Sanity range for any booking start instant (QA fix 8): the server stored a
+ * 1905 booking that arrived through the host "Any time" form. Small grace for
+ * clock skew / in-flight slots; 2 years matches the furthest any scheduling
+ * UI here can navigate.
+ */
+export const BOOKING_PAST_GRACE_MS = 5 * 60_000;
+export const BOOKING_MAX_FUTURE_MS = 2 * 366 * 86_400_000;
+export function bookingStartOutOfRange(startMs: number, now = Date.now()): string | null {
+  if (!Number.isFinite(startMs)) return 'Invalid start time.';
+  if (startMs < now - BOOKING_PAST_GRACE_MS) return 'Start time is in the past.';
+  if (startMs > now + BOOKING_MAX_FUTURE_MS) return 'Start time is too far in the future (max 2 years).';
+  return null;
+}
+
 export async function createBooking(
   db: Db,
   args: CreateBookingArgs,
@@ -615,10 +641,53 @@ export async function createBooking(
   const eventType = await getEventType(db, account.id, member.id, args.slug);
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
+  // Start-instant sanity (QA fix 8) — applies to every surface, including the
+  // host "Any time (outside availability)" path that let a 1905 date through.
+  const rangeErr = bookingStartOutOfRange(args.startMs);
+  if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
   // Required-intake validation (server-side; never trust the client).
   const fields = parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []);
   const invalid = validateIntakeAnswers(fields, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
+
+  // QA fix 13: a PUBLIC booking that isn't consuming a hold must land on a
+  // genuinely offered slot — before this, an unauthenticated caller could
+  // skip the reservation step and book a host at 3 AM Sunday. The check uses
+  // the same seat-aware availability engine the booking page renders from
+  // (group events keep filling seats on a shared slot), WITHOUT the external
+  // calendar: the fail-closed busy/unreachable handling stays downstream so
+  // its CALENDAR_UNAVAILABLE / SLOT_TAKEN semantics are unchanged. On-behalf
+  // host/agent bookings intentionally may book outside availability — the
+  // "Any time" feature.
+  if (!args.onBehalf && !args.reservationUid) {
+    // Rules-only projection (busy deliberately empty): whether the host's
+    // configuration OFFERS this instant at all — working hours, slot
+    // interval, min-notice. Busy/seat/full handling stays downstream so its
+    // SLOT_TAKEN / group-seat semantics are untouched.
+    const referenced = await resolveScheduleTimeZone(db, eventType.schedule_id);
+    const fallback = referenced
+      ? undefined
+      : await resolveScheduleTimeZone(db, member.default_schedule_id);
+    const schedule = referenced ?? fallback;
+    const rules = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
+    const offered =
+      rules.length > 0 &&
+      computeSlots({
+        fromUtc: new Date(args.startMs),
+        toUtc: new Date(args.startMs + eventType.length_minutes * 60_000),
+        timeZone: schedule?.timeZone ?? member.time_zone,
+        availability: rules,
+        durationMin: eventType.length_minutes,
+        slotIntervalMin: eventType.slot_interval,
+        busy: [],
+        beforeBufferMin: eventType.before_event_buffer,
+        afterBufferMin: eventType.after_event_buffer,
+        minimumBookingNoticeMin: eventType.minimum_booking_notice,
+        now: new Date(),
+      }).some((d) => d.getTime() === args.startMs);
+    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+  }
 
   // Idempotency: return the prior booking for a repeated key.
   if (args.idempotencyKey) {
@@ -692,7 +761,7 @@ export async function createBooking(
   // fail-closed — a conflict rejects the slot, and an UNREADABLE calendar
   // blocks the booking visibly instead of booking blind.
   try {
-    const externalBusy = await loadExternalBusy(db, calendar, member.id, startMs, endMs);
+    const externalBusy = await loadExternalBusy(db, calendar, member.id, startMs, endMs, eventType.id);
     if (externalBusy.some((b) => b.start.getTime() < endMs && b.end.getTime() > startMs)) {
       return { ok: false, reason: 'SLOT_TAKEN' };
     }

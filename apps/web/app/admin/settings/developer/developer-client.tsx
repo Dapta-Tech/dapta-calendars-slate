@@ -3,12 +3,14 @@
 import { useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
 import {
   createApiKeyAction,
   createWebhookAction,
   deleteWebhookAction,
   pingWebhookAction,
+  webhookDeliveriesAction,
   toggleWebhookAction,
   revokeApiKeyAction,
 } from './actions';
@@ -26,6 +28,7 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
   const [scopes, setScopes] = useState<string[]>(['availability:read']);
   const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const { success, error } = useToast();
 
   const submit = () =>
     start(async () => {
@@ -40,12 +43,14 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
 
   return (
     <section className="mb-10">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
         <button type="button" onClick={() => setOpen(true)} className={createBtn}>
           {m.createKey}
         </button>
       </div>
+      {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
+      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
         <div className="mb-4 rounded-md border border-primary bg-card p-3">
@@ -65,8 +70,15 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
             {!k.revoked_at_ms ? (
               <button
                 type="button"
-                onClick={() => start(() => revokeApiKeyAction(k.id))}
-                className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const r = await revokeApiKeyAction(k.id);
+                    if (r.ok) success(m.revokedToast);
+                    else error(r.error ?? m.genericError);
+                  })
+                }
+                className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
               >
                 {m.revoke}
               </button>
@@ -118,11 +130,18 @@ function WebhookItem({
   m,
 }: {
   w: WebhookRow;
-  start: (fn: () => void) => void;
+  start: (fn: () => void | Promise<void>) => void;
   pending: boolean;
   m: DevMessages;
 }) {
   const [ping, setPing] = useState<string | null>(null);
+  // Delivery history (QA fix 10): fetched lazily on expand — proof that real
+  // deliveries are landing, beyond the manual test ping.
+  const [deliveries, setDeliveries] = useState<
+    Array<{ id: string; event: string; ok: boolean; statusCode: number | null; error: string | null; createdAt: number }> | null
+  >(null);
+  const [showDeliveries, setShowDeliveries] = useState(false);
+  const { success, error } = useToast();
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-3">
@@ -133,7 +152,13 @@ function WebhookItem({
               type="checkbox"
               checked={w.active === 1}
               disabled={pending}
-              onChange={(e) => start(() => toggleWebhookAction(w.id, e.target.checked))}
+              onChange={(e) =>
+                start(async () => {
+                  const r = await toggleWebhookAction(w.id, e.target.checked);
+                  if (r.ok) success(m.toggledToast);
+                  else error(r.error ?? m.genericError);
+                })
+              }
             />
             {m.active}
           </label>
@@ -141,20 +166,62 @@ function WebhookItem({
             type="button"
             disabled={pending}
             onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}
-            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary disabled:opacity-60"
           >
             {m.ping}
           </button>
           <button
             type="button"
-            onClick={() => start(() => deleteWebhookAction(w.id))}
-            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive"
+            disabled={pending}
+            onClick={() => {
+              const next = !showDeliveries;
+              setShowDeliveries(next);
+              if (next && deliveries === null)
+                start(async () => setDeliveries((await webhookDeliveriesAction(w.id)).items));
+            }}
+            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+            aria-expanded={showDeliveries}
+          >
+            {m.deliveries}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              start(async () => {
+                const r = await deleteWebhookAction(w.id);
+                if (r.ok) success(m.deletedToast);
+                else error(r.error ?? m.genericError);
+              })
+            }
+            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
           >
             {m.delete}
           </button>
         </span>
       </div>
       {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
+      {showDeliveries ? (
+        deliveries === null ? (
+          <span className="text-xs text-muted-foreground">…</span>
+        ) : deliveries.length === 0 ? (
+          <span className="text-xs text-muted-foreground">{m.noDeliveries}</span>
+        ) : (
+          <ul className="flex flex-col gap-1 border-t border-border pt-2">
+            {deliveries.map((d) => (
+              <li key={d.id} className="flex items-center gap-2 text-xs">
+                <span className={d.ok ? 'text-primary' : 'text-destructive'}>{d.ok ? '✓' : '✗'}</span>
+                <code>{d.event}</code>
+                <span className="text-muted-foreground">
+                  {d.statusCode ? `HTTP ${d.statusCode}` : (d.error ?? '')}
+                </span>
+                <span className="ml-auto text-muted-foreground">
+                  {new Date(d.createdAt).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
     </li>
   );
 }
@@ -175,12 +242,13 @@ export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; me
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{m.webhooks}</h2>
         <button type="button" onClick={() => setOpen(true)} className={createBtn}>
           {m.addWebhook}
         </button>
       </div>
+      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
       <ul className="flex flex-col gap-2">
         {webhooks.map((w) => (
           <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} />

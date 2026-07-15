@@ -3,18 +3,24 @@
 import { useActionState, useMemo, useState } from 'react';
 import {
   groupSlotsByDay,
-  detectTimeZone,
   formatSlotDateTime,
   getMessages,
+  isReservedFieldName,
   t,
   validateBookingFieldValue,
   type DisplaySlot,
   type Slot,
 } from '@slate/shared';
+
+/** Mirror of the server's attendee-email rule — catches the 400 before a
+ *  round-trip, so a typo never costs the visitor their filled-in form. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
 import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { postReservation, type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 
 interface Props {
   accountCode: string;
@@ -59,13 +65,65 @@ export function BookingFlow({
   locale = 'en',
 }: Props) {
   const m = getMessages(locale).booking;
+  const pm = getMessages(locale).phonePicker;
+  // Reserved names (name/email/notes) are fixed attendee fields this form
+  // always asks by itself — a legacy custom question reusing one would ask
+  // the attendee twice (QA3 fix 3).
+  const visibleFields = useMemo(
+    () => bookingFields.filter((f) => !isReservedFieldName(f.name)),
+    [bookingFields],
+  );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
   const [holdError, setHoldError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
+  // CONTROLLED values for every visible input: React 19 resets uncontrolled
+  // form fields when the action returns, so a server-side 400 used to wipe
+  // everything the visitor had typed (QA2 fix 3).
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [notes, setNotes] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
+
+  /** Full client-side gate, replacing native validation (noValidate): native
+   *  bubbles doubled up with the inline errors and can't be themed. Returns
+   *  true when the form may submit. */
+  function validateAll(): boolean {
+    let ok = true;
+    if (!name.trim()) {
+      setNameError(m.requiredField);
+      ok = false;
+    }
+    if (!EMAIL_RE.test(email.trim())) {
+      setEmailError(email.trim() ? m.invalidEmail : m.requiredField);
+      ok = false;
+    }
+    const nextFieldErrors: Record<string, string | null> = {};
+    for (const f of visibleFields) {
+      const v = (answers[f.name] ?? '').trim();
+      // Phone values are E.164 from PhoneField — gate on the SAME too-short
+      // rule the field flags inline, so a submit never blocks invisibly.
+      const err =
+        f.required && !v
+          ? m.requiredField
+          : f.type === 'phone'
+            ? isPhoneValueTooShort(v)
+              ? pm.invalid
+              : null
+            : v
+              ? validateBookingFieldValue(f.type, v)
+              : null;
+      nextFieldErrors[f.name] = err;
+      if (err) ok = false;
+    }
+    setFieldErrors((e) => ({ ...e, ...nextFieldErrors }));
+    return ok;
+  }
 
   const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
 
@@ -172,20 +230,16 @@ export function BookingFlow({
           <label htmlFor="tz" className="text-sm text-muted-foreground">
             {m.timezone}
           </label>
-          <select
+          {/* Themed combobox, not the native <select>: the OS popup for ~400
+              zones is un-brandable and covers the screen (QA2 fix 1). */}
+          <TimeZoneSelect
             id="tz"
             value={timeZone}
-            onChange={(e) => setTimeZone(e.target.value)}
-            className="rounded-md border border-input bg-card px-2 py-1 text-sm"
-          >
-            {[timeZone, detectTimeZone(), 'UTC']
-              .filter((v, i, a) => a.indexOf(v) === i)
-              .map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-          </select>
+            onChange={setTimeZone}
+            locale={locale}
+            ariaLabel={m.timezone}
+            className="w-64 max-w-full"
+          />
         </div>
 
         {days.length === 0 ? (
@@ -235,7 +289,16 @@ export function BookingFlow({
 
       <aside aria-label="Your details" className="md:sticky md:top-6 md:self-start">
         {selected ? (
-          <form action={formAction} className="bp-card flex flex-col gap-3 border border-border bg-card p-4">
+          <form
+            action={formAction}
+            noValidate
+            // Client-side gate: block the submit (and the field wipe it used
+            // to cause) instead of round-tripping a guaranteed 400.
+            onSubmit={(e) => {
+              if (!validateAll()) e.preventDefault();
+            }}
+            className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
+          >
             <input type="hidden" name="accountCode" value={accountCode} />
             <input type="hidden" name="ownerSlug" value={ownerSlug} />
             <input type="hidden" name="kind" value={mode} />
@@ -257,16 +320,58 @@ export function BookingFlow({
 
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.yourName} <span className="text-destructive">*</span></span>
-              <input name="name" required className="rounded-md border border-input bg-background px-3 py-2" />
+              <input
+                name="name"
+                required
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (nameError) setNameError(null);
+                }}
+                aria-invalid={!!nameError}
+                className={`rounded-md border bg-background px-3 py-2 ${
+                  nameError ? 'border-destructive' : 'border-input'
+                }`}
+              />
+              {nameError ? (
+                <span role="alert" className="text-xs text-destructive">
+                  {nameError}
+                </span>
+              ) : null}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.yourEmail} <span className="text-destructive">*</span></span>
-              <input name="email" type="email" required className="rounded-md border border-input bg-background px-3 py-2" />
+              <input
+                name="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (emailError) setEmailError(null);
+                }}
+                onBlur={() =>
+                  setEmailError(
+                    email.trim() && !EMAIL_RE.test(email.trim()) ? m.invalidEmail : null,
+                  )
+                }
+                aria-invalid={!!emailError}
+                className={`rounded-md border bg-background px-3 py-2 ${
+                  emailError ? 'border-destructive' : 'border-input'
+                }`}
+              />
+              {emailError ? (
+                <span role="alert" className="text-xs text-destructive">
+                  {emailError}
+                </span>
+              ) : null}
             </label>
 
-            {bookingFields.map((f) => {
+            {visibleFields.map((f) => {
               const validate = (v: string) =>
                 setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
+              const setAnswer = (v: string) => setAnswers((a) => ({ ...a, [f.name]: v }));
+              const value = answers[f.name] ?? '';
               const isMulti = f.type === 'textarea' || f.type === 'guests';
               return (
                 <label key={f.name} className="flex flex-col gap-1 text-sm">
@@ -275,26 +380,50 @@ export function BookingFlow({
                     {f.label}
                     {f.required ? <span className="text-destructive"> *</span> : null}
                   </span>
-                  {isMulti ? (
+                  {f.type === 'phone' ? (
+                    <PhoneField
+                      value={value}
+                      onChange={(v) => {
+                        setAnswer(v);
+                        // PhoneField flags too-short numbers inline itself —
+                        // just keep the submit gate in step with what it shows.
+                        setFieldErrors((e) => ({
+                          ...e,
+                          [f.name]: isPhoneValueTooShort(v) ? pm.invalid : null,
+                        }));
+                      }}
+                      locale={locale}
+                      name={`answer_${f.name}`}
+                      required={f.required}
+                      ariaLabel={f.label}
+                      defaultCountry={f.defaultCountry}
+                    />
+                  ) : isMulti ? (
                     <textarea
                       name={`answer_${f.name}`}
                       required={f.required}
                       rows={2}
                       placeholder={f.type === 'guests' ? 'guest1@example.com, guest2@example.com' : f.placeholder}
+                      value={value}
+                      onChange={(e) => setAnswer(e.target.value)}
                       onBlur={(e) => validate(e.target.value)}
                       className="rounded-md border border-input bg-background px-3 py-2"
                     />
                   ) : (
                     <input
                       name={`answer_${f.name}`}
-                      type={f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : f.type === 'number' ? 'number' : 'text'}
+                      type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
                       required={f.required}
                       placeholder={f.placeholder}
+                      value={value}
+                      onChange={(e) => setAnswer(e.target.value)}
                       onBlur={(e) => validate(e.target.value)}
                       className="rounded-md border border-input bg-background px-3 py-2"
                     />
                   )}
-                  {fieldErrors[f.name] ? (
+                  {/* Phone shows its own inline error for typed-but-short
+                      numbers — only the required-empty case renders here. */}
+                  {fieldErrors[f.name] && (f.type !== 'phone' || !value.trim()) ? (
                     <span className="text-xs text-destructive">{fieldErrors[f.name]}</span>
                   ) : null}
                 </label>
@@ -303,7 +432,13 @@ export function BookingFlow({
 
             <label className="flex flex-col gap-1 text-sm">
               <span>{m.notes}</span>
-              <textarea name="notes" rows={2} className="rounded-md border border-input bg-background px-3 py-2" />
+              <textarea
+                name="notes"
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="rounded-md border border-input bg-background px-3 py-2"
+              />
             </label>
 
             {intakeError ? <p className="text-sm text-destructive">{result!.message}</p> : null}

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { useToast } from '@/components/toast';
@@ -32,6 +33,8 @@ export function TeamMembersPanel({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'owner' | 'member'>('member');
   const [inviteErr, setInviteErr] = useState<string | null>(null);
+  // Whether the current error is the 'not an account member' case — it gets a CTA to the real invite flow (QA fix 7).
+  const [inviteNoMatch, setInviteNoMatch] = useState(false);
   const { success, error } = useToast();
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -74,6 +77,7 @@ export function TeamMembersPanel({
         return;
       }
       // Localize the stable code; pass a BE 409 message through verbatim.
+      setInviteNoMatch(r.code === 'NO_MATCH');
       setInviteErr(
         r.code === 'INVALID_EMAIL'
           ? m.emailInvalid
@@ -127,7 +131,7 @@ export function TeamMembersPanel({
                     owner's role is locked so the team can't be left ownerless. */}
                 <span
                   className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
-                    isOwner ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                   }`}
                 >
                   {isOwner ? m.roleOwner : m.roleMember}
@@ -225,7 +229,22 @@ export function TeamMembersPanel({
                   <option value="owner">{m.roleOwner}</option>
                 </select>
               </label>
-              {inviteErr ? <p role="alert" className="text-sm text-destructive">{inviteErr}</p> : null}
+              {inviteErr ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {inviteErr}
+                  {inviteNoMatch ? (
+                    <>
+                      {' '}
+                      <Link
+                        href="/admin/settings/members"
+                        className="font-medium underline underline-offset-4"
+                      >
+                        {m.inviteFromMembers} →
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
               <div className="mt-1 flex justify-end gap-2">
                 <button type="button" onClick={closeDialog} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm">
                   {m.cancel}

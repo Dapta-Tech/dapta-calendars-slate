@@ -5,6 +5,7 @@
 export * from './time';
 export * from './booking';
 export * from './booking-fields';
+export * from './countries';
 export * from './availability';
 export * from './handle';
 export * from './branding';

@@ -39,6 +39,8 @@ export interface BookingMessages {
     confirmationSentTo: string;
     yourName: string;
     yourEmail: string;
+    invalidEmail: string;
+    requiredField: string;
     notes: string;
     heldUntil: string;
     slotTaken: string;
@@ -90,6 +92,18 @@ export interface BookingMessages {
     round_robin_hint: string;
     collective_hint: string;
     fixed_round_robin_hint: string;
+  };
+  /** Themed timezone combobox (QA2 fix 1) — shared by public + admin surfaces. */
+  tzPicker: {
+    search: string;
+    noResults: string;
+  };
+  /** Phone field with country selector (QA3 fix 2). */
+  phonePicker: {
+    search: string;
+    noResults: string;
+    invalid: string;
+    countryLabel: string;
   };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
@@ -155,6 +169,18 @@ export interface BookingMessages {
       stylePageDesc: string;
       apiKeys: string;
       apiKeysDesc: string;
+      /** "Get bookable" first-run checklist (F1 §2 — driven by real setup status). */
+      setupTitle: string;
+      setupSubtitle: string;
+      setupConnectTitle: string;
+      setupConnectDesc: string;
+      setupConnectAction: string;
+      setupHoursTitle: string;
+      setupHoursDesc: string;
+      setupHoursAction: string;
+      setupLinkTitle: string;
+      setupLinkDesc: string;
+      setupDone: string;
     };
     settings: {
       title: string;
@@ -189,6 +215,27 @@ export interface BookingMessages {
       requiresConfirmation: string;
       hiddenLabel: string;
       intakeQuestions: string;
+      /** Reorder + reserved-name hard block (QA3 fixes 3, 6). */
+      moveUp: string;
+      moveDown: string;
+      reservedBlocked: string;
+      /** Phone questions: which country the selector starts on (QA4 fix 1b). */
+      defaultCountryLabel: string;
+      /** Per-row quick actions + team section on the Events list (QA3 fix 4). */
+      openPublic: string;
+      copyLink: string;
+      linkCopied: string;
+      toggleVisible: string;
+      eventShown: string;
+      eventHidden: string;
+      teamEventsSection: string;
+      /** Built-in booking-page fields shown locked in the intake editor (QA2 fix 7). */
+      fixedFieldsHint: string;
+      fixedName: string;
+      fixedEmail: string;
+      fixedNotes: string;
+      alwaysAsked: string;
+      reservedWarning: string;
       namePlaceholder: string;
       labelPlaceholder: string;
       req: string;
@@ -204,6 +251,24 @@ export interface BookingMessages {
       weight: string;
       fixedHost: string;
       fixedHostHint: string;
+      /** The read-only "which calendar is this linked to" line (Felipe:
+       *  "cómo está el calendario conectado al evento, esto no hace sentido"). */
+      calendarLinkManage: string;
+      /** {calendar} interpolates the connection label (e.g. an email). */
+      calendarLinkBoth: string;
+      calendarLinkWriteOnly: string;
+      /** {n} interpolates the conflict-checked calendar count. */
+      calendarLinkConflictsOnly: string;
+      calendarLinkNoDestination: string;
+      calendarLinkNone: string;
+      calendarLinkConnect: string;
+      /** PHASE 2 — the editable "Calendars for this event" section (personal
+       *  events only; replaces the old read-only calendarLink* notice above). */
+      calendarsSectionTitle: string;
+      calendarsSectionHint: string;
+      calendarsCheckConflicts: string;
+      calendarsAddEventsHere: string;
+      calendarsManageLink: string;
     };
     availability: {
       title: string;
@@ -260,11 +325,21 @@ export interface BookingMessages {
       fromSlots: string;
       anyTime: string;
       noSlotsRange: string;
+      loadingSlots: string;
       dateTimeHost: string;
       attendeeName: string;
       attendeeEmail: string;
       attendeeTimezone: string;
       pickTime: string;
+      /** DateTimePicker status bar (QA2 fix 8): both halves shown, missing one flagged. */
+      pickerDate: string;
+      pickerTime: string;
+      pickerMissing: string;
+      pickDateTime: string;
+      /** "Times shown in {tz}" lead on the bookings list (QA2 fix 8c). */
+      timesShownIn: string;
+      /** Unified questions block on the manual-booking form (QA3 fix 6a). */
+      questionsTitle: string;
       creating: string;
       createBooking: string;
       createdTitle: string;
@@ -280,7 +355,11 @@ export interface BookingMessages {
       scheduleMissingLink: string;
       noHoursNotice: string;
       noScheduleNotice: string;
+      eventQuestions: string;
       availabilityLink: string;
+      /** One-click fix for NO_SCHEDULE — creates + links working hours inline. */
+      createWorkingHours: string;
+      creatingWorkingHours: string;
       calendarUnavailableNotice: string;
       calendarUnavailableLink: string;
       calendarUnavailableBooking: string;
@@ -322,6 +401,7 @@ export interface BookingMessages {
       members: string;
       teamEventTypes: string;
       noTeamEventTypes: string;
+      newTeamEvent: string;
       inviteTitle: string;
       inviteLead: string;
       emailLabel: string;
@@ -331,6 +411,7 @@ export interface BookingMessages {
       ownerLock: string;
       memberPending: string;
       noAccountMember: string;
+      inviteFromMembers: string;
       createTitle: string;
       createSubtitle: string;
       bioLabel: string;
@@ -354,6 +435,10 @@ export interface BookingMessages {
       title: string;
       subtitle: string;
       rosterLabel: string;
+      /** What each role can do (QA3 fix 5) — one line per role under the title. */
+      rolesHintOwner: string;
+      rolesHintAdmin: string;
+      rolesHintMember: string;
       invite: string;
       inviteTitle: string;
       inviteLead: string;
@@ -377,6 +462,10 @@ export interface BookingMessages {
       remove: string;
       ownerLock: string;
       lastOwnerTitle: string;
+      /** Single-owner model (QA2 fix 6b): explicit transfer flow. */
+      transferOwnership: string;
+      transferConfirm: string;
+      ownershipTransferred: string;
       roleUpdated: string;
       statusUpdated: string;
       memberInvited: string;
@@ -399,6 +488,12 @@ export interface BookingMessages {
       syncOffDesc: string;
       syncOffSetPre: string;
       syncOffSetPost: string;
+      /** The "which account?" step shown before starting the OAuth popup. */
+      emailStepTitle: string;
+      emailStepLabel: string;
+      emailStepHelp: string;
+      emailStepContinue: string;
+      emailStepBack: string;
       connectWaiting: string;
       connectHint: string;
       connectDone: string;
@@ -410,6 +505,9 @@ export interface BookingMessages {
       conflictCheck: string;
       disconnect: string;
       disconnectError: string;
+      /** Muted fallback label when a connection's account email couldn't be
+       *  determined (never repeats the provider name — see connectionLabel). */
+      accountUnknown: string;
       manualTitle: string;
       manualDesc: string;
       provider: string;
@@ -439,6 +537,25 @@ export interface BookingMessages {
       emptyBody: string;
       emptyConflicts: string;
       emptyDestination: string;
+      /** {email} interpolates the already-connected account for that provider. */
+      alreadyConnectedWithEmail: string;
+      alreadyConnectedNoEmail: string;
+      connectedPageTitle: string;
+      connectedPageBody: string;
+      connectedPageClose: string;
+      connectedPageErrorTitle: string;
+      connectedPageErrorBody: string;
+      /** The "Test / Run check" self-test — the trust-building proof that
+       *  conflict-checking actually reads the host's real calendar. */
+      testButton: string;
+      testRunning: string;
+      /** {n} interpolates the busy-event count read in the next 14 days. */
+      testOkConflictsOn: string;
+      testOkConflictsOff: string;
+      testFailDisconnected: string;
+      testFailNotReady: string;
+      testFailReadFailed: string;
+      testReconnect: string;
     };
     login: {
       title: string;
@@ -496,6 +613,10 @@ export interface BookingMessages {
       back: string;
     };
     developer: {
+      /** What this page is FOR (QA2 fix 4) — plain-language leads per section. */
+      pageLead: string;
+      apiKeysLead: string;
+      webhooksLead: string;
       apiKeys: string;
       noKeys: string;
       revoke: string;
@@ -510,9 +631,15 @@ export interface BookingMessages {
       events: string;
       addWebhook: string;
       ping: string;
+      deliveries: string;
+      noDeliveries: string;
       delete: string;
       active: string;
       cancel: string;
+      genericError: string;
+      revokedToast: string;
+      deletedToast: string;
+      toggledToast: string;
     };
     bookingPageHeader: {
       title: string;
@@ -614,6 +741,8 @@ export const en: BookingMessages = {
     confirmationSentTo: 'A confirmation was sent to {email}.',
     yourName: 'Your name',
     yourEmail: 'Your email',
+    invalidEmail: 'Enter a valid email.',
+    requiredField: 'This field is required.',
     notes: 'Notes (optional)',
     heldUntil: 'Held until {time}',
     slotTaken: 'That time was just taken.',
@@ -632,6 +761,16 @@ export const en: BookingMessages = {
     round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
     collective_hint: 'Everyone attends — offer only times when all hosts are free.',
     fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+  },
+  tzPicker: {
+    search: 'Search timezone…',
+    noResults: 'No matching timezone.',
+  },
+  phonePicker: {
+    search: 'Search country…',
+    noResults: 'No matching country.',
+    invalid: 'Enter a valid phone number.',
+    countryLabel: 'Country code',
   },
   manage: {
     title: 'Manage your booking',
@@ -724,6 +863,17 @@ export const en: BookingMessages = {
       stylePageDesc: 'Brand + 9-axis studio.',
       apiKeys: 'API keys & webhooks',
       apiKeysDesc: 'Integrate agents & automations.',
+      setupTitle: 'Get bookable',
+      setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
+      setupConnectTitle: 'Connect a calendar',
+      setupConnectDesc: 'So Dapta Calendars checks real conflicts and writes the event.',
+      setupConnectAction: 'Connect',
+      setupHoursTitle: 'Set your working hours',
+      setupHoursDesc: 'Defines the window your booking link offers.',
+      setupHoursAction: 'Create default working hours (Mon–Fri 9–5)',
+      setupLinkTitle: 'Share your booking link',
+      setupLinkDesc: 'Send it to anyone — no account needed on their end.',
+      setupDone: 'Done',
     },
     settings: {
       title: 'Settings',
@@ -758,11 +908,28 @@ export const en: BookingMessages = {
       requiresConfirmation: 'Requires confirmation',
       hiddenLabel: 'Hidden',
       intakeQuestions: 'Intake questions',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      reservedBlocked: 'Rename the highlighted question — "name", "email" and "notes" are always asked automatically.',
+      defaultCountryLabel: 'Default country',
+      openPublic: 'Open booking page',
+      copyLink: 'Copy link',
+      linkCopied: 'Link copied.',
+      toggleVisible: 'Visible on the booking page',
+      eventShown: 'Event is now visible.',
+      eventHidden: 'Event hidden from the booking page.',
+      teamEventsSection: 'Team events',
+      fixedFieldsHint: 'The booking page always asks these — no need to add them below.',
+      fixedName: 'Your name',
+      fixedEmail: 'Your email',
+      fixedNotes: 'Notes',
+      alwaysAsked: 'built-in',
+      reservedWarning: 'Already asked automatically — attendees would answer this twice.',
       namePlaceholder: 'name',
       labelPlaceholder: 'Label',
       req: 'req',
       addQuestion: '+ Add question',
-      saved: 'Saved.',
+      saved: 'Saved successfully.',
       saveChanges: 'Save changes',
       createEventType: 'Create event',
       saving: 'Saving…',
@@ -772,6 +939,18 @@ export const en: BookingMessages = {
       weight: 'Weight',
       fixedHost: 'Fixed',
       fixedHostHint: 'Always on every booking',
+      calendarLinkManage: 'Manage in Calendars',
+      calendarLinkBoth: 'Conflicts checked against & new events added to: {calendar}',
+      calendarLinkWriteOnly: 'New events added to: {calendar}. Checked against {n} calendar(s) for conflicts.',
+      calendarLinkConflictsOnly: 'Checked against {n} calendar(s) for conflicts. No calendar is set to receive new events.',
+      calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
+      calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
+      calendarLinkConnect: 'Connect one',
+      calendarsSectionTitle: 'Calendars for this event',
+      calendarsSectionHint: 'Choose which connected calendars this event checks for conflicts, and where booked events are added.',
+      calendarsCheckConflicts: 'Check for conflicts',
+      calendarsAddEventsHere: 'Add events here',
+      calendarsManageLink: 'Manage calendars',
     },
     availability: {
       title: 'Availability',
@@ -828,11 +1007,18 @@ export const en: BookingMessages = {
       fromSlots: 'From available slots',
       anyTime: 'Any time (outside availability)',
       noSlotsRange: 'No slots in range.',
+      loadingSlots: 'Loading available times…',
       dateTimeHost: 'Date & time (host timezone)',
       attendeeName: 'Attendee name',
       attendeeEmail: 'Attendee email',
       attendeeTimezone: 'Attendee timezone',
       pickTime: 'Pick a time.',
+      pickerDate: 'Date',
+      pickerTime: 'Time',
+      pickerMissing: 'not picked yet',
+      pickDateTime: 'Pick a date and a time.',
+      timesShownIn: 'Times shown in {tz}',
+      questionsTitle: 'Questions',
       creating: 'Creating…',
       createBooking: 'Create booking',
       createdTitle: 'Booking created',
@@ -847,7 +1033,10 @@ export const en: BookingMessages = {
       scheduleMissingLink: 'Open event settings',
       noHoursNotice: 'No working hours configured for this event’s schedule.',
       noScheduleNotice: 'You don’t have a schedule yet — create one with your working hours.',
+      eventQuestions: 'Event questions',
       availabilityLink: 'Open Availability',
+      createWorkingHours: 'Create default working hours (Mon–Fri 9–5)',
+      creatingWorkingHours: 'Creating…',
       calendarUnavailableNotice:
         'Couldn’t reach the connected calendar — times are hidden to prevent double-bookings.',
       calendarUnavailableLink: 'Check Calendars',
@@ -874,13 +1063,16 @@ export const en: BookingMessages = {
       addMember: 'Add member',
       chooseSomeone: 'Choose someone…',
       role: 'Role',
-      roleOwner: 'Owner',
+      // Team-LEVEL role. Named "Team admin" (not "Owner") so it can't be
+      // confused with the ACCOUNT owner role — they are separate systems
+      // (account: owner/admin/member; team: admin/member). QA fix 5.
+      roleOwner: 'Team admin',
       roleMember: 'Member',
       add: 'Add',
       allOnTeam: 'All account members are on this team.',
       remove: 'Remove',
-      lastOwner: 'Last owner',
-      lastOwnerTitle: 'A team must keep at least one owner',
+      lastOwner: 'Last team admin',
+      lastOwnerTitle: 'A team must keep at least one team admin',
       roleUpdated: 'Role updated.',
       memberRemoved: 'Member removed.',
       memberAdded: 'Member added.',
@@ -891,15 +1083,17 @@ export const en: BookingMessages = {
       members: 'Members',
       teamEventTypes: 'Team events',
       noTeamEventTypes: 'No team events yet.',
+      newTeamEvent: 'New team event',
       inviteTitle: 'Add a member',
       inviteLead: 'Invite someone from your account to this team by email.',
       emailLabel: 'Email',
       emailPlaceholder: 'name@company.com',
       emailInvalid: 'Enter a valid email address.',
       sendInvite: 'Add member',
-      ownerLock: 'Owners can’t be removed — change their role first.',
+      ownerLock: 'Team admins can’t be removed — change their role first.',
       memberPending: 'Pending',
       noAccountMember: 'No account member with that email — they need to sign up first.',
+      inviteFromMembers: 'Invite them from Settings → Members',
       createTitle: 'New team',
       createSubtitle: 'Round-robin bookings across a group of hosts. You can add members after creating.',
       bioLabel: 'Bio',
@@ -922,6 +1116,9 @@ export const en: BookingMessages = {
       title: 'Members',
       subtitle: 'Invite your team and control who can administer this workspace.',
       rosterLabel: 'Workspace members',
+      rolesHintOwner: 'Owner — everything an admin can, plus transferring or deleting the workspace. One per workspace: the legal/billing owner.',
+      rolesHintAdmin: 'Admin — manages members (except owners), everyone’s events, schedules, bookings and workspace settings.',
+      rolesHintMember: 'Member — manages only their own events, schedules and bookings.',
       invite: 'Invite member',
       inviteTitle: 'Invite a member',
       inviteLead: 'They’ll join your workspace with the role you choose.',
@@ -943,8 +1140,11 @@ export const en: BookingMessages = {
       enable: 'Enable',
       disable: 'Disable',
       remove: 'Remove',
-      ownerLock: 'Owners can’t be removed — change their role first.',
+      ownerLock: 'Team admins can’t be removed — change their role first.',
       lastOwnerTitle: 'A workspace must keep at least one owner',
+      transferOwnership: 'Transfer ownership',
+      transferConfirm: 'Yes, transfer — I become an admin',
+      ownershipTransferred: 'Ownership transferred.',
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
       memberInvited: 'Invitation sent.',
@@ -967,6 +1167,11 @@ export const en: BookingMessages = {
       syncOffDesc: 'No external calendar provider is configured, so busy times aren’t being read and events aren’t being written yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
+      emailStepTitle: 'Which account are you connecting?',
+      emailStepLabel: 'Account email',
+      emailStepHelp: 'This keeps the new connection separate from any others, and matches it up with the same account if it’s already connected elsewhere in Dapta.',
+      emailStepContinue: 'Continue',
+      emailStepBack: 'Back',
       connectWaiting: 'Waiting for you to finish connecting…',
       connectHint: 'Finish signing in and granting access in the popup window, then return here.',
       connectDone: 'I’ve finished connecting',
@@ -978,6 +1183,7 @@ export const en: BookingMessages = {
       conflictCheck: 'Conflict check',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
+      accountUnknown: 'Account unknown',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
@@ -1006,6 +1212,21 @@ export const en: BookingMessages = {
       emptyBody: 'Connect Google or Outlook so {product} can read your busy times and add booked events to your calendar. You can connect more than one account.',
       emptyConflicts: 'Check for conflicts so busy times block new bookings',
       emptyDestination: 'Pick one calendar to receive your booked events',
+      alreadyConnectedWithEmail: 'Already connected as {email}. You can connect another account below.',
+      alreadyConnectedNoEmail: 'Already connected. You can connect another account below.',
+      connectedPageTitle: 'Connected',
+      connectedPageBody: 'Your calendar is linked. You can close this window.',
+      connectedPageClose: 'Close window',
+      connectedPageErrorTitle: 'Could not connect',
+      connectedPageErrorBody: 'Close this window and try again from the calendars page.',
+      testButton: 'Test',
+      testRunning: 'Testing…',
+      testOkConflictsOn: 'Working — read {n} events from your calendar in the next 14 days; conflict-checking is ON for this calendar.',
+      testOkConflictsOff: 'Working — read {n} events from your calendar in the next 14 days, but conflict-checking is OFF for this calendar. Turn on "Check for conflicts" above.',
+      testFailDisconnected: 'Not connected — this calendar isn’t linked yet.',
+      testFailNotReady: 'Could not reach your calendar — reauthorization may be required.',
+      testFailReadFailed: 'Connected, but reading your events failed.',
+      testReconnect: 'Reconnect',
     },
     login: {
       title: 'Sign in',
@@ -1089,6 +1310,12 @@ export const en: BookingMessages = {
       back: 'Back to notifications',
     },
     developer: {
+      pageLead:
+        'Tools for connecting external systems to your scheduling. If you only book through this dashboard, you don’t need anything here.',
+      apiKeysLead:
+        'Let another system (an AI agent, a CRM, your own app) check availability and create bookings through the API without using this dashboard. Each key is a password for that system — scopes limit what it can do.',
+      webhooksLead:
+        'Notify an external URL the moment something happens here (a booking is created, rescheduled, or cancelled) so other systems can react automatically — e.g. update a CRM or send a Slack message.',
       apiKeys: 'API keys',
       noKeys: 'No API keys.',
       revoke: 'Revoke',
@@ -1103,9 +1330,15 @@ export const en: BookingMessages = {
       events: 'Events',
       addWebhook: 'Add webhook',
       ping: 'Ping',
+      deliveries: 'Deliveries',
+      noDeliveries: 'No deliveries yet — they appear when a real booking event fires this webhook.',
       delete: 'Delete',
       active: 'active',
       cancel: 'Cancel',
+      genericError: 'Something went wrong.',
+      revokedToast: 'Key revoked.',
+      deletedToast: 'Webhook deleted.',
+      toggledToast: 'Webhook updated.',
     },
     bookingPageHeader: {
       title: 'Booking Page',
@@ -1207,6 +1440,8 @@ export const es: BookingMessages = {
     confirmationSentTo: 'Enviamos una confirmación a {email}.',
     yourName: 'Tu nombre',
     yourEmail: 'Tu correo',
+    invalidEmail: 'Ingresa un correo válido.',
+    requiredField: 'Este campo es obligatorio.',
     notes: 'Notas (opcional)',
     heldUntil: 'Reservado hasta las {time}',
     slotTaken: 'Ese horario acaba de ocuparse.',
@@ -1225,6 +1460,16 @@ export const es: BookingMessages = {
     round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
     collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
     fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+  },
+  tzPicker: {
+    search: 'Buscar zona horaria…',
+    noResults: 'No hay zonas que coincidan.',
+  },
+  phonePicker: {
+    search: 'Buscar país…',
+    noResults: 'No hay países que coincidan.',
+    invalid: 'Ingresa un número de teléfono válido.',
+    countryLabel: 'Código de país',
   },
   manage: {
     title: 'Gestiona tu reserva',
@@ -1317,6 +1562,17 @@ export const es: BookingMessages = {
       stylePageDesc: 'Marca + estudio de 9 ejes.',
       apiKeys: 'Claves API y webhooks',
       apiKeysDesc: 'Integra agentes y automatizaciones.',
+      setupTitle: 'Queda lista para reservas',
+      setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
+      setupConnectTitle: 'Conecta un calendario',
+      setupConnectDesc: 'Así Dapta Calendars revisa conflictos reales y escribe el evento.',
+      setupConnectAction: 'Conectar',
+      setupHoursTitle: 'Define tus horas de trabajo',
+      setupHoursDesc: 'Define la ventana que ofrece tu enlace de reservas.',
+      setupHoursAction: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
+      setupLinkTitle: 'Comparte tu enlace de reservas',
+      setupLinkDesc: 'Envíalo a cualquier persona — no necesita cuenta.',
+      setupDone: 'Listo',
     },
     settings: {
       title: 'Ajustes',
@@ -1351,11 +1607,28 @@ export const es: BookingMessages = {
       requiresConfirmation: 'Requiere confirmación',
       hiddenLabel: 'Oculto',
       intakeQuestions: 'Preguntas del formulario',
+      moveUp: 'Subir',
+      moveDown: 'Bajar',
+      reservedBlocked: 'Renombra la pregunta marcada — "name", "email" y "notes" siempre se preguntan automáticamente.',
+      defaultCountryLabel: 'País por defecto',
+      openPublic: 'Abrir página de reservas',
+      copyLink: 'Copiar enlace',
+      linkCopied: 'Enlace copiado.',
+      toggleVisible: 'Visible en la página de reservas',
+      eventShown: 'El evento ya es visible.',
+      eventHidden: 'Evento oculto de la página de reservas.',
+      teamEventsSection: 'Eventos de equipo',
+      fixedFieldsHint: 'La página de reservas siempre pregunta esto — no hace falta añadirlas abajo.',
+      fixedName: 'Tu nombre',
+      fixedEmail: 'Tu correo',
+      fixedNotes: 'Notas',
+      alwaysAsked: 'fija',
+      reservedWarning: 'Ya se pregunta automáticamente — el invitado respondería dos veces.',
       namePlaceholder: 'nombre',
       labelPlaceholder: 'Etiqueta',
       req: 'obl.',
       addQuestion: '+ Añadir pregunta',
-      saved: 'Guardado.',
+      saved: 'Guardado correctamente.',
       saveChanges: 'Guardar cambios',
       createEventType: 'Crear evento',
       saving: 'Guardando…',
@@ -1365,6 +1638,18 @@ export const es: BookingMessages = {
       weight: 'Peso',
       fixedHost: 'Fijo',
       fixedHostHint: 'Siempre en cada reserva',
+      calendarLinkManage: 'Administrar en Calendarios',
+      calendarLinkBoth: 'Conflictos verificados contra y eventos nuevos añadidos a: {calendar}',
+      calendarLinkWriteOnly: 'Eventos nuevos añadidos a: {calendar}. Verificado contra {n} calendario(s) para conflictos.',
+      calendarLinkConflictsOnly: 'Verificado contra {n} calendario(s) para conflictos. Ningún calendario está configurado para recibir eventos nuevos.',
+      calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
+      calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
+      calendarLinkConnect: 'Conectar uno',
+      calendarsSectionTitle: 'Calendarios para este evento',
+      calendarsSectionHint: 'Elige qué calendarios conectados verifica este evento para conflictos, y dónde se añaden los eventos reservados.',
+      calendarsCheckConflicts: 'Verificar conflictos',
+      calendarsAddEventsHere: 'Añadir eventos aquí',
+      calendarsManageLink: 'Administrar calendarios',
     },
     availability: {
       title: 'Disponibilidad',
@@ -1421,11 +1706,18 @@ export const es: BookingMessages = {
       fromSlots: 'Desde horarios disponibles',
       anyTime: 'Cualquier hora (fuera de disponibilidad)',
       noSlotsRange: 'No hay horarios en el rango.',
+      loadingSlots: 'Cargando horarios disponibles…',
       dateTimeHost: 'Fecha y hora (zona del anfitrión)',
       attendeeName: 'Nombre del invitado',
       attendeeEmail: 'Correo del invitado',
       attendeeTimezone: 'Zona horaria del invitado',
       pickTime: 'Elige una hora.',
+      pickerDate: 'Fecha',
+      pickerTime: 'Hora',
+      pickerMissing: 'sin elegir',
+      pickDateTime: 'Elige una fecha y una hora.',
+      timesShownIn: 'Horas en {tz}',
+      questionsTitle: 'Preguntas',
       creating: 'Creando…',
       createBooking: 'Crear reserva',
       createdTitle: 'Reserva creada',
@@ -1441,7 +1733,10 @@ export const es: BookingMessages = {
       scheduleMissingLink: 'Abrir configuración del evento',
       noHoursNotice: 'No hay horas de trabajo configuradas para el horario de este evento.',
       noScheduleNotice: 'Aún no tienes un horario — crea uno con tus horas de trabajo.',
+      eventQuestions: 'Preguntas del evento',
       availabilityLink: 'Abrir Disponibilidad',
+      createWorkingHours: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
+      creatingWorkingHours: 'Creando…',
       calendarUnavailableNotice:
         'No se pudo acceder al calendario conectado — los horarios se ocultan para evitar dobles reservas.',
       calendarUnavailableLink: 'Revisar Calendarios',
@@ -1468,13 +1763,13 @@ export const es: BookingMessages = {
       addMember: 'Añadir miembro',
       chooseSomeone: 'Elige a alguien…',
       role: 'Rol',
-      roleOwner: 'Propietario',
+      roleOwner: 'Admin del equipo',
       roleMember: 'Miembro',
       add: 'Añadir',
       allOnTeam: 'Todos los miembros de la cuenta están en este equipo.',
       remove: 'Quitar',
-      lastOwner: 'Último propietario',
-      lastOwnerTitle: 'Un equipo debe conservar al menos un propietario',
+      lastOwner: 'Último admin del equipo',
+      lastOwnerTitle: 'Un equipo debe conservar al menos un admin del equipo',
       roleUpdated: 'Rol actualizado.',
       memberRemoved: 'Miembro eliminado.',
       memberAdded: 'Miembro añadido.',
@@ -1485,15 +1780,17 @@ export const es: BookingMessages = {
       members: 'Miembros',
       teamEventTypes: 'Eventos del equipo',
       noTeamEventTypes: 'Aún no hay eventos del equipo.',
+      newTeamEvent: 'Nuevo evento de equipo',
       inviteTitle: 'Añadir un miembro',
       inviteLead: 'Invita por correo a alguien de tu cuenta a este equipo.',
       emailLabel: 'Correo',
       emailPlaceholder: 'nombre@empresa.com',
       emailInvalid: 'Introduce un correo válido.',
       sendInvite: 'Añadir miembro',
-      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       memberPending: 'Pendiente',
       noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
+      inviteFromMembers: 'Invítalo desde Configuración → Miembros',
       createTitle: 'Nuevo equipo',
       createSubtitle: 'Reparte reservas por turnos entre un grupo de anfitriones. Puedes añadir miembros después de crearlo.',
       bioLabel: 'Biografía',
@@ -1516,6 +1813,9 @@ export const es: BookingMessages = {
       title: 'Miembros',
       subtitle: 'Invita a tu equipo y controla quién puede administrar este espacio.',
       rosterLabel: 'Miembros del espacio',
+      rolesHintOwner: 'Propietario — todo lo de un admin, más transferir o borrar el espacio. Uno por espacio: el dueño legal/facturable.',
+      rolesHintAdmin: 'Administrador — gestiona miembros (excepto propietarios), y los eventos, horarios, reservas y ajustes de todos.',
+      rolesHintMember: 'Miembro — gestiona solo sus propios eventos, horarios y reservas.',
       invite: 'Invitar miembro',
       inviteTitle: 'Invitar a un miembro',
       inviteLead: 'Se unirá a tu espacio con el rol que elijas.',
@@ -1537,8 +1837,11 @@ export const es: BookingMessages = {
       enable: 'Activar',
       disable: 'Desactivar',
       remove: 'Quitar',
-      ownerLock: 'Los propietarios no se pueden quitar — cambia su rol primero.',
+      ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
+      transferOwnership: 'Transferir propiedad',
+      transferConfirm: 'Sí, transferir — yo paso a admin',
+      ownershipTransferred: 'Propiedad transferida.',
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
       memberInvited: 'Invitación enviada.',
@@ -1561,6 +1864,11 @@ export const es: BookingMessages = {
       syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que aún no se leen horas ocupadas ni se escriben eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
+      emailStepTitle: '¿Qué cuenta vas a conectar?',
+      emailStepLabel: 'Correo de la cuenta',
+      emailStepHelp: 'Esto mantiene la nueva conexión separada de las demás y la vincula con la misma cuenta si ya está conectada en otra parte de Dapta.',
+      emailStepContinue: 'Continuar',
+      emailStepBack: 'Atrás',
       connectWaiting: 'Esperando a que termines de conectar…',
       connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
       connectDone: 'Ya terminé de conectar',
@@ -1572,6 +1880,7 @@ export const es: BookingMessages = {
       conflictCheck: 'Verificar conflictos',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
+      accountUnknown: 'Cuenta desconocida',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',
@@ -1600,6 +1909,21 @@ export const es: BookingMessages = {
       emptyBody: 'Conecta Google u Outlook para que {product} pueda leer tus horas ocupadas y añadir las reservas a tu calendario. Puedes conectar más de una cuenta.',
       emptyConflicts: 'Verifica conflictos para que las horas ocupadas bloqueen nuevas reservas',
       emptyDestination: 'Elige un calendario para recibir tus reservas',
+      alreadyConnectedWithEmail: 'Ya conectado como {email}. Puedes conectar otra cuenta abajo.',
+      alreadyConnectedNoEmail: 'Ya conectado. Puedes conectar otra cuenta abajo.',
+      connectedPageTitle: 'Conectado',
+      connectedPageBody: 'Tu calendario está vinculado. Puedes cerrar esta ventana.',
+      connectedPageClose: 'Cerrar ventana',
+      connectedPageErrorTitle: 'No se pudo conectar',
+      connectedPageErrorBody: 'Cierra esta ventana e inténtalo de nuevo desde la página de calendarios.',
+      testButton: 'Probar',
+      testRunning: 'Probando…',
+      testOkConflictsOn: 'Funciona — se leyeron {n} eventos de tu calendario en los próximos 14 días; la verificación de conflictos está ACTIVADA para este calendario.',
+      testOkConflictsOff: 'Funciona — se leyeron {n} eventos de tu calendario en los próximos 14 días, pero la verificación de conflictos está DESACTIVADA para este calendario. Activa "Verificar conflictos" arriba.',
+      testFailDisconnected: 'No conectado — este calendario aún no está vinculado.',
+      testFailNotReady: 'No se pudo contactar tu calendario — puede requerir reautorización.',
+      testFailReadFailed: 'Conectado, pero no se pudieron leer tus eventos.',
+      testReconnect: 'Reconectar',
     },
     login: {
       title: 'Iniciar sesión',
@@ -1683,6 +2007,12 @@ export const es: BookingMessages = {
       back: 'Volver a notificaciones',
     },
     developer: {
+      pageLead:
+        'Herramientas para conectar sistemas externos con tu agenda. Si solo reservas desde este panel, no necesitas nada de esta página.',
+      apiKeysLead:
+        'Permiten que otro sistema (un agente de IA, un CRM, tu propia app) consulte disponibilidad y cree reservas por API sin usar este panel. Cada clave es una contraseña para ese sistema — los permisos limitan qué puede hacer.',
+      webhooksLead:
+        'Avisan a una URL externa en el momento en que algo pasa aquí (se crea, reagenda o cancela una reserva) para que otros sistemas reaccionen automáticamente — p. ej. actualizar un CRM o mandar un mensaje a Slack.',
       apiKeys: 'Claves API',
       noKeys: 'No hay claves API.',
       revoke: 'Revocar',
@@ -1697,9 +2027,15 @@ export const es: BookingMessages = {
       events: 'Eventos',
       addWebhook: 'Añadir webhook',
       ping: 'Probar',
+      deliveries: 'Entregas',
+      noDeliveries: 'Aún no hay entregas — aparecerán cuando un evento real de reserva dispare este webhook.',
       delete: 'Eliminar',
       active: 'activo',
       cancel: 'Cancelar',
+      genericError: 'Algo salió mal.',
+      revokedToast: 'Clave revocada.',
+      deletedToast: 'Webhook eliminado.',
+      toggledToast: 'Webhook actualizado.',
     },
     bookingPageHeader: {
       title: 'Página de reservas',

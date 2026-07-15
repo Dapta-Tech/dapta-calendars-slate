@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
+  listWebhookDeliveries,
   checkHandleAvailable,
   confirmBooking,
   createApiKey,
@@ -9,24 +10,30 @@ import {
   updateConnection,
   connectionExists,
   getConnectionRef,
+  getMemberIdentity,
   declineBooking,
   createWebhook,
   updateWebhook,
   pingWebhook,
   deleteConnection,
   deleteWebhook,
+  ensureDefaultSchedule,
   enqueueWebhookDeliveries,
   getAvailability,
   getMe,
+  getSchedule,
   listApiKeys,
   listBookings,
   listConnections,
+  listSchedules,
   listWebhooks,
   recordConnectionHealth,
   revokeApiKey,
+  setConnectionPrimaryEmail,
   updateBranding,
   updateHandle,
   updateMemberSettings,
+  updateSchedule,
   cancelBooking,
   cacheEntitlement,
   setVanitySlug,
@@ -50,12 +57,13 @@ import {
   type EmailTemplateKey,
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
+import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { asConnector } from './calendar.http-provider';
 import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES, DEFAULT_FOLLOW_UP_LEAD_MINUTES } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
-import { DB, ENTITLEMENTS, PREMIUM_MODE } from './tokens';
+import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
 /** How long a cached Dapta AI entitlement verdict stays fresh before re-asking upstream. */
 const ENTITLEMENT_TTL_MS = 6 * 3600_000;
@@ -71,10 +79,72 @@ export class AdminService {
     // no upstream + `open` premium mode (fork-friendly).
     @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
     @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // Optional (specs construct this service directly): only used to build the
+    // attendee manage link on host-created bookings.
+    @Optional() @Inject(ENV) private readonly env?: ServerEnv,
   ) {}
 
-  me(p: HostPrincipal) {
+  async me(p: HostPrincipal) {
+    // Hard invariant: a host must never resolve to NO_SCHEDULE — see
+    // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
     return getMe(this.db, p.accountId, p.memberId);
+  }
+
+  /**
+   * One-time browser-timezone catch-up (Home first-run guide / admin layout,
+   * fired once on mount). Only takes effect while the member is still on the
+   * raw schema default ('UTC', never explicitly chosen) — a member who has
+   * explicitly picked a timezone in Settings → General is never silently
+   * overridden. Also re-times the auto-created default schedule so "Working
+   * hours" isn't stuck on UTC once the real timezone is known.
+   */
+  async syncClientTimeZone(p: HostPrincipal, timeZone: string): Promise<{ ok: boolean }> {
+    if (!timeZone || timeZone === 'UTC') return { ok: false };
+    const member = await this.db.get<{ time_zone: string; default_schedule_id: string | null }>(
+      sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${p.memberId} LIMIT 1`,
+    );
+    if (!member || member.time_zone !== 'UTC') return { ok: false }; // already explicit — never override
+    await updateMemberSettings(this.db, p.memberId, { timeZone });
+    if (member.default_schedule_id) {
+      const sched = await getSchedule(this.db, p.accountId, member.default_schedule_id);
+      if (sched && sched.timeZone === 'UTC') {
+        await updateSchedule(this.db, p.accountId, member.default_schedule_id, { timeZone });
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The Home "Get bookable" checklist (R22: real data, not a static nag) —
+   * three steps: a connected calendar, working hours (a default schedule with
+   * ≥1 rule), and a shareable booking link (always true — every member gets an
+   * auto-handle at creation, short-links §3).
+   */
+  async setupStatus(p: HostPrincipal): Promise<{
+    hasConnectedCalendar: boolean;
+    hasWorkingHours: boolean;
+    hasBookingLink: boolean;
+  }> {
+    const [connections, schedules, me] = await Promise.all([
+      listConnections(this.db, p.memberId),
+      listSchedules(this.db, p.memberId),
+      getMe(this.db, p.accountId, p.memberId),
+    ]);
+    let hasWorkingHours = false;
+    if (schedules.length > 0) {
+      const rule = await this.db.get<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM availability WHERE schedule_id IN (
+              SELECT id FROM schedule WHERE member_id = ${p.memberId}
+            )`,
+      );
+      hasWorkingHours = Number(rule?.n ?? 0) > 0;
+    }
+    return {
+      hasConnectedCalendar: connections.length > 0,
+      hasWorkingHours,
+      hasBookingLink: !!me?.handle,
+    };
   }
 
   handleAvailable(p: HostPrincipal, handle: string) {
@@ -138,8 +208,35 @@ export class AdminService {
       this.calendar.provider,
     );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
-    if (outcome.ok && outcome.booking.status === 'accepted')
+    if (outcome.ok && outcome.booking.status === 'accepted') {
       this.calendar.onBookingAccepted(outcome.booking.uid);
+    }
+    // QA2 BUG-1 — same bug develop's 7305d09 fixed; merged as the superset:
+    // this path created the booking but notified NOBODY while the UI claimed
+    // "the attendee has been notified". Mirror the public path's side-effects,
+    // gated on manageToken so an idempotent replay re-sends nothing: emails
+    // carry the attendee manage link, PENDING bookings get the
+    // request-received mail, and booking.created webhooks fire for both.
+    if (outcome.ok && outcome.manageToken) {
+      const b = outcome.booking;
+      const manageUrl = this.env
+        ? `${this.env.PUBLIC_APP_URL}/manage/${b.uid}?token=${outcome.manageToken}`
+        : undefined;
+      if (b.status === 'accepted') {
+        void this.email.enqueueConfirmation(b.uid, { manageUrl });
+        void this.email.enqueueReminders(b.uid, { manageUrl });
+        void this.email.enqueueFollowUps(b.uid, { manageUrl });
+      } else if (b.status === 'pending') {
+        void this.email.enqueuePending(b.uid, { manageUrl });
+      }
+      void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.created', {
+        uid: b.uid,
+        status: b.status,
+        startUtc: new Date(b.startMs).toISOString(),
+        endUtc: new Date(b.endMs).toISOString(),
+        title: b.title,
+      }).catch(() => undefined);
+    }
     return outcome;
   }
 
@@ -200,8 +297,48 @@ export class AdminService {
   }
 
   // Connections (behind the CalendarProvider port — generic).
-  listConnections(p: HostPrincipal) {
-    return listConnections(this.db, p.memberId);
+  /**
+   * List connections, best-effort backfilling any missing `primaryEmail` so
+   * the UI can always show WHICH account a row is (critical once a member has
+   * more than one calendar). Older/seeded rows can predate the "which
+   * account?" email step, or a discovery run whose provider response omitted
+   * it — derive it the same way `discoverConnections` does (the provider's
+   * primary calendar id IS the account email) and persist it once so future
+   * reads are free. Never blocks or fails the read: an unreachable provider
+   * just leaves the row as-is (the UI falls back to "account unknown").
+   */
+  async listConnections(p: HostPrincipal) {
+    const rows = await listConnections(this.db, p.memberId);
+    if (!this.provider.enabled) return rows;
+    // Backfill missing primaryEmail in small batches (optibot #32 fix): an
+    // unbounded Promise.all here would fan out one provider call PER
+    // un-backfilled row on a single page load — fine for the handful a member
+    // normally has, but with many stale rows it can hammer the provider's own
+    // rate limit. A page load is not latency-sensitive enough to need full
+    // parallelism; a small concurrency cap keeps the win (no serial N-deep
+    // wait) without the fan-out risk.
+    const BACKFILL_CONCURRENCY = 4;
+    const toBackfill = rows.filter((c) => !c.primaryEmail);
+    for (let i = 0; i < toBackfill.length; i += BACKFILL_CONCURRENCY) {
+      await Promise.all(
+        toBackfill.slice(i, i + BACKFILL_CONCURRENCY).map(async (c) => {
+          try {
+            const calendars = await this.provider.listCalendars(c.externalId);
+            const email =
+              calendars.find((cal) => cal.isPrimary)?.primaryEmail ??
+              calendars.find((cal) => cal.primaryEmail)?.primaryEmail ??
+              null;
+            if (email) {
+              await setConnectionPrimaryEmail(this.db, p.memberId, c.id, email);
+              c.primaryEmail = email;
+            }
+          } catch {
+            /* best-effort — leave null */
+          }
+        }),
+      );
+    }
+    return rows;
   }
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
     return createConnection(this.db, { accountId: p.accountId, memberId: p.memberId, ...body });
@@ -222,10 +359,27 @@ export class AdminService {
    * Start a connect flow: mint the connect token/URL from the provider. Returns
    * an honest disabled status when no external provider is wired (OSS default),
    * so the UI can say so instead of silently failing.
+   *
+   * The connect subject is keyed by the Dapta-platform identity behind this
+   * member (`getMemberIdentity` — the upstream IAM user id), not the member's
+   * own local id: the rest of Dapta (adminpanel/flow-runner) keys the SAME
+   * external credential broker with `${iamUserId}-${accountEmail}` (a distinct
+   * subject per connected account — this is how a Dapta user already connects
+   * more than one Google account today, verified live against real accounts
+   * with 2-5 calendar connections each). Matching that scheme is what makes an
+   * account connected in the main Dapta app show up here automatically (and
+   * vice versa), and what lets a member add a 2nd/3rd calendar here: each
+   * `email` is a DIFFERENT subject, so the "one connection per subject" rule
+   * upstream never collides across accounts. `email` is the account the host
+   * is ABOUT to connect (collected by the caller before this call, mirroring
+   * adminpanel's own "which account?" prompt) — omitted only for the cheap
+   * enabled/disabled probe (`ConnectionsPage`), which never uses the resulting
+   * connectUrl.
    */
   async connectionToken(
     p: HostPrincipal,
     provider: string,
+    email?: string,
   ): Promise<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }> {
     const connector = asConnector(this.provider);
     if (!connector) {
@@ -236,7 +390,10 @@ export class AdminService {
         message: 'No external calendar provider configured (OSS default). Add a connection manually.',
       };
     }
-    const start = await connector.startConnect(provider, p.memberId);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const subject = email ? `${iamUserId}-${email}` : iamUserId;
+    const start = await connector.startConnect(provider, subject);
     return { enabled: true, token: start.token, connectUrl: start.connectUrl, message: 'Connect started.' };
   }
 
@@ -244,11 +401,20 @@ export class AdminService {
    * After the OAuth popup completes, discover the tenant's connection(s) for the
    * provider and persist any not already stored (first destination wins R20).
    * Returns the connections now on record.
+   *
+   * Discovery is keyed by the PLAIN Dapta iamUserId (no email suffix) so it
+   * enumerates EVERY account subject this member owns
+   * (`${iamUserId}-<email1>`, `${iamUserId}-<email2>`, …) — including accounts
+   * connected from the main Dapta app before this member ever opened
+   * Calendars, and every prior connection of this member's own (legacy plain
+   * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
    */
   async discoverConnections(p: HostPrincipal, provider: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
-    const discovered = await connector.discoverConnections(p.memberId, provider);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const discovered = await connector.discoverConnections(iamUserId, provider);
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {
@@ -280,7 +446,27 @@ export class AdminService {
       });
       firstNew = false;
     }
-    return listConnections(this.db, p.memberId);
+    const persisted = await listConnections(this.db, p.memberId);
+    // Merge in the raw discover metadata (connectionId/connected/state/
+    // updatedAt/lastActiveAt) for rows THIS call actually reported — ephemeral,
+    // not persisted (our schema has no such columns). This is what lets the
+    // frontend detect a completed RECONNECT of an already-linked account: a
+    // reconnect reuses the same externalId/connectionRef, so "is this row new"
+    // can never see it complete; "did updatedAt/lastActiveAt just advance" can.
+    const byRef = new Map(discovered.map((d) => [d.connectionRef, d]));
+    return persisted.map((c) => {
+      const d = byRef.get(c.externalId);
+      return d
+        ? {
+            ...c,
+            connectionId: d.connectionId ?? d.connectionRef,
+            connected: d.connected,
+            state: d.state,
+            updatedAt: d.updatedAt ?? null,
+            lastActiveAt: d.lastActiveAt ?? null,
+          }
+        : c;
+    });
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */
@@ -308,6 +494,84 @@ export class AdminService {
     return { ok: health.ok, enabled: true, message: health.detail };
   }
 
+  /**
+   * The "Test / Run check" self-test (the trust-building button — health
+   * alone was never enough: hosts don't believe a green dot means their
+   * REAL calendar is actually feeding conflict-checking). Exercises the
+   * EXACT two calls the booking engine depends on: `checkConnection` (same
+   * as ping) AND a real `listBusy` over the next 14 days — so a green result
+   * means the pipeline demonstrably read live events, not just that the
+   * token is valid. Never throws; every failure path returns a specific
+   * `reason` so the UI can show what to do next (e.g. Reconnect).
+   */
+  async testConnection(
+    p: HostPrincipal,
+    id: string,
+  ): Promise<{
+    ok: boolean;
+    healthDetail: string;
+    busyCount: number | null;
+    conflictCheckEnabled: boolean;
+    checkedAt: number;
+    reason?: 'DISCONNECTED' | 'NOT_READY' | 'READ_FAILED';
+  }> {
+    const checkedAt = Date.now();
+    if (!this.provider.enabled) {
+      return {
+        ok: false,
+        healthDetail: 'No external calendar provider configured (OSS default).',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const row = (await listConnections(this.db, p.memberId)).find((c) => c.id === id);
+    if (!row) {
+      return {
+        ok: false,
+        healthDetail: 'Connection not found.',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const health = await this.provider.checkConnection(row.externalId);
+    await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
+    if (!health.ok) {
+      return {
+        ok: false,
+        healthDetail: health.detail,
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'NOT_READY',
+      };
+    }
+    try {
+      const fromUtc = new Date(checkedAt).toISOString();
+      const toUtc = new Date(checkedAt + 14 * 24 * 3600_000).toISOString();
+      const busy = await this.provider.listBusy({ connectionRefs: [row.externalId], fromUtc, toUtc });
+      return {
+        ok: true,
+        healthDetail: health.detail,
+        busyCount: busy.length,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        healthDetail: e instanceof Error ? e.message : 'Could not read events.',
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'READ_FAILED',
+      };
+    }
+  }
+
   // API keys.
   listApiKeys(p: HostPrincipal) {
     return listApiKeys(this.db, p.accountId);
@@ -322,6 +586,10 @@ export class AdminService {
   // Webhooks.
   listWebhooks(p: HostPrincipal) {
     return listWebhooks(this.db, p.accountId);
+  }
+
+  listWebhookDeliveries(p: HostPrincipal, webhookId: string) {
+    return listWebhookDeliveries(this.db, p.accountId, webhookId);
   }
   createWebhook(p: HostPrincipal, body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
     return createWebhook(this.db, { accountId: p.accountId, ...body });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
-import { createBooking, getAvailability, getPublicProfile } from './repository';
+import { createBooking, getAvailability, getPublicProfile, validateIntakeAnswers } from './repository';
 
 // End-to-end against an in-memory SQLite database — no infra. Proves the
 // engine→repository→booking path and the dual-enforced double-booking guard.
@@ -151,5 +151,18 @@ describe('repository (SQLite in-memory)', () => {
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
     if (a.ok && b.ok) expect(b.booking.uid).toBe(a.booking.uid);
+  });
+
+  it('intake validation skips reserved names — legacy required "email"/"name"/"notes" questions cannot brick bookings (QA3 fix 3)', () => {
+    const legacy = [
+      { name: 'email', label: 'Email', type: 'email', required: true },
+      { name: 'Name', label: 'Name', type: 'text', required: true },
+      { name: 'notes', label: 'Notes', type: 'textarea', required: true },
+      { name: 'company', label: 'Company', type: 'text', required: true },
+    ] as Parameters<typeof validateIntakeAnswers>[0];
+    // The forms filter reserved questions out and never send answers for them:
+    // only genuinely-custom required fields may fail validation.
+    expect(validateIntakeAnswers(legacy, { company: 'ACME' })).toBeNull();
+    expect(validateIntakeAnswers(legacy, {})).toContain('Company');
   });
 });

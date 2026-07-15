@@ -19,3 +19,36 @@ describe('OpenAPI spec (E11)', () => {
     for (const tok of tokens) expect(json.toLowerCase()).not.toContain(tok);
   });
 });
+
+describe('OpenAPI ↔ controller parity (QA fix 4)', () => {
+  it('documents every machine route (the agent-facing surface cannot drift silently)', () => {
+    // The real machine surface, straight from MachineController's decorators.
+    // If a route is added there without documenting it here, this fails.
+    const machinePaths = Object.keys(openapiSpec.paths).filter((p) => p.startsWith('/v1/machine/'));
+    expect(machinePaths.sort()).toEqual(
+      [
+        '/v1/machine/availability',
+        '/v1/machine/bookings',
+        '/v1/machine/bookings/{uid}',
+        '/v1/machine/bookings/{uid}/attendees',
+        '/v1/machine/bookings/{uid}/cancel',
+      ].sort(),
+    );
+  });
+
+  it('every POST/PATCH operation carries a request-body schema', () => {
+    for (const [path, ops] of Object.entries(openapiSpec.paths)) {
+      for (const [method, op] of Object.entries(ops as Record<string, unknown>)) {
+        if (method !== 'post' && method !== 'patch') continue;
+        const body = (op as { requestBody?: { content?: Record<string, { schema?: unknown }> } }).requestBody;
+        expect(body?.content?.['application/json']?.schema, `${method.toUpperCase()} ${path}`).toBeTruthy();
+      }
+    }
+  });
+
+  it('attendee manage endpoints (cancel/reschedule) are documented', () => {
+    expect(Object.keys(openapiSpec.paths)).toEqual(
+      expect.arrayContaining(['/v1/bookings/{uid}', '/v1/bookings/{uid}/cancel', '/v1/bookings/{uid}/reschedule']),
+    );
+  });
+});

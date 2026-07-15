@@ -16,9 +16,15 @@ export async function createApiKeyAction(name: string, scopes: string[]): Promis
   }
 }
 
-export async function revokeApiKeyAction(id: string): Promise<void> {
-  await adminApi.revokeApiKey(id);
-  revalidatePath('/admin/settings/developer');
+export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await adminApi.revokeApiKey(id);
+    revalidatePath('/admin/settings/developer');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+  }
 }
 
 export async function createWebhookAction(subscriberUrl: string, triggers: string[]): Promise<{ ok: boolean; error?: string }> {
@@ -32,14 +38,38 @@ export async function createWebhookAction(subscriberUrl: string, triggers: strin
   }
 }
 
-export async function deleteWebhookAction(id: string): Promise<void> {
-  await adminApi.deleteWebhook(id);
-  revalidatePath('/admin/settings/developer');
+export async function deleteWebhookAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await adminApi.deleteWebhook(id);
+    revalidatePath('/admin/settings/developer');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+  }
 }
 
-export async function toggleWebhookAction(id: string, active: boolean): Promise<void> {
-  await adminApi.updateWebhook(id, active);
-  revalidatePath('/admin/settings/developer');
+export async function toggleWebhookAction(id: string, active: boolean): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await adminApi.updateWebhook(id, active);
+    revalidatePath('/admin/settings/developer');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+export async function webhookDeliveriesAction(
+  id: string,
+): Promise<{ ok: boolean; items: import('@/lib/admin-api').WebhookDeliveryRow[] }> {
+  try {
+    const r = await adminApi.webhookDeliveries(id);
+    return { ok: true, items: r.items };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, items: [] };
+  }
 }
 
 export async function pingWebhookAction(id: string): Promise<{ ok: boolean; message: string }> {

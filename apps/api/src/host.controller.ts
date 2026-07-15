@@ -16,6 +16,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { brandingSchema } from '@slate/types';
+import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
 import { isEmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
@@ -42,6 +43,25 @@ export class HostController {
     return this.admin.me(p);
   }
 
+  /**
+   * Called once by the browser on first admin mount to report its real IANA
+   * timezone (the server never knows this). No-op once the member has an
+   * explicit (non-'UTC') timezone — see AdminService.syncClientTimeZone.
+   */
+  @Post('me/timezone-sync')
+  @HttpCode(200)
+  async syncTimeZone(@Req() req: ReqLike, @Body() body: { timeZone?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.syncClientTimeZone(p, body?.timeZone ?? '');
+  }
+
+  /** The Home "Get bookable" checklist status (real data, not a static nag). */
+  @Get('me/setup-status')
+  async setupStatus(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.setupStatus(p);
+  }
+
   @Get('handle-available')
   async handleAvailable(@Req() req: ReqLike, @Query('handle') handle: string) {
     const p = await this.auth.resolveHost(req);
@@ -55,6 +75,14 @@ export class HostController {
     @Body() body: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
   ) {
     const p = await this.auth.resolveHost(req);
+    // A persisted zone must always format — a bad one used to brick every
+    // page that renders times for this member (QA fix 1: "UT}fg").
+    if (body?.timeZone !== undefined && !isValidTimeZone(body.timeZone)) {
+      throw new BadRequestException({
+        error: 'INVALID_TIMEZONE',
+        message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City).',
+      });
+    }
     await this.admin.updateSettings(p, body);
     return { ok: true };
   }
@@ -211,9 +239,9 @@ export class HostController {
    */
   @Post('connections/token')
   @HttpCode(200)
-  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.connectionToken(p, body?.provider ?? 'google');
+    return this.admin.connectionToken(p, body?.provider ?? 'google', body?.email);
   }
 
   /**
@@ -252,14 +280,27 @@ export class HostController {
     return this.admin.pingConnection(p, id);
   }
 
+  /**
+   * "Test / Run check" — the trust-building self-test. Unlike `/ping`, this
+   * actually reads real busy events for the next 14 days (the exact call the
+   * booking engine makes) so the host sees proof the pipeline works, not
+   * just a health dot.
+   */
+  @Post('connections/:id/test')
+  @HttpCode(200)
+  async testConnection(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.testConnection(p, id);
+  }
+
+  /**
+   * Disconnect any calendar, including the sole/destination one — a host is
+   * always allowed to walk down to zero connections; the booking engine
+   * already falls back cleanly to availability-only (see deleteConnection).
+   */
   @Delete('connections/:id')
   async deleteConnection(@Req() req: ReqLike, @Param('id') id: string) {
-    const out = await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
-    if (!out.ok)
-      throw new ConflictException({
-        error: 'LAST_DESTINATION_REQUIRED',
-        message: 'Keep at least one destination calendar — unset it as a destination first.',
-      });
+    await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
     return { ok: true };
   }
 
@@ -323,6 +364,15 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     return this.admin.pingWebhook(p, id);
+  }
+
+  /** Latest real delivery attempts (QA fix 10) — the dashboard's proof that a
+   *  webhook is landing, beyond the manual test ping. */
+  @Get('webhooks/:id/deliveries')
+  async webhookDeliveries(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return { items: await this.admin.listWebhookDeliveries(p, id) };
   }
 
   @Delete('webhooks/:id')

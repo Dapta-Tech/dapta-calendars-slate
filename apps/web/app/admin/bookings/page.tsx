@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages, type BookingMessages } from '@slate/shared';
+import { getMessages, t, type BookingMessages, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
@@ -31,7 +31,8 @@ export default async function BookingsPage() {
     adminApi.listBookings('limit=200'),
     adminApi.me(),
   ]);
-  const tz = me?.timeZone ?? 'UTC';
+  // safeTimeZone: a corrupt stored zone must never crash the whole page (QA fix 1).
+  const tz = safeTimeZone(me?.timeZone);
   const m = getMessages(await getLocale()).admin.bookings;
   const now = Date.now();
   const pending = items.filter((b) => b.status === 'pending');
@@ -53,6 +54,10 @@ export default async function BookingsPage() {
           </Link>
         }
       />
+      {/* Which zone the short "MST"-style labels below refer to (QA2 fix 8c). */}
+      <p className="-mt-6 mb-8 text-sm text-muted-foreground">
+        {t(m.timesShownIn, { tz: tz.replaceAll('_', ' ') })}
+      </p>
 
       {pending.length > 0 ? (
         <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} m={m} />
@@ -115,14 +120,26 @@ function Section({
               <div className="flex items-center gap-3">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
                 {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
+                {/* A status pill, NOT a button — a solid background paired with
+                    a foreground text color is reserved for real actions
+                    (Accept/Cancel above use exactly that fill). A same-styled
+                    "accepted" pill next to a real Cancel button reads as a
+                    second, broken button — that was the reported "Accept
+                    doesn't work" bug: there was no pending booking to show real
+                    Accept/Decline controls, only this pill on an
+                    already-accepted booking, styled like one. A soft tint fill
+                    (10 percent background opacity, colored text) keeps the
+                    status legible and color-coded while being visually
+                    unmistakable as non-interactive (same convention as the
+                    member and role pills elsewhere in admin). */}
                 <span
-                  className={`rounded-sm px-2 py-1 text-xs ${
+                  className={`rounded-sm px-2 py-1 text-xs font-medium ${
                     b.status === 'accepted'
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary/10 text-primary'
                       : b.status === 'pending'
-                        ? 'bg-secondary text-secondary-foreground'
+                        ? 'bg-secondary/10 text-secondary'
                         : b.status === 'cancelled' || b.status === 'rejected'
-                          ? 'bg-destructive text-destructive-foreground'
+                          ? 'bg-destructive/10 text-destructive'
                           : 'bg-muted text-muted-foreground'
                   }`}
                 >
