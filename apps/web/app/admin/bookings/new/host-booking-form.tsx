@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { PhoneField } from '@/components/ui/phone-field';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
+import { createDefaultScheduleAction } from '@/app/admin/availability/actions';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
 
 type BookingsMessages = BookingMessages['admin']['bookings'];
@@ -50,10 +51,13 @@ function EmptySlotsNotice({
   issue,
   eventId,
   m,
+  onScheduleCreated,
 }: {
   issue: string | null;
   eventId?: string;
   m: BookingsMessages;
+  /** NO_SCHEDULE only: refetch slots right after the one-click fix succeeds. */
+  onScheduleCreated?: () => void;
 }) {
   if (!issue) {
     return <span className="col-span-full text-sm text-muted-foreground">{m.noSlotsRange}</span>;
@@ -78,12 +82,38 @@ function EmptySlotsNotice({
     return <span className="col-span-full text-sm text-destructive">{m.slotsLoadError}</span>;
   }
   return (
-    <span className="col-span-full flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+    <span className="col-span-full flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
       <span>{notice.text}</span>
-      <Link href={notice.href} className="w-fit font-medium underline underline-offset-4">
-        {notice.link}
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        {issue === 'NO_SCHEDULE' ? (
+          <CreateWorkingHoursButton m={m} onCreated={onScheduleCreated} />
+        ) : null}
+        <Link href={notice.href} className="w-fit font-medium underline underline-offset-4">
+          {notice.link}
+        </Link>
+      </div>
     </span>
+  );
+}
+
+/** The NO_SCHEDULE one-click fix: create + link "Working hours" inline, no navigation. */
+function CreateWorkingHoursButton({ m, onCreated }: { m: BookingsMessages; onCreated?: () => void }) {
+  const [pending, startT] = useTransition();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={pending}
+      onClick={() =>
+        startT(async () => {
+          const r = await createDefaultScheduleAction();
+          if (r.ok) onCreated?.();
+        })
+      }
+    >
+      {pending ? m.creatingWorkingHours : m.createWorkingHours}
+    </Button>
   );
 }
 
@@ -257,7 +287,12 @@ export function HostBookingForm({
             slotsLoading ? (
               <span className="col-span-full text-sm text-muted-foreground">{m.loadingSlots}</span>
             ) : (
-              <EmptySlotsNotice issue={slotsIssue} eventId={event?.id} m={m} />
+              <EmptySlotsNotice
+                issue={slotsIssue}
+                eventId={event?.id}
+                m={m}
+                onScheduleCreated={() => setReloadKey((k) => k + 1)}
+              />
             )
           ) : null}
         </div>

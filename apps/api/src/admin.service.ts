@@ -16,18 +16,22 @@ import {
   pingWebhook,
   deleteConnection,
   deleteWebhook,
+  ensureDefaultSchedule,
   enqueueWebhookDeliveries,
   getAvailability,
   getMe,
+  getSchedule,
   listApiKeys,
   listBookings,
   listConnections,
+  listSchedules,
   listWebhooks,
   recordConnectionHealth,
   revokeApiKey,
   updateBranding,
   updateHandle,
   updateMemberSettings,
+  updateSchedule,
   cancelBooking,
   cacheEntitlement,
   setVanitySlug,
@@ -78,8 +82,67 @@ export class AdminService {
     @Optional() @Inject(ENV) private readonly env?: ServerEnv,
   ) {}
 
-  me(p: HostPrincipal) {
+  async me(p: HostPrincipal) {
+    // Hard invariant: a host must never resolve to NO_SCHEDULE — see
+    // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
     return getMe(this.db, p.accountId, p.memberId);
+  }
+
+  /**
+   * One-time browser-timezone catch-up (Home first-run guide / admin layout,
+   * fired once on mount). Only takes effect while the member is still on the
+   * raw schema default ('UTC', never explicitly chosen) — a member who has
+   * explicitly picked a timezone in Settings → General is never silently
+   * overridden. Also re-times the auto-created default schedule so "Working
+   * hours" isn't stuck on UTC once the real timezone is known.
+   */
+  async syncClientTimeZone(p: HostPrincipal, timeZone: string): Promise<{ ok: boolean }> {
+    if (!timeZone || timeZone === 'UTC') return { ok: false };
+    const member = await this.db.get<{ time_zone: string; default_schedule_id: string | null }>(
+      sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${p.memberId} LIMIT 1`,
+    );
+    if (!member || member.time_zone !== 'UTC') return { ok: false }; // already explicit — never override
+    await updateMemberSettings(this.db, p.memberId, { timeZone });
+    if (member.default_schedule_id) {
+      const sched = await getSchedule(this.db, p.accountId, member.default_schedule_id);
+      if (sched && sched.timeZone === 'UTC') {
+        await updateSchedule(this.db, p.accountId, member.default_schedule_id, { timeZone });
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The Home "Get bookable" checklist (R22: real data, not a static nag) —
+   * three steps: a connected calendar, working hours (a default schedule with
+   * ≥1 rule), and a shareable booking link (always true — every member gets an
+   * auto-handle at creation, short-links §3).
+   */
+  async setupStatus(p: HostPrincipal): Promise<{
+    hasConnectedCalendar: boolean;
+    hasWorkingHours: boolean;
+    hasBookingLink: boolean;
+  }> {
+    const [connections, schedules, me] = await Promise.all([
+      listConnections(this.db, p.memberId),
+      listSchedules(this.db, p.memberId),
+      getMe(this.db, p.accountId, p.memberId),
+    ]);
+    let hasWorkingHours = false;
+    if (schedules.length > 0) {
+      const rule = await this.db.get<{ n: number }>(
+        sql`SELECT COUNT(*) AS n FROM availability WHERE schedule_id IN (
+              SELECT id FROM schedule WHERE member_id = ${p.memberId}
+            )`,
+      );
+      hasWorkingHours = Number(rule?.n ?? 0) > 0;
+    }
+    return {
+      hasConnectedCalendar: connections.length > 0,
+      hasWorkingHours,
+      hasBookingLink: !!me?.handle,
+    };
   }
 
   handleAvailable(p: HostPrincipal, handle: string) {
@@ -143,13 +206,15 @@ export class AdminService {
       this.calendar.provider,
     );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
-    if (outcome.ok && outcome.booking.status === 'accepted')
+    if (outcome.ok && outcome.booking.status === 'accepted') {
       this.calendar.onBookingAccepted(outcome.booking.uid);
-    // QA2 BUG-1: this path created the booking but notified NOBODY — no
-    // attendee email, no reminders, no booking.created webhook — while the UI
-    // claimed "the attendee has been notified". Mirror the public path's
-    // side-effects, gated on manageToken so an idempotent replay re-sends
-    // nothing. (accountId is on the principal — no code lookup needed.)
+    }
+    // QA2 BUG-1 — same bug develop's 7305d09 fixed; merged as the superset:
+    // this path created the booking but notified NOBODY while the UI claimed
+    // "the attendee has been notified". Mirror the public path's side-effects,
+    // gated on manageToken so an idempotent replay re-sends nothing: emails
+    // carry the attendee manage link, PENDING bookings get the
+    // request-received mail, and booking.created webhooks fire for both.
     if (outcome.ok && outcome.manageToken) {
       const b = outcome.booking;
       const manageUrl = this.env
@@ -310,7 +375,27 @@ export class AdminService {
       });
       firstNew = false;
     }
-    return listConnections(this.db, p.memberId);
+    const persisted = await listConnections(this.db, p.memberId);
+    // Merge in the raw discover metadata (connectionId/connected/state/
+    // updatedAt/lastActiveAt) for rows THIS call actually reported — ephemeral,
+    // not persisted (our schema has no such columns). This is what lets the
+    // frontend detect a completed RECONNECT of an already-linked account: a
+    // reconnect reuses the same externalId/connectionRef, so "is this row new"
+    // can never see it complete; "did updatedAt/lastActiveAt just advance" can.
+    const byRef = new Map(discovered.map((d) => [d.connectionRef, d]));
+    return persisted.map((c) => {
+      const d = byRef.get(c.externalId);
+      return d
+        ? {
+            ...c,
+            connectionId: d.connectionId ?? d.connectionRef,
+            connected: d.connected,
+            state: d.state,
+            updatedAt: d.updatedAt ?? null,
+            lastActiveAt: d.lastActiveAt ?? null,
+          }
+        : c;
+    });
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */
@@ -336,6 +421,84 @@ export class AdminService {
     // last-checked info even before the next live probe.
     await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
     return { ok: health.ok, enabled: true, message: health.detail };
+  }
+
+  /**
+   * The "Test / Run check" self-test (the trust-building button — health
+   * alone was never enough: hosts don't believe a green dot means their
+   * REAL calendar is actually feeding conflict-checking). Exercises the
+   * EXACT two calls the booking engine depends on: `checkConnection` (same
+   * as ping) AND a real `listBusy` over the next 14 days — so a green result
+   * means the pipeline demonstrably read live events, not just that the
+   * token is valid. Never throws; every failure path returns a specific
+   * `reason` so the UI can show what to do next (e.g. Reconnect).
+   */
+  async testConnection(
+    p: HostPrincipal,
+    id: string,
+  ): Promise<{
+    ok: boolean;
+    healthDetail: string;
+    busyCount: number | null;
+    conflictCheckEnabled: boolean;
+    checkedAt: number;
+    reason?: 'DISCONNECTED' | 'NOT_READY' | 'READ_FAILED';
+  }> {
+    const checkedAt = Date.now();
+    if (!this.provider.enabled) {
+      return {
+        ok: false,
+        healthDetail: 'No external calendar provider configured (OSS default).',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const row = (await listConnections(this.db, p.memberId)).find((c) => c.id === id);
+    if (!row) {
+      return {
+        ok: false,
+        healthDetail: 'Connection not found.',
+        busyCount: null,
+        conflictCheckEnabled: false,
+        checkedAt,
+        reason: 'DISCONNECTED',
+      };
+    }
+    const health = await this.provider.checkConnection(row.externalId);
+    await recordConnectionHealth(this.db, p.memberId, id, { ok: health.ok, detail: health.detail });
+    if (!health.ok) {
+      return {
+        ok: false,
+        healthDetail: health.detail,
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'NOT_READY',
+      };
+    }
+    try {
+      const fromUtc = new Date(checkedAt).toISOString();
+      const toUtc = new Date(checkedAt + 14 * 24 * 3600_000).toISOString();
+      const busy = await this.provider.listBusy({ connectionRefs: [row.externalId], fromUtc, toUtc });
+      return {
+        ok: true,
+        healthDetail: health.detail,
+        busyCount: busy.length,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        healthDetail: e instanceof Error ? e.message : 'Could not read events.',
+        busyCount: null,
+        conflictCheckEnabled: row.checkConflicts,
+        checkedAt,
+        reason: 'READ_FAILED',
+      };
+    }
   }
 
   // API keys.

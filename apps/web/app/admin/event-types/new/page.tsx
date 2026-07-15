@@ -1,5 +1,5 @@
 import { getMessages } from '@slate/shared';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, describeCalendarLink } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from '../event-type-form';
 
@@ -14,9 +14,16 @@ export default async function NewEventType({
   // event" button lands here; the form gains the scheduling-method + hosts
   // section and returns to the team page on success.
   const { teamId } = await searchParams;
-  const [schedules, locale] = await Promise.all([adminApi.listSchedules(), getLocale()]);
+  const [schedules, connections, locale] = await Promise.all([
+    adminApi.listSchedules(),
+    adminApi.listConnections(),
+    getLocale(),
+  ]);
   const msgs = getMessages(locale);
   const m = msgs.admin.eventTypes;
+  // The calendar-link line applies to PERSONAL events (team events resolve
+  // their hosts' calendars at booking time), so hide it in team mode.
+  const calendarLink = teamId ? undefined : describeCalendarLink(connections);
 
   const teamMembers = teamId
     ? (await adminApi.teamMembers(teamId)).map((tm) => ({
@@ -33,6 +40,7 @@ export default async function NewEventType({
         scheduling={teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
         teamId={teamId}
+        calendarLink={calendarLink}
         redirectOnSuccess={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backHref={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backLabel={teamId ? msgs.admin.teams.teamEventTypes : m.title}

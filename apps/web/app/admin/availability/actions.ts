@@ -70,3 +70,30 @@ export async function deleteScheduleAction(id: string): Promise<ActionResult> {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete schedule.' };
   }
 }
+
+/**
+ * The one-click fix for the NO_SCHEDULE empty state (New booking, event-type
+ * pages): create "Working hours" (Mon-Fri 9-5, the host's own timezone) and
+ * link it — `createSchedule` auto-sets it as the default when none exists, so
+ * this single call is enough to make the host bookable. Callers revalidate
+ * their own page after a successful result (the schedule list AND every
+ * surface that reads the default all need a fresh render).
+ */
+export async function createDefaultScheduleAction(): Promise<ActionResult> {
+  try {
+    const me = await adminApi.me();
+    await adminApi.createSchedule({
+      name: 'Working hours',
+      timeZone: me.timeZone || 'UTC',
+      rules: DEFAULT_RULES,
+    });
+    revalidatePath('/admin/availability');
+    revalidatePath('/admin/bookings/new');
+    revalidatePath('/admin/event-types', 'layout');
+    revalidatePath('/admin'); // Home's "Get bookable" checklist reflects this step as done
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not create a default schedule.' };
+  }
+}

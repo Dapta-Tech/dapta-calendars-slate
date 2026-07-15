@@ -1,9 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
-import type { EventType } from '@/lib/admin-api';
+import { COUNTRIES, countryName, isReservedFieldName, t, type BookingMessages } from '@slate/shared';
+import type { EventCalendarLink, EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormHeader } from '@/components/ui/page-header';
@@ -37,6 +38,40 @@ export interface TeamMemberOption {
   displayName: string | null;
 }
 
+/**
+ * The read-only "which calendar is this actually linked to" line (Felipe:
+ * "cómo está el calendario conectado al evento, esto no hace sentido"). This
+ * product has no per-event calendar picker — every PERSONAL event implicitly
+ * uses the host's connected calendar(s), which was invisible on this screen.
+ */
+function CalendarLinkNotice({ link, m }: { link: EventCalendarLink; m: EventTypeMessages }) {
+  if (!link.hasAnyConnection) {
+    return (
+      <p className="rounded-md border border-dashed border-border bg-background/60 p-3 text-sm text-muted-foreground">
+        {m.calendarLinkNone}{' '}
+        <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
+          {m.calendarLinkConnect} →
+        </Link>
+      </p>
+    );
+  }
+  const body = link.destinationLabel
+    ? link.destinationIsConflictChecked
+      ? t(m.calendarLinkBoth, { calendar: link.destinationLabel })
+      : t(m.calendarLinkWriteOnly, { calendar: link.destinationLabel, n: link.conflictCheckedCount })
+    : link.conflictCheckedCount > 0
+      ? t(m.calendarLinkConflictsOnly, { n: link.conflictCheckedCount })
+      : m.calendarLinkNoDestination;
+  return (
+    <p className="rounded-md border border-border bg-background/60 p-3 text-sm text-muted-foreground">
+      {body}{' '}
+      <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
+        {m.calendarLinkManage} →
+      </Link>
+    </p>
+  );
+}
+
 export function EventTypeForm({
   initial,
   schedules = [],
@@ -44,6 +79,7 @@ export function EventTypeForm({
   scheduling,
   teamMembers,
   teamId,
+  calendarLink,
   redirectOnSuccess,
   backHref,
   backLabel,
@@ -60,6 +96,10 @@ export function EventTypeForm({
   /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
    *  path to team events at all; editing derives the team from `initial`. */
   teamId?: string;
+  /** Which of the host's connected calendars this event checks/writes to —
+   *  omitted for TEAM events (each host has their own connection; a single
+   *  line here would be misleading). */
+  calendarLink?: EventCalendarLink;
   /** When set (the dedicated /new surface), navigate here after a create. */
   redirectOnSuccess?: string;
   /** FormHeader nav + title (the admin screen header system). */
@@ -265,6 +305,8 @@ export function EventTypeForm({
           ))}
         </select>
       </Field>
+
+      {calendarLink ? <CalendarLinkNotice link={calendarLink} m={m} /> : null}
 
       {isTeamEvent && scheduling ? (
         <div className="flex flex-col gap-4 rounded-md border border-border bg-background/40 p-4">

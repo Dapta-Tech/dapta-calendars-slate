@@ -3,15 +3,17 @@ import { getMessages, t } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { CopyLink } from '@/components/copy-link';
+import { SetupChecklist } from '@/components/setup-checklist';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AdminHome() {
   const me = await adminApi.me();
-  const [eventTypes, bookings, teams] = await Promise.all([
+  const [eventTypes, bookings, teams, setupStatus] = await Promise.all([
     adminApi.listEventTypes(),
     adminApi.listBookings('limit=100'),
     adminApi.listTeams(),
+    adminApi.setupStatus(),
   ]);
   const upcoming = bookings.items.filter(
     (b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > Date.now(),
@@ -26,6 +28,8 @@ export default async function AdminHome() {
         {firstName ? t(h.welcomeNamed, { name: firstName }) : h.welcome}
       </h1>
       <p className="mb-8 text-muted-foreground">{h.subtitle}</p>
+
+      <SetupChecklist status={setupStatus} publicUrl={publicUrl} messages={h} />
 
       {/* Every member has an auto-assigned handle (short-links §3), so the
           shareable link always exists — the old "set a handle" nag is gone. */}

@@ -43,6 +43,25 @@ export class HostController {
     return this.admin.me(p);
   }
 
+  /**
+   * Called once by the browser on first admin mount to report its real IANA
+   * timezone (the server never knows this). No-op once the member has an
+   * explicit (non-'UTC') timezone — see AdminService.syncClientTimeZone.
+   */
+  @Post('me/timezone-sync')
+  @HttpCode(200)
+  async syncTimeZone(@Req() req: ReqLike, @Body() body: { timeZone?: string }) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.syncClientTimeZone(p, body?.timeZone ?? '');
+  }
+
+  /** The Home "Get bookable" checklist status (real data, not a static nag). */
+  @Get('me/setup-status')
+  async setupStatus(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.setupStatus(p);
+  }
+
   @Get('handle-available')
   async handleAvailable(@Req() req: ReqLike, @Query('handle') handle: string) {
     const p = await this.auth.resolveHost(req);
@@ -259,6 +278,19 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     // Real reachability test when a provider is wired; honest disabled state otherwise.
     return this.admin.pingConnection(p, id);
+  }
+
+  /**
+   * "Test / Run check" — the trust-building self-test. Unlike `/ping`, this
+   * actually reads real busy events for the next 14 days (the exact call the
+   * booking engine makes) so the host sees proof the pipeline works, not
+   * just a health dot.
+   */
+  @Post('connections/:id/test')
+  @HttpCode(200)
+  async testConnection(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.testConnection(p, id);
   }
 
   @Delete('connections/:id')

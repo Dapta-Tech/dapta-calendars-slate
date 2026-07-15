@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getMessages } from '@slate/shared';
-import { adminApi, ApiError } from '@/lib/admin-api';
+import { adminApi, ApiError, describeCalendarLink } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventRowActions } from '../event-row-actions';
 import { EventTypeForm } from '../event-type-form';
@@ -17,14 +17,16 @@ export default async function EditEventType({
   const { id } = await params;
   const { from } = await searchParams;
   // getEventType throws ApiError on 404 (stale/deleted id) — render a clean 404.
-  const [et, schedules] = await Promise.all([
+  const [et, schedules, connections] = await Promise.all([
     adminApi.getEventType(id).catch((e) => {
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
     }),
     adminApi.listSchedules(),
+    adminApi.listConnections(),
   ]);
   if (!et) notFound();
+  const calendarLink = describeCalendarLink(connections);
   const msgs = getMessages(await getLocale());
   const m = msgs.admin.eventTypes;
 
@@ -64,6 +66,7 @@ export default async function EditEventType({
         messages={m}
         scheduling={et.teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
+        calendarLink={et.teamId ? undefined : calendarLink}
         backHref={backToTeam ? `/admin/teams/${fromTeamId}` : '/admin/event-types'}
         backLabel={backToTeam ? msgs.admin.teams.title : m.title}
         heading={et.title}
