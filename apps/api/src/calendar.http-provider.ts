@@ -24,6 +24,11 @@ import type {
   UpdateEventInput,
 } from '@slate/calendar';
 
+/** Sent on every backend HTTP call — a UA-less request is rejected by the
+ *  backend's WAF (403 "error code: 1010"). Mozilla-prefixed to pass generic
+ *  bot heuristics; identifies the product for the vendor's request logs. */
+const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calendar.dapta.ai)';
+
 /** Token authority for the calendar backend. Mints a short-lived bearer. */
 export interface CalendarTokenSource {
   /**
@@ -243,6 +248,11 @@ export class ExternalCalendarProvider implements CalendarProvider {
         method: req.method,
         headers: {
           authorization: `Bearer ${token}`,
+          // A User-Agent is REQUIRED: the calendar backend sits behind a WAF that
+          // rejects UA-less requests (server-side fetch/undici sends none by
+          // default) with 403 "error code: 1010". Without this the busy-fetch
+          // fails → availability fails closed (CALENDAR_UNAVAILABLE) → no slots.
+          'user-agent': USER_AGENT,
           ...(req.body != null ? { 'content-type': 'application/json' } : {}),
         },
         body: req.body != null ? JSON.stringify(req.body) : undefined,
