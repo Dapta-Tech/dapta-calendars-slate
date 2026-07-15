@@ -409,12 +409,30 @@ export class AdminService {
    * Calendars, and every prior connection of this member's own (legacy plain
    * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
    */
-  async discoverConnections(p: HostPrincipal, provider: string) {
+  async discoverConnections(p: HostPrincipal, provider: string, email?: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
     const identity = await getMemberIdentity(this.db, p.memberId);
     const iamUserId = identity?.iamUserId ?? p.memberId;
-    const discovered = await connector.discoverConnections(iamUserId, provider);
+    // Membrane keys each connected account by the COMPOSITE subject
+    // `${iamUserId}-${email}` (the SAME scheme the main Dapta app uses — proven
+    // against the live workspace). A tenant token is an EXACT customerId match,
+    // so querying the bare `iamUserId` alone never sees a `${iamUserId}-<email>`
+    // account. Enumerate every subject this member could own and union them:
+    //   - the account just connected (the `email` arg from the connect step),
+    //   - the member's own login email (surfaces a calendar connected elsewhere
+    //     in Dapta under the same identity — e.g. the main app),
+    //   - the bare `iamUserId` (legacy pre-per-email connections).
+    const subjects = new Set<string>();
+    if (email) subjects.add(`${iamUserId}-${email}`);
+    if (identity?.email) subjects.add(`${iamUserId}-${identity.email}`);
+    subjects.add(iamUserId);
+    const perSubject = await Promise.all(
+      [...subjects].map((s) => connector.discoverConnections(s, provider).catch(() => [])),
+    );
+    const discoveredByRef = new Map<string, (typeof perSubject)[number][number]>();
+    for (const conn of perSubject.flat()) discoveredByRef.set(conn.connectionRef, conn);
+    const discovered = [...discoveredByRef.values()];
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {
