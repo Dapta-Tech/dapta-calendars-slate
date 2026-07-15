@@ -246,6 +246,16 @@ describe('transactional-v1 wire — response interpretation', () => {
     });
   });
 
+  it('in-flight provider states (deferred/queued/processed) count as dispatched — the provider owns delivery + retries', () => {
+    for (const status of ['deferred', 'queued', 'processed']) {
+      expect(interpretTransactionalResponse(201, { status, messageId: 'm' })).toEqual({
+        delivered: true,
+        messageId: 'm',
+        driver: 'http',
+      });
+    }
+  });
+
   it('a valid idempotent duplicate (accepted + duplicate:true) counts as dispatched', () => {
     expect(
       interpretTransactionalResponse(200, { status: 'accepted', duplicate: true, messageId: 'dup' }),
