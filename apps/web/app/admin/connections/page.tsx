@@ -30,9 +30,12 @@ export default async function ConnectionsPage() {
   // content column (R30 list/create pattern). The primary "Connect another"
   // action lives in the SAME header row as the title — ConnectionsClient
   // renders the PageHeader itself so the action can be wired to its dialog
-  // state, exactly like Bookings' "+ New booking".
+  // state, exactly like Bookings' "+ New booking". ONE container width for the
+  // whole page (header + body) — same max-w-[1520px] canvas as every other
+  // admin list page (Bookings/Event types/Teams) so the body's right edge
+  // lines up under the header action, not a narrower column underneath it.
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-8 py-10">
       <ConnectionsClient
         title={admin.nav.calendars}
         subtitle={messages.pageDesc}
