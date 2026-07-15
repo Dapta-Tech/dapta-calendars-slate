@@ -153,6 +153,10 @@ function ConnectDialog({
   const popupRef = useRef<Window | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeProvider = useRef<string>('google');
+  // The email of the account currently being connected. Discovery MUST query
+  // the SAME composite Membrane subject (`${iamUserId}-${email}`) that the
+  // connect step wrote to — otherwise the just-authorized account is invisible.
+  const activeEmail = useRef<string | undefined>(undefined);
   // The moment the connect popup opened, MINUS a clock-skew grace window —
   // completion is "a row of the active provider kind whose vendor-reported
   // updatedAt/lastActiveAt is at or after this moment", never a raw count NOR
@@ -198,7 +202,7 @@ function ConnectDialog({
   // wasn't present before the popup opened (catches a brand-new connection on
   // a wire that doesn't report timestamps).
   const checkForNew = useCallback(() => {
-    void discoverConnectionsAction(activeProvider.current).then((r) => {
+    void discoverConnectionsAction(activeProvider.current, activeEmail.current).then((r) => {
       if (!r.ok) return;
       const kind = providerKind(activeProvider.current);
       const openedAt = connectOpenedAtRef.current;
@@ -233,6 +237,7 @@ function ConnectDialog({
   const beginConnect = (provider: string, email: string) => {
     setErr(null);
     activeProvider.current = provider;
+    activeEmail.current = email || undefined;
     const kind = providerKind(provider);
     baselineIdsRef.current = new Set(
       connections.filter((c) => providerKind(c.provider) === kind).map((c) => c.id),

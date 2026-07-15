@@ -110,9 +110,10 @@ export async function connectCalendarAction(
  */
 export async function discoverConnectionsAction(
   provider: string,
+  email?: string,
 ): Promise<{ ok: boolean; connections: Connection[]; message?: string }> {
   try {
-    const conns = await adminApi.discoverConnections(provider);
+    const conns = await adminApi.discoverConnections(provider, email);
     revalidatePath('/admin/connections');
     return { ok: true, connections: conns };
   } catch (e) {
