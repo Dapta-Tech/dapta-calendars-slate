@@ -402,6 +402,13 @@ export const eventTypeInputSchema = z.object({
     )
     .optional(),
   teamId: z.string().nullable().optional(),
+  /** PHASE 2 — per-event calendar selection (personal events only; ignored for
+   *  team events — Phase 3). The set of connected_calendar ids this event
+   *  checks for conflicts; empty clears the override. */
+  conflictCalendarIds: z.array(z.string()).optional(),
+  /** PHASE 2 — the connected_calendar id this event writes booked events to;
+   *  null clears the override (falls back to the member-level destination). */
+  destinationCalendarId: z.string().nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

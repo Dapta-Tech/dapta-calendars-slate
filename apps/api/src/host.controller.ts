@@ -239,9 +239,9 @@ export class HostController {
    */
   @Post('connections/token')
   @HttpCode(200)
-  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+  async connectionToken(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.connectionToken(p, body?.provider ?? 'google');
+    return this.admin.connectionToken(p, body?.provider ?? 'google', body?.email);
   }
 
   /**
@@ -293,14 +293,14 @@ export class HostController {
     return this.admin.testConnection(p, id);
   }
 
+  /**
+   * Disconnect any calendar, including the sole/destination one — a host is
+   * always allowed to walk down to zero connections; the booking engine
+   * already falls back cleanly to availability-only (see deleteConnection).
+   */
   @Delete('connections/:id')
   async deleteConnection(@Req() req: ReqLike, @Param('id') id: string) {
-    const out = await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
-    if (!out.ok)
-      throw new ConflictException({
-        error: 'LAST_DESTINATION_REQUIRED',
-        message: 'Keep at least one destination calendar — unset it as a destination first.',
-      });
+    await this.admin.deleteConnection(await this.auth.resolveHost(req), id);
     return { ok: true };
   }
 

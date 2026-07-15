@@ -262,6 +262,13 @@ export interface BookingMessages {
       calendarLinkNoDestination: string;
       calendarLinkNone: string;
       calendarLinkConnect: string;
+      /** PHASE 2 — the editable "Calendars for this event" section (personal
+       *  events only; replaces the old read-only calendarLink* notice above). */
+      calendarsSectionTitle: string;
+      calendarsSectionHint: string;
+      calendarsCheckConflicts: string;
+      calendarsAddEventsHere: string;
+      calendarsManageLink: string;
     };
     availability: {
       title: string;
@@ -481,6 +488,12 @@ export interface BookingMessages {
       syncOffDesc: string;
       syncOffSetPre: string;
       syncOffSetPost: string;
+      /** The "which account?" step shown before starting the OAuth popup. */
+      emailStepTitle: string;
+      emailStepLabel: string;
+      emailStepHelp: string;
+      emailStepContinue: string;
+      emailStepBack: string;
       connectWaiting: string;
       connectHint: string;
       connectDone: string;
@@ -492,6 +505,9 @@ export interface BookingMessages {
       conflictCheck: string;
       disconnect: string;
       disconnectError: string;
+      /** Muted fallback label when a connection's account email couldn't be
+       *  determined (never repeats the provider name — see connectionLabel). */
+      accountUnknown: string;
       manualTitle: string;
       manualDesc: string;
       provider: string;
@@ -930,6 +946,11 @@ export const en: BookingMessages = {
       calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
       calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
       calendarLinkConnect: 'Connect one',
+      calendarsSectionTitle: 'Calendars for this event',
+      calendarsSectionHint: 'Choose which connected calendars this event checks for conflicts, and where booked events are added.',
+      calendarsCheckConflicts: 'Check for conflicts',
+      calendarsAddEventsHere: 'Add events here',
+      calendarsManageLink: 'Manage calendars',
     },
     availability: {
       title: 'Availability',
@@ -1146,6 +1167,11 @@ export const en: BookingMessages = {
       syncOffDesc: 'No external calendar provider is configured, so busy times aren’t being read and events aren’t being written yet. Connections you add below are recorded but not synced.',
       syncOffSetPre: 'To turn sync on, set',
       syncOffSetPost: 'and configure a provider adapter in your deployment.',
+      emailStepTitle: 'Which account are you connecting?',
+      emailStepLabel: 'Account email',
+      emailStepHelp: 'This keeps the new connection separate from any others, and matches it up with the same account if it’s already connected elsewhere in Dapta.',
+      emailStepContinue: 'Continue',
+      emailStepBack: 'Back',
       connectWaiting: 'Waiting for you to finish connecting…',
       connectHint: 'Finish signing in and granting access in the popup window, then return here.',
       connectDone: 'I’ve finished connecting',
@@ -1157,6 +1183,7 @@ export const en: BookingMessages = {
       conflictCheck: 'Conflict check',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
+      accountUnknown: 'Account unknown',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
@@ -1618,6 +1645,11 @@ export const es: BookingMessages = {
       calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
       calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
       calendarLinkConnect: 'Conectar uno',
+      calendarsSectionTitle: 'Calendarios para este evento',
+      calendarsSectionHint: 'Elige qué calendarios conectados verifica este evento para conflictos, y dónde se añaden los eventos reservados.',
+      calendarsCheckConflicts: 'Verificar conflictos',
+      calendarsAddEventsHere: 'Añadir eventos aquí',
+      calendarsManageLink: 'Administrar calendarios',
     },
     availability: {
       title: 'Disponibilidad',
@@ -1832,6 +1864,11 @@ export const es: BookingMessages = {
       syncOffDesc: 'No hay ningún proveedor de calendario externo configurado, así que aún no se leen horas ocupadas ni se escriben eventos. Las conexiones que añadas abajo se registran pero no se sincronizan.',
       syncOffSetPre: 'Para activar la sincronización, define',
       syncOffSetPost: 'y configura un adaptador de proveedor en tu despliegue.',
+      emailStepTitle: '¿Qué cuenta vas a conectar?',
+      emailStepLabel: 'Correo de la cuenta',
+      emailStepHelp: 'Esto mantiene la nueva conexión separada de las demás y la vincula con la misma cuenta si ya está conectada en otra parte de Dapta.',
+      emailStepContinue: 'Continuar',
+      emailStepBack: 'Atrás',
       connectWaiting: 'Esperando a que termines de conectar…',
       connectHint: 'Termina de iniciar sesión y de dar acceso en la ventana emergente y luego vuelve aquí.',
       connectDone: 'Ya terminé de conectar',
@@ -1843,6 +1880,7 @@ export const es: BookingMessages = {
       conflictCheck: 'Verificar conflictos',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
+      accountUnknown: 'Cuenta desconocida',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',

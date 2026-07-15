@@ -20,8 +20,27 @@ import type { Db } from './client';
  * Connection refs used for CONFLICT checking (availability). Only calendars the
  * host opted into (`check_conflicts = 1`) contribute busy times. The ref is the
  * opaque `external_id` the provider round-trips — never an OAuth token.
+ *
+ * PHASE 2 (per-event calendars): when `eventTypeId` is given and the event has
+ * an explicit `event_type_conflict_calendar` set, that set wins — ONLY calendars
+ * belonging to `memberId` are ever considered (defense in depth: a per-event
+ * override can never resolve to another member's calendar). Zero rows for the
+ * event ⇒ fall back to the member-level default (unchanged behavior — a bare
+ * event, or `eventTypeId` omitted, is exactly today's parity).
  */
-export async function loadConflictConnectionRefs(db: Db, memberId: string): Promise<string[]> {
+export async function loadConflictConnectionRefs(
+  db: Db,
+  memberId: string,
+  eventTypeId?: string | null,
+): Promise<string[]> {
+  if (eventTypeId) {
+    const scoped = await db.all<{ external_id: string }>(
+      sql`SELECT cc.external_id FROM event_type_conflict_calendar etcc
+          JOIN connected_calendar cc ON cc.id = etcc.connected_calendar_id
+          WHERE etcc.event_type_id = ${eventTypeId} AND cc.member_id = ${memberId}`,
+    );
+    if (scoped.length > 0) return scoped.map((r) => r.external_id);
+  }
   const rows = await db.all<{ external_id: string }>(
     sql`SELECT external_id FROM connected_calendar
         WHERE member_id = ${memberId} AND check_conflicts = 1`,
@@ -32,8 +51,32 @@ export async function loadConflictConnectionRefs(db: Db, memberId: string): Prom
 /**
  * Connection refs that are WRITE destinations (`is_destination = 1`): where a
  * confirmed booking's event is created. Empty ⇒ nothing is written out.
+ *
+ * PHASE 2 (per-event calendars): when `eventTypeId` is given and the event has
+ * an explicit `destination_calendar_id`, that SINGLE calendar wins — but only
+ * if it still belongs to `memberId` (still connected, still theirs); a
+ * disconnected/foreign reference is treated as unset and falls back to the
+ * member-level default, same as `destination_calendar_id IS NULL`.
  */
-export async function loadDestinationConnectionRefs(db: Db, memberId: string): Promise<string[]> {
+export async function loadDestinationConnectionRefs(
+  db: Db,
+  memberId: string,
+  eventTypeId?: string | null,
+): Promise<string[]> {
+  if (eventTypeId) {
+    const et = await db.get<{ destination_calendar_id: string | null }>(
+      sql`SELECT destination_calendar_id FROM event_type WHERE id = ${eventTypeId} LIMIT 1`,
+    );
+    if (et?.destination_calendar_id) {
+      const cc = await db.get<{ external_id: string }>(
+        sql`SELECT external_id FROM connected_calendar
+            WHERE id = ${et.destination_calendar_id} AND member_id = ${memberId} LIMIT 1`,
+      );
+      if (cc) return [cc.external_id];
+      // Referenced calendar disconnected or not owned by this member — fall
+      // through to the member-level default below (never throw, never 500).
+    }
+  }
   const rows = await db.all<{ external_id: string }>(
     sql`SELECT external_id FROM connected_calendar
         WHERE member_id = ${memberId} AND is_destination = 1`,
@@ -48,6 +91,10 @@ export async function loadDestinationConnectionRefs(db: Db, memberId: string): P
  * Strict no-op contract (keeps clone-and-run behavior identical to before):
  *   - `calendar` undefined or `enabled === false` (the OSS DisabledProvider) → []
  *   - no conflict-checked connections → [] (never calls the provider)
+ *
+ * `eventTypeId` threads the PHASE 2 per-event conflict-calendar override
+ * through to `loadConflictConnectionRefs` — omit it (or pass null) for the
+ * member-level default, exactly today's behavior.
  */
 export async function loadExternalBusy(
   db: Db,
@@ -55,9 +102,10 @@ export async function loadExternalBusy(
   memberId: string,
   fromMs: number,
   toMs: number,
+  eventTypeId?: string | null,
 ): Promise<Interval[]> {
   if (!calendar?.enabled) return [];
-  const connectionRefs = await loadConflictConnectionRefs(db, memberId);
+  const connectionRefs = await loadConflictConnectionRefs(db, memberId, eventTypeId);
   if (connectionRefs.length === 0) return [];
   const busy = await calendar.listBusy({
     connectionRefs,
@@ -105,10 +153,11 @@ export async function loadBookingForCalendarWrite(
     location: string | null;
     attendee_time_zone: string | null;
     host_member_id: string | null;
+    event_type_id: string | null;
     host_email: string | null;
   }>(
     sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.attendee_time_zone,
-               b.host_member_id, m.email AS host_email
+               b.host_member_id, b.event_type_id, m.email AS host_email
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.uid = ${uid} LIMIT 1`,
@@ -132,9 +181,19 @@ export async function loadBookingForCalendarWrite(
   if (b.host_member_id) hostMemberIds.add(b.host_member_id);
   for (const h of coHosts) hostMemberIds.add(h.member_id);
 
+  // PHASE 2 (per-event calendars): the event's `destination_calendar_id`
+  // override applies ONLY to genuinely single-host bookings (personal /
+  // round-robin — no co-hosts recorded). Collective/fixed_round_robin team
+  // bookings keep each host's own member-level default (Phase 3 territory);
+  // applying one event-level override across multiple hosts' calendars would
+  // be a silent wrong-calendar write.
+  const isSingleHost = hostMemberIds.size <= 1;
   const destinationSet = new Set<string>();
   for (const memberId of hostMemberIds) {
-    for (const ref of await loadDestinationConnectionRefs(db, memberId)) destinationSet.add(ref);
+    const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
+    for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
+      destinationSet.add(ref);
+    }
   }
 
   // On multi-host bookings the co-hosts join the invite as attendees (the

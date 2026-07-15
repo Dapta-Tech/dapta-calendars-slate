@@ -10,6 +10,7 @@ import {
   updateConnection,
   connectionExists,
   getConnectionRef,
+  getMemberIdentity,
   declineBooking,
   createWebhook,
   updateWebhook,
@@ -28,6 +29,7 @@ import {
   listWebhooks,
   recordConnectionHealth,
   revokeApiKey,
+  setConnectionPrimaryEmail,
   updateBranding,
   updateHandle,
   updateMemberSettings,
@@ -295,8 +297,48 @@ export class AdminService {
   }
 
   // Connections (behind the CalendarProvider port — generic).
-  listConnections(p: HostPrincipal) {
-    return listConnections(this.db, p.memberId);
+  /**
+   * List connections, best-effort backfilling any missing `primaryEmail` so
+   * the UI can always show WHICH account a row is (critical once a member has
+   * more than one calendar). Older/seeded rows can predate the "which
+   * account?" email step, or a discovery run whose provider response omitted
+   * it — derive it the same way `discoverConnections` does (the provider's
+   * primary calendar id IS the account email) and persist it once so future
+   * reads are free. Never blocks or fails the read: an unreachable provider
+   * just leaves the row as-is (the UI falls back to "account unknown").
+   */
+  async listConnections(p: HostPrincipal) {
+    const rows = await listConnections(this.db, p.memberId);
+    if (!this.provider.enabled) return rows;
+    // Backfill missing primaryEmail in small batches (optibot #32 fix): an
+    // unbounded Promise.all here would fan out one provider call PER
+    // un-backfilled row on a single page load — fine for the handful a member
+    // normally has, but with many stale rows it can hammer the provider's own
+    // rate limit. A page load is not latency-sensitive enough to need full
+    // parallelism; a small concurrency cap keeps the win (no serial N-deep
+    // wait) without the fan-out risk.
+    const BACKFILL_CONCURRENCY = 4;
+    const toBackfill = rows.filter((c) => !c.primaryEmail);
+    for (let i = 0; i < toBackfill.length; i += BACKFILL_CONCURRENCY) {
+      await Promise.all(
+        toBackfill.slice(i, i + BACKFILL_CONCURRENCY).map(async (c) => {
+          try {
+            const calendars = await this.provider.listCalendars(c.externalId);
+            const email =
+              calendars.find((cal) => cal.isPrimary)?.primaryEmail ??
+              calendars.find((cal) => cal.primaryEmail)?.primaryEmail ??
+              null;
+            if (email) {
+              await setConnectionPrimaryEmail(this.db, p.memberId, c.id, email);
+              c.primaryEmail = email;
+            }
+          } catch {
+            /* best-effort — leave null */
+          }
+        }),
+      );
+    }
+    return rows;
   }
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
     return createConnection(this.db, { accountId: p.accountId, memberId: p.memberId, ...body });
@@ -317,10 +359,27 @@ export class AdminService {
    * Start a connect flow: mint the connect token/URL from the provider. Returns
    * an honest disabled status when no external provider is wired (OSS default),
    * so the UI can say so instead of silently failing.
+   *
+   * The connect subject is keyed by the Dapta-platform identity behind this
+   * member (`getMemberIdentity` — the upstream IAM user id), not the member's
+   * own local id: the rest of Dapta (adminpanel/flow-runner) keys the SAME
+   * external credential broker with `${iamUserId}-${accountEmail}` (a distinct
+   * subject per connected account — this is how a Dapta user already connects
+   * more than one Google account today, verified live against real accounts
+   * with 2-5 calendar connections each). Matching that scheme is what makes an
+   * account connected in the main Dapta app show up here automatically (and
+   * vice versa), and what lets a member add a 2nd/3rd calendar here: each
+   * `email` is a DIFFERENT subject, so the "one connection per subject" rule
+   * upstream never collides across accounts. `email` is the account the host
+   * is ABOUT to connect (collected by the caller before this call, mirroring
+   * adminpanel's own "which account?" prompt) — omitted only for the cheap
+   * enabled/disabled probe (`ConnectionsPage`), which never uses the resulting
+   * connectUrl.
    */
   async connectionToken(
     p: HostPrincipal,
     provider: string,
+    email?: string,
   ): Promise<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }> {
     const connector = asConnector(this.provider);
     if (!connector) {
@@ -331,7 +390,10 @@ export class AdminService {
         message: 'No external calendar provider configured (OSS default). Add a connection manually.',
       };
     }
-    const start = await connector.startConnect(provider, p.memberId);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const subject = email ? `${iamUserId}-${email}` : iamUserId;
+    const start = await connector.startConnect(provider, subject);
     return { enabled: true, token: start.token, connectUrl: start.connectUrl, message: 'Connect started.' };
   }
 
@@ -339,11 +401,20 @@ export class AdminService {
    * After the OAuth popup completes, discover the tenant's connection(s) for the
    * provider and persist any not already stored (first destination wins R20).
    * Returns the connections now on record.
+   *
+   * Discovery is keyed by the PLAIN Dapta iamUserId (no email suffix) so it
+   * enumerates EVERY account subject this member owns
+   * (`${iamUserId}-<email1>`, `${iamUserId}-<email2>`, …) — including accounts
+   * connected from the main Dapta app before this member ever opened
+   * Calendars, and every prior connection of this member's own (legacy plain
+   * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
    */
   async discoverConnections(p: HostPrincipal, provider: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
-    const discovered = await connector.discoverConnections(p.memberId, provider);
+    const identity = await getMemberIdentity(this.db, p.memberId);
+    const iamUserId = identity?.iamUserId ?? p.memberId;
+    const discovered = await connector.discoverConnections(iamUserId, provider);
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {

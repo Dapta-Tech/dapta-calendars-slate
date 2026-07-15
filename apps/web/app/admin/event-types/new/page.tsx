@@ -1,5 +1,5 @@
 import { getMessages } from '@slate/shared';
-import { adminApi, describeCalendarLink } from '@/lib/admin-api';
+import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from '../event-type-form';
 
@@ -21,9 +21,9 @@ export default async function NewEventType({
   ]);
   const msgs = getMessages(locale);
   const m = msgs.admin.eventTypes;
-  // The calendar-link line applies to PERSONAL events (team events resolve
-  // their hosts' calendars at booking time), so hide it in team mode.
-  const calendarLink = teamId ? undefined : describeCalendarLink(connections);
+  // The calendars section applies to PERSONAL events (team events resolve
+  // their hosts' calendars at booking time), so it's hidden in team mode —
+  // handled below via `connections={teamId ? undefined : connections}`.
 
   const teamMembers = teamId
     ? (await adminApi.teamMembers(teamId)).map((tm) => ({
@@ -40,7 +40,7 @@ export default async function NewEventType({
         scheduling={teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
         teamId={teamId}
-        calendarLink={calendarLink}
+        connections={teamId ? undefined : connections}
         redirectOnSuccess={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backHref={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backLabel={teamId ? msgs.admin.teams.teamEventTypes : m.title}

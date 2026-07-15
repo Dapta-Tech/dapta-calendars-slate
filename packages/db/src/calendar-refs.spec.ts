@@ -29,14 +29,23 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
     return { fromMs, toMs: fromMs + 10 * 86_400_000 };
   };
 
-  async function connectCalendar(opts: { destination: boolean; conflicts: boolean }): Promise<void> {
+  async function connectCalendar(
+    opts: { destination: boolean; conflicts: boolean },
+    externalId = CAL_REF,
+  ): Promise<string> {
+    const id = randomUUID();
     await db.run(
       sql`INSERT INTO connected_calendar
             (id, account_id, member_id, provider, external_id, primary_email,
              is_destination, check_conflicts, created_at)
-          VALUES (${randomUUID()}, ${accountId}, ${memberId}, ${'google'}, ${CAL_REF}, ${null},
+          VALUES (${id}, ${accountId}, ${memberId}, ${'google'}, ${externalId}, ${null},
              ${opts.destination ? 1 : 0}, ${opts.conflicts ? 1 : 0}, ${Date.now()})`,
     );
+    return id;
+  }
+
+  async function getIntroCallEventTypeId(): Promise<string> {
+    return (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call'`))!.id;
   }
 
   beforeEach(async () => {
@@ -146,5 +155,109 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
 
     await deleteBookingReferences(db, ctx!.bookingId);
     expect(await loadBookingReferences(db, ctx!.bookingId)).toHaveLength(0);
+  });
+
+  // --- PHASE 2: per-event calendar selection --------------------------------
+
+  describe('event-aware conflict/destination resolution (Phase 2)', () => {
+    it('falls back to the member-level default when the event has no override (no regression)', async () => {
+      await connectCalendar({ destination: true, conflicts: true }, 'cal-a');
+      await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      const eventTypeId = await getIntroCallEventTypeId();
+
+      // No event_type_conflict_calendar rows, no destination_calendar_id set —
+      // member default is BOTH conflict-checked calendars + the sole destination.
+      expect((await loadConflictConnectionRefs(db, memberId, eventTypeId)).sort()).toEqual(['cal-a', 'cal-b']);
+      expect(await loadDestinationConnectionRefs(db, memberId, eventTypeId)).toEqual(['cal-a']);
+      // Omitting eventTypeId entirely is identical (today's call shape).
+      expect((await loadConflictConnectionRefs(db, memberId)).sort()).toEqual(['cal-a', 'cal-b']);
+    });
+
+    it('uses the event-scoped conflict-calendar override when configured', async () => {
+      await connectCalendar({ destination: true, conflicts: true }, 'cal-a');
+      const calB = await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      const eventTypeId = await getIntroCallEventTypeId();
+
+      // Configure this event to check ONLY cal-b, even though the member has
+      // both check_conflicts calendars.
+      await db.run(
+        sql`INSERT INTO event_type_conflict_calendar (event_type_id, connected_calendar_id, created_at)
+            VALUES (${eventTypeId}, ${calB}, ${Date.now()})`,
+      );
+      expect(await loadConflictConnectionRefs(db, memberId, eventTypeId)).toEqual(['cal-b']);
+      // A DIFFERENT event type (or no eventTypeId) is unaffected — still both.
+      expect((await loadConflictConnectionRefs(db, memberId)).sort()).toEqual(['cal-a', 'cal-b']);
+    });
+
+    it('uses the event-scoped destination override when configured, and falls back if disconnected', async () => {
+      await connectCalendar({ destination: true, conflicts: true }, 'cal-a');
+      const calB = await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      const eventTypeId = await getIntroCallEventTypeId();
+
+      await db.run(sql`UPDATE event_type SET destination_calendar_id = ${calB} WHERE id = ${eventTypeId}`);
+      expect(await loadDestinationConnectionRefs(db, memberId, eventTypeId)).toEqual(['cal-b']);
+
+      // Disconnect cal-b (the override target) — resolution must fall back to
+      // the member default (cal-a), never throw, never resolve to nothing.
+      await db.run(sql`DELETE FROM connected_calendar WHERE id = ${calB}`);
+      expect(await loadDestinationConnectionRefs(db, memberId, eventTypeId)).toEqual(['cal-a']);
+    });
+
+    it('getAvailability subtracts busy from ONLY the event-scoped conflict calendar', async () => {
+      const calA = await connectCalendar({ destination: false, conflicts: true }, 'cal-a');
+      const calB = await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      const eventTypeId = await getIntroCallEventTypeId();
+      // Scope this event to cal-a ONLY.
+      await db.run(
+        sql`INSERT INTO event_type_conflict_calendar (event_type_id, connected_calendar_id, created_at)
+            VALUES (${eventTypeId}, ${calA}, ${Date.now()})`,
+      );
+
+      const { fromMs, toMs } = WINDOW();
+      const args = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', fromMs, toMs };
+      const baseline = await getAvailability(db, args);
+      const firstStartMs = new Date(baseline!.slots[0]!.startUtc).getTime();
+
+      const provider = new InMemoryCalendarProvider();
+      // Busy on cal-b (NOT in this event's scoped set) must NOT remove the slot.
+      provider.seedBusy('cal-b', [
+        { startUtc: new Date(firstStartMs - 60_000).toISOString(), endUtc: new Date(firstStartMs + 60 * 60_000).toISOString() },
+      ]);
+      const withIrrelevantBusy = await getAvailability(db, args, provider);
+      expect(withIrrelevantBusy!.slots.map((s) => s.startUtc)).toContain(baseline!.slots[0]!.startUtc);
+
+      // Busy on cal-a (the scoped calendar) DOES remove the slot.
+      const provider2 = new InMemoryCalendarProvider();
+      provider2.seedBusy('cal-a', [
+        { startUtc: new Date(firstStartMs - 60_000).toISOString(), endUtc: new Date(firstStartMs + 60 * 60_000).toISOString() },
+      ]);
+      const withScopedBusy = await getAvailability(db, args, provider2);
+      expect(withScopedBusy!.slots.map((s) => s.startUtc)).not.toContain(baseline!.slots[0]!.startUtc);
+    });
+
+    it('loadBookingForCalendarWrite resolves the booking event type\'s destination override', async () => {
+      await connectCalendar({ destination: true, conflicts: true }, 'cal-a');
+      const calB = await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      const eventTypeId = await getIntroCallEventTypeId();
+      await db.run(sql`UPDATE event_type SET destination_calendar_id = ${calB} WHERE id = ${eventTypeId}`);
+
+      const { fromMs, toMs } = WINDOW();
+      const avail = await getAvailability(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', fromMs, toMs });
+      const startMs = new Date(avail!.slots[0]!.startUtc).getTime();
+      const booked = await createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startMs,
+        attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+        answers: { company: 'Acme' },
+      });
+      expect(booked.ok).toBe(true);
+      if (!booked.ok) return;
+
+      const ctx = await loadBookingForCalendarWrite(db, booked.booking.uid);
+      // The event's override (cal-b) wins over the member's actual destination (cal-a).
+      expect(ctx!.destinationRefs).toEqual(['cal-b']);
+    });
   });
 });
