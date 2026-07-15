@@ -88,7 +88,15 @@ export function buildIcs(input: IcsInput): string {
   return lines.map(foldLine).join('\r\n') + '\r\n';
 }
 
-/** Content type for an iTIP attachment of the given method. */
+/** Content type for an iTIP attachment of the given method.
+ *
+ * MUST NOT include a `charset` parameter: the managed email service's attachment
+ * handler 500s on a `text/calendar; …; charset=utf-8` content-type (verified live
+ * — `; method=REQUEST` alone → 202 accepted; adding `; charset=utf-8` → 500). That
+ * silently killed every .ics-bearing mail (confirmation/cancellation) while the
+ * no-attachment mails (pending/reminder) went out fine. `method` is what makes it
+ * an iTIP invite and is safe; utf-8 is the default for text/* so dropping the
+ * explicit charset changes nothing for clients. */
 export function icsContentType(method: IcsMethod): string {
-  return `text/calendar; method=${method}; charset=utf-8`;
+  return `text/calendar; method=${method}`;
 }
