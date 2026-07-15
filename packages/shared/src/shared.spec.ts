@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { groupSlotsByDay, isNavItemActive } from './booking';
+import { isValidTimeZone, safeTimeZone } from './time';
 import { slugifyHandle, validateHandle } from './handle';
 import { t, en, es } from './i18n';
 import { phoneValidator, parseGuests, guestsValidator } from './booking-fields';
@@ -137,5 +138,29 @@ describe('i18n parity', () => {
         expect(typeof val === 'string' && val.length > 0).toBe(true);
       }
     }
+  });
+});
+
+describe('timezone validation (QA fix 1)', () => {
+  it('accepts real IANA zones and common aliases', () => {
+    expect(isValidTimeZone('America/New_York')).toBe(true);
+    expect(isValidTimeZone('America/Phoenix')).toBe(true);
+    expect(isValidTimeZone('UTC')).toBe(true);
+    expect(isValidTimeZone('US/Eastern')).toBe(true); // alias — must not be rejected
+  });
+
+  it('rejects garbage, empties, and non-strings', () => {
+    expect(isValidTimeZone('UT}fg')).toBe(false); // the exact corrupt value from QA
+    expect(isValidTimeZone('')).toBe(false);
+    expect(isValidTimeZone('Not/AZone')).toBe(false);
+    expect(isValidTimeZone(null)).toBe(false);
+    expect(isValidTimeZone(undefined)).toBe(false);
+    expect(isValidTimeZone(42)).toBe(false);
+  });
+
+  it('safeTimeZone falls back to UTC only when invalid', () => {
+    expect(safeTimeZone('America/Bogota')).toBe('America/Bogota');
+    expect(safeTimeZone('UT}fg')).toBe('UTC');
+    expect(safeTimeZone(null)).toBe('UTC');
   });
 });

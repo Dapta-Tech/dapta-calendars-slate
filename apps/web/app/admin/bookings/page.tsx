@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages, type BookingMessages } from '@slate/shared';
+import { getMessages, t, type BookingMessages, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
@@ -31,7 +31,8 @@ export default async function BookingsPage() {
     adminApi.listBookings('limit=200'),
     adminApi.me(),
   ]);
-  const tz = me?.timeZone ?? 'UTC';
+  // safeTimeZone: a corrupt stored zone must never crash the whole page (QA fix 1).
+  const tz = safeTimeZone(me?.timeZone);
   const m = getMessages(await getLocale()).admin.bookings;
   const now = Date.now();
   const pending = items.filter((b) => b.status === 'pending');
@@ -53,6 +54,10 @@ export default async function BookingsPage() {
           </Link>
         }
       />
+      {/* Which zone the short "MST"-style labels below refer to (QA2 fix 8c). */}
+      <p className="-mt-6 mb-8 text-sm text-muted-foreground">
+        {t(m.timesShownIn, { tz: tz.replaceAll('_', ' ') })}
+      </p>
 
       {pending.length > 0 ? (
         <Section title={`${m.pendingConfirmation} (${pending.length})`} rows={pending} action="pending" timeZone={tz} m={m} />

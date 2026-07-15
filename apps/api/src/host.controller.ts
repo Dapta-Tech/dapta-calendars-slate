@@ -16,6 +16,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { brandingSchema } from '@slate/types';
+import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
 import { isEmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
@@ -74,6 +75,14 @@ export class HostController {
     @Body() body: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
   ) {
     const p = await this.auth.resolveHost(req);
+    // A persisted zone must always format — a bad one used to brick every
+    // page that renders times for this member (QA fix 1: "UT}fg").
+    if (body?.timeZone !== undefined && !isValidTimeZone(body.timeZone)) {
+      throw new BadRequestException({
+        error: 'INVALID_TIMEZONE',
+        message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City).',
+      });
+    }
     await this.admin.updateSettings(p, body);
     return { ok: true };
   }
@@ -355,6 +364,15 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     return this.admin.pingWebhook(p, id);
+  }
+
+  /** Latest real delivery attempts (QA fix 10) — the dashboard's proof that a
+   *  webhook is landing, beyond the manual test ping. */
+  @Get('webhooks/:id/deliveries')
+  async webhookDeliveries(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return { items: await this.admin.listWebhookDeliveries(p, id) };
   }
 
   @Delete('webhooks/:id')

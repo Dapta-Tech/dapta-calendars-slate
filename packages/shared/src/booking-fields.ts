@@ -15,6 +15,17 @@ export interface BookingFieldDef {
   hasOptions?: boolean;
 }
 
+/**
+ * Names the booking page always asks by itself (fixed attendee fields). A
+ * custom intake question reusing one of these would ask the attendee twice:
+ * the editor refuses to save them and public/admin renders filter legacy ones
+ * out (QA3 fix 3).
+ */
+export const RESERVED_FIELD_NAMES: ReadonlySet<string> = new Set(['name', 'email', 'notes']);
+
+export const isReservedFieldName = (name: string): boolean =>
+  RESERVED_FIELD_NAMES.has(name.trim().toLowerCase());
+
 /** The field types an organizer can add to an event's intake form. */
 export const BOOKING_FIELD_CATALOG: BookingFieldDef[] = [
   { type: 'text', label: 'Short text' },

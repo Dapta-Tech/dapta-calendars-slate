@@ -18,6 +18,7 @@ import type { Db } from '@slate/db';
 import {
   addTeamMember,
   changeMemberRole,
+  transferOwnership,
   createEventType,
   createSchedule,
   createTeam,
@@ -53,7 +54,7 @@ import {
 } from '@slate/types';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
-import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwnsOrAdmin } from './permissions';
+import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { DB } from './tokens';
 
 function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
@@ -126,6 +127,17 @@ export class AdminCrudController {
     assertCanManageTarget(p, target);
     unwrapCrud(await removeMember(this.db, p.accountId, id));
     return { ok: true };
+  }
+
+  // Ownership changes hands ONLY through this dedicated flow (single-owner
+  // model, QA2 fix 6b): target becomes owner, caller steps down to admin. The
+  // role dropdown can no longer mint owners.
+  @Post('members/:id/transfer-ownership')
+  async transferOwnership(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    assertOwner(p);
+    assertNotSelf(p, id);
+    return unwrapCrud(await transferOwnership(this.db, p.accountId, p.memberId, id));
   }
 
   // --- Event types -------------------------------------------------------

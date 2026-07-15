@@ -60,6 +60,18 @@ export async function toggleWebhookAction(id: string, active: boolean): Promise<
   }
 }
 
+export async function webhookDeliveriesAction(
+  id: string,
+): Promise<{ ok: boolean; items: import('@/lib/admin-api').WebhookDeliveryRow[] }> {
+  try {
+    const r = await adminApi.webhookDeliveries(id);
+    return { ok: true, items: r.items };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, items: [] };
+  }
+}
+
 export async function pingWebhookAction(id: string): Promise<{ ok: boolean; message: string }> {
   try {
     const r = await adminApi.pingWebhook(id);

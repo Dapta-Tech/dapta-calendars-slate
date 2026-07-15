@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import type { BookingMessages } from '@slate/shared';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { saveGeneralAction, type ActionResult } from './actions';
 
 export function GeneralForm({
@@ -10,14 +11,19 @@ export function GeneralForm({
   accountCode,
   timeZone,
   messages: m,
+  locale,
 }: {
   displayName: string;
   handle: string;
   accountCode: string;
   timeZone: string;
   messages: BookingMessages['admin']['settingsGeneral'];
+  locale?: string;
 }) {
   const [res, action, pending] = useActionState<ActionResult | null, FormData>(saveGeneralAction, null);
+  // Controlled: the themed combobox isn't a form control, so the picked zone
+  // travels through a hidden input.
+  const [tz, setTz] = useState(timeZone);
   const cls = 'rounded-md border border-input bg-background px-3 py-2';
 
   return (
@@ -33,10 +39,14 @@ export function GeneralForm({
           <input name="handle" defaultValue={handle} className={`${cls} flex-1`} />
         </div>
       </label>
-      <label className="flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
-        <input name="timeZone" defaultValue={timeZone} className={cls} />
-      </label>
+        {/* Full IANA list, never free text: an invalid zone used to reach the
+            DB and crash every page that formats times (QA fix 1). Themed
+            combobox instead of the native OS popup (QA2 fix 1). */}
+        <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.timezone} />
+        <input type="hidden" name="timeZone" value={tz} />
+      </div>
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
       <button

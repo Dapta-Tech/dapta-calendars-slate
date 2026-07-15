@@ -154,6 +154,7 @@ export const adminApi = {
   updateMember: (id: string, b: { role?: AccountRole; status?: MemberStatus }) =>
     req<AccountMember>('PATCH', `/v1/members/${id}`, b),
   removeMember: (id: string) => req<{ ok: boolean }>('DELETE', `/v1/members/${id}`),
+  transferOwnership: (id: string) => req<AccountMember>('POST', `/v1/members/${id}/transfer-ownership`),
 
   // Bookings (host)
   listBookings: (q = '') =>
@@ -192,6 +193,8 @@ export const adminApi = {
   updateWebhook: (id: string, active: boolean) => req('PATCH', `/v1/webhooks/${id}`, { active }),
   pingWebhook: (id: string) =>
     req<{ ok: boolean; status?: number; message?: string }>('POST', `/v1/webhooks/${id}/ping`, {}),
+  webhookDeliveries: (id: string) =>
+    req<{ items: WebhookDeliveryRow[] }>('GET', `/v1/webhooks/${id}/deliveries`),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
   // Branding
@@ -209,6 +212,10 @@ export interface EventType {
   lengthMinutes: number;
   location: string | null;
   hidden: boolean;
+  minimumBookingNotice: number;
+  beforeEventBuffer: number;
+  afterEventBuffer: number;
+  slotInterval: number | null;
   schedulingType: string | null;
   requiresConfirmation: boolean;
   seatsPerTimeSlot: number | null;
@@ -330,6 +337,15 @@ export interface ApiKeyRow {
   last4: string;
   revoked_at_ms: number | null;
 }
+export interface WebhookDeliveryRow {
+  id: string;
+  event: string;
+  ok: boolean;
+  statusCode: number | null;
+  error: string | null;
+  createdAt: number;
+}
+
 export interface WebhookRow {
   id: string;
   subscriber_url: string;

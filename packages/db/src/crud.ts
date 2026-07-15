@@ -337,12 +337,14 @@ export async function createSchedule(
         VALUES (${id}, ${accountId}, ${memberId}, ${input.name}, ${input.timeZone}, ${Date.now()})`,
   );
   if (input.rules) await setScheduleRules(db, id, input.rules);
-  // A member's FIRST schedule becomes their default automatically — a member
-  // must never resolve to NO_SCHEDULE just because nothing was ever linked.
-  // The WHERE guard means this never clobbers an already-chosen default (safe
-  // to call from provisioning, the editor's "new schedule" action, or both).
+  // A member's FIRST schedule becomes their default. The availability
+  // classifier falls back to `member.default_schedule_id`; before this,
+  // nothing outside the demo seed ever wrote it, so real users saw
+  // NO_SCHEDULE ("You don't have a schedule yet") even with hours configured.
+  // Guarded update (tenant-scoped): never steals an existing default.
   await db.run(
-    sql`UPDATE member SET default_schedule_id = ${id} WHERE id = ${memberId} AND default_schedule_id IS NULL`,
+    sql`UPDATE member SET default_schedule_id = ${id}
+        WHERE id = ${memberId} AND account_id = ${accountId} AND default_schedule_id IS NULL`,
   );
   return (await getSchedule(db, accountId, id))!;
 }

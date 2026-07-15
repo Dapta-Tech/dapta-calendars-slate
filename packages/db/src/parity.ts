@@ -24,7 +24,7 @@ import {
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import { sql, type Db } from './client';
-import {
+import { bookingStartOutOfRange,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -386,6 +386,10 @@ async function hostFreeSlotMs(
   toMs: number,
   now: Date,
   calendar?: CalendarProvider,
+  /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
+   *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
+   *  fail-closed semantics stay the single owner of those outcomes. */
+  rulesOnly = false,
 ): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
   const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
     sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
@@ -410,17 +414,20 @@ async function hostFreeSlotMs(
 
   // Fail-closed: an unreadable external calendar contributes NO free slots
   // (never offer times we couldn't conflict-check) and reports why.
-  let externalBusy: Interval[];
-  try {
-    externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
-  } catch {
-    return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
+  let busy: Interval[] = [];
+  if (!rulesOnly) {
+    let externalBusy: Interval[];
+    try {
+      externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
+    } catch {
+      return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
+    }
+    busy = [
+      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
+      ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
+      ...externalBusy,
+    ];
   }
-  const busy: Interval[] = [
-    ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
-    ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
-    ...externalBusy,
-  ];
   const slots = computeSlots({
     fromUtc: new Date(fromMs),
     toUtc: new Date(toMs),
@@ -624,6 +631,30 @@ export async function createTeamBooking(
   const invalid = validateTeamIntake(et, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
 
+  // Start-instant sanity (QA fix 8) — same range policy as createBooking.
+  const rangeErr = bookingStartOutOfRange(args.startMs);
+  if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
+  // QA fix 13 (team surface): the public team-booking path must land on a
+  // slot the team's CONFIGURATION offers (per-host rules combined by the
+  // scheduling method) — same hole as the personal path: a caller skipping
+  // the availability window could book any instant. Rules-only per host;
+  // busy/conflict handling stays downstream (SLOT_TAKEN / fail-closed).
+  {
+    const now = new Date();
+    const endMsProbe = args.startMs + et.length_minutes * 60_000;
+    const ruleSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+    for (const host of await getEventHosts(db, et.id)) {
+      const { free, reason } = await hostFreeSlotMs(
+        db, host, et, args.startMs, endMsProbe, now, undefined, true,
+      );
+      ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
+    }
+    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets)
+      .includes(args.startMs);
+    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+  }
+
   const endMs = args.startMs + et.length_minutes * 60_000;
   const hosts = await getEventHosts(db, et.id);
   const method = normalizeSchedulingMethod(et.scheduling_type);
@@ -744,6 +775,10 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
   const fields = parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []);
   for (const f of fields) {
     if (!f.required) continue;
+    // Reserved names are the fixed attendee fields the forms collect
+    // themselves — legacy duplicates are filtered from render (QA3 fix 3),
+    // so requiring an answer here would 400 every booking on such an event.
+    if (['name', 'email', 'notes'].includes(f.name.trim().toLowerCase())) continue;
     const v = answers?.[f.name];
     if (v == null || v === '' || (Array.isArray(v) && v.length === 0) || v === false)
       return `Missing required field: ${f.label}`;
@@ -867,6 +902,12 @@ export async function rescheduleBooking(
   if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
+
+  // Start-instant sanity (QA fix 8): explicit guard so a wildly out-of-range
+  // target fails fast with the surface's existing INVALID_SLOT contract
+  // (same 400 the slot-math path returns for past/off-hours targets).
+  if (bookingStartOutOfRange(args.newStartMs, args.now?.getTime()))
+    return { ok: false, reason: 'INVALID_SLOT' };
 
   // P1-2: honor the Idempotency-Key. A retry with the same key returns the
   // already-applied state WITHOUT moving again or re-rotating the manage token
@@ -1002,10 +1043,12 @@ export async function cancelBooking(
   const nowIso = { startUtc: new Date(Number(b.start_ms)).toISOString(), endUtc: new Date(Number(b.end_ms)).toISOString() };
   // P1-1: cancel is IDEMPOTENT. A retried cancel of an already-cancelled booking
   // returns success (was 410 GONE, which broke agent retry loops that treat
-  // non-2xx as failure). Only a truly non-cancellable state (pending/rejected)
-  // is GONE.
+  // non-2xx as failure). Only a truly non-cancellable state (rejected) is GONE.
+  // QA fix 3: PENDING is cancellable too — an agent that booked a
+  // requires-confirmation event via the machine API must be able to retract
+  // it without waiting for a human to decline from the dashboard.
   if (b.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
-  if (b.status !== 'accepted') return { ok: false, reason: 'GONE' };
+  if (b.status !== 'accepted' && b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
   await db.run(
     sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${args.reason ?? null},
@@ -1708,31 +1751,129 @@ export async function enqueueWebhookDeliveries(
  * POSTs. THROWS on any failure (missing hook, blocked URL, network error, or a
  * non-2xx response) so the worker retries; a 2xx resolves the row.
  */
+/** Kept per webhook — enough to debug, bounded so the table can't grow unbounded. */
+const WEBHOOK_DELIVERY_RETENTION = 50;
+
+/** Record one real delivery attempt (QA fix 10) and prune beyond retention. */
+async function recordWebhookDelivery(
+  db: Db,
+  row: {
+    webhookId: string;
+    accountId: string;
+    event: string;
+    ok: boolean;
+    statusCode: number | null;
+    error: string | null;
+  },
+): Promise<void> {
+  await db.run(
+    sql`INSERT INTO webhook_delivery (id, webhook_id, account_id, event, ok, status_code, error, created_at)
+        VALUES (${randomUUID()}, ${row.webhookId}, ${row.accountId}, ${row.event},
+          ${row.ok ? 1 : 0}, ${row.statusCode}, ${row.error}, ${Date.now()})`,
+  );
+  await db.run(
+    sql`DELETE FROM webhook_delivery WHERE webhook_id = ${row.webhookId} AND id NOT IN (
+      SELECT id FROM webhook_delivery WHERE webhook_id = ${row.webhookId}
+      ORDER BY created_at DESC, id DESC LIMIT ${WEBHOOK_DELIVERY_RETENTION})`,
+  );
+}
+
+export interface WebhookDeliveryView {
+  id: string;
+  event: string;
+  ok: boolean;
+  statusCode: number | null;
+  error: string | null;
+  createdAt: number;
+}
+
+/** Latest delivery attempts for a webhook (account-scoped; newest first). */
+export async function listWebhookDeliveries(
+  db: Db,
+  accountId: string,
+  webhookId: string,
+  limit = 20,
+): Promise<WebhookDeliveryView[]> {
+  const rows = await db.all<{
+    id: string;
+    event: string;
+    ok: number;
+    status_code: number | null;
+    error: string | null;
+    created_at: number;
+  }>(
+    sql`SELECT d.id, d.event, d.ok, d.status_code, d.error, d.created_at
+        FROM webhook_delivery d
+        JOIN webhook w ON w.id = d.webhook_id
+        WHERE d.webhook_id = ${webhookId} AND w.account_id = ${accountId}
+        ORDER BY d.created_at DESC, d.id DESC LIMIT ${limit}`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    event: r.event,
+    ok: !!r.ok,
+    statusCode: r.status_code === null ? null : Number(r.status_code),
+    error: r.error,
+    createdAt: Number(r.created_at),
+  }));
+}
+
 export async function deliverWebhookEvent(
   db: Db,
   args: { webhookId: string; body: string },
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const hook = await db.get<{ subscriber_url: string; secret: string | null; active: number }>(
-    sql`SELECT subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  const hook = await db.get<{
+    account_id: string;
+    subscriber_url: string;
+    secret: string | null;
+    active: number;
+  }>(
+    sql`SELECT account_id, subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
   );
   if (!hook || hook.active !== 1) {
     // Subscriber gone/disabled since enqueue — nothing to deliver, don't retry.
     return;
   }
+  const event = (JSON.parse(args.body) as { event?: string }).event ?? '';
+  // Every attempt is recorded (QA fix 10) — success or failure — so the
+  // dashboard can show whether real deliveries are landing; the throw after
+  // a failed record still drives the outbox retry exactly as before.
+  const record = (ok: boolean, statusCode: number | null, error: string | null) =>
+    recordWebhookDelivery(db, {
+      webhookId: args.webhookId,
+      accountId: hook.account_id,
+      event,
+      ok,
+      statusCode,
+      error,
+    });
   if (!(await checkWebhookUrl(hook.subscriber_url)).ok) {
+    await record(false, null, 'URL blocked at egress');
     throw new Error(`webhook URL blocked at egress: ${hook.subscriber_url}`);
   }
   const headers: Record<string, string> = {
     'content-type': 'application/json',
-    'X-Slate-Event': (JSON.parse(args.body) as { event?: string }).event ?? '',
+    'X-Slate-Event': event,
   };
   if (hook.secret) {
     headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
   }
-  const res = await fetchImpl(hook.subscriber_url, { method: 'POST', headers, body: args.body });
-  // A Response-like result must be 2xx; a thrown fetch already propagates.
-  if (res && typeof (res as Response).ok === 'boolean' && !(res as Response).ok) {
-    throw new Error(`webhook delivery failed: HTTP ${(res as Response).status}`);
+  let res: Response | undefined;
+  try {
+    res = (await fetchImpl(hook.subscriber_url, {
+      method: 'POST',
+      headers,
+      body: args.body,
+    })) as Response | undefined;
+  } catch (err) {
+    await record(false, null, err instanceof Error ? err.message : 'fetch failed');
+    throw err;
   }
+  // A Response-like result must be 2xx; a thrown fetch already propagates.
+  if (res && typeof res.ok === 'boolean' && !res.ok) {
+    await record(false, res.status, `HTTP ${res.status}`);
+    throw new Error(`webhook delivery failed: HTTP ${res.status}`);
+  }
+  await record(true, res && typeof res.status === 'number' ? res.status : null, null);
 }

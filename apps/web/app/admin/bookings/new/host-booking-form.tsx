@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
-import { commonTimeZones, type BookingMessages } from '@slate/shared';
+import { isReservedFieldName, type BookingMessages, type Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
+import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
+import { PhoneField } from '@/components/ui/phone-field';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
 import { createDefaultScheduleAction } from '@/app/admin/availability/actions';
 import { createHostBookingAction, loadHostSlotsAction } from './actions';
@@ -122,6 +125,7 @@ export function HostBookingForm({
   backLabel,
   heading,
   notice,
+  locale,
 }: {
   /** The member's public handle, if set. Manual bookings work without one —
    *  slots and booking go through the authenticated host surface. */
@@ -134,6 +138,9 @@ export function HostBookingForm({
   /** Optional banner rendered between the header and the form (e.g. the
    *  no-public-handle notice). */
   notice?: ReactNode;
+  /** Active admin locale — the date picker's month/weekday names come from
+   *  Intl, so it needs the locale itself, not just translated messages. */
+  locale?: Locale;
 }) {
   // Only offer bookable (non-hidden) events.
   const bookable = useMemo(() => eventTypes.filter((e) => !e.hidden), [eventTypes]);
@@ -143,6 +150,11 @@ export function HostBookingForm({
   // Why the slot list is empty: a config-error reason code from the API, or
   // 'LOAD_FAILED' when the request itself failed — each gets distinct copy.
   const [slotsIssue, setSlotsIssue] = useState<string | null>(null);
+  // In-flight fetch: render a loading state, never a premature "No slots in
+  // range." that reads as truth on slow connections (QA fix 12). Starts TRUE
+  // when the initial mode fetches, so even the server-rendered first paint
+  // shows the loading copy instead of the empty state.
+  const [slotsLoading, setSlotsLoading] = useState(() => bookable.length > 0);
   const [startUtc, setStartUtc] = useState('');
   const [customLocal, setCustomLocal] = useState('');
   const [name, setName] = useState('');
@@ -153,7 +165,11 @@ export function HostBookingForm({
   const [pending, startT] = useTransition();
 
   const event = bookable.find((e) => e.slug === slug);
-  const fields = (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean }>;
+  // Reserved names (name/email/notes) are the fixed attendee fields below —
+  // legacy custom questions reusing them would ask twice (QA3 fix 3).
+  const fields = (
+    (event?.bookingFields ?? []) as Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>
+  ).filter((f) => !isReservedFieldName(f.name));
 
   // `reloadKey` bumps to force a slots refetch after a 409 (the picked slot was
   // just taken) so the stale/taken time drops out and the user can really retry.
@@ -163,9 +179,13 @@ export function HostBookingForm({
   // authenticated host surface — resolves the member by id, so this works
   // before a public handle is set (the public endpoint 400s without one).
   useEffect(() => {
-    if (mode !== 'slots' || !slug) return;
+    if (mode !== 'slots' || !slug) {
+      setSlotsLoading(false);
+      return;
+    }
     const from = new Date().toISOString();
     const to = new Date(Date.now() + 21 * 86_400_000).toISOString();
+    setSlotsLoading(true);
     loadHostSlotsAction(slug, from, to)
       .then((r) => {
         setSlots(r.slots);
@@ -174,14 +194,17 @@ export function HostBookingForm({
       .catch(() => {
         setSlots([]);
         setSlotsIssue('LOAD_FAILED');
-      });
+      })
+      .finally(() => setSlotsLoading(false));
     setStartUtc('');
   }, [mode, slug, reloadKey]);
 
   const submit = () =>
     startT(async () => {
       const start = mode === 'any' ? (customLocal ? wallClockToUtc(customLocal, tz) : '') : startUtc;
-      if (!start) return setResult({ ok: false, message: m.pickTime });
+      // 'any' mode needs BOTH halves picked — say so, "Pick a time" alone
+      // contradicts a visibly selected time when the date is missing (QA2 fix 8a).
+      if (!start) return setResult({ ok: false, message: mode === 'any' ? m.pickDateTime : m.pickTime });
       const r = await createHostBookingAction({
         handle: handle || undefined,
         slug,
@@ -261,21 +284,54 @@ export function HostBookingForm({
             </button>
           ))}
           {slots.length === 0 ? (
-            <EmptySlotsNotice
-              issue={slotsIssue}
-              eventId={event?.id}
-              m={m}
-              onScheduleCreated={() => setReloadKey((k) => k + 1)}
-            />
+            slotsLoading ? (
+              <span className="col-span-full text-sm text-muted-foreground">{m.loadingSlots}</span>
+            ) : (
+              <EmptySlotsNotice
+                issue={slotsIssue}
+                eventId={event?.id}
+                m={m}
+                onScheduleCreated={() => setReloadKey((k) => k + 1)}
+              />
+            )
           ) : null}
         </div>
       ) : (
-        <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.dateTimeHost}</span>
-          <Input type="datetime-local" value={customLocal} onChange={(e) => setCustomLocal(e.target.value)} />
-        </label>
+          {/* Emits the same wall-clock 'YYYY-MM-DDTHH:mm' string the native
+              datetime-local input did, so wallClockToUtc at submit — which
+              interprets it in the attendee's tz — stays untouched (QA fix 9). */}
+          <DateTimePicker
+            value={customLocal}
+            onChange={setCustomLocal}
+            locale={locale}
+            timeLabel={m.pickTime}
+            // The event type's own slot granularity — a 15-min event offers
+            // 15-min steps here, not a hardcoded 30 (QA2 fix 2).
+            stepMinutes={event?.slotInterval ?? event?.lengthMinutes ?? 30}
+            dateStatusLabel={m.pickerDate}
+            timeStatusLabel={m.pickerTime}
+            missingLabel={m.pickerMissing}
+          />
+        </div>
       )}
 
+      {/* Timezone stays glued to the calendar it reinterprets; everything the
+          attendee answers — identity AND the event's custom questions — lives
+          in ONE "Questions" block below (QA3 fix 6a). Reserved-name questions
+          are filtered above, so a question named "email" can't shadow the
+          attendee's real email. */}
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="text-muted-foreground">{m.attendeeTimezone}</span>
+        <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.attendeeTimezone} />
+      </div>
+
+      <div className="mt-2 border-t border-border pt-4">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {m.questionsTitle}
+        </span>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.attendeeName}</span>
@@ -286,32 +342,28 @@ export function HostBookingForm({
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
       </div>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted-foreground">{m.attendeeTimezone}</span>
-        <select
-          value={tz}
-          onChange={(e) => setTz(e.target.value)}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-        >
-          {commonTimeZones(tz).map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </select>
-      </label>
-
       {fields.map((f) => (
         <label key={f.name} className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">
             {f.label}
             {f.required ? ' *' : ''}
           </span>
-          <Input
-            required={f.required}
-            value={answers[f.name] ?? ''}
-            onChange={(e) => setAnswers((a) => ({ ...a, [f.name]: e.target.value }))}
-          />
+          {f.type === 'phone' ? (
+            <PhoneField
+              value={answers[f.name] ?? ''}
+              onChange={(v) => setAnswers((a) => ({ ...a, [f.name]: v }))}
+              locale={locale}
+              required={f.required}
+              ariaLabel={f.label}
+              defaultCountry={f.defaultCountry}
+            />
+          ) : (
+            <Input
+              required={f.required}
+              value={answers[f.name] ?? ''}
+              onChange={(e) => setAnswers((a) => ({ ...a, [f.name]: e.target.value }))}
+            />
+          )}
         </label>
       ))}
 

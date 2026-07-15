@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { t, type BookingMessages } from '@slate/shared';
+import { COUNTRIES, countryName, isReservedFieldName, t, type BookingMessages } from '@slate/shared';
 import type { EventCalendarLink, EventType } from '@/lib/admin-api';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormHeader } from '@/components/ui/page-header';
+import { useToast } from '@/components/toast';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
 type EventTypeMessages = BookingMessages['admin']['eventTypes'];
@@ -21,6 +22,8 @@ interface IntakeField {
   label: string;
   type: string;
   required: boolean;
+  /** Phone questions: country the selector starts on (QA4 fix 1b). */
+  defaultCountry?: string;
 }
 
 interface HostRow {
@@ -75,19 +78,24 @@ export function EventTypeForm({
   messages: m,
   scheduling,
   teamMembers,
+  teamId,
   calendarLink,
   redirectOnSuccess,
   backHref,
   backLabel,
   heading,
+  headerExtras,
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
   messages: EventTypeMessages;
   /** Scheduling-method names + hints (from the shared `scheduling` catalog). */
   scheduling?: BookingMessages['scheduling'];
-  /** The team's members — present only when editing a TEAM event type. */
+  /** The team's members — present only for TEAM event types (edit or create). */
   teamMembers?: TeamMemberOption[];
+  /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
+   *  path to team events at all; editing derives the team from `initial`. */
+  teamId?: string;
   /** Which of the host's connected calendars this event checks/writes to —
    *  omitted for TEAM events (each host has their own connection; a single
    *  line here would be misleading). */
@@ -98,6 +106,9 @@ export function EventTypeForm({
   backHref: string;
   backLabel: string;
   heading: string;
+  /** Rendered in the header next to Save — the edit surface mounts the
+   *  open-public/copy-link quick actions here (QA4 fix 3). */
+  headerExtras?: ReactNode;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
@@ -106,10 +117,14 @@ export function EventTypeForm({
   const [description, setDescription] = useState(initial?.description ?? '');
   const [location, setLocation] = useState(initial?.location ?? '');
   const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
-  const [minNotice, setMinNotice] = useState(120);
-  const [slotInterval, setSlotInterval] = useState<number | ''>(initial?.lengthMinutes ?? 30);
-  const [beforeBuf, setBeforeBuf] = useState(0);
-  const [afterBuf, setAfterBuf] = useState(0);
+  // Hydrate from the stored event — these used to default silently, so EDITING
+  // an event reset its notice/interval/buffers on save (QA2 fix 2).
+  const [minNotice, setMinNotice] = useState(initial?.minimumBookingNotice ?? 120);
+  const [slotInterval, setSlotInterval] = useState<number | ''>(
+    initial?.slotInterval ?? initial?.lengthMinutes ?? 30,
+  );
+  const [beforeBuf, setBeforeBuf] = useState(initial?.beforeEventBuffer ?? 0);
+  const [afterBuf, setAfterBuf] = useState(initial?.afterEventBuffer ?? 0);
   const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
   const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
@@ -120,9 +135,10 @@ export function EventTypeForm({
       label: f.label,
       type: f.type,
       required: !!f.required,
+      defaultCountry: f.defaultCountry,
     })) ?? [],
   );
-  const isTeamEvent = !!initial?.teamId && !!teamMembers && !!scheduling;
+  const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
   const [schedulingType, setSchedulingType] = useState<SchedulingMethod>(
     (SCHEDULING_METHODS as readonly string[]).includes(initial?.schedulingType ?? '')
       ? (initial!.schedulingType as SchedulingMethod)
@@ -141,16 +157,48 @@ export function EventTypeForm({
   );
   const setHost = (memberId: string, patch: Partial<HostRow>) =>
     setHosts((hs) => hs.map((h) => (h.memberId === memberId ? { ...h, ...patch } : h)));
+  /** Swap a question with its neighbour — bookingFields is an ordered array and
+   *  every render already respects it; this is the only reorder UI (QA3 fix 6b). */
+  const moveField = (i: number, dir: -1 | 1) =>
+    setFields((fs) => {
+      const j = i + dir;
+      if (j < 0 || j >= fs.length) return fs;
+      const next = [...fs];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
 
   const [res, setRes] = useState<ActionResult | null>(null);
   const [pending, start] = useTransition();
+  const { success } = useToast();
+
+  // Country options for phone questions, alphabetical by (EN) name. Filled
+  // AFTER mount (QA4-B1): Intl.DisplayNames region names differ between
+  // Node's ICU and the browser's (e.g. "Falkland Islands" vs "… (Islas
+  // Malvinas)"), so naming them during SSR guarantees a hydration mismatch.
+  const [countryOptions, setCountryOptions] = useState<
+    Array<{ code: string; dial: string; flag: string; name: string }>
+  >([]);
+  useEffect(() => {
+    setCountryOptions(
+      [...COUNTRIES]
+        .map((c) => ({ ...c, name: countryName(c.code) }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }, []);
 
   const onTitle = (v: string) => {
     setTitle(v);
     if (!slugTouched) setSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
   };
 
-  const save = () =>
+  const save = () => {
+    // Reserved names are a hard stop, not just the inline warning — saving one
+    // would make the public page ask the attendee twice (QA3 fix 3).
+    if (fields.some((f) => f.name && isReservedFieldName(f.name))) {
+      setRes({ ok: false, message: m.reservedBlocked });
+      return;
+    }
     start(async () => {
       const payload: EventTypePayload = {
         id: initial?.id,
@@ -170,6 +218,9 @@ export function EventTypeForm({
         bookingFields: fields.filter((f) => f.name && f.label),
         ...(isTeamEvent
           ? {
+              // teamId travels on CREATE only — an existing event never
+              // changes teams from this form.
+              ...(initial ? {} : { teamId }),
               schedulingType,
               hosts: hosts.map((h) => ({
                 memberId: h.memberId,
@@ -182,9 +233,13 @@ export function EventTypeForm({
       };
       const r = await saveEventTypeAction(payload);
       setRes(r);
+      // Success is a TOAST, not a quiet line below the fold — the old inline
+      // "Saved." was easy to miss (QA4 fix 2). Errors stay inline (persistent).
+      if (r.ok) success(m.saved);
       // Create on a dedicated /new surface → return to the list on success.
       if (r.ok && !initial && redirectOnSuccess) router.push(redirectOnSuccess);
     });
+  };
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
@@ -193,9 +248,12 @@ export function EventTypeForm({
         backLabel={backLabel}
         title={heading}
         actions={
-          <Button type="submit" disabled={pending || !title || !slug}>
-            {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
-          </Button>
+          <span className="flex items-center gap-3">
+            {headerExtras}
+            <Button type="submit" disabled={pending || !title || !slug}>
+              {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
+            </Button>
+          </span>
         }
       />
       <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
@@ -333,34 +391,107 @@ export function EventTypeForm({
       {/* Intake questions */}
       <div className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
+        {/* Built-in fields the public booking page ALWAYS asks — shown locked so
+            nobody re-creates "name"/"email" as custom questions and the attendee
+            gets asked twice (QA2 fix 7). */}
+        <p className="text-xs text-muted-foreground">{m.fixedFieldsHint}</p>
+        {[
+          { label: m.fixedName, required: true },
+          { label: m.fixedEmail, required: true },
+          { label: m.fixedNotes, required: false },
+        ].map((bf) => (
+          <div
+            key={bf.label}
+            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-background/40 px-3 py-1.5 text-sm text-muted-foreground"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+              <rect x="5" y="11" width="14" height="9" rx="2" />
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+            </svg>
+            <span className="flex-1">
+              {bf.label}
+              {bf.required ? ' *' : ''}
+            </span>
+            <span className="text-xs uppercase tracking-wide">{m.alwaysAsked}</span>
+          </div>
+        ))}
         {fields.map((f, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <input
-              placeholder={m.namePlaceholder}
-              value={f.name}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
-              className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-            <input
-              placeholder={m.labelPlaceholder}
-              value={f.label}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-            <select
-              value={f.type}
-              onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
-              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
-            >
-              {FIELD_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-            <label className="flex cursor-pointer items-center gap-1 text-sm">
-              <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
-              {m.req}
-            </label>
-            <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+          <div key={i} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <input
+                placeholder={m.namePlaceholder}
+                value={f.name}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
+                className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+              <input
+                placeholder={m.labelPlaceholder}
+                value={f.label}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+              />
+              <select
+                value={f.type}
+                onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
+                className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              >
+                {FIELD_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              {f.type === 'phone' ? (
+                // Which country the phone selector starts on for attendees
+                // (QA4 fix 1b) — stored inside the question definition.
+                <select
+                  value={f.defaultCountry ?? 'US'}
+                  onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
+                  aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
+                  title={m.defaultCountryLabel}
+                  className="w-36 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                >
+                  {countryOptions.length === 0 ? (
+                    // SSR/first paint: a bare-code option so the select's value
+                    // resolves identically on server and client (QA4-B1); the
+                    // named list replaces it right after mount.
+                    <option value={f.defaultCountry ?? 'US'}>{f.defaultCountry ?? 'US'}</option>
+                  ) : (
+                    countryOptions.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.flag} {c.name} {c.dial}
+                      </option>
+                    ))
+                  )}
+                </select>
+              ) : null}
+              <label className="flex cursor-pointer items-center gap-1 text-sm">
+                <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+                {m.req}
+              </label>
+              <button
+                type="button"
+                disabled={i === 0}
+                onClick={() => moveField(i, -1)}
+                aria-label={`${m.moveUp} — ${f.label || f.name}`}
+                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+              >
+                <ChevronIcon direction="up" />
+              </button>
+              <button
+                type="button"
+                disabled={i === fields.length - 1}
+                onClick={() => moveField(i, 1)}
+                aria-label={`${m.moveDown} — ${f.label || f.name}`}
+                className="text-muted-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+              >
+                <ChevronIcon direction="down" />
+              </button>
+              <button type="button" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive">×</button>
+            </div>
+            {isReservedFieldName(f.name) ? (
+              <p className="text-xs text-destructive" role="alert">
+                {m.reservedWarning}
+              </p>
+            ) : null}
           </div>
         ))}
         <button
@@ -373,7 +504,6 @@ export function EventTypeForm({
       </div>
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
-      {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
       </div>
     </form>
   );
@@ -388,5 +518,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Same inline chevron style as the DateTimePicker's month arrows. */
+function ChevronIcon({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+    >
+      {direction === 'up' ? <path d="M18 15l-6-6-6 6" /> : <path d="M6 9l6 6 6-6" />}
+    </svg>
   );
 }

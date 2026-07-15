@@ -168,6 +168,38 @@ export async function changeMemberRole(
 }
 
 /**
+ * Hand the workspace to another member: the target becomes owner, the current
+ * owner steps down to admin. Single-owner model (QA2 fix 6b) — ownership moves
+ * only through this explicit flow, never the role dropdown. The target must be
+ * an ACTIVE member: an invited/disabled owner couldn't administer anything,
+ * and the workspace would be ownerless in practice.
+ */
+export async function transferOwnership(
+  db: Db,
+  accountId: string,
+  fromMemberId: string,
+  toMemberId: string,
+): Promise<CrudResult<MemberView>> {
+  if (fromMemberId === toMemberId)
+    return { ok: false, reason: 'CONFLICT', message: 'You already own this workspace.' };
+  const target = await getAccountMember(db, accountId, toMemberId);
+  if (!target) return { ok: false, reason: 'NOT_FOUND' };
+  if (target.status !== 'active')
+    return {
+      ok: false,
+      reason: 'CONFLICT',
+      message: 'Ownership can only be transferred to an active member.',
+    };
+  await db.run(
+    sql`UPDATE member SET role = 'owner' WHERE account_id = ${accountId} AND id = ${toMemberId}`,
+  );
+  await db.run(
+    sql`UPDATE member SET role = 'admin' WHERE account_id = ${accountId} AND id = ${fromMemberId}`,
+  );
+  return { ok: true, value: (await getAccountMember(db, accountId, toMemberId))! };
+}
+
+/**
  * Enable/disable a member (soft access revocation). Disabling an owner is guarded
  * the same as demotion — the account must retain an active owner.
  */

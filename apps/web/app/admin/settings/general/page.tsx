@@ -1,4 +1,4 @@
-import { getMessages } from '@slate/shared';
+import { getMessages, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { LanguageSwitcher } from '@/components/language-switcher';
@@ -20,8 +20,9 @@ export default async function GeneralSettings() {
         displayName={me?.displayName ?? ''}
         handle={me?.handle ?? ''}
         accountCode={me?.accountCode ?? ''}
-        timeZone={(profile?.member as { timeZone?: string })?.timeZone ?? 'UTC'}
+        timeZone={safeTimeZone((profile?.member as { timeZone?: string })?.timeZone)}
         messages={m.settingsGeneral}
+        locale={locale}
       />
       <div className="border-t border-border pt-6">
         <LanguageSwitcher locale={locale} label={m.common.language} />
