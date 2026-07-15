@@ -169,8 +169,8 @@ export const adminApi = {
       '/v1/connections/token',
       { provider, email },
     ),
-  discoverConnections: (provider: string) =>
-    req<Connection[]>('POST', '/v1/connections/discover', { provider }),
+  discoverConnections: (provider: string, email?: string) =>
+    req<Connection[]>('POST', '/v1/connections/discover', { provider, email }),
   listConnectionCalendars: (id: string) =>
     req<CalendarSummary[]>('GET', `/v1/connections/${id}/calendars`),
   updateConnection: (id: string, b: unknown) => req('PATCH', `/v1/connections/${id}`, b),

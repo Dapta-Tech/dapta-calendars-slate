@@ -250,9 +250,9 @@ export class HostController {
    */
   @Post('connections/discover')
   @HttpCode(200)
-  async discoverConnections(@Req() req: ReqLike, @Body() body: { provider?: string }) {
+  async discoverConnections(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.discoverConnections(p, body?.provider ?? 'google');
+    return this.admin.discoverConnections(p, body?.provider ?? 'google', body?.email);
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */
