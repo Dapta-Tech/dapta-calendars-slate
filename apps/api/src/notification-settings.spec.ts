@@ -120,9 +120,13 @@ describe('notification settings — toggles + templates through the outbox', () 
     )!;
     await effects.deliver('confirmation', row.payload!, row.accountId);
     const m = email.sent.at(-1)!;
-    expect(m.subject).toBe('See you, Sam!');
-    expect(m.text).toContain('Booked <b>Intro Call</b>');
-    expect(m.html).toContain('&lt;b&gt;Intro Call&lt;/b&gt;'); // template markup escaped
+    expect(m.subject).toBe('See you, Sam!'); // custom subject
+    expect(m.text).toContain('Booked <b>Intro Call</b>'); // custom body → plain-text part
+    // HTML is the branded booking layout (not the raw template body): the event
+    // title is rendered into the card, and any markup is escaped — never injected.
+    expect(m.html).toContain('Dapta Calendars');
+    expect(m.html).toContain('Intro Call');
+    expect(m.html).not.toContain('<b>Intro Call</b>');
     expect(m.to).toEqual(['sam@example.com']); // attendee side only
   });
 

@@ -1,6 +1,6 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
-import { escapeHtml } from './util';
+import { renderBrandedHtml, type Audience, type EmailKind } from './email-layout';
 import {
   renderTemplate,
   templateVars,
@@ -9,11 +9,6 @@ import {
   type TemplateLocale,
   formatWhen,
 } from './templates';
-
-/** Render plaintext lines to a safe HTML body — every line HTML-escaped (E8). */
-function htmlBody(lines: string[]): string {
-  return `<p>${lines.map(escapeHtml).join('<br/>')}</p>`;
-}
 
 /** Everything a booking notification needs to render, provider-agnostic. */
 export interface BookingNotification {
@@ -83,23 +78,33 @@ export class BookingNotifier {
     return n.audience === 'host' ? `${base}:host` : base;
   }
 
-  /** Template copy when one is resolved; otherwise the built-in legacy copy. */
+  /**
+   * Render an email: the subject + plain-text stay the (user-editable) template
+   * copy; the HTML is always the branded booking layout, keyed by `kind` (badge
+   * + call-to-action set) and the recipient audience. Falls back to legacy copy
+   * for subject/text only when no template is resolved.
+   */
   private copy(
     n: BookingNotification & { reminderLeadMinutes?: number },
+    kind: EmailKind,
     legacy: () => { subject: string; lines: string[] },
   ): RenderedEmail {
+    const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
+    const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
+    const vars = templateVars(n, locale);
+    const html = renderBrandedHtml(kind, vars, locale, audience);
     if (n.template) {
-      const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
-      return renderTemplate(n.template, templateVars(n, locale));
+      const base = renderTemplate(n.template, vars);
+      return { subject: base.subject, text: base.text, html };
     }
     const { subject, lines } = legacy();
     const kept = lines.filter(Boolean);
-    return { subject, text: kept.join('\n'), html: htmlBody(kept) };
+    return { subject, text: kept.join('\n'), html };
   }
 
   sendConfirmation(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'confirmation', () => ({
       subject: `Confirmed: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -133,7 +138,7 @@ export class BookingNotifier {
     const lead = n.reminderLeadMinutes;
     const inWord =
       lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'reminder', () => ({
       subject: `Reminder: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -165,7 +170,7 @@ export class BookingNotifier {
    */
   sendFollowUp(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'follow_up', () => ({
       subject: `Thanks for meeting — ${n.title}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -195,7 +200,7 @@ export class BookingNotifier {
    */
   sendPendingRequest(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'pending', () => ({
       subject: `Request received: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -224,7 +229,7 @@ export class BookingNotifier {
   /** B3: the host declined a pending request — tell the attendee it's off. */
   sendDeclined(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'declined', () => ({
       subject: `Not accepted: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -249,7 +254,7 @@ export class BookingNotifier {
   sendReschedule(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
     const prev = n.previousStartUtc ? formatWhen(n.previousStartUtc, n.attendee.timeZone ?? 'UTC') : null;
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'reschedule', () => ({
       subject: `Rescheduled: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
@@ -278,7 +283,7 @@ export class BookingNotifier {
 
   sendCancellation(n: BookingNotification): Promise<EmailResult> {
     const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const rendered = this.copy(n, () => ({
+    const rendered = this.copy(n, 'cancellation', () => ({
       subject: `Cancelled: ${n.title} — ${when}`,
       lines: [
         `Hi ${n.attendee.name},`,
