@@ -16,8 +16,8 @@ import {
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
-import { bookAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
-import { postReservation, type BookResult } from '@/lib/api';
+import { bookAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import { type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
@@ -138,7 +138,7 @@ export function BookingFlow({
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.
     if ((slot.capacity ?? 1) > 1) return;
-    const r = await postReservation({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc });
+    const r = await reserveAction({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc });
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
