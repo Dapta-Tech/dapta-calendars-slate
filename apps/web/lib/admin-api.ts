@@ -8,7 +8,11 @@
 import { redirect } from 'next/navigation';
 import { getSession, clearSession, authProvider } from './auth-session';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
+// `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
+// so a single image can't point at the right env). Falls back to NEXT_PUBLIC_*
+// then localhost for a bare clone. Set `API_URL` in each deployment's config.
+const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /** An API error that carries the HTTP status + error code so callers can drive
  *  status-specific UX (409 slot-taken, 410 gone, 400 validation, …). */
