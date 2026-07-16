@@ -5,7 +5,11 @@
 import { cache } from 'react';
 import type { AvailabilityResponse, BookingView, PublicProfile } from '@slate/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
+// `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
+// so a single image can't point at the right env). Falls back to NEXT_PUBLIC_*
+// then localhost for a bare clone. Set `API_URL` in each deployment's config.
+const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 async function getJson<T>(path: string): Promise<T | null> {
   const res = await fetch(`${API_URL}${path}`, { cache: 'no-store' });
