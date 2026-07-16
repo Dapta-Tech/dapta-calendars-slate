@@ -1,7 +1,23 @@
 'use server';
 
 import { createBookingSchema } from '@slate/types';
-import { postBooking, postTeamBooking, type BookResult } from '@/lib/api';
+import { postBooking, postTeamBooking, postReservation, type BookResult, type ReserveResult } from '@/lib/api';
+
+/**
+ * Server Action: hold a slot. MUST stay a server action (not a direct client
+ * call) — the API base comes from `NEXT_PUBLIC_API_URL`, which Next inlines into
+ * the CLIENT bundle at BUILD time, so a client-side call would hit whatever URL
+ * was baked (one image serves all envs) instead of this deployment's API. Server
+ * actions read it at RUNTIME from the per-env configmap → always the right env.
+ */
+export async function reserveAction(input: {
+  accountCode: string;
+  handle: string;
+  slug: string;
+  startUtc: string;
+}): Promise<ReserveResult> {
+  return postReservation(input);
+}
 
 /**
  * Server Action: re-validate on the server (never trust the client), then POST
