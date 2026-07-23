@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm';
 import type { Interval } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
+import { parseJsonColumn } from './repository';
 
 /**
  * Connection refs used for CONFLICT checking (availability). Only calendars the
@@ -114,7 +115,10 @@ export async function loadExternalBusy(
   });
   // The engine merges/sorts busy itself (computeSlots → mergeIntervals), so an
   // unsorted union is fine here.
-  return busy.map((b) => ({ start: new Date(b.startUtc), end: new Date(b.endUtc) }));
+  return busy.map((b) => ({
+    start: new Date(b.startUtc),
+    end: new Date(b.endUtc),
+  }));
 }
 
 // --- booking_reference (the persisted external event id per booking) --------
@@ -133,6 +137,8 @@ export interface CalendarWriteContext {
   organizerEmail: string | null;
   /** Write-destination connection refs (`is_destination = 1`). */
   destinationRefs: string[];
+  /** Optional provider calendar beneath each connection, selected by the v2 pilot. */
+  destinationCalendarIds: Record<string, string>;
 }
 
 /**
@@ -140,10 +146,7 @@ export interface CalendarWriteContext {
  * needed to write (or later delete) the external calendar event. Returns null
  * if the booking is gone.
  */
-export async function loadBookingForCalendarWrite(
-  db: Db,
-  uid: string,
-): Promise<CalendarWriteContext | null> {
+export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<CalendarWriteContext | null> {
   const b = await db.get<{
     id: string;
     uid: string;
@@ -155,16 +158,19 @@ export async function loadBookingForCalendarWrite(
     host_member_id: string | null;
     event_type_id: string | null;
     host_email: string | null;
+    metadata: unknown;
   }>(
     sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.attendee_time_zone,
-               b.host_member_id, b.event_type_id, m.email AS host_email
+               b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.uid = ${uid} LIMIT 1`,
   );
   if (!b) return null;
   const attendees = await db.all<{ email: string }>(
-    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}`,
+    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}
+        UNION
+        SELECT email FROM booking_guest WHERE booking_id = ${b.id}`,
   );
 
   // The assigned host set: co-hosts recorded in booking_host (collective /
@@ -189,18 +195,26 @@ export async function loadBookingForCalendarWrite(
   // be a silent wrong-calendar write.
   const isSingleHost = hostMemberIds.size <= 1;
   const destinationSet = new Set<string>();
-  for (const memberId of hostMemberIds) {
-    const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
-    for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
-      destinationSet.add(ref);
+  const destinationCalendarIds: Record<string, string> = {};
+  const metadata = parseJsonColumn<{
+    _destinationCalendar?: { connectionRef?: string; externalId?: string };
+  }>(b.metadata, {});
+  const requestedDestination = metadata._destinationCalendar;
+  if (isSingleHost && requestedDestination?.connectionRef && requestedDestination.externalId) {
+    destinationSet.add(requestedDestination.connectionRef);
+    destinationCalendarIds[requestedDestination.connectionRef] = requestedDestination.externalId;
+  } else {
+    for (const memberId of hostMemberIds) {
+      const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
+      for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
+        destinationSet.add(ref);
+      }
     }
   }
 
   // On multi-host bookings the co-hosts join the invite as attendees (the
   // organizer is the booking's primary host, so exclude their email).
-  const coHostEmails = coHosts
-    .map((h) => h.email)
-    .filter((e): e is string => !!e && e !== b.host_email);
+  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e && e !== b.host_email);
   const attendeeEmails = [...new Set([...attendees.map((a) => a.email), ...coHostEmails])].filter(Boolean);
 
   return {
@@ -214,11 +228,13 @@ export async function loadBookingForCalendarWrite(
     attendeeEmails,
     organizerEmail: b.host_email,
     destinationRefs: [...destinationSet],
+    destinationCalendarIds,
   };
 }
 
 export interface BookingReferenceRow {
   id: string;
+  destination: string | null;
   type: string;
   externalEventId: string | null;
   externalCalendarId: string | null;
@@ -277,7 +293,11 @@ export async function claimBookingDestination(
 export async function fillBookingReference(
   db: Db,
   referenceId: string,
-  ref: { externalEventId: string; externalCalendarId: string | null; meetingUrl: string | null },
+  ref: {
+    externalEventId: string;
+    externalCalendarId: string | null;
+    meetingUrl: string | null;
+  },
 ): Promise<void> {
   await db.run(
     sql`UPDATE booking_reference
@@ -293,22 +313,21 @@ export async function releaseBookingReference(db: Db, referenceId: string): Prom
   await db.run(sql`DELETE FROM booking_reference WHERE id = ${referenceId}`);
 }
 
-export async function loadBookingReferences(
-  db: Db,
-  bookingId: string,
-): Promise<BookingReferenceRow[]> {
+export async function loadBookingReferences(db: Db, bookingId: string): Promise<BookingReferenceRow[]> {
   const rows = await db.all<{
     id: string;
+    destination: string | null;
     type: string;
     external_event_id: string | null;
     external_calendar_id: string | null;
     meeting_url: string | null;
   }>(
-    sql`SELECT id, type, external_event_id, external_calendar_id, meeting_url
+    sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
         FROM booking_reference WHERE booking_id = ${bookingId}`,
   );
   return rows.map((r) => ({
     id: r.id,
+    destination: r.destination,
     type: r.type,
     externalEventId: r.external_event_id,
     externalCalendarId: r.external_calendar_id,

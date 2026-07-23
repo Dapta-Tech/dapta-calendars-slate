@@ -48,7 +48,12 @@ export class GenericRestWire implements CalendarWire {
       method: 'POST',
       path: '/v1/free-busy',
       scope: 'tenant',
-      body: { connectionRefs: input.connectionRefs, fromUtc: input.fromUtc, toUtc: input.toUtc },
+      body: {
+        connectionRefs: input.connectionRefs,
+        ...(input.calendarIds ? { calendarIds: input.calendarIds } : {}),
+        fromUtc: input.fromUtc,
+        toUtc: input.toUtc,
+      },
     };
   }
   parseBusy(raw: unknown): BusyInterval[] {
@@ -57,11 +62,20 @@ export class GenericRestWire implements CalendarWire {
     return busy
       .map((b) => asRecord(b))
       .filter((b) => typeof b['startUtc'] === 'string' && typeof b['endUtc'] === 'string')
-      .map((b) => ({ startUtc: String(b['startUtc']), endUtc: String(b['endUtc']) }));
+      .map((b) => ({
+        startUtc: String(b['startUtc']),
+        endUtc: String(b['endUtc']),
+      }));
   }
 
   createEvent(input: CreateEventInput): WireRequest {
-    return { method: 'POST', path: '/v1/events', scope: 'tenant', subject: input.connectionRef, body: input };
+    return {
+      method: 'POST',
+      path: '/v1/events',
+      scope: 'tenant',
+      subject: input.connectionRef,
+      body: input,
+    };
   }
   updateEvent(input: UpdateEventInput): WireRequest {
     return {
@@ -113,6 +127,28 @@ export class GenericRestWire implements CalendarWire {
         name: typeof c['name'] === 'string' ? c['name'] : String(c['id']),
         primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
         isPrimary: c['isPrimary'] === true,
+        readOnly: c['readOnly'] !== false,
+        accessRole:
+          c['accessRole'] === 'owner' ||
+          c['accessRole'] === 'writer' ||
+          c['accessRole'] === 'reader' ||
+          c['accessRole'] === 'freeBusyReader'
+            ? c['accessRole']
+            : 'none',
+        source:
+          c['source'] === 'primary' ||
+          c['source'] === 'owned' ||
+          c['source'] === 'subscribed' ||
+          c['source'] === 'delegated'
+            ? c['source']
+            : 'shared',
+        capabilities: {
+          canRead: asRecord(c['capabilities'])['canRead'] !== false,
+          canReadFreeBusy: asRecord(c['capabilities'])['canReadFreeBusy'] !== false,
+          canCreate: asRecord(c['capabilities'])['canCreate'] === true,
+          canUpdate: asRecord(c['capabilities'])['canUpdate'] === true,
+          canDelete: asRecord(c['capabilities'])['canDelete'] === true,
+        },
       }));
   }
 
@@ -127,11 +163,20 @@ export class GenericRestWire implements CalendarWire {
   parseHealth(raw: unknown): ConnectionHealth {
     const r = asRecord(raw);
     const ok = r['ok'] === true;
-    return { ok, detail: typeof r['detail'] === 'string' ? r['detail'] : ok ? 'Connected' : 'Not connected' };
+    return {
+      ok,
+      detail: typeof r['detail'] === 'string' ? r['detail'] : ok ? 'Connected' : 'Not connected',
+    };
   }
 
   startConnect(provider: string, tenantKey: string): WireRequest {
-    return { method: 'POST', path: '/v1/connect', scope: 'admin', subject: tenantKey, body: { provider, tenantKey } };
+    return {
+      method: 'POST',
+      path: '/v1/connect',
+      scope: 'admin',
+      subject: tenantKey,
+      body: { provider, tenantKey },
+    };
   }
   parseConnectStart(raw: unknown, token: string): ConnectStart {
     const url = asRecord(raw)['connectUrl'];
@@ -141,25 +186,32 @@ export class GenericRestWire implements CalendarWire {
 
   discoverConnections(tenantKey: string, provider: string): WireRequest {
     const qs = `tenantKey=${enc(tenantKey)}&provider=${enc(provider)}`;
-    return { method: 'GET', path: `/v1/connect/connections?${qs}`, scope: 'admin', subject: tenantKey };
+    return {
+      method: 'GET',
+      path: `/v1/connect/connections?${qs}`,
+      scope: 'admin',
+      subject: tenantKey,
+    };
   }
   parseDiscovered(raw: unknown, _tenantKey: string, _provider: string): DiscoveredConnection[] {
     const conns = asRecord(raw)['connections'];
     if (!Array.isArray(conns)) return [];
-    return conns
-      .map((c) => asRecord(c))
-      .filter((c) => typeof c['connectionRef'] === 'string')
-      // Hosted connect screens may create a connection shell BEFORE the user
-      // authorizes. If the backend reports a connected flag, only accept
-      // fully-authorized connections — otherwise list-and-diff would record a
-      // never-authorized account as connected. Absent flag = assumed live.
-      .filter((c) => c['connected'] !== false)
-      .map((c) => ({
-        connectionRef: String(c['connectionRef']),
-        provider: typeof c['provider'] === 'string' ? c['provider'] : 'unknown',
-        primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
-        name: typeof c['name'] === 'string' ? c['name'] : null,
-      }));
+    return (
+      conns
+        .map((c) => asRecord(c))
+        .filter((c) => typeof c['connectionRef'] === 'string')
+        // Hosted connect screens may create a connection shell BEFORE the user
+        // authorizes. If the backend reports a connected flag, only accept
+        // fully-authorized connections — otherwise list-and-diff would record a
+        // never-authorized account as connected. Absent flag = assumed live.
+        .filter((c) => c['connected'] !== false)
+        .map((c) => ({
+          connectionRef: String(c['connectionRef']),
+          provider: typeof c['provider'] === 'string' ? c['provider'] : 'unknown',
+          primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
+          name: typeof c['name'] === 'string' ? c['name'] : null,
+        }))
+    );
   }
 }
 

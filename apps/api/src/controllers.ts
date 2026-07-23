@@ -25,7 +25,12 @@ export class HealthController {
   @Get()
   async health() {
     const db = await this.dbState();
-    return { status: db === 'up' ? 'ok' : 'degraded', service: 'calendars-api', db, dialect: this.db.dialect };
+    return {
+      status: db === 'up' ? 'ok' : 'degraded',
+      service: 'calendars-api',
+      db,
+      dialect: this.db.dialect,
+    };
   }
 
   /**
@@ -49,7 +54,12 @@ export class HealthController {
         outbox = null;
       }
     }
-    const body = { status: db === 'up' ? 'ready' : 'unavailable', service: 'calendars-api', db, outbox };
+    const body = {
+      status: db === 'up' ? 'ready' : 'unavailable',
+      service: 'calendars-api',
+      db,
+      outbox,
+    };
     if (db !== 'up') throw new HttpException(body, HttpStatus.SERVICE_UNAVAILABLE);
     return body;
   }
@@ -80,13 +90,20 @@ a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px
 <main class="intro">
 <h1>Dapta Calendars API</h1>
 <p>OpenAPI 3.1 source: <a href="/openapi.json"><code>/openapi.json</code></a>.
-The R1 Cal-compatible surface is intentionally limited to slots and booking creation.</p>
+This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
 <div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a
 <code>dcl_</code> API key. Never put the key in a URL. Flow Studio should use Bearer auth from Vault,
 raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.</div>
 <h2>Required version pins</h2>
-<div class="pins"><code>GET /v2/slots</code><code>cal-api-version: 2024-09-04</code>
-<code>POST /v2/bookings</code><code>cal-api-version: 2026-02-25</code></div>
+<div class="pins"><code>GET /v2/event-types</code><code>cal-api-version: 2024-06-14</code>
+<code>GET /v2/slots</code><code>cal-api-version: 2024-09-04</code>
+<code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
+<code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
+<h2>Copy-paste discovery request</h2>
+<pre>BASE_URL="https://calendar.dapta.ai"
+curl "$BASE_URL/v2/event-types" \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2024-06-14"</pre>
 <h2>Copy-paste slots request</h2>
 <pre>curl --get "$BASE_URL/v2/slots" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
@@ -103,6 +120,17 @@ raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.
   --header "Idempotency-Key: flow-run-123:create-booking" \\
   --header "Content-Type: application/json" \\
   --data '{"eventTypeId":"replace-with-event-type-id","start":"2026-07-24T15:00:00Z","attendee":{"name":"Test Customer","email":"customer@example.com","timeZone":"America/Bogota","language":"es"},"metadata":{"source":"flow-studio"},"bookingFieldsResponses":{"notes":"Created from an automation"}}'</pre>
+<h2>Lifecycle</h2>
+<pre>curl "$BASE_URL/v2/bookings/$BOOKING_UID" \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2026-02-25"
+
+curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2026-02-25" \\
+  --header "Idempotency-Key: flow-run-123:reschedule" \\
+  --header "Content-Type: application/json" \\
+  --data '{"start":"2026-07-25T16:00:00Z","reschedulingReason":"Customer requested a later time"}'</pre>
 <p>Repository guides: <code>API-CONTRACT.md</code>, <code>FLOW-STUDIO-QUICKSTART.md</code>, and
 <code>CAL-COMPATIBILITY.md</code>.</p>
 </main>

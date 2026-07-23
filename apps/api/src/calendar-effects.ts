@@ -73,7 +73,11 @@ export class CalendarEffects {
    */
   private enqueue(action: CalendarAction, uid: string): void {
     if (!this.calendar.enabled) return;
-    void enqueueOutbox(this.db, { kind: 'calendar', action, bookingUid: uid }).catch((err) => {
+    void enqueueOutbox(this.db, {
+      kind: 'calendar',
+      action,
+      bookingUid: uid,
+    }).catch((err) => {
       this.log.error(`failed to enqueue calendar ${action} for ${uid}: ${String(err)}`);
     });
   }
@@ -113,7 +117,10 @@ export class CalendarEffects {
     }
     for (const ref of movable) {
       await this.calendar.updateEvent({
-        connectionRef: ref.externalCalendarId ?? ctx.destinationRefs[0] ?? '',
+        connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
+        calendarId:
+          ref.externalCalendarId ??
+          ctx.destinationCalendarIds[ref.destination ?? ctx.destinationRefs[0] ?? ''],
         externalEventId: ref.externalEventId!,
         title: ctx.title,
         startUtc: ctx.startUtc,
@@ -137,6 +144,7 @@ export class CalendarEffects {
       try {
         created = await this.calendar.createEvent({
           connectionRef,
+          calendarId: ctx.destinationCalendarIds[connectionRef],
           title: ctx.title,
           startUtc: ctx.startUtc,
           endUtc: ctx.endUtc,
@@ -167,7 +175,7 @@ export class CalendarEffects {
     for (const ref of refs) {
       if (!ref.externalEventId) continue;
       await this.calendar.deleteEvent({
-        connectionRef: ref.externalCalendarId ?? ctx.destinationRefs[0] ?? '',
+        connectionRef: ref.destination ?? ctx.destinationRefs[0] ?? '',
         externalEventId: ref.externalEventId,
       });
     }

@@ -31,7 +31,13 @@ export type AccountRole = (typeof accountRole)[number];
 export const memberStatus = ['active', 'invited', 'disabled'] as const;
 export type MemberStatus = (typeof memberStatus)[number];
 
-export const apiScope = ['availability:read', 'bookings:read', 'bookings:write'] as const;
+export const apiScope = [
+  'availability:read',
+  'bookings:read',
+  'bookings:write',
+  'calendars:read',
+  'event-types:read',
+] as const;
 export type ApiScope = (typeof apiScope)[number];
 
 /** Custom intake-field kinds a booking page may ask. */
@@ -66,7 +72,9 @@ export const timeZoneSchema = z
         return false;
       }
     },
-    { message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City)' },
+    {
+      message: 'Unknown time zone (must be a valid IANA zone, e.g. America/Mexico_City)',
+    },
   );
 
 /** A per-event custom intake field definition (declared early — referenced widely). */
@@ -248,8 +256,15 @@ export const bookingViewSchema = z.object({
   title: z.string(),
   startUtc: isoUtcSchema,
   endUtc: isoUtcSchema,
-  host: z.object({ name: z.string().nullable(), handle: z.string().nullable() }),
-  attendee: z.object({ name: z.string(), email: z.string(), timeZone: z.string() }),
+  host: z.object({
+    name: z.string().nullable(),
+    handle: z.string().nullable(),
+  }),
+  attendee: z.object({
+    name: z.string(),
+    email: z.string(),
+    timeZone: z.string(),
+  }),
   /** Where the meeting happens (physical/phone/free-text) and, when generated,
    *  the meeting link — surfaced on the manage page. Both optional/nullable so
    *  existing responses stay valid. */
@@ -260,9 +275,7 @@ export const bookingViewSchema = z.object({
   /** True when an idempotent replay returned the existing booking (B3). */
   deduplicated: z.boolean().optional(),
   /** Event context for the manage page's availability-backed reschedule picker. */
-  reschedule: z
-    .object({ accountCode: z.string(), handle: z.string(), slug: z.string() })
-    .optional(),
+  reschedule: z.object({ accountCode: z.string(), handle: z.string(), slug: z.string() }).optional(),
 });
 export type BookingView = z.infer<typeof bookingViewSchema>;
 

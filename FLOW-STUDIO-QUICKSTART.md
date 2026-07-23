@@ -1,52 +1,78 @@
 # Flow Studio API Request quickstart
 
-R1 lets a generic Flow Studio API Request node check slots and create personal or team bookings.
-Calendar discovery and the complete booking lifecycle arrive in later milestones; see
-[`CAL-COMPATIBILITY.md`](CAL-COMPATIBILITY.md).
+This is the copy-paste path for Nicolas's production pilot. Use generic **API Request** nodes,
+Bearer auth from Vault, parsed JSON responses, fire-and-forget off, and
+`https://calendar.dapta.ai` as the base URL.
 
-## One-time setup
+## Setup
 
-1. Create a Dapta Calendars API key with `availability:read` and `bookings:write`.
-2. Store it in Vault as `dapta_calendars_api_key`.
-3. Use the generic **API Request** node, not a provider-specific calendar node.
-4. Choose Bearer auth with `{{daptaVault.dapta_calendars_api_key}}`.
-5. Leave fire-and-forget off.
+Create one `dcl_` key with `availability:read`, `event-types:read`, `calendars:read`,
+`bookings:read`, and `bookings:write`. Store it as `dapta_calendars_api_key`; never put it in a URL
+or log node bodies containing customer data.
 
-The examples use `https://calendars-api.dapta.ai`. Replace the event-type ID and timestamps.
+Every request sends:
 
-## Check slots
+```text
+Authorization: Bearer {{daptaVault.dapta_calendars_api_key}}
+```
 
-| Node field | Value                                     |
-| ---------- | ----------------------------------------- |
-| Method     | `GET`                                     |
-| URL        | `https://calendars-api.dapta.ai/v2/slots` |
-| Header     | `cal-api-version: 2024-09-04`             |
-| Query      | `eventTypeId={{eventTypeId}}`             |
-| Query      | `start=2026-07-24T00:00:00Z`              |
-| Query      | `end=2026-07-31T23:59:59Z`                |
-| Query      | `timeZone=America/Bogota`                 |
+## 1. Discover an event type
 
-The parsed body is stored under `response`. A slot start is available at:
+```http
+GET https://calendar.dapta.ai/v2/event-types
+cal-api-version: 2024-06-14
+```
+
+Choose by `data[*].slug` plus `type`. Use `data[*].daptaId` as `eventTypeId`.
+
+## 2. Discover calendars and optional batch availability
+
+```http
+GET https://calendar.dapta.ai/v2/calendars
+```
+
+Calendar IDs are `data.connectedCalendars[*].calendars[*].id`. Inspect `readOnly` and
+`capabilities.canReadFreeBusy/canCreate`.
+
+```http
+POST https://calendar.dapta.ai/v2/calendars/availability
+Content-Type: application/json
+
+{
+  "calendarIds": ["{{calendarIdA}}", "{{calendarIdB}}"],
+  "from": "2026-07-24T00:00:00-05:00",
+  "to": "2026-07-31T23:59:59-05:00",
+  "timeZone": "America/Bogota",
+  "durationMinutes": 30,
+  "intervalMinutes": 30,
+  "mode": "allAvailable"
+}
+```
+
+Read `data.slots` for `allAvailable`/`anyAvailable`, or `data.calendars[calendarId]` for
+`perCalendar`. Check `data.partial` and `data.failures` before selecting a time.
+
+## 3. Get engine-aware slots
+
+```http
+GET https://calendar.dapta.ai/v2/slots?eventTypeId={{eventTypeId}}&start=2026-07-24T00%3A00%3A00Z&end=2026-07-31T23%3A59%3A59Z&timeZone=America%2FBogota
+cal-api-version: 2024-09-04
+```
+
+Example Flow expression:
 
 ```text
 {{Check_Slots.response.data["2026-07-24"][0].start}}
 ```
 
-## Create a booking
+## 4. Create
 
-Derive the idempotency key from a stable trigger or business-request ID before this node. Do not
-generate a new key inside a retry.
+```http
+POST https://calendar.dapta.ai/v2/bookings
+cal-api-version: 2026-02-25
+Idempotency-Key: {{triggerRequestId}}:create
+Content-Type: application/json
 
-| Node field | Value                                                  |
-| ---------- | ------------------------------------------------------ |
-| Method     | `POST`                                                 |
-| URL        | `https://calendars-api.dapta.ai/v2/bookings`           |
-| Header     | `Content-Type: application/json`                       |
-| Header     | `cal-api-version: 2026-02-25`                          |
-| Header     | `Idempotency-Key: {{triggerRequestId}}:create-booking` |
-| Raw body   | JSON below                                             |
-
-```json
 {
   "eventTypeId": "{{eventTypeId}}",
   "start": "{{Check_Slots.response.data[\"2026-07-24\"][0].start}}",
@@ -57,19 +83,55 @@ generate a new key inside a retry.
     "language": "es"
   },
   "guests": ["guest@example.com"],
-  "metadata": { "source": "flow-studio" },
+  "metadata": { "source": "flow-studio", "flowRunId": "{{triggerRequestId}}" },
   "bookingFieldsResponses": { "notes": "Created from an automation" }
 }
 ```
 
-Read the lifecycle identifier at `{{Create_Booking.response.data.uid}}`. Canonical times are
-`data.start` and `data.end`; there are no `startTime` or `endTime` REST aliases.
+Optionally set `destinationCalendarId` to a writable personal calendar. Save
+`data.uid`, `data.title`, `data.start`, `data.end`, and `data.status`. The audited Voice Worker can
+use these canonical fields without formatter changes.
 
-## Retry and error handling
+## 5. Read, add a guest, reschedule, cancel
 
-- Repeat the create node with the same idempotency key and unchanged body: the same `uid` is returned.
-- Reusing the key with a different body returns `409 IDEMPOTENCY_KEY_REUSED`.
-- Treat 401 as a key/Vault problem, 403 as a missing scope, 404 as absent/cross-tenant/out-of-allowlist,
-  409 as a collision or idempotency mismatch, 422 as a documented unsupported feature, and 429/5xx
-  as retryable according to the flow policy.
-- Record `error.requestId` when escalating a failed call; never log the key or attendee body.
+```http
+GET https://calendar.dapta.ai/v2/bookings/{{bookingUid}}
+cal-api-version: 2026-02-25
+```
+
+```http
+POST https://calendar.dapta.ai/v2/bookings/{{bookingUid}}/guests
+cal-api-version: 2024-08-13
+Idempotency-Key: {{triggerRequestId}}:guests
+Content-Type: application/json
+
+{"guests":[{"email":"second@example.com","name":"Second Guest","timeZone":"America/Bogota"}]}
+```
+
+```http
+POST https://calendar.dapta.ai/v2/bookings/{{bookingUid}}/reschedule
+cal-api-version: 2026-02-25
+Idempotency-Key: {{triggerRequestId}}:reschedule
+Content-Type: application/json
+
+{"start":"2026-07-25T16:00:00Z","rescheduledBy":"customer@example.com","reschedulingReason":"Customer requested a later time"}
+```
+
+Save the new `data.uid`. The old booking returns `rescheduledToUid`; the new one returns
+`rescheduledFromUid`.
+
+```http
+POST https://calendar.dapta.ai/v2/bookings/{{newBookingUid}}/cancel
+cal-api-version: 2026-02-25
+Idempotency-Key: {{triggerRequestId}}:cancel
+Content-Type: application/json
+
+{"cancellationReason":"Customer cancelled"}
+```
+
+## Retry and failure policy
+
+Generate every idempotency key before the HTTP node and reuse the unchanged request on retries.
+Treat 401 as key/Vault failure, 403 as scope/calendar permission failure, 404 as unavailable or
+unauthorized resource, 409 as a slot collision or changed idempotent request, 422 as an explicit
+pilot gap, and 429/5xx as retryable. Escalations should record `error.requestId`, never the key.

@@ -24,7 +24,8 @@ import {
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import { sql, type Db } from './client';
-import { bookingStartOutOfRange,
+import {
+  bookingStartOutOfRange,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -70,7 +71,13 @@ export type ReserveOutcome =
  */
 export async function reserveSlot(
   db: Db,
-  args: { accountCode: string; handle: string; slug: string; startMs: number; holdMs?: number },
+  args: {
+    accountCode: string;
+    handle: string;
+    slug: string;
+    startMs: number;
+    holdMs?: number;
+  },
 ): Promise<ReserveOutcome> {
   const now = Date.now();
   await sweepExpiredReservations(db, now);
@@ -99,8 +106,7 @@ export async function reserveSlot(
   const active = await db.get<{ n: number }>(
     sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
   );
-  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER)
-    return { ok: false, reason: 'RATE_LIMITED' };
+  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return { ok: false, reason: 'RATE_LIMITED' };
 
   const uid = randomUUID();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
@@ -134,14 +140,12 @@ export interface MeView {
 }
 
 /** Resolve the authenticated principal's account + member for /me. */
-export async function getMe(
-  db: Db,
-  accountId: string,
-  memberId?: string,
-): Promise<MeView | null> {
-  const account = await db.get<{ id: string; code: string; vanity_slug: string | null }>(
-    sql`SELECT id, code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`,
-  );
+export async function getMe(db: Db, accountId: string, memberId?: string): Promise<MeView | null> {
+  const account = await db.get<{
+    id: string;
+    code: string;
+    vanity_slug: string | null;
+  }>(sql`SELECT id, code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`);
   if (!account) return null;
   const member = await db.get<{
     id: string;
@@ -208,8 +212,7 @@ export async function checkHandleAvailable(
   const h = handle.toLowerCase();
   if (h.length < 3) return { handle: h, available: false, reason: 'too_short' };
   if (h.length > 40) return { handle: h, available: false, reason: 'too_long' };
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h))
-    return { handle: h, available: false, reason: 'invalid' };
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h)) return { handle: h, available: false, reason: 'invalid' };
   if (RESERVED_HANDLES.has(h)) return { handle: h, available: false, reason: 'reserved' };
   if (!(await isHandleFree(db, accountId, h, excludeMemberId))) {
     // Offer the first free handle-N (D18 — old contract returns a suggestion).
@@ -237,11 +240,7 @@ export interface BrandingPatch {
   style?: Record<string, unknown>;
 }
 
-export async function updateBranding(
-  db: Db,
-  memberId: string,
-  patch: BrandingPatch,
-): Promise<boolean> {
+export async function updateBranding(db: Db, memberId: string, patch: BrandingPatch): Promise<boolean> {
   const sets: ReturnType<typeof sql>[] = [];
   if ('displayName' in patch) sets.push(sql`display_name = ${patch.displayName ?? null}`);
   if ('avatarUrl' in patch) sets.push(sql`avatar_url = ${patch.avatarUrl ?? null}`);
@@ -259,7 +258,12 @@ export async function updateBranding(
 export async function updateMemberSettings(
   db: Db,
   memberId: string,
-  patch: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
+  patch: {
+    timeZone?: string;
+    locale?: string | null;
+    weekStart?: string;
+    displayName?: string | null;
+  },
 ): Promise<void> {
   const sets: ReturnType<typeof sql>[] = [];
   if (patch.timeZone !== undefined) sets.push(sql`time_zone = ${patch.timeZone}`);
@@ -280,7 +284,12 @@ export async function updateHandle(db: Db, memberId: string, handle: string): Pr
 
 export interface TeamProfileView {
   account: { code: string; name: string };
-  team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
+  team: {
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    timeZone: string;
+  };
   eventTypes: Array<{
     slug: string;
     title: string;
@@ -291,7 +300,13 @@ export interface TeamProfileView {
 }
 
 async function getTeamBySlug(db: Db, accountId: string, teamSlug: string) {
-  return db.get<{ id: string; slug: string; name: string; logo_url: string | null; time_zone: string }>(
+  return db.get<{
+    id: string;
+    slug: string;
+    name: string;
+    logo_url: string | null;
+    time_zone: string;
+  }>(
     sql`SELECT id, slug, name, logo_url, time_zone FROM team WHERE account_id = ${accountId} AND slug = ${teamSlug} LIMIT 1`,
   );
 }
@@ -319,7 +334,12 @@ export async function getTeamProfile(
   return {
     // Canonical code always (vanity ?? short) — clients redirect aliases to it.
     account: { code: canonicalPublicCode(account), name: account.name },
-    team: { slug: team.slug, name: team.name, logoUrl: team.logo_url, timeZone: team.time_zone },
+    team: {
+      slug: team.slug,
+      name: team.name,
+      logoUrl: team.logo_url,
+      timeZone: team.time_zone,
+    },
     eventTypes: rows.map((r) => ({
       slug: r.slug,
       title: r.title,
@@ -391,14 +411,13 @@ async function hostFreeSlotMs(
    *  fail-closed semantics stay the single owner of those outcomes. */
   rulesOnly = false,
 ): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
-  const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
-    sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
-  );
+  const member = await db.get<{
+    time_zone: string;
+    default_schedule_id: string | null;
+  }>(sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`);
   if (!member) return { free: new Set(), reason: 'NO_SCHEDULE' };
   const referenced = await resolveScheduleTimeZone(db, host.schedule_id);
-  const fallback = referenced
-    ? undefined
-    : await resolveScheduleTimeZone(db, member.default_schedule_id);
+  const fallback = referenced ? undefined : await resolveScheduleTimeZone(db, member.default_schedule_id);
   const schedule = referenced ?? fallback;
   const tz = schedule?.timeZone ?? member.time_zone;
   let rules: AvailabilityRule[] = [];
@@ -521,7 +540,11 @@ export async function getTeamAvailability(
   const now = args.now ?? new Date();
   const method = normalizeSchedulingMethod(et.scheduling_type);
 
-  const hostSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+  const hostSets: Array<{
+    isFixed: boolean;
+    free: Set<number>;
+    reason: AvailabilityEmptyReason | null;
+  }> = [];
   for (const host of hosts) {
     const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
     hostSets.push({ isFixed: host.is_fixed === 1, free, reason });
@@ -572,7 +595,11 @@ function teamEmptyReason(
 
 export type TeamBookingOutcome =
   | { ok: true; uid: string; hostMemberId: string; manageToken: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID' | 'CALENDAR_UNAVAILABLE'; message?: string };
+  | {
+      ok: false;
+      reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID' | 'CALENDAR_UNAVAILABLE';
+      message?: string;
+    };
 
 /** True (as a 1-row SELECT) if `memberId` already holds an overlapping booking —
  * whether as the primary host_member_id OR an assigned co-host (booking_host). */
@@ -614,7 +641,13 @@ export async function createTeamBooking(
     teamSlug: string;
     slug: string;
     startMs: number;
-    attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+    attendee: {
+      name: string;
+      email: string;
+      timeZone: string;
+      notes?: string;
+      phone?: string;
+    };
     additionalAttendees?: Array<{
       name: string;
       email: string;
@@ -652,16 +685,33 @@ export async function createTeamBooking(
   {
     const now = new Date();
     const endMsProbe = args.startMs + et.length_minutes * 60_000;
-    const ruleSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+    const ruleSets: Array<{
+      isFixed: boolean;
+      free: Set<number>;
+      reason: AvailabilityEmptyReason | null;
+    }> = [];
     for (const host of await getEventHosts(db, et.id)) {
       const { free, reason } = await hostFreeSlotMs(
-        db, host, et, args.startMs, endMsProbe, now, undefined, true,
+        db,
+        host,
+        et,
+        args.startMs,
+        endMsProbe,
+        now,
+        undefined,
+        true,
       );
       ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
     }
-    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets)
-      .includes(args.startMs);
-    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets).includes(
+      args.startMs,
+    );
+    if (!offered)
+      return {
+        ok: false,
+        reason: 'INVALID',
+        message: 'That time is not available.',
+      };
   }
 
   const endMs = args.startMs + et.length_minutes * 60_000;
@@ -704,7 +754,10 @@ export async function createTeamBooking(
   // Resolve the assigned host set for the method.
   const assigned = resolveAssignment(method, hosts, candidates);
   if (!assigned || assigned.length === 0)
-    return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
+    return {
+      ok: false,
+      reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN',
+    };
 
   const organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
   const assignedIds = assigned.map((h) => h.memberId);
@@ -714,7 +767,10 @@ export async function createTeamBooking(
   const attendeeId = randomUUID();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
-  const metaExpr = jsonParam(db, { ...(args.metadata ?? {}), _manage: { tokenHash } });
+  const metaExpr = jsonParam(db, {
+    ...(args.metadata ?? {}),
+    _manage: { tokenHash },
+  });
   const responsesExpr = jsonParam(db, args.answers ?? null);
 
   // Snapshot the team event type's configured Where onto the booking (F5), same
@@ -748,13 +804,12 @@ export async function createTeamBooking(
         )
       : [];
 
-  const booked = await insertBookingGuarded(
-    db,
-    assignedIds,
-    args.startMs,
-    endMs,
-    [insertBooking, insertAttendee, ...insertAdditionalAttendees, ...insertHostRows],
-  );
+  const booked = await insertBookingGuarded(db, assignedIds, args.startMs, endMs, [
+    insertBooking,
+    insertAttendee,
+    ...insertAdditionalAttendees,
+    ...insertHostRows,
+  ]);
   return booked
     ? { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token }
     : { ok: false, reason: 'SLOT_TAKEN' };
@@ -928,7 +983,10 @@ export async function rescheduleBooking(
   // already-applied state WITHOUT moving again or re-rotating the manage token
   // (a double-move would silently invalidate the token the first response
   // handed back). Keyed on the booking's stored `_idem.reschedule`.
-  const meta = parseJsonColumn<{ _manage?: unknown; _idem?: { reschedule?: string } }>(b.metadata, {});
+  const meta = parseJsonColumn<{
+    _manage?: unknown;
+    _idem?: { reschedule?: string };
+  }>(b.metadata, {});
   if (args.idempotencyKey && meta._idem?.reschedule === args.idempotencyKey) {
     return {
       ok: true,
@@ -986,8 +1044,7 @@ export async function rescheduleBooking(
   // Preserve any other metadata; rotate the manage token and record the
   // idempotency key so an identical retry short-circuits above.
   const newMeta: Record<string, unknown> = { ...meta, _manage: { tokenHash } };
-  if (args.idempotencyKey)
-    newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
+  if (args.idempotencyKey) newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
   const metaExpr = jsonParam(db, newMeta);
 
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
@@ -1056,7 +1113,10 @@ export async function cancelBooking(
   // bad token), so an idempotent retry still requires a valid principal.
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
-  const nowIso = { startUtc: new Date(Number(b.start_ms)).toISOString(), endUtc: new Date(Number(b.end_ms)).toISOString() };
+  const nowIso = {
+    startUtc: new Date(Number(b.start_ms)).toISOString(),
+    endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
   // P1-1: cancel is IDEMPOTENT. A retried cancel of an already-cancelled booking
   // returns success (was 410 GONE, which broke agent retry loops that treat
   // non-2xx as failure). Only a truly non-cancellable state (rejected) is GONE.
@@ -1066,10 +1126,17 @@ export async function cancelBooking(
   if (b.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
   if (b.status !== 'accepted' && b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
-  await db.run(
+  const updated = await db.get<{ id: string }>(
     sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${args.reason ?? null},
-        cancelled_by = ${args.byHost ? 'host' : 'attendee'}, updated_at = ${now} WHERE id = ${b.id}`,
+        cancelled_by = ${args.byHost ? 'host' : 'attendee'}, updated_at = ${now}
+        WHERE id = ${b.id} AND status IN ('accepted', 'pending')
+        RETURNING id`,
   );
+  if (!updated) {
+    const current = await resolveBooking(db, args.uid, args.accountId);
+    if (current?.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
+    return { ok: false, reason: current ? 'GONE' : 'NOT_FOUND' };
+  }
   return { ok: true, uid: b.uid, ...nowIso };
 }
 
@@ -1081,7 +1148,13 @@ export async function addAttendeeToBooking(
   db: Db,
   uid: string,
   accountId: string,
-  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string },
+  attendee: {
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+  },
 ): Promise<{ ok: boolean; reason?: 'NOT_FOUND' }> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
@@ -1094,11 +1167,7 @@ export async function addAttendeeToBooking(
 }
 
 /** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(
-  db: Db,
-  uid: string,
-  accountId?: string,
-): Promise<MutationOutcome> {
+export async function confirmBooking(db: Db, uid: string, accountId?: string): Promise<MutationOutcome> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
@@ -1210,7 +1279,11 @@ export async function loadBookingNotificationContext(
   if (!row || !row.att_email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.
-  const coHostRows = await db.all<{ member_id: string; name: string | null; email: string | null }>(
+  const coHostRows = await db.all<{
+    member_id: string;
+    name: string | null;
+    email: string | null;
+  }>(
     sql`SELECT bh.member_id, m.display_name AS name, m.email AS email
         FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
         WHERE bh.booking_id = ${row.id} AND bh.member_id <> ${row.host_member_id ?? ''}`,
@@ -1233,7 +1306,11 @@ export async function loadBookingNotificationContext(
     hostLocale: row.host_locale,
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
-        ? { accountCode: row.account_code, handle: row.host_handle, slug: row.event_slug }
+        ? {
+            accountCode: row.account_code,
+            handle: row.host_handle,
+            slug: row.event_slug,
+          }
         : null,
   };
 }
@@ -1288,9 +1365,7 @@ export async function listBookings(
   // page, so paging never skips or repeats rows even as new bookings arrive.
   const cursor = decodeBookingCursor(args.cursor);
   if (cursor) {
-    conds.push(
-      sql`(start_ms < ${cursor.startMs} OR (start_ms = ${cursor.startMs} AND uid < ${cursor.uid}))`,
-    );
+    conds.push(sql`(start_ms < ${cursor.startMs} OR (start_ms = ${cursor.startMs} AND uid < ${cursor.uid}))`);
   }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   // Fetch one extra row to know whether a further page exists.
@@ -1363,9 +1438,10 @@ export interface MemberIdentity {
 }
 
 export async function getMemberIdentity(db: Db, memberId: string): Promise<MemberIdentity | null> {
-  const row = await db.get<{ external_id: string | null; email: string | null }>(
-    sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`,
-  );
+  const row = await db.get<{
+    external_id: string | null;
+    email: string | null;
+  }>(sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`);
   if (!row) return null;
   const iamUserId = row.external_id && row.external_id.length > 0 ? row.external_id : memberId;
   return { iamUserId, email: row.email };
@@ -1481,7 +1557,9 @@ export async function deleteConnection(db: Db, memberId: string, id: string): Pr
   );
   if (!owned) return { ok: true };
   await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE connected_calendar_id = ${id}`);
-  await db.run(sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`);
+  await db.run(
+    sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`,
+  );
   await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
   return { ok: true };
 }
@@ -1558,7 +1636,13 @@ export interface CreatedApiKey {
 
 export async function createApiKey(
   db: Db,
-  args: { accountId: string; name: string; scopes: string[]; eventTypeIds?: string[]; expiresAtMs?: number },
+  args: {
+    accountId: string;
+    name: string;
+    scopes: string[];
+    eventTypeIds?: string[];
+    expiresAtMs?: number;
+  },
 ): Promise<CreatedApiKey> {
   const id = randomUUID();
   const secret = randomBytes(24).toString('base64url');
@@ -1612,7 +1696,13 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
 }
 
 export async function listApiKeys(db: Db, accountId: string) {
-  return db.all<{ id: string; name: string; prefix: string; last4: string; revoked_at_ms: number | null }>(
+  return db.all<{
+    id: string;
+    name: string;
+    prefix: string;
+    last4: string;
+    revoked_at_ms: number | null;
+  }>(
     sql`SELECT id, name, prefix, last4, revoked_at_ms FROM api_key WHERE account_id = ${accountId}
         ORDER BY created_at DESC`,
   );
@@ -1632,9 +1722,7 @@ export async function listWebhooks(db: Db, accountId: string) {
     subscriber_url: string;
     event_triggers: unknown;
     active: number;
-  }>(
-    sql`SELECT id, subscriber_url, event_triggers, active FROM webhook WHERE account_id = ${accountId}`,
-  );
+  }>(sql`SELECT id, subscriber_url, event_triggers, active FROM webhook WHERE account_id = ${accountId}`);
 }
 
 export async function createWebhook(
@@ -1698,10 +1786,18 @@ export async function pingWebhook(
   if (!h) return { ok: false, message: 'Webhook not found.' };
   if (!(await checkWebhookUrl(h.subscriber_url)).ok) return { ok: false, message: 'URL is not allowed.' };
   const body = JSON.stringify({ event: 'ping', data: { ok: true } });
-  const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': 'ping' };
-  if (h.secret) headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'X-Slate-Event': 'ping',
+  };
+  if (h.secret)
+    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
   try {
-    const res = await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
+    const res = await fetchImpl(h.subscriber_url, {
+      method: 'POST',
+      headers,
+      body,
+    });
     return { ok: res.ok, status: res.status };
   } catch {
     return { ok: false, message: 'Subscriber unreachable.' };
@@ -1741,7 +1837,10 @@ export async function dispatchWebhooks(
       // Re-validate at egress (defends against a URL that resolved public at
       // creation but was later re-pointed at a private address — DNS rebinding).
       if (!(await checkWebhookUrl(h.subscriber_url)).ok) return;
-      const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': event };
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        'X-Slate-Event': event,
+      };
       if (h.secret) {
         headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
       }
@@ -1787,7 +1886,11 @@ export async function loadMatchingWebhooks(
   );
   return hooks
     .filter((h) => parseJsonColumn<string[]>(h.event_triggers, []).includes(event))
-    .map((h) => ({ id: h.id, subscriberUrl: h.subscriber_url, secret: h.secret }));
+    .map((h) => ({
+      id: h.id,
+      subscriberUrl: h.subscriber_url,
+      secret: h.secret,
+    }));
 }
 
 /**
@@ -1930,7 +2033,8 @@ export async function deliverWebhookEvent(
     'X-Slate-Event': event,
   };
   if (hook.secret) {
-    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
+    headers['X-Slate-Signature'] =
+      `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
   }
   let res: Response | undefined;
   try {

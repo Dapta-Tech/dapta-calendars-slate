@@ -1,81 +1,76 @@
 # Dapta Calendars public API contract
 
-Status: R0 contract lock / R1 implementation
+Status: production-pilot contract
 Last reviewed: 2026-07-23
 
-The `/v2` API is Cal.com wire-compatible only for the operations marked **Implemented** below. It
-uses the existing Dapta Calendars scheduling engine; `/v1` remains backward compatible.
+The `/v2` surface is the contract for Nicolas's Flow Studio pilot. It uses Cal.com wire names only
+for the implemented paths below and adds one JSON-first Dapta batch endpoint. It is not a claim of
+general Cal.com parity. `/v1`, the web app, and host/admin behavior remain unchanged.
 
-## R1 implemented surface
+## Authentication, envelopes, and permissions
 
-| Operation           |      Version | Status      | Contract                                                                                                                                                               |
-| ------------------- | -----------: | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v2/slots`     | `2024-09-04` | Implemented | `eventTypeId`, personal slug, or team slug selector; timezone; date-keyed slots; `format=range`; personal, round-robin, collective, and fixed round-robin engine paths |
-| `POST /v2/bookings` | `2026-02-25` | Implemented | Personal and team create; attendee, guests, booking fields, metadata; `201`; optional Dapta `Idempotency-Key` extension                                                |
+Send `Authorization: Bearer dcl_<prefix>_<secret>`. `/v2` does not accept `x-api-key`.
 
-Success responses are `{"status":"success","data":...}`. Errors are:
+Every success is `{"status":"success","data":...}`. Every failure is:
 
 ```json
 {
   "status": "error",
   "error": {
     "code": "RESOURCE_NOT_FOUND",
-    "message": "Event type not found.",
+    "message": "Booking not found.",
     "details": {},
     "requestId": "req_example"
   }
 }
 ```
 
-API automation uses `Authorization: Bearer dcl_<prefix>_<secret>`. `/v2` does not accept `x-api-key`.
-Keys require `availability:read` for slots and `bookings:write` for create. Cross-tenant and
-event-type-allowlist misses return the same non-disclosing `404 RESOURCE_NOT_FOUND`.
+Scopes are `availability:read`, `event-types:read`, `calendars:read`, `bookings:read`, and
+`bookings:write`. Resource-allowlisted keys see only permitted event types and their bookings.
+Absent, cross-tenant, and out-of-allowlist resources use the same non-disclosing 404.
+Provider calendar capabilities are fail-closed: a calendar that does not explicitly advertise
+free/busy or create permission returns a clear 403/failure entry rather than being treated writable.
 
-## Selectors and identifiers
+## Pilot operations
 
-Slots and create accept exactly one of:
+| Operation                            |      Version | Notes                                                                                             |
+| ------------------------------------ | -----------: | ------------------------------------------------------------------------------------------------- |
+| `GET /v2/event-types`                | `2024-06-14` | Discover accessible personal/team IDs                                                             |
+| `GET /v2/calendars`                  |         none | Live provider discovery with stable `cal_` IDs, capabilities, cache fallback                      |
+| `POST /v2/calendars/availability`    |         none | 1–100 calendars; `perCalendar`, `allAvailable`, `anyAvailable`; explicit partial failures         |
+| `GET /v2/slots`                      | `2024-09-04` | Personal/team engine slots; date-keyed Cal envelope                                               |
+| `POST /v2/bookings`                  | `2026-02-25` | Personal/team create, metadata, booking fields, all creation guests                               |
+| `GET /v2/bookings/{uid}`             | `2026-02-25` | Tenant/key-scoped canonical booking                                                               |
+| `POST /v2/bookings/{uid}/reschedule` | `2026-02-25` | New UID; bidirectional linkage; carries attendees, guests, metadata, hosts and provider reference |
+| `POST /v2/bookings/{uid}/cancel`     | `2026-02-25` | Preserves UID; safe replay                                                                        |
+| `POST /v2/bookings/{uid}/guests`     | `2024-08-13` | Up to 10/request and 30 total; case-insensitive dedupe                                            |
 
-- `eventTypeId`;
-- `eventTypeSlug` + `username`;
-- `eventTypeSlug` + `teamSlug`.
+Slots and booking create accept exactly one selector: `eventTypeId`,
+`eventTypeSlug + username`, or `eventTypeSlug + teamSlug`. Numeric event-type IDs in Cal-shaped
+responses are compatibility aliases; `daptaId` from discovery is the native ID.
+Booking lifecycle identity is always `uid`. Canonical timestamps are `start` and `end`; the REST API
+does not add `startTime`/`endTime` aliases.
 
-`organizationSlug`, when present, is a Dapta account code or alias and must resolve to the key's
-tenant. Native event-type IDs are strings. Numeric compatibility aliases are accepted and returned
-where a Cal-shaped client expects a number. Booking lifecycle identity is always `uid`; numeric `id`
-is a non-authoritative compatibility alias.
+`destinationCalendarId` is supported for personal create after calendar discovery. A read-only
+calendar returns `403 CALENDAR_READ_ONLY`. Team assignment is dynamic, so a team destination
+override returns an explicit `422 FEATURE_NOT_SUPPORTED` rather than writing to the wrong calendar.
 
-## Idempotency extension
+## Mutation idempotency
 
-`POST /v2/bookings` accepts `Idempotency-Key` (1–128 characters):
+Every pilot mutation accepts `Idempotency-Key` (1–128 characters). Flow Studio should use a stable
+business/trigger ID plus an operation suffix.
 
-- same tenant, key, and canonical request returns the original booking without repeated side effects;
-- the same key with a different request returns `409 IDEMPOTENCY_KEY_REUSED`;
-- keys are hashed before being incorporated into the stored namespace.
+- same tenant, API key, path, key, and request returns the stored response;
+- changing the request with the same namespace returns `409 IDEMPOTENCY_KEY_REUSED`;
+- create, cancel, reschedule, and guest writes have domain-level dedupe as well;
+- plaintext idempotency keys are never persisted; replay records expire after 24 hours.
 
-Flow Studio must send a stable key derived before the HTTP node and reuse it across Temporal retries.
-This header is a Dapta safety extension, not a Cal.com parity claim.
+## Explicitly outside the pilot
 
-## Explicit R1 unsupported behavior
+Seats, recurrence, instant meetings, routing forms, PBAC, broad admin resources, webhook parity,
+old Cal version adapters, reservations, list/search booking filters, routing/instant resources,
+dynamic usernames, and schedule CRUD are not implemented. Recognized unsupported create variants
+return `422 FEATURE_NOT_SUPPORTED`; no route should pretend these work.
 
-Known fields are never silently ignored. These variants return
-`422 FEATURE_NOT_SUPPORTED` with `details.feature`:
-
-- recurrence, seats, instant meetings, and routing;
-- variable duration (a supplied duration equal to the configured duration is accepted);
-- booking-time location, meeting URL, or destination-calendar override;
-- reservations and `bookingUidToReschedule`;
-- email verification and host-only conflict/out-of-bounds overrides;
-- attendee notification locales other than `en` and `es`.
-
-Booking-field values currently support strings, booleans, and string arrays. A personal event type
-must have a public member handle because the existing personal service addresses it by handle.
-
-## Next milestones
-
-R2 adds booking get/list/cancel/reschedule/guests, reservations, and full mutation-idempotency
-storage. R3 adds calendar discovery, busy-times, selected/destination calendars, permission
-capabilities, and 100-calendar batch availability. Event-type/team discovery follows with those
-surfaces. No release may claim complete Cal.com API parity.
-
-The detailed operation and schema source of truth is [`apps/api/src/openapi.ts`](apps/api/src/openapi.ts)
-and is served at `/openapi.json`.
+The executable schema source is [`apps/api/src/openapi.ts`](apps/api/src/openapi.ts), served live at
+`/openapi.json` with an interactive explorer at `/docs`.

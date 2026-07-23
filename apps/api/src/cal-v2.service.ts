@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { HttpException, Inject, Injectable } from "@nestjs/common";
 import type { Db, EventTypeRow, MemberRow } from "@slate/db";
 import {
+  getProviderCalendar,
   getAccountByCode,
   getEventTypeRowById,
   getMemberById,
@@ -135,6 +136,11 @@ interface StoredMetadata {
   _publicMetadata?: Record<string, string>;
   _guests?: string[];
   _primaryAttendee?: { email: string; language: string };
+  _destinationCalendar?: {
+    id: string;
+    connectionRef: string;
+    externalId: string;
+  };
   _idempotency?: {
     requestHash: string;
     response?: Record<string, unknown>;
@@ -224,7 +230,7 @@ function hash(value: string): string {
 }
 
 /** Stable, non-authoritative numeric alias for Cal-shaped response `id` fields. */
-function compatibilityId(value: string): number {
+export function compatibilityId(value: string): number {
   return Number.parseInt(hash(value).slice(0, 13), 16);
 }
 
@@ -407,8 +413,6 @@ export class CalV2Service {
     if (input.meetingUrl !== undefined) featureNotSupported("meetingUrl");
     if (input.reservationUid !== undefined)
       featureNotSupported("reservationUid");
-    if (input.destinationCalendarId !== undefined)
-      featureNotSupported("destinationCalendarId");
     if (input.emailVerificationCode !== undefined)
       featureNotSupported("emailVerification");
     if (input.allowConflicts) featureNotSupported("allowConflicts");
@@ -473,7 +477,11 @@ export class CalV2Service {
     );
   }
 
-  private async bookingResponse(accountId: string, uid: string) {
+  async bookingResponse(
+    accountId: string,
+    uid: string,
+    allowedEventTypeIds?: string[] | null,
+  ) {
     const booking = await this.db.get<{
       id: string;
       uid: string;
@@ -492,11 +500,19 @@ export class CalV2Service {
       length_minutes: number;
       destination_calendar_id: string | null;
       meeting_url: string | null;
+      cancellation_reason: string | null;
+      cancelled_by: string | null;
+      rescheduled_from_uid: string | null;
+      rescheduled_to_uid: string | null;
+      rescheduling_reason: string | null;
+      rescheduled_by_email: string | null;
     }>(
       sql`SELECT b.id, b.uid, b.title, b.status, b.start_ms, b.end_ms, b.location,
                  b.responses, b.metadata, b.created_at, b.updated_at, b.event_type_id,
                  et.slug AS event_slug, et.description AS event_description,
-                 et.length_minutes, et.destination_calendar_id,
+                 et.length_minutes, et.destination_calendar_id, b.cancellation_reason,
+                 b.cancelled_by, b.rescheduled_from_uid, b.rescheduled_to_uid,
+                 b.rescheduling_reason, b.rescheduled_by_email,
                  (SELECT br.meeting_url FROM booking_reference br
                   WHERE br.booking_id = b.id AND br.meeting_url IS NOT NULL LIMIT 1) AS meeting_url
           FROM booking b
@@ -504,6 +520,11 @@ export class CalV2Service {
           WHERE b.account_id = ${accountId} AND b.uid = ${uid} LIMIT 1`,
     );
     if (!booking) v2Error(404, "RESOURCE_NOT_FOUND", "Booking not found.");
+    if (
+      allowedEventTypeIds &&
+      !allowedEventTypeIds.includes(booking.event_type_id)
+    )
+      v2Error(404, "RESOURCE_NOT_FOUND", "Booking not found.");
 
     const hosts = await this.db.all<{
       id: string;
@@ -529,6 +550,14 @@ export class CalV2Service {
           WHERE booking_id = ${booking.id} ORDER BY created_at ASC, id ASC`,
     );
     const internal = parseJsonColumn<StoredMetadata>(booking.metadata, {});
+    const persistedGuests = await this.db.all<{
+      email: string;
+      name: string | null;
+      time_zone: string | null;
+    }>(
+      sql`SELECT email, name, time_zone FROM booking_guest
+          WHERE booking_id = ${booking.id} ORDER BY created_at ASC, id ASC`,
+    );
     const guestSet = new Set(
       (internal._guests ?? []).map((email) => email.toLowerCase()),
     );
@@ -579,10 +608,30 @@ export class CalV2Service {
         booking.responses,
         {},
       ),
-      guests: internal._guests ?? [],
+      guests: [
+        ...(internal._guests ?? []),
+        ...persistedGuests
+          .map((guest) => guest.email)
+          .filter(
+            (email) =>
+              !(internal._guests ?? []).some(
+                (stored) => stored.toLowerCase() === email.toLowerCase(),
+              ),
+          ),
+      ],
       metadata: internal._publicMetadata ?? {},
       meetingUrl: booking.meeting_url,
-      destinationCalendarId: booking.destination_calendar_id,
+      destinationCalendarId:
+        internal._destinationCalendar?.id ?? booking.destination_calendar_id,
+      cancellationReason: booking.cancellation_reason,
+      cancelledByEmail: booking.cancelled_by?.includes("@")
+        ? booking.cancelled_by
+        : null,
+      rescheduledFromUid: booking.rescheduled_from_uid,
+      rescheduledToUid: booking.rescheduled_to_uid,
+      reschedulingReason: booking.rescheduling_reason,
+      rescheduledByEmail: booking.rescheduled_by_email,
+      icsUid: booking.uid,
     };
   }
 
@@ -601,6 +650,35 @@ export class CalV2Service {
     )
       v2Error(404, "RESOURCE_NOT_FOUND", "Event type not found.");
     this.rejectUnsupportedBookingFields(input, resolved.eventType);
+
+    let destinationCalendar:
+      { id: string; connectionRef: string; externalId: string } | undefined;
+    if (input.destinationCalendarId) {
+      if (resolved.kind !== "personal")
+        featureNotSupported(
+          "teamDestinationCalendar",
+          "destinationCalendarId is only supported for personal event types because team host assignment is dynamic.",
+        );
+      const calendar = await getProviderCalendar(
+        this.db,
+        accountId,
+        input.destinationCalendarId,
+      );
+      if (!calendar || calendar.memberId !== resolved.member!.id)
+        v2Error(404, "RESOURCE_NOT_FOUND", "Calendar not found.");
+      if (!calendar.capabilities.canCreate || calendar.readOnly)
+        v2Error(
+          403,
+          "CALENDAR_READ_ONLY",
+          "The selected calendar does not permit event creation.",
+          { calendarId: calendar.id },
+        );
+      destinationCalendar = {
+        id: calendar.id,
+        connectionRef: calendar.connectionRef,
+        externalId: calendar.externalId,
+      };
+    }
 
     const guests = [
       ...new Map(
@@ -637,6 +715,9 @@ export class CalV2Service {
         email: input.attendee.email,
         language: input.attendee.language,
       },
+      ...(destinationCalendar
+        ? { _destinationCalendar: destinationCalendar }
+        : {}),
       ...(storedKey ? { _idempotency: { requestHash } } : {}),
     };
     const primary = {

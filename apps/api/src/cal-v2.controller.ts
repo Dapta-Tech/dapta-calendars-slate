@@ -14,6 +14,7 @@ import {
   HttpStatus,
   Injectable,
   NestInterceptor,
+  Param,
   Post,
   Query,
   Req,
@@ -32,9 +33,12 @@ import {
   type CalV2SlotsQuery,
   v2Error,
 } from "./cal-v2.service";
+import { CalV2PilotService } from "./cal-v2-pilot.service";
 
 export const CAL_V2_SLOTS_VERSION = "2024-09-04";
 export const CAL_V2_BOOKINGS_VERSION = "2026-02-25";
+export const CAL_V2_EVENT_TYPES_VERSION = "2024-06-14";
+export const CAL_V2_GUESTS_VERSION = "2024-08-13";
 
 interface V2Request extends ReqLike {
   v2RequestId?: string;
@@ -140,12 +144,18 @@ function requireVersion(
 export class CalV2Controller {
   constructor(
     private readonly service: CalV2Service,
+    private readonly pilot: CalV2PilotService,
     private readonly auth: AuthService,
   ) {}
 
   private async principal(
     req: ReqLike,
-    scope: "availability:read" | "bookings:write",
+    scope:
+      | "availability:read"
+      | "bookings:read"
+      | "bookings:write"
+      | "calendars:read"
+      | "event-types:read",
   ): Promise<MachinePrincipal> {
     const authorization = req.headers.authorization;
     const value = Array.isArray(authorization)
@@ -219,6 +229,133 @@ export class CalV2Controller {
         idempotencyKey,
         principal.eventTypeIds,
         principal.keyId,
+      ),
+    };
+  }
+
+  @Get("event-types")
+  async eventTypes(
+    @Req() req: ReqLike,
+    @Headers("cal-api-version") apiVersion: string | undefined,
+    @Query() query: unknown,
+  ) {
+    requireVersion(apiVersion, [CAL_V2_EVENT_TYPES_VERSION]);
+    const principal = await this.principal(req, "event-types:read");
+    return {
+      status: "success" as const,
+      data: await this.pilot.eventTypes(
+        principal.accountId,
+        query,
+        principal.eventTypeIds,
+      ),
+    };
+  }
+
+  @Get("calendars")
+  async calendars(@Req() req: ReqLike) {
+    const principal = await this.principal(req, "calendars:read");
+    return {
+      status: "success" as const,
+      data: await this.pilot.calendars(principal.accountId),
+    };
+  }
+
+  @Post("calendars/availability")
+  @HttpCode(200)
+  async calendarAvailability(@Req() req: ReqLike, @Body() body: unknown) {
+    const principal = await this.principal(req, "calendars:read");
+    return {
+      status: "success" as const,
+      data: await this.pilot.availability(principal.accountId, body),
+    };
+  }
+
+  @Get("bookings/:uid")
+  async getBooking(
+    @Req() req: ReqLike,
+    @Headers("cal-api-version") apiVersion: string | undefined,
+    @Param("uid") uid: string,
+  ) {
+    requireVersion(apiVersion, [CAL_V2_BOOKINGS_VERSION]);
+    const principal = await this.principal(req, "bookings:read");
+    return {
+      status: "success" as const,
+      data: await this.pilot.getBooking(
+        principal.accountId,
+        uid,
+        principal.eventTypeIds,
+      ),
+    };
+  }
+
+  @Post("bookings/:uid/cancel")
+  @HttpCode(200)
+  async cancelBooking(
+    @Req() req: ReqLike,
+    @Headers("cal-api-version") apiVersion: string | undefined,
+    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Param("uid") uid: string,
+    @Body() body: unknown,
+  ) {
+    requireVersion(apiVersion, [CAL_V2_BOOKINGS_VERSION]);
+    const principal = await this.principal(req, "bookings:write");
+    return {
+      status: "success" as const,
+      data: await this.pilot.cancel(
+        principal.accountId,
+        uid,
+        body,
+        idempotencyKey,
+        principal.keyId,
+        principal.eventTypeIds,
+      ),
+    };
+  }
+
+  @Post("bookings/:uid/reschedule")
+  @HttpCode(201)
+  async rescheduleBooking(
+    @Req() req: ReqLike,
+    @Headers("cal-api-version") apiVersion: string | undefined,
+    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Param("uid") uid: string,
+    @Body() body: unknown,
+  ) {
+    requireVersion(apiVersion, [CAL_V2_BOOKINGS_VERSION]);
+    const principal = await this.principal(req, "bookings:write");
+    return {
+      status: "success" as const,
+      data: await this.pilot.reschedule(
+        principal.accountId,
+        uid,
+        body,
+        idempotencyKey,
+        principal.keyId,
+        principal.eventTypeIds,
+      ),
+    };
+  }
+
+  @Post("bookings/:uid/guests")
+  @HttpCode(200)
+  async addGuests(
+    @Req() req: ReqLike,
+    @Headers("cal-api-version") apiVersion: string | undefined,
+    @Headers("idempotency-key") idempotencyKey: string | undefined,
+    @Param("uid") uid: string,
+    @Body() body: unknown,
+  ) {
+    requireVersion(apiVersion, [CAL_V2_GUESTS_VERSION]);
+    const principal = await this.principal(req, "bookings:write");
+    return {
+      status: "success" as const,
+      data: await this.pilot.addGuests(
+        principal.accountId,
+        uid,
+        body,
+        idempotencyKey,
+        principal.keyId,
+        principal.eventTypeIds,
       ),
     };
   }

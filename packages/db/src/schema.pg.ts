@@ -184,6 +184,10 @@ export const booking = pgTable('booking', {
   cancelledBy: text('cancelled_by'),
   rescheduled: integer('rescheduled'),
   fromReschedule: text('from_reschedule'),
+  rescheduledFromUid: text('rescheduled_from_uid'),
+  rescheduledToUid: text('rescheduled_to_uid'),
+  reschedulingReason: text('rescheduling_reason'),
+  rescheduledByEmail: text('rescheduled_by_email'),
   recurringEventId: text('recurring_event_id'),
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
@@ -198,6 +202,17 @@ export const bookingAttendee = pgTable('booking_attendee', {
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+/** Post-create guests. Kept separate so case-insensitive dedupe has a safe unique key. */
+export const bookingGuest = pgTable('booking_guest', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  email: text('email').notNull(),
+  emailNormalized: text('email_normalized').notNull(),
+  name: text('name'),
+  timeZone: text('time_zone'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -237,6 +252,45 @@ export const connectedCalendar = pgTable('connected_calendar', {
   lastCheckAt: bigint('last_check_at', { mode: 'number' }),
   lastCheckOk: integer('last_check_ok'),
   lastCheckDetail: text('last_check_detail'),
+});
+
+/** Provider calendars discovered beneath a connected account/credential. */
+export const providerCalendar = pgTable('provider_calendar', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  memberId: text('member_id').notNull(),
+  connectedCalendarId: text('connected_calendar_id').notNull(),
+  externalId: text('external_id').notNull(),
+  name: text('name').notNull(),
+  email: text('email'),
+  isPrimary: integer('is_primary').notNull().default(0),
+  readOnly: integer('read_only').notNull().default(1),
+  accessRole: text('access_role').notNull().default('none'),
+  source: text('source').notNull().default('shared'),
+  canRead: integer('can_read').notNull().default(1),
+  canReadFreeBusy: integer('can_read_free_busy').notNull().default(1),
+  canCreate: integer('can_create').notNull().default(0),
+  canUpdate: integer('can_update').notNull().default(0),
+  canDelete: integer('can_delete').notNull().default(0),
+  syncStatus: text('sync_status').notNull().default('healthy'),
+  lastSyncedAt: bigint('last_synced_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
+/** Hashed, tenant/key/path-scoped mutation replay records (never stores plaintext keys). */
+export const apiIdempotency = pgTable('api_idempotency', {
+  id: text('id').primaryKey(),
+  namespaceHash: text('namespace_hash').notNull().unique(),
+  accountId: text('account_id').notNull(),
+  apiKeyId: text('api_key_id').notNull(),
+  method: text('method').notNull(),
+  path: text('path').notNull(),
+  requestHash: text('request_hash').notNull(),
+  statusCode: integer('status_code'),
+  responseBody: jsonb('response_body'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
 });
 
 export const apiKey = pgTable('api_key', {
@@ -326,9 +380,12 @@ export const pgSchema = {
   eventTypeConflictCalendar,
   booking,
   bookingAttendee,
+  bookingGuest,
   bookingHost,
   slotReservation,
   connectedCalendar,
+  providerCalendar,
+  apiIdempotency,
   apiKey,
   webhook,
   bookingReference,

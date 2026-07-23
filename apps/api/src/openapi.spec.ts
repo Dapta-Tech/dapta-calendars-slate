@@ -14,8 +14,15 @@ describe('OpenAPI spec (E11)', () => {
         '/v1/availability',
         '/v1/bookings',
         '/v1/machine/bookings',
+        '/v2/calendars',
+        '/v2/calendars/availability',
+        '/v2/event-types',
         '/v2/slots',
         '/v2/bookings',
+        '/v2/bookings/{uid}',
+        '/v2/bookings/{uid}/cancel',
+        '/v2/bookings/{uid}/reschedule',
+        '/v2/bookings/{uid}/guests',
       ]),
     );
   });
@@ -27,17 +34,37 @@ describe('OpenAPI spec (E11)', () => {
     for (const tok of tokens) expect(json.toLowerCase()).not.toContain(tok);
   });
 
-  it('locks the R1 versions, Bearer auth, response envelopes, and idempotency extension', () => {
+  it('locks the MVP versions, Bearer auth, response envelopes, and mutation idempotency', () => {
     const slots = openapiSpec.paths['/v2/slots'].get;
     const bookings = openapiSpec.paths['/v2/bookings'].post;
+    const getBooking = openapiSpec.paths['/v2/bookings/{uid}'].get;
+    const cancel = openapiSpec.paths['/v2/bookings/{uid}/cancel'].post;
+    const reschedule = openapiSpec.paths['/v2/bookings/{uid}/reschedule'].post;
+    const guests = openapiSpec.paths['/v2/bookings/{uid}/guests'].post;
+    const eventTypes = openapiSpec.paths['/v2/event-types'].get;
     expect(slots.security).toEqual([{ dclBearer: [] }]);
     expect(bookings.security).toEqual([{ dclBearer: [] }]);
     expect(JSON.stringify(slots.parameters)).toContain('2024-09-04');
     expect(JSON.stringify(bookings.parameters)).toContain('2026-02-25');
-    expect(bookings['x-dapta-idempotency']).toBeTruthy();
+    expect(JSON.stringify(getBooking.parameters)).toContain('2026-02-25');
+    expect(JSON.stringify(cancel.parameters)).toContain('2026-02-25');
+    expect(JSON.stringify(reschedule.parameters)).toContain('2026-02-25');
+    expect(JSON.stringify(guests.parameters)).toContain('2024-08-13');
+    expect(JSON.stringify(eventTypes.parameters)).toContain('2024-06-14');
+    for (const mutation of [bookings, cancel, reschedule, guests])
+      expect(mutation['x-dapta-idempotency']).toBeTruthy();
     expect(openapiSpec.components.schemas.ErrorEnvelope).toBeTruthy();
     expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('startTime');
     expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('endTime');
+  });
+
+  it('documents discoverable permissions and the 100-calendar JSON batch extension', () => {
+    const calendar = openapiSpec.components.schemas.Calendar;
+    const batch = openapiSpec.components.schemas.CalendarAvailabilityInput;
+    expect(calendar.properties).toHaveProperty('accessRole');
+    expect(calendar.properties).toHaveProperty('capabilities');
+    expect(batch.properties.calendarIds.maxItems).toBe(100);
+    expect(openapiSpec.paths['/v2/calendars/availability'].post.tags).toContain('Dapta MVP extension');
   });
 });
 
@@ -61,7 +88,11 @@ describe('OpenAPI ↔ controller parity (QA fix 4)', () => {
     for (const [path, ops] of Object.entries(openapiSpec.paths)) {
       for (const [method, op] of Object.entries(ops as Record<string, unknown>)) {
         if (method !== 'post' && method !== 'patch') continue;
-        const body = (op as { requestBody?: { content?: Record<string, { schema?: unknown }> } }).requestBody;
+        const body = (
+          op as {
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+          }
+        ).requestBody;
         expect(body?.content?.['application/json']?.schema, `${method.toUpperCase()} ${path}`).toBeTruthy();
       }
     }
@@ -69,7 +100,11 @@ describe('OpenAPI ↔ controller parity (QA fix 4)', () => {
 
   it('attendee manage endpoints (cancel/reschedule) are documented', () => {
     expect(Object.keys(openapiSpec.paths)).toEqual(
-      expect.arrayContaining(['/v1/bookings/{uid}', '/v1/bookings/{uid}/cancel', '/v1/bookings/{uid}/reschedule']),
+      expect.arrayContaining([
+        '/v1/bookings/{uid}',
+        '/v1/bookings/{uid}/cancel',
+        '/v1/bookings/{uid}/reschedule',
+      ]),
     );
   });
 });
