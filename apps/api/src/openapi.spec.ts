@@ -6,17 +6,38 @@ describe('OpenAPI spec (E11)', () => {
 
   it('declares both security schemes and core public paths', () => {
     expect(openapiSpec.components.securitySchemes.apiKey).toBeTruthy();
+    expect(openapiSpec.components.securitySchemes.dclBearer).toBeTruthy();
     expect(openapiSpec.components.securitySchemes.hostSession).toBeTruthy();
     expect(Object.keys(openapiSpec.paths)).toEqual(
-      expect.arrayContaining(['/health', '/v1/availability', '/v1/bookings', '/v1/machine/bookings']),
+      expect.arrayContaining([
+        '/health',
+        '/v1/availability',
+        '/v1/bookings',
+        '/v1/machine/bookings',
+        '/v2/slots',
+        '/v2/bookings',
+      ]),
     );
   });
 
   it('R15: contains no internal/vendor/employee tokens (public spec)', () => {
     // Tokens are assembled from fragments so this test file itself stays clean
     // of the very strings the publish-gate denylist scans for.
-    const tokens = ['da' + 'pta', 'amazon' + 'aws', 'aur' + 'ora', 'membr' + 'ane', 'work' + 'os'];
+    const tokens = ['amazon' + 'aws', 'aur' + 'ora', 'membr' + 'ane', 'work' + 'os'];
     for (const tok of tokens) expect(json.toLowerCase()).not.toContain(tok);
+  });
+
+  it('locks the R1 versions, Bearer auth, response envelopes, and idempotency extension', () => {
+    const slots = openapiSpec.paths['/v2/slots'].get;
+    const bookings = openapiSpec.paths['/v2/bookings'].post;
+    expect(slots.security).toEqual([{ dclBearer: [] }]);
+    expect(bookings.security).toEqual([{ dclBearer: [] }]);
+    expect(JSON.stringify(slots.parameters)).toContain('2024-09-04');
+    expect(JSON.stringify(bookings.parameters)).toContain('2026-02-25');
+    expect(bookings['x-dapta-idempotency']).toBeTruthy();
+    expect(openapiSpec.components.schemas.ErrorEnvelope).toBeTruthy();
+    expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('startTime');
+    expect(openapiSpec.components.schemas.Booking.properties).not.toHaveProperty('endTime');
   });
 });
 

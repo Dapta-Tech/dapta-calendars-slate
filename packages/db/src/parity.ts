@@ -615,7 +615,16 @@ export async function createTeamBooking(
     slug: string;
     startMs: number;
     attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+    additionalAttendees?: Array<{
+      name: string;
+      email: string;
+      timeZone: string;
+      notes?: string;
+      phone?: string;
+    }>;
     answers?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    idempotencyKey?: string;
   },
   /** Wired CalendarProvider — candidate hosts are conflict-checked against
    *  their external calendars, fail-closed (see createBooking). */
@@ -705,7 +714,7 @@ export async function createTeamBooking(
   const attendeeId = randomUUID();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
-  const metaExpr = jsonParam(db, { _manage: { tokenHash } });
+  const metaExpr = jsonParam(db, { ...(args.metadata ?? {}), _manage: { tokenHash } });
   const responsesExpr = jsonParam(db, args.answers ?? null);
 
   // Snapshot the team event type's configured Where onto the booking (F5), same
@@ -713,14 +722,20 @@ export async function createTeamBooking(
   const eventLocation = parseJsonColumn<string | null>(et.locations, null);
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key, created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title}, ${eventLocation},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
-      ${now}, ${now})`;
+      ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+    (attendee) => sql`
+      INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+      VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+  );
   // Multi-host bookings (collective / fixed_round_robin) record every assigned
   // host so write-out + notifications fan out. Round-robin's single host is
   // already carried by host_member_id, so it writes no booking_host rows.
@@ -738,7 +753,7 @@ export async function createTeamBooking(
     assignedIds,
     args.startMs,
     endMs,
-    [insertBooking, insertAttendee, ...insertHostRows],
+    [insertBooking, insertAttendee, ...insertAdditionalAttendees, ...insertHostRows],
   );
   return booked
     ? { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token }
@@ -1562,6 +1577,7 @@ export async function createApiKey(
 }
 
 export interface ApiKeyPrincipal {
+  keyId: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
@@ -1588,6 +1604,7 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
   if (row.expires_at_ms != null && Number(row.expires_at_ms) <= now) return null;
   await db.run(sql`UPDATE api_key SET last_used_at_ms = ${now} WHERE id = ${row.id}`);
   return {
+    keyId: row.id,
     accountId: row.account_id,
     scopes: parseJsonColumn<string[]>(row.scopes, []),
     eventTypeIds: parseJsonColumn<string[] | null>(row.event_type_ids, null),

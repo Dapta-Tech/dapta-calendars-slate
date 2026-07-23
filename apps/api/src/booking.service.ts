@@ -106,7 +106,20 @@ export class BookingService {
     return { reservationUid: held.uid, expiresAt: new Date(held.releaseAtMs).toISOString() };
   }
 
-  async book(raw: unknown, onBehalf = false): Promise<BookingView | ServiceError> {
+  async book(
+    raw: unknown,
+    onBehalf = false,
+    context?: {
+      additionalAttendees?: Array<{
+        name: string;
+        email: string;
+        timeZone: string;
+        notes?: string;
+        phone?: string;
+      }>;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
     const outcome = await createBooking(
       this.db,
@@ -116,7 +129,9 @@ export class BookingService {
         slug: input.slug,
         startMs: new Date(input.startUtc).getTime(),
         attendee: input.attendee,
+        additionalAttendees: context?.additionalAttendees,
         answers: input.answers,
+        metadata: context?.metadata,
         reservationUid: input.reservationUid,
         idempotencyKey: input.idempotencyKey,
         onBehalf,
@@ -393,7 +408,15 @@ export class BookingService {
   async teamBook(
     accountCode: string,
     teamSlug: string,
-    body: { slug: string; startUtc: string; attendee: BookingView['attendee']; answers?: Record<string, unknown> },
+    body: {
+      slug: string;
+      startUtc: string;
+      attendee: BookingView['attendee'];
+      additionalAttendees?: Array<BookingView['attendee']>;
+      answers?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      idempotencyKey?: string;
+    },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -403,7 +426,10 @@ export class BookingService {
         slug: body.slug,
         startMs: new Date(body.startUtc).getTime(),
         attendee: body.attendee,
+        additionalAttendees: body.additionalAttendees,
         answers: body.answers,
+        metadata: body.metadata,
+        idempotencyKey: body.idempotencyKey,
       },
       this.calendar.provider,
     );

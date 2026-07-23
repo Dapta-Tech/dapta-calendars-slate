@@ -19,6 +19,8 @@ import { PublicController } from './public.controller';
 import { HostController } from './host.controller';
 import { MachineController } from './machine.controller';
 import { AdminCrudController } from './admin-crud.controller';
+import { CalV2Controller, CalV2RequestIdInterceptor } from './cal-v2.controller';
+import { CalV2Service } from './cal-v2.service';
 
 @Module({
   controllers: [
@@ -27,6 +29,7 @@ import { AdminCrudController } from './admin-crud.controller';
     PublicController,
     HostController,
     MachineController,
+    CalV2Controller,
     AdminCrudController,
   ],
   providers: [
@@ -83,6 +86,8 @@ import { AdminCrudController } from './admin-crud.controller';
     { provide: RATE_LIMITER, useFactory: (env: ServerEnv) => createRateLimiter(env), inject: [ENV] },
     RateLimitGuard,
     BookingService,
+    CalV2Service,
+    CalV2RequestIdInterceptor,
     AdminService,
     AuthService,
     CalendarEffects,
