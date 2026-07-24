@@ -20,7 +20,7 @@ pnpm-workspaces monorepo.
 
 ## Making a change
 
-1. Create a branch off `main`.
+1. Create a branch off the latest `develop`.
 2. Make your change with a test. Run:
    ```bash
    pnpm typecheck && pnpm lint && pnpm test
@@ -30,9 +30,12 @@ pnpm-workspaces monorepo.
    pnpm changeset
    ```
 4. Commit with a **Conventional Commit** message and a **DCO sign-off** (below).
-5. Open a PR. CI runs lint, typecheck, tests on **SQLite** and a **Postgres**
-   parity job (which exercises the double-booking `EXCLUDE` path), builds both
-   apps, and runs the publish-gate secret scan.
+5. Open the feature/fix PR into `develop`. CI runs lint, typecheck, tests on
+   **SQLite** and a **Postgres** parity job (which exercises the double-booking
+   `EXCLUDE` path), builds both apps, and runs the publish-gate secret scan.
+
+Maintainers promote validated releases with a separate `develop` → `main` PR.
+Do not open feature/fix PRs directly into `main`.
 
 ## Commit conventions
 
