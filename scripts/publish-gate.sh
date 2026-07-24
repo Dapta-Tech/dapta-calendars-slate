@@ -25,6 +25,9 @@ PATTERN='[a-z0-9-]+\.dapta\.(ai|dev)|daptatech|amazonaws|aurora|\bbooking_ms\b|d
 # Product-PUBLIC hosts (our own public web/API/platform hosts) are not leaks —
 # they may appear anywhere in the public repo. Internal service hosts stay blocked.
 PUBLIC_HOST_ALLOW='\b(app|www|calendars?(-api)?)\.dapta\.(ai|dev)\b'
+# The customer-facing support address is intentionally public product copy, not
+# an internal host, credential, or employee identity.
+PUBLIC_EMAIL_ALLOW='support@daptatech\.com'
 
 # Scan tracked/working files, excluding vendored/build/self paths. The deploy/
 # overlay is gitignored (never in public history) so it is not scanned here.
@@ -36,7 +39,7 @@ MATCHES=$(grep -RInEi "$PATTERN" \
   --exclude-dir=.turbo \
   --exclude-dir=deploy \
   --exclude=publish-gate.sh \
-  . 2>/dev/null | grep -vE "$PUBLIC_HOST_ALLOW" || true)
+  . 2>/dev/null | grep -vE "$PUBLIC_HOST_ALLOW" | grep -vE "$PUBLIC_EMAIL_ALLOW" || true)
 
 if [ -n "$MATCHES" ]; then
   echo "FAIL: internal tokens found in tree:"
