@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { CalendarProvider } from '@slate/calendar';
 import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
@@ -648,6 +648,6 @@ export async function rescheduleBookingV2(
 }
 
 export function hashApiValue(value: string): string {
-  // Collision-free storage encoding for a non-secret idempotency namespace.
-  return Buffer.from(value, 'utf8').toString('base64url');
+  // Fixed-length one-way digest for a non-secret idempotency namespace.
+  return createHash('sha256').update(value).digest('hex');
 }

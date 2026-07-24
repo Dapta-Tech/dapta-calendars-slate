@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HttpException, Inject, Injectable } from "@nestjs/common";
 import type { Db, EventTypeRow, MemberRow } from "@slate/db";
 import {
@@ -224,9 +225,9 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Collision-free storage encoding for non-secret idempotency inputs. */
-function storageFingerprint(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
+/** Fixed-length one-way digest for non-credential idempotency inputs. */
+function nonCredentialDigest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 /** Stable, non-authoritative numeric alias for Cal-shaped response `id` fields. */
@@ -696,9 +697,9 @@ export class CalV2Service {
           .map((email) => [email.toLowerCase(), email]),
       ).values(),
     ];
-    const requestHash = storageFingerprint(stableStringify(input));
+    const requestHash = nonCredentialDigest(stableStringify(input));
     const storedKey = idempotencyKey
-      ? `v2:${storageFingerprint(
+      ? `v2:${nonCredentialDigest(
           `${accountId}:${keyIdentity}:POST:${BOOKING_PATH}:${idempotencyKeySchema.parse(idempotencyKey)}`,
         )}`
       : undefined;
