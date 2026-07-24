@@ -1,4 +1,3 @@
-import { createHmac } from "node:crypto";
 import { HttpException, Inject, Injectable } from "@nestjs/common";
 import type { Db, EventTypeRow, MemberRow } from "@slate/db";
 import {
@@ -225,19 +224,20 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/**
- * Domain-separated deterministic fingerprint for public aliases and
- * idempotency namespaces. This never stores or verifies credentials.
- */
-function hash(value: string): string {
-  return createHmac("sha256", "dapta-cal-v2-fingerprint-v1")
-    .update(value)
-    .digest("hex");
+/** Collision-free storage encoding for non-secret idempotency inputs. */
+function storageFingerprint(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
 }
 
 /** Stable, non-authoritative numeric alias for Cal-shaped response `id` fields. */
 export function compatibilityId(value: string): number {
-  return Number.parseInt(hash(value).slice(0, 13), 16);
+  // FNV-1a 64-bit folded into JavaScript's exact 53-bit integer range.
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of Buffer.from(value, "utf8")) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+  }
+  return Number(hash & 0x1fffffffffffffn);
 }
 
 @Injectable()
@@ -696,9 +696,9 @@ export class CalV2Service {
           .map((email) => [email.toLowerCase(), email]),
       ).values(),
     ];
-    const requestHash = hash(stableStringify(input));
+    const requestHash = storageFingerprint(stableStringify(input));
     const storedKey = idempotencyKey
-      ? `v2:${hash(
+      ? `v2:${storageFingerprint(
           `${accountId}:${keyIdentity}:POST:${BOOKING_PATH}:${idempotencyKeySchema.parse(idempotencyKey)}`,
         )}`
       : undefined;
