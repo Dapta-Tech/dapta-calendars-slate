@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { CalendarProvider } from '@slate/calendar';
 import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
@@ -648,5 +648,6 @@ export async function rescheduleBookingV2(
 }
 
 export function hashApiValue(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
+  // Deterministic idempotency namespace fingerprint; never a credential hash.
+  return createHmac('sha256', 'dapta-api-idempotency-v1').update(value).digest('hex');
 }

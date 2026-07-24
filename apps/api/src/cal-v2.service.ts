@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { HttpException, Inject, Injectable } from "@nestjs/common";
 import type { Db, EventTypeRow, MemberRow } from "@slate/db";
 import {
@@ -225,8 +225,14 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Domain-separated deterministic fingerprint for public aliases and
+ * idempotency namespaces. This never stores or verifies credentials.
+ */
 function hash(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+  return createHmac("sha256", "dapta-cal-v2-fingerprint-v1")
+    .update(value)
+    .digest("hex");
 }
 
 /** Stable, non-authoritative numeric alias for Cal-shaped response `id` fields. */
