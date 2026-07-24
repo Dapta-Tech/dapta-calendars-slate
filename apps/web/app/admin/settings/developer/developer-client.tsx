@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
+import type { ApiScope } from '@slate/types';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
@@ -17,7 +18,13 @@ import {
 
 type DevMessages = BookingMessages['admin']['developer'];
 
-const SCOPES = ['availability:read', 'bookings:read', 'bookings:write'];
+const SCOPES: ApiScope[] = [
+  'availability:read',
+  'event-types:read',
+  'calendars:read',
+  'bookings:read',
+  'bookings:write',
+];
 const TRIGGERS = ['booking.created', 'booking.rescheduled', 'booking.cancelled'];
 
 const createBtn = 'inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60';

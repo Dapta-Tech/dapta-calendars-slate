@@ -15,7 +15,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { brandingSchema } from '@slate/types';
+import { apiScope, brandingSchema } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
 import { isEmailTemplateKey } from '@slate/notifications';
@@ -318,6 +318,8 @@ export class HostController {
     assertAdmin(p);
     if (!body?.name || !Array.isArray(body?.scopes) || body.scopes.length === 0)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'name and >=1 scope required' });
+    if (body.scopes.some((scope) => !apiScope.includes(scope as (typeof apiScope)[number])))
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown API-key scope.' });
     return this.admin.createApiKey(p, body);
   }
   @Delete('api-keys/:id')

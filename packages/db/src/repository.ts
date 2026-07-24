@@ -115,8 +115,18 @@ export interface CreateBookingArgs {
   slug: string;
   startMs: number;
   attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+  /** Additional creation-time guests/attendees, inserted in the booking transaction. */
+  additionalAttendees?: Array<{
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+  }>;
   /** Answers to the event type's custom intake fields. */
   answers?: Record<string, unknown>;
+  /** Public API metadata. Internal keys are added by the repository. */
+  metadata?: Record<string, unknown>;
   /** A held reservation to consume (deleted on success). */
   reservationUid?: string;
   idempotencyKey?: string;
@@ -736,6 +746,13 @@ export async function createBooking(
             VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
               ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
       );
+      for (const attendee of args.additionalAttendees ?? []) {
+        await db.run(
+          sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+              VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
+                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
+        );
+      }
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       const rec: BookingRecord = {
@@ -774,7 +791,7 @@ export async function createBooking(
   const bookingId = randomUUID();
   const attendeeId = randomUUID();
   const { token, tokenHash } = generateManageToken();
-  const metadata = JSON.stringify({ _manage: { tokenHash } });
+  const metadata = JSON.stringify({ ...(args.metadata ?? {}), _manage: { tokenHash } });
   const title = eventType.title;
 
   // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
@@ -798,6 +815,12 @@ export async function createBooking(
     INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+    (attendee) => sql`
+      INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+      VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+  );
 
   const record: BookingRecord = {
     uid,
@@ -819,6 +842,7 @@ export async function createBooking(
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
       return 'ok';
     });
     if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
@@ -837,6 +861,7 @@ export async function createBooking(
       if (rows.length > 0) return true;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) await tx.execute(attendee);
       return false;
     });
     if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };

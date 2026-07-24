@@ -15,12 +15,16 @@ export interface BusyInterval {
 export interface ListBusyInput {
   /** Opaque connection references (never OAuth tokens) to read busy from. */
   connectionRefs: string[];
+  /** Provider calendar IDs beneath the supplied connection (MVP batch discovery path). */
+  calendarIds?: string[];
   fromUtc: string;
   toUtc: string;
 }
 
 export interface CreateEventInput {
   connectionRef: string;
+  /** Optional provider-calendar target discovered beneath the connection. */
+  calendarId?: string;
   title: string;
   description?: string | null;
   startUtc: string;
@@ -50,6 +54,8 @@ export interface DeleteEventInput {
  */
 export interface UpdateEventInput {
   connectionRef: string;
+  /** Provider-calendar target used when the connection exposes many calendars. */
+  calendarId?: string;
   externalEventId: string;
   title: string;
   description?: string | null;
@@ -68,6 +74,16 @@ export interface CalendarSummary {
   primaryEmail?: string | null;
   /** The account's default calendar — a sensible default destination. */
   isPrimary?: boolean;
+  readOnly?: boolean;
+  accessRole?: 'owner' | 'writer' | 'reader' | 'freeBusyReader' | 'none';
+  source?: 'primary' | 'owned' | 'shared' | 'subscribed' | 'delegated';
+  capabilities?: {
+    canRead: boolean;
+    canReadFreeBusy: boolean;
+    canCreate: boolean;
+    canUpdate: boolean;
+    canDelete: boolean;
+  };
 }
 
 /** Health of a single connection, surfaced in the connections UI. */
@@ -103,10 +119,16 @@ export class DisabledCalendarProvider implements CalendarProvider {
     return Promise.resolve([]);
   }
   createEvent(input: CreateEventInput): Promise<CreatedEvent> {
-    return Promise.resolve({ externalEventId: `disabled-${input.connectionRef}`, meetingUrl: null });
+    return Promise.resolve({
+      externalEventId: `disabled-${input.connectionRef}`,
+      meetingUrl: null,
+    });
   }
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
-    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null });
+    return Promise.resolve({
+      externalEventId: input.externalEventId,
+      meetingUrl: null,
+    });
   }
   deleteEvent(): Promise<void> {
     return Promise.resolve();
@@ -115,7 +137,10 @@ export class DisabledCalendarProvider implements CalendarProvider {
     return Promise.resolve([]);
   }
   checkConnection(): Promise<ConnectionHealth> {
-    return Promise.resolve({ ok: false, detail: 'No external calendar provider configured.' });
+    return Promise.resolve({
+      ok: false,
+      detail: 'No external calendar provider configured.',
+    });
   }
 }
 
@@ -124,6 +149,7 @@ export class InMemoryCalendarProvider implements CalendarProvider {
   readonly enabled = true;
   private busy = new Map<string, BusyInterval[]>();
   private calendars = new Map<string, CalendarSummary[]>();
+  private calendarBusy = new Map<string, BusyInterval[]>();
   readonly created: CreateEventInput[] = [];
   readonly updated: UpdateEventInput[] = [];
   readonly deleted: DeleteEventInput[] = [];
@@ -137,23 +163,38 @@ export class InMemoryCalendarProvider implements CalendarProvider {
     this.calendars.set(connectionRef, calendars);
   }
 
+  seedCalendarBusy(connectionRef: string, calendarId: string, intervals: BusyInterval[]): void {
+    this.calendarBusy.set(`${connectionRef}\u0000${calendarId}`, intervals);
+  }
+
   listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
     const out: BusyInterval[] = [];
     for (const ref of input.connectionRefs) {
-      for (const b of this.busy.get(ref) ?? []) {
-        if (b.endUtc > input.fromUtc && b.startUtc < input.toUtc) out.push(b);
+      const sources = input.calendarIds?.length
+        ? input.calendarIds.map((calendarId) => this.calendarBusy.get(`${ref}\u0000${calendarId}`) ?? [])
+        : [this.busy.get(ref) ?? []];
+      for (const intervals of sources) {
+        for (const b of intervals) {
+          if (b.endUtc > input.fromUtc && b.startUtc < input.toUtc) out.push(b);
+        }
       }
     }
     return Promise.resolve(out);
   }
   createEvent(input: CreateEventInput): Promise<CreatedEvent> {
     this.created.push(input);
-    return Promise.resolve({ externalEventId: `evt-${++this.seq}`, meetingUrl: null });
+    return Promise.resolve({
+      externalEventId: `evt-${++this.seq}`,
+      meetingUrl: null,
+    });
   }
   updateEvent(input: UpdateEventInput): Promise<CreatedEvent> {
     this.updated.push(input);
     // A move keeps the same external event id.
-    return Promise.resolve({ externalEventId: input.externalEventId, meetingUrl: null });
+    return Promise.resolve({
+      externalEventId: input.externalEventId,
+      meetingUrl: null,
+    });
   }
   deleteEvent(input: DeleteEventInput): Promise<void> {
     this.deleted.push(input);

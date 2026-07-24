@@ -57,6 +57,7 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(provider.enabled).toBe(true);
     const busy = await provider.listBusy({
       connectionRefs: ['conn-A'],
+      calendarIds: ['calendar-A'],
       fromUtc: '2026-08-01T00:00:00.000Z',
       toUtc: '2026-08-02T00:00:00.000Z',
     });
@@ -64,7 +65,10 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/free-busy');
     expect(calls[0]!.method).toBe('POST');
     expect(calls[0]!.auth).toBe('Bearer tok-123');
-    expect(calls[0]!.body).toMatchObject({ connectionRefs: ['conn-A'] });
+    expect(calls[0]!.body).toMatchObject({
+      connectionRefs: ['conn-A'],
+      calendarIds: ['calendar-A'],
+    });
   });
 
   it('short-circuits listBusy with no connection refs (no HTTP call)', async () => {
@@ -133,6 +137,49 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     const cals = await provider.listCalendars('conn-A');
     expect(cals).toHaveLength(2);
     expect(cals[0]).toMatchObject({ id: 'c1', name: 'Work', isPrimary: true });
+    expect(cals[0]).toMatchObject({
+      readOnly: true,
+      capabilities: { canCreate: false, canUpdate: false, canDelete: false },
+    });
+  });
+
+  it('passes through explicit provider-calendar permissions', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          calendars: [
+            {
+              id: 'writable',
+              name: 'Writable',
+              readOnly: false,
+              accessRole: 'writer',
+              source: 'shared',
+              capabilities: {
+                canRead: true,
+                canReadFreeBusy: true,
+                canCreate: true,
+                canUpdate: true,
+                canDelete: false,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(await provider.listCalendars('conn-A')).toEqual([
+      expect.objectContaining({
+        readOnly: false,
+        accessRole: 'writer',
+        source: 'shared',
+        capabilities: {
+          canRead: true,
+          canReadFreeBusy: true,
+          canCreate: true,
+          canUpdate: true,
+          canDelete: false,
+        },
+      }),
+    ]);
   });
 
   it('checkConnection reports health and NEVER throws on backend error', async () => {

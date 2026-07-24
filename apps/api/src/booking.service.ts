@@ -98,15 +98,43 @@ export class BookingService {
     });
     if (!held.ok) {
       if (held.reason === 'NOT_FOUND')
-        return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'No such booking page.',
+          status: 404,
+        };
       if (held.reason === 'RATE_LIMITED')
-        return { error: 'RATE_LIMITED', message: 'Too many active holds. Try again shortly.', status: 429 };
-      return { error: 'INVALID_SLOT', message: 'That time is not available to hold.', status: 400 };
+        return {
+          error: 'RATE_LIMITED',
+          message: 'Too many active holds. Try again shortly.',
+          status: 429,
+        };
+      return {
+        error: 'INVALID_SLOT',
+        message: 'That time is not available to hold.',
+        status: 400,
+      };
     }
-    return { reservationUid: held.uid, expiresAt: new Date(held.releaseAtMs).toISOString() };
+    return {
+      reservationUid: held.uid,
+      expiresAt: new Date(held.releaseAtMs).toISOString(),
+    };
   }
 
-  async book(raw: unknown, onBehalf = false): Promise<BookingView | ServiceError> {
+  async book(
+    raw: unknown,
+    onBehalf = false,
+    context?: {
+      additionalAttendees?: Array<{
+        name: string;
+        email: string;
+        timeZone: string;
+        notes?: string;
+        phone?: string;
+      }>;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
     const outcome = await createBooking(
       this.db,
@@ -116,7 +144,9 @@ export class BookingService {
         slug: input.slug,
         startMs: new Date(input.startUtc).getTime(),
         attendee: input.attendee,
+        additionalAttendees: context?.additionalAttendees,
         answers: input.answers,
+        metadata: context?.metadata,
         reservationUid: input.reservationUid,
         idempotencyKey: input.idempotencyKey,
         onBehalf,
@@ -127,18 +157,34 @@ export class BookingService {
 
     if (!outcome.ok) {
       if (outcome.reason === 'NOT_FOUND')
-        return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'No such booking page.',
+          status: 404,
+        };
       if (outcome.reason === 'INVALID')
-        return { error: 'INTAKE_INVALID', message: outcome.message, status: 400 };
+        return {
+          error: 'INTAKE_INVALID',
+          message: outcome.message,
+          status: 400,
+        };
       if (outcome.reason === 'RESERVATION_EXPIRED')
-        return { error: 'RESERVATION_EXPIRED', message: 'Your hold on this time expired. Please pick a time again.', status: 410 };
+        return {
+          error: 'RESERVATION_EXPIRED',
+          message: 'Your hold on this time expired. Please pick a time again.',
+          status: 410,
+        };
       if (outcome.reason === 'CALENDAR_UNAVAILABLE')
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      return { error: 'SLOT_TAKEN', message: 'That time was just booked. Pick another slot.', status: 409 };
+      return {
+        error: 'SLOT_TAKEN',
+        message: 'That time was just booked. Pick another slot.',
+        status: 409,
+      };
     }
 
     const b = outcome.booking;
@@ -202,10 +248,16 @@ export class BookingService {
     // Reuse the repository verify by attempting a no-op check via cancel/reschedule guards
     const meta = parseJsonColumn<{ _manage?: { tokenHash?: string } }>(b.metadata, {});
     if (!verifyManageToken(token, meta._manage?.tokenHash ?? null))
-      return { error: 'FORBIDDEN', message: 'Invalid manage link.', status: 403 };
-    const attendee = await this.db.get<{ name: string; email: string; time_zone: string | null }>(
-      sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`,
-    );
+      return {
+        error: 'FORBIDDEN',
+        message: 'Invalid manage link.',
+        status: 403,
+      };
+    const attendee = await this.db.get<{
+      name: string;
+      email: string;
+      time_zone: string | null;
+    }>(sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`);
     // Where/meeting-link for the manage page. `location` is the booking's own
     // location column (same field calendar write-out reads); the meeting link is
     // the provider-generated URL persisted per booking in booking_reference (the
@@ -219,7 +271,11 @@ export class BookingService {
     );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
-    const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
+    const ctx = await this.db.get<{
+      code: string;
+      handle: string | null;
+      slug: string;
+    }>(
       // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
       // page's reschedule link never resurrects a legacy alias.
       sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug
@@ -250,7 +306,13 @@ export class BookingService {
 
   async cancel(
     uid: string,
-    opts: { reason?: string; token?: string; byHost?: boolean; idempotencyKey?: string },
+    opts: {
+      reason?: string;
+      token?: string;
+      byHost?: boolean;
+      idempotencyKey?: string;
+      accountId?: string;
+    },
   ): Promise<{ uid: string; status: string } | ServiceError> {
     const out = await cancelBooking(this.db, {
       uid,
@@ -258,6 +320,7 @@ export class BookingService {
       manageToken: opts.token,
       byHost: opts.byHost,
       idempotencyKey: opts.idempotencyKey,
+      accountId: opts.accountId,
     });
     if (!out.ok) return this.mapMutation(out.reason);
     // Idempotent retry (already cancelled): skip side-effects so a retried
@@ -268,14 +331,52 @@ export class BookingService {
       // Drop any scheduled reminders — don't remind about a cancelled meeting.
       void this.email.cancelReminders(uid);
       void this.email.cancelFollowUps(uid);
-      this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
+      this.fireWebhook(uid, 'booking.cancelled', {
+        uid,
+        reason: opts.reason ?? null,
+      });
     }
     return { uid: out.uid, status: 'cancelled' };
   }
 
+  /** Complete the durable side effects for the v2 new-UID reschedule contract. */
+  afterV2Reschedule(
+    oldUid: string,
+    newUid: string,
+    manageToken: string | undefined,
+    previousStartUtc: string,
+    status: string,
+  ): void {
+    const manageUrl = manageToken ? this.manageUrl(newUid, manageToken) : undefined;
+    void this.email.cancelReminders(oldUid);
+    void this.email.cancelFollowUps(oldUid);
+    if (status === 'accepted') {
+      this.calendar.onBookingRescheduled(newUid);
+      void this.email.enqueueReschedule(newUid, { manageUrl, previousStartUtc });
+      void this.email.enqueueReminders(newUid, { manageUrl });
+      void this.email.enqueueFollowUps(newUid, { manageUrl });
+    } else {
+      void this.email.enqueuePending(newUid, { manageUrl });
+    }
+    this.fireWebhook(newUid, 'booking.rescheduled', {
+      uid: newUid,
+      rescheduledFromUid: oldUid,
+    });
+  }
+
+  /** Re-write the existing provider event so newly added guests receive it. */
+  afterGuestsChanged(uid: string): void {
+    this.calendar.onBookingRescheduled(uid);
+  }
+
   async reschedule(
     uid: string,
-    opts: { newStartUtc: string; token?: string; byHost?: boolean; idempotencyKey?: string },
+    opts: {
+      newStartUtc: string;
+      token?: string;
+      byHost?: boolean;
+      idempotencyKey?: string;
+    },
   ): Promise<{ uid: string; startUtc: string; endUtc: string; manageUrl?: string } | ServiceError> {
     const out = await rescheduleBooking(
       this.db,
@@ -303,10 +404,18 @@ export class BookingService {
           previousStartUtc: out.previousStartUtc ?? null,
         });
         // Move the reminders to the new time (drop old, re-schedule).
-        void this.email.repointReminders(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
-        void this.email.repointFollowUps(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
+        void this.email.repointReminders(uid, {
+          manageUrl: this.manageUrl(uid, out.manageToken),
+        });
+        void this.email.repointFollowUps(uid, {
+          manageUrl: this.manageUrl(uid, out.manageToken),
+        });
       }
-      this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
+      this.fireWebhook(uid, 'booking.rescheduled', {
+        uid,
+        startUtc: out.startUtc,
+        endUtc: out.endUtc,
+      });
     }
     // The repo layer ROTATES the manage token on a real move (single-active-token
     // invariant), which invalidates the token the caller just used. Return the
@@ -333,13 +442,29 @@ export class BookingService {
   ): ServiceError {
     switch (reason) {
       case 'NOT_FOUND':
-        return { error: 'NOT_FOUND', message: 'Booking not found.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'Booking not found.',
+          status: 404,
+        };
       case 'FORBIDDEN':
-        return { error: 'FORBIDDEN', message: 'Invalid manage link.', status: 403 };
+        return {
+          error: 'FORBIDDEN',
+          message: 'Invalid manage link.',
+          status: 403,
+        };
       case 'GONE':
-        return { error: 'GONE', message: 'Booking is no longer active.', status: 410 };
+        return {
+          error: 'GONE',
+          message: 'Booking is no longer active.',
+          status: 410,
+        };
       case 'SLOT_TAKEN':
-        return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+        return {
+          error: 'SLOT_TAKEN',
+          message: 'That time is taken.',
+          status: 409,
+        };
       case 'CALENDAR_UNAVAILABLE':
         return {
           error: 'CALENDAR_UNAVAILABLE',
@@ -393,7 +518,15 @@ export class BookingService {
   async teamBook(
     accountCode: string,
     teamSlug: string,
-    body: { slug: string; startUtc: string; attendee: BookingView['attendee']; answers?: Record<string, unknown> },
+    body: {
+      slug: string;
+      startUtc: string;
+      attendee: BookingView['attendee'];
+      additionalAttendees?: Array<BookingView['attendee']>;
+      answers?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      idempotencyKey?: string;
+    },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -403,21 +536,32 @@ export class BookingService {
         slug: body.slug,
         startMs: new Date(body.startUtc).getTime(),
         attendee: body.attendee,
+        additionalAttendees: body.additionalAttendees,
         answers: body.answers,
+        metadata: body.metadata,
+        idempotencyKey: body.idempotencyKey,
       },
       this.calendar.provider,
     );
     if (!out.ok) {
       if (out.reason === 'NOT_FOUND') return { error: 'NOT_FOUND', message: 'Not found.', status: 404 };
       if (out.reason === 'INVALID')
-        return { error: 'INTAKE_INVALID', message: out.message ?? 'Invalid.', status: 400 };
+        return {
+          error: 'INTAKE_INVALID',
+          message: out.message ?? 'Invalid.',
+          status: 400,
+        };
       if (out.reason === 'CALENDAR_UNAVAILABLE')
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+      return {
+        error: 'SLOT_TAKEN',
+        message: 'That time is taken.',
+        status: 409,
+      };
     }
     // B4: a team booking is created `accepted`. It was silently unmanageable
     // before — now write it to the chosen host's calendar, send the attendee a

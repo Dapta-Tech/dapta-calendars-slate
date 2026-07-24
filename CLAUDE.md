@@ -198,10 +198,15 @@ invariants above and the gates so CI does not surprise you.
 
 ## Branch flow
 
-Feature branch off `main` → PR **into `main`** (there is no long-lived `develop` in
-the public core). CI gates + one approving review gate the merge. `main` is always
-releasable; the private deploy overlay ships it (see `SELF-HOSTING.md` for how a
-self-hoster releases their own build).
+Feature/fix branch off `develop` → PR **into `develop`**. CI gates + one approving
+review gate the integration merge. Never target a feature/fix branch directly at
+`main`.
+
+After validation on `develop`, a release PR promotes **`develop` → `main`**.
+`main` is the production/release branch and must remain releasable; the private
+deploy overlay ships it (see `SELF-HOSTING.md` for how a self-hoster releases
+their own build). Keep `develop` synchronized with the released tree before
+starting new work so feature PRs contain only their intended changes.
 
 ## Common tasks (file pointers)
 

@@ -162,6 +162,7 @@ export class MachineController {
           idempotencyKey,
         },
         true,
+        { additionalAttendees: body.attendees.slice(1) },
       ),
     );
     // Machine envelope: attendees[] (plural).

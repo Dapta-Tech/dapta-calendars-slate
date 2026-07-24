@@ -182,7 +182,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
     // sorts/merges the union itself, so an unsorted concat is fine.
     const out: BusyInterval[] = [];
     for (const ref of input.connectionRefs) {
-      const req = this.wire.listBusy({ connectionRefs: [ref], fromUtc: input.fromUtc, toUtc: input.toUtc });
+      const req = this.wire.listBusy({
+        connectionRefs: [ref],
+        calendarIds: input.calendarIds,
+        fromUtc: input.fromUtc,
+        toUtc: input.toUtc,
+      });
       out.push(...this.wire.parseBusy(await this.send('listBusy', req)));
     }
     return out;
