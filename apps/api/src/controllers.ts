@@ -100,7 +100,7 @@ raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.
 <code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
 <code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
 <h2>Copy-paste discovery request</h2>
-<pre>BASE_URL="https://calendar.dapta.ai"
+<pre>BASE_URL="https://calendars-api.dapta.ai"
 curl "$BASE_URL/v2/event-types" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
   --header "cal-api-version: 2024-06-14"</pre>

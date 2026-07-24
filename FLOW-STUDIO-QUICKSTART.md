@@ -2,7 +2,7 @@
 
 This is the copy-paste path for Nicolas's production pilot. Use generic **API Request** nodes,
 Bearer auth from Vault, parsed JSON responses, fire-and-forget off, and
-`https://calendar.dapta.ai` as the base URL.
+`https://calendars-api.dapta.ai` as the base URL.
 
 ## Setup
 
@@ -19,7 +19,7 @@ Authorization: Bearer {{daptaVault.dapta_calendars_api_key}}
 ## 1. Discover an event type
 
 ```http
-GET https://calendar.dapta.ai/v2/event-types
+GET https://calendars-api.dapta.ai/v2/event-types
 cal-api-version: 2024-06-14
 ```
 
@@ -28,14 +28,14 @@ Choose by `data[*].slug` plus `type`. Use `data[*].daptaId` as `eventTypeId`.
 ## 2. Discover calendars and optional batch availability
 
 ```http
-GET https://calendar.dapta.ai/v2/calendars
+GET https://calendars-api.dapta.ai/v2/calendars
 ```
 
 Calendar IDs are `data.connectedCalendars[*].calendars[*].id`. Inspect `readOnly` and
 `capabilities.canReadFreeBusy/canCreate`.
 
 ```http
-POST https://calendar.dapta.ai/v2/calendars/availability
+POST https://calendars-api.dapta.ai/v2/calendars/availability
 Content-Type: application/json
 
 {
@@ -55,7 +55,7 @@ Read `data.slots` for `allAvailable`/`anyAvailable`, or `data.calendars[calendar
 ## 3. Get engine-aware slots
 
 ```http
-GET https://calendar.dapta.ai/v2/slots?eventTypeId={{eventTypeId}}&start=2026-07-24T00%3A00%3A00Z&end=2026-07-31T23%3A59%3A59Z&timeZone=America%2FBogota
+GET https://calendars-api.dapta.ai/v2/slots?eventTypeId={{eventTypeId}}&start=2026-07-24T00%3A00%3A00Z&end=2026-07-31T23%3A59%3A59Z&timeZone=America%2FBogota
 cal-api-version: 2024-09-04
 ```
 
@@ -68,7 +68,7 @@ Example Flow expression:
 ## 4. Create
 
 ```http
-POST https://calendar.dapta.ai/v2/bookings
+POST https://calendars-api.dapta.ai/v2/bookings
 cal-api-version: 2026-02-25
 Idempotency-Key: {{triggerRequestId}}:create
 Content-Type: application/json
@@ -95,12 +95,12 @@ use these canonical fields without formatter changes.
 ## 5. Read, add a guest, reschedule, cancel
 
 ```http
-GET https://calendar.dapta.ai/v2/bookings/{{bookingUid}}
+GET https://calendars-api.dapta.ai/v2/bookings/{{bookingUid}}
 cal-api-version: 2026-02-25
 ```
 
 ```http
-POST https://calendar.dapta.ai/v2/bookings/{{bookingUid}}/guests
+POST https://calendars-api.dapta.ai/v2/bookings/{{bookingUid}}/guests
 cal-api-version: 2024-08-13
 Idempotency-Key: {{triggerRequestId}}:guests
 Content-Type: application/json
@@ -109,7 +109,7 @@ Content-Type: application/json
 ```
 
 ```http
-POST https://calendar.dapta.ai/v2/bookings/{{bookingUid}}/reschedule
+POST https://calendars-api.dapta.ai/v2/bookings/{{bookingUid}}/reschedule
 cal-api-version: 2026-02-25
 Idempotency-Key: {{triggerRequestId}}:reschedule
 Content-Type: application/json
@@ -121,7 +121,7 @@ Save the new `data.uid`. The old booking returns `rescheduledToUid`; the new one
 `rescheduledFromUid`.
 
 ```http
-POST https://calendar.dapta.ai/v2/bookings/{{newBookingUid}}/cancel
+POST https://calendars-api.dapta.ai/v2/bookings/{{newBookingUid}}/cancel
 cal-api-version: 2026-02-25
 Idempotency-Key: {{triggerRequestId}}:cancel
 Content-Type: application/json

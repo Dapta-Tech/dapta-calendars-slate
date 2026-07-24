@@ -107,7 +107,7 @@ export const openapiSpec = {
     license: { name: 'MIT' },
   },
   servers: [
-    { url: 'https://calendar.dapta.ai', description: 'Production' },
+    { url: 'https://calendars-api.dapta.ai', description: 'Production' },
     { url: '/', description: 'This deployment' },
   ],
   tags: [

@@ -161,8 +161,11 @@ export class CalendarEffects {
       }
       await fillBookingReference(this.db, claimId, {
         externalEventId: created.externalEventId,
-        // Store the connection ref so a later delete addresses the same calendar.
-        externalCalendarId: created.externalCalendarId ?? connectionRef,
+        // Preserve the exact provider-calendar target for a later reschedule.
+        // Some backends only return the event id, so fall back to the selected
+        // calendar beneath the connection rather than to the connection itself.
+        externalCalendarId:
+          created.externalCalendarId ?? ctx.destinationCalendarIds[connectionRef] ?? null,
         meetingUrl: created.meetingUrl ?? null,
       });
     }

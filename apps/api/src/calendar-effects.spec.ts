@@ -182,6 +182,37 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(refs[0]!.external_event_id).toBe('evt-1');
   });
 
+  it('create → reschedule preserves a selected secondary calendar when the provider omits its id', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    const secondaryCalendarId = 'provider-secondary-calendar';
+    await db.run(
+      sql`UPDATE booking
+          SET metadata = ${JSON.stringify({
+            _destinationCalendar: {
+              connectionRef: CAL_REF,
+              externalId: secondaryCalendarId,
+            },
+          })}
+          WHERE uid = ${uid}`,
+    );
+
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    await (effects as unknown as Awaitable).moveEvent(uid);
+
+    expect(provider.created[0]!.connectionRef).toBe(CAL_REF);
+    expect(provider.created[0]!.calendarId).toBe(secondaryCalendarId);
+    expect(provider.updated[0]!.connectionRef).toBe(CAL_REF);
+    expect(provider.updated[0]!.calendarId).toBe(secondaryCalendarId);
+    const ref = await db.get<{ external_calendar_id: string | null }>(
+      sql`SELECT br.external_calendar_id
+          FROM booking_reference br JOIN booking b ON b.id = br.booking_id
+          WHERE b.uid = ${uid}`,
+    );
+    expect(ref!.external_calendar_id).toBe(secondaryCalendarId);
+  });
+
   it('reschedule with nothing created yet falls back to a fresh create', async () => {
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);
