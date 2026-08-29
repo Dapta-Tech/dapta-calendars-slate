@@ -231,6 +231,20 @@ point `CALENDAR_BACKEND_MODULE` at a private overlay. See
 add a full message const (the interface forces complete key coverage), wire it into
 the message getter.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
+
 ## Related
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — request flows, package dependency
