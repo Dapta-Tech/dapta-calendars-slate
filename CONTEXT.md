@@ -35,3 +35,19 @@ _Avoid_: redesign (implies rethinking flows)
 **Calendar write-out**:
 Pushing a confirmed booking onto the host's connected external calendar through the vendor-neutral calendar port, with a conferencing link attached.
 _Avoid_: sync (that's free-busy reading), any vendor name
+
+**Transactional email**:
+An email the system sends because a booking changed state — confirmation, pending, declined, cancellation, reschedule. Its text is account-wide; hosts never write it per event.
+_Avoid_: notification (covers reminders too), lifecycle email
+
+**Reminder**:
+A scheduled email sent a chosen time before a booking starts. Owned by the event type, not the account: each one has its own switch, lead time, subject, and body.
+_Avoid_: notification, alert
+
+**Follow-up**:
+A reminder's mirror after the meeting ends. Same shape, same ownership, disabled unless the host turns it on.
+_Avoid_: post-event email, thank-you email
+
+**Form variable**:
+A placeholder in reminder copy that prints an answer to one of that event's own intake questions, written `{{form.<field name>}}`. The prefix keeps a question named `location` from shadowing the built-in `{{location}}`.
+_Avoid_: custom variable, merge tag
