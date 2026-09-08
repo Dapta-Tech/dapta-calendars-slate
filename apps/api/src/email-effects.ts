@@ -2,7 +2,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   enqueueOutbox,
   deletePendingOutbox,
+  DEFAULT_MAX_ATTEMPTS,
+  hasPendingCalendarJob,
   getNotificationSettings,
+  loadBookingMeetingUrl,
   loadBookingNotificationContext,
   defaultNotificationSetting,
   type BookingNotificationContext,
@@ -19,7 +22,8 @@ import {
 } from '@slate/notifications';
 import { formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
-import { DB, EMAIL, ENV, NOTIFIER } from './tokens';
+import type { CalendarProvider } from '@slate/calendar';
+import { CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
 
 /**
  * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
@@ -27,6 +31,45 @@ import { DB, EMAIL, ENV, NOTIFIER } from './tokens';
  * row `skipped` ONCE with this reason — it never burns the retry schedule.
  */
 export class OutboxSkipError extends Error {}
+
+/**
+ * Thrown by `deliver` while a conferencing booking's link has not been minted
+ * yet and the bounded wait still has room (ADR 0007). Deliberately a RETRYABLE
+ * error, not an `OutboxSkipError`: the worker's normal failure path backs it off
+ * and tries again, and the row's `last_error` then names the wait so nobody
+ * reading the delivery log mistakes it for a transport fault.
+ */
+export class ConferencingLinkPendingError extends Error {}
+
+/**
+ * How late a conferencing booking's confirmation/reschedule row is first made
+ * due, so the calendar row that mints the link gets a head start (ADR 0007).
+ * Three ticks of the default `OUTBOX_POLL_MS` (5000) — the realistic floor for
+ * "the calendar row has been drained".
+ */
+export const CONFERENCING_LINK_GRACE_MS = 15_000;
+
+/**
+ * How many attempts a conferencing row waits for its link before sending
+ * WITHOUT it.
+ *
+ * A waiting row does NOT spend the transport's retry budget: link-aware rows are
+ * enqueued with `DEFAULT_MAX_ATTEMPTS + CONFERENCING_LINK_WAIT_ATTEMPTS`, so
+ * after the wait is spent a conferencing email still has the same five attempts
+ * at the mail transport that every other email gets. Sharing one counter would
+ * quietly leave conferencing confirmations with two.
+ */
+export const CONFERENCING_LINK_WAIT_ATTEMPTS = 3;
+
+/**
+ * The email kinds that wait for a link. Reminders and follow-ups are scheduled
+ * far in the future — by the time they fire the link exists or never will, so
+ * waiting would burn attempts for nothing (they still read it FRESH, which is
+ * what makes a late link show up in them). `pending` never waits: the booking
+ * is not accepted, so no calendar row exists to wait for. Cancellations and
+ * declines carry no join line at all.
+ */
+const LINK_AWARE_KINDS = new Set(['confirmation', 'reschedule']);
 
 /** The booking emails the outbox can carry. */
 export type EmailKind =
@@ -126,6 +169,10 @@ export class EmailEffects {
     @Inject(EMAIL) private readonly provider?: EmailProvider,
     // Optional: only needed to compose the public {{booking_link}} URL.
     @Inject(ENV) private readonly env?: ServerEnv,
+    // Read for ONE bit: whether a calendar write-out exists at all, which is
+    // what decides if a conferencing booking's mail is worth delaying. The PORT
+    // interface only (invariant 7) — no adapter, no vendor.
+    @Inject(CALENDAR) private readonly calendar?: CalendarProvider,
   ) {}
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
@@ -136,13 +183,15 @@ export class EmailEffects {
   enqueuePending(uid: string, opts: { manageUrl?: string } = {}): Promise<void> {
     return this.enqueue('pending', uid, opts);
   }
-  enqueueCancellation(uid: string, opts: { reason?: string | null } = {}): Promise<void> {
+  async enqueueCancellation(uid: string, opts: { reason?: string | null } = {}): Promise<void> {
+    await this.dropUnsentLifecycleMail(uid);
     return this.enqueue('cancellation', uid, { cancellationReason: opts.reason ?? null });
   }
   enqueueReschedule(uid: string, opts: { manageUrl?: string; previousStartUtc?: string | null } = {}): Promise<void> {
     return this.enqueue('reschedule', uid, opts);
   }
-  enqueueDeclined(uid: string, opts: { reason?: string | null } = {}): Promise<void> {
+  async enqueueDeclined(uid: string, opts: { reason?: string | null } = {}): Promise<void> {
+    await this.dropUnsentLifecycleMail(uid);
     return this.enqueue('declined', uid, { cancellationReason: opts.reason ?? null });
   }
 
@@ -195,6 +244,28 @@ export class EmailEffects {
       await deletePendingOutbox(this.db, { bookingUid: uid, kind: 'email', action: 'reminder' });
     } catch (err) {
       this.log.error(`failed to cancel reminders for ${uid}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Drop a confirmation/reschedule row still sitting in its conferencing grace,
+   * because the booking is now off.
+   *
+   * Those rows used to leave within one poll tick, so a cancellation could never
+   * overtake them; with a deliberate delay in front of them it can, and the
+   * invitee would read "Cancelled" and then "Confirmed". A booking that is
+   * already cancelled should not announce itself as confirmed at all.
+   *
+   * Deliberately NOT folded into `cancelReminders`: a reschedule calls that one
+   * (via `repointReminders`) and must keep the reschedule mail it just queued.
+   */
+  private async dropUnsentLifecycleMail(uid: string): Promise<void> {
+    try {
+      for (const action of ['confirmation', 'reschedule']) {
+        await deletePendingOutbox(this.db, { bookingUid: uid, kind: 'email', action });
+      }
+    } catch (err) {
+      this.log.error(`failed to drop unsent lifecycle mail for ${uid}: ${String(err)}`);
     }
   }
 
@@ -279,6 +350,19 @@ export class EmailEffects {
         return;
       }
       const settings = await getNotificationSettings(this.db, ctx.accountId);
+      // ADR 0007: a conferencing booking's mail is made due slightly LATE, so
+      // the calendar row that mints the link gets a head start. Every other
+      // booking is due immediately — the wait must never tax a booking that
+      // will never have a link, which is why a disabled calendar (the OSS
+      // default, where NO calendar row is ever enqueued) is excluded here
+      // rather than discovered three failed attempts later.
+      const waitsForLink =
+        LINK_AWARE_KINDS.has(kind) &&
+        ctx.locationKind === 'conferencing' &&
+        this.calendar?.enabled === true;
+      // The grace must outlast a poll tick, or it expires before the worker
+      // has looked at the calendar row even once.
+      const graceMs = Math.max(CONFERENCING_LINK_GRACE_MS, (this.env?.OUTBOX_POLL_MS ?? 0) * 3);
       for (const side of KIND_SIDES[kind]) {
         const n = this.sideNotification(kind, ctx, side, settings, extra);
         if (!n) continue;
@@ -288,6 +372,13 @@ export class EmailEffects {
           bookingUid: uid,
           accountId: ctx.accountId,
           payload: JSON.stringify(n),
+          ...(waitsForLink
+            ? {
+                nextAttemptAt: Date.now() + graceMs,
+                // The wait gets its OWN budget on top of the transport's.
+                maxAttempts: DEFAULT_MAX_ATTEMPTS + CONFERENCING_LINK_WAIT_ATTEMPTS,
+              }
+            : {}),
         });
       }
     } catch (err) {
@@ -349,6 +440,10 @@ export class EmailEffects {
         ctx.location,
         getMessages(ctx.hostLocale ?? 'en'),
       ),
+      // Snapshotted so DELIVERY can tell whether this booking is even supposed
+      // to have a link, and therefore whether waiting for one is warranted.
+      // `meetingUrl` is deliberately NOT set here — it does not exist yet.
+      locationKind: ctx.locationKind ?? null,
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,
@@ -369,8 +464,19 @@ export class EmailEffects {
    * Reminders are re-gated here: their rows can sit for days, so a toggle
    * flipped OFF after scheduling must still silence them (skip = success, the
    * row is marked done — not an error to retry).
+   *
+   * The conferencing link is RESOLVED here too, and it is the only value that
+   * is (ADR 0007). Everything else stays exactly as it was snapshotted at
+   * enqueue; the link cannot be, because the calendar row that mints it drains
+   * later. `attempts` is how many times this row has already failed — it is
+   * what bounds the wait described on `ConferencingLinkPendingError`.
    */
-  async deliver(kind: string, payloadJson: string, outboxAccountId?: string | null): Promise<void> {
+  async deliver(
+    kind: string,
+    payloadJson: string,
+    outboxAccountId?: string | null,
+    attempts = 0,
+  ): Promise<void> {
     const n = JSON.parse(payloadJson) as BookingNotification & { reminderLeadMinutes?: number };
     if (!n.accountId && outboxAccountId) n.accountId = outboxAccountId;
     if (!n.accountId && n.uid) {
@@ -410,6 +516,38 @@ export class EmailEffects {
           `skip queued reminder (${n.audience ?? 'legacy combined'}) for ${n.uid} — disabled by account settings`,
         );
         return;
+      }
+    }
+    // --- ADR 0007: the ONE variable resolved at delivery time ----------------
+    // Read fresh for every kind, so a reminder scheduled days ago still shows a
+    // link that arrived late. Placed after the toggle gates above so a silenced
+    // row costs no query and no wait.
+    if (n.uid) {
+      n.meetingUrl = await loadBookingMeetingUrl(this.db, n.uid);
+      // Wait only while a calendar write-out is genuinely still in flight. The
+      // location kind alone is NOT enough: a bare fork (disabled provider) and a
+      // host who picked `conferencing` with no destination calendar both enqueue
+      // no calendar row at all, so no link can ever arrive and there is nothing
+      // to wait for. Gating on the kind would delay every one of those bookings
+      // for the full budget and log a failure per attempt, for nothing.
+      const stillWriting =
+        !n.meetingUrl &&
+        n.locationKind === 'conferencing' &&
+        LINK_AWARE_KINDS.has(kind) &&
+        (await hasPendingCalendarJob(this.db, n.uid));
+      if (stillWriting && attempts < CONFERENCING_LINK_WAIT_ATTEMPTS) {
+        // Bounded: the worker backs this off on the normal schedule, and on the
+        // attempt where the budget runs out we fall through and SEND ANYWAY.
+        // A calendar failure costs the link, never the email and never the
+        // booking — and the manage page self-heals the moment write-out lands.
+        throw new ConferencingLinkPendingError(
+          `waiting for the conferencing link for ${n.uid} (attempt ${attempts + 1}/${CONFERENCING_LINK_WAIT_ATTEMPTS}) — will send without it after that`,
+        );
+      }
+      if (stillWriting) {
+        this.log.warn(
+          `sending ${kind} for ${n.uid} WITHOUT a conferencing link — write-out has not produced one after ${attempts} attempts`,
+        );
       }
     }
     switch (kind) {

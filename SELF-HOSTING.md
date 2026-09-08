@@ -279,6 +279,30 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
+#### Conferencing links
+
+`POST /v1/events` and `PATCH /v1/events/:id` both carry
+`requestConferenceLink: boolean` in the request body. When it is `true`, create a
+conferencing room for the event and return its join URL as `meetingUrl`; when it
+is `false` or absent, create none.
+
+Three rules make a booking end up with exactly one room:
+
+- **One request per booking.** `requestConferenceLink` is set on at most one
+  destination — the organizer's. A team booking's co-host events arrive with
+  `requestConferenceLink: false` and the organizer's URL already in
+  `description`. Do not mint a competing room for them.
+- **On a reschedule, `null` is a valid answer.** Return `meetingUrl` only when
+  the room actually changed. A `null` never overwrites the URL already stored, so
+  a backend that keeps the same room across a move needs to do nothing.
+- **A missing link is never fatal.** If you cannot mint one, return the event
+  without `meetingUrl`. The booking still stands and the confirmation email still
+  goes out — it simply carries no join line (see
+  `docs/adr/0007-the-booking-email-never-waits-on-the-calendar.md`).
+
+The link is stored on `booking_reference.meeting_url` and read from there by the
+email, the `.ics` and the manage page. Only `https://` URLs are rendered.
+
 ### The ESM module contract (advanced)
 
 For a backend that needs its own token authority (short-lived minted tokens per

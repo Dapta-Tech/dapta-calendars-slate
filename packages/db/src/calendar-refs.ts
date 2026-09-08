@@ -78,9 +78,14 @@ export async function loadDestinationConnectionRefs(
       // through to the member-level default below (never throw, never 500).
     }
   }
+  // ORDER BY id: a partial unique index already caps this at one destination per
+  // member, but `destinationRefs[0]` is now a documented contract (one
+  // conferencing room, minted from the organizer's side) and a contract must not
+  // rest on an unordered SELECT.
   const rows = await db.all<{ external_id: string }>(
     sql`SELECT external_id FROM connected_calendar
-        WHERE member_id = ${memberId} AND is_destination = 1`,
+        WHERE member_id = ${memberId} AND is_destination = 1
+        ORDER BY id`,
   );
   return rows.map((r) => r.external_id);
 }
@@ -141,7 +146,18 @@ export interface CalendarWriteContext {
   attendeeTimeZone: string | null;
   attendeeEmails: string[];
   organizerEmail: string | null;
-  /** Write-destination connection refs (`is_destination = 1`). */
+  /** The organizer's locale — the co-hosts' event body is written in it. */
+  organizerLocale: string | null;
+  /**
+   * Write-destination connection refs (`is_destination = 1`), **ordered with
+   * the primary organizer's destinations first**.
+   *
+   * The order is a CONTRACT, not an accident of Set insertion: the conferencing
+   * link is minted from `destinationRefs[0]` and only from there, so a team
+   * booking gets exactly ONE room rather than one per host (#66). When the
+   * primary host has no destination of their own, the first co-host's stands in
+   * — still one room, which is what the invitee needs.
+   */
   destinationRefs: string[];
   /** Optional provider calendar beneath each connection, selected by the v2 pilot. */
   destinationCalendarIds: Record<string, string>;
@@ -165,10 +181,11 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     host_member_id: string | null;
     event_type_id: string | null;
     host_email: string | null;
+    host_locale: string | null;
     metadata: unknown;
   }>(
     sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.location_kind, b.attendee_time_zone,
-               b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email
+               b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email, m.locale AS host_locale
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.uid = ${uid} LIMIT 1`,
@@ -190,9 +207,16 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
         FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
         WHERE bh.booking_id = ${b.id}`,
   );
-  const hostMemberIds = new Set<string>();
-  if (b.host_member_id) hostMemberIds.add(b.host_member_id);
-  for (const h of coHosts) hostMemberIds.add(h.member_id);
+  // ORDERED, organizer first — `destinationRefs`' documented contract depends on
+  // it (one conferencing room per booking, minted from the organizer's side).
+  // A plain array + dedupe rather than relying on Set insertion order being
+  // obvious to the next reader.
+  const hostMemberIds: string[] = [];
+  const addHost = (id: string) => {
+    if (!hostMemberIds.includes(id)) hostMemberIds.push(id);
+  };
+  if (b.host_member_id) addHost(b.host_member_id);
+  for (const h of coHosts) addHost(h.member_id);
 
   // PHASE 2 (per-event calendars): the event's `destination_calendar_id`
   // override applies ONLY to genuinely single-host bookings (personal /
@@ -200,7 +224,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   // bookings keep each host's own member-level default (Phase 3 territory);
   // applying one event-level override across multiple hosts' calendars would
   // be a silent wrong-calendar write.
-  const isSingleHost = hostMemberIds.size <= 1;
+  const isSingleHost = hostMemberIds.length <= 1;
   const destinationSet = new Set<string>();
   const destinationCalendarIds: Record<string, string> = {};
   const metadata = parseJsonColumn<{
@@ -235,6 +259,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     attendeeTimeZone: b.attendee_time_zone,
     attendeeEmails,
     organizerEmail: b.host_email,
+    organizerLocale: b.host_locale,
     destinationRefs: [...destinationSet],
     destinationCalendarIds,
   };
@@ -314,6 +339,62 @@ export async function fillBookingReference(
             meeting_url = ${ref.meetingUrl}
         WHERE id = ${referenceId}`,
   );
+}
+
+/**
+ * Set ONLY the conferencing link on an existing reference.
+ *
+ * Distinct from `fillBookingReference`, which also rewrites the external ids:
+ * a reschedule has an event id already and must not touch it. Used to persist a
+ * URL a `moveEvent` returned, and to mirror the organizer's room onto co-host
+ * rows so every reference for a booking names the same room.
+ */
+export async function setBookingReferenceMeetingUrl(
+  db: Db,
+  bookingId: string,
+  meetingUrl: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE booking_reference SET meeting_url = ${meetingUrl} WHERE booking_id = ${bookingId}`,
+  );
+}
+
+/**
+ * Is a calendar write-out for this booking still in flight?
+ *
+ * The precise answer to "is it worth waiting for a link" (ADR 0007). It is
+ * FALSE by construction on a bare fork — a disabled provider enqueues no
+ * calendar row at all — and false once the job has finished or given up, so a
+ * booking that can never receive a link is never delayed for one.
+ */
+export async function hasPendingCalendarJob(db: Db, uid: string): Promise<boolean> {
+  const row = await db.get<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM outbox
+        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending'`,
+  );
+  return Number(row?.n ?? 0) > 0;
+}
+
+/**
+ * The booking's conferencing link, or null. ADR 0007: this is the ONE value an
+ * email resolves at DELIVERY time rather than at enqueue — it is minted later,
+ * by the calendar outbox row, so the enqueue-time snapshot cannot contain it.
+ *
+ * Every filled reference for a booking carries the same URL (write-out mints one
+ * room and mirrors it in a single booking-wide UPDATE), so the value is the same
+ * whichever row wins. `ORDER BY` is belt-and-braces: it keeps the read stable
+ * even for rows written before that invariant held, so this reader, the manage
+ * page and `/v1` cannot disagree about a legacy booking.
+ */
+export async function loadBookingMeetingUrl(db: Db, uid: string): Promise<string | null> {
+  const row = await db.get<{ meeting_url: string | null }>(
+    sql`SELECT br.meeting_url FROM booking_reference br
+        JOIN booking b ON b.id = br.booking_id
+        WHERE b.uid = ${uid} AND br.meeting_url IS NOT NULL
+        ORDER BY br.created_at, br.id
+        LIMIT 1`,
+  );
+  return row?.meeting_url ?? null;
 }
 
 /** Release a claim (e.g. createEvent failed) so a later retry can re-create it. */
