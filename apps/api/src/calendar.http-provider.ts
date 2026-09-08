@@ -155,10 +155,13 @@ export interface ExternalCalendarOptions {
    * consent screen instead of an intermediate hosted page.
    */
   startConnect?: (provider: string, tenantKey: string) => Promise<ConnectStart>;
+  /** Display name for the conferencing this backend mints (deploy config). */
+  conferencingLabel?: string | null;
 }
 
 export class ExternalCalendarProvider implements CalendarProvider {
   readonly enabled = true;
+  readonly conferencingLabel: string | null;
   private readonly baseUrl: string;
   private readonly tokens: CalendarTokenSource;
   private readonly wire: CalendarWire;
@@ -173,6 +176,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.startConnectOverride = opts.startConnect;
+    this.conferencingLabel = opts.conferencingLabel ?? null;
   }
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {

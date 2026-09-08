@@ -96,6 +96,14 @@ export interface ConnectionHealth {
 export interface CalendarProvider {
   /** True when a real provider is wired; false disables all calendar effects. */
   readonly enabled: boolean;
+  /**
+   * Display name for the conferencing this provider mints, shown to the host
+   * when they pick the `conferencing` location kind. THE REPO NAMES NOBODY
+   * (R15): a private overlay supplies this at runtime, and a bare fork leaves it
+   * null so the UI shows only generic wording (ADR 0008). Optional so an overlay
+   * written before this existed still satisfies the port.
+   */
+  readonly conferencingLabel?: string | null;
   listBusy(input: ListBusyInput): Promise<BusyInterval[]>;
   createEvent(input: CreateEventInput): Promise<CreatedEvent>;
   /** Move an existing event in place (true reschedule). */
@@ -115,6 +123,8 @@ export interface CalendarProvider {
  */
 export class DisabledCalendarProvider implements CalendarProvider {
   readonly enabled = false;
+  /** No provider ⇒ no conferencing to name. */
+  readonly conferencingLabel = null;
   listBusy(): Promise<BusyInterval[]> {
     return Promise.resolve([]);
   }

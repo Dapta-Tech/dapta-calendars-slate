@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import Link from 'next/link';
-import { getMessages, t } from '@slate/shared';
+import { formatLocation, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -54,6 +54,7 @@ export default async function BookingPage({
   const { accountCode, handle, slug } = await params;
   const { lang } = await searchParams;
   const locale = await publicLocale(lang);
+  const messages = getMessages(locale);
 
   const now = new Date();
   const from = now.toISOString();
@@ -87,6 +88,14 @@ export default async function BookingPage({
           {availability.eventType.lengthMinutes} min · with{' '}
           {profile.member.displayName ?? profile.member.handle}
         </p>
+        {/* The Where, so an invitee knows how they are meeting BEFORE booking.
+            Generic wording only: the repo names no conferencing platform. */}
+        {formatLocation(availability.eventType.location, messages) ? (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{messages.location.whereLabel}:</span>{' '}
+            {formatLocation(availability.eventType.location, messages)}
+          </p>
+        ) : null}
       </header>
 
         <BookingFlow

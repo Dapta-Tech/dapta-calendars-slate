@@ -9,3 +9,4 @@ export * from './tz.util';
 export * from './host-selector';
 export * from './manage-token';
 export * from './pg-errors';
+export * from './location';

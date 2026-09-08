@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import Link from 'next/link';
-import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
+import { formatLocation, getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -71,6 +71,13 @@ export default async function TeamBookingPage({
             {availability.eventType.lengthMinutes} min · {team.team.name} ·{' '}
             {schedulingMethodLabel(messages, availability.eventType.schedulingType)}
           </p>
+          {/* The Where, same as the personal booking page. */}
+          {formatLocation(availability.eventType.location, messages) ? (
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{messages.location.whereLabel}:</span>{' '}
+              {formatLocation(availability.eventType.location, messages)}
+            </p>
+          ) : null}
         </header>
 
         <BookingFlow

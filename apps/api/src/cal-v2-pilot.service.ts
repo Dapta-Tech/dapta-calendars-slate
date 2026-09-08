@@ -15,6 +15,7 @@ import {
   sql,
   upsertProviderCalendar,
 } from "@slate/db";
+import { parseEventLocation } from "@slate/engine";
 import { isValidTimeZone } from "@slate/shared";
 import { z } from "zod";
 import { BookingService } from "./booking.service";
@@ -213,7 +214,13 @@ export class CalV2PilotService {
         teamSlug: row.team_slug,
         schedulingType: row.scheduling_type,
         type: row.team_id ? "team" : "personal",
-        locations: parseJsonColumn<unknown[]>(row.locations, []),
+        // The column holds ONE location (a `{ kind, detail }` object, or legacy
+        // free text); the v2 contract declares an array, so normalize to a
+        // 0-or-1 element list rather than leaking a bare object into it.
+        locations: (() => {
+          const loc = parseEventLocation(parseJsonColumn<unknown>(row.locations, null));
+          return loc ? [loc] : [];
+        })(),
         bookingFields: parseJsonColumn<unknown[]>(row.booking_fields, []),
         team:
           row.team_id && row.team_slug && row.team_name

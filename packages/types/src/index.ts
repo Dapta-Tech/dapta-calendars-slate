@@ -5,7 +5,10 @@
  * from the same schema (never trust the client; validate on both sides).
  */
 import { z } from 'zod';
-import { AVAILABILITY_EMPTY_REASONS } from '@slate/engine';
+import { AVAILABILITY_EMPTY_REASONS, LOCATION_DETAIL_MAX, LOCATION_KINDS } from '@slate/engine';
+
+export { LOCATION_KINDS, parseEventLocation } from '@slate/engine';
+export type { EventLocation, LocationKind } from '@slate/engine';
 
 // --- Enums (string unions — portable across SQLite & Postgres) -------------
 
@@ -17,6 +20,19 @@ export type SchedulingType = (typeof schedulingType)[number];
 
 export const membershipRole = ['member', 'admin', 'owner'] as const;
 export type MembershipRole = (typeof membershipRole)[number];
+
+/**
+ * WHERE a meeting happens. `conferencing` means "the calendar port mints a
+ * meeting link"; the other three carry a host-authored `detail` (an address, a
+ * number, free text). No conferencing vendor is named here — the running
+ * product supplies a display label at runtime (ADR 0008).
+ */
+export const eventLocationSchema = z.object({
+  kind: z.enum(LOCATION_KINDS),
+  // Same cap the engine clamps to, so validation and normalization cannot drift.
+  detail: z.string().max(LOCATION_DETAIL_MAX).nullable().optional(),
+});
+export type EventLocationDto = z.infer<typeof eventLocationSchema>;
 
 /**
  * Account-level role (on `member`), distinct from the per-team `membershipRole`
@@ -144,6 +160,8 @@ export const availabilityResponseSchema = z.object({
     bookingFields: z.array(bookingFieldSchema).default([]),
     /** Team scheduling method (null for personal events). */
     schedulingType: z.enum(schedulingType).nullable().default(null),
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: eventLocationSchema.nullable().default(null),
   }),
   timeZone: timeZoneSchema,
   slots: z.array(slotSchema),
@@ -269,6 +287,9 @@ export const bookingViewSchema = z.object({
    *  the meeting link — surfaced on the manage page. Both optional/nullable so
    *  existing responses stay valid. */
   location: z.string().nullable().optional(),
+  /** The location KIND snapshotted at booking time; null on bookings written
+   *  before it existed — the render falls back to `location` unchanged. */
+  locationKind: z.enum(LOCATION_KINDS).nullable().optional(),
   meetingUrl: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
@@ -388,9 +409,15 @@ export const eventTypeInputSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(2000).nullable().optional(),
   lengthMinutes: z.number().int().positive().max(1440),
-  /** Where the meeting happens (free text: "Google Meet", "Phone", an address).
-   *  Copied onto each booking's `location` so the manage page can show a Where. */
-  location: z.string().max(500).nullable().optional(),
+  /** Where the meeting happens, as a location kind + optional detail. The kind
+   *  is snapshotted onto each booking (`location_kind`) and the detail onto its
+   *  `location`, so the manage page can show a Where that a later edit of this
+   *  event type cannot rewrite. A bare string is still accepted — that is the
+   *  legacy shape, coerced by `parseEventLocation`. */
+  location: z
+    .union([eventLocationSchema, z.string().max(LOCATION_DETAIL_MAX)])
+    .nullable()
+    .optional(),
   scheduleId: z.string().nullable().optional(),
   hidden: z.boolean().optional(),
   schedulingType: z.enum(schedulingType).nullable().optional(),

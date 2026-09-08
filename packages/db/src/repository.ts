@@ -14,8 +14,10 @@ import {
   generateManageToken,
   isExclusionViolation,
   isUniqueViolation,
+  parseEventLocation,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type EventLocation,
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
@@ -377,6 +379,8 @@ export interface AvailabilityResult {
     title: string;
     lengthMinutes: number;
     bookingFields: BookingFieldDef[];
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: EventLocation | null;
   };
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
@@ -510,6 +514,7 @@ export async function getAvailability(
     title: eventType.title,
     lengthMinutes: eventType.length_minutes,
     bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
+    location: parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null)),
   };
   const displayTz = args.displayTimeZone ?? scheduleTimeZone;
 
@@ -803,12 +808,15 @@ export async function createBooking(
   const responsesExpr = jsonParam(db, args.answers ?? null);
   // Snapshot the event type's configured Where onto the booking so the manage
   // page (and calendar write-out) can show it, even if the event is edited later.
-  const eventLocation = parseJsonColumn<string | null>(eventType.locations, null);
+  // The KIND drives behaviour (conferencing ⇒ request a link at write-out); the
+  // detail is the human string. Both are frozen here on purpose.
+  const eventLocation = parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null));
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
       created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title}, ${eventLocation},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
+      ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`

@@ -63,6 +63,7 @@ export default async function EditEventType({
         initial={et}
         schedules={schedules}
         messages={m}
+        locationLabels={msgs.location}
         scheduling={et.teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
         connections={et.teamId ? undefined : connections}

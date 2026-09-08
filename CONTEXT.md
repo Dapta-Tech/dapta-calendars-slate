@@ -32,6 +32,10 @@ _Avoid_: single-use event
 Bringing Calendars' public page and admin to the Dapta Forms design language (tokens, components, polish). Visual/UX work on existing screens, not new features.
 _Avoid_: redesign (implies rethinking flows)
 
+**Location kind**:
+WHERE a meeting happens, as one of four vendor-neutral values — `conferencing`, `in_person`, `phone`, `custom` — plus an optional detail. Configured on the event type and snapshotted onto each booking, so editing the event type later never rewrites what a past booking meant. `conferencing` is the only kind with no host-typed detail: the link is minted by the calendar port.
+_Avoid_: location (ambiguous — that word is the human string), meeting type, any vendor name
+
 **Calendar write-out**:
 Pushing a confirmed booking onto the host's connected external calendar through the vendor-neutral calendar port, with a conferencing link attached.
 _Avoid_: sync (that's free-busy reading), any vendor name

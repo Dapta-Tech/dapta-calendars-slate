@@ -29,7 +29,7 @@ const base: BookingNotification = {
   host: { name: 'Alex Rivera', email: 'alex@example.com' },
   coHosts: [{ name: 'Jordan', email: 'jordan@example.com' }],
   attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
-  location: 'Google Meet',
+  location: 'Online meeting',
   manageUrl: 'https://app.example.com/manage/bk-123?token=tok',
   stamp: '2026-07-09T12:00:00.000Z',
 };

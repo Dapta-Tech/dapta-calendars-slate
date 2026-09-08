@@ -37,6 +37,7 @@ export default async function NewEventType({
       <EventTypeForm
         schedules={schedules}
         messages={m}
+        locationLabels={msgs.location}
         scheduling={teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
         teamId={teamId}

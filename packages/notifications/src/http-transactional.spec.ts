@@ -339,7 +339,7 @@ describe('BookingNotifier → transactional-v1 (end-to-end idempotency + attachm
     endUtc: '2026-08-01T15:30:00.000Z',
     host: { name: 'Alex Rivera', email: 'alex@example.com' },
     attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
-    location: 'Google Meet',
+    location: 'Online meeting',
     manageUrl: 'https://app.example.com/manage/bk-42?token=tok',
     stamp: '2026-07-09T12:00:00.000Z',
   };
