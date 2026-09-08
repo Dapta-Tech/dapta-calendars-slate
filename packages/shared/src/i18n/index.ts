@@ -178,8 +178,9 @@ export interface BookingMessages {
       setupHoursTitle: string;
       setupHoursDesc: string;
       setupHoursAction: string;
-      setupLinkTitle: string;
-      setupLinkDesc: string;
+      setupEventTitle: string;
+      setupEventDesc: string;
+      setupEventAction: string;
       setupDone: string;
     };
     settings: {
@@ -718,6 +719,47 @@ export interface BookingMessages {
       minSuffix: string;
     };
   };
+  // --- O1: onboarding's two gates (ADR 0002) ------------------------------
+  // Appended as one namespaced block at the end of the catalogue, per #71's
+  // parallel-worktree convention: concurrent units that each append their own
+  // block leave git an adjacency to resolve rather than an overlap.
+  onboarding: {
+    /** Gate 1 — qualification (account level, owner/admin). */
+    qualifyTitle: string;
+    qualifySubtitle: string;
+    /** Labels for Forms' shared question bank, keyed by `question_key`. */
+    questions: {
+      phone: string;
+      industry: string;
+      crm: string;
+      lead_volume: string;
+      lead_source: string;
+      use_case: string;
+    };
+    /** Gate 2 — setup (member level, every active host). */
+    templateTitle: string;
+    templateSubtitle: string;
+    /** Template copy — keys mirror the registry in @slate/engine. */
+    template30MinTitle: string;
+    template30MinDesc: string;
+    template15MinTitle: string;
+    template15MinDesc: string;
+    template45MinTitle: string;
+    template45MinDesc: string;
+    template60MinTitle: string;
+    template60MinDesc: string;
+    /** Intake field labels a template creates on the new event type. */
+    intakeTopic: string;
+    intakeCompany: string;
+    minutes: string;
+    continueLabel: string;
+    saving: string;
+    finish: string;
+    finishing: string;
+    /** Setup only — the escape hatch that makes the Home checklist reachable. */
+    skipForNow: string;
+    errorGeneric: string;
+  };
 }
 
 export const en: BookingMessages = {
@@ -871,8 +913,9 @@ export const en: BookingMessages = {
       setupHoursTitle: 'Set your working hours',
       setupHoursDesc: 'Defines the window your booking link offers.',
       setupHoursAction: 'Create default working hours (Mon–Fri 9–5)',
-      setupLinkTitle: 'Share your booking link',
-      setupLinkDesc: 'Send it to anyone — no account needed on their end.',
+      setupEventTitle: 'Publish an event type',
+      setupEventDesc: 'Until one is live your booking page loads but has nothing to book.',
+      setupEventAction: 'Create an event',
       setupDone: 'Done',
     },
     settings: {
@@ -1416,6 +1459,37 @@ export const en: BookingMessages = {
       minSuffix: 'min',
     },
   },
+  onboarding: {
+    qualifyTitle: 'Tell us about your work',
+    qualifySubtitle: 'A couple of questions so we can set things up for how you actually book.',
+    questions: {
+      phone: 'Phone number',
+      industry: 'What industry are you in?',
+      crm: 'Which CRM does your team use?',
+      lead_volume: 'How many new leads do you handle in a month?',
+      lead_source: 'Where do most of your leads come from?',
+      use_case: 'What will you use scheduling for?',
+    },
+    templateTitle: 'Create your first event',
+    templateSubtitle: 'Pick a starting point. You can rename it, re-time it, or add more later.',
+    template30MinTitle: '30-minute meeting',
+    template30MinDesc: 'The default for most conversations.',
+    template15MinTitle: 'Quick call',
+    template15MinDesc: 'Short check-ins and intros.',
+    template45MinTitle: 'Demo',
+    template45MinDesc: 'Enough room to show something properly.',
+    template60MinTitle: 'One-on-one',
+    template60MinDesc: 'A full hour for deeper conversations.',
+    intakeTopic: 'What would you like to discuss?',
+    intakeCompany: 'Company',
+    minutes: '{minutes} min',
+    continueLabel: 'Continue',
+    saving: 'Saving…',
+    finish: 'Create event and finish',
+    finishing: 'Creating…',
+    skipForNow: 'Skip for now',
+    errorGeneric: 'Something went wrong. Please try again.',
+  },
 };
 
 export const es: BookingMessages = {
@@ -1570,8 +1644,9 @@ export const es: BookingMessages = {
       setupHoursTitle: 'Define tus horas de trabajo',
       setupHoursDesc: 'Define la ventana que ofrece tu enlace de reservas.',
       setupHoursAction: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
-      setupLinkTitle: 'Comparte tu enlace de reservas',
-      setupLinkDesc: 'Envíalo a cualquier persona — no necesita cuenta.',
+      setupEventTitle: 'Publica un tipo de evento',
+      setupEventDesc: 'Hasta que publiques uno tu página de reservas carga, pero no hay nada que reservar.',
+      setupEventAction: 'Crear un evento',
       setupDone: 'Listo',
     },
     settings: {
@@ -2112,6 +2187,37 @@ export const es: BookingMessages = {
       introCall: 'Llamada de introducción',
       minSuffix: 'min',
     },
+  },
+  onboarding: {
+    qualifyTitle: 'Cuéntanos sobre tu trabajo',
+    qualifySubtitle: 'Un par de preguntas para configurar todo según cómo agendas en realidad.',
+    questions: {
+      phone: 'Número de teléfono',
+      industry: '¿En qué industria trabajas?',
+      crm: '¿Qué CRM usa tu equipo?',
+      lead_volume: '¿Cuántos leads nuevos manejas al mes?',
+      lead_source: '¿De dónde vienen la mayoría de tus leads?',
+      use_case: '¿Para qué vas a usar la agenda?',
+    },
+    templateTitle: 'Crea tu primer evento',
+    templateSubtitle: 'Elige un punto de partida. Luego puedes renombrarlo, cambiar la duración o agregar más.',
+    template30MinTitle: 'Reunión de 30 minutos',
+    template30MinDesc: 'La opción por defecto para la mayoría de las conversaciones.',
+    template15MinTitle: 'Llamada rápida',
+    template15MinDesc: 'Para seguimientos cortos y presentaciones.',
+    template45MinTitle: 'Demo',
+    template45MinDesc: 'Espacio suficiente para mostrar algo con calma.',
+    template60MinTitle: 'Reunión 1:1',
+    template60MinDesc: 'Una hora completa para conversaciones más profundas.',
+    intakeTopic: '¿Qué te gustaría conversar?',
+    intakeCompany: 'Empresa',
+    minutes: '{minutes} min',
+    continueLabel: 'Continuar',
+    saving: 'Guardando…',
+    finish: 'Crear evento y terminar',
+    finishing: 'Creando…',
+    skipForNow: 'Ahora no',
+    errorGeneric: 'Algo salió mal. Inténtalo de nuevo.',
   },
 };
 

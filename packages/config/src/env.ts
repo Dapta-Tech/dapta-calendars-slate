@@ -65,6 +65,18 @@ export const serverEnvSchema = z.object({
   ENTITLEMENTS_API_URL: z.string().url().optional(),
   ENTITLEMENTS_API_KEY: z.string().optional(),
 
+  // Onboarding cohort probe (ADR 0002 / #65). The upstream identity service is
+  // asked whether this signup is already a known Dapta identity — a hit selects
+  // the `dapta` cohort (asks 2 questions), a definitive miss selects `cold`
+  // (asks all 6). Any error or timeout FAILS CLOSED to `dapta`, the cohort that
+  // asks less. Unset selects `cold`: a bare fork has no upstream and no lead
+  // funnel to protect. URL-only — never a hardcoded host (publish gate).
+  ONBOARDING_IAM_BASE_URL: z.string().url().optional(),
+  ONBOARDING_IAM_TOKEN: z.string().optional(),
+  // Deliberately short: this probe sits in front of a first-run wizard, so a
+  // slow upstream must degrade to "ask less" quickly rather than stall a signup.
+  ONBOARDING_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 

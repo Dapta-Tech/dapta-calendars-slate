@@ -170,6 +170,23 @@ set** boots on the zero-infra path.
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
 
+### Onboarding cohort probe (first-run wizard)
+
+Decides how many questions a new workspace is asked before it can use the
+dashboard. Leave all three unset for a self-host: with no upstream identity
+service to consult, every new workspace simply answers the full question bank.
+
+A configured probe asks the service whether the signup is an identity it already
+knows — a hit selects the short cohort, a definitive `404` the full one. **Any
+error or timeout fails closed to the short cohort**, so an upstream outage never
+widens the interrogation of a real signup.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `ONBOARDING_IAM_BASE_URL` | — | only to enable the probe (unset = ask the full bank) | no |
+| `ONBOARDING_IAM_TOKEN` | — | only when the probe endpoint requires a bearer | **yes** |
+| `ONBOARDING_PROBE_TIMEOUT_MS` | `1500` | never — raise only if the probe legitimately runs slow | no |
+
 ### Outbox, CORS, rate limiting
 
 | Var | Default | Notes | Secret? |

@@ -15,12 +15,18 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { apiScope, brandingSchema } from '@slate/types';
+import {
+  apiScope,
+  brandingSchema,
+  onboardingQualificationSchema,
+  onboardingSetupSchema,
+} from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
 import { isEmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
+import { OnboardingService } from './onboarding.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { assertAdmin } from './permissions';
 import { unwrap } from './http';
@@ -34,6 +40,7 @@ import { unwrap } from './http';
 export class HostController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
+    @Inject(OnboardingService) private readonly onboarding: OnboardingService,
     @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
@@ -60,6 +67,57 @@ export class HostController {
   async setupStatus(@Req() req: ReqLike) {
     const p = await this.auth.resolveHost(req);
     return this.admin.setupStatus(p);
+  }
+
+  /**
+   * Onboarding's two gates (ADR 0002) — which are owed, this cohort's question
+   * set, and the template registry, in ONE payload so the wizard renders its
+   * first step without a second round-trip.
+   */
+  @Get('me/onboarding')
+  async onboardingState(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.onboarding.getState(p);
+  }
+
+  /**
+   * Gate 1 — the account's qualification answers. Owner/admin only: these
+   * describe the WORKSPACE, and a plain member answering would send
+   * contradictory facts about one business to the growth funnel (ADR 0002).
+   * `assertAdmin` is what makes that a rule rather than a UI convention.
+   */
+  @Post('me/onboarding/qualification')
+  @HttpCode(200)
+  async submitQualification(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const parsed = onboardingQualificationSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.onboarding.submitQualification(p, parsed.data);
+  }
+
+  /**
+   * Gate 2 — create this host's first event type from a named template. Every
+   * active member may call this for themselves, invited members included: the
+   * gate is about one host's own public page, not about the workspace.
+   */
+  @Post('me/onboarding/setup')
+  @HttpCode(200)
+  async submitSetup(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    const parsed = onboardingSetupSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.onboarding.submitSetup(p, parsed.data);
   }
 
   @Get('handle-available')

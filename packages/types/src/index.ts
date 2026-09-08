@@ -5,7 +5,12 @@
  * from the same schema (never trust the client; validate on both sides).
  */
 import { z } from 'zod';
-import { AVAILABILITY_EMPTY_REASONS } from '@slate/engine';
+import {
+  AVAILABILITY_EMPTY_REASONS,
+  ONBOARDING_COHORTS,
+  ONBOARDING_QUESTION_KEYS,
+  ONBOARDING_TEMPLATE_IDS,
+} from '@slate/engine';
 
 // --- Enums (string unions — portable across SQLite & Postgres) -------------
 
@@ -345,6 +350,14 @@ export const meResponseSchema = z.object({
   /** Account-level role + status — the FE gates admin-only surfaces on these. */
   role: z.enum(accountRole),
   status: z.enum(memberStatus),
+  /**
+   * The two onboarding gates (ADR 0002). Server-side verdicts, never derived
+   * by the web app from an empty event-type list — deriving them client-side is
+   * what causes the redirect loops and first-paint flicker this shape avoids.
+   * Optional so a client pinned to the pre-O1 contract still parses.
+   */
+  onboardingRequired: z.boolean().optional(),
+  setupRequired: z.boolean().optional(),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
 
@@ -470,3 +483,59 @@ export const apiErrorSchema = z.object({
   message: z.string(),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;
+
+// --- Onboarding: the two gates (ADR 0002) ---------------------------------
+
+/**
+ * A qualification answer. The VALUE is free text — Forms' bank mixes selects
+ * with open fields and the IAM scores the raw string — so the contract bounds
+ * length rather than shape: the account's write-once `onboarding` blob must
+ * never become unbounded storage for whatever a client posts.
+ */
+export const onboardingAnswerSchema = z.string().trim().min(1).max(500);
+
+/**
+ * Gate 1's submission. Keys are restricted to the shared bank, so an unknown
+ * key is REJECTED rather than stored — the blob is claimed write-once and can
+ * never be corrected, and the IAM cannot score a key it does not know.
+ */
+export const onboardingQualificationSchema = z.object({
+  answers: z
+    .record(z.enum(ONBOARDING_QUESTION_KEYS), onboardingAnswerSchema)
+    .refine((a) => Object.keys(a).length > 0, { message: 'at least one answer required' }),
+});
+export type OnboardingQualificationInput = z.infer<typeof onboardingQualificationSchema>;
+
+/**
+ * Gate 2's submission. The client may only ever NAME a template — never supply
+ * a config — so the entire payload is one enum. Duration, slug and intake
+ * fields come from the server-side registry in @slate/engine.
+ */
+export const onboardingSetupSchema = z.object({
+  templateId: z.enum(ONBOARDING_TEMPLATE_IDS),
+});
+export type OnboardingSetupInput = z.infer<typeof onboardingSetupSchema>;
+
+/** A template as offered to the wizard — copy already resolved to the locale. */
+export const onboardingTemplateViewSchema = z.object({
+  id: z.enum(ONBOARDING_TEMPLATE_IDS),
+  slug: z.string(),
+  lengthMinutes: z.number().int().positive(),
+  title: z.string(),
+  description: z.string(),
+});
+export type OnboardingTemplateView = z.infer<typeof onboardingTemplateViewSchema>;
+
+/**
+ * What `GET /v1/me/onboarding` hands the wizard: which gates are owed, which
+ * questions this cohort answers, and the templates to choose from — one payload,
+ * so the wizard never needs a second round-trip to learn which step to render.
+ */
+export const onboardingStateSchema = z.object({
+  onboardingRequired: z.boolean(),
+  setupRequired: z.boolean(),
+  cohort: z.enum(ONBOARDING_COHORTS),
+  questionKeys: z.array(z.enum(ONBOARDING_QUESTION_KEYS)),
+  templates: z.array(onboardingTemplateViewSchema),
+});
+export type OnboardingState = z.infer<typeof onboardingStateSchema>;

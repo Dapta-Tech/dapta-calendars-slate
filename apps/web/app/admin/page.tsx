@@ -29,11 +29,13 @@ export default async function AdminHome() {
       </h1>
       <p className="mb-8 text-muted-foreground">{h.subtitle}</p>
 
-      <SetupChecklist status={setupStatus} publicUrl={publicUrl} messages={h} />
+      <SetupChecklist status={setupStatus} messages={h} />
 
-      {/* Every member has an auto-assigned handle (short-links §3), so the
-          shareable link always exists — the old "set a handle" nag is gone. */}
-      {publicUrl ? (
+      {/* Every member has an auto-assigned handle (short-links §3), so the link
+          always exists — but a link to a page with nothing on it is not worth
+          copying. Shown only once the host has a published event type (#84);
+          until then the checklist above is telling them to create one. */}
+      {publicUrl && setupStatus.hasPublishedEventType ? (
         <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
           <span className="text-sm text-muted-foreground">{h.bookingLink}</span>
           <CopyLink path={publicUrl} labels={{ copy: h.copy, copied: h.copied, open: h.open }} />
