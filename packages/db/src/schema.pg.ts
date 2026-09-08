@@ -30,6 +30,13 @@ export const account = pgTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: bigint('entitlement_checked_at', { mode: 'number' }),
+  // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
+  // by Forms' question bank. Written once, alongside the claim below.
+  onboarding: jsonb('onboarding'),
+  // The write-once qualification claim. NULL means "this account still owes
+  // onboarding" — which is why migration 0013 STAMPS every pre-existing account,
+  // so the wizard greets new signups only and never traps an existing host.
+  onboardingCompletedAt: bigint('onboarding_completed_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

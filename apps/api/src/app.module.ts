@@ -15,6 +15,7 @@ import {
 } from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
+import { OnboardingService } from './onboarding.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
@@ -117,6 +118,7 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
     CalV2PilotService,
     CalV2RequestIdInterceptor,
     AdminService,
+    OnboardingService,
     AuthService,
     CalendarEffects,
     EmailEffects,

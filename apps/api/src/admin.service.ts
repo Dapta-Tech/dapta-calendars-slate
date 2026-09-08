@@ -9,6 +9,7 @@ import {
   createConnection,
   updateConnection,
   connectionExists,
+  countPublishedEventTypes,
   getConnectionRef,
   getMemberIdentity,
   declineBooking,
@@ -88,6 +89,9 @@ export class AdminService {
   async me(p: HostPrincipal) {
     // Hard invariant: a host must never resolve to NO_SCHEDULE — see
     // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    // The onboarding gates are NOT read here: OnboardingService is their single
+    // authority (it also decides whether gate 1 applies to this deployment at
+    // all), and HostController.me composes the two onto one response.
     await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
     return getMe(this.db, p.accountId, p.memberId);
   }
@@ -119,18 +123,25 @@ export class AdminService {
   /**
    * The Home "Get bookable" checklist (R22: real data, not a static nag) —
    * three steps: a connected calendar, working hours (a default schedule with
-   * ≥1 rule), and a shareable booking link (always true — every member gets an
-   * auto-handle at creation, short-links §3).
+   * ≥1 rule), and at least one PUBLISHED event type.
+   *
+   * That third step used to be `hasBookingLink: !!me?.handle`, and it lied to
+   * every host in the product. Every member is given an auto-handle at creation
+   * (short-links §3), so the flag was true from the first second of an account's
+   * life — the checklist reported "you are bookable" while the host's public
+   * page rendered an empty list with nothing to book. The measure is now the
+   * thing the step is actually about: does this host own a published event type
+   * (ADR 0002 → Consequences, #84).
    */
   async setupStatus(p: HostPrincipal): Promise<{
     hasConnectedCalendar: boolean;
     hasWorkingHours: boolean;
-    hasBookingLink: boolean;
+    hasPublishedEventType: boolean;
   }> {
-    const [connections, schedules, me] = await Promise.all([
+    const [connections, schedules, publishedEventTypes] = await Promise.all([
       listConnections(this.db, p.memberId),
       listSchedules(this.db, p.memberId),
-      getMe(this.db, p.accountId, p.memberId),
+      countPublishedEventTypes(this.db, p.accountId, p.memberId),
     ]);
     let hasWorkingHours = false;
     if (schedules.length > 0) {
@@ -144,7 +155,7 @@ export class AdminService {
     return {
       hasConnectedCalendar: connections.length > 0,
       hasWorkingHours,
-      hasBookingLink: !!me?.handle,
+      hasPublishedEventType: publishedEventTypes > 0,
     };
   }
 

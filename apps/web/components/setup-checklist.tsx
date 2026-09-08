@@ -4,13 +4,12 @@ import { type ReactNode, useTransition } from 'react';
 import Link from 'next/link';
 import type { BookingMessages } from '@slate/shared';
 import { createDefaultScheduleAction } from '@/app/admin/availability/actions';
-import { CopyLink } from './copy-link';
 import { Button } from './ui/button';
 
 export interface SetupStatus {
   hasConnectedCalendar: boolean;
   hasWorkingHours: boolean;
-  hasBookingLink: boolean;
+  hasPublishedEventType: boolean;
 }
 
 type HomeMessages = BookingMessages['admin']['home'];
@@ -23,15 +22,16 @@ type HomeMessages = BookingMessages['admin']['home'];
  */
 export function SetupChecklist({
   status,
-  publicUrl,
   messages: m,
 }: {
   status: SetupStatus;
-  publicUrl: string | null;
   messages: HomeMessages;
 }) {
-  const linkDone = status.hasBookingLink && !!publicUrl;
-  if (status.hasConnectedCalendar && status.hasWorkingHours && linkDone) return null;
+  // The third step is "does this host have something to book", NOT "does a URL
+  // exist" — every member gets an auto-handle, so the old check was true for
+  // everyone while the page it pointed at rendered nothing (#84).
+  const eventDone = status.hasPublishedEventType;
+  if (status.hasConnectedCalendar && status.hasWorkingHours && eventDone) return null;
 
   return (
     <div className="mb-8 flex flex-col gap-3 rounded-md border border-border bg-card p-5">
@@ -63,15 +63,21 @@ export function SetupChecklist({
         action={<CreateWorkingHoursInline label={m.setupHoursAction} />}
       />
 
+      {/* Offering a copy button here was the same lie in UI form: it handed the
+          host a link to an empty page. The gap is closed by publishing an event,
+          so that is what the action does. */}
       <ChecklistRow
-        done={linkDone}
-        title={m.setupLinkTitle}
-        desc={m.setupLinkDesc}
+        done={eventDone}
+        title={m.setupEventTitle}
+        desc={m.setupEventDesc}
         doneLabel={m.setupDone}
         action={
-          publicUrl ? (
-            <CopyLink path={publicUrl} labels={{ copy: m.copy, copied: m.copied, open: m.open }} />
-          ) : null
+          <Link
+            href="/admin/event-types"
+            className="text-sm font-medium text-primary underline underline-offset-4"
+          >
+            {m.setupEventAction}
+          </Link>
         }
       />
     </div>

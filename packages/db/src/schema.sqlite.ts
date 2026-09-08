@@ -29,6 +29,14 @@ export const account = sqliteTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: integer('entitlement_checked_at'),
+  // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
+  // by Forms' question bank. Written once, alongside the claim below.
+  // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
+  onboarding: text('onboarding'),
+  // The write-once qualification claim. NULL means "this account still owes
+  // onboarding" — which is why migration 0012 STAMPS every pre-existing account,
+  // so the wizard greets new signups only and never traps an existing host.
+  onboardingCompletedAt: integer('onboarding_completed_at'),
   createdAt: integer('created_at').notNull(),
 });
 

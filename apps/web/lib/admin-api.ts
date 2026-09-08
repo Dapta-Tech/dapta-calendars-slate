@@ -6,7 +6,7 @@
  * ApiError the /admin gate turns into a redirect to /login.
  */
 import { redirect } from 'next/navigation';
-import type { EventLocationDto } from '@slate/types';
+import type { EventLocationDto, OnboardingState } from '@slate/types';
 import { getSession, clearSession, authProvider } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -78,6 +78,14 @@ export interface Me {
   /** Account-level role + status — the FE gates admin-only surfaces on these. */
   role: AccountRole;
   status: MemberStatus;
+  /**
+   * The two onboarding gates (ADR 0002). SERVER-side verdicts: the admin guard
+   * redirects on these rather than inferring a gate from an empty event-type
+   * list, which is what causes redirect loops and first-paint flicker.
+   * Optional so a web build talking to a pre-O1 API still renders.
+   */
+  onboardingRequired?: boolean;
+  setupRequired?: boolean;
 }
 
 export type AccountRole = 'owner' | 'admin' | 'member';
@@ -100,13 +108,24 @@ export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || r
 export interface SetupStatus {
   hasConnectedCalendar: boolean;
   hasWorkingHours: boolean;
-  hasBookingLink: boolean;
+  /**
+   * At least one PUBLISHED event type of this host's own. Replaces the old
+   * `hasBookingLink`, which measured the auto-created handle and so reported
+   * "bookable" to every host while their public page rendered nothing (#84).
+   */
+  hasPublishedEventType: boolean;
 }
 
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   // Home "Get bookable" checklist — real data, not a static nag (see AdminService.setupStatus).
   setupStatus: () => req<SetupStatus>('GET', '/v1/me/setup-status'),
+  // Onboarding's two gates (ADR 0002).
+  onboardingState: () => req<OnboardingState>('GET', '/v1/me/onboarding'),
+  submitQualification: (answers: Record<string, string>) =>
+    req<{ ok: true; claimed: boolean }>('POST', '/v1/me/onboarding/qualification', { answers }),
+  submitOnboardingSetup: (templateId: string) =>
+    req<{ id: string; slug: string }>('POST', '/v1/me/onboarding/setup', { templateId }),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   // Vanity account slug (premium — included with the Dapta AI subscription).

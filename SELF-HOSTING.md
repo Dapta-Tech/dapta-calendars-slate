@@ -171,6 +171,28 @@ set** boots on the zero-infra path.
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
 
+### Onboarding cohort probe (first-run wizard)
+
+**Leave all three unset for a self-host.** The qualification questions exist to
+feed a growth funnel; with no upstream identity service there is no funnel, so
+the whole gate is skipped and your first admin goes straight to the dashboard.
+A self-hoster is never asked which CRM their team uses.
+
+The per-host setup step still runs — it creates your first event type from a
+template, which is what makes your booking page show something — and it carries
+a "Skip for now".
+
+With a probe configured, the service is asked whether the signup is an identity
+it already knows: a hit selects the short cohort, a definitive `404` the full
+one. **Any error or timeout fails closed to the short cohort**, so an upstream
+outage never widens the interrogation of a real signup.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `ONBOARDING_IAM_BASE_URL` | — | only to enable the probe (unset = ask the full bank) | no |
+| `ONBOARDING_IAM_TOKEN` | — | only when the probe endpoint requires a bearer | **yes** |
+| `ONBOARDING_PROBE_TIMEOUT_MS` | `1500` | never — raise only if the probe legitimately runs slow | no |
+
 ### Outbox, CORS, rate limiting
 
 | Var | Default | Notes | Secret? |
