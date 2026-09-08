@@ -1,5 +1,5 @@
 import { adminApi } from '@/lib/admin-api';
-import { defaultBranding, getMessages } from '@slate/shared';
+import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { Studio } from './studio';
 
@@ -16,7 +16,10 @@ export default async function BookingPageSettings() {
   const t = getMessages(locale).admin;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
-  const accent = profile?.member.brandColor ?? '#cbe84f';
+  // The literal used to live here. If DEFAULT_ACCENT ever moves, a hardcoded
+  // copy seeds the studio from a colour the public page would never render —
+  // preview != prod, one indirection out.
+  const accent = profile?.member.brandColor ?? DEFAULT_ACCENT;
   const style = (profile?.member.style ?? {}) as Record<string, unknown>;
   const def = defaultBranding(displayName);
   const axes = {
