@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
 import { AppSwitcher } from '@/components/app-switcher';
+import { ThemeToggle } from '@/components/theme-toggle';
+import type { Theme } from '@/lib/theme';
 
 type AdminMessages = BookingMessages['admin'];
 
@@ -118,6 +120,7 @@ export function AdminShell({
   user,
   messages,
   initialCollapsed = false,
+  initialTheme,
   children,
 }: {
   user: ShellUser | null;
@@ -125,11 +128,17 @@ export function AdminShell({
   messages: AdminMessages;
   /** Server-read cookie value → no collapse-rail FOUC on reload. */
   initialCollapsed?: boolean;
+  /** Server-read cookie value → the toggle's icon is right on the first paint,
+   *  same reason and same shape as `initialCollapsed` (#90). */
+  initialTheme: Theme;
   children: ReactNode;
 }) {
   const pathname = usePathname();
   const c = messages.common;
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  // Owned here, not in ThemeToggle: the footer renders twice (desktop rail and
+  // mobile drawer) and both instances have to agree across a resize.
+  const [theme, setTheme] = useState<Theme>(initialTheme);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
 
@@ -220,22 +229,33 @@ export function AdminShell({
     </form>
   );
 
+  // Identity on one row, icon actions on the next.
+  //
+  // They shared a single row while there were two actions. A third (the theme
+  // toggle) does not fit: three 44px targets plus the avatar leave 25px for the
+  // name in a 240px rail, which truncates "Alex Rivera" to nothing. Dropping to
+  // a smaller target to buy the room would trade a legible name for a hit area
+  // below the 44px floor, so the row splits instead — the one direction the rail
+  // has to spare.
   const renderFooter = (footerCollapsed: boolean) => (
     <div
-      className={`mt-auto grid items-center gap-2 border-t border-border pt-3 ${
-        footerCollapsed ? 'grid-cols-1 justify-items-center' : 'grid-cols-[30px_1fr_auto]'
+      className={`mt-auto flex flex-col border-t border-border pt-3 ${
+        footerCollapsed ? 'items-center gap-1' : 'gap-2'
       }`}
     >
-      <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
-        {initial}
-      </span>
-      {!footerCollapsed ? (
-        <span className="truncate text-sm text-foreground" title={userLabel}>
-          {userLabel}
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
+          {initial}
         </span>
-      ) : null}
+        {!footerCollapsed ? (
+          <span className="truncate text-sm text-foreground" title={userLabel}>
+            {userLabel}
+          </span>
+        ) : null}
+      </span>
       {/* Icon actions stay reachable in the collapsed rail too. */}
       <span className={`flex items-center ${footerCollapsed ? 'flex-col gap-1' : 'gap-0.5'}`}>
+        <ThemeToggle theme={theme} onFlip={setTheme} messages={c.theme} />
         {viewPublic}
         {signOut}
       </span>
