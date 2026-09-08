@@ -61,6 +61,11 @@ export const TEMPLATE_VARIABLES = [
   'start_time',
   'end_time',
   'location',
+  // The conferencing link. UNIQUE among these: it is the one variable resolved
+  // at DELIVERY time rather than snapshotted at enqueue, because it is minted
+  // later by the calendar outbox row (ADR 0007). Empty when the write-out has
+  // not produced one — the empty-line rule then drops its whole line.
+  'meeting_url',
   'manage_url',
   'cancel_link',
   'reschedule_link',
@@ -142,6 +147,7 @@ export function templateVars(
     start_time: formatWhen(n.startUtc, tz, locale),
     end_time: formatWhen(n.endUtc, tz, locale),
     location: n.location ?? '',
+    meeting_url: n.meetingUrl ?? '',
     manage_url: n.manageUrl ?? '',
     cancel_link: n.manageUrl ?? '',
     reschedule_link: n.manageUrl ?? '',
@@ -218,6 +224,7 @@ Your booking "{{event_title}}" is confirmed.
 When: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   attendee_pending: {
@@ -246,6 +253,7 @@ Was: {{previous_start_time}}
 Now: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   attendee_cancellation: {
@@ -263,6 +271,7 @@ Reminder: "{{event_title}}" starts {{reminder_lead}}.
 When: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   host_booked: {
@@ -272,6 +281,7 @@ Manage your booking: {{manage_url}}`,
 {{attendee_name}} ({{attendee_email}}) booked "{{event_title}}".
 When: {{start_time}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 {{pending_note}}`,
   },
   host_rescheduled: {
@@ -281,7 +291,8 @@ Where: {{location}}
 The booking "{{event_title}}" with {{attendee_name}} has been rescheduled.
 Was: {{previous_start_time}}
 Now: {{start_time}}
-Where: {{location}}`,
+Where: {{location}}
+Join the meeting: {{meeting_url}}`,
   },
   host_cancelled: {
     subject: 'Cancelled: {{event_title}} — {{start_time}}',
@@ -303,7 +314,8 @@ Reason: {{cancellation_reason}}`,
 
 Reminder: "{{event_title}}" with {{attendee_name}} starts {{reminder_lead}}.
 When: {{start_time}}
-Where: {{location}}`,
+Where: {{location}}
+Join the meeting: {{meeting_url}}`,
   },
   follow_up: {
     subject: 'Thanks for meeting — {{event_title}}',
@@ -323,6 +335,7 @@ Tu reserva "{{event_title}}" está confirmada.
 Cuándo: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   attendee_pending: {
@@ -351,6 +364,7 @@ Antes: {{previous_start_time}}
 Ahora: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   attendee_cancellation: {
@@ -368,6 +382,7 @@ Recordatorio: "{{event_title}}" comienza {{reminder_lead}}.
 Cuándo: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   host_booked: {
@@ -377,6 +392,7 @@ Gestiona tu reserva: {{manage_url}}`,
 {{attendee_name}} ({{attendee_email}}) reservó "{{event_title}}".
 Cuándo: {{start_time}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 {{pending_note}}`,
   },
   host_rescheduled: {
@@ -386,7 +402,8 @@ Dónde: {{location}}
 La reserva "{{event_title}}" con {{attendee_name}} ha sido reprogramada.
 Antes: {{previous_start_time}}
 Ahora: {{start_time}}
-Dónde: {{location}}`,
+Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}`,
   },
   host_cancelled: {
     subject: 'Cancelada: {{event_title}} — {{start_time}}',
@@ -408,7 +425,8 @@ Motivo: {{cancellation_reason}}`,
 
 Recordatorio: "{{event_title}}" con {{attendee_name}} comienza {{reminder_lead}}.
 Cuándo: {{start_time}}
-Dónde: {{location}}`,
+Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}`,
   },
   follow_up: {
     subject: 'Gracias por la reunión — {{event_title}}',

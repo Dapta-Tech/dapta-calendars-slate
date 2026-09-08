@@ -143,7 +143,10 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     }
     if (row.kind === 'email') {
       if (row.payload == null) throw new Error('email outbox row missing payload');
-      await this.email.deliver(row.action, row.payload, row.accountId);
+      // `attempts` bounds the conferencing-link wait (ADR 0007): the delivery
+      // side needs to know how long it has already waited to decide when to
+      // stop waiting and send the mail without the link.
+      await this.email.deliver(row.action, row.payload, row.accountId, row.attempts);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);
