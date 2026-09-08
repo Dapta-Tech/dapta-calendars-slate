@@ -16,7 +16,7 @@ import {
   parseJsonColumn,
   sql,
 } from '@slate/db';
-import { verifyManageToken } from '@slate/engine';
+import { isLocationKind, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
@@ -262,8 +262,8 @@ export class BookingService {
     // location column (same field calendar write-out reads); the meeting link is
     // the provider-generated URL persisted per booking in booking_reference (the
     // real source — booking.meeting_url is not populated by the create flow).
-    const details = await this.db.get<{ location: string | null }>(
-      sql`SELECT location FROM booking WHERE id = ${b.id} LIMIT 1`,
+    const details = await this.db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE id = ${b.id} LIMIT 1`,
     );
     const ref = await this.db.get<{ meeting_url: string | null }>(
       sql`SELECT meeting_url FROM booking_reference
@@ -298,6 +298,7 @@ export class BookingService {
         timeZone: attendee?.time_zone ?? 'UTC',
       },
       location: details?.location ?? null,
+      locationKind: isLocationKind(details?.location_kind) ? details.location_kind : null,
       meetingUrl: ref?.meeting_url ?? null,
       reschedule:
         ctx?.handle && ctx.slug ? { accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug } : undefined,

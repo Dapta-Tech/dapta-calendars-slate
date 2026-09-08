@@ -13,12 +13,14 @@ import {
   computeSlots,
   generateManageToken,
   intersectInstants,
+  parseEventLocation,
   selectFixedRoundRobinHosts,
   selectLuckyHost,
   unionInstants,
   verifyManageToken,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type EventLocation,
   type HostCandidate,
   type Interval,
 } from '@slate/engine';
@@ -470,6 +472,8 @@ export interface TeamAvailabilityResult {
     lengthMinutes: number;
     bookingFields: BookingFieldDef[];
     schedulingType: string | null;
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: EventLocation | null;
   };
   timeZone: string;
   slots: string[];
@@ -557,6 +561,7 @@ export async function getTeamAvailability(
       lengthMinutes: et.length_minutes,
       bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
       schedulingType: et.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(et.locations, null)),
     },
     timeZone: args.displayTimeZone ?? team.time_zone,
     slots,
@@ -775,11 +780,12 @@ export async function createTeamBooking(
 
   // Snapshot the team event type's configured Where onto the booking (F5), same
   // as the personal path — otherwise team bookings show no location.
-  const eventLocation = parseJsonColumn<string | null>(et.locations, null);
+  const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key, created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title}, ${eventLocation},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
+      ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
@@ -1222,7 +1228,10 @@ export interface BookingNotificationContext {
   startUtc: string;
   endUtc: string;
   status: string;
+  /** The human detail of the Where; null for conferencing (no typed detail). */
   location: string | null;
+  /** The kind snapshotted on the booking; null on pre-kind rows. */
+  locationKind: string | null;
   host: { name: string | null; email: string | null };
   attendee: { name: string; email: string; timeZone: string };
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
@@ -1253,6 +1262,7 @@ export async function loadBookingNotificationContext(
     end_ms: number;
     status: string;
     location: string | null;
+    location_kind: string | null;
     host_member_id: string | null;
     host_name: string | null;
     host_email: string | null;
@@ -1265,7 +1275,7 @@ export async function loadBookingNotificationContext(
     event_slug: string | null;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
-               b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+               b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
                m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
@@ -1296,6 +1306,7 @@ export async function loadBookingNotificationContext(
     endUtc: new Date(Number(row.end_ms)).toISOString(),
     status: row.status,
     location: row.location,
+    locationKind: row.location_kind,
     host: { name: row.host_name, email: row.host_email },
     attendee: {
       name: row.att_name ?? '',

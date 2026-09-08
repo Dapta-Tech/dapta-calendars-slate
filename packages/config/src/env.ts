@@ -115,6 +115,11 @@ export const serverEnvSchema = z.object({
   CALENDAR_API_TOKEN: z.string().optional(),
   CALENDAR_BACKEND_MODULE: z.string().optional(),
   CALENDAR_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Display name for the conferencing the connected backend mints, shown to the
+  // host when they pick the `conferencing` location kind. Deploy config only —
+  // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
+  // generic wording, which is the correct default for a bare fork.
+  CALENDAR_CONFERENCING_LABEL: z.string().max(60).optional(),
 
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval

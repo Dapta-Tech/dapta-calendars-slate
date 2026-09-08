@@ -57,6 +57,7 @@ import {
   type EmailTemplateKey,
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
+import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
@@ -308,7 +309,12 @@ export class AdminService {
    * just leaves the row as-is (the UI falls back to "account unknown").
    */
   async listConnections(p: HostPrincipal) {
-    const rows = await listConnections(this.db, p.memberId);
+    const rows = (await listConnections(this.db, p.memberId)).map((c) => ({
+      ...c,
+      // ADR 0008: the running product names the conferencing platform, the repo
+      // never does. Null on a bare fork ⇒ the editor shows generic wording.
+      conferencingLabel: this.provider.conferencingLabel ?? null,
+    }));
     if (!this.provider.enabled) return rows;
     // Backfill missing primaryEmail in small batches (optibot #32 fix): an
     // unbounded Promise.all here would fan out one provider call PER
@@ -794,7 +800,7 @@ export class AdminService {
         email: 'guest@example.com',
         timeZone: me?.timeZone ?? 'UTC',
       },
-      location: 'Google Meet',
+      location: getMessages(locale).location.conferencing,
       manageUrl: 'https://example.com/manage/sample',
       bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
       cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
