@@ -118,6 +118,74 @@ export const bookingFieldSchema = z.object({
 });
 export type BookingField = z.infer<typeof bookingFieldSchema>;
 
+/* --- Per-event reminders -------------------------------------------------- */
+
+/** At most this many reminders on one event type (#68 decision 7). */
+export const MAX_REMINDERS_PER_EVENT = 10;
+/** Lead bounds, shared with the retired account screen: 5 minutes … 28 days. */
+export const MIN_REMINDER_LEAD_MINUTES = 5;
+export const MAX_REMINDER_LEAD_MINUTES = 28 * 24 * 60;
+export const MAX_REMINDER_SUBJECT = 200;
+export const MAX_REMINDER_BODY = 5000;
+
+/**
+ * ONE reminder on an event type: its own switch, its own lead time, its own
+ * subject and body (#68 decision 1). `kind` splits the two directions — a
+ * `reminder` fires `leadMinutes` BEFORE start, a `follow_up` that many minutes
+ * AFTER the end.
+ *
+ * `subject`/`body` NULL = the shipped default template, resolved in the host's
+ * locale at enqueue time (same convention `notification_setting` uses), which
+ * is what lets the copy-forward migration carry an account's untouched copy
+ * without freezing today's English into every event type.
+ *
+ * `id` is unique WITHIN one event type's list, not globally: it is what the
+ * deliver-time gate re-reads to decide whether a reminder queued days ago is
+ * still wanted.
+ */
+export const eventReminderSchema = z.object({
+  id: z.string().min(1).max(64),
+  kind: z.enum(['reminder', 'follow_up']),
+  enabled: z.boolean(),
+  leadMinutes: z
+    .number()
+    .int()
+    .min(MIN_REMINDER_LEAD_MINUTES)
+    .max(MAX_REMINDER_LEAD_MINUTES),
+  subject: z.string().max(MAX_REMINDER_SUBJECT).nullable(),
+  body: z.string().max(MAX_REMINDER_BODY).nullable(),
+});
+export type EventReminder = z.infer<typeof eventReminderSchema>;
+
+/**
+ * The whole list as an event type accepts it. Caps are enforced here so the
+ * API and the editor cannot disagree: at most 10 reminders, at most one
+ * follow-up, no duplicate ids.
+ */
+export const eventRemindersSchema = z
+  .array(eventReminderSchema)
+  .max(MAX_REMINDERS_PER_EVENT + 1)
+  .superRefine((rows, ctx) => {
+    if (rows.filter((r) => r.kind === 'reminder').length > MAX_REMINDERS_PER_EVENT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `At most ${MAX_REMINDERS_PER_EVENT} reminders per event type.`,
+      });
+    }
+    if (rows.filter((r) => r.kind === 'follow_up').length > 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At most one follow-up per event type.' });
+    }
+    if (new Set(rows.map((r) => r.id)).size !== rows.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Reminder ids must be unique.' });
+    }
+  });
+
+/** The `{{form.<field name>}}` namespace (#68 decision 2) — the prefix keeps a
+ *  question named `location` from shadowing the built-in `{{location}}`. The
+ *  editor already sanitizes field names to this charset. */
+export const FORM_VARIABLE_PREFIX = 'form.';
+export const formVariableNameRe = /^[A-Za-z0-9_]{1,64}$/;
+
 /** ISO-8601 UTC instant. */
 export const isoUtcSchema = z.string().datetime({ offset: true });
 
@@ -443,6 +511,10 @@ export const eventTypeInputSchema = z.object({
   requiresConfirmation: z.boolean().optional(),
   seatsPerTimeSlot: z.number().int().positive().nullable().optional(),
   bookingFields: z.array(bookingFieldSchema).optional(),
+  /** Reminders + follow-up, owned by the event type rather than the account
+   *  (#68). Omitted on create ⇒ the shipped pre-fill (24h + 1h on, follow-up
+   *  off); an EMPTY array is a deliberate "no reminders", never a reset. */
+  reminders: eventRemindersSchema.optional(),
   /** For team events: the host member ids (round-robin pool). */
   hostMemberIds: z.array(z.string()).optional(),
   /** For team events: per-host round-robin detail. Takes precedence over hostMemberIds. */

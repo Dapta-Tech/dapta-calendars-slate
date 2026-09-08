@@ -7,6 +7,13 @@ import { randomUUID } from 'node:crypto';
 import { parseEventLocation, type EventLocation, type EventLocationInput } from '@slate/engine';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
+import {
+  defaultEventReminders,
+  effectiveReminders,
+  normalizeEventReminders,
+  parseEventReminders,
+  type EventReminder,
+} from './reminders';
 
 export type CrudResult<T> =
   | { ok: true; value: T }
@@ -46,6 +53,10 @@ export interface EventTypeView {
   requiresConfirmation: boolean;
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
+  /** Reminders + follow-up owned by this event type (#68). NULL in the column
+   *  means "never configured" — the view surfaces the shipped defaults so the
+   *  editor opens on what this event actually sends. */
+  reminders: EventReminder[];
   hostMemberIds: string[];
   /** Per-host priority/weight/fixed (team events); empty for personal events. */
   hosts: HostDetail[];
@@ -78,13 +89,14 @@ interface EventTypeDbRow {
   requires_confirmation: number;
   seats_per_time_slot: number | null;
   booking_fields: unknown;
+  reminders: unknown;
   destination_calendar_id: string | null;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields,
-  destination_calendar_id`;
+  reminders, destination_calendar_id`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
@@ -112,6 +124,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     requiresConfirmation: !!r.requires_confirmation,
     seatsPerTimeSlot: r.seats_per_time_slot,
     bookingFields: parseJsonColumn<unknown[]>(r.booking_fields, []),
+    reminders: effectiveReminders(parseEventReminders(r.reminders)),
     hostMemberIds: hosts.map((h) => h.member_id),
     hosts: hosts.map((h) => ({
       memberId: h.member_id,
@@ -218,6 +231,9 @@ export interface EventTypeInputRepo {
   requiresConfirmation?: boolean;
   seatsPerTimeSlot?: number | null;
   bookingFields?: unknown[];
+  /** Reminders + follow-up (#68). UNDEFINED on create ⇒ the shipped pre-fill
+   *  (24h + 1h on, follow-up off); an EMPTY array is a deliberate "none". */
+  reminders?: EventReminder[];
   hostMemberIds?: string[];
   /** Per-host detail (priority/weight/fixed). Takes precedence over hostMemberIds. */
   hosts?: HostDetailInput[];
@@ -265,14 +281,16 @@ export async function createEventType(
     : null;
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
-          length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields,
+          length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, seats_per_time_slot, destination_calendar_id, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
           ${input.schedulingType ?? null},
-          ${jsonParam(db, input.bookingFields ?? null)}, ${input.minimumBookingNotice ?? 120},
+          ${jsonParam(db, input.bookingFields ?? null)},
+          ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
+          ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId}, ${now})`,
   );
@@ -314,6 +332,11 @@ export async function updateEventType(
   if (input.requiresConfirmation !== undefined) set('requires_confirmation', sql`${input.requiresConfirmation ? 1 : 0}`);
   if (input.seatsPerTimeSlot !== undefined) set('seats_per_time_slot', sql`${input.seatsPerTimeSlot ?? null}`);
   if (input.bookingFields !== undefined) set('booking_fields', jsonParam(db, input.bookingFields ?? null));
+  // An empty array is a deliberate "no reminders" and is stored as `[]`, never
+  // as NULL — NULL would read back as the shipped defaults and hand the host
+  // back the reminder they just deleted.
+  if (input.reminders !== undefined)
+    set('reminders', jsonParam(db, normalizeEventReminders(input.reminders)));
 
   // PHASE 2 (personal events only — team events, `existing.teamId` set, keep no
   // per-event calendar config, Phase 3): validate against the OWNER member's

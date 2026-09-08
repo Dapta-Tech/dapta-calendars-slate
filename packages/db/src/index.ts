@@ -13,6 +13,7 @@ export * from './short-links';
 export * from './webhook-url';
 export * from './outbox';
 export * from './notification-settings';
+export * from './reminders';
 export * from './onboarding';
 export * from './v2-pilot';
 export { migrate } from './migrate';

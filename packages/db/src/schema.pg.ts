@@ -135,6 +135,12 @@ export const eventType = pgTable('event_type', {
   schedulingType: text('scheduling_type'),
   locations: jsonb('locations'),
   bookingFields: jsonb('booking_fields'),
+  /**
+   * Per-event reminders + follow-up (#68). NULL = never configured (the read
+   * falls back to the shipped defaults); `[]` = deliberately none. See
+   * `reminders.ts` for the row shape and the copy-forward.
+   */
+  reminders: jsonb('reminders'),
   metadata: jsonb('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),

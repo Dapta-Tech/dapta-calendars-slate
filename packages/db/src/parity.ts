@@ -41,6 +41,7 @@ import {
   resolveScheduleTimeZone,
   type BookingFieldDef,
 } from './repository';
+import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
@@ -1240,6 +1241,30 @@ export interface BookingNotificationContext {
   hostLocale: string | null;
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
+  /**
+   * The EVENT TYPE's reminders + follow-up (#68) — what the enqueue path
+   * schedules from, replacing the account's single lead-time list. NULL on the
+   * column (never configured) resolves to the shipped defaults here; a booking
+   * with no event type at all gets those defaults too, which is what it got
+   * before reminders moved.
+   */
+  reminders: EventReminder[];
+  /**
+   * The booking's own intake answers, RAW (`string | boolean | string[]`), for
+   * the `{{form.<field name>}}` namespace. Snapshotted into the outbox payload
+   * at enqueue time like the rest of the notification (ADR 0007) — the answer
+   * exists the moment the booking does, so nothing waits for delivery. They
+   * stay raw here because rendering a boolean as Yes/Sí needs the locale, which
+   * is the renderer's business, not the storage layer's.
+   */
+  formAnswers: Record<string, unknown>;
+}
+
+/** `booking.responses` as a plain own-property record; anything else (null, an
+ *  array, a legacy scalar) becomes `{}` so `{{form.*}}` simply resolves empty. */
+function asAnswerRecord(raw: unknown): Record<string, unknown> {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return { ...(raw as Record<string, unknown>) };
 }
 
 /**
@@ -1273,11 +1298,14 @@ export async function loadBookingNotificationContext(
     host_handle: string | null;
     account_code: string | null;
     event_slug: string | null;
+    event_reminders: unknown;
+    responses: unknown;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
                m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
+               et.reminders AS event_reminders, b.responses AS responses,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -1315,6 +1343,8 @@ export async function loadBookingNotificationContext(
     },
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
     hostLocale: row.host_locale,
+    reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
+    formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
         ? {

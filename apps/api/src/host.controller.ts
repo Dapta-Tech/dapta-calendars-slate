@@ -23,7 +23,7 @@ import {
 } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
-import { isEmailTemplateKey } from '@slate/notifications';
+import { isAccountTemplateKey, isEmailTemplateKey, type EmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
 import { OnboardingService } from './onboarding.service';
@@ -466,8 +466,7 @@ export class HostController {
   ) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    assertAccountTemplateKey(key);
     const patch = parseNotificationPatch(key, body);
     return this.admin.updateNotificationSetting(p, key, patch);
   }
@@ -482,8 +481,7 @@ export class HostController {
   ) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    assertAccountTemplateKey(key);
     return this.admin.previewNotificationTemplate(p, key, {
       subject: cleanTemplateField(body?.subject, MAX_SUBJECT),
       body: cleanTemplateField(body?.body, MAX_BODY),
@@ -496,10 +494,25 @@ export class HostController {
   async resetNotificationTemplate(@Req() req: ReqLike, @Param('key') key: string) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    assertAccountTemplateKey(key);
     return this.admin.resetNotificationTemplate(p, key);
   }
+}
+
+/**
+ * Settings → Notifications edits ACCOUNT-WIDE transactional mail only. The
+ * reminder and follow-up keys moved to the event type (#68) — one place per
+ * thing — so they are refused here with a message that says where they went,
+ * rather than silently accepting a write nothing would read.
+ */
+function assertAccountTemplateKey(key: string): asserts key is EmailTemplateKey {
+  if (isAccountTemplateKey(key)) return;
+  throw new BadRequestException({
+    error: 'BAD_REQUEST',
+    message: isEmailTemplateKey(key)
+      ? 'Reminders and the follow-up are configured on the event type.'
+      : 'Unknown notification key.',
+  });
 }
 
 const MAX_SUBJECT = 200;

@@ -3,7 +3,7 @@
 import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
-import type { EventLocationDto } from '@slate/types';
+import type { EventLocationDto, EventReminder } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -25,6 +25,9 @@ export interface EventTypePayload {
   hidden: boolean;
   scheduleId: string | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;
+  /** Reminders + follow-up owned by this event (#68). An empty array is a
+   *  deliberate "no reminders", never a reset to the shipped defaults. */
+  reminders: EventReminder[];
   /** Team events: scheduling method + per-host round-robin detail. */
   schedulingType?: string | null;
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;

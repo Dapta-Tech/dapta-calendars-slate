@@ -6,7 +6,7 @@
  * ApiError the /admin gate turns into a redirect to /login.
  */
 import { redirect } from 'next/navigation';
-import type { EventLocationDto, OnboardingState } from '@slate/types';
+import type { EventLocationDto, EventReminder, OnboardingState } from '@slate/types';
 import { getSession, clearSession, authProvider } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -245,6 +245,9 @@ export interface EventType {
   requiresConfirmation: boolean;
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
+  /** Reminders + follow-up owned by this event (#68) — always the EFFECTIVE
+   *  list, so a never-configured event arrives carrying the shipped defaults. */
+  reminders: EventReminder[];
   hostMemberIds: string[];
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;

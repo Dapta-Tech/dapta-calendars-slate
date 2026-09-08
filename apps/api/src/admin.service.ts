@@ -46,7 +46,7 @@ import {
   upsertNotificationSetting,
 } from '@slate/db';
 import {
-  EMAIL_TEMPLATE_KEYS,
+  ACCOUNT_TEMPLATE_KEYS,
   TEMPLATE_VARIABLES,
   defaultEnabledFor,
   defaultTemplate,
@@ -63,7 +63,7 @@ import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { asConnector } from './calendar.http-provider';
-import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES, DEFAULT_FOLLOW_UP_LEAD_MINUTES } from './email-effects';
+import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
@@ -748,8 +748,10 @@ export class AdminService {
     const stored = await getNotificationSettings(this.db, p.accountId);
     return {
       variables: [...TEMPLATE_VARIABLES],
-      defaultReminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
-      settings: EMAIL_TEMPLATE_KEYS.map((key) => {
+      // Reminders and the follow-up moved to the event type (#68) — one place
+      // per thing, so this screen no longer lists them. The stored rows stay as
+      // the copy-forward source; they are just not editable here any more.
+      settings: ACCOUNT_TEMPLATE_KEYS.map((key) => {
         const s =
           stored.get(key) ??
           { ...defaultNotificationSetting(key), enabled: defaultEnabledFor(key) };
@@ -762,12 +764,6 @@ export class AdminService {
           defaultSubject: def.subject,
           defaultBody: def.body,
           customized: s.subject != null || s.body != null,
-          reminderLeadMinutes:
-            key === 'attendee_reminder'
-              ? (s.reminderLeadMinutes ?? DEFAULT_REMINDER_LEAD_MINUTES)
-              : key === 'follow_up'
-                ? (s.reminderLeadMinutes ?? DEFAULT_FOLLOW_UP_LEAD_MINUTES)
-                : undefined,
         };
       }),
     };

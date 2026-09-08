@@ -8,7 +8,7 @@
  * vars + the email KIND (which fixes the status badge + call-to-action set).
  * All interpolated values are HTML-escaped — templates carry user/attendee text.
  */
-import type { TemplateVariable } from './templates';
+import type { TemplateVarMap } from './templates';
 
 export type EmailKind =
   | 'confirmation'
@@ -21,7 +21,8 @@ export type EmailKind =
 
 export type Audience = 'attendee' | 'host';
 
-type Vars = Record<TemplateVariable, string>;
+/** Every built-in plus the open `{{form.*}}` tail — see TemplateVarMap. */
+type Vars = TemplateVarMap;
 
 const LIME = '#cbe84f';
 const INK = '#1a1a1c';

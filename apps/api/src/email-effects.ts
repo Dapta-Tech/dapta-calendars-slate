@@ -6,6 +6,7 @@ import {
   loadBookingNotificationContext,
   defaultNotificationSetting,
   type BookingNotificationContext,
+  type EventReminder,
   type NotificationSetting,
   type Db,
 } from '@slate/db';
@@ -38,11 +39,12 @@ export type EmailKind =
   | 'reminder'
   | 'follow_up';
 
-/** Default reminder lead times (minutes before start): 24h and 1h. */
-export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
-
-/** Default follow-up lead (minutes AFTER the meeting ends): 1h. */
-export const DEFAULT_FOLLOW_UP_LEAD_MINUTES = [60];
+/**
+ * Reminder timing no longer lives here. The shipped 24h + 1h leads and the 1h
+ * follow-up moved to `@slate/db`'s `reminders` module, beside the storage that
+ * pre-fills a new event type with them (#68) — one definition of what a host
+ * gets by default, read by the enqueue path through the booking's event type.
+ */
 
 /**
  * Which per-account notification keys a lifecycle event fans out to. Each side
@@ -100,9 +102,10 @@ export function emailKeyFor(kind: EmailKind, audience: 'attendee' | 'host'): Ema
  *   - The payload snapshots the resolved template (per-account custom or
  *     shipped default in the host's locale) at enqueue time, so a later
  *     template edit never rewrites queued mail.
- *   - Reminder lead times come from the account's reminder setting; reminders
- *     are ALSO gated at deliver time (long-lived rows — flipping the toggle
- *     OFF must silence already-scheduled reminders).
+ *   - Reminders and the follow-up are the exception: they come from the EVENT
+ *     TYPE (#68), one outbox row per enabled reminder per side, and are ALSO
+ *     gated at deliver time by that reminder's own id (long-lived rows — a
+ *     reminder switched off or deleted must silence what it scheduled).
  *
  * The payload snapshots the fully-resolved `BookingNotification` at enqueue
  * time (correct semantics: an email about "booking created" should reflect the
@@ -164,22 +167,34 @@ export class EmailEffects {
       const settings = await getNotificationSettings(this.db, ctx.accountId);
       const now = opts.now ?? Date.now();
       const startMs = new Date(ctx.startUtc).getTime();
-      const leads =
-        opts.leadMinutes ??
-        settings.get('attendee_reminder')?.reminderLeadMinutes ??
-        DEFAULT_REMINDER_LEAD_MINUTES;
+      // Each ENABLED reminder on the EVENT TYPE is its own row: its own lead,
+      // its own copy, its own id. `leadMinutes` stays as a caller override for
+      // tests and scripts; it borrows the first reminder's copy.
+      const rows = opts.leadMinutes
+        ? opts.leadMinutes.map((leadMinutes, i) => ({
+            ...(ctx.reminders.find((r) => r.kind === 'reminder') ?? {
+              id: `r${i + 1}`,
+              kind: 'reminder' as const,
+              enabled: true,
+              subject: null,
+              body: null,
+            }),
+            id: `r${i + 1}`,
+            leadMinutes,
+          }))
+        : ctx.reminders.filter((r) => r.kind === 'reminder' && r.enabled);
       for (const side of KIND_SIDES.reminder) {
-        const n = this.sideNotification('reminder', ctx, side, settings, { manageUrl: opts.manageUrl });
-        if (!n) continue;
-        for (const lead of leads) {
-          const fireAt = startMs - lead * 60_000;
+        for (const row of rows) {
+          const n = this.sideNotification('reminder', ctx, side, settings, { manageUrl: opts.manageUrl }, row);
+          if (!n) continue;
+          const fireAt = startMs - row.leadMinutes * 60_000;
           if (fireAt <= now) continue; // too late for this lead — skip, don't spam
           await enqueueOutbox(this.db, {
             kind: 'email',
             action: 'reminder',
             bookingUid: uid,
             accountId: ctx.accountId,
-            payload: JSON.stringify({ ...n, reminderLeadMinutes: lead }),
+            payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
           });
         }
@@ -221,22 +236,33 @@ export class EmailEffects {
       const settings = await getNotificationSettings(this.db, ctx.accountId);
       const now = opts.now ?? Date.now();
       const endMs = new Date(ctx.endUtc).getTime();
-      const leads =
-        opts.leadMinutes ??
-        settings.get('follow_up')?.reminderLeadMinutes ??
-        DEFAULT_FOLLOW_UP_LEAD_MINUTES;
+      // The event type carries at most one follow-up row, off unless the host
+      // turned it on (#68 decision 5).
+      const stored = ctx.reminders.find((r) => r.kind === 'follow_up');
+      const rows = opts.leadMinutes
+        ? opts.leadMinutes.map((leadMinutes, i) => ({
+            id: stored?.id ?? `f${i + 1}`,
+            kind: 'follow_up' as const,
+            enabled: true,
+            leadMinutes,
+            subject: stored?.subject ?? null,
+            body: stored?.body ?? null,
+          }))
+        : stored && stored.enabled
+          ? [stored]
+          : [];
       for (const side of KIND_SIDES.follow_up) {
-        const n = this.sideNotification('follow_up', ctx, side, settings, { manageUrl: opts.manageUrl });
-        if (!n) continue;
-        for (const lead of leads) {
-          const fireAt = endMs + lead * 60_000;
+        for (const row of rows) {
+          const n = this.sideNotification('follow_up', ctx, side, settings, { manageUrl: opts.manageUrl }, row);
+          if (!n) continue;
+          const fireAt = endMs + row.leadMinutes * 60_000;
           if (fireAt <= now) continue; // meeting long over — never send stale thanks
           await enqueueOutbox(this.db, {
             kind: 'email',
             action: 'follow_up',
             bookingUid: uid,
             accountId: ctx.accountId,
-            payload: JSON.stringify({ ...n, reminderLeadMinutes: lead }),
+            payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
           });
         }
@@ -305,23 +331,43 @@ export class EmailEffects {
     side: { key: EmailTemplateKey; audience: 'attendee' | 'host' },
     settings: Map<string, NotificationSetting>,
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    // Present for reminder / follow_up: the EVENT TYPE's row, which owns the
+    // switch, the lead and the copy for both sides (#68).
+    reminder?: EventReminder,
   ): BookingNotification | null {
-    const setting =
-      settings.get(side.key) ??
-      { ...defaultNotificationSetting(side.key), enabled: defaultEnabledFor(side.key) };
-    if (!setting.enabled) {
-      this.log.log(`skip ${kind}/${side.key} for ${ctx.uid} — disabled by account settings`);
-      return null;
+    if (reminder) {
+      if (!reminder.enabled) return null;
+    } else {
+      const setting =
+        settings.get(side.key) ??
+        { ...defaultNotificationSetting(side.key), enabled: defaultEnabledFor(side.key) };
+      if (!setting.enabled) {
+        this.log.log(`skip ${kind}/${side.key} for ${ctx.uid} — disabled by account settings`);
+        return null;
+      }
     }
     if (side.audience === 'host' && !ctx.host.email && !ctx.coHosts.some((h) => h.email)) {
       return null; // nobody to notify on the host side
     }
+    const setting = reminder
+      ? // The row's subject/body are the INVITEE copy. The host copy renders the
+        // shipped `host_reminder` default in the host's locale, at the same lead
+        // and under the same switch: one text cannot serve both sides, and the
+        // host template says "with {{attendee_name}}", which is the wrong mail
+        // to send an invitee.
+        side.audience === 'attendee'
+        ? { subject: reminder.subject, body: reminder.body }
+        : null
+      : (settings.get(side.key) ?? defaultNotificationSetting(side.key));
     return {
       ...this.toNotification(ctx, extra),
       audience: side.audience,
       template: resolveTemplate(side.key, setting, ctx.hostLocale),
       templateLocale: ctx.hostLocale,
       pending: kind === 'pending',
+      // `{{form.*}}` is reminder copy only (CONTEXT.md): the account-wide
+      // transactional templates cannot know one event type's questions.
+      ...(reminder ? { formAnswers: ctx.formAnswers } : {}),
     };
   }
 
@@ -371,7 +417,12 @@ export class EmailEffects {
    * row is marked done — not an error to retry).
    */
   async deliver(kind: string, payloadJson: string, outboxAccountId?: string | null): Promise<void> {
-    const n = JSON.parse(payloadJson) as BookingNotification & { reminderLeadMinutes?: number };
+    const n = JSON.parse(payloadJson) as BookingNotification & {
+      reminderLeadMinutes?: number;
+      /** The event-type reminder that scheduled this row; absent on rows queued
+       *  before reminders moved off the account. */
+      reminderId?: string;
+    };
     if (!n.accountId && outboxAccountId) n.accountId = outboxAccountId;
     if (!n.accountId && n.uid) {
       const current = await loadBookingNotificationContext(this.db, n.uid);
@@ -385,9 +436,24 @@ export class EmailEffects {
         'email outbox row missing account context — skipped (signed transport requires a tenant)',
       );
     }
-    if (kind === 'follow_up' && n.accountId) {
-      // Long-lived opt-in row: re-check the toggle at deliver time; absent
-      // setting = the key's default (OFF for follow_up).
+    if ((kind === 'reminder' || kind === 'follow_up') && n.reminderId && n.uid) {
+      // A reminder row can sit dormant for 28 days, so the switch is re-read at
+      // delivery — the same reason the account toggle was re-read before this
+      // change. It now keys on the REMINDER, not the account: a row switched
+      // off, or deleted outright, silences the mail it scheduled. Skipping is a
+      // decision, not a failure: the row is marked done and never retried.
+      const current = await loadBookingNotificationContext(this.db, n.uid);
+      const row = current?.reminders.find((r) => r.id === n.reminderId);
+      if (!row || !row.enabled) {
+        this.log.log(
+          `skip queued ${kind} ${n.reminderId} for ${n.uid} — ${row ? 'switched off' : 'deleted'} on the event type`,
+        );
+        return;
+      }
+    }
+    if (kind === 'follow_up' && !n.reminderId && n.accountId) {
+      // Pre-migration row (no reminderId): keep the account gate it was queued
+      // under, so nothing already in the outbox changes meaning mid-flight.
       const settings = await getNotificationSettings(this.db, n.accountId);
       const enabled = settings.get('follow_up')?.enabled ?? defaultEnabledFor('follow_up');
       if (!enabled) {
@@ -395,7 +461,7 @@ export class EmailEffects {
         return;
       }
     }
-    if (kind === 'reminder' && n.accountId) {
+    if (kind === 'reminder' && !n.reminderId && n.accountId) {
       const settings = await getNotificationSettings(this.db, n.accountId);
       const enabledFor = (audience: 'attendee' | 'host') =>
         settings.get(emailKeyFor('reminder', audience))?.enabled ?? true;
