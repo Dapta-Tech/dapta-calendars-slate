@@ -74,12 +74,34 @@ function declarations(body: string): Record<string, string> {
   return out;
 }
 
+/**
+ * The PLAIN (non-custom) property declarations in a rule body — the mirror of
+ * `declarations()` above, which reads `--*` only.
+ *
+ * A theme block is not only its tokens. `color-scheme` is a plain property and
+ * decides what the BROWSER paints for itself, so a parity check that reads
+ * custom properties alone is blind to half of what a theme declares. The two
+ * readers together are the whole rule.
+ */
+function plainDeclarations(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const decl of body.split(';')) {
+    const match = /^\s*([a-z][\w-]*)\s*:\s*([\s\S]+)$/.exec(decl);
+    if (match && !match[1].startsWith('--')) out[match[1]] = match[2].trim();
+  }
+  return out;
+}
+
 const sheet = stripComments(TOKENS_CSS);
-const BASE = declarations(ruleBody(sheet, ':root,'));
-const LIGHT = declarations(ruleBody(sheet, ":root[data-theme='light']"));
-const PREFERS = declarations(
-  ruleBody(ruleBody(sheet, '@media (prefers-color-scheme: light)'), ":root:not([data-theme='dark'])"),
+const BASE_BODY = ruleBody(sheet, ':root,');
+const LIGHT_BODY = ruleBody(sheet, ":root[data-theme='light']");
+const PREFERS_BODY = ruleBody(
+  ruleBody(sheet, '@media (prefers-color-scheme: light)'),
+  ":root:not([data-theme='dark'])",
 );
+const BASE = declarations(BASE_BODY);
+const LIGHT = declarations(LIGHT_BODY);
+const PREFERS = declarations(PREFERS_BODY);
 
 /** A theme is the base declarations with that theme's overrides applied. */
 const THEMES: Record<string, Record<string, string>> = {
@@ -255,6 +277,26 @@ describe('token sheet structure', () => {
     // of them is the hardest kind of theme bug to notice by eye.
     expect(Object.keys(PREFERS).sort()).toEqual(Object.keys(LIGHT).sort());
     expect(PREFERS).toEqual(LIGHT);
+    // Plain properties too, not just tokens. `color-scheme` is the one the sheet
+    // declares today, and it slipped past this check while it read `--*` alone —
+    // so the check now covers the whole declaration, not the instance that
+    // exposed the gap.
+    expect(plainDeclarations(PREFERS_BODY)).toEqual(plainDeclarations(LIGHT_BODY));
+  });
+
+  it('every theme block tells the browser which half it is on', () => {
+    // `color-scheme` is the one part of a theme no token can carry: it is what
+    // the USER AGENT reads to paint the things it owns — `<select>` popups, the
+    // internals of `<input type='date'>`, autofill, the default scrollbar, the
+    // canvas behind an overscroll bounce. A theme block without it renders the
+    // browser's own chrome for the OTHER palette.
+    //
+    // Asserted per block by value, because the parity check above only proves
+    // the two LIGHT blocks agree with each other — it would be equally happy if
+    // both said `dark`.
+    expect(plainDeclarations(BASE_BODY)['color-scheme']).toBe('dark');
+    expect(plainDeclarations(LIGHT_BODY)['color-scheme']).toBe('light');
+    expect(plainDeclarations(PREFERS_BODY)['color-scheme']).toBe('light');
   });
 
   it('the accent is one value on dark, so the rim is invisible there', () => {
