@@ -216,7 +216,7 @@ export function DateTimePicker({
         </div>
         <div className="grid grid-cols-7 gap-1 text-center">
           {weekdays.map((w) => (
-            <span key={w} className="py-1 text-[11px] uppercase text-muted-foreground">
+            <span key={w} className="py-1 text-xs uppercase text-muted-foreground">
               {w}
             </span>
           ))}
@@ -246,7 +246,7 @@ export function DateTimePicker({
                   // a bordered today reads as a second selection (QA2 fix 8b).
                   isToday &&
                     !selected &&
-                    "relative font-semibold after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary after:content-['']",
+                    "relative font-semibold after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary-edge after:content-['']",
                   disabled && 'cursor-not-allowed opacity-40 hover:border-border',
                 )}
               >

@@ -750,7 +750,7 @@ function ConnectionRow({
                 {connectionLabel(c, m)}
               </span>
               {c.isDestination ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
                   <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
@@ -795,10 +795,10 @@ function ConnectionRow({
             </button>
           </div>
           {health.state === 'error' && health.detail ? (
-            <span className="max-w-[220px] text-right text-[11px] leading-tight text-destructive">{health.detail}</span>
+            <span className="max-w-[220px] text-right text-xs leading-tight text-destructive">{health.detail}</span>
           ) : null}
           {health.checkedCaption ? (
-            <span className="text-[11px] leading-tight text-muted-foreground">{health.checkedCaption}</span>
+            <span className="text-xs leading-tight text-muted-foreground">{health.checkedCaption}</span>
           ) : null}
         </div>
       </div>
@@ -997,7 +997,7 @@ export function ConnectionsClient({
           bookings status-pill fix for why that matters). */}
       <span className="flex items-center gap-2 text-sm">
         <span
-          className={`flex h-2.5 w-2.5 rounded-full ${status.enabled ? 'bg-primary' : 'bg-muted-foreground/60'}`}
+          className={`flex h-2.5 w-2.5 rounded-full ${status.enabled ? 'bg-primary-edge' : 'bg-muted-foreground/60'}`}
           aria-hidden
         />
         <span className="font-medium text-foreground">{status.enabled ? m.syncOnTitle : m.syncOffTitle}</span>

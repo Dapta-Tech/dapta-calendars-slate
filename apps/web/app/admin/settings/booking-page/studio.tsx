@@ -238,7 +238,7 @@ export function Studio(init: StudioInit) {
         <div className="flex items-center gap-3">
           <span
             className={`rounded-sm px-2 py-1 text-xs ${
-              isDirty ? 'bg-secondary text-secondary-foreground' : 'bg-muted text-muted-foreground'
+              isDirty ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
             }`}
           >
             {isDirty ? m.unsavedChanges : m.allChangesSaved}

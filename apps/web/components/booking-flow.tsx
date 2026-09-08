@@ -273,7 +273,7 @@ export function BookingFlow({
                       >
                         <span className="whitespace-nowrap">{s.label}</span>
                         {isGroup ? (
-                          <span className="whitespace-nowrap text-[11px] text-muted-foreground">
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">
                             {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
                           </span>
                         ) : null}

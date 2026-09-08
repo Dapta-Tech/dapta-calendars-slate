@@ -82,6 +82,23 @@ function contrast(a: Rgb, b: Rgb): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/**
+ * The WCAG contrast ratio between two hex colors, rounded to one decimal.
+ *
+ * The math was already here, private, serving `clampAccent`. It is exported
+ * because the token sheet's contrast law is now a unit test (`tokens.spec.ts`)
+ * that measures the shipped `tokens.css` rather than a TypeScript mirror of it,
+ * and that test needs the same arithmetic the engine clamps with — one
+ * implementation, so a palette cannot pass the test and fail the engine.
+ * Returns 0 if either color fails to parse.
+ */
+export function contrastRatio(a: string, b: string): number {
+  const ca = parseHex(a);
+  const cb = parseHex(b);
+  if (!ca || !cb) return 0;
+  return Math.round(contrast(ca, cb) * 10) / 10;
+}
+
 function mix(rgb: Rgb, target: Rgb, amount: number): Rgb {
   return {
     r: rgb.r + (target.r - rgb.r) * amount,
@@ -130,7 +147,12 @@ export function accentVars(rawAccent: string): Record<string, string> {
     '--accent-contrast': onAccent(accent),
     '--accent-hover': toHex(mix(parseHex(accent)!, WHITE, 0.16)),
     '--accent-soft': `color-mix(in srgb, ${accent} 16%, transparent)`,
-    '--accent-wash': `color-mix(in srgb, ${accent} 22%, var(--bg-app))`,
+    // Composited against `--background`, not `--bg-app`: that variable is defined
+    // nowhere in this repo, so the whole declaration was invalid and the cover
+    // band on the public profile and in the studio preview painted nothing. This
+    // is the minimum edit that makes an existing live declaration valid; the
+    // theme-aware rework of this function is slice B1 (ADR 0004).
+    '--accent-wash': `color-mix(in srgb, ${accent} 22%, var(--background))`,
   };
 }
 
@@ -161,9 +183,17 @@ const DENSITY_SPACE: Record<BookingDensity, { pad: string; gap: string; slotPad:
   compact: { pad: '12px', gap: '8px', slotPad: '8px' },
 };
 
+/**
+ * The booking page's three font axes. This is a HOST choice about their own
+ * page, not product chrome, so the reskin leaves the axis alone — `sans` still
+ * means "the product's own face" and a host who picked it keeps whatever that
+ * is. Only the fallback name inside the `sans` display stack moved from Poppins
+ * to Figtree, so an unbranded page and the product agree on the face they name
+ * when `--font-display` is absent.
+ */
 const FONT_STACKS: Record<BookingFont, { display: string; body: string }> = {
   sans: {
-    display: 'var(--font-display, Poppins, ui-sans-serif, system-ui, sans-serif)',
+    display: 'var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif)',
     body: 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)',
   },
   rounded: {

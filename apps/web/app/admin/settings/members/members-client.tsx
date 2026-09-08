@@ -142,7 +142,7 @@ export function MembersClient({
                 <span className="flex items-center gap-2 truncate text-sm font-medium">
                   {member.displayName ?? member.email ?? member.id.slice(0, 8)}
                   {isSelf ? (
-                    <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                       {m.you}
                     </span>
                   ) : null}
