@@ -3,6 +3,7 @@
 import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
+import type { EventLocationDto } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -13,7 +14,8 @@ export interface EventTypePayload {
   slug: string;
   description: string | null;
   lengthMinutes: number;
-  location: string | null;
+  /** The location kind + its detail; null clears the Where. */
+  location: EventLocationDto | null;
   minimumBookingNotice: number;
   slotInterval: number | null;
   beforeEventBuffer: number;

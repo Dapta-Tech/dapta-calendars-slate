@@ -4,6 +4,7 @@
  * shape as the rest of the repository. All ops are account-scoped by the caller.
  */
 import { randomUUID } from 'node:crypto';
+import { parseEventLocation, type EventLocation, type EventLocationInput } from '@slate/engine';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 
@@ -33,7 +34,8 @@ export interface EventTypeView {
   title: string;
   description: string | null;
   lengthMinutes: number;
-  location: string | null;
+  /** Normalized from `event_type.locations`, which may still hold legacy text. */
+  location: EventLocation | null;
   scheduleId: string | null;
   hidden: boolean;
   schedulingType: string | null;
@@ -99,7 +101,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     title: r.title,
     description: r.description,
     lengthMinutes: r.length_minutes,
-    location: parseJsonColumn<string | null>(r.locations, null),
+    location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
     scheduleId: r.schedule_id,
     hidden: !!r.hidden,
     schedulingType: r.scheduling_type,
@@ -204,7 +206,8 @@ export interface EventTypeInputRepo {
   title: string;
   description?: string | null;
   lengthMinutes: number;
-  location?: string | null;
+  /** The kind object, or a legacy free-text string — both are normalized on write. */
+  location?: EventLocationInput | string | null;
   scheduleId?: string | null;
   hidden?: boolean;
   schedulingType?: string | null;
@@ -267,7 +270,7 @@ export async function createEventType(
           requires_confirmation, seats_per_time_slot, destination_calendar_id, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
-          ${jsonParam(db, input.location ?? null)}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
+          ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
           ${input.schedulingType ?? null},
           ${jsonParam(db, input.bookingFields ?? null)}, ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
@@ -297,7 +300,10 @@ export async function updateEventType(
   if (input.title !== undefined) set('title', sql`${input.title}`);
   if (input.description !== undefined) set('description', sql`${input.description ?? null}`);
   if (input.lengthMinutes !== undefined) set('length_minutes', sql`${input.lengthMinutes}`);
-  if (input.location !== undefined) set('locations', jsonParam(db, input.location ?? null));
+  // Normalize on write so the column converges on the kind shape: a legacy
+  // string in, a `{ kind, detail }` object stored.
+  if (input.location !== undefined)
+    set('locations', jsonParam(db, parseEventLocation(input.location ?? null)));
   if (input.scheduleId !== undefined) set('schedule_id', sql`${input.scheduleId ?? null}`);
   if (input.hidden !== undefined) set('hidden', sql`${input.hidden ? 1 : 0}`);
   if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);

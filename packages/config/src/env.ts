@@ -65,12 +65,13 @@ export const serverEnvSchema = z.object({
   ENTITLEMENTS_API_URL: z.string().url().optional(),
   ENTITLEMENTS_API_KEY: z.string().optional(),
 
-  // Onboarding cohort probe (ADR 0002 / #65). The upstream identity service is
-  // asked whether this signup is already a known Dapta identity — a hit selects
-  // the `dapta` cohort (asks 2 questions), a definitive miss selects `cold`
-  // (asks all 6). Any error or timeout FAILS CLOSED to `dapta`, the cohort that
-  // asks less. Unset selects `cold`: a bare fork has no upstream and no lead
-  // funnel to protect. URL-only — never a hardcoded host (publish gate).
+  // Onboarding cohort probe (ADR 0002 / #65). UNSET disables gate 1 entirely:
+  // the qualification questions feed a growth funnel, and with no upstream there
+  // is no funnel, so a bare fork's first admin is never asked them. Set, the
+  // identity service is asked whether this signup is already a known identity —
+  // a hit selects the `dapta` cohort (2 questions), a definitive miss `cold`
+  // (all 6). Any error or timeout FAILS CLOSED to `dapta`, the cohort that asks
+  // less. URL-only — never a hardcoded host (publish gate).
   ONBOARDING_IAM_BASE_URL: z.string().url().optional(),
   ONBOARDING_IAM_TOKEN: z.string().optional(),
   // Deliberately short: this probe sits in front of a first-run wizard, so a
@@ -127,6 +128,11 @@ export const serverEnvSchema = z.object({
   CALENDAR_API_TOKEN: z.string().optional(),
   CALENDAR_BACKEND_MODULE: z.string().optional(),
   CALENDAR_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Display name for the conferencing the connected backend mints, shown to the
+  // host when they pick the `conferencing` location kind. Deploy config only —
+  // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
+  // generic wording, which is the correct default for a bare fork.
+  CALENDAR_CONFERENCING_LABEL: z.string().max(60).optional(),
 
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval

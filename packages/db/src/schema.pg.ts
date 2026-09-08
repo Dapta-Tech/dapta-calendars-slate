@@ -182,7 +182,13 @@ export const booking = pgTable('booking', {
   startMs: bigint('start_ms', { mode: 'number' }).notNull(),
   endMs: bigint('end_ms', { mode: 'number' }).notNull(),
   status: text('status').notNull().default('accepted'),
+  /** Human detail of the Where (address, number, custom label). */
   location: text('location'),
+  /**
+   * The event type's location kind, SNAPSHOTTED at booking time. Null for rows
+   * written before the kind existed — the render falls back to `location`.
+   */
+  locationKind: text('location_kind'),
   meetingUrl: text('meeting_url'),
   attendeeTimeZone: text('attendee_time_zone'),
   responses: jsonb('responses'),

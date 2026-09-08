@@ -12,7 +12,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import type { Interval } from '@slate/engine';
+import { isLocationKind, type Interval, type LocationKind } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { parseJsonColumn } from './repository';
@@ -130,8 +130,14 @@ export interface CalendarWriteContext {
   title: string;
   startUtc: string;
   endUtc: string;
-  /** B9: a Meet link is requested when this is exactly `'google_meet'`. */
+  /** The human detail of the Where (address, number, custom label). */
   location: string | null;
+  /**
+   * B9: a conferencing link is requested when this is `'conferencing'` — the
+   * kind snapshotted on the booking, never a vendor literal (R15).
+   * Null on rows written before the kind existed.
+   */
+  locationKind: LocationKind | null;
   attendeeTimeZone: string | null;
   attendeeEmails: string[];
   organizerEmail: string | null;
@@ -154,13 +160,14 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     start_ms: number;
     end_ms: number;
     location: string | null;
+    location_kind: string | null;
     attendee_time_zone: string | null;
     host_member_id: string | null;
     event_type_id: string | null;
     host_email: string | null;
     metadata: unknown;
   }>(
-    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.attendee_time_zone,
+    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.location_kind, b.attendee_time_zone,
                b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -224,6 +231,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     startUtc: new Date(Number(b.start_ms)).toISOString(),
     endUtc: new Date(Number(b.end_ms)).toISOString(),
     location: b.location,
+    locationKind: isLocationKind(b.location_kind) ? b.location_kind : null,
     attendeeTimeZone: b.attendee_time_zone,
     attendeeEmails,
     organizerEmail: b.host_email,

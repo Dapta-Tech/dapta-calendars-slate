@@ -146,6 +146,7 @@ set** boots on the zero-infra path.
 | `CALENDAR_API_TOKEN` | — | required for the generic REST backend | **yes** |
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
+| `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
 
@@ -320,6 +321,13 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 - **Rollback:** deploy the previous image tags. Additive migrations mean the old
   code ignores columns it doesn't know about, so no down-migration is required for a
   normal rollback. Keep previous images in your registry.
+- **One exception — `booking.location_kind` (`postgres/0013`, `sqlite/0012`).**
+  That migration also *mutates data*: it back-fills the legacy conferencing token
+  from `booking.location` into `booking.location_kind` and blanks the old text, so
+  a booking taken before the upgrade keeps its meeting link. Deploying the previous
+  images does not restore that text. Rollback across this migration is
+  forward-only; take a snapshot before upgrading if you need a true point-in-time
+  revert.
 
 ## Troubleshooting
 

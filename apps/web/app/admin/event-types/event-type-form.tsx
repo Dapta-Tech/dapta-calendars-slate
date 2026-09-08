@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
+import { LOCATION_KINDS, type LocationKind } from '@slate/types';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { Button } from '@/components/ui/button';
@@ -127,10 +128,114 @@ function CalendarsForEventSection({
   );
 }
 
+/**
+ * WHERE the meeting happens: a location KIND plus, for the kinds that need one,
+ * a detail. Each kind gets its own labelled input, so every shape a location can
+ * take is reachable — a bare text box could only ever express "custom".
+ *
+ * `conferencing` is the one kind with no detail: the link is minted by the
+ * calendar port when the booking is confirmed. Its display name is injected by
+ * the deployment (ADR 0008) — this repo names no platform, so a bare fork shows
+ * only the generic wording.
+ */
+function LocationField({
+  kind,
+  detail,
+  onKind,
+  onDetail,
+  connections,
+  m,
+  locationLabels,
+}: {
+  kind: LocationKind | '';
+  detail: string;
+  onKind: (kind: LocationKind | '') => void;
+  onDetail: (detail: string) => void;
+  connections?: Connection[];
+  m: EventTypeMessages;
+  locationLabels: BookingMessages['location'];
+}) {
+  // ADR 0008: the repo names no conferencing platform, the RUNNING product does.
+  // The port reports it and it rides here on the connections response the editor
+  // already fetches — so a host sees which platform they are choosing. Null (a
+  // bare fork, or no calendar connected) falls back to the generic wording,
+  // which is correct: there is no conferencing to name. This is a HOST-facing
+  // affordance only; invitee surfaces stay generic.
+  const conferencingLabel =
+    connections?.map((c) => c.conferencingLabel).find((l) => !!l && l.trim() !== '') ?? null;
+  const kindLabel: Record<LocationKind, string> = {
+    conferencing: conferencingLabel?.trim() || locationLabels.conferencing,
+    in_person: locationLabels.inPerson,
+    phone: locationLabels.phone,
+    custom: locationLabels.custom,
+  };
+  const detailLabel: Partial<Record<LocationKind, string>> = {
+    in_person: m.locationDetailAddress,
+    phone: m.locationDetailPhone,
+    custom: m.locationDetailCustom,
+  };
+  // Warn, never disable: a host must be able to configure conferencing BEFORE
+  // connecting a calendar, or connecting later leaves a silently broken event.
+  // `connections === undefined` is a team event — each host has their own
+  // calendar, so there is nothing here to be sure about.
+  const missingDestination =
+    kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Field label={m.fLocation}>
+        <select
+          value={kind}
+          onChange={(e) => {
+            const next = e.target.value as LocationKind | '';
+            onKind(next);
+            // Detail belongs to the kind that asked for it — carrying an
+            // address over into "Phone" would be worse than starting clean.
+            if (next !== kind) onDetail('');
+          }}
+          className={inputCls}
+        >
+          <option value="">{m.locationNone}</option>
+          {LOCATION_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {kindLabel[k]}
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      {kind && kind !== 'conferencing' ? (
+        <Field label={detailLabel[kind] ?? m.fLocation}>
+          <input
+            value={detail}
+            onChange={(e) => onDetail(e.target.value)}
+            placeholder={m.locationPlaceholder}
+            className={inputCls}
+          />
+        </Field>
+      ) : null}
+
+      {kind === 'conferencing' ? (
+        <p className="text-xs text-muted-foreground">{m.locationConferencingHint}</p>
+      ) : null}
+
+      {missingDestination ? (
+        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          {m.locationNoDestinationWarning}{' '}
+          <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
+            {m.calendarLinkConnect} →
+          </Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function EventTypeForm({
   initial,
   schedules = [],
   messages: m,
+  locationLabels,
   scheduling,
   teamMembers,
   teamId,
@@ -144,6 +249,9 @@ export function EventTypeForm({
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
   messages: EventTypeMessages;
+  /** Location-kind names (from the shared `location` catalog) — the same copy
+   *  the public booking page and the manage page render. */
+  locationLabels: BookingMessages['location'];
   /** Scheduling-method names + hints (from the shared `scheduling` catalog). */
   scheduling?: BookingMessages['scheduling'];
   /** The team's members — present only for TEAM event types (edit or create). */
@@ -170,7 +278,10 @@ export function EventTypeForm({
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [slugTouched, setSlugTouched] = useState(!!initial);
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [location, setLocation] = useState(initial?.location ?? '');
+  // Where the meeting happens: a KIND plus, for the kinds that need one, a
+  // detail. '' is "not specified" — the same absent value the column always had.
+  const [locationKind, setLocationKind] = useState<LocationKind | ''>(initial?.location?.kind ?? '');
+  const [locationDetail, setLocationDetail] = useState(initial?.location?.detail ?? '');
   const [lengthMinutes, setLength] = useState(initial?.lengthMinutes ?? 30);
   // Hydrate from the stored event — these used to default silently, so EDITING
   // an event reset its notice/interval/buffers on save (QA2 fix 2).
@@ -282,7 +393,14 @@ export function EventTypeForm({
         title,
         slug,
         description: description.trim() || null,
-        location: location.trim() || null,
+        location: locationKind
+          ? {
+              kind: locationKind,
+              // Conferencing has no host-authored detail — the link is minted
+              // by the calendar port at write-out.
+              detail: locationKind === 'conferencing' ? null : locationDetail.trim() || null,
+            }
+          : null,
         lengthMinutes: Number(lengthMinutes),
         minimumBookingNotice: Number(minNotice),
         slotInterval: slotInterval === '' ? null : Number(slotInterval),
@@ -352,9 +470,15 @@ export function EventTypeForm({
       <Field label={m.fDescription}>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputCls} />
       </Field>
-      <Field label={m.fLocation}>
-        <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder={m.locationPlaceholder} className={inputCls} />
-      </Field>
+      <LocationField
+        kind={locationKind}
+        detail={locationDetail}
+        onKind={setLocationKind}
+        onDetail={setLocationDetail}
+        connections={connections}
+        m={m}
+        locationLabels={locationLabels}
+      />
       <div className="grid grid-cols-3 gap-3">
         <Field label={m.fLength}>
           <input type="number" value={lengthMinutes} onChange={(e) => setLength(Number(e.target.value))} className={inputCls} />

@@ -17,6 +17,7 @@ import {
   type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
+import { formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { DB, EMAIL, ENV, NOTIFIER } from './tokens';
 
@@ -337,7 +338,17 @@ export class EmailEffects {
       host: ctx.host,
       coHosts: ctx.coHosts,
       attendee: ctx.attendee,
-      location: ctx.location,
+      // The Where as one human string, rendered from the booking's snapshotted
+      // KIND. Deliberately GENERIC for conferencing: the platform name is a
+      // host-facing affordance read from the calendar port in the event-type
+      // editor (ADR 0008), and reading it from env here instead would both
+      // bypass the port and disagree with the public booking page an invitee
+      // just used. The link itself is C2's job — resolved at delivery time.
+      location: formatBookingLocation(
+        ctx.locationKind,
+        ctx.location,
+        getMessages(ctx.hostLocale ?? 'en'),
+      ),
       manageUrl: extra.manageUrl ?? null,
       cancellationReason: extra.cancellationReason ?? null,
       previousStartUtc: extra.previousStartUtc ?? null,

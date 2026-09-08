@@ -150,8 +150,9 @@ export class CalendarEffects {
           endUtc: ctx.endUtc,
           attendeeEmails: ctx.attendeeEmails,
           organizerEmail: ctx.organizerEmail,
-          // B9: the exact literal that triggers a conferencing link.
-          requestConferenceLink: ctx.location === 'google_meet',
+          // B9: the booking's snapshotted location KIND triggers the link — no
+          // vendor literal on the public path (R15, ADR 0008).
+          requestConferenceLink: ctx.locationKind === 'conferencing',
           timeZone: ctx.attendeeTimeZone,
         });
       } catch (err) {

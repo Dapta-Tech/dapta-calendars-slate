@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   ALL_BOOKING_THEMES,
+  DEFAULT_ACCENT,
   THEME_PRESETS,
-  accentVars,
+  brandVars,
   widgetStyleVars,
   brandingClassOf,
   clampAccent,
@@ -20,6 +21,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
+import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
@@ -156,11 +158,17 @@ export function Studio(init: StudioInit) {
   const isDirty = snapshot !== initialSnapshot.current;
 
   const activeTheme = useMemo(() => matchTheme(axes), [axes]);
+  // `brandVars`, not `accentVars`: the preview has to emit the PRODUCT accent
+  // tokens too. Emitting only `--accent*` left `--primary-ink`/`--primary-edge`
+  // resolving from the admin palette, so the preview drew the host's links and
+  // rims in our lime while the real page drew them in the host's colour — the
+  // exact "preview == prod" break ADR 0004 is written against. Same function and
+  // same canvas as BrandedShell, so the two cannot drift.
   const previewVars = useMemo(
-    () => ({ ...accentVars(accent), ...widgetStyleVars(axes) }) as Record<string, string>,
+    () => ({ ...brandVars(accent, BOOKING_CANVAS), ...widgetStyleVars(axes) }) as Record<string, string>,
     [accent, axes],
   );
-  const adjusted = accentWasAdjusted(accent);
+  const adjusted = accentWasAdjusted(accent, BOOKING_CANVAS);
 
   // Live handle availability (debounced, per-account).
   useEffect(() => {
@@ -218,7 +226,14 @@ export function Studio(init: StudioInit) {
         displayName,
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
-        brandColor: clampAccent(accent),
+        // The host's RAW pick, not the clamped one. A clamp is only meaningful
+        // against a ground (ADR 0004), so a stored clamped colour has a canvas
+        // baked into it — and B2, which lets a host move their page to the light
+        // canvas, would have nothing left to re-clamp: a navy saved today comes
+        // back as the washed `#66798c` the dark canvas needed. Every read path
+        // already clamps (BrandedShell, the public profile, this preview), so
+        // storing the pick costs nothing and keeps the choice recoverable.
+        brandColor: accent,
         style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
       });
       if (r.ok) {
@@ -351,14 +366,14 @@ export function Studio(init: StudioInit) {
                 ))}
                 <input
                   type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#cbe84f'}
+                  value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : DEFAULT_ACCENT}
                   onChange={(e) => setAccent(e.target.value)}
                   className="h-7 w-9 rounded-md border border-input bg-background"
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                {t(m.contrast, { ratio: accentLabelContrast(accent) })}
-                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent) }) : ''}
+                {t(m.contrast, { ratio: accentLabelContrast(accent, BOOKING_CANVAS) })}
+                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent, BOOKING_CANVAS) }) : ''}
               </p>
             </Field>
             <Field label={m.photoAvatar}>
@@ -565,7 +580,11 @@ function ProfilePreview({
         ) : (
           <div
             className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
-            style={{ background: 'var(--accent)', color: onAccent(clampAccent(accent)), borderRadius: 'var(--bp-radius)' }}
+            style={{
+              background: 'var(--accent)',
+              color: onAccent(clampAccent(accent, BOOKING_CANVAS)),
+              borderRadius: 'var(--bp-radius)',
+            }}
           >
             {monogram(displayName)}
           </div>

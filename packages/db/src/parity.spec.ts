@@ -50,7 +50,7 @@ describe('parity (SQLite in-memory)', () => {
   it('F5: an event type Location is snapshotted onto booking.location at book time', async () => {
     const { sql } = await import('drizzle-orm');
     const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
-    await updateEventType(db, accountId, et.id, { location: 'Google Meet' });
+    await updateEventType(db, accountId, et.id, { location: { kind: 'in_person', detail: 'Calle 93 #11-20' } });
 
     const startMs = await firstSlotMs(db);
     const out = await createBooking(db, {
@@ -63,9 +63,85 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(true);
     const uid = (out as { booking: { uid: string } }).booking.uid;
-    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
-    // The chain event editor → event_type.locations → booking.location is closed.
-    expect(row?.location).toBe('Google Meet');
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    // The chain event editor → event_type.locations → booking.location(+kind) is closed.
+    expect(row?.location).toBe('Calle 93 #11-20');
+    expect(row?.location_kind).toBe('in_person');
+  });
+
+  it('C1: a legacy free-text Location still books, coerced to the custom kind', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    // A row written before the kind existed — the editor used to store raw text.
+    await db.run(sql`UPDATE event_type SET locations = '"Room 4"' WHERE id = ${et.id}`);
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBe('Room 4');
+    expect(row?.location_kind).toBe('custom');
+  });
+
+  it('C1: conferencing snapshots the kind with no detail — the link comes from the port', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, { location: { kind: 'conferencing' } });
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBeNull();
+    expect(row?.location_kind).toBe('conferencing');
+  });
+
+  it('C1: editing the event type later does NOT rewrite an existing booking', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, { location: { kind: 'phone', detail: '+57 300 000 0000' } });
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+
+    // The host changes their mind AFTER the booking exists.
+    await updateEventType(db, accountId, et.id, { location: { kind: 'conferencing' } });
+
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location_kind).toBe('phone');
+    expect(row?.location).toBe('+57 300 000 0000');
   });
 
   it('F5 (team): a team event type Location is snapshotted onto booking.location too', async () => {
@@ -73,7 +149,7 @@ describe('parity (SQLite in-memory)', () => {
     // Seed has a round-robin team event type (team_id set).
     const et = await db.get<{ id: string; slug: string }>(sql`SELECT id, slug FROM event_type WHERE team_id IS NOT NULL LIMIT 1`);
     if (!et) return; // no team event in seed → nothing to assert
-    await updateEventType(db, accountId, et.id, { location: 'Zoom' });
+    await updateEventType(db, accountId, et.id, { location: { kind: 'custom', detail: 'Meeting room 4' } });
     const team = (await db.get<{ slug: string }>(sql`SELECT slug FROM team LIMIT 1`))!;
     const now = Date.now();
     const avail = await getTeamAvailability(db, {
@@ -93,8 +169,11 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(true);
     const uid = (out as { uid: string }).uid;
-    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
-    expect(row?.location).toBe('Zoom');
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBe('Meeting room 4');
+    expect(row?.location_kind).toBe('custom');
   });
 
   it('rejects a booking missing a required intake field', async () => {

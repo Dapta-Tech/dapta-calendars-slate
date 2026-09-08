@@ -71,7 +71,6 @@ export interface BookingMessages {
     statusRejected: string;
     cancelThis: string;
     noOpenTimes: string;
-    whereLabel: string;
     joinMeeting: string;
   };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
@@ -82,6 +81,19 @@ export interface BookingMessages {
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
+  };
+  /**
+   * Location kind labels — WHERE a meeting happens. Shared by the public
+   * booking page, the manage page and the event-type editor so one kind reads
+   * the same everywhere. No conferencing vendor is named (R15); the running
+   * product may override `conferencing` with a runtime label (ADR 0008).
+   */
+  location: {
+    whereLabel: string;
+    conferencing: string;
+    inPerson: string;
+    phone: string;
+    custom: string;
   };
   /** Team scheduling method names (the FREE layer competitors paywall). */
   scheduling: {
@@ -204,6 +216,12 @@ export interface BookingMessages {
       fDescription: string;
       fLocation: string;
       locationPlaceholder: string;
+      locationNone: string;
+      locationDetailAddress: string;
+      locationDetailPhone: string;
+      locationDetailCustom: string;
+      locationConferencingHint: string;
+      locationNoDestinationWarning: string;
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
@@ -833,7 +851,6 @@ export const en: BookingMessages = {
     statusRejected: 'rejected',
     cancelThis: 'Cancel this booking',
     noOpenTimes: 'No open times in the next 3 weeks.',
-    whereLabel: 'Where',
     joinMeeting: 'Join the meeting',
   },
   growth: {
@@ -842,6 +859,13 @@ export const en: BookingMessages = {
     ctaAction: 'Get Dapta Calendars — free',
     seoProfile: 'Book time with {name} online.',
     seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
+  },
+  location: {
+    whereLabel: 'Where',
+    conferencing: 'Online meeting',
+    inPerson: 'In person',
+    phone: 'Phone call',
+    custom: 'Custom',
   },
   admin: {
     nav: {
@@ -938,7 +962,14 @@ export const en: BookingMessages = {
       fSlug: 'Slug',
       fDescription: 'Description',
       fLocation: 'Location',
-      locationPlaceholder: 'e.g. Google Meet, Phone, or an address',
+      locationPlaceholder: 'e.g. an address, a phone number, or your own wording',
+      locationNone: 'Not specified',
+      locationDetailAddress: 'Address',
+      locationDetailPhone: 'Phone number',
+      locationDetailCustom: 'What to tell invitees',
+      locationConferencingHint: 'A meeting link is created automatically when the booking is confirmed.',
+      locationNoDestinationWarning:
+        'No calendar is connected yet, so no meeting link can be created. Connect one in Connections — bookings still work in the meantime.',
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
@@ -1564,7 +1595,6 @@ export const es: BookingMessages = {
     statusRejected: 'rechazada',
     cancelThis: 'Cancelar esta reserva',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
-    whereLabel: 'Dónde',
     joinMeeting: 'Unirse a la reunión',
   },
   growth: {
@@ -1573,6 +1603,13 @@ export const es: BookingMessages = {
     ctaAction: 'Consigue Dapta Calendars — gratis',
     seoProfile: 'Reserva un horario con {name} en línea.',
     seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+  },
+  location: {
+    whereLabel: 'Dónde',
+    conferencing: 'Reunión en línea',
+    inPerson: 'Presencial',
+    phone: 'Llamada telefónica',
+    custom: 'Personalizado',
   },
   admin: {
     nav: {
@@ -1669,7 +1706,14 @@ export const es: BookingMessages = {
       fSlug: 'Identificador',
       fDescription: 'Descripción',
       fLocation: 'Ubicación',
-      locationPlaceholder: 'p. ej. Google Meet, Teléfono o una dirección',
+      locationPlaceholder: 'p. ej. una dirección, un teléfono o tu propio texto',
+      locationNone: 'Sin especificar',
+      locationDetailAddress: 'Dirección',
+      locationDetailPhone: 'Número de teléfono',
+      locationDetailCustom: 'Qué indicar a los invitados',
+      locationConferencingHint: 'El enlace de la reunión se crea automáticamente al confirmar la reserva.',
+      locationNoDestinationWarning:
+        'Aún no hay ningún calendario conectado, así que no se puede crear el enlace. Conecta uno en Conexiones — las reservas siguen funcionando mientras tanto.',
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',

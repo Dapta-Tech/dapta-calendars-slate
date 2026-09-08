@@ -10,6 +10,7 @@ import type {
   DeleteEventInput,
   UpdateEventInput,
 } from '@slate/calendar';
+import { LEGACY_CONFERENCING_VALUE } from '@slate/engine';
 import { CalendarEffects } from './calendar-effects';
 
 /** A fake provider that records writes, moves AND deletes (the port's effects). */
@@ -107,7 +108,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(provider.created).toHaveLength(1);
     expect(provider.created[0]!.connectionRef).toBe(CAL_REF);
     expect(provider.created[0]!.attendeeEmails).toEqual(['sam@example.com']);
-    expect(provider.created[0]!.requestConferenceLink).toBe(false); // location is null, not 'google_meet'
+    expect(provider.created[0]!.requestConferenceLink).toBe(false); // no location kind on the booking
 
     const refs = await db.all<{ external_event_id: string; meeting_url: string }>(
       sql`SELECT br.external_event_id, br.meeting_url
@@ -224,14 +225,39 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     expect(provider.created).toHaveLength(1);
   });
 
-  it('B9: requests a conferencing link only when location is exactly "google_meet"', async () => {
+  it('B9: requests a conferencing link when the booking\'s location KIND is conferencing', async () => {
     const provider = new RecordingCalendarProvider();
     const effects = new CalendarEffects(provider, db);
     const uid = await bookFirstSlot();
-    await db.run(sql`UPDATE booking SET location = 'google_meet' WHERE uid = ${uid}`);
+    await db.run(sql`UPDATE booking SET location_kind = 'conferencing' WHERE uid = ${uid}`);
 
     await (effects as unknown as Awaitable).writeEvent(uid);
     expect(provider.created[0]!.requestConferenceLink).toBe(true);
+  });
+
+  it('B9: a non-conferencing kind never requests a link', async () => {
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    await db.run(
+      sql`UPDATE booking SET location_kind = 'in_person', location = 'HQ' WHERE uid = ${uid}`,
+    );
+
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    expect(provider.created[0]!.requestConferenceLink).toBe(false);
+  });
+
+  it('B9: the retired legacy token in `location` no longer triggers a link on its own', async () => {
+    // The old trigger read booking.location. The migration backfills the kind
+    // for rows that already carried the token; anything written AFTER that
+    // without a kind must not mint a link — the KIND is the only trigger.
+    const provider = new RecordingCalendarProvider();
+    const effects = new CalendarEffects(provider, db);
+    const uid = await bookFirstSlot();
+    await db.run(sql`UPDATE booking SET location = ${LEGACY_CONFERENCING_VALUE} WHERE uid = ${uid}`);
+
+    await (effects as unknown as Awaitable).writeEvent(uid);
+    expect(provider.created[0]!.requestConferenceLink).toBe(false);
   });
 
   it('disabled provider (OSS default) is a strict no-op — no writes, no references', async () => {

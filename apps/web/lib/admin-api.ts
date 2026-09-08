@@ -6,7 +6,7 @@
  * ApiError the /admin gate turns into a redirect to /login.
  */
 import { redirect } from 'next/navigation';
-import type { OnboardingState } from '@slate/types';
+import type { EventLocationDto, OnboardingState } from '@slate/types';
 import { getSession, clearSession, authProvider } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -234,7 +234,8 @@ export interface EventType {
   title: string;
   description: string | null;
   lengthMinutes: number;
-  location: string | null;
+  /** Where the meeting happens — normalized server-side to a kind + detail. */
+  location: EventLocationDto | null;
   hidden: boolean;
   minimumBookingNotice: number;
   beforeEventBuffer: number;
@@ -289,6 +290,11 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /**
+   * Display name for the conferencing this deployment mints, injected at
+   * runtime (ADR 0008). Null on a bare fork ⇒ the editor shows generic wording.
+   */
+  conferencingLabel?: string | null;
   /**
    * Only present on the RESPONSE of a `discoverConnections` call (never
    * persisted — the vendor's own bookkeeping for this connection). Lets the

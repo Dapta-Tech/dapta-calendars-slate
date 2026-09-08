@@ -182,7 +182,13 @@ export const booking = sqliteTable('booking', {
   startMs: integer('start_ms').notNull(),
   endMs: integer('end_ms').notNull(),
   status: text('status').notNull().default('accepted'),
+  /** Human detail of the Where (address, number, custom label). */
   location: text('location'),
+  /**
+   * The event type's location kind, SNAPSHOTTED at booking time. Null for rows
+   * written before the kind existed — the render falls back to `location`.
+   */
+  locationKind: text('location_kind'),
   meetingUrl: text('meeting_url'),
   attendeeTimeZone: text('attendee_time_zone'),
   responses: text('responses'),

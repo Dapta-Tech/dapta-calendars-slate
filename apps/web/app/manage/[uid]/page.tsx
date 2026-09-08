@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { formatSlotDateTime, getMessages, t } from '@slate/shared';
+import { formatBookingLocation, formatSlotDateTime, getMessages, t } from '@slate/shared';
 import { getManageView, getAvailability } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { ManageActions } from './manage-actions';
@@ -32,7 +32,8 @@ export default async function ManagePage({
   const tz = booking.attendee.timeZone;
   // Public emailed link — no admin cookie; take the locale from the browser.
   const locale = await publicLocale();
-  const m = getMessages(locale).manage;
+  const messages = getMessages(locale);
+  const m = messages.manage;
   const statusText = (s: string) =>
     s === 'pending' ? m.statusPending : s === 'cancelled' ? m.statusCancelled : s === 'rejected' ? m.statusRejected : s;
   // Only render a meeting link if it's an http(s) URL — `meeting_url` is a
@@ -66,9 +67,12 @@ export default async function ManagePage({
         <p className="text-sm text-muted-foreground">
           {m.withLabel} {booking.host.name ?? booking.attendee.name} · {booking.attendee.email}
         </p>
-        {booking.location ? (
+        {/* Rendered from the SNAPSHOTTED kind; a booking written before the
+            kind existed has none and falls back to its raw location text. */}
+        {formatBookingLocation(booking.locationKind, booking.location, messages) ? (
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{m.whereLabel}:</span> {booking.location}
+            <span className="font-medium text-foreground">{messages.location.whereLabel}:</span>{' '}
+            {formatBookingLocation(booking.locationKind, booking.location, messages)}
           </p>
         ) : null}
         {meetingUrl ? (
