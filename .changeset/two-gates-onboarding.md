@@ -3,7 +3,7 @@
 "@slate/types": minor
 "@slate/db": minor
 "@slate/config": minor
-"@slate/shared": minor
+"@slate/shared": major
 ---
 
 Add onboarding's two gates: account qualification and per-host setup.

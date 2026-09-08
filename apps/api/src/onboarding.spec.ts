@@ -72,6 +72,41 @@ describe('onboarding surface (two gates)', () => {
     });
   });
 
+  // BARE FORK. Qualification exists to feed a growth funnel; a self-hoster has
+  // none, so asking would trap their first admin behind six commercial
+  // questions before they could reach their own dashboard. Gate 2 still
+  // applies — a first event type is product value every deployment wants.
+  it('never owes qualification when the deployment has no upstream', async () => {
+    const fork = new HostController(
+      admin,
+      new OnboardingService(db, { ONBOARDING_IAM_BASE_URL: undefined } as never),
+      { resolveHost: async () => principal } as unknown as AuthService,
+    );
+    await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
+    await db.run(sql`DELETE FROM event_type WHERE member_id = ${alex}`);
+
+    expect(await fork.me(REQ)).toMatchObject({
+      onboardingRequired: false,
+      setupRequired: true,
+    });
+    const state = await fork.onboardingState(REQ);
+    expect(state.onboardingRequired).toBe(false);
+    expect(state.questionKeys).toEqual([]);
+    expect(state.templates).toHaveLength(4);
+  });
+
+  it('owes qualification once an upstream IS configured', async () => {
+    const cloud = new HostController(
+      admin,
+      new OnboardingService(db, {
+        ONBOARDING_IAM_BASE_URL: 'https://identity.example',
+      } as never),
+      { resolveHost: async () => principal } as unknown as AuthService,
+    );
+    await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
+    expect(await cloud.me(REQ)).toMatchObject({ onboardingRequired: true });
+  });
+
   it('owes BOTH to the owner of a brand-new account', async () => {
     await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
     await db.run(sql`DELETE FROM event_type WHERE member_id = ${alex}`);
@@ -83,11 +118,24 @@ describe('onboarding surface (two gates)', () => {
 
   // --- The wizard payload -------------------------------------------------
 
-  it('asks the FULL bank when no upstream is configured', async () => {
+  // With the gate owed but nothing to probe (an upstream is configured, this
+  // member has no upstream identity), the probe reports `not_configured` and
+  // the cohort falls to the short one — the fail-closed direction. `cold` is
+  // reached only on a definitive upstream miss, which is covered as a pure
+  // unit in @slate/engine rather than by mocking fetch here.
+  it('asks the SHORT bank when the gate is owed but nothing can be probed', async () => {
     await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
-    const state = await ctrl.onboardingState(REQ);
-    expect(state.cohort).toBe('cold');
-    expect(state.questionKeys).toHaveLength(6);
+    const cloud = new HostController(
+      admin,
+      new OnboardingService(db, {
+        ONBOARDING_IAM_BASE_URL: 'https://identity.example',
+      } as never),
+      { resolveHost: async () => principal } as unknown as AuthService,
+    );
+    const state = await cloud.onboardingState(REQ);
+    expect(state.onboardingRequired).toBe(true);
+    expect(state.cohort).toBe('dapta');
+    expect(state.questionKeys).toEqual(['phone', 'use_case']);
   });
 
   // Claiming a question set nobody probed for would be the same species of lie

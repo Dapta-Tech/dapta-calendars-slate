@@ -5,6 +5,7 @@ import {
   ONBOARDING_TEMPLATES,
   cohortQuestionKeys,
   resolveCohort,
+  qualificationApplies,
   getOnboardingTemplate,
   isOnboardingTemplateId,
   qualificationRequired,
@@ -56,9 +57,24 @@ describe('cohort probe resolution', () => {
     expect(resolveCohort(undefined)).toBe('dapta');
   });
 
-  // `cold` is answered only when there is no IAM to probe at all — a bare fork.
-  it('answers cold only when no upstream is configured', () => {
-    expect(resolveCohort({ outcome: 'not_configured' })).toBe('cold');
+  // `cold` is answered ONLY on a definitive miss. `not_configured` is not a
+  // cohort question — see qualificationApplies — but if a caller asks anyway it
+  // must still err toward asking less.
+  it('errs toward the short cohort when there is no upstream to ask', () => {
+    expect(resolveCohort({ outcome: 'not_configured' })).toBe('dapta');
+  });
+});
+
+describe('does gate 1 apply to this deployment at all?', () => {
+  it('applies when there is an upstream identity service to feed', () => {
+    expect(qualificationApplies(true)).toBe(true);
+  });
+
+  // The bare-fork trap: without this, a self-hoster with nothing configured
+  // cannot reach their own dashboard until they answer six commercial questions
+  // ("Which CRM does your team use?") that no funnel will ever read.
+  it('does NOT apply with no upstream — a fork has no funnel to feed', () => {
+    expect(qualificationApplies(false)).toBe(false);
   });
 });
 

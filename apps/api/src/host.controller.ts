@@ -44,10 +44,17 @@ export class HostController {
     @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
+  /**
+   * Identity + the two onboarding gates on ONE response. The web app's admin
+   * guard needs the verdicts on the same request it already makes to establish
+   * identity — a second round-trip is a second chance to paint the dashboard
+   * before the verdict lands, which is the flicker ADR 0002 set out to avoid.
+   */
   @Get('me')
   async me(@Req() req: ReqLike) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.me(p);
+    const [me, gates] = await Promise.all([this.admin.me(p), this.onboarding.gatesFor(p)]);
+    return me ? { ...me, ...gates } : me;
   }
 
   /**

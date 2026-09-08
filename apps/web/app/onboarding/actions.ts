@@ -37,10 +37,27 @@ export async function submitSetupAction(templateId: string): Promise<OnboardingA
 }
 
 /**
+ * Leave the wizard having owed nothing further. Deliberately NOT the skip
+ * action: setting the skip cookie here would mute the guard for the rest of the
+ * session, so a host who later deleted their only event type would not be
+ * guided again — which is exactly the behaviour gate 2's missing completion
+ * claim exists to provide.
+ */
+export async function finishOnboardingAction(): Promise<void> {
+  redirect('/admin');
+}
+
+/**
  * "Skip for now" — set the session marker the admin guard honours, so the Home
  * checklist (the designated recovery path) is reachable. The gate itself stays
  * unsatisfied: this records that the host asked to move on, not that they are
  * bookable.
+ *
+ * NOT a security boundary. Neither gate is one — the API never refuses a
+ * request on `onboardingRequired`/`setupRequired`, it only reports them — so a
+ * forged cookie costs the forger a wizard and nothing else. `httpOnly` keeps it
+ * out of page JS; it is not proof against the person holding the browser, and
+ * no authorization decision may ever be hung on it.
  */
 export async function skipOnboardingAction(): Promise<void> {
   const jar = await cookies();

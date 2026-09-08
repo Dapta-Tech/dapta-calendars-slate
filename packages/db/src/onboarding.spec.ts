@@ -72,25 +72,25 @@ describe('onboarding gates (ADR 0002)', () => {
 
   describe('countPublishedEventTypes', () => {
     it('counts the host’s own published event type', async () => {
-      expect(await countPublishedEventTypes(db, alex)).toBe(1);
+      expect(await countPublishedEventTypes(db, accountId, alex)).toBe(1);
     });
 
     // The exact bug #84 exists to kill: Jordan has a handle and an auto-created
     // public page, is a host on the round-robin team event, and yet
     // /acme/jordan-lee renders EMPTY. A team event is not a personal one.
     it('does NOT count a team event the member merely hosts', async () => {
-      expect(await countPublishedEventTypes(db, jordan)).toBe(0);
+      expect(await countPublishedEventTypes(db, accountId, jordan)).toBe(0);
     });
 
     it('does not count a hidden event type — an unpublished page is still empty', async () => {
       await db.run(sql`UPDATE event_type SET hidden = 1 WHERE member_id = ${alex}`);
-      expect(await countPublishedEventTypes(db, alex)).toBe(0);
+      expect(await countPublishedEventTypes(db, accountId, alex)).toBe(0);
     });
 
     it('never counts another member’s event types', async () => {
       await db.run(sql`DELETE FROM event_type WHERE member_id = ${alex}`);
-      expect(await countPublishedEventTypes(db, alex)).toBe(0);
-      expect(await countPublishedEventTypes(db, jordan)).toBe(0);
+      expect(await countPublishedEventTypes(db, accountId, alex)).toBe(0);
+      expect(await countPublishedEventTypes(db, accountId, jordan)).toBe(0);
     });
   });
 

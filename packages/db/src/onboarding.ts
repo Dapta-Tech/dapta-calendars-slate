@@ -42,6 +42,9 @@ export async function getAccountOnboarding(db: Db, accountId: string): Promise<A
  * types does this host own personally?
  *
  * The three qualifiers are each load-bearing:
+ *  - `account_id = ?` — invariant 4 is absolute for anything an admin route
+ *    reads, and this decides both a gate and the Home checklist. `member_id`
+ *    alone would resolve correctly today; the scope is what keeps it correct;
  *  - `member_id = ?` — a TEAM event the member merely hosts does not put
  *    anything on /account/handle, which is the page the gate is about;
  *  - `team_id IS NULL` — belt and braces against a row carrying both;
@@ -52,10 +55,15 @@ export async function getAccountOnboarding(db: Db, accountId: string): Promise<A
  * auto-created for everyone — so it reported "bookable" to every host in the
  * product while their public page rendered nothing.
  */
-export async function countPublishedEventTypes(db: Db, memberId: string): Promise<number> {
+export async function countPublishedEventTypes(
+  db: Db,
+  accountId: string,
+  memberId: string,
+): Promise<number> {
   const row = await db.get<{ n: number }>(
     sql`SELECT COUNT(*) AS n FROM event_type
-        WHERE member_id = ${memberId} AND team_id IS NULL AND hidden = 0`,
+        WHERE account_id = ${accountId} AND member_id = ${memberId}
+          AND team_id IS NULL AND hidden = 0`,
   );
   return Number(row?.n ?? 0);
 }
@@ -161,7 +169,7 @@ export async function getOnboardingGates(
 
   const [qualifiedElsewhere, publishedEventTypeCount] = await Promise.all([
     couldOweQualification ? personQualifiedElsewhere(db, accountId, memberId) : Promise.resolve(false),
-    countPublishedEventTypes(db, memberId),
+    countPublishedEventTypes(db, accountId, memberId),
   ]);
 
   return {
@@ -185,21 +193,20 @@ export interface QualificationClaim {
 /**
  * Claim gate 1 write-once.
  *
- * The DATA guarantee is the `IS NULL` guard inside the UPDATE: two submissions
- * cannot both write, so the second matches no rows and the workspace keeps the
- * answers it was first given. That holds unconditionally, on both dialects.
+ * Two guarantees, and they are not the same strength:
  *
- * Reporting WHICH call won is the softer half. `db.run` returns no row count on
- * either dialect, so the outcome has to be read back — and reading it back as
- * "is the stored timestamp the one I passed?" is wrong the moment two calls
- * land in the same millisecond, which an in-memory SQLite test does routinely:
- * the loser sees its own `now` in the row and reports a claim it never made.
+ *  - the DATA guarantee is the `IS NULL` guard inside the UPDATE. Two claims
+ *    cannot both write; the second matches no rows and the workspace keeps the
+ *    answers it was first given. Unconditional, on both dialects.
+ *  - `claimed` says WHICH call wrote, and it is exact here because the write
+ *    reports its own affected-row count: `RETURNING` on Postgres, `changes()`
+ *    on SQLite (read on the same connection, immediately after the statement).
  *
- * So the already-claimed case is answered by a read BEFORE the write, which is
- * both deterministic and the only case that happens in practice (a second
- * submission arrives from a retry or another admin, not inside one tick).
- * Under genuinely simultaneous first claims the attribution is best-effort;
- * the stored answers are not.
+ * The earlier shape inferred `claimed` by comparing the stored timestamp with
+ * the one this call passed, which told the LOSER it had won whenever two claims
+ * shared a millisecond. That mattered beyond tidiness: O2 hangs the IAM
+ * lead-score write on this flag, and two `claimed: true` results are two lead
+ * scores for one workspace.
  */
 export async function claimQualification(
   db: Db,
@@ -207,14 +214,23 @@ export async function claimQualification(
   answers: OnboardingAnswers,
   now = Date.now(),
 ): Promise<QualificationClaim> {
-  const before = await getAccountOnboarding(db, accountId);
-  if (before.completedAt !== null) return { claimed: false, completedAt: before.completedAt };
+  const set = sql`SET onboarding = ${jsonParam(db, answers)}, onboarding_completed_at = ${now}`;
+  const where = sql`WHERE id = ${accountId} AND onboarding_completed_at IS NULL`;
 
-  await db.run(
-    sql`UPDATE account
-           SET onboarding = ${jsonParam(db, answers)}, onboarding_completed_at = ${now}
-         WHERE id = ${accountId} AND onboarding_completed_at IS NULL`,
-  );
+  let claimed: boolean;
+  if (db.dialect === 'postgres') {
+    const row = await db.get<{ onboarding_completed_at: number }>(
+      sql`UPDATE account ${set} ${where} RETURNING onboarding_completed_at`,
+    );
+    claimed = !!row;
+  } else {
+    await db.run(sql`UPDATE account ${set} ${where}`);
+    // better-sqlite3 runs synchronously on one connection, so `changes()` here
+    // reports exactly the UPDATE above.
+    const c = await db.get<{ n: number }>(sql`SELECT changes() AS n`);
+    claimed = Number(c?.n ?? 0) > 0;
+  }
+
   const after = await getAccountOnboarding(db, accountId);
-  return { claimed: after.completedAt === now, completedAt: after.completedAt };
+  return { claimed, completedAt: after.completedAt };
 }

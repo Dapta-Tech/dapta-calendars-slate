@@ -63,23 +63,35 @@ export type CohortProbeResult =
 /**
  * FAILS CLOSED to `dapta` — the cohort that asks LESS (#65). An IAM blip must
  * never widen the interrogation: six questions fired at someone Dapta already
- * knows is a worse failure than two questions fired at a stranger, because the
- * answers are then written over a better-attributed contact.
+ * knows is a worse failure than two fired at a stranger, because the answers
+ * are then written over a better-attributed contact.
  *
- * `cold` is answered only on a definitive upstream miss, or when there is no
- * upstream at all (a bare fork, which has no IAM and no lead funnel to protect).
+ * `cold` is answered ONLY on a definitive upstream miss. `not_configured` is
+ * not a cohort question at all — see `qualificationApplies`: with no upstream
+ * there is no funnel, so the gate does not apply and no cohort is consulted.
+ * It maps to the short cohort here purely so a caller that ignores that rule
+ * still errs toward asking less.
  */
 export function resolveCohort(probe: CohortProbeResult | null | undefined): OnboardingCohort {
   if (!probe) return 'dapta';
-  switch (probe.outcome) {
-    case 'unknown':
-    case 'not_configured':
-      return 'cold';
-    case 'known':
-    case 'error':
-    default:
-      return 'dapta';
-  }
+  return probe.outcome === 'unknown' ? 'cold' : 'dapta';
+}
+
+/**
+ * Does gate 1 apply to this DEPLOYMENT at all?
+ *
+ * Qualification exists to feed a growth funnel. A deployment with no upstream
+ * identity service has no funnel, so the questions have no reader — and asking
+ * them anyway would hard-trap the first admin of a bare fork behind six
+ * commercial questions ("Which CRM does your team use?") before they can reach
+ * their own dashboard. That is the wrong default for a self-hostable product
+ * and contradicts the repo's own posture that nothing configured still runs.
+ *
+ * Gate 2 is unaffected: creating a first event type is product value that every
+ * deployment wants, and it carries a skip.
+ */
+export function qualificationApplies(hasUpstreamIdentityService: boolean): boolean {
+  return hasUpstreamIdentityService;
 }
 
 // --- The template registry ------------------------------------------------

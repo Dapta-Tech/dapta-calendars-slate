@@ -1,4 +1,10 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  Optional,
+} from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   claimQualification,
@@ -12,6 +18,7 @@ import {
   ONBOARDING_TEMPLATES,
   cohortQuestionKeys,
   getOnboardingTemplate,
+  qualificationApplies,
   resolveCohort,
   type CohortProbeResult,
   type OnboardingCohort,
@@ -57,6 +64,19 @@ export class OnboardingService {
    * must never see a distinction it would be tempted to branch on.
    */
   private async probeCohort(externalId: string | null): Promise<CohortProbeResult> {
+    const cached = externalId ? PROBE_CACHE.get(externalId) : undefined;
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    const result = await this.probeCohortUncached(externalId);
+    if (externalId) {
+      // Bounded so a hostile caller cannot grow the map without limit; the
+      // wizard is a first-run screen, so a handful of live entries is normal.
+      if (PROBE_CACHE.size >= PROBE_CACHE_MAX) PROBE_CACHE.clear();
+      PROBE_CACHE.set(externalId, { result, expiresAt: Date.now() + PROBE_CACHE_TTL_MS });
+    }
+    return result;
+  }
+
+  private async probeCohortUncached(externalId: string | null): Promise<CohortProbeResult> {
     const base = this.env?.ONBOARDING_IAM_BASE_URL;
     // No upstream, or no upstream identity to ask about (a seeded/local member):
     // there is no lead funnel to protect, so answer the full bank.
@@ -87,25 +107,66 @@ export class OnboardingService {
     return me?.locale ?? 'en';
   }
 
+  /**
+   * Resolve one catalog key to a string.
+   *
+   * The `onboarding` block is NOT flat — it carries the nested `questions` map —
+   * so a blind `Record<string, string>` cast would let a future key that points
+   * at an object render `[object Object]` into an event type's title, with no
+   * type error to catch it. The `typeof` guard is what makes the cast safe.
+   */
+  private copy(locale: string, key: string, fallback: string): string {
+    const block = getMessages(locale).onboarding as unknown as Record<string, unknown>;
+    const value = block[key];
+    return typeof value === 'string' ? value : fallback;
+  }
+
   private templateViews(locale: string): OnboardingTemplateView[] {
-    const copy = getMessages(locale).onboarding as unknown as Record<string, string>;
     return ONBOARDING_TEMPLATES.map((t) => ({
       id: t.id,
       slug: t.slug,
       lengthMinutes: t.lengthMinutes,
-      title: copy[t.titleKey] ?? t.id,
-      description: copy[t.descriptionKey] ?? '',
+      title: this.copy(locale, t.titleKey, t.id),
+      description: this.copy(locale, t.descriptionKey, ''),
     }));
   }
 
   /**
+   * True when this deployment has an upstream identity service to feed.
+   *
+   * A MISSING env object is a direct-construction/spec context, not a verdict
+   * about a deployment — only a loaded env that lacks the base URL means "this
+   * deployment has no upstream". Erring this way keeps the gate ON when the
+   * answer is unknown, which is the safe direction: a missed question costs a
+   * lead, a suppressed gate costs the funnel silently.
+   */
+  private get hasUpstream(): boolean {
+    return this.env ? !!this.env.ONBOARDING_IAM_BASE_URL : true;
+  }
+
+  /**
+   * The two verdicts.
+   *
+   * Gate 1 is suppressed entirely when the deployment has no upstream identity
+   * service. Qualification exists to feed a growth funnel; with no funnel the
+   * answers have no reader, and asking anyway would hard-trap the first admin
+   * of a bare fork behind six commercial questions before they could reach
+   * their own dashboard. Gate 2 always applies — a first event type is product
+   * value every deployment wants.
+   *
    * `isStaffAccessGrant` is plumbed but always false today: Calendars has no
    * staff-access seam yet. The exemption lives in the engine predicate (and is
    * unit-tested there), so wiring it later is a one-line change here rather
    * than a rule to rebuild.
    */
-  gatesFor(p: HostPrincipal) {
-    return getOnboardingGates(this.db, p.accountId, p.memberId, { isStaffAccessGrant: false });
+  async gatesFor(p: HostPrincipal) {
+    const gates = await getOnboardingGates(this.db, p.accountId, p.memberId, {
+      isStaffAccessGrant: false,
+    });
+    if (!qualificationApplies(this.hasUpstream)) {
+      return { ...gates, onboardingRequired: false };
+    }
+    return gates;
   }
 
   private async externalIdFor(p: HostPrincipal): Promise<string | null> {
@@ -175,18 +236,23 @@ export class OnboardingService {
     const template = getOnboardingTemplate(input.templateId);
     // Unreachable through the zod contract, but this is the boundary that makes
     // "the client may only ever NAME a template" true — so it is checked here.
-    if (!template) throw new Error(`Unknown onboarding template: ${input.templateId}`);
+    if (!template) {
+      throw new BadRequestException({
+        error: 'UNKNOWN_TEMPLATE',
+        message: 'That starter template does not exist.',
+      });
+    }
 
     const locale = await this.localeFor(p);
-    const copy = getMessages(locale).onboarding as unknown as Record<string, string>;
 
     const member = await this.db.get<{ default_schedule_id: string | null }>(
-      sql`SELECT default_schedule_id FROM member WHERE id = ${p.memberId} LIMIT 1`,
+      sql`SELECT default_schedule_id FROM member
+           WHERE id = ${p.memberId} AND account_id = ${p.accountId} LIMIT 1`,
     );
 
     const bookingFields = template.intake.map((f) => ({
       name: f.name,
-      label: copy[f.labelKey] ?? f.name,
+      label: this.copy(locale, f.labelKey, f.name),
       type: f.type,
       required: f.required,
     }));
@@ -197,8 +263,8 @@ export class OnboardingService {
     for (const slug of slugCandidates(template)) {
       const created = await createEventType(this.db, p.accountId, p.memberId, {
         slug,
-        title: copy[template.titleKey] ?? template.id,
-        description: copy[template.descriptionKey] ?? null,
+        title: this.copy(locale, template.titleKey, template.id),
+        description: this.copy(locale, template.descriptionKey, ''),
         lengthMinutes: template.lengthMinutes,
         scheduleId: member?.default_schedule_id ?? null,
         hidden: false,
@@ -206,12 +272,34 @@ export class OnboardingService {
       });
       if (created.ok) return created.value;
       if (created.reason !== 'SLUG_TAKEN') {
-        throw new Error(`Could not create the starter event type: ${created.reason}`);
+        // Reachable, so it gets the repo's `{ error, message }` shape rather
+        // than a raw 500 carrying an internal string (error-visibility.spec.ts).
+        throw new InternalServerErrorException({
+          error: 'SETUP_FAILED',
+          message: 'Could not create your first event type. Please try again.',
+        });
       }
     }
-    throw new Error('Could not find a free slug for the starter event type.');
+    throw new InternalServerErrorException({
+      error: 'SETUP_FAILED',
+      message: 'Could not create your first event type. Please try again.',
+    });
   }
 }
+
+/**
+ * Short-lived memo of the cohort probe, keyed by upstream identity.
+ *
+ * `/v1/me/onboarding` carries no rate limit (RateLimitGuard is applied to the
+ * public controller only), so without this an authenticated owner of an
+ * unqualified account could hold down reload and turn the API into an
+ * amplifier against the identity service. The TTL is short because the answer
+ * only has to survive one wizard session; O2 persists the resolved cohort
+ * alongside the answers and this becomes redundant.
+ */
+const PROBE_CACHE_TTL_MS = 5 * 60_000;
+const PROBE_CACHE_MAX = 1_000;
+const PROBE_CACHE = new Map<string, { result: CohortProbeResult; expiresAt: number }>();
 
 /** `demo`, then `demo-2` … `demo-10`. Bounded so a pathological account cannot spin. */
 function* slugCandidates(template: OnboardingTemplate): Generator<string> {

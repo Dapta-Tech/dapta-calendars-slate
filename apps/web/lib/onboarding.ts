@@ -7,5 +7,9 @@
  * unreachable if the redirect never yields. No Max-Age, so it dies with the
  * browser session and the wizard greets them again next visit; the gate itself
  * is never marked satisfied, because it isn't.
+ *
+ * NOT a security boundary: neither gate is one. The API reports the verdicts
+ * and never refuses a request on them, so forging this cookie costs the forger
+ * a wizard and nothing more. Never hang an authorization decision on it.
  */
 export const ONBOARDING_SKIP_COOKIE = 'slate.onboarding.skipped';

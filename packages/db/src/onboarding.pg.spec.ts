@@ -108,18 +108,18 @@ describePg('onboarding gates (real Postgres)', () => {
 
   it('counts only the host’s own PUBLISHED, PERSONAL event types', async () => {
     const { accountId, memberId } = await freshWorkspace({});
-    expect(await countPublishedEventTypes(db, memberId)).toBe(0);
+    expect(await countPublishedEventTypes(db, accountId, memberId)).toBe(0);
 
     await addEventType(accountId, { memberId });
-    expect(await countPublishedEventTypes(db, memberId)).toBe(1);
+    expect(await countPublishedEventTypes(db, accountId, memberId)).toBe(1);
 
     // A hidden one does not make the public page render anything.
     await addEventType(accountId, { memberId, hidden: true });
-    expect(await countPublishedEventTypes(db, memberId)).toBe(1);
+    expect(await countPublishedEventTypes(db, accountId, memberId)).toBe(1);
 
     // Neither does a team event this member merely hosts — the #84 case.
     await addEventType(accountId, { teamId: randomUUID() });
-    expect(await countPublishedEventTypes(db, memberId)).toBe(1);
+    expect(await countPublishedEventTypes(db, accountId, memberId)).toBe(1);
   });
 
   it('composes the two verdicts the same way as the SQLite path', async () => {

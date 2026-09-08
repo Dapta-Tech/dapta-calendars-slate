@@ -172,14 +172,19 @@ set** boots on the zero-infra path.
 
 ### Onboarding cohort probe (first-run wizard)
 
-Decides how many questions a new workspace is asked before it can use the
-dashboard. Leave all three unset for a self-host: with no upstream identity
-service to consult, every new workspace simply answers the full question bank.
+**Leave all three unset for a self-host.** The qualification questions exist to
+feed a growth funnel; with no upstream identity service there is no funnel, so
+the whole gate is skipped and your first admin goes straight to the dashboard.
+A self-hoster is never asked which CRM their team uses.
 
-A configured probe asks the service whether the signup is an identity it already
-knows — a hit selects the short cohort, a definitive `404` the full one. **Any
-error or timeout fails closed to the short cohort**, so an upstream outage never
-widens the interrogation of a real signup.
+The per-host setup step still runs — it creates your first event type from a
+template, which is what makes your booking page show something — and it carries
+a "Skip for now".
+
+With a probe configured, the service is asked whether the signup is an identity
+it already knows: a hit selects the short cohort, a definitive `404` the full
+one. **Any error or timeout fails closed to the short cohort**, so an upstream
+outage never widens the interrogation of a real signup.
 
 | Var | Default | Required when | Secret? |
 |---|---|---|---|

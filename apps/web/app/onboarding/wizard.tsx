@@ -6,7 +6,12 @@ import { t } from '@slate/shared';
 import type { OnboardingState } from '@slate/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { skipOnboardingAction, submitQualificationAction, submitSetupAction } from './actions';
+import {
+  finishOnboardingAction,
+  skipOnboardingAction,
+  submitQualificationAction,
+  submitSetupAction,
+} from './actions';
 
 type Messages = BookingMessages['onboarding'];
 type Step = 'qualify' | 'template';
@@ -38,8 +43,10 @@ export function OnboardingWizard({
       if (!r.ok) return setError(m.errorGeneric);
       // Gate 2 may not be owed (a host who already has an event type and was
       // sent here only for the commercial questions) — then the wizard is done.
+      // Done is not skipped: finishing must NOT set the skip cookie, or this
+      // host stops being guided if they delete their last event type later.
       if (state.setupRequired) setStep('template');
-      else await skipOnboardingAction();
+      else await finishOnboardingAction();
     });
   }
 

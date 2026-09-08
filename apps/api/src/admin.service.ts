@@ -11,7 +11,6 @@ import {
   connectionExists,
   countPublishedEventTypes,
   getConnectionRef,
-  getOnboardingGates,
   getMemberIdentity,
   declineBooking,
   createWebhook,
@@ -89,18 +88,11 @@ export class AdminService {
   async me(p: HostPrincipal) {
     // Hard invariant: a host must never resolve to NO_SCHEDULE — see
     // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    // The onboarding gates are NOT read here: OnboardingService is their single
+    // authority (it also decides whether gate 1 applies to this deployment at
+    // all), and HostController.me composes the two onto one response.
     await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
-    const [me, gates] = await Promise.all([
-      getMe(this.db, p.accountId, p.memberId),
-      // The two onboarding gates ride /v1/me because the web app's admin guard
-      // needs them on the SAME request it already makes to establish identity —
-      // a second round-trip is a second chance to render the dashboard before
-      // the verdict arrives, which is the flicker ADR 0002 set out to avoid.
-      // `isStaffAccessGrant` is false until Calendars grows a staff-access seam.
-      getOnboardingGates(this.db, p.accountId, p.memberId, { isStaffAccessGrant: false }),
-    ]);
-    if (!me) return me;
-    return { ...me, ...gates };
+    return getMe(this.db, p.accountId, p.memberId);
   }
 
   /**
@@ -148,7 +140,7 @@ export class AdminService {
     const [connections, schedules, publishedEventTypes] = await Promise.all([
       listConnections(this.db, p.memberId),
       listSchedules(this.db, p.memberId),
-      countPublishedEventTypes(this.db, p.memberId),
+      countPublishedEventTypes(this.db, p.accountId, p.memberId),
     ]);
     let hasWorkingHours = false;
     if (schedules.length > 0) {
