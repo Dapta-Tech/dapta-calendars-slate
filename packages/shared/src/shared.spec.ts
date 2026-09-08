@@ -5,25 +5,13 @@ import { slugifyHandle, validateHandle } from './handle';
 import { t, en, es } from './i18n';
 import { phoneValidator, parseGuests, guestsValidator } from './booking-fields';
 import { validateDayRanges, copyRangesToDays, daysToBlocks, blocksToDays } from './availability';
-import {
-  clampAccent,
-  accentWasAdjusted,
-  matchTheme,
-  widgetStyleVars,
-  THEME_PRESETS,
-  DEFAULT_ACCENT,
-} from './branding';
+import { matchTheme, widgetStyleVars, THEME_PRESETS } from './branding';
 
+// The colour half of the branding engine — the canvas-aware clamp and the
+// ink/edge derivations — is specced in `branding.spec.ts`, which states each
+// rule as a contrast law against a ground rather than as a fixed hex. What
+// stays here is the part that has nothing to do with colour: the axis maps.
 describe('branding engine', () => {
-  it('AA-clamps a too-dark accent lighter, leaves a safe one', () => {
-    // Near-black gets nudged lighter (adjusted); the DS lime is already safe.
-    expect(accentWasAdjusted('#000000')).toBe(true);
-    expect(clampAccent('#000000')).not.toBe('#000000');
-    expect(accentWasAdjusted(DEFAULT_ACCENT)).toBe(false);
-    // Unparseable falls back to the DS accent.
-    expect(clampAccent('nope')).toBe(DEFAULT_ACCENT);
-  });
-
   it('widgetStyleVars maps corners/density to the exact radii/spacing', () => {
     const v = widgetStyleVars({ corners: 'round', density: 'compact', buttons: 'pill' });
     expect(v['--bp-radius']).toBe('28px');
