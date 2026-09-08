@@ -32,7 +32,7 @@ export function NewScheduleButton({ messages: m }: { messages: AvailabilityMessa
       type="button"
       onClick={create}
       disabled={pending}
-      className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:bg-muted disabled:text-muted-foreground"
+      className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
     >
       {pending ? m.saving : m.newSchedule}
     </button>

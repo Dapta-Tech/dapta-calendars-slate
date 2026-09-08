@@ -38,6 +38,17 @@ export function BrandedShell({
     '--primary': accent,
     '--primary-foreground': onAccent(accent),
     '--ring': accent,
+    /* The accent's other two jobs, emitted so the product's lime cannot leak onto
+       a host's page. globals.css re-points the `text-primary` utility at
+       `--primary-ink` and rims every `bg-primary` with `--primary-edge`; both are
+       product tokens, so without these two lines a branded surface would render
+       the growth link in OUR lime and put a lime rim on the host's own button.
+       Set to the clamped accent, which reproduces today's behaviour exactly: one
+       clamp, one direction, dark ground assumed. This is the temporary shape for
+       the window before the theme-aware derivation lands — ADR 0004 owns the real
+       one, along with the bidirectional `clampAccent(color, canvas)`. */
+    '--primary-ink': accent,
+    '--primary-edge': accent,
   } as CSSProperties;
 
   const cls = brandingClassOf({

@@ -21,7 +21,7 @@ export const Radio = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
           )}
           {...props}
         />
-        <span className="pointer-events-none absolute h-2 w-2 scale-0 rounded-full bg-primary opacity-0 transition-all peer-checked:scale-100 peer-checked:opacity-100" />
+        <span className="pointer-events-none absolute h-2 w-2 scale-0 rounded-full bg-primary-edge opacity-0 transition-all peer-checked:scale-100 peer-checked:opacity-100" />
       </span>
     );
   },

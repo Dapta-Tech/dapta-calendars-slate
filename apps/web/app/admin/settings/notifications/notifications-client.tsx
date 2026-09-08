@@ -142,7 +142,7 @@ function Row({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{m.labels[s.key]}</span>
           {s.customized ? (
-            <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] text-secondary-foreground">
+            <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-faint">
               {m.customizedBadge}
             </span>
           ) : null}
@@ -322,7 +322,7 @@ function TemplateEditor({
             ← {m.back}
           </button>
           <span className="text-sm font-semibold">{m.labels[setting.key]}</span>
-          <span className="rounded-sm bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+          <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             {isDefault ? m.usingDefault : m.usingCustom}
           </span>
           {saveState === 'saved' && !isDirty ? <span className="text-xs text-primary">{m.saved}</span> : null}
