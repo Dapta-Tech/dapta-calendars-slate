@@ -8,8 +8,10 @@ import {
   listOutbox,
   enqueueOutbox,
   loadBookingNotificationContext,
+  updateEventType,
   upsertNotificationSetting,
   type Db,
+  type EventReminder,
 } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { BookingNotifier } from '@slate/notifications';
@@ -17,6 +19,7 @@ import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notificati
 import { loadServerEnv } from '@slate/config/env';
 import { AdminService } from './admin.service';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects, OutboxSkipError } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 import { BookingService } from './booking.service';
@@ -89,6 +92,22 @@ describe('notification settings — toggles + templates through the outbox', () 
   const emailRows = async (uid: string, action: string) =>
     (await listOutbox(db, { kind: 'email', bookingUid: uid })).filter((r) => r.action === action);
 
+  /** Reminders live on the EVENT TYPE now (#68) — this is where a host edits them. */
+  async function setReminders(rows: EventReminder[]): Promise<void> {
+    const et = (await db.get<{ id: string }>(
+      sql`SELECT id FROM event_type WHERE slug='intro-call' AND account_id=${accountId}`,
+    ))!;
+    const out = await updateEventType(db, accountId, et.id, { reminders: rows });
+    if (!out.ok) throw new Error(`setReminders failed: ${out.reason}`);
+  }
+
+  /** The shipped pre-fill with the follow-up switched on (it ships OFF). */
+  const withFollowUp = (leadMinutes = 60, enabled = true): EventReminder[] => [
+    { id: 'r1', kind: 'reminder', enabled: true, leadMinutes: 1440, subject: null, body: null },
+    { id: 'r2', kind: 'reminder', enabled: true, leadMinutes: 60, subject: null, body: null },
+    { id: 'f1', kind: 'follow_up', enabled, leadMinutes, subject: null, body: null },
+  ];
+
   it('booking enqueues one confirmation row per side with resolved templates', async () => {
     const uid = await book();
     await settle();
@@ -130,26 +149,106 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(m.to).toEqual(['sam@example.com']); // attendee side only
   });
 
-  it('reminder leads come from settings; disabled reminder side is not scheduled', async () => {
-    await upsertNotificationSetting(db, accountId, 'attendee_reminder', { reminderLeadMinutes: [120] });
-    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+  it('reminder leads come from the EVENT TYPE; a disabled reminder is not scheduled', async () => {
+    await setReminders([
+      { id: 'a', kind: 'reminder', enabled: true, leadMinutes: 120, subject: null, body: null },
+      { id: 'b', kind: 'reminder', enabled: false, leadMinutes: 30, subject: null, body: null },
+    ]);
     const uid = await book();
     await settle();
     const rows = await emailRows(uid, 'reminder');
-    expect(rows).toHaveLength(1); // one lead × attendee side only
-    const p = JSON.parse(rows[0]!.payload!) as { audience: string; reminderLeadMinutes: number };
-    expect(p.audience).toBe('attendee');
-    expect(p.reminderLeadMinutes).toBe(120);
+    // One ENABLED reminder × two sides — the row's switch governs both.
+    expect(rows).toHaveLength(2);
+    const payloads = rows.map(
+      (r) => JSON.parse(r.payload!) as { audience: string; reminderLeadMinutes: number; reminderId: string },
+    );
+    expect(payloads.map((p) => p.audience).sort()).toEqual(['attendee', 'host']);
+    expect(payloads.every((p) => p.reminderLeadMinutes === 120)).toBe(true);
+    expect(payloads.every((p) => p.reminderId === 'a')).toBe(true);
   });
 
-  it('a queued reminder is re-gated at deliver time (toggle OFF after scheduling)', async () => {
+  it('each reminder carries its own copy; the host copy stays the shipped default', async () => {
+    await setReminders([
+      {
+        id: 'a',
+        kind: 'reminder',
+        enabled: true,
+        leadMinutes: 120,
+        subject: 'Tomorrow: {{event_title}}',
+        body: 'See you soon, {{attendee_name}}.',
+      },
+      { id: 'b', kind: 'reminder', enabled: true, leadMinutes: 60, subject: 'One hour!', body: 'Nearly time.' },
+    ]);
+    const uid = await book();
+    await settle();
+    const rows = await emailRows(uid, 'reminder');
+    expect(rows).toHaveLength(4); // two reminders × two sides
+    const payloads = rows.map(
+      (r) => JSON.parse(r.payload!) as { audience: string; reminderId: string; template?: { subject: string } },
+    );
+    const attendee = payloads.filter((p) => p.audience === 'attendee');
+    expect(attendee.map((p) => p.template?.subject).sort()).toEqual([
+      'One hour!',
+      'Tomorrow: {{event_title}}',
+    ]);
+    // One text cannot serve both sides: the host keeps the shipped template.
+    const host = payloads.filter((p) => p.audience === 'host');
+    expect(host.every((p) => p.template?.subject === 'Reminder: {{event_title}} — {{start_time}}')).toBe(true);
+  });
+
+  it('a queued reminder is re-gated at deliver time (switched off after scheduling)', async () => {
     const uid = await book();
     await settle();
     const row = (await emailRows(uid, 'reminder')).find(
       (r) => (JSON.parse(r.payload!) as { audience?: string }).audience === 'attendee',
     )!;
-    // Flip OFF after the row was scheduled — delivery must silently skip.
-    await upsertNotificationSetting(db, accountId, 'attendee_reminder', { enabled: false });
+    const id = (JSON.parse(row.payload!) as { reminderId: string }).reminderId;
+    // Switch that reminder OFF after its row was scheduled — delivery skips.
+    await setReminders([
+      { id, kind: 'reminder', enabled: false, leadMinutes: 1440, subject: null, body: null },
+    ]);
+    await effects.deliver('reminder', row.payload!, row.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(0);
+
+    // Back ON → the same queued payload delivers.
+    await setReminders([
+      { id, kind: 'reminder', enabled: true, leadMinutes: 1440, subject: null, body: null },
+    ]);
+    await effects.deliver('reminder', row.payload!, row.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(1);
+  });
+
+  it('a host who muted their own reminder copies stays muted after the move', async () => {
+    // `host_reminder` used to be independently toggleable and has left Settings
+    // → Notifications. The stored key survives as a legacy MUTE on the host
+    // side: it can silence, never enable, so nobody starts receiving mail they
+    // had turned off (#68 decision 9).
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+    const uid = await book();
+    await settle();
+    const rows = await emailRows(uid, 'reminder');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(
+      rows.map((r) => (JSON.parse(r.payload!) as { audience: string }).audience),
+    ).not.toContain('host');
+
+    // Muting AFTER scheduling silences the queued row at delivery too.
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: true });
+    const uid2 = await book();
+    await settle();
+    const hostRow = (await emailRows(uid2, 'reminder')).find(
+      (r) => (JSON.parse(r.payload!) as { audience?: string }).audience === 'host',
+    )!;
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+    await effects.deliver('reminder', hostRow.payload!, hostRow.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(0);
+  });
+
+  it('a reminder DELETED from the event type silences the rows it scheduled', async () => {
+    const uid = await book();
+    await settle();
+    const row = (await emailRows(uid, 'reminder'))[0]!;
+    await setReminders([]); // the host removed every reminder
     await effects.deliver('reminder', row.payload!, row.accountId);
     expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(0);
   });
@@ -192,6 +291,10 @@ describe('notification settings — toggles + templates through the outbox', () 
     const legacy = JSON.parse(row.payload!) as Record<string, unknown>;
     delete legacy.audience; // pre-split rows mailed attendee+host combined
     delete legacy.template;
+    // Queued before reminders moved to the event type: no reminderId, so the
+    // ACCOUNT toggle still gates it — mail already in flight never changes
+    // meaning under a deploy.
+    delete legacy.reminderId;
 
     // attendee OFF but host ON → the combined mail still goes (host must not
     // be silenced by the attendee toggle).
@@ -242,6 +345,7 @@ describe('notification settings — toggles + templates through the outbox', () 
       ENV,
       new CalendarEffects(new DisabledCalendarProvider(), db),
       signedEffects,
+      new DaptaSyncEffects(ENV),
     );
     await worker.drainOnce(2000);
     const after = (await listOutbox(db, { kind: 'email' })).find((r) => r.id === rowId)!;
@@ -253,18 +357,18 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(((await listOutbox(db, { kind: 'email' })).find((r) => r.id === rowId))!.status).toBe('skipped');
   });
 
-  it('listNotificationSettings returns the full catalog with defaults + overrides', async () => {
+  it('listNotificationSettings returns the account catalog — reminders have left it', async () => {
     await upsertNotificationSetting(db, accountId, 'attendee_cancellation', {
       enabled: false,
       subject: 'Bye',
     });
     const out = await admin.listNotificationSettings(principal);
-    expect(out.settings).toHaveLength(12);
-    // follow_up is the one OPT-IN key: absent row reads back DISABLED, with
-    // its own default lead (after end) exposed for the editor.
-    const followUp = out.settings.find((s) => s.key === 'follow_up')!;
-    expect(followUp.enabled).toBe(false);
-    expect(followUp.reminderLeadMinutes).toEqual([60]);
+    // The 9 transactional keys; reminders and the follow-up are configured on
+    // the event type now, so this screen neither shows nor accepts them.
+    expect(out.settings).toHaveLength(9);
+    expect(out.settings.map((s) => s.key)).not.toContain('attendee_reminder');
+    expect(out.settings.map((s) => s.key)).not.toContain('host_reminder');
+    expect(out.settings.map((s) => s.key)).not.toContain('follow_up');
     expect(out.variables).toContain('attendee_name');
     const cancel = out.settings.find((s) => s.key === 'attendee_cancellation')!;
     expect(cancel.enabled).toBe(false);
@@ -274,8 +378,6 @@ describe('notification settings — toggles + templates through the outbox', () 
     const conf = out.settings.find((s) => s.key === 'attendee_confirmation')!;
     expect(conf.enabled).toBe(true);
     expect(conf.customized).toBe(false);
-    const rem = out.settings.find((s) => s.key === 'attendee_reminder')!;
-    expect(rem.reminderLeadMinutes).toEqual([1440, 60]);
   });
 
   // --- Post-meeting follow-up (v1.5) — mirrors the reminders pattern -------
@@ -286,7 +388,7 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(await emailRows(uid, 'follow_up')).toHaveLength(0); // default OFF
     expect((await emailRows(uid, 'reminder')).length).toBeGreaterThan(0); // reminders unaffected
 
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    await setReminders(withFollowUp());
     const uid2 = await book();
     await settle();
     const rows = await emailRows(uid2, 'follow_up');
@@ -308,10 +410,7 @@ describe('notification settings — toggles + templates through the outbox', () 
   });
 
   it('follow-up lead is editable (like reminders) and drives next_attempt_at', async () => {
-    await upsertNotificationSetting(db, accountId, 'follow_up', {
-      enabled: true,
-      reminderLeadMinutes: [120],
-    });
+    await setReminders(withFollowUp(120));
     const uid = await book();
     await settle();
     const rows = await emailRows(uid, 'follow_up');
@@ -321,7 +420,7 @@ describe('notification settings — toggles + templates through the outbox', () 
   });
 
   it('reschedule re-points the follow-up to the new end time', async () => {
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    await setReminders(withFollowUp());
     const uid = await book();
     await settle();
     const before = (await emailRows(uid, 'follow_up'))[0]!;
@@ -345,7 +444,7 @@ describe('notification settings — toggles + templates through the outbox', () 
   });
 
   it('cancel deletes the pending follow-up', async () => {
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    await setReminders(withFollowUp());
     const uid = await book();
     await settle();
     expect((await emailRows(uid, 'follow_up')).filter((r) => r.status === 'pending')).toHaveLength(1);
@@ -354,17 +453,17 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect((await emailRows(uid, 'follow_up')).filter((r) => r.status === 'pending')).toHaveLength(0);
   });
 
-  it('a queued follow-up is re-gated at deliver time (toggle OFF after scheduling)', async () => {
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+  it('a queued follow-up is re-gated at deliver time (switched off after scheduling)', async () => {
+    await setReminders(withFollowUp());
     const uid = await book();
     await settle();
     const row = (await emailRows(uid, 'follow_up'))[0]!;
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: false });
+    await setReminders(withFollowUp(60, false));
     await effects.deliver('follow_up', row.payload!, row.accountId);
     expect(email.sent.filter((m) => m.subject.startsWith('Thanks for meeting'))).toHaveLength(0);
 
     // Re-enable → the (still pending) payload delivers with the book-again link.
-    await upsertNotificationSetting(db, accountId, 'follow_up', { enabled: true });
+    await setReminders(withFollowUp());
     await effects.deliver('follow_up', row.payload!, row.accountId);
     const sent = email.sent.filter((m) => m.subject.startsWith('Thanks for meeting'));
     expect(sent).toHaveLength(1);

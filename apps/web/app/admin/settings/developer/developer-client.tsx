@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
+import type { ApiScope } from '@slate/types';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
@@ -17,7 +18,13 @@ import {
 
 type DevMessages = BookingMessages['admin']['developer'];
 
-const SCOPES = ['availability:read', 'bookings:read', 'bookings:write'];
+const SCOPES: ApiScope[] = [
+  'availability:read',
+  'event-types:read',
+  'calendars:read',
+  'bookings:read',
+  'bookings:write',
+];
 const TRIGGERS = ['booking.created', 'booking.rescheduled', 'booking.cancelled'];
 
 const createBtn = 'inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60';
@@ -230,11 +237,28 @@ export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; me
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['booking.created']);
+  const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const { error } = useToast();
 
+  /**
+   * W (#75): the reply is now load-bearing in both directions, so neither half
+   * may be dropped.
+   *
+   * On success the signing secret comes back ONCE — it is an envelope at rest
+   * from here on, with no read endpoint — so it is revealed the way a new API
+   * key is, immediately above the list. On failure the modal STAYS OPEN with the
+   * typed url intact: a deployment with no encryption key refuses every create,
+   * and closing the form on that answer would read as success.
+   */
   const submit = () =>
     start(async () => {
-      await createWebhookAction(url, triggers);
+      const r = await createWebhookAction(url, triggers);
+      if (!r.ok) {
+        error(r.code === 'INTEGRATION_KEY_MISSING' ? m.webhookNoKeyError : (r.error ?? m.genericError));
+        return;
+      }
+      setReveal(r.secret ?? null);
       setUrl('');
       setTriggers(['booking.created']);
       setOpen(false);
@@ -249,6 +273,16 @@ export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; me
         </button>
       </div>
       <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
+
+      {/* The one and only chance to read this secret — it is encrypted at rest
+          from here on, and no endpoint gives it back (W / #75). */}
+      {reveal ? (
+        <div className="mb-4 rounded-md border border-primary bg-card p-3">
+          <p className="mb-1 text-sm text-muted-foreground">{m.webhookSecretCopyOnce}</p>
+          <code className="break-all text-sm">{reveal}</code>
+        </div>
+      ) : null}
+
       <ul className="flex flex-col gap-2">
         {webhooks.map((w) => (
           <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} />

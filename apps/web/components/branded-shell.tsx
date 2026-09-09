@@ -1,20 +1,20 @@
 import type { CSSProperties, ReactNode } from 'react';
-import {
-  accentVars,
-  widgetStyleVars,
-  brandingClassOf,
-  clampAccent,
-  onAccent,
-  DEFAULT_ACCENT,
-} from '@slate/shared';
+import { brandVars, widgetStyleVars, brandingClassOf, DEFAULT_ACCENT } from '@slate/shared';
+import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 
 /**
  * Wraps a public surface with the host's branding — the SAME engine output the
- * studio preview uses (preview == prod). Applies the accent (AA-clamped) as the
- * page's `--primary` and the widget vars (radii/spacing/font), AND emits
- * brandingClassOf() so the class-driven axes (cardStyle/slotLayout/dayGroup/
- * slotSelect/template) render via the .branded-surface CSS. All 9 axes reach the
- * DOM through this single wrapper.
+ * studio preview uses (preview == prod). Applies the accent (clamped for the
+ * page's canvas) as the page's `--primary`, derives the accent's other two jobs
+ * (`--primary-ink` as letters, `--primary-edge` as rim and focus outline) from
+ * that same accent, and emits the widget vars (radii/spacing/font) plus
+ * brandingClassOf() so the class-driven axes render via the .branded-surface
+ * CSS. All 9 axes reach the DOM through this single wrapper.
+ *
+ * The ink/edge pair is not decoration: globals.css re-points `text-primary` at
+ * `--primary-ink` and rims every accent fill with `--primary-edge`, both of
+ * which resolve from the PRODUCT palette unless a branded surface sets them.
+ * Without them the host's links and rims come out in our lime (ADR 0004).
  */
 export function BrandedShell({
   brandColor,
@@ -25,19 +25,15 @@ export function BrandedShell({
   style: Record<string, unknown> | null;
   children: ReactNode;
 }) {
-  const accent = clampAccent(brandColor ?? DEFAULT_ACCENT);
   const axes = (style ?? {}) as Record<string, string>;
   const vars = {
-    ...accentVars(accent),
+    ...brandVars(brandColor ?? DEFAULT_ACCENT, BOOKING_CANVAS),
     ...widgetStyleVars({
       corners: axes.corners as never,
       density: axes.density as never,
       font: axes.font as never,
       buttons: axes.buttons as never,
     }),
-    '--primary': accent,
-    '--primary-foreground': onAccent(accent),
-    '--ring': accent,
   } as CSSProperties;
 
   const cls = brandingClassOf({

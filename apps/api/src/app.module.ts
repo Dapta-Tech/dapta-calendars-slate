@@ -2,16 +2,32 @@ import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { AUTH_PROVIDER, CALENDAR, DB, EMAIL, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE, RATE_LIMITER } from './tokens';
+import {
+  AUTH_PROVIDER,
+  CALENDAR,
+  CRM,
+  DB,
+  EMAIL,
+  ENTITLEMENTS,
+  ENV,
+  NOTIFIER,
+  PREMIUM_MODE,
+  RATE_LIMITER,
+} from './tokens';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
+import { OnboardingService } from './onboarding.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
+import { GrowthService } from './growth.service';
 import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
 import { resolveEntitlementsProvider } from './entitlements.provider';
+import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
@@ -19,6 +35,9 @@ import { PublicController } from './public.controller';
 import { HostController } from './host.controller';
 import { MachineController } from './machine.controller';
 import { AdminCrudController } from './admin-crud.controller';
+import { CalV2Controller, CalV2RequestIdInterceptor } from './cal-v2.controller';
+import { CalV2Service } from './cal-v2.service';
+import { CalV2PilotService } from './cal-v2-pilot.service';
 
 @Module({
   controllers: [
@@ -27,6 +46,7 @@ import { AdminCrudController } from './admin-crud.controller';
     PublicController,
     HostController,
     MachineController,
+    CalV2Controller,
     AdminCrudController,
   ],
   providers: [
@@ -66,12 +86,32 @@ import { AdminCrudController } from './admin-crud.controller';
     // CalendarProvider selected by CALENDAR_PROVIDER: the OSS default is
     // `disabled` (no external calendar); a private overlay ships the `external`
     // adapter. See calendar.provider.ts.
-    { provide: CALENDAR, useFactory: (env: ServerEnv) => createCalendarProviderAsync(env), inject: [ENV] },
+    {
+      provide: CALENDAR,
+      useFactory: (env: ServerEnv) => createCalendarProviderAsync(env),
+      inject: [ENV],
+    },
+    // CrmProvider selected by CRM_PROVIDER: the OSS default is `disabled` (no
+    // CRM at all, nothing enqueued). Unlike the calendar seam this adapter is
+    // committed in-repo and names its vendor — ADR 0001 carves CRM out of R15.
+    {
+      provide: CRM,
+      useFactory: (env: ServerEnv) => resolveCrmProvider(env),
+      inject: [ENV],
+    },
     // Premium entitlements (vanity slug…): Calendars is always free — the gate
     // is the customer's Dapta AI subscription via the upstream service. OSS
     // default: disabled provider + PREMIUM_FEATURES=open (everything unlocked).
-    { provide: ENTITLEMENTS, useFactory: (env: ServerEnv) => resolveEntitlementsProvider(env), inject: [ENV] },
-    { provide: PREMIUM_MODE, useFactory: (env: ServerEnv) => env.PREMIUM_FEATURES, inject: [ENV] },
+    {
+      provide: ENTITLEMENTS,
+      useFactory: (env: ServerEnv) => resolveEntitlementsProvider(env),
+      inject: [ENV],
+    },
+    {
+      provide: PREMIUM_MODE,
+      useFactory: (env: ServerEnv) => env.PREMIUM_FEATURES,
+      inject: [ENV],
+    },
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,
@@ -80,15 +120,26 @@ import { AdminCrudController } from './admin-crud.controller';
     },
     // Rate limiter for the public surface (P1-5): token bucket by default, noop
     // when RATE_LIMIT_ENABLED=false; swappable for a distributed limiter.
-    { provide: RATE_LIMITER, useFactory: (env: ServerEnv) => createRateLimiter(env), inject: [ENV] },
+    {
+      provide: RATE_LIMITER,
+      useFactory: (env: ServerEnv) => createRateLimiter(env),
+      inject: [ENV],
+    },
     RateLimitGuard,
     BookingService,
+    CalV2Service,
+    CalV2PilotService,
+    CalV2RequestIdInterceptor,
     AdminService,
+    OnboardingService,
+    GrowthService,
     AuthService,
     CalendarEffects,
+    CrmEffects,
     EmailEffects,
-    // Drains the durable outbox (calendar write-out + webhook delivery + booking
-    // emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
+    DaptaSyncEffects,
+    // Drains the durable outbox (calendar write-out + CRM write-out + webhook
+    // delivery + booking emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
     OutboxWorker,
   ],
 })

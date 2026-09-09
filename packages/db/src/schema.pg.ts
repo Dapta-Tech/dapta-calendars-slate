@@ -30,6 +30,22 @@ export const account = pgTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: bigint('entitlement_checked_at', { mode: 'number' }),
+  // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
+  // by Forms' question bank. Written once, alongside the claim below.
+  onboarding: jsonb('onboarding'),
+  // The write-once qualification claim. NULL means "this account still owes
+  // onboarding" — which is why migration 0013 STAMPS every pre-existing account,
+  // so the wizard greets new signups only and never traps an existing host.
+  onboardingCompletedAt: bigint('onboarding_completed_at', { mode: 'number' }),
+  // O2 growth attribution: the 7-key allowlist blob captured at the front door
+  // and claimed WRITE-ONCE onto this account. NULL is the truthful state for
+  // organic traffic and for every account predating the migration — nothing
+  // backfills it, because a synthetic value here can never be corrected.
+  attribution: jsonb('attribution'),
+  // The write-once attribution claim. Also refuses accounts older than the
+  // 10-minute window, so a campaign click by the owner of an established
+  // workspace can never restamp its origin.
+  attributionClaimedAt: bigint('attribution_claimed_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -128,12 +144,25 @@ export const eventType = pgTable('event_type', {
   schedulingType: text('scheduling_type'),
   locations: jsonb('locations'),
   bookingFields: jsonb('booking_fields'),
+  /**
+   * Per-event reminders + follow-up (#68). NULL = never configured (the read
+   * falls back to the shipped defaults); `[]` = deliberately none. See
+   * `reminders.ts` for the row shape and the copy-forward.
+   */
+  reminders: jsonb('reminders'),
   metadata: jsonb('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
   requiresConfirmation: integer('requires_confirmation').notNull().default(0),
+  /**
+   * Duplicate-booking guard (#69/AB1): 1 = one normalized email may hold at
+   * most one UPCOMING booking on this event type. Off (0) by default and off
+   * on every already-saved event — turning it on is the host's choice. Not a
+   * security control: email is verified nowhere, so it prevents accidents.
+   */
+  preventDuplicateBookings: integer('prevent_duplicate_bookings').notNull().default(0),
   seatsPerTimeSlot: integer('seats_per_time_slot'),
   /** Per-event calendar write destination override; NULL = fall back to the
    *  host's member-level `is_destination` calendar (calendar-refs.ts). */
@@ -175,7 +204,13 @@ export const booking = pgTable('booking', {
   startMs: bigint('start_ms', { mode: 'number' }).notNull(),
   endMs: bigint('end_ms', { mode: 'number' }).notNull(),
   status: text('status').notNull().default('accepted'),
+  /** Human detail of the Where (address, number, custom label). */
   location: text('location'),
+  /**
+   * The event type's location kind, SNAPSHOTTED at booking time. Null for rows
+   * written before the kind existed — the render falls back to `location`.
+   */
+  locationKind: text('location_kind'),
   meetingUrl: text('meeting_url'),
   attendeeTimeZone: text('attendee_time_zone'),
   responses: jsonb('responses'),
@@ -184,7 +219,14 @@ export const booking = pgTable('booking', {
   cancelledBy: text('cancelled_by'),
   rescheduled: integer('rescheduled'),
   fromReschedule: text('from_reschedule'),
+  rescheduledFromUid: text('rescheduled_from_uid'),
+  rescheduledToUid: text('rescheduled_to_uid'),
+  reschedulingReason: text('rescheduling_reason'),
+  rescheduledByEmail: text('rescheduled_by_email'),
   recurringEventId: text('recurring_event_id'),
+  /** Namespaced by account before it is stored (#104) — this `unique` is
+   *  GLOBAL, so a raw caller-supplied key would be claimable across
+   *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
@@ -195,9 +237,28 @@ export const bookingAttendee = pgTable('booking_attendee', {
   bookingId: text('booking_id').notNull(),
   name: text('name').notNull(),
   email: text('email').notNull(),
+  /**
+   * `lower(trim(email))`, indexed, for the duplicate-booking guard (#69/AB1).
+   * NULLABLE on purpose, unlike `booking_guest.email_normalized`: migrations
+   * land before the API that writes this column, so rows inserted in that
+   * window carry NULL. Every read coalesces — see `normalizedEmailSql`.
+   * `+tags` are NOT stripped (#69: most providers treat them as distinct).
+   */
+  emailNormalized: text('email_normalized'),
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
+/** Post-create guests. Kept separate so case-insensitive dedupe has a safe unique key. */
+export const bookingGuest = pgTable('booking_guest', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  email: text('email').notNull(),
+  emailNormalized: text('email_normalized').notNull(),
+  name: text('name'),
+  timeZone: text('time_zone'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -239,6 +300,45 @@ export const connectedCalendar = pgTable('connected_calendar', {
   lastCheckDetail: text('last_check_detail'),
 });
 
+/** Provider calendars discovered beneath a connected account/credential. */
+export const providerCalendar = pgTable('provider_calendar', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  memberId: text('member_id').notNull(),
+  connectedCalendarId: text('connected_calendar_id').notNull(),
+  externalId: text('external_id').notNull(),
+  name: text('name').notNull(),
+  email: text('email'),
+  isPrimary: integer('is_primary').notNull().default(0),
+  readOnly: integer('read_only').notNull().default(1),
+  accessRole: text('access_role').notNull().default('none'),
+  source: text('source').notNull().default('shared'),
+  canRead: integer('can_read').notNull().default(1),
+  canReadFreeBusy: integer('can_read_free_busy').notNull().default(1),
+  canCreate: integer('can_create').notNull().default(0),
+  canUpdate: integer('can_update').notNull().default(0),
+  canDelete: integer('can_delete').notNull().default(0),
+  syncStatus: text('sync_status').notNull().default('healthy'),
+  lastSyncedAt: bigint('last_synced_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
+/** Hashed, tenant/key/path-scoped mutation replay records (never stores plaintext keys). */
+export const apiIdempotency = pgTable('api_idempotency', {
+  id: text('id').primaryKey(),
+  namespaceHash: text('namespace_hash').notNull().unique(),
+  accountId: text('account_id').notNull(),
+  apiKeyId: text('api_key_id').notNull(),
+  method: text('method').notNull(),
+  path: text('path').notNull(),
+  requestHash: text('request_hash').notNull(),
+  statusCode: integer('status_code'),
+  responseBody: jsonb('response_body'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+});
+
 export const apiKey = pgTable('api_key', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
@@ -261,7 +361,14 @@ export const webhook = pgTable('webhook', {
   teamId: text('team_id'),
   eventTypeId: text('event_type_id'),
   subscriberUrl: text('subscriber_url').notNull(),
+  /** LEGACY plaintext signing secret (W / #75). Read-only fallback: rows written
+   *  before the envelope still sign, and are re-sealed into `secretCipher` the
+   *  first time a key is present at signing time. Never written with a plaintext
+   *  value by new code — only cleared to NULL on re-seal. */
   secret: text('secret'),
+  /** AES-256-GCM envelope (`v1.<iv>.<tag>.<ciphertext>`) bound to
+   *  `${accountId}:webhook:${id}`. Decrypted ONLY at signing time. */
+  secretCipher: text('secret_cipher'),
   eventTriggers: jsonb('event_triggers'),
   active: integer('active').notNull().default(1),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
@@ -314,6 +421,44 @@ export const notificationSetting = pgTable('notification_setting', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * H1a (#63 / ADR 0001): ONE third-party integration credential per (account,
+ * provider). The pasted private-app token is stored AES-256-GCM encrypted under
+ * a `v1.<iv>.<tag>.<ciphertext>` envelope bound to (account_id, provider), and
+ * is NEVER returned to a client — `label` + `token_last4` are the whole of what
+ * a status view may show.
+ *
+ * Disconnecting is a SOFT delete: `status = 'disconnected'` and `token_cipher`
+ * nulled. The row's `id` must survive, because `booking_reference.destination`
+ * points at it — a hard delete would mint a new id on reconnect, orphan every
+ * stored reference, and turn the first post-reconnect cancellation into a
+ * duplicate meeting.
+ *
+ * Health mirrors `connected_calendar.last_check_*` so the two read alike, plus
+ * `last_error_detail`: the STRUCTURED provider error (category + the missing
+ * scope names), so a UI can name the exact checkbox that was missed rather than
+ * re-parsing prose.
+ */
+export const accountIntegration = pgTable('account_integration', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  /** Vendor key, e.g. `hubspot`. UNIQUE with account_id. */
+  provider: text('provider').notNull(),
+  /** `connected` | `unhealthy` | `disconnected`. Never auto-disabled. */
+  status: text('status').notNull().default('connected'),
+  /** `v1.<iv>.<tag>.<ciphertext>`; NULL once disconnected (credential scrubbed). */
+  tokenCipher: text('token_cipher'),
+  label: text('label'),
+  tokenLast4: text('token_last4'),
+  lastCheckAt: bigint('last_check_at', { mode: 'number' }),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
+  /** Structured provider error: `{ category, requiredGranularScopes }`. */
+  lastErrorDetail: jsonb('last_error_detail'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -326,12 +471,16 @@ export const pgSchema = {
   eventTypeConflictCalendar,
   booking,
   bookingAttendee,
+  bookingGuest,
   bookingHost,
   slotReservation,
   connectedCalendar,
+  providerCalendar,
+  apiIdempotency,
   apiKey,
   webhook,
   bookingReference,
   outbox,
   notificationSetting,
+  accountIntegration,
 };

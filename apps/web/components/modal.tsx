@@ -28,7 +28,14 @@ export function Modal({
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
+    // `data-modal-autofocus` wins where a dialog knows which control the person
+    // came for; otherwise the first control, as before. A dialog that opens
+    // with explanatory checkboxes above its real field would otherwise focus
+    // one of those.
+    (
+      ref.current?.querySelector<HTMLElement>('[data-modal-autofocus]') ??
+      ref.current?.querySelector<HTMLElement>('input, select, textarea, button')
+    )?.focus();
     return () => {
       window.removeEventListener('keydown', onKey);
       restoreRef.current?.focus?.();

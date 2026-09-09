@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { hashManageToken } from '@slate/engine';
 import { createDb, type Db } from './client';
 import { migrate } from './migrate';
@@ -24,7 +25,11 @@ import {
   updateBranding,
   verifyApiKey,
 } from './parity';
+import { loadEncryptionKey } from './crypto';
 import { createEventType, createTeam, setEventTypeHosts, updateEventType } from './crud';
+
+/** W (#75): webhook secrets are enveloped, so the write and the signer need a key. */
+const WEBHOOK_KEY = loadEncryptionKey(randomBytes(32).toString('base64'));
 
 async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
   const a = await getAvailability(db, {
@@ -50,7 +55,7 @@ describe('parity (SQLite in-memory)', () => {
   it('F5: an event type Location is snapshotted onto booking.location at book time', async () => {
     const { sql } = await import('drizzle-orm');
     const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
-    await updateEventType(db, accountId, et.id, { location: 'Google Meet' });
+    await updateEventType(db, accountId, et.id, { location: { kind: 'in_person', detail: 'Calle 93 #11-20' } });
 
     const startMs = await firstSlotMs(db);
     const out = await createBooking(db, {
@@ -63,9 +68,85 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(true);
     const uid = (out as { booking: { uid: string } }).booking.uid;
-    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
-    // The chain event editor → event_type.locations → booking.location is closed.
-    expect(row?.location).toBe('Google Meet');
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    // The chain event editor → event_type.locations → booking.location(+kind) is closed.
+    expect(row?.location).toBe('Calle 93 #11-20');
+    expect(row?.location_kind).toBe('in_person');
+  });
+
+  it('C1: a legacy free-text Location still books, coerced to the custom kind', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    // A row written before the kind existed — the editor used to store raw text.
+    await db.run(sql`UPDATE event_type SET locations = '"Room 4"' WHERE id = ${et.id}`);
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBe('Room 4');
+    expect(row?.location_kind).toBe('custom');
+  });
+
+  it('C1: conferencing snapshots the kind with no detail — the link comes from the port', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, { location: { kind: 'conferencing' } });
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    expect(out.ok).toBe(true);
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBeNull();
+    expect(row?.location_kind).toBe('conferencing');
+  });
+
+  it('C1: editing the event type later does NOT rewrite an existing booking', async () => {
+    const { sql } = await import('drizzle-orm');
+    const et = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug='intro-call' LIMIT 1`))!;
+    await updateEventType(db, accountId, et.id, { location: { kind: 'phone', detail: '+57 300 000 0000' } });
+
+    const startMs = await firstSlotMs(db);
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme' },
+    });
+    const uid = (out as { booking: { uid: string } }).booking.uid;
+
+    // The host changes their mind AFTER the booking exists.
+    await updateEventType(db, accountId, et.id, { location: { kind: 'conferencing' } });
+
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location_kind).toBe('phone');
+    expect(row?.location).toBe('+57 300 000 0000');
   });
 
   it('F5 (team): a team event type Location is snapshotted onto booking.location too', async () => {
@@ -73,7 +154,7 @@ describe('parity (SQLite in-memory)', () => {
     // Seed has a round-robin team event type (team_id set).
     const et = await db.get<{ id: string; slug: string }>(sql`SELECT id, slug FROM event_type WHERE team_id IS NOT NULL LIMIT 1`);
     if (!et) return; // no team event in seed → nothing to assert
-    await updateEventType(db, accountId, et.id, { location: 'Zoom' });
+    await updateEventType(db, accountId, et.id, { location: { kind: 'custom', detail: 'Meeting room 4' } });
     const team = (await db.get<{ slug: string }>(sql`SELECT slug FROM team LIMIT 1`))!;
     const now = Date.now();
     const avail = await getTeamAvailability(db, {
@@ -93,8 +174,11 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(true);
     const uid = (out as { uid: string }).uid;
-    const row = await db.get<{ location: string | null }>(sql`SELECT location FROM booking WHERE uid = ${uid} LIMIT 1`);
-    expect(row?.location).toBe('Zoom');
+    const row = await db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE uid = ${uid} LIMIT 1`,
+    );
+    expect(row?.location).toBe('Meeting room 4');
+    expect(row?.location_kind).toBe('custom');
   });
 
   it('rejects a booking missing a required intake field', async () => {
@@ -450,17 +534,18 @@ describe('parity (SQLite in-memory)', () => {
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
       secret: 's3cret',
+      key: WEBHOOK_KEY,
     });
     const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
     const fakeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       calls.push({ url, headers: init.headers, body: init.body });
       return { ok: true } as Response;
     }) as unknown as typeof fetch;
-    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, WEBHOOK_KEY, fakeFetch);
     expect(sent).toBe(1);
     expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
     // A non-matching event fires nothing.
-    const none = await dispatchWebhooks(db, accountId, 'booking.cancelled', {}, fakeFetch);
+    const none = await dispatchWebhooks(db, accountId, 'booking.cancelled', {}, WEBHOOK_KEY, fakeFetch);
     expect(none).toBe(0);
   });
 
@@ -531,6 +616,7 @@ describe('parity (SQLite in-memory)', () => {
       accountId,
       subscriberUrl: 'https://198.51.100.11/hook',
       eventTriggers: ['booking.created'],
+      key: WEBHOOK_KEY,
     });
     expect(wh.secret).toMatch(/^whsec_/);
 
@@ -539,7 +625,7 @@ describe('parity (SQLite in-memory)', () => {
       calls.push({ headers: init.headers });
       return { ok: true } as Response;
     }) as unknown as typeof fetch;
-    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, WEBHOOK_KEY, fakeFetch);
     expect(sent).toBe(1);
     expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
   });

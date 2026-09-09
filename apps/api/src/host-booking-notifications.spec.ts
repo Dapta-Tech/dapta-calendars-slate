@@ -1,11 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, createWebhook, migrate, seed, sql, type Db } from '@slate/db';
+import { randomBytes } from 'node:crypto';
+import { createDb, createWebhook, loadEncryptionKey, migrate, seed, sql, type Db } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 import { AdminService } from './admin.service';
 import type { HostPrincipal } from './auth.service';
+
+/** W (#75): webhook signing secrets are enveloped; the write path needs a key. */
+const WEBHOOK_KEY = loadEncryptionKey(randomBytes(32).toString('base64'));
 
 /**
  * QA2 BUG-1 — a booking created from the admin dashboard produced NO outbox
@@ -46,6 +50,7 @@ describe('host-created bookings notify (QA2 BUG-1)', () => {
       accountId: account!.id,
       subscriberUrl: 'https://example.com/hook',
       eventTriggers: ['booking.created'],
+      key: WEBHOOK_KEY,
     });
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     const email = new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db);

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   cancelBooking,
@@ -16,10 +16,11 @@ import {
   parseJsonColumn,
   sql,
 } from '@slate/db';
-import { verifyManageToken } from '@slate/engine';
+import { isLocationKind, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
 import {
   availabilityQuerySchema,
@@ -31,9 +32,69 @@ import {
   type PublicProfile,
   type TeamProfile,
 } from '@slate/types';
+import { z } from 'zod';
 import { DB, ENV } from './tokens';
 
 export type ServiceError = { error: string; message: string; status: number };
+
+/**
+ * The bound `createBookingSchema` used to apply to `idempotencyKey` before the
+ * field moved off the request body (#104). It is re-stated here rather than
+ * dropped: the value lands in a UNIQUE-indexed column, and an unbounded string
+ * reaches Postgres as an index-row-size error that the booking path does not
+ * classify. Every caller that hands the service a key inherits the check.
+ */
+const contextIdempotencyKeySchema = z.string().min(1).max(200);
+
+/**
+ * The duplicate-booking guard's public message (#69), shared by the personal
+ * and team write paths so the two cannot drift. It names NO date, time or
+ * host: revealing the existing slot would hand a third party's schedule to
+ * anyone who guesses an email, and the person it belongs to already has the
+ * confirmation in their inbox. The booking page renders its own localized
+ * copy from the i18n catalogue; this is the API-level fallback.
+ */
+const DUPLICATE_BOOKING_MESSAGE =
+  'A booking already exists for this email on this event. Check your inbox.';
+
+/** The manage view's event-context projection — see `manageView`. */
+interface RescheduleContextRow {
+  code: string;
+  handle: string | null;
+  slug: string;
+  team_id: string | null;
+  team_slug: string | null;
+}
+
+/**
+ * Name the reschedule context by the event type that owns the booking (#122).
+ *
+ * A team event type is addressable ONLY as `account + team + slug`; the
+ * organizer's handle does not reach it, because a team event type has no
+ * `member_id` for the personal lookup to match on. Saying which kind it is —
+ * rather than always answering the personal shape — is what lets the manage
+ * page call the availability route that can actually resolve the event.
+ *
+ * `team_id` decides, not `team_slug`: a team booking has BOTH a team and an
+ * organizer — the join finds the team through the event type, while
+ * `host_member_id` still points at whichever organizer the scheduling method
+ * assigned — so the handle is present and would otherwise win.
+ *
+ * `team.slug` is nullable in both dialects. A team event type whose team has no
+ * slug is not addressable on any public route, so it answers NO context rather
+ * than falling through to the organizer's handle — that fallthrough would emit
+ * exactly the personal-shaped context this function exists to stop, and the
+ * picker would silently go empty again. An absent picker beats a wrong one.
+ */
+function rescheduleContextOf(ctx: RescheduleContextRow | undefined): BookingView['reschedule'] {
+  if (!ctx?.slug) return undefined;
+  if (ctx.team_id)
+    return ctx.team_slug
+      ? { kind: 'team', accountCode: ctx.code, teamSlug: ctx.team_slug, slug: ctx.slug }
+      : undefined;
+  if (ctx.handle) return { kind: 'personal', accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug };
+  return undefined;
+}
 
 @Injectable()
 export class BookingService {
@@ -42,6 +103,13 @@ export class BookingService {
     @Inject(ENV) private readonly env: ServerEnv,
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
     @Inject(EmailEffects) private readonly email: EmailEffects,
+    // H1a: the CRM write-out rides the SAME lifecycle transitions as the
+    // calendar one, as its own enqueue — no-op when CRM_PROVIDER=disabled,
+    // which is the OSS default. LAST and @Optional() so the many specs that
+    // construct this service positionally keep working: absent, the booking
+    // lifecycle simply enqueues no CRM row, which is exactly what those specs
+    // (and a bare fork) already expect.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
 
   private manageUrl(uid: string, token: string): string {
@@ -98,15 +166,60 @@ export class BookingService {
     });
     if (!held.ok) {
       if (held.reason === 'NOT_FOUND')
-        return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'No such booking page.',
+          status: 404,
+        };
       if (held.reason === 'RATE_LIMITED')
-        return { error: 'RATE_LIMITED', message: 'Too many active holds. Try again shortly.', status: 429 };
-      return { error: 'INVALID_SLOT', message: 'That time is not available to hold.', status: 400 };
+        return {
+          error: 'RATE_LIMITED',
+          message: 'Too many active holds. Try again shortly.',
+          status: 429,
+        };
+      return {
+        error: 'INVALID_SLOT',
+        message: 'That time is not available to hold.',
+        status: 400,
+      };
     }
-    return { reservationUid: held.uid, expiresAt: new Date(held.releaseAtMs).toISOString() };
+    return {
+      reservationUid: held.uid,
+      expiresAt: new Date(held.releaseAtMs).toISOString(),
+    };
   }
 
-  async book(raw: unknown, onBehalf = false): Promise<BookingView | ServiceError> {
+  async book(
+    raw: unknown,
+    onBehalf = false,
+    context?: {
+      additionalAttendees?: Array<{
+        name: string;
+        email: string;
+        timeZone: string;
+        notes?: string;
+        phone?: string;
+      }>;
+      metadata?: Record<string, unknown>;
+      /**
+       * True when the caller is an API key (the machine API or the
+       * v2 compatibility surface). Read ONLY by the duplicate-booking
+       * guard (#69), which exempts host-initiated and API-key writes. It is
+       * separate from `onBehalf` because the compatibility surface is an
+       * API-key write that deliberately reports `onBehalf: false`.
+       */
+      apiKeyWrite?: boolean;
+      /**
+       * Retry-dedupe key. CONTEXT, never the request body (#104): `POST
+       * /v1/bookings` is unauthenticated, and a key set there would land in a
+       * column the whole deployment shares. Only a controller that has
+       * authenticated an API key may set it — today the machine API (from its
+       * `Idempotency-Key` header) and the v2 compatibility surface. The
+       * repository namespaces it by account before storing.
+       */
+      idempotencyKey?: string;
+    },
+  ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
     const outcome = await createBooking(
       this.db,
@@ -116,10 +229,15 @@ export class BookingService {
         slug: input.slug,
         startMs: new Date(input.startUtc).getTime(),
         attendee: input.attendee,
+        additionalAttendees: context?.additionalAttendees,
         answers: input.answers,
+        metadata: context?.metadata,
         reservationUid: input.reservationUid,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: context?.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(context.idempotencyKey)
+          : undefined,
         onBehalf,
+        apiKeyWrite: context?.apiKeyWrite,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
       this.calendar.provider,
@@ -127,18 +245,41 @@ export class BookingService {
 
     if (!outcome.ok) {
       if (outcome.reason === 'NOT_FOUND')
-        return { error: 'NOT_FOUND', message: 'No such booking page.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'No such booking page.',
+          status: 404,
+        };
       if (outcome.reason === 'INVALID')
-        return { error: 'INTAKE_INVALID', message: outcome.message, status: 400 };
+        return {
+          error: 'INTAKE_INVALID',
+          message: outcome.message,
+          status: 400,
+        };
       if (outcome.reason === 'RESERVATION_EXPIRED')
-        return { error: 'RESERVATION_EXPIRED', message: 'Your hold on this time expired. Please pick a time again.', status: 410 };
+        return {
+          error: 'RESERVATION_EXPIRED',
+          message: 'Your hold on this time expired. Please pick a time again.',
+          status: 410,
+        };
       if (outcome.reason === 'CALENDAR_UNAVAILABLE')
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      return { error: 'SLOT_TAKEN', message: 'That time was just booked. Pick another slot.', status: 409 };
+      // Duplicate-booking guard (#69) — see DUPLICATE_BOOKING_MESSAGE.
+      if (outcome.reason === 'DUPLICATE_BOOKING')
+        return {
+          error: 'DUPLICATE_BOOKING',
+          message: DUPLICATE_BOOKING_MESSAGE,
+          status: 409,
+        };
+      return {
+        error: 'SLOT_TAKEN',
+        message: 'That time was just booked. Pick another slot.',
+        status: 409,
+      };
     }
 
     const b = outcome.booking;
@@ -156,6 +297,7 @@ export class BookingService {
       // nothing to the calendar until the host confirms. (B8: never blocks.)
       if (b.status === 'accepted') {
         this.calendar.onBookingAccepted(b.uid);
+        this.crm?.onBookingAccepted(b.uid);
         void this.email.enqueueConfirmation(b.uid, { manageUrl });
         // Schedule the pre-meeting reminders (24h + 1h) — dormant outbox rows.
         void this.email.enqueueReminders(b.uid, { manageUrl });
@@ -202,16 +344,22 @@ export class BookingService {
     // Reuse the repository verify by attempting a no-op check via cancel/reschedule guards
     const meta = parseJsonColumn<{ _manage?: { tokenHash?: string } }>(b.metadata, {});
     if (!verifyManageToken(token, meta._manage?.tokenHash ?? null))
-      return { error: 'FORBIDDEN', message: 'Invalid manage link.', status: 403 };
-    const attendee = await this.db.get<{ name: string; email: string; time_zone: string | null }>(
-      sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`,
-    );
+      return {
+        error: 'FORBIDDEN',
+        message: 'Invalid manage link.',
+        status: 403,
+      };
+    const attendee = await this.db.get<{
+      name: string;
+      email: string;
+      time_zone: string | null;
+    }>(sql`SELECT name, email, time_zone FROM booking_attendee WHERE booking_id = ${b.id} LIMIT 1`);
     // Where/meeting-link for the manage page. `location` is the booking's own
     // location column (same field calendar write-out reads); the meeting link is
     // the provider-generated URL persisted per booking in booking_reference (the
     // real source — booking.meeting_url is not populated by the create flow).
-    const details = await this.db.get<{ location: string | null }>(
-      sql`SELECT location FROM booking WHERE id = ${b.id} LIMIT 1`,
+    const details = await this.db.get<{ location: string | null; location_kind: string | null }>(
+      sql`SELECT location, location_kind FROM booking WHERE id = ${b.id} LIMIT 1`,
     );
     const ref = await this.db.get<{ meeting_url: string | null }>(
       sql`SELECT meeting_url FROM booking_reference
@@ -219,14 +367,24 @@ export class BookingService {
     );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
-    const ctx = await this.db.get<{ code: string; handle: string | null; slug: string }>(
+    const ctx = await this.db.get<RescheduleContextRow>(
       // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
       // page's reschedule link never resurrects a legacy alias.
-      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug
+      //
+      // The team join is what makes a TEAM booking reschedulable at all (#122).
+      // A team event type carries `team_id` and NO `member_id`, so describing it
+      // by the assigned organizer's handle names an event type the personal
+      // availability lookup cannot find — the picker came back empty and the
+      // invitee's only remaining option was to cancel. Joined off `et.team_id`
+      // rather than `bk.team_id`: the EVENT TYPE decides which public route
+      // serves it, and it is the event type the picker has to resolve.
+      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug,
+                 et.team_id AS team_id, tm.slug AS team_slug
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
           LEFT JOIN member m ON m.id = bk.host_member_id
+          LEFT JOIN team tm ON tm.id = et.team_id
           WHERE bk.id = ${b.id} LIMIT 1`,
     );
     return {
@@ -242,40 +400,90 @@ export class BookingService {
         timeZone: attendee?.time_zone ?? 'UTC',
       },
       location: details?.location ?? null,
+      locationKind: isLocationKind(details?.location_kind) ? details.location_kind : null,
       meetingUrl: ref?.meeting_url ?? null,
-      reschedule:
-        ctx?.handle && ctx.slug ? { accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug } : undefined,
+      reschedule: rescheduleContextOf(ctx),
     };
   }
 
   async cancel(
     uid: string,
-    opts: { reason?: string; token?: string; byHost?: boolean; idempotencyKey?: string },
+    opts: {
+      reason?: string;
+      token?: string;
+      byHost?: boolean;
+      idempotencyKey?: string;
+      accountId?: string;
+    },
   ): Promise<{ uid: string; status: string } | ServiceError> {
     const out = await cancelBooking(this.db, {
       uid,
       reason: opts.reason,
       manageToken: opts.token,
       byHost: opts.byHost,
-      idempotencyKey: opts.idempotencyKey,
+      idempotencyKey: opts.idempotencyKey
+        ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
+        : undefined,
+      accountId: opts.accountId,
     });
     if (!out.ok) return this.mapMutation(out.reason);
     // Idempotent retry (already cancelled): skip side-effects so a retried
     // cancel doesn't send a second email / fire a second webhook.
     if (!out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
+      this.crm?.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
       // Drop any scheduled reminders — don't remind about a cancelled meeting.
       void this.email.cancelReminders(uid);
       void this.email.cancelFollowUps(uid);
-      this.fireWebhook(uid, 'booking.cancelled', { uid, reason: opts.reason ?? null });
+      this.fireWebhook(uid, 'booking.cancelled', {
+        uid,
+        reason: opts.reason ?? null,
+      });
     }
     return { uid: out.uid, status: 'cancelled' };
   }
 
+  /** Complete the durable side effects for the v2 new-UID reschedule contract. */
+  afterV2Reschedule(
+    oldUid: string,
+    newUid: string,
+    manageToken: string | undefined,
+    previousStartUtc: string,
+    status: string,
+  ): void {
+    const manageUrl = manageToken ? this.manageUrl(newUid, manageToken) : undefined;
+    void this.email.cancelReminders(oldUid);
+    void this.email.cancelFollowUps(oldUid);
+    if (status === 'accepted') {
+      this.calendar.onBookingRescheduled(newUid);
+      this.crm?.onBookingRescheduled(newUid);
+      void this.email.enqueueReschedule(newUid, { manageUrl, previousStartUtc });
+      void this.email.enqueueReminders(newUid, { manageUrl });
+      void this.email.enqueueFollowUps(newUid, { manageUrl });
+    } else {
+      void this.email.enqueuePending(newUid, { manageUrl });
+    }
+    this.fireWebhook(newUid, 'booking.rescheduled', {
+      uid: newUid,
+      rescheduledFromUid: oldUid,
+    });
+  }
+
+  /** Re-write the existing provider event so newly added guests receive it. */
+  afterGuestsChanged(uid: string): void {
+    this.calendar.onBookingRescheduled(uid);
+    this.crm?.onBookingRescheduled(uid);
+  }
+
   async reschedule(
     uid: string,
-    opts: { newStartUtc: string; token?: string; byHost?: boolean; idempotencyKey?: string },
+    opts: {
+      newStartUtc: string;
+      token?: string;
+      byHost?: boolean;
+      idempotencyKey?: string;
+    },
   ): Promise<{ uid: string; startUtc: string; endUtc: string; manageUrl?: string } | ServiceError> {
     const out = await rescheduleBooking(
       this.db,
@@ -284,7 +492,9 @@ export class BookingService {
         newStartMs: new Date(opts.newStartUtc).getTime(),
         manageToken: opts.token,
         byHost: opts.byHost,
-        idempotencyKey: opts.idempotencyKey,
+        idempotencyKey: opts.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
+          : undefined,
       },
       // Fail-closed external conflict check on the target slot — the same
       // policy as create (no-op when the provider is disabled).
@@ -295,6 +505,7 @@ export class BookingService {
     // so skip all side-effects (no duplicate calendar move / email / webhook).
     if (!out.alreadyApplied) {
       this.calendar.onBookingRescheduled(uid);
+      this.crm?.onBookingRescheduled(uid);
       // Durable reschedule email (attendee + host) with the previous time + a
       // REQUEST .ics so the existing calendar event is updated in place.
       if (out.manageToken) {
@@ -303,10 +514,18 @@ export class BookingService {
           previousStartUtc: out.previousStartUtc ?? null,
         });
         // Move the reminders to the new time (drop old, re-schedule).
-        void this.email.repointReminders(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
-        void this.email.repointFollowUps(uid, { manageUrl: this.manageUrl(uid, out.manageToken) });
+        void this.email.repointReminders(uid, {
+          manageUrl: this.manageUrl(uid, out.manageToken),
+        });
+        void this.email.repointFollowUps(uid, {
+          manageUrl: this.manageUrl(uid, out.manageToken),
+        });
       }
-      this.fireWebhook(uid, 'booking.rescheduled', { uid, startUtc: out.startUtc, endUtc: out.endUtc });
+      this.fireWebhook(uid, 'booking.rescheduled', {
+        uid,
+        startUtc: out.startUtc,
+        endUtc: out.endUtc,
+      });
     }
     // The repo layer ROTATES the manage token on a real move (single-active-token
     // invariant), which invalidates the token the caller just used. Return the
@@ -333,13 +552,29 @@ export class BookingService {
   ): ServiceError {
     switch (reason) {
       case 'NOT_FOUND':
-        return { error: 'NOT_FOUND', message: 'Booking not found.', status: 404 };
+        return {
+          error: 'NOT_FOUND',
+          message: 'Booking not found.',
+          status: 404,
+        };
       case 'FORBIDDEN':
-        return { error: 'FORBIDDEN', message: 'Invalid manage link.', status: 403 };
+        return {
+          error: 'FORBIDDEN',
+          message: 'Invalid manage link.',
+          status: 403,
+        };
       case 'GONE':
-        return { error: 'GONE', message: 'Booking is no longer active.', status: 410 };
+        return {
+          error: 'GONE',
+          message: 'Booking is no longer active.',
+          status: 410,
+        };
       case 'SLOT_TAKEN':
-        return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+        return {
+          error: 'SLOT_TAKEN',
+          message: 'That time is taken.',
+          status: 409,
+        };
       case 'CALENDAR_UNAVAILABLE':
         return {
           error: 'CALENDAR_UNAVAILABLE',
@@ -390,11 +625,44 @@ export class BookingService {
     });
   }
 
+  /**
+   * Book a team event, answering the SAME `BookingView` the personal `book()`
+   * path answers, with `hostMemberId` kept as an additive field.
+   *
+   * It used to return a narrow `{ uid, hostMemberId, manageUrl }`. The web
+   * client casts a 201 body to `BookingView` on both routes, so `startUtc`
+   * arrived `undefined`, `formatSlotDateTime` threw `RangeError: Invalid time
+   * value`, and the public error boundary told every team invitee that a
+   * booking which had in fact SUCCEEDED had failed — sending them back to make
+   * a second one (#102). One concept, one shape: the confirmed branch then
+   * needs no team special case.
+   */
   async teamBook(
     accountCode: string,
     teamSlug: string,
-    body: { slug: string; startUtc: string; attendee: BookingView['attendee']; answers?: Record<string, unknown> },
-  ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
+    body: {
+      slug: string;
+      startUtc: string;
+      attendee: BookingView['attendee'];
+      additionalAttendees?: Array<BookingView['attendee']>;
+      answers?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    },
+    /**
+     * Caller-supplied context, NEVER request body. `PublicController` passes
+     * a raw `@Body()` straight into `body` above and there is no global
+     * ValidationPipe, so an exemption flag living on that object would let an
+     * unauthenticated booker turn the duplicate-booking guard off by adding a
+     * JSON key. It is a separate argument for that reason — only a controller
+     * that has authenticated an API key may set it.
+     *
+     * `idempotencyKey` sits here for the same reason (#104), and to match the
+     * personal `book()` path — leaving it on `body` above while removing it
+     * from the personal payload would keep the hazard alive on one route and
+     * invite the next edit to that controller to reopen it.
+     */
+    context?: { apiKeyWrite?: boolean; idempotencyKey?: string },
+  ): Promise<(BookingView & { hostMemberId: string }) | ServiceError> {
     const out = await createTeamBooking(
       this.db,
       {
@@ -403,27 +671,49 @@ export class BookingService {
         slug: body.slug,
         startMs: new Date(body.startUtc).getTime(),
         attendee: body.attendee,
+        additionalAttendees: body.additionalAttendees,
         answers: body.answers,
+        metadata: body.metadata,
+        idempotencyKey: context?.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(context.idempotencyKey)
+          : undefined,
+        apiKeyWrite: context?.apiKeyWrite,
       },
       this.calendar.provider,
     );
     if (!out.ok) {
       if (out.reason === 'NOT_FOUND') return { error: 'NOT_FOUND', message: 'Not found.', status: 404 };
       if (out.reason === 'INVALID')
-        return { error: 'INTAKE_INVALID', message: out.message ?? 'Invalid.', status: 400 };
+        return {
+          error: 'INTAKE_INVALID',
+          message: out.message ?? 'Invalid.',
+          status: 400,
+        };
       if (out.reason === 'CALENDAR_UNAVAILABLE')
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      return { error: 'SLOT_TAKEN', message: 'That time is taken.', status: 409 };
+      // Duplicate-booking guard (#69) — see DUPLICATE_BOOKING_MESSAGE.
+      if (out.reason === 'DUPLICATE_BOOKING')
+        return {
+          error: 'DUPLICATE_BOOKING',
+          message: DUPLICATE_BOOKING_MESSAGE,
+          status: 409,
+        };
+      return {
+        error: 'SLOT_TAKEN',
+        message: 'That time is taken.',
+        status: 409,
+      };
     }
     // B4: a team booking is created `accepted`. It was silently unmanageable
     // before — now write it to the chosen host's calendar, send the attendee a
     // confirmation WITH a working manage link (the token minted by
     // createTeamBooking, previously discarded), and fire the webhook.
     this.calendar.onBookingAccepted(out.uid);
+    this.crm?.onBookingAccepted(out.uid);
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });
@@ -433,6 +723,63 @@ export class BookingService {
       status: 'accepted',
       startUtc: body.startUtc,
     });
-    return { uid: out.uid, hostMemberId: out.hostMemberId, manageUrl };
+    // Read the row back for the fields the create call does not hand out: the
+    // title, the resolved end instant, and the organizer's name/handle.
+    //
+    // The booking is ALREADY COMMITTED by this point, so nothing here may throw
+    // or the invitee gets a 500 — the error boundary again, for a booking that
+    // succeeded, which is the whole of #102 one layer down. Hence `.catch`, not
+    // just the empty-row fallback: a rejected query (a dropped connection, an
+    // exhausted pool, a statement timeout) has to degrade exactly like a missing
+    // row. Either way the confirmation loses DETAIL, never its SHAPE.
+    //
+    // An empty row is reachable in one real deployment: `DATABASE_URL` pointed
+    // at a load-balanced endpoint with read replicas, where this read can land
+    // on a replica that has not caught up with the insert.
+    const row = await this.db
+      .get<{
+        title: string;
+        start_ms: number | string;
+        end_ms: number | string;
+        status: string;
+        host_name: string | null;
+        host_handle: string | null;
+      }>(
+        // `uid` is a UUID this request just minted and `booking.uid` is UNIQUE in
+        // both dialects, so this is an exact index hit that cannot reach another
+        // account's row — the value is never caller-supplied.
+        sql`SELECT b.title AS title, b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
+                   m.display_name AS host_name, m.handle AS host_handle
+            FROM booking b
+            LEFT JOIN member m ON m.id = b.host_member_id
+            WHERE b.uid = ${out.uid} LIMIT 1`,
+      )
+      .catch(() => undefined);
+    // NORMALIZED on the fallback too: `body.startUtc` is the raw unvalidated
+    // controller body, which may carry an offset (`…T15:00:00+02:00`). The rest
+    // of the API answers UTC instants, and a booking that reports its time two
+    // ways is the class of drift this fix exists to close.
+    const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
+    const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
+    return {
+      uid: out.uid,
+      // A team booking is created `accepted` (it has no confirmation gate), so
+      // the column is the authority here and the literal is only the fallback.
+      status: (row?.status as BookingView['status']) ?? 'accepted',
+      title: row?.title ?? '',
+      startUtc,
+      endUtc,
+      host: { name: row?.host_name ?? null, handle: row?.host_handle ?? null },
+      // Picked field by field, never spread: the public controller forwards a
+      // raw unvalidated `@Body()` into `body`, so spreading would echo whatever
+      // extra keys an anonymous caller attached straight back out of a 201.
+      attendee: {
+        name: body.attendee.name,
+        email: body.attendee.email,
+        timeZone: body.attendee.timeZone,
+      },
+      hostMemberId: out.hostMemberId,
+      manageUrl,
+    };
   }
 }

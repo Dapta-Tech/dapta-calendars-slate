@@ -65,6 +65,30 @@ export const serverEnvSchema = z.object({
   ENTITLEMENTS_API_URL: z.string().url().optional(),
   ENTITLEMENTS_API_KEY: z.string().optional(),
 
+  // Onboarding cohort probe (ADR 0002 / #65). UNSET disables gate 1 entirely:
+  // the qualification questions feed a growth funnel, and with no upstream there
+  // is no funnel, so a bare fork's first admin is never asked them. Set, the
+  // identity service is asked whether this signup is already a known identity —
+  // a hit selects the `dapta` cohort (2 questions), a definitive miss `cold`
+  // (all 6). Any error or timeout FAILS CLOSED to `dapta`, the cohort that asks
+  // less. URL-only — never a hardcoded host (publish gate).
+  ONBOARDING_IAM_BASE_URL: z.string().url().optional(),
+  ONBOARDING_IAM_TOKEN: z.string().optional(),
+  // Deliberately short: this probe sits in front of a first-run wizard, so a
+  // slow upstream must degrade to "ask less" quickly rather than stall a signup.
+  ONBOARDING_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+
+  // O2 growth — the contact sync into the OPERATOR'S OWN marketing CRM
+  // (#94/#65). Not the customer-facing CRM integration a host connects to their
+  // own account (#63): different system, different purpose. UNSET sends nothing
+  // — the outbox rows are still enqueued and the worker records them as
+  // skipped, so a fork reports nothing anywhere and nothing accumulates as
+  // failures. URL-only, never a hardcoded host or flow id (publish gate).
+  DAPTA_SYNC_URL: z.string().url().optional(),
+  DAPTA_SYNC_TOKEN: z.string().optional(),
+  // Bounded so a slow marketing endpoint can never hold an outbox worker tick.
+  DAPTA_SYNC_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 
@@ -115,6 +139,32 @@ export const serverEnvSchema = z.object({
   CALENDAR_API_TOKEN: z.string().optional(),
   CALENDAR_BACKEND_MODULE: z.string().optional(),
   CALENDAR_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Display name for the conferencing the connected backend mints, shown to the
+  // host when they pick the `conferencing` location kind. Deploy config only —
+  // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
+  // generic wording, which is the correct default for a bare fork.
+  CALENDAR_CONFERENCING_LABEL: z.string().max(60).optional(),
+
+  // CRM write-out (H1a / #63 / ADR 0001). `disabled` (default) runs with no CRM
+  // at all: nothing is enqueued and nothing is called, so a bare fork behaves
+  // exactly as it did before the seam existed. `hubspot` selects the committed
+  // adapter. Unlike the calendar seam, this one MAY name its vendor — R15
+  // governs calendar vendors only; see docs/adr/0001-*.md.
+  CRM_PROVIDER: z.enum(['disabled', 'hubspot']).default('disabled'),
+  // Symmetric key for integration credentials at rest: 32 raw bytes, base64
+  // (`openssl rand -base64 32`). Read ONLY when a credential is written or
+  // read, so a deployment that never connects a CRM never needs one and boot is
+  // unaffected. Connecting without it is REFUSED loudly rather than stored in
+  // plaintext. Shared with #75 when webhook secrets move under the same envelope.
+  INTEGRATION_ENCRYPTION_KEY: z.string().optional(),
+  // Zero-config fallback: one private-app token for the whole deployment, used
+  // only by accounts that have connected nothing of their own. A connected
+  // token always wins. Placeholder values are detected and treated as UNSET, so
+  // an uncommented-but-unfilled .env line disables the integration rather than
+  // 401-ing forever.
+  HUBSPOT_PRIVATE_APP_TOKEN: z.string().optional(),
+  // Bounded so a slow CRM can never hold an outbox worker tick.
+  CRM_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval

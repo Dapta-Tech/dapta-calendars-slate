@@ -27,7 +27,31 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Db } from './client';
 
-export type OutboxKind = 'calendar' | 'webhook' | 'email';
+/**
+ * `dapta_sync` (contact → Dapta's OWN marketing CRM) and `iam_onboarding` (the
+ * lead-score post) are O2's two kinds, and they are deliberately SEPARATE rows
+ * rather than one row doing both calls: they retry independently, so a CRM
+ * failure can never re-post the qualification responses and mint a second lead
+ * score for one workspace. The invite path simply never enqueues the second
+ * kind, which is how "the invite path skips the IAM entirely" (#65) holds by
+ * construction rather than by a conditional inside a shared handler.
+ *
+ * The `outbox.kind` column is unconstrained text, so adding a kind is a
+ * type-level change only — no migration.
+ */
+export type OutboxKind =
+  | 'calendar'
+  | 'webhook'
+  | 'email'
+  | 'dapta_sync'
+  | 'iam_onboarding'
+  /**
+   * H1a (#63): the CRM write-out. ONE row per lifecycle transition, and the
+   * accept row does BOTH halves -- resolve the contact and create the meeting
+   * associated to it. Two rows would need an ordering the outbox does not
+   * have, and the meeting cannot be associated before the contact id exists.
+   */
+  | 'crm';
 /**
  * `skipped` = deliberately not performed (e.g. a legacy email row whose tenant
  * context is unrecoverable on a transport that requires it) — recorded ONCE

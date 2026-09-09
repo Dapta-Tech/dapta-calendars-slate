@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
 import { PhoneField } from '@/components/ui/phone-field';
+import { Select } from '@/components/ui/select';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { FormHeader } from '@/components/ui/page-header';
 import { createDefaultScheduleAction } from '@/app/admin/availability/actions';
@@ -247,16 +248,22 @@ export function HostBookingForm({
       />
       {notice}
       <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
-      <label className="flex flex-col gap-1 text-sm">
+      {/* A <div>, not a <label>: the Select's trigger is a <button>, which is not
+          a labelable element — a wrapping label would associate with nothing and
+          click through to nothing. The name is carried by `ariaLabel` instead. */}
+      <div className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.eventType}</span>
-        <select value={slug} onChange={(e) => setSlug(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2">
-          {bookable.map((et) => (
-            <option key={et.slug} value={et.slug}>
-              {et.title} · {et.lengthMinutes} min
-            </option>
-          ))}
-        </select>
-      </label>
+        <Select
+          value={slug}
+          onChange={setSlug}
+          ariaLabel={m.eventType}
+          locale={locale}
+          options={bookable.map((et) => ({
+            value: et.slug,
+            label: `${et.title} · ${et.lengthMinutes} min`,
+          }))}
+        />
+      </div>
 
       <div className="flex gap-2 text-sm">
         <Button variant={mode === 'slots' ? 'default' : 'outline'} size="sm" onClick={() => setMode('slots')}>

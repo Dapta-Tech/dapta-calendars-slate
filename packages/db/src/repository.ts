@@ -14,14 +14,21 @@ import {
   generateManageToken,
   isExclusionViolation,
   isUniqueViolation,
+  parseEventLocation,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type EventLocation,
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
+import {
+  duplicateGuardApplies,
+  hasUpcomingBookingForEmail,
+  normalizeAttendeeEmail,
+} from './duplicate-guard';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -86,12 +93,24 @@ export interface EventTypeRow {
   after_event_buffer: number;
   slot_interval: number | null;
   requires_confirmation: number;
+  /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
+  prevent_duplicate_bookings: number;
   seats_per_time_slot: number | null;
 }
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' | 'CALENDAR_UNAVAILABLE' }
+  | {
+      ok: false;
+      reason:
+        | 'SLOT_TAKEN'
+        | 'NOT_FOUND'
+        | 'RESERVATION_EXPIRED'
+        | 'CALENDAR_UNAVAILABLE'
+        /** The event type's duplicate-booking guard refused this email (#69).
+         *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
+        | 'DUPLICATE_BOOKING';
+    }
   | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
@@ -115,13 +134,31 @@ export interface CreateBookingArgs {
   slug: string;
   startMs: number;
   attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+  /** Additional creation-time guests/attendees, inserted in the booking transaction. */
+  additionalAttendees?: Array<{
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+  }>;
   /** Answers to the event type's custom intake fields. */
   answers?: Record<string, unknown>;
+  /** Public API metadata. Internal keys are added by the repository. */
+  metadata?: Record<string, unknown>;
   /** A held reservation to consume (deleted on success). */
   reservationUid?: string;
   idempotencyKey?: string;
   /** True when a host/agent booked on behalf (attribution; skips manage-token gating upstream). */
   onBehalf?: boolean;
+  /**
+   * True when this write arrives through an API key (the machine API or the
+   * v2 compatibility surface). Only the duplicate-booking guard reads it
+   * — it is a SEPARATE flag from `onBehalf` because the compatibility surface
+   * is an API-key write that deliberately reports `onBehalf: false`. See
+   * `duplicate-guard.ts`.
+   */
+  apiKeyWrite?: boolean;
 }
 
 /**
@@ -194,7 +231,7 @@ export async function getEventType(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
               AND hidden = 0 LIMIT 1`,
@@ -214,7 +251,7 @@ export async function getEventTypeRowById(db: Db, id: string): Promise<EventType
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type WHERE id = ${id} LIMIT 1`,
   );
 }
@@ -367,6 +404,8 @@ export interface AvailabilityResult {
     title: string;
     lengthMinutes: number;
     bookingFields: BookingFieldDef[];
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: EventLocation | null;
   };
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
@@ -500,6 +539,7 @@ export async function getAvailability(
     title: eventType.title,
     lengthMinutes: eventType.length_minutes,
     bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
+    location: parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null)),
   };
   const displayTz = args.displayTimeZone ?? scheduleTimeZone;
 
@@ -619,6 +659,31 @@ export function bookingStartOutOfRange(startMs: number, now = Date.now()): strin
   return null;
 }
 
+/**
+ * The value actually stored in `booking.idempotency_key` (#104).
+ *
+ * That column carries a GLOBAL `UNIQUE`, so a raw caller-supplied key belongs
+ * to whichever tenant writes it first: a second account reusing the same
+ * string collides on insert and can never book with it, and a replay lookup
+ * that forgot its account would hand one tenant's booking to another. Both
+ * halves are closed by never storing the raw key — the account id is folded in
+ * here, and every read of the column goes through the same function so the
+ * write and the lookup cannot drift apart.
+ *
+ * The prefix needs no escaping, but the reason is narrower than it looks. Keys
+ * are opaque, so within one account the mapping is trivially injective; what
+ * the UNIQUE column needs is injectivity ACROSS accounts, and that holds only
+ * because an account id never contains the separator. Ids are `randomUUID()`
+ * (see `insertAccountWithShortCode` in `short-links.ts`), so it never does.
+ * Were that to change, `a:b` + `c` and `a` + `b:c` would collide.
+ *
+ * Callers still hold the raw key (it is what the client retries with); only
+ * storage and lookup are namespaced.
+ */
+export function scopedIdempotencyKey(accountId: string, key: string): string {
+  return `${accountId}:${key}`;
+}
+
 export async function createBooking(
   db: Db,
   args: CreateBookingArgs,
@@ -689,9 +754,11 @@ export async function createBooking(
     if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
   }
 
-  // Idempotency: return the prior booking for a repeated key.
+  // Idempotency: return the prior booking for a repeated key. Scoped to the
+  // account resolved above (#104) — a key only ever replays its own tenant's
+  // booking.
   if (args.idempotencyKey) {
-    const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
+    const prior = await findBookingByIdempotencyKey(db, account.id, args.idempotencyKey);
     // Replay: return the existing booking, do NOT re-mint the token, and flag it
     // deduplicated (B3 — contract).
     if (prior) return { ok: true, booking: prior.record, manageToken: '', deduplicated: true };
@@ -708,6 +775,23 @@ export async function createBooking(
       await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       return { ok: false, reason: 'RESERVATION_EXPIRED' };
     }
+  }
+
+  // Duplicate-booking guard (#69/AB1): the host switched this event type to one
+  // upcoming booking per email. Placed AFTER the idempotency replay above — a
+  // repeated key must return its original booking, never a 409 — and BEFORE the
+  // group-seat branch below, so on a multi-seat event the same address is
+  // refused instead of quietly taking a second seat. Advisory and outside the
+  // write transaction on purpose; see `duplicate-guard.ts`.
+  if (
+    duplicateGuardApplies({
+      preventDuplicateBookings: eventType.prevent_duplicate_bookings,
+      onBehalf: args.onBehalf,
+      apiKeyWrite: args.apiKeyWrite,
+    }) &&
+    (await hasUpcomingBookingForEmail(db, account.id, eventType.id, args.attendee.email))
+  ) {
+    return { ok: false, reason: 'DUPLICATE_BOOKING' };
   }
 
   const startMs = args.startMs;
@@ -732,10 +816,19 @@ export async function createBooking(
       );
       if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
       await db.run(
-        sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
+              ${normalizeAttendeeEmail(args.attendee.email)},
               ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
       );
+      for (const attendee of args.additionalAttendees ?? []) {
+        await db.run(
+          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+              VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
+                ${normalizeAttendeeEmail(attendee.email)},
+                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
+        );
+      }
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       const rec: BookingRecord = {
@@ -774,7 +867,7 @@ export async function createBooking(
   const bookingId = randomUUID();
   const attendeeId = randomUUID();
   const { token, tokenHash } = generateManageToken();
-  const metadata = JSON.stringify({ _manage: { tokenHash } });
+  const metadata = JSON.stringify({ ...(args.metadata ?? {}), _manage: { tokenHash } });
   const title = eventType.title;
 
   // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
@@ -786,18 +879,30 @@ export async function createBooking(
   const responsesExpr = jsonParam(db, args.answers ?? null);
   // Snapshot the event type's configured Where onto the booking so the manage
   // page (and calendar write-out) can show it, even if the event is edited later.
-  const eventLocation = parseJsonColumn<string | null>(eventType.locations, null);
+  // The KIND drives behaviour (conferencing ⇒ request a link at write-out); the
+  // detail is the human string. Both are frozen here on purpose.
+  const eventLocation = parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null));
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
       created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title}, ${eventLocation},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
+      ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
-      ${args.idempotencyKey ?? null}, ${now}, ${now})`;
+      ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
+      ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
+      ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+    (attendee) => sql`
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+      VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${normalizeAttendeeEmail(attendee.email)},
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+  );
 
   const record: BookingRecord = {
     uid,
@@ -819,6 +924,7 @@ export async function createBooking(
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
       return 'ok';
     });
     if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
@@ -837,6 +943,7 @@ export async function createBooking(
       if (rows.length > 0) return true;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) await tx.execute(attendee);
       return false;
     });
     if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };
@@ -850,8 +957,16 @@ export async function createBooking(
   }
 }
 
+/**
+ * Replay lookup for a repeated idempotency key — ALWAYS account-scoped (#104).
+ * This route is reachable without a credential, and the row it returns carries
+ * the host, the attendee and the meeting time, so a key alone must never be
+ * enough to read a booking. The account filter is the guarantee;
+ * `scopedIdempotencyKey` matches how the value was written.
+ */
 async function findBookingByIdempotencyKey(
   db: Db,
+  accountId: string,
   key: string,
 ): Promise<{ record: BookingRecord } | undefined> {
   const row = await db.get<{
@@ -872,7 +987,8 @@ async function findBookingByIdempotencyKey(
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         LEFT JOIN booking_attendee a ON a.booking_id = b.id
-        WHERE b.idempotency_key = ${key} LIMIT 1`,
+        WHERE b.account_id = ${accountId}
+          AND b.idempotency_key = ${scopedIdempotencyKey(accountId, key)} LIMIT 1`,
   );
   if (!row) return undefined;
   return {

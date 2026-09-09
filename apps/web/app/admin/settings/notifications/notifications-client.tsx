@@ -8,7 +8,6 @@ import { useToast } from '@/components/toast';
 import {
   previewTemplateAction,
   resetTemplateAction,
-  saveLeadsAction,
   saveTemplateAction,
   toggleNotificationAction,
   type PreviewResult,
@@ -24,26 +23,11 @@ export interface NotificationSettingView {
   defaultSubject: string;
   defaultBody: string;
   customized: boolean;
-  reminderLeadMinutes?: number[];
 }
 
 export interface NotificationSettingsPayload {
   variables: string[];
-  defaultReminderLeadMinutes: number[];
   settings: NotificationSettingView[];
-}
-
-const MAX_LEADS = 5;
-const MIN_LEAD = 5;
-const MAX_LEAD = 28 * 24 * 60;
-
-/** "1440, 60" → [1440, 60]; null when anything is out of contract. */
-function parseLeads(raw: string): number[] | null {
-  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
-  if (parts.length === 0 || parts.length > MAX_LEADS) return null;
-  const leads = [...new Set(parts.map(Number))];
-  if (leads.some((n) => !Number.isInteger(n) || n < MIN_LEAD || n > MAX_LEAD)) return null;
-  return leads.sort((a, b) => b - a);
 }
 
 export function NotificationsClient({ data, messages: m }: { data: NotificationSettingsPayload; messages: Messages }) {
@@ -142,7 +126,7 @@ function Row({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{m.labels[s.key]}</span>
           {s.customized ? (
-            <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] text-secondary-foreground">
+            <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-faint">
               {m.customizedBadge}
             </span>
           ) : null}
@@ -155,67 +139,9 @@ function Row({
         >
           {m.editTemplate}
         </button>
-        {s.key === 'attendee_reminder' || s.key === 'follow_up' ? <LeadsField s={s} m={m} /> : null}
       </div>
       <Switch checked={enabled} disabled={pending} onCheckedChange={toggle} aria-label={m.labels[s.key]} />
     </li>
-  );
-}
-
-/** Lead times (reminders: before start; follow-up: after end) — comma list,
- *  saved on blur/Enter when valid + changed. */
-function LeadsField({ s, m }: { s: NotificationSettingView; m: Messages }) {
-  const isFollowUp = s.key === 'follow_up';
-  const saved = (s.reminderLeadMinutes ?? []).join(', ');
-  const [value, setValue] = useState(saved);
-  const [invalid, setInvalid] = useState(false);
-  const [pending, start] = useTransition();
-  const toast = useToast();
-  const router = useRouter();
-
-  const commit = () => {
-    if (value.trim() === saved.trim()) return;
-    const leads = parseLeads(value);
-    if (!leads) {
-      setInvalid(true);
-      return;
-    }
-    setInvalid(false);
-    start(async () => {
-      const r = await saveLeadsAction(s.key, leads);
-      if (r.ok) {
-        setValue(leads.join(', '));
-        toast.success(m.updated);
-        router.refresh();
-      } else {
-        toast.error(r.message ?? m.updateFailed);
-      }
-    });
-  };
-
-  return (
-    <div className="mt-2 flex max-w-xs flex-col gap-1">
-      <label className="text-xs text-muted-foreground" htmlFor={`${s.key}-leads`}>
-        {isFollowUp ? m.followUpLead : m.reminderLeads}
-      </label>
-      <input
-        id={`${s.key}-leads`}
-        value={value}
-        disabled={pending}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setInvalid(false);
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        }}
-        className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-      />
-      <span className={`text-xs ${invalid ? 'text-destructive' : 'text-muted-foreground'}`}>
-        {invalid ? m.reminderLeadsInvalid : isFollowUp ? m.followUpLeadHint : m.reminderLeadsHint}
-      </span>
-    </div>
   );
 }
 
@@ -322,7 +248,7 @@ function TemplateEditor({
             ← {m.back}
           </button>
           <span className="text-sm font-semibold">{m.labels[setting.key]}</span>
-          <span className="rounded-sm bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+          <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             {isDefault ? m.usingDefault : m.usingCustom}
           </span>
           {saveState === 'saved' && !isDirty ? <span className="text-xs text-primary">{m.saved}</span> : null}

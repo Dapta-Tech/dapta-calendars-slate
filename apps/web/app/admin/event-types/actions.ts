@@ -3,6 +3,7 @@
 import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
+import type { EventLocationDto, EventReminder } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -13,16 +14,23 @@ export interface EventTypePayload {
   slug: string;
   description: string | null;
   lengthMinutes: number;
-  location: string | null;
+  /** The location kind + its detail; null clears the Where. */
+  location: EventLocationDto | null;
   minimumBookingNotice: number;
   slotInterval: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
   seatsPerTimeSlot: number | null;
   requiresConfirmation: boolean;
+  /** Duplicate-booking guard (#69): one upcoming booking per email on this
+   *  event. Travels on CREATE and EDIT, personal and team events alike. */
+  preventDuplicateBookings: boolean;
   hidden: boolean;
   scheduleId: string | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;
+  /** Reminders + follow-up owned by this event (#68). An empty array is a
+   *  deliberate "no reminders", never a reset to the shipped defaults. */
+  reminders: EventReminder[];
   /** Team events: scheduling method + per-host round-robin detail. */
   schedulingType?: string | null;
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;

@@ -7,7 +7,9 @@ import {
   Get,
   HttpCode,
   Inject,
+  Logger,
   NotFoundException,
+  Optional,
   Param,
   Patch,
   Post,
@@ -54,6 +56,7 @@ import {
 } from '@slate/types';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
+import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { DB } from './tokens';
 
@@ -76,9 +79,14 @@ function unwrapCrud<T>(r: CrudResult<T>): T {
 /** Host-authed CRUD for event-types, schedules, teams, members. */
 @Controller('v1')
 export class AdminCrudController {
+  private readonly log = new Logger('AdminCrudController');
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AuthService) private readonly auth: AuthService,
+    // Optional so the existing CRUD specs can construct this controller with
+    // two arguments. A roster write must never depend on the growth funnel.
+    @Optional() @Inject(GrowthService) private readonly growth?: GrowthService,
   ) {}
 
   // --- Members (workspace roster) ---------------------------------------
@@ -97,7 +105,21 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     const input = parse(memberInviteSchema, body);
-    return unwrapCrud(await inviteMember(this.db, p.accountId, input));
+    const member = unwrapCrud(await inviteMember(this.db, p.accountId, input));
+
+    // O2 (#65 → Growth funnel): the invitee reaches Dapta's marketing CRM the
+    // moment their membership row exists, NOT at template pick — an invitee who
+    // never finishes setup is exactly the person this is meant to capture.
+    // Enqueue only (invariant 5), and never able to fail the invite: the member
+    // was created, and the caller's request is about that.
+    if (this.growth) {
+      try {
+        await this.growth.enqueueMemberInvite(p.accountId, member.id);
+      } catch (err) {
+        this.log.error(`growth enqueue failed for invited member ${member.id}: ${String(err)}`);
+      }
+    }
+    return member;
   }
 
   @Patch('members/:id')

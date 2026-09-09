@@ -146,6 +146,7 @@ set** boots on the zero-infra path.
 | `CALENDAR_API_TOKEN` | — | required for the generic REST backend | **yes** |
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
+| `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
 
@@ -169,6 +170,154 @@ set** boots on the zero-infra path.
 | `PREMIUM_FEATURES` | `open` | keep `open` for a self-host (everything unlocked) | no |
 | `ENTITLEMENTS_API_URL` | — | only when `PREMIUM_FEATURES=locked` | no |
 | `ENTITLEMENTS_API_KEY` | — | only when `PREMIUM_FEATURES=locked` | **yes** |
+
+### Onboarding cohort probe (first-run wizard)
+
+**Leave all three unset for a self-host.** The qualification questions exist to
+feed a growth funnel; with no upstream identity service there is no funnel, so
+the whole gate is skipped and your first admin goes straight to the dashboard.
+A self-hoster is never asked which CRM their team uses.
+
+The per-host setup step still runs — it creates your first event type from a
+template, which is what makes your booking page show something — and it carries
+a "Skip for now".
+
+With a probe configured, the service is asked whether the signup is an identity
+it already knows: a hit selects the short cohort, a definitive `404` the full
+one. **Any error or timeout fails closed to the short cohort**, so an upstream
+outage never widens the interrogation of a real signup.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `ONBOARDING_IAM_BASE_URL` | — | only to enable the probe (unset = ask the full bank) | no |
+| `ONBOARDING_IAM_TOKEN` | — | only when the probe endpoint requires a bearer | **yes** |
+| `ONBOARDING_PROBE_TIMEOUT_MS` | `1500` | never — raise only if the probe legitimately runs slow | no |
+
+### Growth contact sync
+
+**Unset by default, and a fork that leaves it unset sends nothing anywhere.**
+
+When a deployment wants to know who signed up and where they came from, two
+things happen, both optional and both env-gated.
+
+**Attribution needs no configuration at all.** A visitor arriving with campaign
+parameters has them normalized against a fixed allowlist — `utm_source`,
+`utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `gclid`, `fbclid`, and
+nothing else — parked in a ten-minute httpOnly cookie, and claimed **write-once**
+onto their account if that account is younger than ten minutes. Values are
+trimmed, capped, and the five `utm_*` lowercased; click ids keep their case. The
+referrer is read from the request header and only when it is cross-origin, never
+from a query parameter, because a caller-supplied one is attacker-controlled
+text that could never be distinguished from the real thing once stored.
+
+**Organic traffic records nothing.** There is no synthetic `utm_source=direct`.
+The claim can never be undone, so a guess written there is wrong forever.
+
+**The contact push** is what actually leaves the building, and it needs
+`DAPTA_SYNC_URL`. It is enqueued to the outbox and drained by the worker, never
+sent inline from a request, so a CRM outage cannot slow or fail a signup. It
+fires twice for a self-serve signup — once on their first onboarding answer, so
+someone who abandons the wizard is still recorded, and once when qualification
+completes — and once for an invited member, when their membership row is created.
+An invited member carries `entry_type: workspace_invite` in a field of its own
+and never a `lead_source`, so an invitation cannot overwrite better attribution
+on a contact who already existed, and no lead score is computed for someone who
+answered no questions.
+
+With `DAPTA_SYNC_URL` unset the rows are still enqueued and the worker marks
+them **skipped** with a reason. That is deliberate: nothing is sent, nothing is
+retried against a URL that does not exist, and the delivery log says plainly why.
+A member with no email address is skipped the same way, permanently — there is
+no key to upsert them by, and waiting cannot produce one.
+
+**What a visitor's browser stores.** Capturing attribution sets one httpOnly
+cookie, for ten minutes, on any page a visitor reaches carrying campaign
+parameters or a cross-origin referrer — public booking pages included. It is
+server-only, never readable from page scripts, never sent anywhere outside your
+deployment, and it is deleted as soon as it is claimed or when it expires. It
+holds only the allowlisted values above. If your jurisdiction or your policy
+requires consent before any non-essential cookie, gate the middleware behind
+whatever consent signal you already collect.
+
+The lead-score post reuses `ONBOARDING_IAM_BASE_URL` from the section above, so
+there is one upstream identity service and one pair of credentials.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `DAPTA_SYNC_URL` | — | only to enable the contact push (unset = send nothing) | no |
+| `DAPTA_SYNC_TOKEN` | — | only when that endpoint requires a bearer | **yes** |
+| `DAPTA_SYNC_TIMEOUT_MS` | `5000` | never — raise only if the endpoint legitimately runs slow | no |
+
+### CRM write-out (optional)
+
+Writes an accepted booking into the CRM your hosts already work in: the invitee
+becomes a contact (an existing one keeps its own name) and the booking becomes a
+meeting associated to it, PATCHed on cancel and reschedule. This is the
+**customer-facing** integration a workspace connects to its own portal — not the
+operator's own growth sync above.
+
+Unset (`disabled`) means nothing is enqueued and nothing is called. Naming the
+vendor here is deliberate: [ADR 0001](docs/adr/0001-crm-integrations-are-open-core-and-name-their-vendor.md)
+carves CRM out of the vendor-neutral rule, which governs **calendar** providers only.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `CRM_PROVIDER` | `disabled` | set to `hubspot` to enable the write-out | no |
+| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential, or to CREATE a webhook; boot never reads it | **yes** |
+| `HUBSPOT_PRIVATE_APP_TOKEN` | — | only as a deployment-wide fallback for accounts that connect nothing | **yes** |
+| `CRM_HTTP_TIMEOUT_MS` | `10000` | never — raise only if the CRM legitimately runs slow | no |
+
+`INTEGRATION_ENCRYPTION_KEY` is 32 raw bytes, base64 — generate one with
+`openssl rand -base64 32`. Credentials are stored AES-256-GCM encrypted under a
+`v1.<iv>.<tag>.<ciphertext>` envelope bound to `(account, provider)`, so a
+ciphertext lifted from one account's row cannot be opened in another's. **Losing
+this key means every stored credential must be re-pasted**; rotating it requires
+re-connecting each integration, since nothing re-encrypts in place yet.
+Connecting without a key is refused with `INTEGRATION_KEY_MISSING` rather than
+storing a token in plaintext.
+
+**The same key also protects webhook signing secrets.** `webhook.secret` rides
+the same envelope, bound to `(account, webhook)` rather than `(account,
+provider)`, and is decrypted only at signing time. The consequences for a
+deployment that has no key are deliberately asymmetric:
+
+- Webhooks that **already exist** with a plaintext secret keep delivering,
+  signed exactly as before. Nothing about them changes.
+- **Creating** a webhook is refused with the same `INTEGRATION_KEY_MISSING`,
+  because the only alternative is minting a fresh signing secret and writing it
+  to disk in the clear.
+- A webhook whose secret is **already encrypted** refuses to deliver rather than
+  falling back to an unsigned POST — a key that has gone missing is a
+  deployment fault, and an unsigned delivery would strip the very guarantee the
+  subscriber authenticates on.
+
+Once a key is present, a legacy plaintext secret is re-encrypted in place the
+first time that webhook signs a delivery. The signature the subscriber verifies
+is byte-identical before and after, so no subscriber needs to be told.
+
+> **Treat this key as unrecoverable state, not config.** Once a deployment sets
+> a valid key, every legacy plaintext secret is drained on its next delivery.
+> From that point, **losing or rotating the key means every webhook subscriber
+> must be reconfigured with a new secret** — nothing re-encrypts in place yet,
+> and there is no command that reads a secret back. This is the same rotation
+> caveat the CRM credentials carry, with a worse blast radius: a CRM token can
+> be re-pasted from the provider's portal, but a signing secret exists only
+> here. Back the key up the way you back up the database.
+
+> **A key outage drops webhook events, and the drop is permanent.** A refused
+> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
+> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
+> marked `failed` — which is terminal, with no re-drive path. In practice a
+> deployment whose key is removed or corrupted loses every webhook event
+> enqueued in the following ~15 seconds, and restoring the key does **not**
+> replay them. Fix a key problem before it has been wrong for one drain cycle.
+
+A private app needs exactly two scopes, and there is no meetings scope to grant:
+`crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
+surfaces as a 403 on the first booking, which marks the integration unhealthy
+and records the scope names; it is never auto-disconnected, so granting the
+scope in the portal is enough to recover. Disconnecting scrubs the credential,
+marks queued write-out `skipped`, and deletes nothing in the CRM.
 
 ### Outbox, CORS, rate limiting
 
@@ -256,6 +405,30 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
+#### Conferencing links
+
+`POST /v1/events` and `PATCH /v1/events/:id` both carry
+`requestConferenceLink: boolean` in the request body. When it is `true`, create a
+conferencing room for the event and return its join URL as `meetingUrl`; when it
+is `false` or absent, create none.
+
+Three rules make a booking end up with exactly one room:
+
+- **One request per booking.** `requestConferenceLink` is set on at most one
+  destination — the organizer's. A team booking's co-host events arrive with
+  `requestConferenceLink: false` and the organizer's URL already in
+  `description`. Do not mint a competing room for them.
+- **On a reschedule, `null` is a valid answer.** Return `meetingUrl` only when
+  the room actually changed. A `null` never overwrites the URL already stored, so
+  a backend that keeps the same room across a move needs to do nothing.
+- **A missing link is never fatal.** If you cannot mint one, return the event
+  without `meetingUrl`. The booking still stands and the confirmation email still
+  goes out — it simply carries no join line (see
+  `docs/adr/0007-the-booking-email-never-waits-on-the-calendar.md`).
+
+The link is stored on `booking_reference.meeting_url` and read from there by the
+email, the `.ics` and the manage page. Only `https://` URLs are rendered.
+
 ### The ESM module contract (advanced)
 
 For a backend that needs its own token authority (short-lived minted tokens per
@@ -298,6 +471,13 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 - **Rollback:** deploy the previous image tags. Additive migrations mean the old
   code ignores columns it doesn't know about, so no down-migration is required for a
   normal rollback. Keep previous images in your registry.
+- **One exception — `booking.location_kind` (`postgres/0013`, `sqlite/0012`).**
+  That migration also *mutates data*: it back-fills the legacy conferencing token
+  from `booking.location` into `booking.location_kind` and blanks the old text, so
+  a booking taken before the upgrade keeps its meeting link. Deploying the previous
+  images does not restore that text. Rollback across this migration is
+  forward-only; take a snapshot before upgrading if you need a true point-in-time
+  revert.
 
 ## Troubleshooting
 

@@ -142,7 +142,7 @@ export function AppSwitcher({
               <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
             </span>
             <span className="flex-1 truncate">{m.forms}</span>
-            <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+            <span className="rounded-full border border-border px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide">
               {m.comingSoon}
             </span>
           </span>

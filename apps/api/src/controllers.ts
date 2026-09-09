@@ -25,7 +25,12 @@ export class HealthController {
   @Get()
   async health() {
     const db = await this.dbState();
-    return { status: db === 'up' ? 'ok' : 'degraded', service: 'calendars-api', db, dialect: this.db.dialect };
+    return {
+      status: db === 'up' ? 'ok' : 'degraded',
+      service: 'calendars-api',
+      db,
+      dialect: this.db.dialect,
+    };
   }
 
   /**
@@ -49,13 +54,18 @@ export class HealthController {
         outbox = null;
       }
     }
-    const body = { status: db === 'up' ? 'ready' : 'unavailable', service: 'calendars-api', db, outbox };
+    const body = {
+      status: db === 'up' ? 'ready' : 'unavailable',
+      service: 'calendars-api',
+      db,
+      outbox,
+    };
     if (db !== 'up') throw new HttpException(body, HttpStatus.SERVICE_UNAVAILABLE);
     return body;
   }
 }
 
-/** Public API documentation (E11): the OpenAPI JSON + a dependency-free viewer. */
+/** Public API documentation: OpenAPI JSON plus an interactive Scalar explorer. */
 @Controller()
 export class DocsController {
   @Get('openapi.json')
@@ -66,11 +76,68 @@ export class DocsController {
   @Get('docs')
   @Header('content-type', 'text/html; charset=utf-8')
   docs(): string {
-    // No CDN (offline/CSP-safe): pretty-print the spec with a link to the raw JSON.
-    return `<!doctype html><html><head><title>Slate API</title>
-<style>body{font:14px/1.5 system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}
-pre{background:#f6f8fa;padding:1rem;border-radius:8px;overflow:auto}a{color:#2563eb}</style></head>
-<body><h1>Slate API</h1><p>OpenAPI 3.1 · <a href="/openapi.json">/openapi.json</a></p>
-<pre>${JSON.stringify(openapiSpec, null, 2).replace(/</g, '&lt;')}</pre></body></html>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dapta Calendars API</title>
+<style>
+body{margin:0;font:15px/1.55 system-ui,sans-serif;color:#17202a;background:#fff}
+.intro{max-width:1040px;margin:0 auto;padding:32px 24px 8px}
+h1{margin:0 0 8px}h2{margin-top:28px}code,pre{font-family:ui-monospace,SFMono-Regular,monospace}
+pre{background:#111827;color:#f9fafb;padding:16px;border-radius:8px;overflow:auto}
+.notice{border-left:4px solid #84cc16;background:#f7fee7;padding:12px 16px}
+a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
+</style></head><body>
+<main class="intro">
+<h1>Dapta Calendars API</h1>
+<p>OpenAPI 3.1 source: <a href="/openapi.json"><code>/openapi.json</code></a>.
+This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
+<div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a
+<code>dcl_</code> API key. Never put the key in a URL. Flow Studio should use Bearer auth from Vault,
+raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.</div>
+<h2>Required version pins</h2>
+<div class="pins"><code>GET /v2/event-types</code><code>cal-api-version: 2024-06-14</code>
+<code>GET /v2/slots</code><code>cal-api-version: 2024-09-04</code>
+<code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
+<code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
+<h2>Copy-paste discovery request</h2>
+<pre>BASE_URL="https://calendars-api.dapta.ai"
+curl "$BASE_URL/v2/event-types" \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2024-06-14"</pre>
+<h2>Copy-paste slots request</h2>
+<pre>curl --get "$BASE_URL/v2/slots" \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2024-09-04" \\
+  --data-urlencode "eventTypeId=$EVENT_TYPE_ID" \\
+  --data-urlencode "start=2026-07-24T00:00:00Z" \\
+  --data-urlencode "end=2026-07-31T23:59:59Z" \\
+  --data-urlencode "timeZone=America/Bogota"</pre>
+<h2>Copy-paste booking request</h2>
+<pre>curl "$BASE_URL/v2/bookings" \\
+  --request POST \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2026-02-25" \\
+  --header "Idempotency-Key: flow-run-123:create-booking" \\
+  --header "Content-Type: application/json" \\
+  --data '{"eventTypeId":"replace-with-event-type-id","start":"2026-07-24T15:00:00Z","attendee":{"name":"Test Customer","email":"customer@example.com","timeZone":"America/Bogota","language":"es"},"metadata":{"source":"flow-studio"},"bookingFieldsResponses":{"notes":"Created from an automation"}}'</pre>
+<h2>Lifecycle</h2>
+<pre>curl "$BASE_URL/v2/bookings/$BOOKING_UID" \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2026-02-25"
+
+curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
+  --header "Authorization: Bearer $DCL_API_KEY" \\
+  --header "cal-api-version: 2026-02-25" \\
+  --header "Idempotency-Key: flow-run-123:reschedule" \\
+  --header "Content-Type: application/json" \\
+  --data '{"start":"2026-07-25T16:00:00Z","reschedulingReason":"Customer requested a later time"}'</pre>
+<p>Repository guides: <code>API-CONTRACT.md</code>, <code>FLOW-STUDIO-QUICKSTART.md</code>, and
+<code>CAL-COMPATIBILITY.md</code>.</p>
+</main>
+<script id="api-reference" data-url="/openapi.json" data-configuration='{"theme":"default","hideModels":false}'></script>
+<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+<noscript><p class="intro">JavaScript is required for the interactive explorer. Use
+<a href="/openapi.json">the raw OpenAPI document</a> instead.</p></noscript>
+</body></html>`;
   }
 }

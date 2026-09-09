@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, permanentRedirect, redirect } from 'next/navigation';
-import { clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
+import { DEFAULT_ACCENT, clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
+import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
 import { MadeWithBadge } from '@/components/made-with-badge';
 
@@ -55,7 +56,10 @@ export default async function ProfilePage({
   if (landing?.landingEnabled === false && defaultSlug && profile.eventTypes.some((e) => e.slug === defaultSlug)) {
     redirect(`/${code}/${handle}/${defaultSlug}`);
   }
-  const accent = clampAccent(m.brandColor ?? '#cbe84f');
+  // Same canvas the shell below clamps against — the monogram tile sits inside
+  // it, so a second, differently-grounded clamp here would paint a tile that
+  // does not match the accent everything around it resolved to.
+  const accent = clampAccent(m.brandColor ?? DEFAULT_ACCENT, BOOKING_CANVAS);
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
 

@@ -9,7 +9,7 @@ export function FieldHelp({ text }: { text: string }) {
       aria-label={text}
       title={text}
       onClick={(e) => e.preventDefault()}
-      className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] leading-none text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-2xs leading-none text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       ?
     </button>

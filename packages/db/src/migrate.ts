@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { sql } from 'drizzle-orm';
 import type { Db } from './client';
 import { applyShortLinkFixups } from './short-links';
+import { applyReminderCopyForward } from './reminders';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // src/ at runtime (tsx) or dist/ after build — migrations live one level up.
@@ -40,6 +41,13 @@ export async function migrate(db: Db, migrationsRoot = MIGRATIONS_ROOT): Promise
   // handle derivation). Idempotent + cheap no-ops once applied, so they run
   // unconditionally after the SQL migrations on both dialects.
   await applyShortLinkFixups(db);
+
+  // Reminders moved from the account to the event type (#68): give every event
+  // type that has none a copy of its account's current times and copy, so no
+  // host loses configuration and no invitee's mail moves. Touches only rows
+  // WHERE reminders IS NULL, so it is a no-op on the second run and never
+  // overwrites what a host edited afterwards.
+  await applyReminderCopyForward(db);
 
   // Self-heal: members with schedules but no default (QA fix 2). The 0008
   // backfill migration runs once, so anything created in a

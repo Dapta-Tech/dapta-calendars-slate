@@ -21,7 +21,8 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
     adminApi.teamMembers(id),
     adminApi.teamEventTypes(id),
   ]);
-  const msgs = getMessages(await getLocale());
+  const locale = await getLocale();
+  const msgs = getMessages(locale);
   const m = msgs.admin.teams;
 
   return (
@@ -47,7 +48,7 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
         {m.members} <span className="font-normal">({members.length})</span>
       </h2>
       <div className="mb-8">
-        <TeamMembersPanel teamId={team.id} members={members} messages={m} />
+        <TeamMembersPanel teamId={team.id} members={members} messages={m} locale={locale} />
       </div>
 
       <div className="mb-3 flex items-center justify-between">

@@ -12,7 +12,8 @@ export default async function TeamsPage() {
   const withMembers = await Promise.all(
     teams.map(async (t) => ({ team: t, count: (await adminApi.teamMembers(t.id)).length })),
   );
-  const m = getMessages(await getLocale()).admin.teams;
+  const locale = await getLocale();
+  const m = getMessages(locale).admin.teams;
   const accountCode = me?.accountCode ?? '';
 
   return (
@@ -36,7 +37,14 @@ export default async function TeamsPage() {
       {teams.length > 0 ? (
         <div className="flex flex-col gap-3">
           {withMembers.map(({ team, count }) => (
-            <TeamCard key={team.id} team={team} memberCount={count} accountCode={accountCode} messages={m} />
+            <TeamCard
+              key={team.id}
+              team={team}
+              memberCount={count}
+              accountCode={accountCode}
+              messages={m}
+              locale={locale}
+            />
           ))}
         </div>
       ) : (

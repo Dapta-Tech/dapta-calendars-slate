@@ -4,9 +4,26 @@
  * provider, `x-slate-email` for the local dev provider. The API reads whichever
  * its configured provider expects and ignores the other. A `401` throws an
  * ApiError the /admin gate turns into a redirect to /login.
+ *
+ * One failure is deliberately NOT a sign-out (#114): when a `401` is followed by
+ * an identity service that cannot be reached, this throws
+ * `SESSION_REFRESH_UNAVAILABLE` as a `503` ApiError. It is a status no caller
+ * treats as "sign in again", so the session survives and the page shows
+ * something the person can retry.
  */
-import { redirect } from 'next/navigation';
-import { getSession, clearSession, authProvider } from './auth-session';
+import type {
+  EventLocationDto,
+  EventReminder,
+  IntegrationCapabilities,
+  IntegrationStatusView,
+  OnboardingState,
+} from '@slate/types';
+import {
+  getSession,
+  refreshOrSignOut,
+  SessionUnavailableError,
+  signOutAndRedirect,
+} from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -21,6 +38,15 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
+    /**
+     * The rest of the error body, for replies that answer with DATA rather than
+     * prose. A refused CRM credential carries `requiredGranularScopes` — the
+     * scope NAME list the provider returned (#74) — and without this the
+     * connect dialog could not name the exact checkbox that was missed, because
+     * the field was already being discarded here. Never assume a shape: read it
+     * defensively at the call site.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -28,34 +54,82 @@ export class ApiError extends Error {
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const session = await getSession();
-  const headers: Record<string, string> = {};
-  if (body) headers['content-type'] = 'application/json';
-  if (session?.provider === 'workos') headers['authorization'] = `Bearer ${session.accessToken}`;
-  else if (session?.provider === 'local') headers['x-slate-email'] = session.email;
+  // Identity is read per attempt, not once: after a refresh the retry has to
+  // carry the token the identity service has just minted, not the dead one.
+  const call = async (): Promise<Response> => {
+    const session = await getSession();
+    const headers: Record<string, string> = {};
+    if (body) headers['content-type'] = 'application/json';
+    if (session?.provider === 'workos') headers['authorization'] = `Bearer ${session.accessToken}`;
+    else if (session?.provider === 'local') headers['x-slate-email'] = session.email;
+    return fetch(`${API_URL}${path}`, {
+      method,
+      headers: Object.keys(headers).length ? headers : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+  };
 
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: Object.keys(headers).length ? headers : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-    cache: 'no-store',
-  });
+  let res = await call();
   if (res.status === 401) {
-    // Global 401 guard (AUTH-WEB-CONTRACT §4): the session is invalid → clear it
-    // (best-effort: allowed in an action, a no-op during render) and bounce to
-    // login. In an action, wrap the caller's catch with `unstable_rethrow` so
-    // this redirect isn't swallowed.
+    // Global 401 guard (AUTH-WEB-CONTRACT §4). An expiring token is the ordinary
+    // end of a token's life, not a reason to sign anyone out, so the session is
+    // refreshed first and the request retried ONCE.
+    //
+    // This client serves BOTH contexts — every admin page renders through it,
+    // and nine action files post through it — so the decision of where the
+    // exchange happens lives in `refreshOrSignOut`: inline when the caller may
+    // write cookies, and in the /api/auth/refresh route handler when it may not
+    // (a render, where `set()` and `delete()` both throw). The cookie is never
+    // cleared before that hand-off: that would hand the route a null session, so
+    // the refresh could not happen and a later revoke would have no id.
+    //
+    // In an action, wrap the caller's catch with `unstable_rethrow` so the
+    // redirects thrown from here aren't swallowed.
+    //
+    // A `SessionUnavailableError` means the identity service never answered, so
+    // the credential was never shown to be dead (#114). It becomes a `503`
+    // ApiError rather than a sign-out: this client's whole contract is that a
+    // failure arrives as an ApiError, so an action's catch renders the retryable
+    // copy it carries, with the session still in the jar. Redirects are
+    // re-thrown untouched.
+    //
+    // Reachable from an ACTION or a ROUTE HANDLER only. A render never gets
+    // here: `refreshOrSignOut` probes cookie-writability BEFORE the network
+    // call, and a Server Component fails that probe and redirects to
+    // /api/auth/refresh, which renders the retryable page itself.
     try {
-      await clearSession();
-    } catch {
-      /* cookies are immutable during render — the redirect still fires */
+      await refreshOrSignOut();
+    } catch (e) {
+      if (e instanceof SessionUnavailableError) throw new ApiError(503, e.message, e.code);
+      throw e;
     }
-    redirect(authProvider() === 'workos' ? '/api/auth/logout' : '/login');
+    res = await call();
+    if (res.status === 401) {
+      // The just-minted token is being rejected too, so this was never expiry.
+      // Reached from a render, `clearSession()` inside there throws and the
+      // cookie outlives the revoke; the person lands on /login with a dead
+      // session still in the jar. It self-heals on the next visit — /admin →
+      // /api/auth/refresh → the freshness guard → the logout ROUTE, which can
+      // clear it — at the cost of two hops. There is no render-context fix.
+      await signOutAndRedirect(await getSession());
+    }
   }
   if (!res.ok) {
-    const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    // Surface the HTTP status (was discarded) so the UI can handle 409/410/400.
-    throw new ApiError(res.status, j.message ?? j.error ?? `${method} ${path} → ${res.status}`, j.error);
+    const j = (await res.json().catch(() => ({}))) as {
+      message?: string;
+      error?: string;
+      [k: string]: unknown;
+    };
+    // Surface the HTTP status (was discarded) so the UI can handle 409/410/400,
+    // and the rest of the body so a reply that answers structurally (a refused
+    // credential naming the scopes it lacked) does not arrive as prose alone.
+    throw new ApiError(
+      res.status,
+      j.message ?? j.error ?? `${method} ${path} → ${res.status}`,
+      j.error,
+      j,
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json().catch(() => ({}))) as T;
@@ -77,6 +151,14 @@ export interface Me {
   /** Account-level role + status — the FE gates admin-only surfaces on these. */
   role: AccountRole;
   status: MemberStatus;
+  /**
+   * The two onboarding gates (ADR 0002). SERVER-side verdicts: the admin guard
+   * redirects on these rather than inferring a gate from an empty event-type
+   * list, which is what causes redirect loops and first-paint flicker.
+   * Optional so a web build talking to a pre-O1 API still renders.
+   */
+  onboardingRequired?: boolean;
+  setupRequired?: boolean;
 }
 
 export type AccountRole = 'owner' | 'admin' | 'member';
@@ -99,13 +181,30 @@ export const isAdminRole = (role: AccountRole): boolean => role === 'owner' || r
 export interface SetupStatus {
   hasConnectedCalendar: boolean;
   hasWorkingHours: boolean;
-  hasBookingLink: boolean;
+  /**
+   * At least one PUBLISHED event type of this host's own. Replaces the old
+   * `hasBookingLink`, which measured the auto-created handle and so reported
+   * "bookable" to every host while their public page rendered nothing (#84).
+   */
+  hasPublishedEventType: boolean;
 }
 
 export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   // Home "Get bookable" checklist — real data, not a static nag (see AdminService.setupStatus).
   setupStatus: () => req<SetupStatus>('GET', '/v1/me/setup-status'),
+  // Onboarding's two gates (ADR 0002).
+  onboardingState: () => req<OnboardingState>('GET', '/v1/me/onboarding'),
+  submitQualification: (answers: Record<string, string>) =>
+    req<{ ok: true; claimed: boolean }>('POST', '/v1/me/onboarding/qualification', { answers }),
+  submitOnboardingSetup: (templateId: string) =>
+    req<{ id: string; slug: string }>('POST', '/v1/me/onboarding/setup', { templateId }),
+  // O2 growth (#94). Fire-and-forget from the UI's point of view: the verdict
+  // describes what the funnel recorded, and nothing the browser can act on
+  // depends on it. The sibling attribution claim deliberately does NOT live
+  // here — it runs in the auth callback with a bare fetch, because this
+  // client's 401 guard would clear the session that callback just created.
+  onboardingEarly: () => req<{ enqueued: boolean }>('POST', '/v1/me/onboarding/early'),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   // Vanity account slug (premium — included with the Dapta AI subscription).
@@ -201,6 +300,16 @@ export const adminApi = {
     req<{ items: WebhookDeliveryRow[] }>('GET', `/v1/webhooks/${id}/deliveries`),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
 
+  // CRM integrations (H1b / #93). The token travels IN only — `connect` answers
+  // with the same token-free status view the list returns, never the credential.
+  listIntegrations: () => req<IntegrationStatusView[]>('GET', '/v1/integrations'),
+  integrationCapabilities: () =>
+    req<IntegrationCapabilities>('GET', '/v1/integrations/capabilities'),
+  connectIntegration: (b: { provider: string; token: string; label?: string }) =>
+    req<IntegrationStatusView>('POST', '/v1/integrations', b),
+  disconnectIntegration: (provider: string) =>
+    req<{ disconnected: boolean }>('DELETE', `/v1/integrations/${provider}`),
+
   // Branding
   profile: (code: string, handle: string) => req<Profile>('GET', `/v1/profiles/${code}/${handle}`),
   updateBranding: (b: unknown) => req('PATCH', '/v1/booking-page', b),
@@ -214,7 +323,8 @@ export interface EventType {
   title: string;
   description: string | null;
   lengthMinutes: number;
-  location: string | null;
+  /** Where the meeting happens — normalized server-side to a kind + detail. */
+  location: EventLocationDto | null;
   hidden: boolean;
   minimumBookingNotice: number;
   beforeEventBuffer: number;
@@ -222,8 +332,13 @@ export interface EventType {
   slotInterval: number | null;
   schedulingType: string | null;
   requiresConfirmation: boolean;
+  /** Duplicate-booking guard (#69) — false on every event nobody switched on. */
+  preventDuplicateBookings: boolean;
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
+  /** Reminders + follow-up owned by this event (#68) — always the EFFECTIVE
+   *  list, so a never-configured event arrives carrying the shipped defaults. */
+  reminders: EventReminder[];
   hostMemberIds: string[];
   hosts?: Array<{ memberId: string; priority: number | null; weight: number | null; isFixed: boolean }>;
   scheduleId: string | null;
@@ -269,6 +384,11 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /**
+   * Display name for the conferencing this deployment mints, injected at
+   * runtime (ADR 0008). Null on a bare fork ⇒ the editor shows generic wording.
+   */
+  conferencingLabel?: string | null;
   /**
    * Only present on the RESPONSE of a `discoverConnections` call (never
    * persisted — the vendor's own bookkeeping for this connection). Lets the

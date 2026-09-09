@@ -41,6 +41,9 @@ importers:
       '@slate/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@slate/crm':
+        specifier: workspace:*
+        version: link:../../packages/crm
       '@slate/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -139,6 +142,9 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
 
   packages/calendar:
     devDependencies:
@@ -180,6 +186,24 @@ importers:
         specifier: ^8.18.1
         version: 8.63.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
 
+  packages/crm:
+    devDependencies:
+      '@slate/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(lightningcss@1.32.0)
+
   packages/db:
     dependencies:
       '@slate/calendar':
@@ -188,6 +212,9 @@ importers:
       '@slate/engine':
         specifier: workspace:*
         version: link:../engine
+      '@slate/types':
+        specifier: workspace:*
+        version: link:../types
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
@@ -1784,6 +1811,7 @@ packages:
   eslint@9.39.5:
     resolution: {integrity: sha512-DgZS62aPLXKlnxILS/AYCoRvHaZeXceIzlXPkkGGzJWSow1aEk0lbTlxUSlyjC8jcaKxAdOnTDz+o1JFSBsyjw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

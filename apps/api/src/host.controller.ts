@@ -15,12 +15,21 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { brandingSchema } from '@slate/types';
+import {
+  apiScope,
+  attributionClaimSchema,
+  brandingSchema,
+  integrationConnectSchema,
+  onboardingQualificationSchema,
+  onboardingSetupSchema,
+} from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
-import { isEmailTemplateKey } from '@slate/notifications';
+import { isAccountTemplateKey, isEmailTemplateKey, type EmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
+import { OnboardingService } from './onboarding.service';
+import { GrowthService } from './growth.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { assertAdmin } from './permissions';
 import { unwrap } from './http';
@@ -34,13 +43,22 @@ import { unwrap } from './http';
 export class HostController {
   constructor(
     @Inject(AdminService) private readonly admin: AdminService,
+    @Inject(OnboardingService) private readonly onboarding: OnboardingService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(GrowthService) private readonly growth: GrowthService,
   ) {}
 
+  /**
+   * Identity + the two onboarding gates on ONE response. The web app's admin
+   * guard needs the verdicts on the same request it already makes to establish
+   * identity — a second round-trip is a second chance to paint the dashboard
+   * before the verdict lands, which is the flicker ADR 0002 set out to avoid.
+   */
   @Get('me')
   async me(@Req() req: ReqLike) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.me(p);
+    const [me, gates] = await Promise.all([this.admin.me(p), this.onboarding.gatesFor(p)]);
+    return me ? { ...me, ...gates } : me;
   }
 
   /**
@@ -60,6 +78,104 @@ export class HostController {
   async setupStatus(@Req() req: ReqLike) {
     const p = await this.auth.resolveHost(req);
     return this.admin.setupStatus(p);
+  }
+
+  /**
+   * Onboarding's two gates (ADR 0002) — which are owed, this cohort's question
+   * set, and the template registry, in ONE payload so the wizard renders its
+   * first step without a second round-trip.
+   */
+  @Get('me/onboarding')
+  async onboardingState(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.onboarding.getState(p);
+  }
+
+  /**
+   * Gate 1 — the account's qualification answers. Owner/admin only: these
+   * describe the WORKSPACE, and a plain member answering would send
+   * contradictory facts about one business to the growth funnel (ADR 0002).
+   * `assertAdmin` is what makes that a rule rather than a UI convention.
+   */
+  @Post('me/onboarding/qualification')
+  @HttpCode(200)
+  async submitQualification(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const parsed = onboardingQualificationSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.onboarding.submitQualification(p, parsed.data);
+  }
+
+  /**
+   * Gate 2 — create this host's first event type from a named template. Every
+   * active member may call this for themselves, invited members included: the
+   * gate is about one host's own public page, not about the workspace.
+   */
+  @Post('me/onboarding/setup')
+  @HttpCode(200)
+  async submitSetup(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    const parsed = onboardingSetupSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.onboarding.submitSetup(p, parsed.data);
+  }
+
+  /**
+   * O2 — the wizard's FIRST answer (#65 → Growth funnel).
+   *
+   * Enqueues the early contact push so someone who types one answer and closes
+   * the tab still reaches the funnel. Idempotent per account, so re-opening the
+   * wizard cannot push the same lead again.
+   *
+   * Owner/admin only, matching gate 1: this fires from the qualification step,
+   * which only they are ever shown. Returns a plain verdict — the wizard shows
+   * nothing either way, and a growth push must never be able to fail a signup.
+   */
+  @Post('me/onboarding/early')
+  @HttpCode(200)
+  async onboardingEarly(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.growth.enqueueEarly(p);
+  }
+
+  /**
+   * O2 — claim the attribution blob parked at the front door, WRITE-ONCE.
+   *
+   * Called once by the web app's auth callback, right after the identity
+   * round-trip. Refused silently (`claimed: false`) when the account already
+   * has attribution or is older than the ten-minute window — neither is
+   * something the browser can act on.
+   *
+   * NO role gate, deliberately. The first member of a self-serve account is its
+   * owner, but an invited member's very first request could also carry a parked
+   * click, and refusing them would lose the attribution that invite arrived
+   * under. Both guards that matter are in the write itself: it fires once ever,
+   * and only inside the account's first ten minutes.
+   */
+  @Post('me/attribution')
+  @HttpCode(200)
+  async claimAttribution(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    const parsed = attributionClaimSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.growth.claim(p, parsed.data.attribution);
   }
 
   @Get('handle-available')
@@ -218,6 +334,75 @@ export class HostController {
     return { uid, status: 'rejected' };
   }
 
+  // --- Integrations (H1a / #63). No UI here — that is H1b / #93. ------------
+  //
+  // Account-level credential, so admin/owner only: a plain member must not be
+  // able to repoint or unplug the workspace's CRM. `assertAdmin` is what makes
+  // that a rule rather than a UI convention.
+  //
+  // NOTHING these routes return carries the token or its ciphertext. The
+  // service projects each row through `IntegrationStatusView`, so a credential
+  // cannot reach a browser by someone forgetting to strip a field.
+
+  @Get('integrations')
+  async listIntegrations(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.listIntegrations(p);
+  }
+
+  /**
+   * What this DEPLOYMENT can do, for a UI that must not offer an action which
+   * cannot succeed (H1b / #93).
+   *
+   * Declared BEFORE `integrations/:provider`-shaped routes so a literal segment
+   * is never eaten by a parameter. (`:provider` is only on DELETE today, so
+   * there is no live collision — the ordering is here so adding a GET one later
+   * cannot quietly shadow this.)
+   */
+  @Get('integrations/capabilities')
+  async integrationCapabilities(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.integrationCapabilities(p);
+  }
+
+  /**
+   * Connect a pasted private-app token. Fail-closed: the credential is VERIFIED
+   * by using it before anything is stored, so a bad token is rejected here
+   * rather than surfacing as a silently failing booking a week later.
+   *
+   * A rejection carries `requiredGranularScopes` — the scope NAME list the
+   * provider returned (#74) — so H1b can name the exact checkbox that was
+   * missed instead of saying something went wrong.
+   */
+  @Post('integrations')
+  @HttpCode(201)
+  async connectIntegration(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const parsed = integrationConnectSchema.safeParse(body);
+    if (!parsed.success) {
+      // Field paths only. The one field that could be echoed here is the token
+      // itself, and zod issues carry paths rather than values — which is what
+      // keeps a rejected credential out of a 400 body and out of any log that
+      // records one.
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.admin.connectIntegration(p, parsed.data);
+  }
+
+  /** Disconnect: the credential is scrubbed, nothing is deleted in the CRM. */
+  @Delete('integrations/:provider')
+  async disconnectIntegration(@Req() req: ReqLike, @Param('provider') provider: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.disconnectIntegration(p, provider);
+  }
+
   // Connections.
   @Get('connections')
   async listConnections(@Req() req: ReqLike) {
@@ -318,6 +503,8 @@ export class HostController {
     assertAdmin(p);
     if (!body?.name || !Array.isArray(body?.scopes) || body.scopes.length === 0)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'name and >=1 scope required' });
+    if (body.scopes.some((scope) => !apiScope.includes(scope as (typeof apiScope)[number])))
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown API-key scope.' });
     return this.admin.createApiKey(p, body);
   }
   @Delete('api-keys/:id')
@@ -395,13 +582,12 @@ export class HostController {
   async updateNotificationSetting(
     @Req() req: ReqLike,
     @Param('key') key: string,
-    @Body() body: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
+    @Body() body: { enabled?: boolean; subject?: string | null; body?: string | null },
   ) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
-    const patch = parseNotificationPatch(key, body);
+    assertAccountTemplateKey(key);
+    const patch = parseNotificationPatch(body);
     return this.admin.updateNotificationSetting(p, key, patch);
   }
 
@@ -415,8 +601,7 @@ export class HostController {
   ) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    assertAccountTemplateKey(key);
     return this.admin.previewNotificationTemplate(p, key, {
       subject: cleanTemplateField(body?.subject, MAX_SUBJECT),
       body: cleanTemplateField(body?.body, MAX_BODY),
@@ -429,18 +614,29 @@ export class HostController {
   async resetNotificationTemplate(@Req() req: ReqLike, @Param('key') key: string) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    if (!isEmailTemplateKey(key))
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'Unknown notification key.' });
+    assertAccountTemplateKey(key);
     return this.admin.resetNotificationTemplate(p, key);
   }
 }
 
+/**
+ * Settings → Notifications edits ACCOUNT-WIDE transactional mail only. The
+ * reminder and follow-up keys moved to the event type (#68) — one place per
+ * thing — so they are refused here with a message that says where they went,
+ * rather than silently accepting a write nothing would read.
+ */
+function assertAccountTemplateKey(key: string): asserts key is EmailTemplateKey {
+  if (isAccountTemplateKey(key)) return;
+  throw new BadRequestException({
+    error: 'BAD_REQUEST',
+    message: isEmailTemplateKey(key)
+      ? 'Reminders and the follow-up are configured on the event type.'
+      : 'Unknown notification key.',
+  });
+}
+
 const MAX_SUBJECT = 200;
 const MAX_BODY = 5000;
-/** Reminder leads: 5 minutes … 28 days, at most 5 per account. */
-const MAX_LEADS = 5;
-const MIN_LEAD_MINUTES = 5;
-const MAX_LEAD_MINUTES = 28 * 24 * 60;
 
 /** Empty/whitespace template fields mean "back to default" (NULL). */
 function cleanTemplateField(v: string | null | undefined, max: number): string | null | undefined {
@@ -455,10 +651,15 @@ function cleanTemplateField(v: string | null | undefined, max: number): string |
   return trimmed;
 }
 
+/**
+ * The account-wide template patch. Lead times are deliberately absent: they
+ * live on the event type now (#68), and `assertAccountTemplateKey` has already
+ * rejected the only two keys that ever carried one — so there is nothing left
+ * for this to key off, and no lead field to accept.
+ */
 function parseNotificationPatch(
-  key: string,
-  body: { enabled?: unknown; subject?: unknown; body?: unknown; reminderLeadMinutes?: unknown },
-): { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null } {
+  body: { enabled?: unknown; subject?: unknown; body?: unknown },
+): { enabled?: boolean; subject?: string | null; body?: string | null } {
   const patch: ReturnType<typeof parseNotificationPatch> = {};
   if (body?.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean')
@@ -469,28 +670,5 @@ function parseNotificationPatch(
     patch.subject = cleanTemplateField(body.subject as string | null, MAX_SUBJECT);
   if (body?.body !== undefined)
     patch.body = cleanTemplateField(body.body as string | null, MAX_BODY);
-  if (body?.reminderLeadMinutes !== undefined) {
-    if (key !== 'attendee_reminder' && key !== 'follow_up')
-      throw new BadRequestException({
-        error: 'BAD_REQUEST',
-        message: 'Lead times are set on the attendee_reminder or follow_up keys.',
-      });
-    if (body.reminderLeadMinutes === null) {
-      patch.reminderLeadMinutes = null;
-    } else {
-      if (!Array.isArray(body.reminderLeadMinutes) || body.reminderLeadMinutes.length === 0)
-        throw new BadRequestException({ error: 'BAD_REQUEST', message: 'reminderLeadMinutes must be a non-empty array.' });
-      const leads = [...new Set(body.reminderLeadMinutes.map(Number))];
-      if (
-        leads.length > MAX_LEADS ||
-        leads.some((n) => !Number.isInteger(n) || n < MIN_LEAD_MINUTES || n > MAX_LEAD_MINUTES)
-      )
-        throw new BadRequestException({
-          error: 'BAD_REQUEST',
-          message: `Lead times: up to ${MAX_LEADS} whole minutes between ${MIN_LEAD_MINUTES} and ${MAX_LEAD_MINUTES}.`,
-        });
-      patch.reminderLeadMinutes = leads.sort((a, b) => b - a);
-    }
-  }
   return patch;
 }
