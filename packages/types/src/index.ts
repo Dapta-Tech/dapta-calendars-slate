@@ -415,6 +415,13 @@ export const bookingViewSchema = z.object({
   meetingUrl: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
+  /** The organizer a TEAM booking's scheduling method resolved to (#102).
+   *  Additive and team-only — the personal path never sets it, and a booking
+   *  read back later carries its host in `host` instead. It belongs on this
+   *  schema so ONE booking shape covers both public write paths: the team
+   *  route used to answer a narrow `{ uid, hostMemberId, manageUrl }` that the
+   *  web client cast to a `BookingView` it was not. */
+  hostMemberId: z.string().optional(),
   /** True when an idempotent replay returned the existing booking (B3). */
   deduplicated: z.boolean().optional(),
   /** Event context for the manage page's availability-backed reschedule picker. */

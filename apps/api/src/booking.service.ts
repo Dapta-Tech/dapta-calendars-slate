@@ -581,6 +581,18 @@ export class BookingService {
     });
   }
 
+  /**
+   * Book a team event, answering the SAME `BookingView` the personal `book()`
+   * path answers, with `hostMemberId` kept as an additive field.
+   *
+   * It used to return a narrow `{ uid, hostMemberId, manageUrl }`. The web
+   * client casts a 201 body to `BookingView` on both routes, so `startUtc`
+   * arrived `undefined`, `formatSlotDateTime` threw `RangeError: Invalid time
+   * value`, and the public error boundary told every team invitee that a
+   * booking which had in fact SUCCEEDED had failed — sending them back to make
+   * a second one (#102). One concept, one shape: the confirmed branch then
+   * needs no team special case.
+   */
   async teamBook(
     accountCode: string,
     teamSlug: string,
@@ -606,7 +618,7 @@ export class BookingService {
      * invite the next edit to that controller to reopen it.
      */
     context?: { apiKeyWrite?: boolean; idempotencyKey?: string },
-  ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
+  ): Promise<(BookingView & { hostMemberId: string }) | ServiceError> {
     const out = await createTeamBooking(
       this.db,
       {
@@ -667,6 +679,63 @@ export class BookingService {
       status: 'accepted',
       startUtc: body.startUtc,
     });
-    return { uid: out.uid, hostMemberId: out.hostMemberId, manageUrl };
+    // Read the row back for the fields the create call does not hand out: the
+    // title, the resolved end instant, and the organizer's name/handle.
+    //
+    // The booking is ALREADY COMMITTED by this point, so nothing here may throw
+    // or the invitee gets a 500 — the error boundary again, for a booking that
+    // succeeded, which is the whole of #102 one layer down. Hence `.catch`, not
+    // just the empty-row fallback: a rejected query (a dropped connection, an
+    // exhausted pool, a statement timeout) has to degrade exactly like a missing
+    // row. Either way the confirmation loses DETAIL, never its SHAPE.
+    //
+    // An empty row is reachable in one real deployment: `DATABASE_URL` pointed
+    // at a load-balanced endpoint with read replicas, where this read can land
+    // on a replica that has not caught up with the insert.
+    const row = await this.db
+      .get<{
+        title: string;
+        start_ms: number | string;
+        end_ms: number | string;
+        status: string;
+        host_name: string | null;
+        host_handle: string | null;
+      }>(
+        // `uid` is a UUID this request just minted and `booking.uid` is UNIQUE in
+        // both dialects, so this is an exact index hit that cannot reach another
+        // account's row — the value is never caller-supplied.
+        sql`SELECT b.title AS title, b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
+                   m.display_name AS host_name, m.handle AS host_handle
+            FROM booking b
+            LEFT JOIN member m ON m.id = b.host_member_id
+            WHERE b.uid = ${out.uid} LIMIT 1`,
+      )
+      .catch(() => undefined);
+    // NORMALIZED on the fallback too: `body.startUtc` is the raw unvalidated
+    // controller body, which may carry an offset (`…T15:00:00+02:00`). The rest
+    // of the API answers UTC instants, and a booking that reports its time two
+    // ways is the class of drift this fix exists to close.
+    const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
+    const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
+    return {
+      uid: out.uid,
+      // A team booking is created `accepted` (it has no confirmation gate), so
+      // the column is the authority here and the literal is only the fallback.
+      status: (row?.status as BookingView['status']) ?? 'accepted',
+      title: row?.title ?? '',
+      startUtc,
+      endUtc,
+      host: { name: row?.host_name ?? null, handle: row?.host_handle ?? null },
+      // Picked field by field, never spread: the public controller forwards a
+      // raw unvalidated `@Body()` into `body`, so spreading would echo whatever
+      // extra keys an anonymous caller attached straight back out of a 201.
+      attendee: {
+        name: body.attendee.name,
+        email: body.attendee.email,
+        timeZone: body.attendee.timeZone,
+      },
+      hostMemberId: out.hostMemberId,
+      manageUrl,
+    };
   }
 }

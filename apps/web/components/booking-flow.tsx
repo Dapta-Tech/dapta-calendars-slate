@@ -180,18 +180,35 @@ export function BookingFlow({
     const isPending = b.status === 'pending';
     const g = getMessages(locale).growth;
     const ctaHref = signupHref('confirmation', accountCode);
+    /**
+     * This branch is shared by the personal and the team path, and it must
+     * never be able to THROW: `formatSlotDateTime` raises `RangeError: Invalid
+     * time value` on an unparseable instant, that escapes to the public error
+     * boundary, and the booker is shown a failure screen for a booking that
+     * succeeded — which is how they end up making a second one (#102). The
+     * team route now returns the same full `BookingView` the personal one
+     * does; this is the belt to that braces, so a future shape drift costs the
+     * confirmation a line of detail rather than the confirmation itself.
+     */
+    const when = Number.isNaN(Date.parse(b.startUtc ?? ''))
+      ? null
+      : formatSlotDateTime(b.startUtc, timeZone);
+    // Dropped rather than interpolated empty: both strings end in the address,
+    // so a missing one renders "A confirmation was sent to ." — worse than
+    // saying nothing.
+    const attendeeEmail = b.attendee?.email;
     return (
       <div>
         <section className="bp-card border border-border bg-card p-6 text-card-foreground">
           <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
-          <p className="text-muted-foreground">
-            {b.title} — {formatSlotDateTime(b.startUtc, timeZone)}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isPending
-              ? t(m.awaitingConfirmation, { email: b.attendee.email })
-              : t(m.confirmationSentTo, { email: b.attendee.email })}
-          </p>
+          <p className="text-muted-foreground">{when ? `${b.title} — ${when}` : b.title}</p>
+          {attendeeEmail ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isPending
+                ? t(m.awaitingConfirmation, { email: attendeeEmail })
+                : t(m.confirmationSentTo, { email: attendeeEmail })}
+            </p>
+          ) : null}
           {b.manageUrl ? (
             <a
               href={b.manageUrl}

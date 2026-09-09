@@ -3,6 +3,7 @@
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
 import { cache } from 'react';
+import { bookingViewSchema } from '@slate/types';
 import type { AvailabilityResponse, BookingView, PublicProfile } from '@slate/types';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -53,6 +54,35 @@ export function getTeamAvailability(params: {
   );
 }
 
+/**
+ * Read a 201 booking body as a `BookingView` — PARSED against the shared
+ * contract, not asserted into it. The team route used to answer a narrow
+ * `{ uid, hostMemberId, manageUrl }`, and an `as unknown as BookingView` cast
+ * called that a booking, so `startUtc` reached the confirmation `undefined`
+ * and the render threw into the public error boundary (#102).
+ *
+ * A body that fails to parse is still a CREATED booking — a 201 is the API
+ * saying the row exists — so this never turns one into a failure: reporting
+ * failure for a booking that succeeded is exactly what sends a booker back to
+ * make a second one. It hands over what arrived and lets the confirmation
+ * render the fields it actually has.
+ */
+function toBookingView(json: Record<string, unknown>): BookingView {
+  const parsed = bookingViewSchema.safeParse(json);
+  if (parsed.success) return parsed.data;
+  // Say so. #102 hid for as long as it did because the cast absorbed the
+  // mismatch silently and it only ever surfaced as a `RangeError` thrown deep
+  // in a render. This runs server-side, so the line lands in the app log. It
+  // names the FIELD PATHS only — never the body, which carries the attendee's
+  // name and email.
+  console.warn(
+    `[web] booking response did not match the contract: ${parsed.error.issues
+      .map((i) => i.path.join('.') || '(root)')
+      .join(', ')}`,
+  );
+  return json as Partial<BookingView> as BookingView;
+}
+
 export async function postTeamBooking(
   accountCode: string,
   teamSlug: string,
@@ -68,7 +98,7 @@ export async function postTeamBooking(
     },
   );
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, status: 201, booking: json as unknown as BookingView };
+  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json) };
   return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
 }
 
@@ -170,7 +200,7 @@ export async function postBooking(body: unknown): Promise<BookResult> {
     cache: 'no-store',
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, status: 201, booking: json as unknown as BookingView };
+  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json) };
   return {
     ok: false,
     status: res.status,
