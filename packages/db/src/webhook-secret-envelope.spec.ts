@@ -162,6 +162,63 @@ describe('webhook signing secrets at rest (W, #75)', () => {
     expect(after.calls[0]!.headers['X-Slate-Signature']).toBe(sign('legacy-s3cret', BODY));
   });
 
+  it('two concurrent deliveries on the same legacy row cannot lose the secret', async () => {
+    // The re-seal is guarded by `secret_cipher IS NULL`, so of two racing
+    // workers exactly one UPDATE matches. The claim worth pinning is that the
+    // loser does not clobber the winner and both still sign identically — a
+    // divergence here would be a subscriber rejecting a real delivery.
+    const id = await insertLegacyWebhook(db, { accountId, secret: 'legacy-s3cret' });
+    const a = recorder();
+    const b = recorder();
+
+    await Promise.all([
+      deliverWebhookEvent(db, { webhookId: id, body: BODY, key: KEY }, a.impl),
+      deliverWebhookEvent(db, { webhookId: id, body: BODY, key: KEY }, b.impl),
+    ]);
+
+    const expected = sign('legacy-s3cret', BODY);
+    expect(a.calls[0]!.headers['X-Slate-Signature']).toBe(expected);
+    expect(b.calls[0]!.headers['X-Slate-Signature']).toBe(expected);
+
+    // Exactly one envelope survives, and it still opens to the same secret.
+    const row = await rawSecretColumns(db, id);
+    expect(row!.secret).toBeNull();
+    expect(row!.secret_cipher).toMatch(/^v1\./);
+    const after = recorder();
+    await deliverWebhookEvent(db, { webhookId: id, body: BODY, key: KEY }, after.impl);
+    expect(after.calls[0]!.headers['X-Slate-Signature']).toBe(expected);
+  });
+
+  it('a failed re-seal still delivers: the upgrade is best-effort, signing is not', async () => {
+    const id = await insertLegacyWebhook(db, { accountId, secret: 'legacy-s3cret' });
+    // Make the upgrade UPDATE fail the way a read-only replica or a lock would,
+    // leaving every read path intact.
+    const realRun = db.run.bind(db);
+    let failed = false;
+    db.run = (async (q: Parameters<typeof realRun>[0]) => {
+      const text = JSON.stringify(q);
+      if (text.includes('secret_cipher')) {
+        failed = true;
+        throw new Error('attempt to write a readonly database');
+      }
+      return realRun(q);
+    }) as typeof db.run;
+
+    try {
+      const { calls, impl } = recorder();
+      await deliverWebhookEvent(db, { webhookId: id, body: BODY, key: KEY }, impl);
+      expect(calls[0]!.headers['X-Slate-Signature']).toBe(sign('legacy-s3cret', BODY));
+      expect(failed).toBe(true);
+    } finally {
+      db.run = realRun;
+    }
+
+    // The plaintext survives the failed upgrade — nothing was lost.
+    const row = await rawSecretColumns(db, id);
+    expect(row!.secret).toBe('legacy-s3cret');
+    expect(row!.secret_cipher).toBeNull();
+  });
+
   it('a key-less deployment cannot open an envelope: the delivery fails, it does not go unsigned', async () => {
     const wh = await createWebhook(db, {
       accountId,
