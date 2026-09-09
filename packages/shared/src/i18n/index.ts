@@ -726,6 +726,10 @@ export interface BookingMessages {
       createKey: string;
       webhooks: string;
       noWebhooks: string;
+      /** Shown once with a new webhook's signing secret (W / #75). */
+      webhookSecretCopyOnce: string;
+      /** This deployment has no encryption key, so no secret can be stored. */
+      webhookNoKeyError: string;
       subscriberUrl: string;
       events: string;
       addWebhook: string;
@@ -1610,6 +1614,10 @@ export const en: BookingMessages = {
       createKey: 'Create key',
       webhooks: 'Webhooks',
       noWebhooks: 'No webhooks.',
+      webhookSecretCopyOnce:
+        'Copy this signing secret now — it won’t be shown again. Your subscriber uses it to verify the X-Slate-Signature header on every delivery:',
+      webhookNoKeyError:
+        'This installation has no encryption key, so a signing secret could only be kept in the clear. We refuse to do that. Ask whoever runs it to set INTEGRATION_ENCRYPTION_KEY, then come back. Webhooks you already have keep working.',
       subscriberUrl: 'Subscriber URL',
       events: 'Events',
       addWebhook: 'Add webhook',
@@ -2475,6 +2483,10 @@ export const es: BookingMessages = {
       createKey: 'Crear clave',
       webhooks: 'Webhooks',
       noWebhooks: 'No hay webhooks.',
+      webhookSecretCopyOnce:
+        'Copia ahora esta clave de firma — no se volverá a mostrar. Tu suscriptor la usa para verificar la cabecera X-Slate-Signature en cada entrega:',
+      webhookNoKeyError:
+        'Esta instalación no tiene clave de cifrado, así que una clave de firma solo podría guardarse sin proteger. Nos negamos a hacerlo. Pide a quien la administra que configure INTEGRATION_ENCRYPTION_KEY y vuelve. Los webhooks que ya tienes siguen funcionando.',
       subscriberUrl: 'URL del suscriptor',
       events: 'Eventos',
       addWebhook: 'Añadir webhook',
