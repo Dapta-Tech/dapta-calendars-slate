@@ -135,6 +135,11 @@ export const eventType = sqliteTable('event_type', {
   schedulingType: text('scheduling_type'),
   locations: text('locations'),
   bookingFields: text('booking_fields'),
+  /**
+   * Per-event reminders + follow-up (#68), JSON text. NULL = never configured
+   * (the read falls back to the shipped defaults); `[]` = deliberately none.
+   */
+  reminders: text('reminders'),
   metadata: text('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),

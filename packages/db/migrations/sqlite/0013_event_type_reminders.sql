@@ -1,0 +1,21 @@
+-- Per-event-type reminders + follow-up (#68 / #91). Additive and SAFE.
+--
+-- The list lives as JSON text on the event type rather than in a table of its
+-- own: it is an ordered list, owned by one event type, always read as a whole
+-- and never queried across events — the same shape as `booking_fields` beside
+-- it. Row shape (packages/db/src/reminders.ts):
+--   { id, kind: 'reminder'|'follow_up', enabled, leadMinutes, subject, body }
+--
+-- Three states, and the difference between the first two matters:
+--   NULL  never configured — the read falls back to the shipped defaults
+--   []    deliberately none — no reminder is scheduled
+--   [...] exactly these
+-- Without that distinction a host who deletes their last reminder gets it back
+-- on the next save.
+--
+-- The DATA copy-forward (every existing event type inherits its account's
+-- current lead times and copy) is NOT here — it runs as the idempotent fixup
+-- `applyReminderCopyForward` in migrate.ts, so one implementation covers both
+-- dialects. See the Postgres twin of this file for the reasoning.
+
+ALTER TABLE event_type ADD COLUMN reminders TEXT;

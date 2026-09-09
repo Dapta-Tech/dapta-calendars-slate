@@ -1,5 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, migrate, seed, sql, getAvailability, listOutbox, type Db } from '@slate/db';
+import {
+  createDb,
+  createEventType,
+  migrate,
+  seed,
+  sql,
+  getAvailability,
+  listOutbox,
+  updateEventType,
+  type Db,
+  type EventReminder,
+} from '@slate/db';
+import { eventRemindersSchema } from '@slate/types';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { BookingNotifier } from '@slate/notifications';
 import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notifications';
@@ -26,12 +38,18 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
   let email: RecordingEmailProvider;
   let booking: BookingService;
   let effects: EmailEffects;
+  let accountId: string;
+  let memberId: string;
 
   beforeEach(async () => {
     db = await createDb('file::memory:');
     await migrate(db);
     await seed(db);
-    const memberId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    const member = (await db.get<{ id: string; account_id: string }>(
+      sql`SELECT id, account_id FROM member WHERE handle='alex-rivera'`,
+    ))!;
+    memberId = member.id;
+    accountId = member.account_id;
     await db.run(sql`UPDATE member SET email='alex@dapta.test' WHERE id=${memberId}`);
     email = new RecordingEmailProvider();
     effects = new EmailEffects(new BookingNotifier(email), db);
@@ -117,4 +135,84 @@ describe('reminders — scheduled via the outbox at start − lead', () => {
   async function effectsManageUrl(_uid: string): Promise<string | null> {
     return null;
   }
+
+  /* --- Per-event reminders (#68) ----------------------------------------- */
+
+  async function setReminders(rows: EventReminder[]): Promise<void> {
+    const et = (await db.get<{ id: string }>(
+      sql`SELECT id FROM event_type WHERE slug='intro-call' AND account_id=${accountId}`,
+    ))!;
+    const out = await updateEventType(db, accountId, et.id, { reminders: rows });
+    if (!out.ok) throw new Error(`setReminders failed: ${out.reason}`);
+  }
+
+  it('a new event type is born with 24h + 1h reminders and the follow-up OFF', async () => {
+    const created = await createEventType(db, accountId, memberId, {
+      slug: 'born-with-reminders',
+      title: 'Born with reminders',
+      lengthMinutes: 30,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const rows = created.value.reminders;
+    expect(rows.filter((r) => r.kind === 'reminder').map((r) => r.leadMinutes)).toEqual([1440, 60]);
+    expect(rows.filter((r) => r.kind === 'reminder').every((r) => r.enabled)).toBe(true);
+    // Post-meeting mail nobody asked for reads as spam — opt in per event.
+    expect(rows.find((r) => r.kind === 'follow_up')!.enabled).toBe(false);
+  });
+
+  it('an empty list is a deliberate "no reminders", not a reset to the defaults', async () => {
+    await setReminders([]);
+    const { uid } = await bookFarOut();
+    await settle();
+    expect(await reminders(uid)).toHaveLength(0);
+  });
+
+  it('a reminder body quotes the invitee’s own answers through {{form.*}}', async () => {
+    await setReminders([
+      {
+        id: 'a',
+        kind: 'reminder',
+        enabled: true,
+        leadMinutes: 1440,
+        subject: 'Reminder: ready, {{attendee_name}}?',
+        body: 'You told us: {{form.company}}\nBudget: {{form.budget}}',
+      },
+    ]);
+    const { uid } = await bookFarOut(); // answers: { company: 'Acme' }
+    await settle();
+    const row = (await reminders(uid)).find(
+      (r) => (JSON.parse(r.payload!) as { audience?: string }).audience === 'attendee',
+    )!;
+    await effects.deliver('reminder', row.payload!);
+    const sent = email.sent.filter((m) => m.subject.startsWith('Reminder:'));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('You told us: Acme');
+    // An unanswered question drops its whole line rather than leaving a label.
+    expect(sent[0]!.text).not.toContain('Budget');
+    expect(sent[0]!.text).not.toContain('{{');
+  });
+
+  it('the cap is 10 reminders and one follow-up', async () => {
+    const many = Array.from({ length: 11 }, (_, i) => ({
+      id: `r${i}`,
+      kind: 'reminder' as const,
+      enabled: true,
+      leadMinutes: 60 + i,
+      subject: null,
+      body: null,
+    }));
+    expect(eventRemindersSchema.safeParse(many).success).toBe(false);
+    expect(eventRemindersSchema.safeParse(many.slice(0, 10)).success).toBe(true);
+
+    const twoFollowUps = [0, 1].map((i) => ({
+      id: `f${i}`,
+      kind: 'follow_up' as const,
+      enabled: true,
+      leadMinutes: 60,
+      subject: null,
+      body: null,
+    }));
+    expect(eventRemindersSchema.safeParse(twoFollowUps).success).toBe(false);
+  });
 });

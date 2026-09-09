@@ -54,7 +54,8 @@ Three properties fall out of this shape:
 
 Dependencies point one way: apps depend on packages; packages depend only on
 packages below them; nothing depends on an app. `types` and `engine` are the
-shared foundation.
+shared foundation — a package may depend on them (for example `@slate/db`
+reads the reminder contract from `@slate/types`), never the other way round.
 
 ```
         apps/web  ────HTTP────▶  apps/api

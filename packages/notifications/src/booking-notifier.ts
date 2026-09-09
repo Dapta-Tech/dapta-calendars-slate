@@ -61,6 +61,14 @@ export interface BookingNotification {
   pending?: boolean;
   /** Public book-again URL for this event type (drives {{booking_link}}). */
   bookingLink?: string | null;
+  /**
+   * The booking's own intake answers, raw, driving the `{{form.<field name>}}`
+   * namespace (#68 decision 2). Snapshotted into the outbox payload at enqueue
+   * time like the rest of this object (ADR 0007) — the answer exists the moment
+   * the booking does, so nothing here waits on delivery. Absent = no form
+   * variables resolve, and each of their lines is dropped.
+   */
+  formAnswers?: Record<string, unknown> | null;
 }
 
 /**

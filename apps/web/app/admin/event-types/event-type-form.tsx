@@ -1,10 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
-import { LOCATION_KINDS, type LocationKind } from '@slate/types';
+import {
+  LOCATION_KINDS,
+  MAX_REMINDERS_PER_EVENT,
+  MAX_REMINDER_BODY,
+  MAX_REMINDER_LEAD_MINUTES,
+  MAX_REMINDER_SUBJECT,
+  MIN_REMINDER_LEAD_MINUTES,
+  defaultEventReminders,
+  type EventReminder,
+  type LocationKind,
+} from '@slate/types';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { Button } from '@/components/ui/button';
@@ -39,6 +49,322 @@ interface HostRow {
 export interface TeamMemberOption {
   memberId: string;
   displayName: string | null;
+}
+
+type ReminderMessages = EventTypeMessages['reminders'];
+
+/** The built-ins a reminder may quote, mirroring `TEMPLATE_VARIABLES`. */
+const REMINDER_VARIABLES = [
+  'attendee_name',
+  'attendee_email',
+  'host_name',
+  'event_title',
+  'start_time',
+  'end_time',
+  'location',
+  // The meeting link (C2 #85), resolved at delivery — the one variable that is
+  // not snapshotted with the rest. It belongs in reminder copy more than
+  // anywhere: a nudge an hour before the call is exactly when someone wants it.
+  'meeting_url',
+  'manage_url',
+  'reminder_lead',
+  'booking_link',
+];
+
+const FORM_TOKEN_RE = /\{\{\s*form\.([A-Za-z0-9_]+)\s*\}\}/g;
+
+type LeadUnit = 'minutes' | 'hours' | 'days';
+
+/** Show a lead in the largest whole unit it fits — 1440 reads as "1 day". */
+function splitLead(minutes: number): { value: number; unit: LeadUnit } {
+  if (minutes % 1440 === 0) return { value: minutes / 1440, unit: 'days' };
+  if (minutes % 60 === 0) return { value: minutes / 60, unit: 'hours' };
+  return { value: minutes, unit: 'minutes' };
+}
+
+function joinLead(value: number, unit: LeadUnit): number {
+  const factor = unit === 'days' ? 1440 : unit === 'hours' ? 60 : 1;
+  const minutes = Math.round(value * factor);
+  return Math.min(Math.max(minutes, MIN_REMINDER_LEAD_MINUTES), MAX_REMINDER_LEAD_MINUTES);
+}
+
+function newReminderId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `r${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * One reminder row: its own switch, its own lead, its own subject and body
+ * (#68 decision 1). The variable chips insert into whichever of the two text
+ * fields was last focused — a raw text box beside a list of variable names is
+ * a gap, not a feature.
+ */
+function ReminderCard({
+  row,
+  onChange,
+  onRemove,
+  fieldNames,
+  m,
+}: {
+  row: EventReminder;
+  onChange: (patch: Partial<EventReminder>) => void;
+  onRemove?: () => void;
+  fieldNames: string[];
+  m: ReminderMessages;
+}) {
+  const subjectRef = useRef<HTMLInputElement | null>(null);
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastFocused = useRef<'subject' | 'body'>('body');
+  const lead = splitLead(row.leadMinutes);
+
+  const insert = (token: string) => {
+    const el = lastFocused.current === 'subject' ? subjectRef.current : bodyRef.current;
+    const current = (lastFocused.current === 'subject' ? row.subject : row.body) ?? '';
+    const at = el?.selectionStart ?? current.length;
+    const next = `${current.slice(0, at)}{{${token}}}${current.slice(el?.selectionEnd ?? at)}`;
+    onChange(lastFocused.current === 'subject' ? { subject: next } : { body: next });
+    // Put the caret after the inserted token rather than at the end.
+    requestAnimationFrame(() => {
+      const pos = at + token.length + 4;
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border bg-background/40 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <Checkbox
+            checked={row.enabled}
+            onChange={(e) => onChange({ enabled: e.target.checked })}
+            aria-label={m.enabledLabel}
+          />
+          <span className="text-muted-foreground">{m.sendLabel}</span>
+        </label>
+        <input
+          type="number"
+          // The floor is 5 MINUTES, so it is only 5 in the minutes unit — an
+          // input advertising min=1 that silently snaps to 5 is a small lie.
+          min={lead.unit === 'minutes' ? MIN_REMINDER_LEAD_MINUTES : 1}
+          max={lead.unit === 'days' ? 28 : lead.unit === 'hours' ? 672 : MAX_REMINDER_LEAD_MINUTES}
+          value={lead.value}
+          onChange={(e) => onChange({ leadMinutes: joinLead(Number(e.target.value) || 1, lead.unit) })}
+          aria-label={`${m.sendLabel} — ${m.unitMinutes}/${m.unitHours}/${m.unitDays}`}
+          className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+        />
+        <select
+          value={lead.unit}
+          onChange={(e) => onChange({ leadMinutes: joinLead(lead.value, e.target.value as LeadUnit) })}
+          aria-label={row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
+          className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+        >
+          <option value="minutes">{m.unitMinutes}</option>
+          <option value="hours">{m.unitHours}</option>
+          <option value="days">{m.unitDays}</option>
+        </select>
+        <span className="text-sm text-muted-foreground">
+          {row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
+        </span>
+        {onRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={m.remove}
+            className="ml-auto text-muted-foreground hover:text-destructive"
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+
+      <input
+        ref={subjectRef}
+        value={row.subject ?? ''}
+        onFocus={() => (lastFocused.current = 'subject')}
+        onChange={(e) => onChange({ subject: e.target.value || null })}
+        placeholder={m.subjectLabel}
+        aria-label={m.subjectLabel}
+        maxLength={MAX_REMINDER_SUBJECT}
+        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+      />
+      <textarea
+        ref={bodyRef}
+        value={row.body ?? ''}
+        onFocus={() => (lastFocused.current = 'body')}
+        onChange={(e) => onChange({ body: e.target.value || null })}
+        placeholder={m.bodyLabel}
+        aria-label={m.bodyLabel}
+        // Stop at the contract's limit rather than letting the save come back
+        // as a bare 400 from the other side of the wire.
+        maxLength={MAX_REMINDER_BODY}
+        rows={3}
+        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+      />
+      <p className="text-xs text-muted-foreground">{m.defaultCopyHint}</p>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-2xs uppercase tracking-wide text-muted-foreground">{m.variablesLabel}</span>
+        <div className="flex flex-wrap gap-1">
+          {REMINDER_VARIABLES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => insert(v)}
+              className="rounded border border-border px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+            >
+              {`{{${v}}}`}
+            </button>
+          ))}
+        </div>
+        <span className="mt-1 text-2xs uppercase tracking-wide text-muted-foreground">
+          {m.formVariablesLabel}
+        </span>
+        {fieldNames.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{m.noFormVariables}</p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {fieldNames.map((name) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => insert(`form.${name}`)}
+                className="rounded border border-border px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+              >
+                {`{{form.${name}}}`}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Reminders + follow-up, owned by the event type (#68). The list is one array
+ * with a `kind` discriminator: reminders fire before the start, the single
+ * follow-up after the end, and both share the row shape and the same switch.
+ */
+function RemindersSection({
+  rows,
+  setRows,
+  fieldNames,
+  m,
+}: {
+  rows: EventReminder[];
+  setRows: (fn: (rows: EventReminder[]) => EventReminder[]) => void;
+  fieldNames: string[];
+  m: ReminderMessages;
+}) {
+  const reminders = rows.filter((r) => r.kind === 'reminder');
+  const followUp = rows.find((r) => r.kind === 'follow_up');
+  const patch = (id: string, p: Partial<EventReminder>) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
+
+  // Dangling references warn, never block (#68 decision 3): renaming or
+  // deleting a question leaves the variable rendering empty, which is a
+  // surprise worth naming — not a reason to refuse the save.
+  const dangling = useMemo(() => {
+    const known = new Set(fieldNames);
+    const found = new Set<string>();
+    for (const r of rows) {
+      for (const text of [r.subject ?? '', r.body ?? '']) {
+        for (const match of text.matchAll(FORM_TOKEN_RE)) {
+          if (!known.has(match[1]!)) found.add(match[1]!);
+        }
+      }
+    }
+    return [...found];
+  }, [rows, fieldNames]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-semibold text-muted-foreground">{m.sectionTitle}</span>
+      <p className="text-xs text-muted-foreground">{m.sectionHint}</p>
+
+      <span className="mt-1 text-xs font-medium text-muted-foreground">{m.beforeMeeting}</span>
+      {reminders.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{m.noReminders}</p>
+      ) : (
+        reminders.map((r) => (
+          <ReminderCard
+            key={r.id}
+            row={r}
+            fieldNames={fieldNames}
+            m={m}
+            onChange={(p) => patch(r.id, p)}
+            onRemove={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}
+          />
+        ))
+      )}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={reminders.length >= MAX_REMINDERS_PER_EVENT}
+          onClick={() =>
+            setRows((rs) => [
+              ...rs.filter((r) => r.kind === 'reminder'),
+              { id: newReminderId(), kind: 'reminder', enabled: true, leadMinutes: 60, subject: null, body: null },
+              ...rs.filter((r) => r.kind === 'follow_up'),
+            ])
+          }
+          className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+        >
+          {m.addReminder}
+        </button>
+        {reminders.length >= MAX_REMINDERS_PER_EVENT ? (
+          <span className="text-xs text-muted-foreground">
+            {m.capReached.replace('{max}', String(MAX_REMINDERS_PER_EVENT))}
+          </span>
+        ) : null}
+      </div>
+
+      <span className="mt-2 text-xs font-medium text-muted-foreground">{m.afterMeeting}</span>
+      <p className="text-xs text-muted-foreground">{m.followUpHint}</p>
+      <ReminderCard
+        // An event whose stored list carries no follow-up still shows one,
+        // switched off — the control has to be reachable to be turned on.
+        row={
+          followUp ?? {
+            id: 'follow-up',
+            kind: 'follow_up',
+            enabled: false,
+            leadMinutes: 60,
+            subject: null,
+            body: null,
+          }
+        }
+        fieldNames={fieldNames}
+        m={m}
+        onChange={(p) =>
+          setRows((rs) =>
+            rs.some((r) => r.kind === 'follow_up')
+              ? rs.map((r) => (r.kind === 'follow_up' ? { ...r, ...p } : r))
+              : [
+                  ...rs,
+                  {
+                    id: newReminderId(),
+                    kind: 'follow_up' as const,
+                    enabled: false,
+                    leadMinutes: 60,
+                    subject: null,
+                    body: null,
+                    ...p,
+                  },
+                ],
+          )
+        }
+      />
+
+      {dangling.length > 0 ? (
+        <p className="text-xs text-destructive" role="alert">
+          {m.danglingWarn.replace('{tokens}', dangling.map((t) => `{{form.${t}}}`).join(', '))}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -295,6 +621,15 @@ export function EventTypeForm({
   const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
+  // Reminders + follow-up (#68). Editing opens on the effective list the API
+  // returns (a never-configured event surfaces the shipped 24h + 1h with the
+  // follow-up off). CREATE has no `initial`, so it seeds the same shipped list
+  // — the form both shows what the new event will send and submits it, instead
+  // of displaying "no reminders" and then storing that empty list as a
+  // deliberate "none".
+  const [reminders, setReminders] = useState<EventReminder[]>(
+    initial?.reminders ?? defaultEventReminders(),
+  );
   const [fields, setFields] = useState<IntakeField[]>(
     (initial?.bookingFields as IntakeField[] | undefined)?.map((f) => ({
       name: f.name,
@@ -411,6 +746,7 @@ export function EventTypeForm({
         requiresConfirmation,
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
+        reminders,
         ...(isTeamEvent
           ? {
               // teamId travels on CREATE only — an existing event never
@@ -719,6 +1055,15 @@ export function EventTypeForm({
           {m.addQuestion}
         </button>
       </div>
+
+      {/* Reminders — below intake, because their {{form.*}} variables read the
+          questions defined right above them. */}
+      <RemindersSection
+        rows={reminders}
+        setRows={(fn) => setReminders(fn)}
+        fieldNames={fields.filter((f) => f.name && !isReservedFieldName(f.name)).map((f) => f.name)}
+        m={m.reminders}
+      />
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       </div>

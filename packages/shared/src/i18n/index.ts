@@ -295,6 +295,34 @@ export interface BookingMessages {
       calendarsCheckConflicts: string;
       calendarsAddEventsHere: string;
       calendarsManageLink: string;
+      /** R (#91) — reminders + follow-up, owned by the event type (#68). */
+      reminders: {
+        sectionTitle: string;
+        sectionHint: string;
+        beforeMeeting: string;
+        afterMeeting: string;
+        addReminder: string;
+        /** {max} interpolates the per-event cap. */
+        capReached: string;
+        sendLabel: string;
+        unitMinutes: string;
+        unitHours: string;
+        unitDays: string;
+        beforeStart: string;
+        afterEnd: string;
+        subjectLabel: string;
+        bodyLabel: string;
+        defaultCopyHint: string;
+        remove: string;
+        followUpHint: string;
+        variablesLabel: string;
+        formVariablesLabel: string;
+        noFormVariables: string;
+        /** {tokens} interpolates the dangling `{{form.*}}` variables. */
+        danglingWarn: string;
+        enabledLabel: string;
+        noReminders: string;
+      };
     };
     availability: {
       title: string;
@@ -617,11 +645,6 @@ export interface BookingMessages {
       editTemplate: string;
       updated: string;
       updateFailed: string;
-      reminderLeads: string;
-      reminderLeadsHint: string;
-      reminderLeadsInvalid: string;
-      followUpLead: string;
-      followUpLeadHint: string;
       editorSubject: string;
       editorBody: string;
       variables: string;
@@ -1036,6 +1059,31 @@ export const en: BookingMessages = {
       calendarsCheckConflicts: 'Check for conflicts',
       calendarsAddEventsHere: 'Add events here',
       calendarsManageLink: 'Manage calendars',
+      reminders: {
+        sectionTitle: 'Reminders',
+        sectionHint: 'Reminders belong to this event. Each one has its own switch, timing and wording.',
+        beforeMeeting: 'Before the meeting',
+        afterMeeting: 'After the meeting',
+        addReminder: 'Add reminder',
+        capReached: 'Up to {max} reminders on one event.',
+        sendLabel: 'Send',
+        unitMinutes: 'minutes',
+        unitHours: 'hours',
+        unitDays: 'days',
+        beforeStart: 'before it starts',
+        afterEnd: 'after it ends',
+        subjectLabel: 'Subject',
+        bodyLabel: 'Message',
+        defaultCopyHint: 'Leave empty to use the standard wording.',
+        remove: 'Remove',
+        followUpHint: 'A thank-you sent once the meeting is over. Off unless you turn it on.',
+        variablesLabel: 'Variables',
+        formVariablesLabel: 'From this event’s questions',
+        noFormVariables: 'Add a question above to use its answer here.',
+        danglingWarn: 'These variables no longer match a question and will arrive empty: {tokens}',
+        enabledLabel: 'Send this reminder',
+        noReminders: 'No reminders — invitees get no nudge before this event.',
+      },
     },
     availability: {
       title: 'Availability',
@@ -1373,11 +1421,6 @@ export const en: BookingMessages = {
       editTemplate: 'Edit template',
       updated: 'Updated.',
       updateFailed: 'Could not update — try again.',
-      reminderLeads: 'Send reminders before start',
-      reminderLeadsHint: 'Minutes before start, comma-separated (e.g. 1440, 60). Up to 5.',
-      reminderLeadsInvalid: 'Whole minutes between 5 and 40320, up to 5 values.',
-      followUpLead: 'Send after the meeting ends',
-      followUpLeadHint: 'Minutes after the end time, comma-separated (e.g. 60). Up to 5.',
       editorSubject: 'Subject',
       editorBody: 'Body',
       variables: 'Variables',
@@ -1784,6 +1827,33 @@ export const es: BookingMessages = {
       calendarsCheckConflicts: 'Verificar conflictos',
       calendarsAddEventsHere: 'Añadir eventos aquí',
       calendarsManageLink: 'Administrar calendarios',
+      reminders: {
+        sectionTitle: 'Recordatorios',
+        sectionHint:
+          'Los recordatorios son de este evento. Cada uno tiene su propio interruptor, momento y texto.',
+        beforeMeeting: 'Antes de la reunión',
+        afterMeeting: 'Después de la reunión',
+        addReminder: 'Añadir recordatorio',
+        capReached: 'Hasta {max} recordatorios por evento.',
+        sendLabel: 'Enviar',
+        unitMinutes: 'minutos',
+        unitHours: 'horas',
+        unitDays: 'días',
+        beforeStart: 'antes de que empiece',
+        afterEnd: 'después de que termine',
+        subjectLabel: 'Asunto',
+        bodyLabel: 'Mensaje',
+        defaultCopyHint: 'Déjalo vacío para usar el texto estándar.',
+        remove: 'Quitar',
+        followUpHint:
+          'Un agradecimiento que se envía cuando la reunión termina. Desactivado salvo que lo actives.',
+        variablesLabel: 'Variables',
+        formVariablesLabel: 'De las preguntas de este evento',
+        noFormVariables: 'Añade una pregunta arriba para usar su respuesta aquí.',
+        danglingWarn: 'Estas variables ya no coinciden con ninguna pregunta y llegarán vacías: {tokens}',
+        enabledLabel: 'Enviar este recordatorio',
+        noReminders: 'Sin recordatorios: nadie recibirá aviso antes de este evento.',
+      },
     },
     availability: {
       title: 'Disponibilidad',
@@ -2119,11 +2189,6 @@ export const es: BookingMessages = {
       editTemplate: 'Editar plantilla',
       updated: 'Actualizado.',
       updateFailed: 'No se pudo actualizar — inténtalo de nuevo.',
-      reminderLeads: 'Enviar recordatorios antes del inicio',
-      reminderLeadsHint: 'Minutos antes del inicio, separados por comas (p. ej. 1440, 60). Hasta 5.',
-      reminderLeadsInvalid: 'Minutos enteros entre 5 y 40320, hasta 5 valores.',
-      followUpLead: 'Enviar después de que termine la reunión',
-      followUpLeadHint: 'Minutos después de la hora de fin, separados por comas (p. ej. 60). Hasta 5.',
       editorSubject: 'Asunto',
       editorBody: 'Cuerpo',
       variables: 'Variables',
