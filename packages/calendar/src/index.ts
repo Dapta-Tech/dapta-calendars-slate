@@ -63,6 +63,13 @@ export interface UpdateEventInput {
   endUtc: string;
   attendeeEmails: string[];
   organizerEmail?: string | null;
+  /**
+   * Request a conferencing link on the moved event. Set on the ORGANIZER's
+   * destination only, so a team booking keeps exactly one room across a
+   * reschedule. A backend that keeps the same room simply echoes it back (or
+   * returns null, which is never persisted over a good stored URL).
+   */
+  requestConferenceLink?: boolean;
   timeZone?: string | null;
 }
 

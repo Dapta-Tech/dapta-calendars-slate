@@ -83,7 +83,18 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience) {
   const AMBER = { c: '#7a5b00', b: '#fbeeb8' };
   const RED = { c: '#7a1f1f', b: '#f7d9d9' };
 
-  const reschedule = button(es ? 'Reagendar' : 'Reschedule', manage, true);
+  // The conferencing link, when write-out produced one. It leads the CTA row on
+  // the kinds where the meeting is still ahead — it is the only button that
+  // gets the reader INTO the meeting. Wording matches the manage page's
+  // `manage.joinMeeting` so the product says one thing in one voice.
+  // `safeHref` collapses anything that is not http(s)/mailto, so a malformed
+  // stored URL degrades to '#' rather than becoming an injection vector.
+  const join = v.meeting_url
+    ? button(es ? 'Unirse a la reunión' : 'Join the meeting', v.meeting_url, true)
+    : '';
+  // Demoted to the outline treatment whenever Join is present, so exactly one
+  // filled button competes for the eye.
+  const reschedule = button(es ? 'Reagendar' : 'Reschedule', manage, !join);
   const cancel = button(es ? 'Cancelar' : 'Cancel', manage, false);
   const bookAgain = button(es ? 'Reservar otra hora' : 'Book another time', again, true);
 
@@ -95,7 +106,7 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience) {
         intro: es
           ? `Tu reunión con ${who} quedó confirmada. Adjuntamos la invitación de calendario — ábrela para agregar el evento.`
           : `Your meeting with ${who} is confirmed. We've attached a calendar invite — open it to add the event.`,
-        ctas: manage ? reschedule + cancel : '',
+        ctas: join + (manage ? reschedule + cancel : ''),
         note: es ? 'La invitación de calendario (invite.ics) va adjunta.' : 'The calendar invite (invite.ics) is attached.',
       };
     case 'reschedule':
@@ -105,7 +116,7 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience) {
         intro: es
           ? `Tu reunión con ${who} se movió a una nueva hora. Invitación actualizada adjunta.`
           : `Your meeting with ${who} was moved to a new time. Updated invite attached.`,
-        ctas: manage ? reschedule + cancel : '',
+        ctas: join + (manage ? reschedule + cancel : ''),
         note: es ? 'La invitación actualizada va adjunta.' : 'The updated calendar invite is attached.',
       };
     case 'pending':
@@ -143,7 +154,7 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience) {
         badge: badge(es ? 'RECORDATORIO' : 'REMINDER', GREEN.c, GREEN.b),
         heading: es ? 'Tu reunión es pronto' : 'Your meeting starts soon',
         intro: es ? `Un recordatorio de tu reunión con ${who}.` : `A quick reminder about your meeting with ${who}.`,
-        ctas: manage ? reschedule : '',
+        ctas: join + (manage ? reschedule : ''),
         note: '',
       };
     case 'follow_up':

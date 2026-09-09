@@ -49,10 +49,15 @@
  *      `--primary-foreground`. They are identical to the base values, so this
  *      changes nothing that paints — it makes the two light blocks a literal
  *      value-for-value match, which is what `tokens.spec.ts` asserts.
+ *   4. Each theme block declares `color-scheme`. Forms carries it on the app
+ *      shell; here it belongs to the sheet, because the sheet is what a
+ *      self-hoster imports and a theme that does not tell the browser which half
+ *      it is on leaves the user agent's own chrome painted for the other one.
  *
  * Everything the sheet declares is asserted by `tokens.spec.ts`, which reads THIS
- * FILE. The light half is authored and proven here but not reachable: the root
- * layout still stamps `dark`, and the theme toggle is a later slice.
+ * FILE. Both halves are reachable in the running app: the root layout stamps the
+ * theme per request, from the host's cookie on a product route and from the
+ * booking page's own canvas on a public one (ADR 0004).
  */
 
 /* `:root` AND `[data-theme='dark']`, one declaration, no second copy.
@@ -65,6 +70,16 @@
    view rather than the AUTHOR's. */
 :root,
 [data-theme='dark'] {
+  /* Tell the BROWSER which half of the sheet is in force, not just our own
+     utilities. Everything the user agent paints for itself reads this and
+     nothing else: `<select>` popups, the internals of `<input type='date'>`,
+     autofill backgrounds, the default scrollbar on any region the themed
+     scrollbar rules do not reach, and the canvas behind an overscroll bounce.
+     Without it a light page still renders the browser's own chrome dark, which
+     is the one part of the theme no token can reach. It inherits, so a subtree
+     that re-establishes a theme re-establishes this too. */
+  color-scheme: dark;
+
   /* Accent channels — retune the lime here, never at a call site. */
   --acc-h: 68;
   --acc-s: 76%;
@@ -198,6 +213,7 @@
    2.79:1 — the one ground it actually had to work on.
    KEEP THIS BLOCK AND THE `prefers-color-scheme` BLOCK BELOW IDENTICAL. */
 :root[data-theme='light'] {
+  color-scheme: light;
   --background: #f4f6f8;
   --foreground: #0d1013;
   --card: #ffffff;
@@ -244,6 +260,7 @@
    them is the hardest kind of theme bug to notice. `tokens.spec.ts` asserts it. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
+    color-scheme: light;
     --background: #f4f6f8;
     --foreground: #0d1013;
     --card: #ffffff;

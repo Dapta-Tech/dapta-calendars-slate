@@ -9,6 +9,17 @@
  *   POST   /v1/free-busy                                 → { busy: [{startUtc,endUtc}] }
  *   POST   /v1/events                                    → { externalEventId, externalCalendarId?, meetingUrl? }
  *   PATCH  /v1/events/:externalEventId                   → { externalEventId, ... }
+ *
+ * CONFERENCING (both POST and PATCH). The request body carries
+ * `requestConferenceLink: boolean`. When true, create a conferencing room and
+ * return its join URL as `meetingUrl`; when false or absent, create none.
+ *   - It is set on AT MOST ONE destination per booking — the organizer's — so a
+ *     team booking gets one room, not one per host. Co-hosts' events arrive with
+ *     `requestConferenceLink: false` and the organizer's URL already in
+ *     `description`; do not mint a competing room for them.
+ *   - On PATCH (a reschedule) return `meetingUrl` only if the room actually
+ *     changed. Returning `null` is the right answer for a backend that keeps the
+ *     same room across a move: a null NEVER overwrites the stored URL.
  *   DELETE /v1/connections/:ref/events/:externalEventId  → 204
  *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,isPrimary?}] }
  *   GET    /v1/connections/:ref                          → { ok, detail }

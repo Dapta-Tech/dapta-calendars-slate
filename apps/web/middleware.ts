@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { PATH_HEADER } from '@/lib/theme';
 
 /**
  * Canonical-host redirect: the Dapta cloud deployment's canonical hosts are
@@ -22,7 +23,19 @@ export function middleware(req: NextRequest) {
     url.protocol = 'https';
     return NextResponse.redirect(url, 308);
   }
-  return NextResponse.next();
+
+  // Tag the request with its own path so the ROOT layout can tell a product
+  // route from a booking page and stamp the right `data-theme` before paint.
+  // The App Router gives a layout its params and never its path, and the root
+  // layout is the only element that can carry the document theme — so the path
+  // has to travel as a header.
+  //
+  // Set on the forwarded REQUEST headers: it reaches the app and never the
+  // browser, which also means a header of this name arriving from a client is
+  // overwritten here rather than trusted into the theme decision.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(PATH_HEADER, req.nextUrl.pathname);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

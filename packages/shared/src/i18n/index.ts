@@ -160,6 +160,13 @@ export interface BookingMessages {
         opensNewTab: string;
         forms: string;
       };
+      /** Product theme switch (rail footer). Both strings name the DESTINATION,
+       *  not the current state — a control reading "Dark" is ambiguous about
+       *  whether that is where you are or where you are going. */
+      theme: {
+        toLight: string;
+        toDark: string;
+      };
     };
     home: {
       welcome: string;
@@ -932,6 +939,10 @@ export const en: BookingMessages = {
         opensNewTab: '(opens in a new tab)',
         forms: 'Forms',
       },
+      theme: {
+        toLight: 'Switch to light theme',
+        toDark: 'Switch to dark theme',
+      },
     },
     home: {
       welcome: 'Welcome',
@@ -1695,6 +1706,10 @@ export const es: BookingMessages = {
         comingSoon: 'Próximamente',
         opensNewTab: '(se abre en una pestaña nueva)',
         forms: 'Forms',
+      },
+      theme: {
+        toLight: 'Cambiar al tema claro',
+        toDark: 'Cambiar al tema oscuro',
       },
     },
     home: {

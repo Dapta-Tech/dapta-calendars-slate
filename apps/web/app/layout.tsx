@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Figtree, IBM_Plex_Mono } from 'next/font/google';
 import 'primeicons/primeicons.css';
+import { ThemeStamp } from '@/components/theme-stamp';
+import { resolveDocumentTheme } from '@/lib/theme.server';
 import './globals.css';
 
 /**
@@ -66,18 +68,37 @@ export const metadata: Metadata = {
   description: `${productName} is open-source scheduling. Clone, run, and book — anywhere.`,
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // The document theme, resolved on the SERVER and stamped before the response
+  // is sent — so the palette a host chose is the FIRST thing painted and a full
+  // load never flashes the other one.
+  //
+  // This layout wraps both audiences: the admin, login and onboarding on one
+  // side, the four public booking routes and `manage/[uid]` on the other. Which
+  // question gets asked is decided by the route, in `resolveDocumentTheme` —
+  // ADR 0004 forbids the booking page from inheriting the host's own product
+  // theme, so a bare `data-theme={cookie}` here is not a smaller version of this
+  // change, it is the specific change the ADR exists to prevent.
+  //
+  // `suppressHydrationWarning` stays: `ThemeToggle` mutates this exact attribute
+  // on the client so the flip is a repaint rather than a navigation.
+  const theme = await resolveDocumentTheme();
+
   return (
-    // `data-theme="dark"` stays hardcoded here on purpose. The light half of the
-    // token sheet is authored and unit-tested but deliberately unreachable until
-    // the theme cookie, the server-stamped attribute and the toggle land together.
     <html
       lang="en"
-      data-theme="dark"
+      data-theme={theme}
       className={`${figtree.variable} ${plexMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh bg-background text-foreground">{children}</body>
+      <body className="min-h-dvh bg-background text-foreground">
+        {/* `<html>` is committed once and preserved across soft navigations, so
+            the server stamp above is only right until the first `<Link>` that
+            crosses between the product and a booking page. This re-derives it
+            from the route on the client. */}
+        <ThemeStamp />
+        {children}
+      </body>
     </html>
   );
 }
