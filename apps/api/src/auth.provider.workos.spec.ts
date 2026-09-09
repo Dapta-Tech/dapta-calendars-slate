@@ -86,6 +86,20 @@ describe('WorkOsAuthProvider — validates the platform JWT and projects a princ
     await expect(provider.resolveHost(bearer(mint({ account_id: 'only_acct' })))).rejects.toMatchObject({ status: 401 });
   });
 
+  // The trigger for the web's whole refresh contract: the platform token carries
+  // a mandatory `exp`, so every session eventually hits this 401 in the ordinary
+  // course of its life. `jwt.spec.ts` covers expiry at the verifier; this covers
+  // it where the request path actually meets it.
+  it('rejects a just-expired token (401) — the 401 the web answers by refreshing', async () => {
+    const provider = new WorkOsAuthProvider(db, env);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const expired = signJwtHs256(
+      { iss: ISS, aud: AUD, exp: nowSec - 1, account_id: 'ext_acct_exp', sub: 'ext_user_exp' },
+      SECRET,
+    );
+    await expect(provider.resolveHost(bearer(expired))).rejects.toMatchObject({ status: 401 });
+  });
+
   it('rejects a wrong-issuer / wrong-audience token (401)', async () => {
     const provider = new WorkOsAuthProvider(db, env);
     const nowSec = Math.floor(Date.now() / 1000);

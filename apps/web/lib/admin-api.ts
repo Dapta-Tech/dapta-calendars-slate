@@ -5,9 +5,8 @@
  * its configured provider expects and ignores the other. A `401` throws an
  * ApiError the /admin gate turns into a redirect to /login.
  */
-import { redirect } from 'next/navigation';
 import type { EventLocationDto, EventReminder, OnboardingState } from '@slate/types';
-import { getSession, clearSession, authProvider } from './auth-session';
+import { getSession, refreshOrSignOut, signOutAndRedirect } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -29,29 +28,49 @@ export class ApiError extends Error {
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const session = await getSession();
-  const headers: Record<string, string> = {};
-  if (body) headers['content-type'] = 'application/json';
-  if (session?.provider === 'workos') headers['authorization'] = `Bearer ${session.accessToken}`;
-  else if (session?.provider === 'local') headers['x-slate-email'] = session.email;
+  // Identity is read per attempt, not once: after a refresh the retry has to
+  // carry the token the identity service has just minted, not the dead one.
+  const call = async (): Promise<Response> => {
+    const session = await getSession();
+    const headers: Record<string, string> = {};
+    if (body) headers['content-type'] = 'application/json';
+    if (session?.provider === 'workos') headers['authorization'] = `Bearer ${session.accessToken}`;
+    else if (session?.provider === 'local') headers['x-slate-email'] = session.email;
+    return fetch(`${API_URL}${path}`, {
+      method,
+      headers: Object.keys(headers).length ? headers : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
+    });
+  };
 
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: Object.keys(headers).length ? headers : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-    cache: 'no-store',
-  });
+  let res = await call();
   if (res.status === 401) {
-    // Global 401 guard (AUTH-WEB-CONTRACT §4): the session is invalid → clear it
-    // (best-effort: allowed in an action, a no-op during render) and bounce to
-    // login. In an action, wrap the caller's catch with `unstable_rethrow` so
-    // this redirect isn't swallowed.
-    try {
-      await clearSession();
-    } catch {
-      /* cookies are immutable during render — the redirect still fires */
+    // Global 401 guard (AUTH-WEB-CONTRACT §4). An expiring token is the ordinary
+    // end of a token's life, not a reason to sign anyone out, so the session is
+    // refreshed first and the request retried ONCE.
+    //
+    // This client serves BOTH contexts — every admin page renders through it,
+    // and nine action files post through it — so the decision of where the
+    // exchange happens lives in `refreshOrSignOut`: inline when the caller may
+    // write cookies, and in the /api/auth/refresh route handler when it may not
+    // (a render, where `set()` and `delete()` both throw). The cookie is never
+    // cleared before that hand-off: that would hand the route a null session, so
+    // the refresh could not happen and a later revoke would have no id.
+    //
+    // In an action, wrap the caller's catch with `unstable_rethrow` so the
+    // redirects thrown from here aren't swallowed.
+    await refreshOrSignOut();
+    res = await call();
+    if (res.status === 401) {
+      // The just-minted token is being rejected too, so this was never expiry.
+      // Reached from a render, `clearSession()` inside there throws and the
+      // cookie outlives the revoke; the person lands on /login with a dead
+      // session still in the jar. It self-heals on the next visit — /admin →
+      // /api/auth/refresh → the freshness guard → the logout ROUTE, which can
+      // clear it — at the cost of two hops. There is no render-context fix.
+      await signOutAndRedirect(await getSession());
     }
-    redirect(authProvider() === 'workos' ? '/api/auth/logout' : '/login');
   }
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
