@@ -354,6 +354,16 @@ export type Branding = z.infer<typeof brandingSchema>;
 
 // --- Reschedule / cancel --------------------------------------------------
 
+/**
+ * UNUSED — nothing parses this today. The public reschedule route builds its
+ * own explicit object, so the `idempotencyKey` below reaches no code.
+ *
+ * Left in place rather than deleted, but flagged (#104): if this ever becomes
+ * the parser for the unauthenticated reschedule route, that field is the same
+ * trap the create payload just had — an anonymous caller writing into a column
+ * with a global unique. Drop it before wiring this up, and pass the key as
+ * caller-supplied context the way `BookingService.book()` does.
+ */
 export const rescheduleBookingSchema = z.object({
   uid: z.string().min(1),
   newStartUtc: isoUtcSchema,

@@ -25,6 +25,8 @@ describePg('#104 — booking idempotency keys are account-scoped (real Postgres)
   let db: Db;
   const tag = randomUUID().slice(0, 8);
   const KEY = `flow-run-${tag}:create-booking`;
+  /** The backfill that namespaces keys stored before this shipped. */
+  const MIGRATION = '0016_scope_idempotency_keys.sql';
 
   interface Tenant {
     accountId: string;
@@ -150,5 +152,51 @@ describePg('#104 — booking idempotency keys are account-scoped (real Postgres)
             AND account_id IN (${a.accountId}, ${b.accountId})`,
     );
     expect(Number(stored!.n)).toBe(2);
+  });
+
+  it('the backfill migration namespaces pre-existing keys on this dialect', async () => {
+    // The SQLite spec proves the same SQL on the other dialect. Both files are
+    // needed: the statement uses a correlated NOT EXISTS against the table it
+    // updates, and the two engines evaluate that differently enough to be
+    // worth asserting where the real UNIQUE can reject the result.
+    const a = await tenant('legacy');
+    const start = await firstSlotMs(a);
+    const created = await book(a, start, 'legacy-key');
+    if (!created.ok) throw new Error('setup');
+    const rawKey = `legacy-${tag}`;
+    // Put the row back the way the pre-fix code wrote it.
+    await db.run(
+      sql`UPDATE booking SET idempotency_key = ${rawKey} WHERE uid = ${created.booking.uid}`,
+    );
+
+    // Re-applying touches every row in the database, not just this file's.
+    // That is safe only because `packages/db/vitest.config.ts` sets
+    // `fileParallelism: false` on Postgres, so no other spec file is mid-test,
+    // and because every other writer namespaces its key — the NOT LIKE guard
+    // therefore skips all of them. Both halves matter: flip that config and
+    // this becomes a baffling cross-file failure.
+    await db.run(sql`DELETE FROM _migrations WHERE name = ${MIGRATION}`);
+    const applied = await migrate(db);
+    expect(applied).toContain(MIGRATION);
+
+    const after = await db.get<{ k: string }>(
+      sql`SELECT idempotency_key AS k FROM booking WHERE uid = ${created.booking.uid}`,
+    );
+    expect(after!.k).toBe(`${a.accountId}:${rawKey}`);
+
+    // Re-running is a no-op rather than a double prefix.
+    await db.run(sql`DELETE FROM _migrations WHERE name = ${MIGRATION}`);
+    await migrate(db);
+    const again = await db.get<{ k: string }>(
+      sql`SELECT idempotency_key AS k FROM booking WHERE uid = ${created.booking.uid}`,
+    );
+    expect(again!.k).toBe(`${a.accountId}:${rawKey}`);
+
+    // And the backfilled row replays.
+    const replay = await book(a, start, rawKey);
+    expect(replay.ok).toBe(true);
+    if (!replay.ok) return;
+    expect(replay.deduplicated).toBe(true);
+    expect(replay.booking.uid).toBe(created.booking.uid);
   });
 });

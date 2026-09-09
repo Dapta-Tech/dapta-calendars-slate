@@ -756,12 +756,12 @@ export class CalV2Service {
               additionalAttendees,
               answers: input.bookingFieldsResponses,
               metadata: internalMetadata,
-              idempotencyKey: storedKey,
             },
-            // API-key surface ⇒ exempt from the duplicate-booking guard (#69).
-            // Passed as CONTEXT, never on the body: the public controller
-            // forwards an unvalidated `@Body()` into that same parameter.
-            { apiKeyWrite: true },
+            // API-key surface ⇒ exempt from the duplicate-booking guard (#69),
+            // and the holder of the idempotency key (#104). Both passed as
+            // CONTEXT, never on the body: the public controller forwards an
+            // unvalidated `@Body()` into that same parameter.
+            { apiKeyWrite: true, idempotencyKey: storedKey },
           )
         : await this.bookings.book(
             {

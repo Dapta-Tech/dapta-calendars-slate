@@ -668,9 +668,14 @@ export function bookingStartOutOfRange(startMs: number, now = Date.now()): strin
  * that forgot its account would hand one tenant's booking to another. Both
  * halves are closed by never storing the raw key — the account id is folded in
  * here, and every read of the column goes through the same function so the
- * write and the lookup cannot drift apart. Keys are opaque strings, so the
- * prefix needs no escaping: two accounts have different ids, and within one
- * account the mapping is injective.
+ * write and the lookup cannot drift apart.
+ *
+ * The prefix needs no escaping, but the reason is narrower than it looks. Keys
+ * are opaque, so within one account the mapping is trivially injective; what
+ * the UNIQUE column needs is injectivity ACROSS accounts, and that holds only
+ * because an account id never contains the separator. Ids are `randomUUID()`
+ * (see `insertAccountWithShortCode` in `short-links.ts`), so it never does.
+ * Were that to change, `a:b` + `c` and `a` + `b:c` would collide.
  *
  * Callers still hold the raw key (it is what the client retries with); only
  * storage and lookup are namespaced.
