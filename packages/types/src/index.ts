@@ -390,6 +390,41 @@ export const reserveSlotSchema = z.object({
 });
 export type ReserveSlotInput = z.infer<typeof reserveSlotSchema>;
 
+/**
+ * Which availability route the manage page's reschedule picker must ask (#122).
+ *
+ * A TEAM event type has `member_id NULL` and `team_id` set, so the personal
+ * lookup (`account_id + member_id + slug`) can never see it. The manage view
+ * used to hand over the assigned ORGANIZER's handle alongside the TEAM event
+ * slug — a context that reads as perfectly valid, resolves to nothing, and
+ * renders an empty picker. Nothing errored; a team invitee could cancel but
+ * never reschedule.
+ *
+ * The two shapes are told apart by `kind`, so the page picks its endpoint from
+ * the payload instead of inferring it. `kind` is OPTIONAL on the personal
+ * branch: a v1 body (`{ accountCode, handle, slug }`, written before this
+ * existed) still parses, and still means personal. The branches are also
+ * disjoint on their own fields — `handle` vs `teamSlug` — so the union stays
+ * unambiguous even without the discriminant.
+ */
+export const rescheduleContextSchema = z.union([
+  z.object({
+    kind: z.literal('team'),
+    accountCode: z.string(),
+    /** Team URL segment → `/v1/public/teams/{accountCode}/{teamSlug}/availability`. */
+    teamSlug: z.string(),
+    slug: z.string(),
+  }),
+  z.object({
+    kind: z.literal('personal').optional(),
+    accountCode: z.string(),
+    /** Member handle → `/v1/availability?accountCode=…&handle=…&slug=…`. */
+    handle: z.string(),
+    slug: z.string(),
+  }),
+]);
+export type RescheduleContext = z.infer<typeof rescheduleContextSchema>;
+
 export const bookingViewSchema = z.object({
   uid: z.string(),
   status: z.enum(['accepted', 'pending', 'cancelled', 'rejected']),
@@ -424,8 +459,9 @@ export const bookingViewSchema = z.object({
   hostMemberId: z.string().optional(),
   /** True when an idempotent replay returned the existing booking (B3). */
   deduplicated: z.boolean().optional(),
-  /** Event context for the manage page's availability-backed reschedule picker. */
-  reschedule: z.object({ accountCode: z.string(), handle: z.string(), slug: z.string() }).optional(),
+  /** Event context for the manage page's availability-backed reschedule picker —
+   *  team or personal, so the page asks the route that can SEE the event type. */
+  reschedule: rescheduleContextSchema.optional(),
 });
 export type BookingView = z.infer<typeof bookingViewSchema>;
 
