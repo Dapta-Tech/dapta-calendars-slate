@@ -681,25 +681,41 @@ export class BookingService {
     });
     // Read the row back for the fields the create call does not hand out: the
     // title, the resolved end instant, and the organizer's name/handle.
-    // `createTeamBooking` returns `ok` only after its insert committed, so this
-    // always finds the row; the fallbacks below exist so that a read-back miss
-    // could at worst cost the confirmation its DETAIL, never its SHAPE — the
-    // shape is the bug (#102).
-    const row = await this.db.get<{
-      title: string;
-      start_ms: number | string;
-      end_ms: number | string;
-      status: string;
-      host_name: string | null;
-      host_handle: string | null;
-    }>(
-      sql`SELECT b.title AS title, b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
-                 m.display_name AS host_name, m.handle AS host_handle
-          FROM booking b
-          LEFT JOIN member m ON m.id = b.host_member_id
-          WHERE b.uid = ${out.uid} LIMIT 1`,
-    );
-    const startUtc = row ? new Date(Number(row.start_ms)).toISOString() : body.startUtc;
+    //
+    // The booking is ALREADY COMMITTED by this point, so nothing here may throw
+    // or the invitee gets a 500 — the error boundary again, for a booking that
+    // succeeded, which is the whole of #102 one layer down. Hence `.catch`, not
+    // just the empty-row fallback: a rejected query (a dropped connection, an
+    // exhausted pool, a statement timeout) has to degrade exactly like a missing
+    // row. Either way the confirmation loses DETAIL, never its SHAPE.
+    //
+    // An empty row is reachable in one real deployment: `DATABASE_URL` pointed
+    // at a load-balanced endpoint with read replicas, where this read can land
+    // on a replica that has not caught up with the insert.
+    const row = await this.db
+      .get<{
+        title: string;
+        start_ms: number | string;
+        end_ms: number | string;
+        status: string;
+        host_name: string | null;
+        host_handle: string | null;
+      }>(
+        // `uid` is a UUID this request just minted and `booking.uid` is UNIQUE in
+        // both dialects, so this is an exact index hit that cannot reach another
+        // account's row — the value is never caller-supplied.
+        sql`SELECT b.title AS title, b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
+                   m.display_name AS host_name, m.handle AS host_handle
+            FROM booking b
+            LEFT JOIN member m ON m.id = b.host_member_id
+            WHERE b.uid = ${out.uid} LIMIT 1`,
+      )
+      .catch(() => undefined);
+    // NORMALIZED on the fallback too: `body.startUtc` is the raw unvalidated
+    // controller body, which may carry an offset (`…T15:00:00+02:00`). The rest
+    // of the API answers UTC instants, and a booking that reports its time two
+    // ways is the class of drift this fix exists to close.
+    const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
     const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
     return {
       uid: out.uid,

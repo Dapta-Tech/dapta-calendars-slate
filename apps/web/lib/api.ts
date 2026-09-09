@@ -69,7 +69,18 @@ export function getTeamAvailability(params: {
  */
 function toBookingView(json: Record<string, unknown>): BookingView {
   const parsed = bookingViewSchema.safeParse(json);
-  return parsed.success ? parsed.data : (json as Partial<BookingView> as BookingView);
+  if (parsed.success) return parsed.data;
+  // Say so. #102 hid for as long as it did because the cast absorbed the
+  // mismatch silently and it only ever surfaced as a `RangeError` thrown deep
+  // in a render. This runs server-side, so the line lands in the app log. It
+  // names the FIELD PATHS only — never the body, which carries the attendee's
+  // name and email.
+  console.warn(
+    `[web] booking response did not match the contract: ${parsed.error.issues
+      .map((i) => i.path.join('.') || '(root)')
+      .join(', ')}`,
+  );
+  return json as Partial<BookingView> as BookingView;
 }
 
 export async function postTeamBooking(

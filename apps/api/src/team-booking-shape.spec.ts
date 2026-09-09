@@ -167,4 +167,67 @@ describe('public team booking — response shape (#102)', () => {
     // What the browser actually receives, after `unwrap()`.
     expect(bookingViewSchema.safeParse(body).success).toBe(true);
   });
+
+  it('still answers a valid shape when the read-back fails', async () => {
+    const svc = service();
+    const startUtc = await firstTeamSlot(svc);
+
+    // The booking is COMMITTED before the read-back runs, so a failure there
+    // must never reach the invitee: a rejection would surface as a 500 and the
+    // public error boundary — #102 again, for a booking that succeeded.
+    //
+    // ONLY the read-back is failed. `host_name` alone is not specific enough —
+    // the notification loader aliases it too, and failing that just makes the
+    // fire-and-forget email enqueues log errors — so match the exact projection
+    // this query uses. If it is ever reworded the stub stops matching, and the
+    // `sawReadBack` assertion below fails loudly rather than letting this test
+    // pass without exercising anything.
+    const READ_BACK = 'm.display_name AS host_name, m.handle AS host_handle';
+    const realGet = db.get.bind(db);
+    let sawReadBack = false;
+    db.get = ((q: Parameters<typeof realGet>[0]) => {
+      const chunks = (q as unknown as { queryChunks?: unknown[] }).queryChunks ?? [];
+      const text = chunks
+        .map((c) =>
+          c && typeof c === 'object' && 'value' in c ? String((c as { value: unknown }).value) : '',
+        )
+        .join('');
+      if (text.includes(READ_BACK)) {
+        sawReadBack = true;
+        return Promise.reject(new Error('connection reset'));
+      }
+      return realGet(q);
+    }) as typeof db.get;
+
+    const out = await svc
+      .teamBook('acme', 'sales', { slug: 'team-demo', startUtc, attendee })
+      .finally(() => {
+        db.get = realGet;
+      });
+    if ('error' in out) throw new Error(`teamBook failed: ${out.error}`);
+
+    expect(sawReadBack).toBe(true); // the stub actually fired
+    expect(bookingViewSchema.safeParse(out).success).toBe(true);
+    expect(out.uid).toBeTruthy();
+    expect(out.manageUrl).toBeTruthy();
+    // Degraded to detail, not to shape: the instant still renders.
+    expect(Number.isNaN(Date.parse(out.startUtc))).toBe(false);
+  });
+
+  it('normalizes the start instant even on the fallback path', async () => {
+    const svc = service();
+    const startUtc = await firstTeamSlot(svc);
+    // The public controller forwards a raw unvalidated body, so an offset form
+    // of the same instant is reachable. The response must still be UTC.
+    const withOffset = new Date(startUtc).toISOString().replace('Z', '+00:00');
+    const out = await svc.teamBook('acme', 'sales', {
+      slug: 'team-demo',
+      startUtc: withOffset,
+      attendee,
+    });
+    if ('error' in out) throw new Error(`teamBook failed: ${out.error}`);
+
+    expect(out.startUtc).toBe(new Date(startUtc).toISOString());
+    expect(out.startUtc.endsWith('Z')).toBe(true);
+  });
 });

@@ -193,17 +193,22 @@ export function BookingFlow({
     const when = Number.isNaN(Date.parse(b.startUtc ?? ''))
       ? null
       : formatSlotDateTime(b.startUtc, timeZone);
-    const attendeeEmail = b.attendee?.email ?? '';
+    // Dropped rather than interpolated empty: both strings end in the address,
+    // so a missing one renders "A confirmation was sent to ." — worse than
+    // saying nothing.
+    const attendeeEmail = b.attendee?.email;
     return (
       <div>
         <section className="bp-card border border-border bg-card p-6 text-card-foreground">
           <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
           <p className="text-muted-foreground">{when ? `${b.title} — ${when}` : b.title}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isPending
-              ? t(m.awaitingConfirmation, { email: attendeeEmail })
-              : t(m.confirmationSentTo, { email: attendeeEmail })}
-          </p>
+          {attendeeEmail ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isPending
+                ? t(m.awaitingConfirmation, { email: attendeeEmail })
+                : t(m.confirmationSentTo, { email: attendeeEmail })}
+            </p>
+          ) : null}
           {b.manageUrl ? (
             <a
               href={b.manageUrl}
