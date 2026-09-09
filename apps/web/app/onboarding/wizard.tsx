@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { t } from '@slate/shared';
 import type { OnboardingState } from '@slate/types';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   finishOnboardingAction,
+  noteFirstAnswerAction,
   skipOnboardingAction,
   submitQualificationAction,
   submitSetupAction,
@@ -35,6 +36,24 @@ export function OnboardingWizard({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, startT] = useTransition();
+  // O2: the early contact push fires at most once per mount; the server is
+  // idempotent per account, so this only avoids a pointless second request.
+  const firstAnswerNoted = useRef(false);
+
+  /**
+   * O2 (#65 → Growth funnel) — the contact reaches the CRM as soon as ONE
+   * question is answered, so someone who abandons the wizard here is still
+   * reachable. Deliberately on blur rather than on every keystroke: a partial
+   * value mid-typing is not an answer.
+   *
+   * Not awaited and never surfaced. The growth funnel has no claim on this
+   * screen's behaviour, so a failure is invisible by construction.
+   */
+  function noteFirstAnswer(value: string) {
+    if (firstAnswerNoted.current || value.trim().length === 0) return;
+    firstAnswerNoted.current = true;
+    void noteFirstAnswerAction();
+  }
 
   function submitQualify() {
     setError(null);
@@ -63,6 +82,7 @@ export function OnboardingWizard({
               <Input
                 value={answers[key] ?? ''}
                 onChange={(e) => setAnswers((a) => ({ ...a, [key]: e.target.value }))}
+                onBlur={(e) => noteFirstAnswer(e.target.value)}
                 // `phone` is the one key with a known input type; the rest of
                 // the bank is free text by design (Forms scores the raw string).
                 type={key === 'phone' ? 'tel' : 'text'}

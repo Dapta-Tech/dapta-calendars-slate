@@ -193,6 +193,61 @@ outage never widens the interrogation of a real signup.
 | `ONBOARDING_IAM_TOKEN` | — | only when the probe endpoint requires a bearer | **yes** |
 | `ONBOARDING_PROBE_TIMEOUT_MS` | `1500` | never — raise only if the probe legitimately runs slow | no |
 
+### Growth contact sync
+
+**Unset by default, and a fork that leaves it unset sends nothing anywhere.**
+
+When a deployment wants to know who signed up and where they came from, two
+things happen, both optional and both env-gated.
+
+**Attribution needs no configuration at all.** A visitor arriving with campaign
+parameters has them normalized against a fixed allowlist — `utm_source`,
+`utm_medium`, `utm_campaign`, `utm_term`, `utm_content`, `gclid`, `fbclid`, and
+nothing else — parked in a ten-minute httpOnly cookie, and claimed **write-once**
+onto their account if that account is younger than ten minutes. Values are
+trimmed, capped, and the five `utm_*` lowercased; click ids keep their case. The
+referrer is read from the request header and only when it is cross-origin, never
+from a query parameter, because a caller-supplied one is attacker-controlled
+text that could never be distinguished from the real thing once stored.
+
+**Organic traffic records nothing.** There is no synthetic `utm_source=direct`.
+The claim can never be undone, so a guess written there is wrong forever.
+
+**The contact push** is what actually leaves the building, and it needs
+`DAPTA_SYNC_URL`. It is enqueued to the outbox and drained by the worker, never
+sent inline from a request, so a CRM outage cannot slow or fail a signup. It
+fires twice for a self-serve signup — once on their first onboarding answer, so
+someone who abandons the wizard is still recorded, and once when qualification
+completes — and once for an invited member, when their membership row is created.
+An invited member carries `entry_type: workspace_invite` in a field of its own
+and never a `lead_source`, so an invitation cannot overwrite better attribution
+on a contact who already existed, and no lead score is computed for someone who
+answered no questions.
+
+With `DAPTA_SYNC_URL` unset the rows are still enqueued and the worker marks
+them **skipped** with a reason. That is deliberate: nothing is sent, nothing is
+retried against a URL that does not exist, and the delivery log says plainly why.
+A member with no email address is skipped the same way, permanently — there is
+no key to upsert them by, and waiting cannot produce one.
+
+**What a visitor's browser stores.** Capturing attribution sets one httpOnly
+cookie, for ten minutes, on any page a visitor reaches carrying campaign
+parameters or a cross-origin referrer — public booking pages included. It is
+server-only, never readable from page scripts, never sent anywhere outside your
+deployment, and it is deleted as soon as it is claimed or when it expires. It
+holds only the allowlisted values above. If your jurisdiction or your policy
+requires consent before any non-essential cookie, gate the middleware behind
+whatever consent signal you already collect.
+
+The lead-score post reuses `ONBOARDING_IAM_BASE_URL` from the section above, so
+there is one upstream identity service and one pair of credentials.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `DAPTA_SYNC_URL` | — | only to enable the contact push (unset = send nothing) | no |
+| `DAPTA_SYNC_TOKEN` | — | only when that endpoint requires a bearer | **yes** |
+| `DAPTA_SYNC_TIMEOUT_MS` | `5000` | never — raise only if the endpoint legitimately runs slow | no |
+
 ### Outbox, CORS, rate limiting
 
 | Var | Default | Notes | Secret? |

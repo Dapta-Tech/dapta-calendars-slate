@@ -37,6 +37,16 @@ export const account = sqliteTable('account', {
   // onboarding" — which is why migration 0012 STAMPS every pre-existing account,
   // so the wizard greets new signups only and never traps an existing host.
   onboardingCompletedAt: integer('onboarding_completed_at'),
+  // O2 growth attribution: the 7-key allowlist blob captured at the front door
+  // and claimed WRITE-ONCE onto this account. NULL is the truthful state for
+  // organic traffic and for every account predating the migration — nothing
+  // backfills it, because a synthetic value here can never be corrected.
+  // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
+  attribution: text('attribution'),
+  // The write-once attribution claim. Also refuses accounts older than the
+  // 10-minute window, so a campaign click by the owner of an established
+  // workspace can never restamp its origin.
+  attributionClaimedAt: integer('attribution_claimed_at'),
   createdAt: integer('created_at').notNull(),
 });
 

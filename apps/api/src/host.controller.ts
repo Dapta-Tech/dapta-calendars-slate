@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import {
   apiScope,
+  attributionClaimSchema,
   brandingSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
@@ -27,6 +28,7 @@ import { isAccountTemplateKey, isEmailTemplateKey, type EmailTemplateKey } from 
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
 import { OnboardingService } from './onboarding.service';
+import { GrowthService } from './growth.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { assertAdmin } from './permissions';
 import { unwrap } from './http';
@@ -42,6 +44,7 @@ export class HostController {
     @Inject(AdminService) private readonly admin: AdminService,
     @Inject(OnboardingService) private readonly onboarding: OnboardingService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(GrowthService) private readonly growth: GrowthService,
   ) {}
 
   /**
@@ -125,6 +128,53 @@ export class HostController {
       });
     }
     return this.onboarding.submitSetup(p, parsed.data);
+  }
+
+  /**
+   * O2 — the wizard's FIRST answer (#65 → Growth funnel).
+   *
+   * Enqueues the early contact push so someone who types one answer and closes
+   * the tab still reaches the funnel. Idempotent per account, so re-opening the
+   * wizard cannot push the same lead again.
+   *
+   * Owner/admin only, matching gate 1: this fires from the qualification step,
+   * which only they are ever shown. Returns a plain verdict — the wizard shows
+   * nothing either way, and a growth push must never be able to fail a signup.
+   */
+  @Post('me/onboarding/early')
+  @HttpCode(200)
+  async onboardingEarly(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.growth.enqueueEarly(p);
+  }
+
+  /**
+   * O2 — claim the attribution blob parked at the front door, WRITE-ONCE.
+   *
+   * Called once by the web app's auth callback, right after the identity
+   * round-trip. Refused silently (`claimed: false`) when the account already
+   * has attribution or is older than the ten-minute window — neither is
+   * something the browser can act on.
+   *
+   * NO role gate, deliberately. The first member of a self-serve account is its
+   * owner, but an invited member's very first request could also carry a parked
+   * click, and refusing them would lose the attribution that invite arrived
+   * under. Both guards that matter are in the write itself: it fires once ever,
+   * and only inside the account's first ten minutes.
+   */
+  @Post('me/attribution')
+  @HttpCode(200)
+  async claimAttribution(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    const parsed = attributionClaimSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.growth.claim(p, parsed.data.attribution);
   }
 
   @Get('handle-available')

@@ -25,6 +25,7 @@ import type {
 import { loadServerEnv } from '@slate/config/env';
 import { BookingNotifier, NoopEmailProvider, type EmailProvider, type EmailResult } from '@slate/notifications';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 
@@ -118,7 +119,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('retries a failing calendar write and eventually succeeds (no silent loss)', async () => {
     const provider = new FlakyCalendarProvider(1); // fail once, then succeed
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
     const uid = await bookFirstSlot();
 
     await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid, now: 0 });
@@ -147,7 +148,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('a duplicate-enqueued calendar job does NOT double-create the remote event (DH1)', async () => {
     const provider = new FlakyCalendarProvider(0); // always succeeds
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
     const uid = await bookFirstSlot();
 
     // Two rows for the same booking (e.g. a retry that also got re-enqueued).
@@ -172,7 +173,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     try {
       const provider = new FlakyCalendarProvider(0);
       const effects = new CalendarEffects(provider, db);
-      const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
+      const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
       // A real, active subscriber (public IP literal → SSRF guard passes offline).
       const wh = await createWebhook(db, {
         accountId,
@@ -217,7 +218,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('delivers a webhook successfully via the outbox and marks it done', async () => {
     const provider = new FlakyCalendarProvider(0);
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
     const wh = await createWebhook(db, {
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
@@ -249,7 +250,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   it('a webhook that returns non-2xx is retried (treated as a failure)', async () => {
     const provider = new FlakyCalendarProvider(0);
     const effects = new CalendarEffects(provider, db);
-    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db));
+    const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
     const wh = await createWebhook(db, {
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
@@ -287,7 +288,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     };
     const effects = new CalendarEffects(new FlakyCalendarProvider(0), db);
     const emailEffects = new EmailEffects(new BookingNotifier(flakyEmail), db);
-    const worker = new OutboxWorker(db, ENV, effects, emailEffects);
+    const worker = new OutboxWorker(db, ENV, effects, emailEffects, new DaptaSyncEffects(ENV));
 
     const notification = {
       accountId,

@@ -673,3 +673,59 @@ export const onboardingStateSchema = z.object({
   templates: z.array(onboardingTemplateViewSchema),
 });
 export type OnboardingState = z.infer<typeof onboardingStateSchema>;
+
+// --- O2 growth: attribution + how a member reached the workspace ------------
+
+/**
+ * How a person arrived. Its own field, NEVER folded into `lead_source`.
+ *
+ * The CRM upsert is by email, so an invitee who is already a contact from an
+ * earlier campaign must keep the better attribution they already have. A
+ * workspace invitation is not campaign acquisition and must never be counted
+ * as one (#65 → Growth funnel, constraint 1).
+ */
+export const ENTRY_TYPES = ['self_serve', 'workspace_invite'] as const;
+export type EntryType = (typeof ENTRY_TYPES)[number];
+
+/**
+ * The attribution blob the web app claims onto a new account.
+ *
+ * Deliberately a CLOSED object over the seven allowlisted keys plus the
+ * header-read `referer`: the claim is write-once, so an unknown key would be
+ * stored permanently and could never be corrected. The parser in
+ * `@slate/shared` already drops everything else; this is the same rule stated
+ * again at the trust boundary, because the endpoint is reachable without it.
+ *
+ * `referer` is accepted here because by this point it has been read from the
+ * request HEADER by the middleware — it is never sourced from a query
+ * parameter, where it would be attacker-controlled text.
+ */
+/**
+ * Must stay equal to `ATTRIBUTION_VALUE_MAX` in `@slate/shared`, which is where
+ * the parser caps values before they ever reach this contract. Restated rather
+ * than imported: `@slate/types` is the contract package and depends on nothing.
+ */
+const ATTRIBUTION_VALUE_MAX = 128;
+
+export const attributionValueSchema = z.string().trim().min(1).max(ATTRIBUTION_VALUE_MAX);
+
+export const attributionSchema = z
+  .object({
+    utm_source: attributionValueSchema.optional(),
+    utm_medium: attributionValueSchema.optional(),
+    utm_campaign: attributionValueSchema.optional(),
+    utm_term: attributionValueSchema.optional(),
+    utm_content: attributionValueSchema.optional(),
+    gclid: attributionValueSchema.optional(),
+    fbclid: attributionValueSchema.optional(),
+    referer: attributionValueSchema.optional(),
+  })
+  .strict()
+  .refine((a) => Object.values(a).some((v) => v !== undefined), {
+    message: 'at least one attribution value required',
+  });
+export type AttributionInput = z.infer<typeof attributionSchema>;
+
+/** `POST /v1/me/attribution` — claimed write-once, and only on a young account. */
+export const attributionClaimSchema = z.object({ attribution: attributionSchema });
+export type AttributionClaimInput = z.infer<typeof attributionClaimSchema>;

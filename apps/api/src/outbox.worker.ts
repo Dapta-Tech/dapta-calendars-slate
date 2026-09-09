@@ -17,6 +17,7 @@ import {
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects, OutboxSkipError } from './email-effects';
 import { DB, ENV } from './tokens';
 
@@ -54,6 +55,7 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     // the class a value and gives Nest the token directly.
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
     @Inject(EmailEffects) private readonly email: EmailEffects,
+    @Inject(DaptaSyncEffects) private readonly daptaSync: DaptaSyncEffects,
   ) {}
 
   onModuleInit(): void {
@@ -147,6 +149,17 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
       // side needs to know how long it has already waited to decide when to
       // stop waiting and send the mail without the link.
       await this.email.deliver(row.action, row.payload, row.accountId, row.attempts);
+      return;
+    }
+    // O2 growth (#94). Two kinds, never one: the contact upsert and the
+    // lead-score post retry independently, so a CRM outage can never re-post
+    // the qualification responses and mint a second lead score.
+    if (row.kind === 'dapta_sync') {
+      await this.daptaSync.deliverContact(row.action, row.payload);
+      return;
+    }
+    if (row.kind === 'iam_onboarding') {
+      await this.daptaSync.deliverLeadScore(row.action, row.payload);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);

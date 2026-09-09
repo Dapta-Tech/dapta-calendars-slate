@@ -33,8 +33,17 @@ it always goes through the API over HTTP, so the two apps deploy independently.
      ▼
   apps/api/outbox.worker.ts  (poll + retry/backoff)
      ├── @slate/notifications → EmailProvider adapter (log-only|noop|smtp|http)
-     └── @slate/calendar      → CalendarProvider write-out (disabled|external)
+     ├── @slate/calendar      → CalendarProvider write-out (disabled|external)
+     └── dapta-sync.effects   → growth contact sync + lead score (both opt-in)
 ```
+
+The worker handles five row kinds: `calendar`, `webhook`, `email`, and the two
+growth kinds `dapta_sync` and `iam_onboarding`. The growth pair is deliberately
+two kinds rather than one row doing two calls — they retry independently, so a
+failing contact upsert can never re-post the qualification responses and mint a
+second lead score for one workspace. Both are unconfigured by default, and an
+unconfigured destination marks its row `skipped` with a reason rather than
+burning retries against a URL that does not exist.
 
 Three properties fall out of this shape:
 

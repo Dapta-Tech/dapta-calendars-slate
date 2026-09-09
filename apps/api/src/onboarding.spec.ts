@@ -8,6 +8,7 @@ import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import { EmailEffects } from './email-effects';
 import { AdminService } from './admin.service';
 import { OnboardingService } from './onboarding.service';
+import { GrowthService } from './growth.service';
 import { HostController } from './host.controller';
 import type { AuthService, HostPrincipal, ReqLike } from './auth.service';
 
@@ -25,6 +26,7 @@ describe('onboarding surface (two gates)', () => {
   let alex: string;
   let jordan: string;
   let principal: HostPrincipal;
+  let growth: GrowthService;
 
   const REQ = {} as ReqLike;
   const as = (p: HostPrincipal) => {
@@ -48,9 +50,10 @@ describe('onboarding surface (two gates)', () => {
       new CalendarEffects(new DisabledCalendarProvider(), db),
       new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
     );
-    onboarding = new OnboardingService(db);
+    growth = new GrowthService(db);
+    onboarding = new OnboardingService(db, undefined, growth);
     const auth = { resolveHost: async () => principal } as unknown as AuthService;
-    ctrl = new HostController(admin, onboarding, auth);
+    ctrl = new HostController(admin, onboarding, auth, growth);
     as({ accountId, memberId: alex, role: 'owner' });
   });
 
@@ -81,6 +84,7 @@ describe('onboarding surface (two gates)', () => {
       admin,
       new OnboardingService(db, { ONBOARDING_IAM_BASE_URL: undefined } as never),
       { resolveHost: async () => principal } as unknown as AuthService,
+      growth,
     );
     await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
     await db.run(sql`DELETE FROM event_type WHERE member_id = ${alex}`);
@@ -102,6 +106,7 @@ describe('onboarding surface (two gates)', () => {
         ONBOARDING_IAM_BASE_URL: 'https://identity.example',
       } as never),
       { resolveHost: async () => principal } as unknown as AuthService,
+      growth,
     );
     await db.run(sql`UPDATE account SET onboarding_completed_at = NULL WHERE id = ${accountId}`);
     expect(await cloud.me(REQ)).toMatchObject({ onboardingRequired: true });
@@ -131,6 +136,7 @@ describe('onboarding surface (two gates)', () => {
         ONBOARDING_IAM_BASE_URL: 'https://identity.example',
       } as never),
       { resolveHost: async () => principal } as unknown as AuthService,
+      growth,
     );
     const state = await cloud.onboardingState(REQ);
     expect(state.onboardingRequired).toBe(true);

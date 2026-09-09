@@ -22,6 +22,25 @@ export async function submitQualificationAction(
 }
 
 /**
+ * O2 — the wizard's FIRST answer (#65 → Growth funnel).
+ *
+ * Fires once the host leaves the first question with something in it, so a
+ * contact exists for someone who types one answer and closes the tab. The
+ * server enqueues an outbox row and nothing more; it is idempotent per account,
+ * so re-opening the wizard cannot push the same lead twice.
+ *
+ * Returns void and swallows everything: the wizard shows no outcome either way,
+ * and a growth push must never be able to interrupt a signup.
+ */
+export async function noteFirstAnswerAction(): Promise<void> {
+  try {
+    await adminApi.onboardingEarly();
+  } catch {
+    /* the funnel is best-effort; the wizard is not */
+  }
+}
+
+/**
  * Gate 2 — create the host's first event type from a named template, then leave
  * the wizard. The redirect is deliberately OUTSIDE the try: `redirect()` works
  * by throwing, so catching it here would report a successful setup as a failure.

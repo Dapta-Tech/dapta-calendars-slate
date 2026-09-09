@@ -37,6 +37,15 @@ export const account = pgTable('account', {
   // onboarding" — which is why migration 0013 STAMPS every pre-existing account,
   // so the wizard greets new signups only and never traps an existing host.
   onboardingCompletedAt: bigint('onboarding_completed_at', { mode: 'number' }),
+  // O2 growth attribution: the 7-key allowlist blob captured at the front door
+  // and claimed WRITE-ONCE onto this account. NULL is the truthful state for
+  // organic traffic and for every account predating the migration — nothing
+  // backfills it, because a synthetic value here can never be corrected.
+  attribution: jsonb('attribution'),
+  // The write-once attribution claim. Also refuses accounts older than the
+  // 10-minute window, so a campaign click by the owner of an established
+  // workspace can never restamp its origin.
+  attributionClaimedAt: bigint('attribution_claimed_at', { mode: 'number' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

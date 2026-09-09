@@ -15,6 +15,7 @@ import { BookingNotifier } from '@slate/notifications';
 import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notifications';
 import { loadServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
@@ -73,7 +74,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     booking = new BookingService(db, ENV, calendar, emailEffects);
     admin = new AdminService(db, calendar, emailEffects);
-    worker = new OutboxWorker(db, ENV, calendar, emailEffects);
+    worker = new OutboxWorker(db, ENV, calendar, emailEffects, new DaptaSyncEffects(ENV));
     worker.fetchImpl = fakeFetch;
   });
 

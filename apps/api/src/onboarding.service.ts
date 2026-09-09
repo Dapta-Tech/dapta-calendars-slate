@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   Optional,
 } from '@nestjs/common';
 import type { Db } from '@slate/db';
@@ -33,6 +34,7 @@ import type {
 } from '@slate/types';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
+import { GrowthService } from './growth.service';
 import { DB, ENV } from './tokens';
 
 /**
@@ -54,7 +56,12 @@ export class OnboardingService {
     // AdminService. With no env there is no upstream, so the probe reports
     // `not_configured` and a bare fork answers the full question bank.
     @Optional() @Inject(ENV) private readonly env?: ServerEnv,
+    // Optional for the same reason: O1's existing specs construct this service
+    // with two arguments, and a gate must never depend on the funnel.
+    @Optional() @Inject(GrowthService) private readonly growth?: GrowthService,
   ) {}
+
+  private readonly log = new Logger('OnboardingService');
 
   /**
    * Ask the upstream identity service whether it already knows this human.
@@ -218,11 +225,24 @@ export class OnboardingService {
     p: HostPrincipal,
     input: OnboardingQualificationInput,
   ): Promise<{ ok: true; claimed: boolean }> {
-    const result = await claimQualification(
-      this.db,
-      p.accountId,
-      input.answers as OnboardingAnswers,
-    );
+    const answers = input.answers as OnboardingAnswers;
+    const result = await claimQualification(this.db, p.accountId, answers);
+
+    // O2: the growth funnel is told ONLY by the winner. `claimed` is exact
+    // because the write reports its own affected-row count — the correction
+    // this service's own history records, made for exactly this call site: two
+    // winners here would be two lead scores for one workspace.
+    //
+    // Enqueue only, never an outbound call (invariant 5), and never allowed to
+    // fail the request: the gate is satisfied whatever the funnel makes of it,
+    // and a marketing outage must not become a signup outage.
+    if (result.claimed && this.growth) {
+      try {
+        await this.growth.enqueueQualified(p, answers);
+      } catch (err) {
+        this.log.error(`growth enqueue failed for ${p.accountId}: ${String(err)}`);
+      }
+    }
     return { ok: true, claimed: result.claimed };
   }
 
