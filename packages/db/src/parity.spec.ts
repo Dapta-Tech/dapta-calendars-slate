@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { hashManageToken } from '@slate/engine';
 import { createDb, type Db } from './client';
 import { migrate } from './migrate';
@@ -24,7 +25,11 @@ import {
   updateBranding,
   verifyApiKey,
 } from './parity';
+import { loadEncryptionKey } from './crypto';
 import { createEventType, createTeam, setEventTypeHosts, updateEventType } from './crud';
+
+/** W (#75): webhook secrets are enveloped, so the write and the signer need a key. */
+const WEBHOOK_KEY = loadEncryptionKey(randomBytes(32).toString('base64'));
 
 async function firstSlotMs(db: Db, slug = 'intro-call'): Promise<number> {
   const a = await getAvailability(db, {
@@ -529,17 +534,18 @@ describe('parity (SQLite in-memory)', () => {
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
       secret: 's3cret',
+      key: WEBHOOK_KEY,
     });
     const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
     const fakeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       calls.push({ url, headers: init.headers, body: init.body });
       return { ok: true } as Response;
     }) as unknown as typeof fetch;
-    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, WEBHOOK_KEY, fakeFetch);
     expect(sent).toBe(1);
     expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
     // A non-matching event fires nothing.
-    const none = await dispatchWebhooks(db, accountId, 'booking.cancelled', {}, fakeFetch);
+    const none = await dispatchWebhooks(db, accountId, 'booking.cancelled', {}, WEBHOOK_KEY, fakeFetch);
     expect(none).toBe(0);
   });
 
@@ -610,6 +616,7 @@ describe('parity (SQLite in-memory)', () => {
       accountId,
       subscriberUrl: 'https://198.51.100.11/hook',
       eventTriggers: ['booking.created'],
+      key: WEBHOOK_KEY,
     });
     expect(wh.secret).toMatch(/^whsec_/);
 
@@ -618,7 +625,7 @@ describe('parity (SQLite in-memory)', () => {
       calls.push({ headers: init.headers });
       return { ok: true } as Response;
     }) as unknown as typeof fetch;
-    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, fakeFetch);
+    const sent = await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, WEBHOOK_KEY, fakeFetch);
     expect(sent).toBe(1);
     expect(calls[0]!.headers['X-Slate-Signature']).toMatch(/^sha256=[0-9a-f]{64}$/);
   });

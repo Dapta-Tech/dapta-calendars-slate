@@ -25,6 +25,7 @@ import {
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
+import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } from './crypto';
 import { sql, type Db } from './client';
 import {
   bookingStartOutOfRange,
@@ -1798,6 +1799,92 @@ export async function revokeApiKey(db: Db, accountId: string, id: string): Promi
 
 // --- Webhooks -------------------------------------------------------------
 
+// --- Webhook signing secrets at rest (W / #75) ----------------------------
+//
+// A webhook secret cannot be hashed the way `api_key` is: the signer has to read
+// it back to build the HMAC, so it must be reversible. It therefore rides the
+// SAME AES-256-GCM envelope H1a introduced for `account_integration`, in a new
+// `secret_cipher` column, bound per row by `webhookSecretAad`.
+//
+// The plaintext is decrypted at ONE moment — signing — and never leaves these
+// helpers, never reaches a list/read endpoint, and is never logged.
+
+/** The two secret columns as they come off a row. */
+interface WebhookSecretColumns {
+  secret: string | null;
+  secret_cipher: string | null;
+}
+
+/**
+ * Re-seal a legacy plaintext row into the envelope. Best-effort by design:
+ * the backfill is a convenience, and a delivery must never fail because the
+ * upgrade could not be written (a read-only replica, a lock, a racing worker).
+ *
+ * Guarded by `secret_cipher IS NULL` so two workers racing the same row cannot
+ * clobber each other — the loser's UPDATE simply matches nothing.
+ */
+async function upgradeLegacyWebhookSecret(
+  db: Db,
+  args: { webhookId: string; accountId: string; secret: string; key: Buffer },
+): Promise<void> {
+  try {
+    const aad = webhookSecretAad(args.accountId, args.webhookId);
+    const cipher = encryptSecret(args.secret, args.key, aad);
+    // Read it back before destroying the only recoverable copy. This UPDATE is
+    // irreversible in a way the CRM's is not — there, a host can re-paste the
+    // token; here the plaintext in this column is the last copy anyone has, and
+    // clearing it on the strength of an envelope nobody has opened would trade a
+    // readable secret for an unopenable one. Cheap, and it runs once per row.
+    if (decryptSecret(cipher, args.key, aad) !== args.secret) return;
+    await db.run(
+      sql`UPDATE webhook SET secret_cipher = ${cipher}, secret = NULL
+          WHERE id = ${args.webhookId} AND secret_cipher IS NULL`,
+    );
+  } catch {
+    /* best-effort: signing this delivery matters more than draining plaintext */
+  }
+}
+
+/**
+ * The signing secret for one webhook, or null when it has none.
+ *
+ * Precedence and the key-absent contract (#75), in one place so all three
+ * signing paths agree:
+ *
+ *   - `secret_cipher` set  → decrypt; with NO key this THROWS. A stored
+ *     ciphertext we cannot open is a deployment fault (the key was removed or
+ *     changed), and the honest response is a failed delivery the outbox retries
+ *     and an operator can see — never a silent downgrade to an unsigned POST
+ *     that a subscriber would reject anyway, or worse, accept.
+ *   - legacy plaintext `secret` → returned as-is, key or no key, so a
+ *     deployment that has never configured one keeps working exactly as today.
+ *     When a key IS present the row is re-sealed on the way past.
+ *   - neither → null (unsigned, which is what an old secret-less row already did).
+ */
+async function resolveWebhookSecret(
+  db: Db,
+  args: {
+    webhookId: string;
+    accountId: string;
+    row: WebhookSecretColumns;
+    key: Buffer | null;
+  },
+): Promise<string | null> {
+  const { row, key, webhookId, accountId } = args;
+  if (row.secret_cipher) {
+    if (!key) {
+      throw new SecretCryptoError(
+        'cannot sign this webhook delivery: the signing secret is encrypted and ' +
+          'INTEGRATION_ENCRYPTION_KEY is not configured.',
+      );
+    }
+    return decryptSecret(row.secret_cipher, key, webhookSecretAad(accountId, webhookId));
+  }
+  if (!row.secret) return null;
+  if (key) await upgradeLegacyWebhookSecret(db, { webhookId, accountId, secret: row.secret, key });
+  return row.secret;
+}
+
 export async function listWebhooks(db: Db, accountId: string) {
   return db.all<{
     id: string;
@@ -1813,6 +1900,14 @@ export async function createWebhook(
     accountId: string;
     subscriberUrl: string;
     eventTriggers: string[];
+    /**
+     * REQUIRED (#75) — not `Buffer | null`. Making the key a type obligation is
+     * what guarantees no call site can write a plaintext secret: there is no
+     * runtime branch to forget, and a new caller cannot compile without deciding
+     * where its key comes from. The API layer turns an absent key into a coded
+     * refusal before it ever reaches here.
+     */
+    key: Buffer;
     secret?: string;
     memberId?: string;
     teamId?: string;
@@ -1822,13 +1917,18 @@ export async function createWebhook(
   const id = randomUUID();
   // Always store a signing secret so payloads are never unsigned. If the caller
   // didn't supply one we mint it and return it once (subscribers verify the
-  // X-Slate-Signature HMAC with it — see dispatchWebhooks).
+  // X-Slate-Signature HMAC with it — see dispatchWebhooks). Generation is
+  // unchanged by #75: the `whsec_` prefix and 24 random bytes are what a
+  // subscriber already knows how to handle.
   const secret = args.secret ?? `whsec_${randomBytes(24).toString('base64url')}`;
+  // `secret` is written NULL: a row is readable one way only, so nothing can
+  // later disagree about which column is authoritative.
+  const cipher = encryptSecret(secret, args.key, webhookSecretAad(args.accountId, id));
   await db.run(
     sql`INSERT INTO webhook (id, account_id, member_id, team_id, event_type_id, subscriber_url,
-          secret, event_triggers, active, created_at)
+          secret, secret_cipher, event_triggers, active, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId ?? null}, ${args.teamId ?? null},
-          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${secret},
+          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${null}, ${cipher},
           ${jsonParam(db, args.eventTriggers)}, 1, ${Date.now()})`,
   );
   return { id, secret };
@@ -1860,10 +1960,12 @@ export async function pingWebhook(
   db: Db,
   accountId: string,
   id: string,
+  key: Buffer | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: boolean; status?: number; message?: string }> {
-  const h = await db.get<{ subscriber_url: string; secret: string | null }>(
-    sql`SELECT subscriber_url, secret FROM webhook WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
+  const h = await db.get<{ subscriber_url: string } & WebhookSecretColumns>(
+    sql`SELECT subscriber_url, secret, secret_cipher FROM webhook
+        WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
   );
   if (!h) return { ok: false, message: 'Webhook not found.' };
   if (!(await checkWebhookUrl(h.subscriber_url)).ok) return { ok: false, message: 'URL is not allowed.' };
@@ -1872,8 +1974,17 @@ export async function pingWebhook(
     'content-type': 'application/json',
     'X-Slate-Event': 'ping',
   };
-  if (h.secret)
-    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+  // A ping that cannot be signed is reported as a failed ping, not thrown:
+  // this function's whole contract is "never throws, return the result", and
+  // an operator staring at the developer page needs the reason, not a 500.
+  let secret: string | null;
+  try {
+    secret = await resolveWebhookSecret(db, { webhookId: id, accountId, row: h, key });
+  } catch {
+    return { ok: false, message: 'Cannot sign: the signing secret could not be decrypted.' };
+  }
+  if (secret)
+    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
   try {
     const res = await fetchImpl(h.subscriber_url, {
       method: 'POST',
@@ -1898,16 +2009,18 @@ export async function dispatchWebhooks(
   accountId: string,
   event: string,
   payload: unknown,
+  key: Buffer | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<number> {
-  const hooks = await db.all<{
-    id: string;
-    subscriber_url: string;
-    secret: string | null;
-    event_triggers: unknown;
-    active: number;
-  }>(
-    sql`SELECT id, subscriber_url, secret, event_triggers, active FROM webhook
+  const hooks = await db.all<
+    {
+      id: string;
+      subscriber_url: string;
+      event_triggers: unknown;
+      active: number;
+    } & WebhookSecretColumns
+  >(
+    sql`SELECT id, subscriber_url, secret, secret_cipher, event_triggers, active FROM webhook
         WHERE account_id = ${accountId} AND active = 1`,
   );
   const body = JSON.stringify({ event, data: payload });
@@ -1923,10 +2036,20 @@ export async function dispatchWebhooks(
         'content-type': 'application/json',
         'X-Slate-Event': event,
       };
-      if (h.secret) {
-        headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
-      }
       try {
+        // Inside the try with the POST: this path is documented as
+        // best-effort/never-throws, so an unopenable secret drops THIS
+        // subscriber rather than sending it unsigned or failing the others.
+        const secret = await resolveWebhookSecret(db, {
+          webhookId: h.id,
+          accountId,
+          row: h,
+          key,
+        });
+        if (secret) {
+          headers['X-Slate-Signature'] =
+            `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+        }
         await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
         sent++;
       } catch {
@@ -1945,10 +2068,15 @@ export async function dispatchWebhooks(
 // gives per-subscriber isolation (a slow/broken subscriber can't starve the
 // others), per-subscriber retry, and a delivery log.
 
+/**
+ * NO `secret` field (#75). This type only ever fed `enqueueWebhookDeliveries`,
+ * which needs the id and nothing else — carrying the plaintext here made it one
+ * careless `...spread` away from an outbox payload or a log line. The secret is
+ * now read at signing time only, by `deliverWebhookEvent`.
+ */
 export interface MatchingWebhook {
   id: string;
   subscriberUrl: string;
-  secret: string | null;
 }
 
 /** Active webhooks in the account whose triggers include `event`. */
@@ -1960,10 +2088,9 @@ export async function loadMatchingWebhooks(
   const hooks = await db.all<{
     id: string;
     subscriber_url: string;
-    secret: string | null;
     event_triggers: unknown;
   }>(
-    sql`SELECT id, subscriber_url, secret, event_triggers FROM webhook
+    sql`SELECT id, subscriber_url, event_triggers FROM webhook
         WHERE account_id = ${accountId} AND active = 1`,
   );
   return hooks
@@ -1971,7 +2098,6 @@ export async function loadMatchingWebhooks(
     .map((h) => ({
       id: h.id,
       subscriberUrl: h.subscriber_url,
-      secret: h.secret,
     }));
 }
 
@@ -2078,16 +2204,18 @@ export async function listWebhookDeliveries(
 
 export async function deliverWebhookEvent(
   db: Db,
-  args: { webhookId: string; body: string },
+  args: { webhookId: string; body: string; key: Buffer | null },
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const hook = await db.get<{
-    account_id: string;
-    subscriber_url: string;
-    secret: string | null;
-    active: number;
-  }>(
-    sql`SELECT account_id, subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  const hook = await db.get<
+    {
+      account_id: string;
+      subscriber_url: string;
+      active: number;
+    } & WebhookSecretColumns
+  >(
+    sql`SELECT account_id, subscriber_url, secret, secret_cipher, active FROM webhook
+        WHERE id = ${args.webhookId} LIMIT 1`,
   );
   if (!hook || hook.active !== 1) {
     // Subscriber gone/disabled since enqueue — nothing to deliver, don't retry.
@@ -2114,9 +2242,31 @@ export async function deliverWebhookEvent(
     'content-type': 'application/json',
     'X-Slate-Event': event,
   };
-  if (hook.secret) {
+  // Signing is a delivery precondition, not a best-effort extra: an envelope we
+  // cannot open FAILS the attempt (recorded, then rethrown so the outbox retries
+  // with backoff). Sending unsigned instead would strip the guarantee the
+  // subscriber authenticates on, silently, at exactly the moment an operator
+  // has misconfigured the key — the one time it must be loud.
+  let secret: string | null;
+  try {
+    secret = await resolveWebhookSecret(db, {
+      webhookId: args.webhookId,
+      accountId: hook.account_id,
+      row: hook,
+      key: args.key,
+    });
+  } catch (err) {
+    // Two audiences, two messages. The delivery log is rendered to any account
+    // admin, so it gets a generic line: naming a deployment env var to a tenant
+    // tells them something they cannot act on about infrastructure they do not
+    // run. The specific reason rides the thrown error, which reaches the
+    // operator's worker log.
+    await record(false, null, 'delivery could not be signed — contact the administrator');
+    throw err;
+  }
+  if (secret) {
     headers['X-Slate-Signature'] =
-      `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
+      `sha256=${createHmac('sha256', secret).update(args.body).digest('hex')}`;
   }
   let res: Response | undefined;
   try {

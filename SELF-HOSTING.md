@@ -263,7 +263,7 @@ carves CRM out of the vendor-neutral rule, which governs **calendar** providers 
 | Var | Default | Required when | Secret? |
 |---|---|---|---|
 | `CRM_PROVIDER` | `disabled` | set to `hubspot` to enable the write-out | no |
-| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential from the dashboard; boot never reads it | **yes** |
+| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential, or to CREATE a webhook; boot never reads it | **yes** |
 | `HUBSPOT_PRIVATE_APP_TOKEN` | — | only as a deployment-wide fallback for accounts that connect nothing | **yes** |
 | `CRM_HTTP_TIMEOUT_MS` | `10000` | never — raise only if the CRM legitimately runs slow | no |
 
@@ -275,6 +275,42 @@ this key means every stored credential must be re-pasted**; rotating it requires
 re-connecting each integration, since nothing re-encrypts in place yet.
 Connecting without a key is refused with `INTEGRATION_KEY_MISSING` rather than
 storing a token in plaintext.
+
+**The same key also protects webhook signing secrets.** `webhook.secret` rides
+the same envelope, bound to `(account, webhook)` rather than `(account,
+provider)`, and is decrypted only at signing time. The consequences for a
+deployment that has no key are deliberately asymmetric:
+
+- Webhooks that **already exist** with a plaintext secret keep delivering,
+  signed exactly as before. Nothing about them changes.
+- **Creating** a webhook is refused with the same `INTEGRATION_KEY_MISSING`,
+  because the only alternative is minting a fresh signing secret and writing it
+  to disk in the clear.
+- A webhook whose secret is **already encrypted** refuses to deliver rather than
+  falling back to an unsigned POST — a key that has gone missing is a
+  deployment fault, and an unsigned delivery would strip the very guarantee the
+  subscriber authenticates on.
+
+Once a key is present, a legacy plaintext secret is re-encrypted in place the
+first time that webhook signs a delivery. The signature the subscriber verifies
+is byte-identical before and after, so no subscriber needs to be told.
+
+> **Treat this key as unrecoverable state, not config.** Once a deployment sets
+> a valid key, every legacy plaintext secret is drained on its next delivery.
+> From that point, **losing or rotating the key means every webhook subscriber
+> must be reconfigured with a new secret** — nothing re-encrypts in place yet,
+> and there is no command that reads a secret back. This is the same rotation
+> caveat the CRM credentials carry, with a worse blast radius: a CRM token can
+> be re-pasted from the provider's portal, but a signing secret exists only
+> here. Back the key up the way you back up the database.
+
+> **A key outage drops webhook events, and the drop is permanent.** A refused
+> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
+> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
+> marked `failed` — which is terminal, with no re-drive path. In practice a
+> deployment whose key is removed or corrupted loses every webhook event
+> enqueued in the following ~15 seconds, and restoring the key does **not**
+> replay them. Fix a key problem before it has been wrong for one drain cycle.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope

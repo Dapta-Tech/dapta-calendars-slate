@@ -361,7 +361,14 @@ export const webhook = pgTable('webhook', {
   teamId: text('team_id'),
   eventTypeId: text('event_type_id'),
   subscriberUrl: text('subscriber_url').notNull(),
+  /** LEGACY plaintext signing secret (W / #75). Read-only fallback: rows written
+   *  before the envelope still sign, and are re-sealed into `secretCipher` the
+   *  first time a key is present at signing time. Never written with a plaintext
+   *  value by new code — only cleared to NULL on re-seal. */
   secret: text('secret'),
+  /** AES-256-GCM envelope (`v1.<iv>.<tag>.<ciphertext>`) bound to
+   *  `${accountId}:webhook:${id}`. Decrypted ONLY at signing time. */
+  secretCipher: text('secret_cipher'),
   eventTriggers: jsonb('event_triggers'),
   active: integer('active').notNull().default(1),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),

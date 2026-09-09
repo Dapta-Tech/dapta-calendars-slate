@@ -70,6 +70,24 @@ export function secretAad(accountId: string, provider: string): string {
   return `${accountId}:${provider}`;
 }
 
+/**
+ * The AAD for a WEBHOOK signing secret (W / #75) — deliberately its own
+ * function, never `secretAad`.
+ *
+ * Two different tables now keep two different kinds of secret under one key, and
+ * the whole point of the binding is that a ciphertext only opens in the row it
+ * was sealed for. Reusing the CRM's `${accountId}:${provider}` would mean a
+ * webhook secret and a CRM token bound to the same string the moment a provider
+ * were ever named `webhook:<uuid>` — vanishingly unlikely, and exactly the kind
+ * of "can't happen" that is cheaper to make structurally impossible than to
+ * reason about. The webhook id makes each envelope open in ONE row: a ciphertext
+ * copied to another webhook, another account, or the integration table fails to
+ * decrypt rather than quietly signing deliveries with a secret it never owned.
+ */
+export function webhookSecretAad(accountId: string, webhookId: string): string {
+  return `${accountId}:webhook:${webhookId}`;
+}
+
 /** Encrypt a credential into the versioned envelope, bound to `aad`. */
 export function encryptSecret(plaintext: string, key: Buffer, aad: string): string {
   if (key.length !== KEY_BYTES) throw new SecretCryptoError('encryption key must be 32 bytes.');

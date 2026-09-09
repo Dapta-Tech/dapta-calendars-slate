@@ -779,8 +779,43 @@ export class AdminService {
   listWebhookDeliveries(p: HostPrincipal, webhookId: string) {
     return listWebhookDeliveries(this.db, p.accountId, webhookId);
   }
+  /**
+   * The encryption key, or WHY there isn't one (#75).
+   *
+   * The reason is carried, not discarded, because "unset" and "set but not 32
+   * bytes" need different actions from whoever reads the message — and
+   * `loadEncryptionKey` already writes the useful sentence for the second case
+   * (`must decode to exactly 32 bytes (got N)`). Collapsing both into a bare
+   * null told an operator with a malformed key that it was "not configured",
+   * which sends them to fix the one thing that is not wrong.
+   */
+  private webhookKey(): { key: Buffer; reason?: undefined } | { key: null; reason: string } {
+    try {
+      return { key: loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY) };
+    } catch (err) {
+      return { key: null, reason: err instanceof Error ? err.message : 'no encryption key' };
+    }
+  }
+
+  /**
+   * Create a webhook. REFUSES when there is no usable encryption key (#75).
+   *
+   * Webhooks used to work with no key at all, so this is a deliberate trim to
+   * clone-and-run, made for the same reason `connectIntegration` refuses: the
+   * only alternative is minting a fresh signing secret and writing it to disk in
+   * the clear with nobody told. Refusing is loud, coded, and one
+   * `openssl rand -base64 32` away from fixed — a silent plaintext write is none
+   * of those. Webhooks that already exist are untouched and keep delivering.
+   */
   createWebhook(p: HostPrincipal, body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
-    return createWebhook(this.db, { accountId: p.accountId, ...body });
+    const resolved = this.webhookKey();
+    if (!resolved.key) {
+      throw new ServiceUnavailableException({
+        error: 'INTEGRATION_KEY_MISSING',
+        message: `This deployment cannot store a webhook signing secret: ${resolved.reason}`,
+      });
+    }
+    return createWebhook(this.db, { accountId: p.accountId, ...body, key: resolved.key });
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);
@@ -789,7 +824,9 @@ export class AdminService {
     return updateWebhook(this.db, p.accountId, id, patch);
   }
   pingWebhook(p: HostPrincipal, id: string) {
-    return pingWebhook(this.db, p.accountId, id);
+    // A ping READS: no key is legitimate here (a legacy plaintext row still
+    // signs), so this passes null rather than refusing.
+    return pingWebhook(this.db, p.accountId, id, this.webhookKey().key);
   }
 
   /** Resolve the account code for a principal (for host on-behalf booking). */
