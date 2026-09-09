@@ -111,7 +111,7 @@ export class CalendarEffects {
   private async moveEvent(uid: string): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
-    const refs = await loadBookingReferences(this.db, ctx.bookingId);
+    const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
     const movable = refs.filter((r) => r.externalEventId);
     if (movable.length === 0) {
       await this.writeEvent(uid);
@@ -191,7 +191,7 @@ export class CalendarEffects {
         // Already written by an earlier partial run. If that was the organizer's
         // destination, adopt the room it minted rather than minting a second one.
         if (isOrganizer && wantsLink) {
-          const existing = await loadBookingReferences(this.db, ctx.bookingId);
+          const existing = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
           meetingUrl =
             existing.find((r) => r.destination === connectionRef)?.meetingUrl ??
             existing.find((r) => r.meetingUrl)?.meetingUrl ??
@@ -246,7 +246,7 @@ export class CalendarEffects {
   private async removeEvent(uid: string): Promise<void> {
     const ctx = await loadBookingForCalendarWrite(this.db, uid);
     if (!ctx) return;
-    const refs = await loadBookingReferences(this.db, ctx.bookingId);
+    const refs = await loadBookingReferences(this.db, ctx.bookingId, 'calendar_event');
     for (const ref of refs) {
       if (!ref.externalEventId) continue;
       await this.calendar.deleteEvent({
@@ -254,6 +254,8 @@ export class CalendarEffects {
         externalEventId: ref.externalEventId,
       });
     }
-    await deleteBookingReferences(this.db, ctx.bookingId);
+    // Only the calendar's rows: the CRM's reference points at a meeting that
+    // is PATCHed to cancelled, not deleted, and is still needed to do that.
+    await deleteBookingReferences(this.db, ctx.bookingId, 'calendar_event');
   }
 }

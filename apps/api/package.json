@@ -20,6 +20,7 @@
     "@nestjs/platform-express": "^10.4.15",
     "@slate/calendar": "workspace:*",
     "@slate/config": "workspace:*",
+    "@slate/crm": "workspace:*",
     "@slate/db": "workspace:*",
     "@slate/engine": "workspace:*",
     "@slate/notifications": "workspace:*",

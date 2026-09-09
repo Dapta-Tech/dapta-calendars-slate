@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   cancelBooking,
@@ -20,6 +20,7 @@ import { isLocationKind, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
 import {
   availabilityQuerySchema,
@@ -53,6 +54,13 @@ export class BookingService {
     @Inject(ENV) private readonly env: ServerEnv,
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
     @Inject(EmailEffects) private readonly email: EmailEffects,
+    // H1a: the CRM write-out rides the SAME lifecycle transitions as the
+    // calendar one, as its own enqueue — no-op when CRM_PROVIDER=disabled,
+    // which is the OSS default. LAST and @Optional() so the many specs that
+    // construct this service positionally keep working: absent, the booking
+    // lifecycle simply enqueues no CRM row, which is exactly what those specs
+    // (and a bare fork) already expect.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
 
   private manageUrl(uid: string, token: string): string {
@@ -229,6 +237,7 @@ export class BookingService {
       // nothing to the calendar until the host confirms. (B8: never blocks.)
       if (b.status === 'accepted') {
         this.calendar.onBookingAccepted(b.uid);
+        this.crm?.onBookingAccepted(b.uid);
         void this.email.enqueueConfirmation(b.uid, { manageUrl });
         // Schedule the pre-meeting reminders (24h + 1h) — dormant outbox rows.
         void this.email.enqueueReminders(b.uid, { manageUrl });
@@ -355,6 +364,7 @@ export class BookingService {
     // cancel doesn't send a second email / fire a second webhook.
     if (!out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
+      this.crm?.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: opts.reason ?? null });
       // Drop any scheduled reminders — don't remind about a cancelled meeting.
       void this.email.cancelReminders(uid);
@@ -380,6 +390,7 @@ export class BookingService {
     void this.email.cancelFollowUps(oldUid);
     if (status === 'accepted') {
       this.calendar.onBookingRescheduled(newUid);
+      this.crm?.onBookingRescheduled(newUid);
       void this.email.enqueueReschedule(newUid, { manageUrl, previousStartUtc });
       void this.email.enqueueReminders(newUid, { manageUrl });
       void this.email.enqueueFollowUps(newUid, { manageUrl });
@@ -395,6 +406,7 @@ export class BookingService {
   /** Re-write the existing provider event so newly added guests receive it. */
   afterGuestsChanged(uid: string): void {
     this.calendar.onBookingRescheduled(uid);
+    this.crm?.onBookingRescheduled(uid);
   }
 
   async reschedule(
@@ -424,6 +436,7 @@ export class BookingService {
     // so skip all side-effects (no duplicate calendar move / email / webhook).
     if (!out.alreadyApplied) {
       this.calendar.onBookingRescheduled(uid);
+      this.crm?.onBookingRescheduled(uid);
       // Durable reschedule email (attendee + host) with the previous time + a
       // REQUEST .ics so the existing calendar event is updated in place.
       if (out.manageToken) {
@@ -613,6 +626,7 @@ export class BookingService {
     // confirmation WITH a working manage link (the token minted by
     // createTeamBooking, previously discarded), and fire the webhook.
     this.calendar.onBookingAccepted(out.uid);
+    this.crm?.onBookingAccepted(out.uid);
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });

@@ -552,8 +552,12 @@ export async function rescheduleBookingV2(
     FROM booking_host WHERE booking_id = ${source.id}`;
   const moveReferences = sql`UPDATE booking_reference SET booking_id = ${newId}
     WHERE booking_id = ${source.id}`;
+  // Both durable write-out queues follow the booking. `crm` joins `calendar`
+  // here (H1a): a still-pending CRM write-out left pointing at the predecessor
+  // would drain against a booking this transaction just cancelled and create a
+  // SECOND meeting, at the old time, that nothing ever cancels.
   const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, updated_at = ${now}
-    WHERE booking_uid = ${source.uid} AND kind = 'calendar' AND status = 'pending'`;
+    WHERE booking_uid = ${source.uid} AND kind IN ('calendar', 'crm') AND status = 'pending'`;
 
   type TxResult = 'ok' | 'gone' | 'conflict';
   let result: TxResult;

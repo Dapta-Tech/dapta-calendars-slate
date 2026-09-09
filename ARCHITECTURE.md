@@ -1,7 +1,7 @@
 # Architecture
 
 Dapta Calendars is a Turborepo + pnpm-workspaces monorepo: two deployable apps
-over seven packages. This page is the map — the request flows, the dependency
+over eight packages. This page is the map — the request flows, the dependency
 direction, and the ports/adapters seams that keep the project self-hostable. For
 how to run and change it, see [`CLAUDE.md`](CLAUDE.md); for self-hosting, see
 [`SELF-HOSTING.md`](SELF-HOSTING.md).
@@ -104,6 +104,7 @@ empty `.env` runs end-to-end.
 |---|---|---|---|---|
 | **Auth** | `apps/api/src/auth.provider.ts` | `local` stub, `workos` (HS256 JWT) | `AUTH_PROVIDER` | `local` (no identity server) |
 | **Calendar** | `packages/calendar` (`CalendarProvider`) | `disabled`, `external` (generic HTTP) | `CALENDAR_PROVIDER` | `disabled` (local busy only, no write-out) |
+| **CRM** | `packages/crm` (`CrmProvider`) | `disabled`, `hubspot` | `CRM_PROVIDER` | `disabled` (nothing enqueued, nothing called) |
 | **Email** | `packages/notifications/src/email.port.ts` | `log-only`, `noop`, `smtp`, `http` | `EMAIL_PROVIDER` | `log-only` (prints to API log) |
 | **Entitlements** | `apps/api/src/entitlements.provider.ts` | `open`, upstream service | `PREMIUM_FEATURES` | `open` (every feature unlocked) |
 | **Database** | `createDb(url)` in `packages/db/src/client.ts` | Postgres (`postgres://…`) or SQLite (`file:…`) | `DATABASE_URL` | SQLite at `.data/dev.db` |

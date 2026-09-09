@@ -829,6 +829,22 @@ export interface BookingMessages {
     skipForNow: string;
     errorGeneric: string;
   };
+  // --- H1a: CRM write-out (#63 / ADR 0001) --------------------------------
+  // Appended as its own namespaced block, per #71's parallel-worktree
+  // convention. Small on purpose: H1a has no UI, so the only user-facing copy
+  // is what a host reads inside the CRM record itself. The connect dialog's
+  // copy belongs to H1b.
+  crm: {
+    /** Body line naming the assigned host (`hubspot_owner_id` is left unset). */
+    hostLabel: string;
+    /** Body line carrying the booking's uid — traceable, and not a capability. */
+    bookingReferenceLabel: string;
+    /** Rendering for boolean intake answers. */
+    yes: string;
+    no: string;
+    /** Prefixed onto the meeting title when the booking is cancelled. */
+    cancelledTitlePrefix: string;
+  };
 }
 
 export const en: BookingMessages = {
@@ -1606,6 +1622,13 @@ export const en: BookingMessages = {
     finishing: 'Creating…',
     skipForNow: 'Skip for now',
     errorGeneric: 'Something went wrong. Please try again.',
+  },
+  crm: {
+    hostLabel: 'Host',
+    bookingReferenceLabel: 'Booking reference',
+    yes: 'Yes',
+    no: 'No',
+    cancelledTitlePrefix: '[Canceled] ',
   },
 };
 
@@ -2385,6 +2408,13 @@ export const es: BookingMessages = {
     finishing: 'Creando…',
     skipForNow: 'Ahora no',
     errorGeneric: 'Algo salió mal. Inténtalo de nuevo.',
+  },
+  crm: {
+    hostLabel: 'Anfitrión',
+    bookingReferenceLabel: 'Referencia de la reserva',
+    yes: 'Sí',
+    no: 'No',
+    cancelledTitlePrefix: '[Cancelada] ',
   },
 };
 

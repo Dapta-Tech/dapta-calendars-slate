@@ -248,6 +248,41 @@ there is one upstream identity service and one pair of credentials.
 | `DAPTA_SYNC_TOKEN` | — | only when that endpoint requires a bearer | **yes** |
 | `DAPTA_SYNC_TIMEOUT_MS` | `5000` | never — raise only if the endpoint legitimately runs slow | no |
 
+### CRM write-out (optional)
+
+Writes an accepted booking into the CRM your hosts already work in: the invitee
+becomes a contact (an existing one keeps its own name) and the booking becomes a
+meeting associated to it, PATCHed on cancel and reschedule. This is the
+**customer-facing** integration a workspace connects to its own portal — not the
+operator's own growth sync above.
+
+Unset (`disabled`) means nothing is enqueued and nothing is called. Naming the
+vendor here is deliberate: [ADR 0001](docs/adr/0001-crm-integrations-are-open-core-and-name-their-vendor.md)
+carves CRM out of the vendor-neutral rule, which governs **calendar** providers only.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `CRM_PROVIDER` | `disabled` | set to `hubspot` to enable the write-out | no |
+| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential from the dashboard; boot never reads it | **yes** |
+| `HUBSPOT_PRIVATE_APP_TOKEN` | — | only as a deployment-wide fallback for accounts that connect nothing | **yes** |
+| `CRM_HTTP_TIMEOUT_MS` | `10000` | never — raise only if the CRM legitimately runs slow | no |
+
+`INTEGRATION_ENCRYPTION_KEY` is 32 raw bytes, base64 — generate one with
+`openssl rand -base64 32`. Credentials are stored AES-256-GCM encrypted under a
+`v1.<iv>.<tag>.<ciphertext>` envelope bound to `(account, provider)`, so a
+ciphertext lifted from one account's row cannot be opened in another's. **Losing
+this key means every stored credential must be re-pasted**; rotating it requires
+re-connecting each integration, since nothing re-encrypts in place yet.
+Connecting without a key is refused with `INTEGRATION_KEY_MISSING` rather than
+storing a token in plaintext.
+
+A private app needs exactly two scopes, and there is no meetings scope to grant:
+`crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
+surfaces as a 403 on the first booking, which marks the integration unhealthy
+and records the scope names; it is never auto-disconnected, so granting the
+scope in the portal is enough to recover. Disconnecting scrubs the credential,
+marks queued write-out `skipped`, and deletes nothing in the CRM.
+
 ### Outbox, CORS, rate limiting
 
 | Var | Default | Notes | Secret? |

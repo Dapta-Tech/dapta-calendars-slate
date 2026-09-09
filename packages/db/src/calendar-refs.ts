@@ -265,6 +265,16 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   };
 }
 
+/**
+ * The two kinds of external record this table tracks. `calendar_event` is the
+ * event written to a host's calendar; `crm` is the meeting written to the
+ * account's CRM (H1a / #63). They share the table because they share ONE
+ * guarantee — the `(booking_id, destination)` unique index that makes a retry
+ * unable to create a duplicate — but they are addressed by different providers
+ * and must never be handed to each other's.
+ */
+export type BookingReferenceType = 'calendar_event' | 'crm';
+
 export interface BookingReferenceRow {
   id: string;
   destination: string | null;
@@ -283,7 +293,7 @@ export async function writeBookingReference(
   db: Db,
   ref: {
     bookingId: string;
-    type: string;
+    type: BookingReferenceType;
     externalEventId: string;
     externalCalendarId: string | null;
     meetingUrl: string | null;
@@ -303,17 +313,24 @@ export async function writeBookingReference(
  * retried or concurrent write loses the race and gets `null`, so it skips
  * createEvent and cannot produce a duplicate external event. Returns the new
  * reference id on success, or null if this destination is already claimed.
+ *
+ * `type` defaults to `calendar_event`, which is the whole of what this table
+ * held before H1a. The CRM write-out (#63) reuses this exact mechanism with
+ * `type='crm'` and an `account_integration`-derived destination rather than
+ * growing a second table: one guarantee, implemented once. A parallel copy of
+ * this INSERT would put the no-duplicates promise in two places.
  */
 export async function claimBookingDestination(
   db: Db,
   bookingId: string,
   destination: string,
+  type: BookingReferenceType = 'calendar_event',
 ): Promise<string | null> {
   const id = randomUUID();
   try {
     await db.run(
       sql`INSERT INTO booking_reference (id, booking_id, destination, type, created_at)
-          VALUES (${id}, ${bookingId}, ${destination}, 'calendar_event', ${Date.now()})`,
+          VALUES (${id}, ${bookingId}, ${destination}, ${type}, ${Date.now()})`,
     );
     return id;
   } catch {
@@ -344,6 +361,10 @@ export async function fillBookingReference(
 /**
  * Set ONLY the conferencing link on an existing reference.
  *
+ * Scoped to `calendar_event`: a conferencing room is the calendar's business,
+ * and the CRM's row must not be written by the calendar path (see
+ * `BookingReferenceType`).
+ *
  * Distinct from `fillBookingReference`, which also rewrites the external ids:
  * a reschedule has an event id already and must not touch it. Used to persist a
  * URL a `moveEvent` returned, and to mirror the organizer's room onto co-host
@@ -355,7 +376,8 @@ export async function setBookingReferenceMeetingUrl(
   meetingUrl: string,
 ): Promise<void> {
   await db.run(
-    sql`UPDATE booking_reference SET meeting_url = ${meetingUrl} WHERE booking_id = ${bookingId}`,
+    sql`UPDATE booking_reference SET meeting_url = ${meetingUrl}
+        WHERE booking_id = ${bookingId} AND type = 'calendar_event'`,
   );
 }
 
@@ -402,7 +424,19 @@ export async function releaseBookingReference(db: Db, referenceId: string): Prom
   await db.run(sql`DELETE FROM booking_reference WHERE id = ${referenceId}`);
 }
 
-export async function loadBookingReferences(db: Db, bookingId: string): Promise<BookingReferenceRow[]> {
+/**
+ * References for a booking, optionally narrowed to ONE kind.
+ *
+ * `type` is not optional in spirit: since H1a this table holds calendar events
+ * AND CRM meetings, and a reader that takes both will hand a CRM meeting id to
+ * the calendar provider. Every production caller passes a type; the parameter
+ * stays optional only so a diagnostic can still see the whole set.
+ */
+export async function loadBookingReferences(
+  db: Db,
+  bookingId: string,
+  type?: BookingReferenceType,
+): Promise<BookingReferenceRow[]> {
   const rows = await db.all<{
     id: string;
     destination: string | null;
@@ -411,8 +445,11 @@ export async function loadBookingReferences(db: Db, bookingId: string): Promise<
     external_calendar_id: string | null;
     meeting_url: string | null;
   }>(
-    sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
-        FROM booking_reference WHERE booking_id = ${bookingId}`,
+    type
+      ? sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
+            FROM booking_reference WHERE booking_id = ${bookingId} AND type = ${type}`
+      : sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
+            FROM booking_reference WHERE booking_id = ${bookingId}`,
   );
   return rows.map((r) => ({
     id: r.id,
@@ -424,7 +461,19 @@ export async function loadBookingReferences(db: Db, bookingId: string): Promise<
   }));
 }
 
-/** Drop all references for a booking once the remote events are deleted. */
-export async function deleteBookingReferences(db: Db, bookingId: string): Promise<void> {
-  await db.run(sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId}`);
+/**
+ * Drop a booking's references once the remote records are gone. SCOPED BY TYPE:
+ * the calendar teardown must not delete the CRM's row, which points at a meeting
+ * that is PATCHed rather than deleted and is still needed to cancel it.
+ */
+export async function deleteBookingReferences(
+  db: Db,
+  bookingId: string,
+  type?: BookingReferenceType,
+): Promise<void> {
+  await db.run(
+    type
+      ? sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId} AND type = ${type}`
+      : sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId}`,
+  );
 }

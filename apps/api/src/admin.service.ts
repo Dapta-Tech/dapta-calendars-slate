@@ -1,4 +1,11 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   listWebhookDeliveries,
@@ -25,6 +32,11 @@ import {
   getSchedule,
   listApiKeys,
   listBookings,
+  listAccountIntegrations,
+  type IntegrationStatusRow,
+  disconnectAccountIntegration,
+  loadEncryptionKey,
+  upsertAccountIntegration,
   listConnections,
   listSchedules,
   listWebhooks,
@@ -58,10 +70,13 @@ import {
   type EmailTemplateKey,
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
+import { CrmAuthError } from '@slate/crm';
+import type { IntegrationConnectInput, IntegrationStatusView } from '@slate/types';
 import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { asConnector } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
@@ -84,6 +99,13 @@ export class AdminService {
     // Optional (specs construct this service directly): only used to build the
     // attendee manage link on host-created bookings.
     @Optional() @Inject(ENV) private readonly env?: ServerEnv,
+    // H1a: the CRM write-out rides the SAME lifecycle transitions as the
+    // calendar one, as its own enqueue — no-op when CRM_PROVIDER=disabled,
+    // which is the OSS default. LAST and @Optional() so the many specs that
+    // construct this service positionally keep working: absent, the booking
+    // lifecycle simply enqueues no CRM row, which is exactly what those specs
+    // (and a bare fork) already expect.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
 
   async me(p: HostPrincipal) {
@@ -222,6 +244,7 @@ export class AdminService {
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
     if (outcome.ok && outcome.booking.status === 'accepted') {
       this.calendar.onBookingAccepted(outcome.booking.uid);
+      this.crm?.onBookingAccepted(outcome.booking.uid);
     }
     // QA2 BUG-1 — same bug develop's 7305d09 fixed; merged as the superset:
     // this path created the booking but notified NOBODY while the UI claimed
@@ -260,6 +283,7 @@ export class AdminService {
     // idempotent retry (already cancelled) so nothing is duplicated (P1-1).
     if (out.ok && !out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
+      this.crm?.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: reason ?? null });
       // The booking is off — its still-pending reminders must never fire.
       // (The public cancel path already did this; the host path missed it.)
@@ -280,6 +304,7 @@ export class AdminService {
       // the attendee the confirmation (they already hold the manage link from
       // the "request received" email; the token isn't retrievable here).
       this.calendar.onBookingAccepted(uid);
+      this.crm?.onBookingAccepted(uid);
       void this.email.enqueueConfirmation(uid);
       // Now that it's confirmed, schedule its pre-meeting reminders.
       void this.email.enqueueReminders(uid);
@@ -319,6 +344,98 @@ export class AdminService {
    * reads are free. Never blocks or fails the read: an unreachable provider
    * just leaves the row as-is (the UI falls back to "account unknown").
    */
+  // --- H1a: CRM integrations (#63 / ADR 0001) ------------------------------
+  //
+  // Three admin operations, no UI (that is H1b / #93). Every one resolves the
+  // principal upstream and is scoped to `p.accountId` — a credential is an
+  // ACCOUNT-level resource, so it is `assertAdmin` at the controller and
+  // account-scoped here (invariant 4).
+  //
+  // The token travels in only. Nothing any of these returns carries it, or the
+  // cipher: `IntegrationStatusView` is the whole of what a client may see.
+
+  /** Status rows for the account's integrations. Never carries a credential. */
+  async listIntegrations(p: HostPrincipal): Promise<IntegrationStatusView[]> {
+    const rows = await listAccountIntegrations(this.db, p.accountId);
+    return rows.map(toIntegrationView);
+  }
+
+  /**
+   * Connect a credential: VERIFY FIRST, store only on success (fail-closed).
+   *
+   * #63 rejected introspecting the token for its scope list — that endpoint is
+   * documented only in community threads and has an EU-token quirk, and resting
+   * the connect gate on it is fragile. So we simply use the credential: if the
+   * read works, the token is real and carries the scopes this integration
+   * needs; if it 403s, the reply names the scopes that are missing (#74), and
+   * they go back to the caller as DATA rather than prose.
+   */
+  async connectIntegration(
+    p: HostPrincipal,
+    input: IntegrationConnectInput,
+  ): Promise<IntegrationStatusView> {
+    const provider = this.crm?.provider;
+    if (!provider?.enabled || provider.name !== input.provider) {
+      throw new BadRequestException({
+        error: 'CRM_DISABLED',
+        message: `No ${input.provider} integration is enabled on this deployment (set CRM_PROVIDER).`,
+      });
+    }
+    // Loud, not silent: refusing is the only honest alternative to writing a
+    // customer's CRM credential to disk in plaintext. Translated to a coded
+    // reply rather than left to surface as a bare 500 — "the operator has not
+    // set a key" and "the CRM is unreachable" need different actions from
+    // whoever is looking at the screen.
+    let key: Buffer;
+    try {
+      key = loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+    } catch {
+      throw new ServiceUnavailableException({
+        error: 'INTEGRATION_KEY_MISSING',
+        message:
+          'This deployment cannot store integration credentials: INTEGRATION_ENCRYPTION_KEY is not configured.',
+      });
+    }
+
+    try {
+      await provider.verifyCredential({ token: input.token });
+    } catch (err) {
+      if (err instanceof CrmAuthError) {
+        throw new UnprocessableEntityException({
+          error: 'INTEGRATION_REJECTED',
+          message: 'That token was rejected. Check the private app\'s scopes and try again.',
+          requiredGranularScopes: err.requiredGranularScopes,
+          category: err.category,
+        });
+      }
+      // Reachable upstream, unreachable right now. Nothing is stored: a
+      // credential we could not verify is a credential we do not keep.
+      throw new BadRequestException({
+        error: 'INTEGRATION_UNVERIFIED',
+        message: 'Could not reach the CRM to verify that token. Try again in a moment.',
+      });
+    }
+
+    const row = await upsertAccountIntegration(this.db, {
+      accountId: p.accountId,
+      provider: input.provider,
+      token: input.token,
+      key,
+      label: input.label ?? null,
+    });
+    return toIntegrationView(row);
+  }
+
+  /**
+   * Disconnect: scrub the credential, keep the row (and therefore its id).
+   * Pending write-out is marked `skipped` — the user reversed a decision, they
+   * did not suffer a delivery failure. Nothing is deleted in the CRM.
+   */
+  async disconnectIntegration(p: HostPrincipal, provider: string): Promise<{ disconnected: boolean }> {
+    const disconnected = await disconnectAccountIntegration(this.db, p.accountId, provider);
+    return { disconnected };
+  }
+
   async listConnections(p: HostPrincipal) {
     const rows = (await listConnections(this.db, p.memberId)).map((c) => ({
       ...c,
@@ -821,4 +938,24 @@ export class AdminService {
       unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
     };
   }
+}
+
+/**
+ * `IntegrationStatusRow` → what a client may see.
+ *
+ * The explicit field list is the point. A spread would silently start leaking
+ * whatever column someone adds to the row type later, and the column this table
+ * exists to hold is a decrypted-on-read credential.
+ */
+function toIntegrationView(row: IntegrationStatusRow): IntegrationStatusView {
+  return {
+    provider: row.provider,
+    status: row.status,
+    label: row.label,
+    tokenLast4: row.tokenLast4,
+    lastCheckAt: row.lastCheckAt,
+    lastCheckOk: row.lastCheckOk,
+    lastCheckDetail: row.lastCheckDetail,
+    lastErrorDetail: row.lastErrorDetail,
+  };
 }

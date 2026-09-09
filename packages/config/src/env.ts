@@ -145,6 +145,27 @@ export const serverEnvSchema = z.object({
   // generic wording, which is the correct default for a bare fork.
   CALENDAR_CONFERENCING_LABEL: z.string().max(60).optional(),
 
+  // CRM write-out (H1a / #63 / ADR 0001). `disabled` (default) runs with no CRM
+  // at all: nothing is enqueued and nothing is called, so a bare fork behaves
+  // exactly as it did before the seam existed. `hubspot` selects the committed
+  // adapter. Unlike the calendar seam, this one MAY name its vendor — R15
+  // governs calendar vendors only; see docs/adr/0001-*.md.
+  CRM_PROVIDER: z.enum(['disabled', 'hubspot']).default('disabled'),
+  // Symmetric key for integration credentials at rest: 32 raw bytes, base64
+  // (`openssl rand -base64 32`). Read ONLY when a credential is written or
+  // read, so a deployment that never connects a CRM never needs one and boot is
+  // unaffected. Connecting without it is REFUSED loudly rather than stored in
+  // plaintext. Shared with #75 when webhook secrets move under the same envelope.
+  INTEGRATION_ENCRYPTION_KEY: z.string().optional(),
+  // Zero-config fallback: one private-app token for the whole deployment, used
+  // only by accounts that have connected nothing of their own. A connected
+  // token always wins. Placeholder values are detected and treated as UNSET, so
+  // an uncommented-but-unfilled .env line disables the integration rather than
+  // 401-ing forever.
+  HUBSPOT_PRIVATE_APP_TOKEN: z.string().optional(),
+  // Bounded so a slow CRM can never hold an outbox worker tick.
+  CRM_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval
   // and retry ceiling are tunable. Set OUTBOX_WORKER_ENABLED=false to run the
