@@ -75,9 +75,21 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   private webhookKey(): Buffer | null {
     if (this.cachedWebhookKey === undefined) {
       try {
-        this.cachedWebhookKey = loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
-      } catch {
+        this.cachedWebhookKey = loadEncryptionKey(this.env.INTEGRATION_ENCRYPTION_KEY);
+      } catch (err) {
         this.cachedWebhookKey = null;
+        // Warned ONCE, at the moment the answer is decided. A key that is set
+        // but malformed is the state that otherwise hides: legacy plaintext
+        // rows keep signing and nothing is ever re-sealed, so without this line
+        // the deployment looks healthy while quietly doing nothing it was
+        // configured to do. The message names the variable, never a secret.
+        if (this.env.INTEGRATION_ENCRYPTION_KEY) {
+          this.log.warn(
+            `webhook signing key unusable, encrypted secrets cannot be opened: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
     }
     return this.cachedWebhookKey;

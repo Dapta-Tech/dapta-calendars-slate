@@ -1828,11 +1828,14 @@ async function upgradeLegacyWebhookSecret(
   args: { webhookId: string; accountId: string; secret: string; key: Buffer },
 ): Promise<void> {
   try {
-    const cipher = encryptSecret(
-      args.secret,
-      args.key,
-      webhookSecretAad(args.accountId, args.webhookId),
-    );
+    const aad = webhookSecretAad(args.accountId, args.webhookId);
+    const cipher = encryptSecret(args.secret, args.key, aad);
+    // Read it back before destroying the only recoverable copy. This UPDATE is
+    // irreversible in a way the CRM's is not — there, a host can re-paste the
+    // token; here the plaintext in this column is the last copy anyone has, and
+    // clearing it on the strength of an envelope nobody has opened would trade a
+    // readable secret for an unopenable one. Cheap, and it runs once per row.
+    if (decryptSecret(cipher, args.key, aad) !== args.secret) return;
     await db.run(
       sql`UPDATE webhook SET secret_cipher = ${cipher}, secret = NULL
           WHERE id = ${args.webhookId} AND secret_cipher IS NULL`,
@@ -2253,8 +2256,12 @@ export async function deliverWebhookEvent(
       key: args.key,
     });
   } catch (err) {
-    // The message is the crypto module's, which never names the secret.
-    await record(false, null, err instanceof Error ? err.message : 'cannot sign delivery');
+    // Two audiences, two messages. The delivery log is rendered to any account
+    // admin, so it gets a generic line: naming a deployment env var to a tenant
+    // tells them something they cannot act on about infrastructure they do not
+    // run. The specific reason rides the thrown error, which reaches the
+    // operator's worker log.
+    await record(false, null, 'delivery could not be signed — contact the administrator');
     throw err;
   }
   if (secret) {
