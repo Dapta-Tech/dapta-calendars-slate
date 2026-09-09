@@ -46,5 +46,16 @@ UPDATE booking_attendee
    SET email_normalized = lower(trim(email))
  WHERE email_normalized IS NULL;
 
+-- Indexed as the EXPRESSION the guard actually matches on, not as the bare
+-- column: the read is COALESCE(email_normalized, lower(trim(email))), and a
+-- plain column index cannot answer that. Both arms are immutable, so the
+-- expression is indexable.
 CREATE INDEX IF NOT EXISTS booking_attendee_email_normalized_idx
-  ON booking_attendee (email_normalized);
+  ON booking_attendee ((COALESCE(email_normalized, lower(trim(email)))));
+
+-- The guard's outer filter. `booking` is indexed on (host_member_id, status,
+-- start_ms, end_ms) and (account_id, start_ms) today, neither of which leads
+-- with event_type_id — so without this every guarded public booking POST
+-- scans the table.
+CREATE INDEX IF NOT EXISTS booking_event_type_status_end_idx
+  ON booking (event_type_id, status, end_ms);

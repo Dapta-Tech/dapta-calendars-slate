@@ -7,6 +7,7 @@ import { loadServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 import { BookingService } from './booking.service';
+import { PublicController } from './public.controller';
 
 const ENV = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
 
@@ -159,10 +160,32 @@ describe('duplicate-booking guard — API mapping', () => {
     const body = (startUtc: string) => ({ slug: t.slug, startUtc, attendee });
 
     expect('error' in (await svc.teamBook('acme', t.teamSlug, body(slots[0]!.startUtc)))).toBe(false);
-    const viaKey = await svc.teamBook('acme', t.teamSlug, {
-      ...body(slots[1]!.startUtc),
+    // The exemption travels as CONTEXT — a third argument only an
+    // API-key-authenticated controller supplies — never on the body.
+    const viaKey = await svc.teamBook('acme', t.teamSlug, body(slots[1]!.startUtc), {
       apiKeyWrite: true,
     });
     expect('error' in viaKey).toBe(false);
+  });
+
+  it('team path: an unauthenticated booker cannot switch the guard off from the request body', async () => {
+    // PublicController hands `@Body()` to the service verbatim and the app
+    // installs no global ValidationPipe, so an exemption flag living on that
+    // object would be settable by anyone who can POST. It must be ignored.
+    const svc = service();
+    const controller = new PublicController(svc);
+    const t = await teamEvent('ab1-team-bodyflag');
+    const w = WINDOW();
+    const avail = await svc.teamAvailability('acme', t.teamSlug, t.slug, w.from, w.to);
+    const slots = avail!.slots;
+    const body = (startUtc: string) =>
+      ({ slug: t.slug, startUtc, attendee, apiKeyWrite: true }) as never;
+
+    await controller.teamBook('acme', t.teamSlug, body(slots[0]!.startUtc));
+
+    await expect(controller.teamBook('acme', t.teamSlug, body(slots[1]!.startUtc))).rejects.toMatchObject({
+      status: 409,
+      response: { error: 'DUPLICATE_BOOKING' },
+    });
   });
 });

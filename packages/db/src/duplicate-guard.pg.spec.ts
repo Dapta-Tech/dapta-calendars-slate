@@ -28,7 +28,12 @@ describePg('duplicate-booking guard (real Postgres)', () => {
   beforeAll(async () => {
     db = await createDb(url);
     await migrate(db);
-    await seed(db);
+    // Seed ONLY if the demo account is missing. `seed()` deletes and re-inserts
+    // it wholesale, and several spec files share one Postgres — re-seeding
+    // unconditionally wipes the account another file is mid-test on. Same
+    // guard `reminders.spec.ts` documents.
+    const existing = await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`);
+    if (!existing) await seed(db);
     accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
     alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
     jordanId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='jordan-lee'`))!.id;

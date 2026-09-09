@@ -50,13 +50,20 @@ const normalizedEmailSql = sql`COALESCE(a.email_normalized, lower(trim(a.email))
  * Counts `accepted` + `pending` with `end_ms > now`, so cancelling frees the
  * slot and a past booking never blocks a returning invitee (#69).
  *
- * Matches ANY `booking_attendee` row on the booking — the booker and the
- * co-attendees supplied at create time alike. `booking_attendee` carries no
- * `is_primary` marker and adding one would not be additive; the plain reading
- * of the switch ("this email already has an upcoming booking on this event")
- * is the one implemented. Guests added AFTER the fact live in `booking_guest`
- * and are deliberately out of scope, so being CC'd from the manage page never
- * blocks anyone.
+ * Matches ANY `booking_attendee` row on the booking: the booker, the
+ * co-attendees supplied at create time, and anyone an API-key integration
+ * later adds through `addAttendeeToBooking`. `booking_attendee` carries no
+ * `is_primary` marker and adding one would not be additive, so the plain
+ * reading of the switch — "this email already has an upcoming booking on this
+ * event" — is the one implemented. Only `booking_guest`, the post-hoc guest
+ * list on the manage page, is out of scope: being CC'd there never blocks
+ * anyone.
+ *
+ * `accountId` is required even though `eventTypeId` is already unique. Both
+ * call sites resolve their event type account-scoped first, so this is
+ * defence in depth for invariant 4 — the function is exported from
+ * `@slate/db`, and the next caller should not be able to reach across tenants
+ * by holding an id alone.
  *
  * ADVISORY, and outside the write transaction on purpose: two simultaneous
  * submissions from one address can both pass. That is the same posture the
@@ -68,6 +75,7 @@ const normalizedEmailSql = sql`COALESCE(a.email_normalized, lower(trim(a.email))
  */
 export async function hasUpcomingBookingForEmail(
   db: Db,
+  accountId: string,
   eventTypeId: string,
   email: string,
   now = Date.now(),
@@ -76,7 +84,8 @@ export async function hasUpcomingBookingForEmail(
   if (!normalized) return false;
   const hit = await db.get<{ id: string }>(
     sql`SELECT b.id FROM booking b
-        WHERE b.event_type_id = ${eventTypeId}
+        WHERE b.account_id = ${accountId}
+          AND b.event_type_id = ${eventTypeId}
           AND b.status IN ('accepted','pending')
           AND b.end_ms > ${now}
           AND EXISTS (

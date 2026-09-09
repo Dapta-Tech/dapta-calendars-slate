@@ -35,6 +35,17 @@ import { DB, ENV } from './tokens';
 
 export type ServiceError = { error: string; message: string; status: number };
 
+/**
+ * The duplicate-booking guard's public message (#69), shared by the personal
+ * and team write paths so the two cannot drift. It names NO date, time or
+ * host: revealing the existing slot would hand a third party's schedule to
+ * anyone who guesses an email, and the person it belongs to already has the
+ * confirmation in their inbox. The booking page renders its own localized
+ * copy from the i18n catalogue; this is the API-level fallback.
+ */
+const DUPLICATE_BOOKING_MESSAGE =
+  'A booking already exists for this email on this event. Check your inbox.';
+
 @Injectable()
 export class BookingService {
   constructor(
@@ -189,14 +200,11 @@ export class BookingService {
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      // Duplicate-booking guard (#69). The message names NO date, time or host:
-      // revealing the existing slot would hand a third party's schedule to
-      // anyone who guesses an email, and the person it belongs to already has
-      // the confirmation in their inbox.
+      // Duplicate-booking guard (#69) — see DUPLICATE_BOOKING_MESSAGE.
       if (outcome.reason === 'DUPLICATE_BOOKING')
         return {
           error: 'DUPLICATE_BOOKING',
-          message: 'A booking already exists for this email on this event. Check your inbox.',
+          message: DUPLICATE_BOOKING_MESSAGE,
           status: 409,
         };
       return {
@@ -546,10 +554,16 @@ export class BookingService {
       answers?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
       idempotencyKey?: string;
-      /** API-key caller — exempt from the duplicate-booking guard (#69). The
-       *  team path has no `onBehalf` notion, so this is the whole exemption. */
-      apiKeyWrite?: boolean;
     },
+    /**
+     * Caller-supplied context, NEVER request body. `PublicController` passes
+     * a raw `@Body()` straight into `body` above and there is no global
+     * ValidationPipe, so an exemption flag living on that object would let an
+     * unauthenticated booker turn the duplicate-booking guard off by adding a
+     * JSON key. It is a separate argument for that reason — only a controller
+     * that has authenticated an API key may set it.
+     */
+    context?: { apiKeyWrite?: boolean },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -563,7 +577,7 @@ export class BookingService {
         answers: body.answers,
         metadata: body.metadata,
         idempotencyKey: body.idempotencyKey,
-        apiKeyWrite: body.apiKeyWrite,
+        apiKeyWrite: context?.apiKeyWrite,
       },
       this.calendar.provider,
     );
@@ -581,12 +595,11 @@ export class BookingService {
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
           status: 409,
         };
-      // Duplicate-booking guard (#69) — same slot-free wording as the personal
-      // path in `book()` above; the two must not drift.
+      // Duplicate-booking guard (#69) — see DUPLICATE_BOOKING_MESSAGE.
       if (out.reason === 'DUPLICATE_BOOKING')
         return {
           error: 'DUPLICATE_BOOKING',
-          message: 'A booking already exists for this email on this event. Check your inbox.',
+          message: DUPLICATE_BOOKING_MESSAGE,
           status: 409,
         };
       return {

@@ -762,7 +762,7 @@ export async function createBooking(
       onBehalf: args.onBehalf,
       apiKeyWrite: args.apiKeyWrite,
     }) &&
-    (await hasUpcomingBookingForEmail(db, eventType.id, args.attendee.email))
+    (await hasUpcomingBookingForEmail(db, account.id, eventType.id, args.attendee.email))
   ) {
     return { ok: false, reason: 'DUPLICATE_BOOKING' };
   }

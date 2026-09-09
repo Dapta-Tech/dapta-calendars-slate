@@ -337,6 +337,12 @@ export function BookingFlow({
             // to cause) instead of round-tripping a guaranteed 400.
             onSubmit={(e) => {
               if (!validateAll()) e.preventDefault();
+              // Un-dismiss on every real submit. `dismissDuplicate` keeps the
+              // slot rather than routing back through `pick()`, which is the
+              // only other place this resets — without this line the NEXT
+              // failure on this slot (another duplicate, a taken slot, a 400)
+              // would render nothing at all.
+              else setDismissed(false);
             }}
             className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
           >

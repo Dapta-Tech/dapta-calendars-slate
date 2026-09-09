@@ -752,11 +752,11 @@ export class CalV2Service {
               answers: input.bookingFieldsResponses,
               metadata: internalMetadata,
               idempotencyKey: storedKey,
-              // API-key surface ⇒ exempt from the duplicate-booking guard
-              // (#69). Note this path reports `onBehalf: false` below, which
-              // is why the guard reads a separate flag.
-              apiKeyWrite: true,
             },
+            // API-key surface ⇒ exempt from the duplicate-booking guard (#69).
+            // Passed as CONTEXT, never on the body: the public controller
+            // forwards an unvalidated `@Body()` into that same parameter.
+            { apiKeyWrite: true },
           )
         : await this.bookings.book(
             {

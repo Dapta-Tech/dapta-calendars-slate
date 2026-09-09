@@ -26,5 +26,14 @@ UPDATE booking_attendee
    SET email_normalized = lower(trim(email))
  WHERE email_normalized IS NULL;
 
+-- Indexed as the EXPRESSION the guard matches on, not the bare column — the
+-- read is COALESCE(email_normalized, lower(trim(email))), which a plain
+-- column index cannot answer. SQLite supports expression indexes over
+-- deterministic built-ins, which coalesce/lower/trim are.
 CREATE INDEX IF NOT EXISTS booking_attendee_email_normalized_idx
-  ON booking_attendee (email_normalized);
+  ON booking_attendee (COALESCE(email_normalized, lower(trim(email))));
+
+-- The guard's outer filter; no existing index on `booking` leads with
+-- event_type_id. See the Postgres twin.
+CREATE INDEX IF NOT EXISTS booking_event_type_status_end_idx
+  ON booking (event_type_id, status, end_ms);

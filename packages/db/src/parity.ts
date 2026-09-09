@@ -714,7 +714,7 @@ export async function createTeamBooking(
       preventDuplicateBookings: et.prevent_duplicate_bookings,
       apiKeyWrite: args.apiKeyWrite,
     }) &&
-    (await hasUpcomingBookingForEmail(db, et.id, args.attendee.email))
+    (await hasUpcomingBookingForEmail(db, account.id, et.id, args.attendee.email))
   ) {
     return { ok: false, reason: 'DUPLICATE_BOOKING' };
   }

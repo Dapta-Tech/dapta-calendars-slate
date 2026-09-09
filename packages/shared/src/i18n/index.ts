@@ -1045,7 +1045,7 @@ export const en: BookingMessages = {
       // Duplicate-booking guard (#69 / AB1) — the host-facing switch.
       duplicateGuard: {
         label: 'One booking per person',
-        hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected.',
+        hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected. Anyone who guesses an invitee’s address is told a booking exists for it, though never when it is.',
       },
       intakeQuestions: 'Intake questions',
       moveUp: 'Move up',
@@ -1824,7 +1824,7 @@ export const es: BookingMessages = {
       // Duplicate-booking guard (#69 / AB1) — el interruptor del anfitrión.
       duplicateGuard: {
         label: 'Una reserva por persona',
-        hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados.',
+        hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados. A quien adivine el correo de un invitado se le dirá que existe una reserva, aunque nunca cuándo es.',
       },
       intakeQuestions: 'Preguntas del formulario',
       moveUp: 'Subir',
