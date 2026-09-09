@@ -24,6 +24,11 @@ import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
+import {
+  duplicateGuardApplies,
+  hasUpcomingBookingForEmail,
+  normalizeAttendeeEmail,
+} from './duplicate-guard';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -88,12 +93,24 @@ export interface EventTypeRow {
   after_event_buffer: number;
   slot_interval: number | null;
   requires_confirmation: number;
+  /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
+  prevent_duplicate_bookings: number;
   seats_per_time_slot: number | null;
 }
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' | 'CALENDAR_UNAVAILABLE' }
+  | {
+      ok: false;
+      reason:
+        | 'SLOT_TAKEN'
+        | 'NOT_FOUND'
+        | 'RESERVATION_EXPIRED'
+        | 'CALENDAR_UNAVAILABLE'
+        /** The event type's duplicate-booking guard refused this email (#69).
+         *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
+        | 'DUPLICATE_BOOKING';
+    }
   | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
@@ -134,6 +151,14 @@ export interface CreateBookingArgs {
   idempotencyKey?: string;
   /** True when a host/agent booked on behalf (attribution; skips manage-token gating upstream). */
   onBehalf?: boolean;
+  /**
+   * True when this write arrives through an API key (the machine API or the
+   * v2 compatibility surface). Only the duplicate-booking guard reads it
+   * — it is a SEPARATE flag from `onBehalf` because the compatibility surface
+   * is an API-key write that deliberately reports `onBehalf: false`. See
+   * `duplicate-guard.ts`.
+   */
+  apiKeyWrite?: boolean;
 }
 
 /**
@@ -206,7 +231,7 @@ export async function getEventType(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
               AND hidden = 0 LIMIT 1`,
@@ -226,7 +251,7 @@ export async function getEventTypeRowById(db: Db, id: string): Promise<EventType
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type WHERE id = ${id} LIMIT 1`,
   );
 }
@@ -725,6 +750,23 @@ export async function createBooking(
     }
   }
 
+  // Duplicate-booking guard (#69/AB1): the host switched this event type to one
+  // upcoming booking per email. Placed AFTER the idempotency replay above — a
+  // repeated key must return its original booking, never a 409 — and BEFORE the
+  // group-seat branch below, so on a multi-seat event the same address is
+  // refused instead of quietly taking a second seat. Advisory and outside the
+  // write transaction on purpose; see `duplicate-guard.ts`.
+  if (
+    duplicateGuardApplies({
+      preventDuplicateBookings: eventType.prevent_duplicate_bookings,
+      onBehalf: args.onBehalf,
+      apiKeyWrite: args.apiKeyWrite,
+    }) &&
+    (await hasUpcomingBookingForEmail(db, account.id, eventType.id, args.attendee.email))
+  ) {
+    return { ok: false, reason: 'DUPLICATE_BOOKING' };
+  }
+
   const startMs = args.startMs;
   const endMs = startMs + eventType.length_minutes * 60_000;
 
@@ -747,14 +789,16 @@ export async function createBooking(
       );
       if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
       await db.run(
-        sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
+              ${normalizeAttendeeEmail(args.attendee.email)},
               ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
       );
       for (const attendee of args.additionalAttendees ?? []) {
         await db.run(
-          sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
               VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
+                ${normalizeAttendeeEmail(attendee.email)},
                 ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
         );
       }
@@ -820,13 +864,15 @@ export async function createBooking(
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
+      ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
     (attendee) => sql`
-      INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${normalizeAttendeeEmail(attendee.email)},
         ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
   );
 

@@ -537,8 +537,10 @@ export async function rescheduleBookingV2(
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
       ${source.recurring_event_id}, ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const copyAttendees = sql`INSERT INTO booking_attendee
-    (id, booking_id, name, email, time_zone, phone, notes, created_at)
-    SELECT ${newId} || ':' || id, ${newId}, name, email, time_zone, phone, notes, ${now}
+    (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+    SELECT ${newId} || ':' || id, ${newId}, name,
+           email, COALESCE(email_normalized, lower(trim(email))),
+           time_zone, phone, notes, ${now}
     FROM booking_attendee WHERE booking_id = ${source.id}`;
   const copyGuests = sql`INSERT INTO booking_guest
     (id, booking_id, email, email_normalized, name, time_zone, created_at)

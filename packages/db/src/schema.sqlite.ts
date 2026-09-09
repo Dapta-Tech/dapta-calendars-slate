@@ -156,6 +156,13 @@ export const eventType = sqliteTable('event_type', {
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
   requiresConfirmation: integer('requires_confirmation').notNull().default(0),
+  /**
+   * Duplicate-booking guard (#69/AB1): 1 = one normalized email may hold at
+   * most one UPCOMING booking on this event type. Off (0) by default and off
+   * on every already-saved event — turning it on is the host's choice. Not a
+   * security control: email is verified nowhere, so it prevents accidents.
+   */
+  preventDuplicateBookings: integer('prevent_duplicate_bookings').notNull().default(0),
   seatsPerTimeSlot: integer('seats_per_time_slot'),
   /** Per-event calendar write destination override; NULL = fall back to the
    *  host's member-level `is_destination` calendar (calendar-refs.ts). */
@@ -227,6 +234,14 @@ export const bookingAttendee = sqliteTable('booking_attendee', {
   bookingId: text('booking_id').notNull(),
   name: text('name').notNull(),
   email: text('email').notNull(),
+  /**
+   * `lower(trim(email))`, indexed, for the duplicate-booking guard (#69/AB1).
+   * NULLABLE on purpose, unlike `booking_guest.email_normalized`: migrations
+   * land before the API that writes this column, so rows inserted in that
+   * window carry NULL. Every read coalesces — see `normalizedEmailSql`.
+   * `+tags` are NOT stripped (#69: most providers treat them as distinct).
+   */
+  emailNormalized: text('email_normalized'),
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),

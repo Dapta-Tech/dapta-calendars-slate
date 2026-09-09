@@ -55,6 +55,12 @@ does not add `startTime`/`endTime` aliases.
 calendar returns `403 CALENDAR_READ_ONLY`. Team assignment is dynamic, so a team destination
 override returns an explicit `422 FEATURE_NOT_SUPPORTED` rather than writing to the wrong calendar.
 
+A host can switch on a **duplicate-booking guard** per event type, which stops one normalized email
+address holding more than one upcoming booking on that event. **API-key writes are exempt**, so
+`POST /v2/bookings` never fails for that reason and an integration cannot be broken by a host
+flipping the switch. On the unauthenticated public booking endpoints the guard answers
+`409 DUPLICATE_BOOKING`, whose message deliberately carries no date, time, or host.
+
 ## Mutation idempotency
 
 Every pilot mutation accepts `Idempotency-Key` (1–128 characters). Flow Studio should use a stable

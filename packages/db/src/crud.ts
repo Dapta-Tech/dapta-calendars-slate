@@ -51,6 +51,9 @@ export interface EventTypeView {
   afterEventBuffer: number;
   slotInterval: number | null;
   requiresConfirmation: boolean;
+  /** Duplicate-booking guard (#69). False on every event type that has never
+   *  been switched on, which is all of them until a host does it. */
+  preventDuplicateBookings: boolean;
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
   /** Reminders + follow-up owned by this event type (#68). NULL in the column
@@ -87,6 +90,7 @@ interface EventTypeDbRow {
   after_event_buffer: number;
   slot_interval: number | null;
   requires_confirmation: number;
+  prevent_duplicate_bookings: number;
   seats_per_time_slot: number | null;
   booking_fields: unknown;
   reminders: unknown;
@@ -95,8 +99,8 @@ interface EventTypeDbRow {
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
-  after_event_buffer, slot_interval, requires_confirmation, seats_per_time_slot, booking_fields,
-  reminders, destination_calendar_id`;
+  after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
+  seats_per_time_slot, booking_fields, reminders, destination_calendar_id`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
@@ -122,6 +126,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     afterEventBuffer: r.after_event_buffer,
     slotInterval: r.slot_interval,
     requiresConfirmation: !!r.requires_confirmation,
+    preventDuplicateBookings: !!r.prevent_duplicate_bookings,
     seatsPerTimeSlot: r.seats_per_time_slot,
     bookingFields: parseJsonColumn<unknown[]>(r.booking_fields, []),
     reminders: effectiveReminders(parseEventReminders(r.reminders)),
@@ -229,6 +234,9 @@ export interface EventTypeInputRepo {
   afterEventBuffer?: number;
   slotInterval?: number | null;
   requiresConfirmation?: boolean;
+  /** Duplicate-booking guard (#69). UNDEFINED on create ⇒ off, matching every
+   *  event type that already exists. */
+  preventDuplicateBookings?: boolean;
   seatsPerTimeSlot?: number | null;
   bookingFields?: unknown[];
   /** Reminders + follow-up (#68). UNDEFINED on create ⇒ the shipped pre-fill
@@ -283,7 +291,8 @@ export async function createEventType(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
-          requires_confirmation, seats_per_time_slot, destination_calendar_id, created_at)
+          requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
+          destination_calendar_id, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -292,7 +301,8 @@ export async function createEventType(
           ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
           ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
-          ${input.requiresConfirmation ? 1 : 0}, ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId}, ${now})`,
+          ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
+          ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -330,6 +340,8 @@ export async function updateEventType(
   if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);
   if (input.slotInterval !== undefined) set('slot_interval', sql`${input.slotInterval ?? null}`);
   if (input.requiresConfirmation !== undefined) set('requires_confirmation', sql`${input.requiresConfirmation ? 1 : 0}`);
+  if (input.preventDuplicateBookings !== undefined)
+    set('prevent_duplicate_bookings', sql`${input.preventDuplicateBookings ? 1 : 0}`);
   if (input.seatsPerTimeSlot !== undefined) set('seats_per_time_slot', sql`${input.seatsPerTimeSlot ?? null}`);
   if (input.bookingFields !== undefined) set('booking_fields', jsonParam(db, input.bookingFields ?? null));
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never

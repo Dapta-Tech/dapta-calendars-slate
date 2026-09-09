@@ -22,6 +22,9 @@ export interface EventTypePayload {
   afterEventBuffer: number;
   seatsPerTimeSlot: number | null;
   requiresConfirmation: boolean;
+  /** Duplicate-booking guard (#69): one upcoming booking per email on this
+   *  event. Travels on CREATE and EDIT, personal and team events alike. */
+  preventDuplicateBookings: boolean;
   hidden: boolean;
   scheduleId: string | null;
   bookingFields: Array<{ name: string; label: string; type: string; required: boolean; defaultCountry?: string }>;

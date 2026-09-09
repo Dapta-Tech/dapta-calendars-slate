@@ -77,7 +77,18 @@ export function BookingFlow({
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
   const [holdError, setHoldError] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  /**
+   * The error result the booker has already acknowledged, held BY IDENTITY
+   * rather than as a boolean.
+   *
+   * `useActionState` keeps the previous state until the next action resolves,
+   * so a boolean cannot tell "this error is still current" from "this error is
+   * last attempt's, still on screen while the new one is in flight". Comparing
+   * objects can: `bookAction` returns a fresh object per attempt, so a stale
+   * result stays dismissed and a genuinely new one always renders — during the
+   * request, and after picking a different slot.
+   */
+  const [dismissedResult, setDismissedResult] = useState<BookResult | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   // CONTROLLED values for every visible input: React 19 resets uncontrolled
   // form fields when the action returns, so a server-side 400 used to wipe
@@ -129,7 +140,10 @@ export function BookingFlow({
 
   async function pick(slot: DisplaySlot) {
     setSelected(slot.startUtc);
-    setDismissed(false);
+    // The last attempt's error stays dismissed: picking a slot used to clear
+    // the flag while `result` still held that error, so choosing a new time
+    // after a conflict re-rendered the conflict card straight back.
+    setDismissedResult(result);
     setHoldError(null);
     setHold(null);
     // Team events resolve their host set at booking time (round-robin picks one,
@@ -147,7 +161,17 @@ export function BookingFlow({
     setSelected(null);
     setHold(null);
     setHoldError(null);
-    setDismissed(true);
+    setDismissedResult(result);
+  }
+
+  /**
+   * Duplicate-booking guard (#69): the booker is blocked on their ADDRESS, not
+   * on the time, so `retry()` — which drops the slot and sends them back to the
+   * grid — is exactly the wrong move. Dismiss the error and keep the slot, the
+   * hold and everything they typed, so correcting a typo'd email is one edit.
+   */
+  function dismissDuplicate() {
+    setDismissedResult(result);
   }
 
   // --- Confirmed ----------------------------------------------------------
@@ -196,8 +220,39 @@ export function BookingFlow({
     );
   }
 
-  const conflict = result && !result.ok && !dismissed && (result.status === 409 || result.status === 410);
-  const intakeError = result && !result.ok && !dismissed && result.status === 400;
+  // The duplicate-booking guard (#69) answers 409, like a taken slot — but it
+  // is a different failure and gets its own card BEFORE the conflict branch.
+  // Left to fall through, it would render "that time was just taken" over a
+  // "pick another slot" button, telling the booker to do the one thing that
+  // cannot possibly help: the block is on their email, not on the time.
+  // `result !== dismissedResult` is the freshness test: an error the booker has
+  // acknowledged stays hidden until the NEXT attempt produces a different
+  // object, so nothing here can render last attempt's failure over an in-flight
+  // request or over a newly picked slot.
+  const live = result && !result.ok && result !== dismissedResult;
+  const duplicate = live && result.error === 'DUPLICATE_BOOKING';
+  const conflict = live && !duplicate && (result.status === 409 || result.status === 410);
+  const intakeError = live && result.status === 400;
+
+  // --- Duplicate booking (409 DUPLICATE_BOOKING) --------------------------
+  // The copy names NO date, time or host: revealing the existing slot would
+  // hand a third party's schedule to anyone who guesses an email, and the
+  // person it belongs to already has the confirmation in their inbox.
+  if (duplicate) {
+    return (
+      <section className="bp-card border border-destructive bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold">{m.duplicateGuard.title}</h2>
+        <p className="mb-4 text-sm text-muted-foreground">{m.duplicateGuard.body}</p>
+        <button
+          type="button"
+          onClick={dismissDuplicate}
+          className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98]"
+        >
+          {m.duplicateGuard.changeEmail}
+        </button>
+      </section>
+    );
+  }
 
   // --- Conflict (409/410): R22 error + retry ------------------------------
   // CALENDAR_UNAVAILABLE (booking blocked fail-closed) gets its own localized
