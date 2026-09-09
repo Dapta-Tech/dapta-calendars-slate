@@ -129,6 +129,21 @@ export interface BookingMessages {
     invalid: string;
     countryLabel: string;
   };
+  /**
+   * Generic token-styled listbox (`Select`, reskin slice P) — a sibling of
+   * `tzPicker`/`phonePicker`: a shared primitive that owns its OWN copy, so a
+   * caller never threads these two strings through. Only the search affordance
+   * needs words; the options are the caller's.
+   */
+  select: {
+    search: string;
+    noResults: string;
+  };
+  /** Generic dialog actions — the `ConfirmDialog` defaults (reskin slice P). */
+  dialog: {
+    confirm: string;
+    cancel: string;
+  };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
     nav: {
@@ -453,6 +468,18 @@ export interface BookingMessages {
       delete: string;
       cancel: string;
       deleteError: string;
+      /**
+       * Destructive-confirmation copy for the `ConfirmDialog` (reskin slice P).
+       * The inline two-button confirm this replaced asked nothing — it just
+       * swapped the Delete button out — so a real dialog needs a question and a
+       * consequence. `{name}` interpolates the team / member.
+       * Deleting a team is API-guarded against orphaned event types (409), so
+       * the body deliberately does NOT claim they go with it.
+       */
+      deleteTitle: string;
+      deleteBody: string;
+      removeTitle: string;
+      removeBody: string;
       memberSingular: string;
       memberPlural: string;
       noMembers: string;
@@ -905,6 +932,14 @@ export const en: BookingMessages = {
     invalid: 'Enter a valid phone number.',
     countryLabel: 'Country code',
   },
+  select: {
+    search: 'Search…',
+    noResults: 'No matching option.',
+  },
+  dialog: {
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+  },
   manage: {
     title: 'Manage your booking',
     reschedule: 'Reschedule',
@@ -1238,6 +1273,10 @@ export const en: BookingMessages = {
       delete: 'Delete',
       cancel: 'Cancel',
       deleteError: 'Could not delete.',
+      deleteTitle: 'Delete this team?',
+      deleteBody: '“{name}” will be deleted permanently. This cannot be undone.',
+      removeTitle: 'Remove this member?',
+      removeBody: '{name} will lose access to this team. You can add them again later.',
       memberSingular: 'member',
       memberPlural: 'members',
       noMembers: 'No members yet. Add someone from your account below.',
@@ -1691,6 +1730,14 @@ export const es: BookingMessages = {
     invalid: 'Ingresa un número de teléfono válido.',
     countryLabel: 'Código de país',
   },
+  select: {
+    search: 'Buscar…',
+    noResults: 'No hay opciones que coincidan.',
+  },
+  dialog: {
+    confirm: 'Confirmar',
+    cancel: 'Cancelar',
+  },
   manage: {
     title: 'Gestiona tu reserva',
     reschedule: 'Reprogramar',
@@ -2027,6 +2074,10 @@ export const es: BookingMessages = {
       delete: 'Eliminar',
       cancel: 'Cancelar',
       deleteError: 'No se pudo eliminar.',
+      deleteTitle: '¿Eliminar este equipo?',
+      deleteBody: '“{name}” se eliminará de forma permanente. Esta acción no se puede deshacer.',
+      removeTitle: '¿Quitar a este miembro?',
+      removeBody: '{name} perderá el acceso a este equipo. Puedes volver a añadirle más adelante.',
       memberSingular: 'miembro',
       memberPlural: 'miembros',
       noMembers: 'Aún no hay miembros. Añade a alguien de tu cuenta abajo.',

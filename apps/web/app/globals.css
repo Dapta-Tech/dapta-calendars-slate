@@ -159,9 +159,11 @@
         (`.checked\:bg-primary:checked`) and gets no rim. It is listed here rather
         than fixed because raising this rule's specificity to catch it would also
         beat `focus-visible:ring-2`, which sets `box-shadow` too — the rim would eat
-        the focus ring. The checkbox primitive is the only such site; it needs
-        `checked:border-primary` moved to `border-primary-edge` at the call site,
-        which is the primitives slice's job. On dark none of this shows. */
+        the focus ring. There are two such sites, not the one this note first
+        claimed: `checkbox.tsx` and `radio.tsx` both carried `checked:border-primary`.
+        Both now carry `checked:border-primary-edge` instead (reskin slice P, #97) —
+        the edge colour on the border does the job the rim cannot. A NEW
+        variant-prefixed accent fill must do the same. On dark none of this shows. */
   .bg-primary {
     box-shadow: inset 0 0 0 1px var(--primary-edge);
   }
