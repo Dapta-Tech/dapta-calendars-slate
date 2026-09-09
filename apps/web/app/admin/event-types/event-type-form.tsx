@@ -62,6 +62,10 @@ const REMINDER_VARIABLES = [
   'start_time',
   'end_time',
   'location',
+  // The meeting link (C2 #85), resolved at delivery — the one variable that is
+  // not snapshotted with the rest. It belongs in reminder copy more than
+  // anywhere: a nudge an hour before the call is exactly when someone wants it.
+  'meeting_url',
   'manage_url',
   'reminder_lead',
   'booking_link',
