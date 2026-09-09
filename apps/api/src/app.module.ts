@@ -5,6 +5,7 @@ import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
   AUTH_PROVIDER,
   CALENDAR,
+  CRM,
   DB,
   EMAIL,
   ENTITLEMENTS,
@@ -18,6 +19,7 @@ import { AdminService } from './admin.service';
 import { OnboardingService } from './onboarding.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
@@ -25,6 +27,7 @@ import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
 import { resolveEntitlementsProvider } from './entitlements.provider';
+import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
@@ -88,6 +91,14 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       useFactory: (env: ServerEnv) => createCalendarProviderAsync(env),
       inject: [ENV],
     },
+    // CrmProvider selected by CRM_PROVIDER: the OSS default is `disabled` (no
+    // CRM at all, nothing enqueued). Unlike the calendar seam this adapter is
+    // committed in-repo and names its vendor — ADR 0001 carves CRM out of R15.
+    {
+      provide: CRM,
+      useFactory: (env: ServerEnv) => resolveCrmProvider(env),
+      inject: [ENV],
+    },
     // Premium entitlements (vanity slug…): Calendars is always free — the gate
     // is the customer's Dapta AI subscription via the upstream service. OSS
     // default: disabled provider + PREMIUM_FEATURES=open (everything unlocked).
@@ -124,10 +135,11 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
     GrowthService,
     AuthService,
     CalendarEffects,
+    CrmEffects,
     EmailEffects,
     DaptaSyncEffects,
-    // Drains the durable outbox (calendar write-out + webhook delivery + booking
-    // emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
+    // Drains the durable outbox (calendar write-out + CRM write-out + webhook
+    // delivery + booking emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
     OutboxWorker,
   ],
 })

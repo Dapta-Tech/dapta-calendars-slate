@@ -734,3 +734,41 @@ export type AttributionInput = z.infer<typeof attributionSchema>;
 /** `POST /v1/me/attribution` — claimed write-once, and only on a young account. */
 export const attributionClaimSchema = z.object({ attribution: attributionSchema });
 export type AttributionClaimInput = z.infer<typeof attributionClaimSchema>;
+
+// --- H1a: CRM integration credentials (#63 / ADR 0001) ----------------------
+
+/**
+ * `POST /v1/integrations` — connect one account's CRM credential.
+ *
+ * The token travels IN only. Nothing in this file describes a response shape
+ * carrying it back, and that is deliberate: "never echoed back to the client"
+ * is a property of the contract, not a habit of whoever writes the controller.
+ */
+export const integrationConnectSchema = z.object({
+  provider: z.literal('hubspot'),
+  /** The pasted private-app token. Verified by use before anything is stored. */
+  token: z.string().trim().min(8).max(512),
+  /** Optional human name for the portal, so a status row is recognizable. */
+  label: z.string().trim().max(80).optional(),
+});
+export type IntegrationConnectInput = z.infer<typeof integrationConnectSchema>;
+
+/**
+ * What a status view may show. `tokenLast4` and `label` are the WHOLE of what
+ * identifies the credential; the cipher never leaves `@slate/db`.
+ */
+export interface IntegrationStatusView {
+  provider: string;
+  status: 'connected' | 'unhealthy' | 'disconnected';
+  label: string | null;
+  tokenLast4: string | null;
+  lastCheckAt: number | null;
+  lastCheckOk: boolean | null;
+  lastCheckDetail: string | null;
+  /**
+   * The structured provider error. `requiredGranularScopes` is a scope NAME
+   * list (verified in #74), so a UI can name the exact checkbox that was
+   * missed rather than rendering prose.
+   */
+  lastErrorDetail: { category?: string | null; requiredGranularScopes?: string[] } | null;
+}

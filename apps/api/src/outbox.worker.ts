@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   type OnModuleDestroy,
+  Optional,
   type OnModuleInit,
 } from '@nestjs/common';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects, OutboxSkipError } from './email-effects';
 import { DB, ENV } from './tokens';
@@ -56,6 +58,10 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
     @Inject(EmailEffects) private readonly email: EmailEffects,
     @Inject(DaptaSyncEffects) private readonly daptaSync: DaptaSyncEffects,
+    // H1a. LAST and @Optional() for the same reason as the lifecycle services:
+    // the existing worker specs construct this positionally, and a worker with
+    // no CRM handler simply has no `crm` rows to drain.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
 
   onModuleInit(): void {
@@ -131,6 +137,16 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     if (row.kind === 'calendar') {
       if (!row.bookingUid) throw new Error('calendar outbox row missing booking_uid');
       await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid);
+      return;
+    }
+    // H1a (#63): ONE row does both halves of the CRM write-out — resolve the
+    // contact, then create the meeting associated to it. Retries are safe: the
+    // DH1 claim on `booking_reference` means a re-run cannot create a second
+    // meeting.
+    if (row.kind === 'crm') {
+      if (!row.bookingUid) throw new Error('crm outbox row missing booking_uid');
+      if (!this.crm) throw new Error('crm outbox row with no CRM handler wired');
+      await this.crm.runCrmJob(row.action, row.bookingUid);
       return;
     }
     if (row.kind === 'webhook') {

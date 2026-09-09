@@ -411,6 +411,44 @@ export const notificationSetting = pgTable('notification_setting', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * H1a (#63 / ADR 0001): ONE third-party integration credential per (account,
+ * provider). The pasted private-app token is stored AES-256-GCM encrypted under
+ * a `v1.<iv>.<tag>.<ciphertext>` envelope bound to (account_id, provider), and
+ * is NEVER returned to a client — `label` + `token_last4` are the whole of what
+ * a status view may show.
+ *
+ * Disconnecting is a SOFT delete: `status = 'disconnected'` and `token_cipher`
+ * nulled. The row's `id` must survive, because `booking_reference.destination`
+ * points at it — a hard delete would mint a new id on reconnect, orphan every
+ * stored reference, and turn the first post-reconnect cancellation into a
+ * duplicate meeting.
+ *
+ * Health mirrors `connected_calendar.last_check_*` so the two read alike, plus
+ * `last_error_detail`: the STRUCTURED provider error (category + the missing
+ * scope names), so a UI can name the exact checkbox that was missed rather than
+ * re-parsing prose.
+ */
+export const accountIntegration = pgTable('account_integration', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  /** Vendor key, e.g. `hubspot`. UNIQUE with account_id. */
+  provider: text('provider').notNull(),
+  /** `connected` | `unhealthy` | `disconnected`. Never auto-disabled. */
+  status: text('status').notNull().default('connected'),
+  /** `v1.<iv>.<tag>.<ciphertext>`; NULL once disconnected (credential scrubbed). */
+  tokenCipher: text('token_cipher'),
+  label: text('label'),
+  tokenLast4: text('token_last4'),
+  lastCheckAt: bigint('last_check_at', { mode: 'number' }),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
+  /** Structured provider error: `{ category, requiredGranularScopes }`. */
+  lastErrorDetail: jsonb('last_error_detail'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -434,4 +472,5 @@ export const pgSchema = {
   bookingReference,
   outbox,
   notificationSetting,
+  accountIntegration,
 };

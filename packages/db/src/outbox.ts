@@ -39,7 +39,19 @@ import type { Db } from './client';
  * The `outbox.kind` column is unconstrained text, so adding a kind is a
  * type-level change only — no migration.
  */
-export type OutboxKind = 'calendar' | 'webhook' | 'email' | 'dapta_sync' | 'iam_onboarding';
+export type OutboxKind =
+  | 'calendar'
+  | 'webhook'
+  | 'email'
+  | 'dapta_sync'
+  | 'iam_onboarding'
+  /**
+   * H1a (#63): the CRM write-out. ONE row per lifecycle transition, and the
+   * accept row does BOTH halves -- resolve the contact and create the meeting
+   * associated to it. Two rows would need an ordering the outbox does not
+   * have, and the meeting cannot be associated before the contact id exists.
+   */
+  | 'crm';
 /**
  * `skipped` = deliberately not performed (e.g. a legacy email row whose tenant
  * context is unrecoverable on a transport that requires it) — recorded ONCE

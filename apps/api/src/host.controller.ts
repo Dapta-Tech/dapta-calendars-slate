@@ -19,6 +19,7 @@ import {
   apiScope,
   attributionClaimSchema,
   brandingSchema,
+  integrationConnectSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
 } from '@slate/types';
@@ -331,6 +332,59 @@ export class HostController {
     const out = await this.admin.decline(p, uid, body?.reason);
     if (!out.ok) throw new ConflictException({ error: out.reason, message: 'Cannot decline.' });
     return { uid, status: 'rejected' };
+  }
+
+  // --- Integrations (H1a / #63). No UI here — that is H1b / #93. ------------
+  //
+  // Account-level credential, so admin/owner only: a plain member must not be
+  // able to repoint or unplug the workspace's CRM. `assertAdmin` is what makes
+  // that a rule rather than a UI convention.
+  //
+  // NOTHING these routes return carries the token or its ciphertext. The
+  // service projects each row through `IntegrationStatusView`, so a credential
+  // cannot reach a browser by someone forgetting to strip a field.
+
+  @Get('integrations')
+  async listIntegrations(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.listIntegrations(p);
+  }
+
+  /**
+   * Connect a pasted private-app token. Fail-closed: the credential is VERIFIED
+   * by using it before anything is stored, so a bad token is rejected here
+   * rather than surfacing as a silently failing booking a week later.
+   *
+   * A rejection carries `requiredGranularScopes` — the scope NAME list the
+   * provider returned (#74) — so H1b can name the exact checkbox that was
+   * missed instead of saying something went wrong.
+   */
+  @Post('integrations')
+  @HttpCode(201)
+  async connectIntegration(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const parsed = integrationConnectSchema.safeParse(body);
+    if (!parsed.success) {
+      // Field paths only. The one field that could be echoed here is the token
+      // itself, and zod issues carry paths rather than values — which is what
+      // keeps a rejected credential out of a 400 body and out of any log that
+      // records one.
+      throw new BadRequestException({
+        error: 'BAD_REQUEST',
+        message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+      });
+    }
+    return this.admin.connectIntegration(p, parsed.data);
+  }
+
+  /** Disconnect: the credential is scrubbed, nothing is deleted in the CRM. */
+  @Delete('integrations/:provider')
+  async disconnectIntegration(@Req() req: ReqLike, @Param('provider') provider: string) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.disconnectIntegration(p, provider);
   }
 
   // Connections.
