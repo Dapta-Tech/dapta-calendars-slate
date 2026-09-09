@@ -55,19 +55,23 @@ export function getTeamAvailability(params: {
 }
 
 /**
- * Read a 201 booking body as a `BookingView` — PARSED against the shared
- * contract, not asserted into it. The team route used to answer a narrow
+ * Read a booking body as a `BookingView` — PARSED against the shared contract,
+ * not asserted into it. The team route used to answer a narrow
  * `{ uid, hostMemberId, manageUrl }`, and an `as unknown as BookingView` cast
  * called that a booking, so `startUtc` reached the confirmation `undefined`
  * and the render threw into the public error boundary (#102).
  *
- * A body that fails to parse is still a CREATED booking — a 201 is the API
- * saying the row exists — so this never turns one into a failure: reporting
- * failure for a booking that succeeded is exactly what sends a booker back to
- * make a second one. It hands over what arrived and lets the confirmation
- * render the fields it actually has.
+ * A body that fails to parse is still a real booking — a 201 is the API saying
+ * the row exists, and the manage read is a booking the visitor already made —
+ * so this never turns one into a failure: reporting failure for a booking that
+ * succeeded is exactly what sends a booker back to make a second one. It hands
+ * over what arrived and lets the page render the fields it actually has, which
+ * is why every caller's render must tolerate a missing field (#123).
+ *
+ * `source` names the path that drifted, so the log line below points at one of
+ * the three rather than at "a booking somewhere".
  */
-function toBookingView(json: Record<string, unknown>): BookingView {
+function toBookingView(json: Record<string, unknown>, source: string): BookingView {
   const parsed = bookingViewSchema.safeParse(json);
   if (parsed.success) return parsed.data;
   // Say so. #102 hid for as long as it did because the cast absorbed the
@@ -76,7 +80,7 @@ function toBookingView(json: Record<string, unknown>): BookingView {
   // names the FIELD PATHS only — never the body, which carries the attendee's
   // name and email.
   console.warn(
-    `[web] booking response did not match the contract: ${parsed.error.issues
+    `[web] ${source} response did not match the booking contract: ${parsed.error.issues
       .map((i) => i.path.join('.') || '(root)')
       .join(', ')}`,
   );
@@ -98,7 +102,7 @@ export async function postTeamBooking(
     },
   );
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json) };
+  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json, 'team booking') };
   return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
 }
 
@@ -162,8 +166,45 @@ export async function postReservation(body: {
   return { ok: false, status: res.status, message: (json.message as string) ?? 'Could not hold the time.' };
 }
 
-export function getManageView(uid: string, token: string): Promise<BookingView | null> {
-  return getJson<BookingView>(`/v1/bookings/${encodeURIComponent(uid)}?token=${encodeURIComponent(token)}`);
+/**
+ * The manage read has three outcomes and the page renders something different
+ * for each, so it answers a result rather than `BookingView | null` (#123).
+ *
+ * `invalid-link` is the one worth naming. The manage token ROTATES on every
+ * reschedule (the single-active-token invariant), so the link in an older
+ * confirmation or reschedule email answers 403 BY DESIGN. That is a routine
+ * event on a page whose only entry point is an emailed link — and it used to
+ * throw out of `getJson`, telling someone whose booking is perfectly fine that
+ * something had failed.
+ */
+export type ManageViewResult =
+  | { ok: true; booking: BookingView }
+  | { ok: false; reason: 'not-found' | 'invalid-link' };
+
+/**
+ * Read the token-gated manage view — PARSED with the same `bookingViewSchema`
+ * the two booking POST paths use, not asserted through `getJson<BookingView>`
+ * (#123). This route is reached from a link in a CONFIRMATION EMAIL, so a shape
+ * drift here is hit by someone who has already booked and is trying to cancel
+ * or reschedule; the unchecked cast would surface it as a `RangeError` thrown
+ * from a render and a public error boundary — #102's failure mode, one endpoint
+ * over.
+ *
+ * A body that fails to PARSE is still handed over (see `toBookingView`) because
+ * it still describes a real booking; only the REQUEST outcomes branch here.
+ */
+export async function getManageView(uid: string, token: string): Promise<ManageViewResult> {
+  const res = await fetch(
+    `${API_URL}/v1/bookings/${encodeURIComponent(uid)}?token=${encodeURIComponent(token)}`,
+    { cache: 'no-store' },
+  );
+  if (res.status === 404) return { ok: false, reason: 'not-found' };
+  // 403 = a wrong or already-rotated token; 410 = the booking is gone. Both are
+  // a dead LINK rather than a failure, and both have to read as one.
+  if (res.status === 403 || res.status === 410) return { ok: false, reason: 'invalid-link' };
+  if (!res.ok) throw new Error(`API manage view failed: ${res.status}`);
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { ok: true, booking: toBookingView(json, 'manage view') };
 }
 
 export async function postManage(
@@ -200,7 +241,7 @@ export async function postBooking(body: unknown): Promise<BookResult> {
     cache: 'no-store',
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json) };
+  if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json, 'booking') };
   return {
     ok: false,
     status: res.status,

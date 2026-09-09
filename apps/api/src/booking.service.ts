@@ -57,6 +57,45 @@ const contextIdempotencyKeySchema = z.string().min(1).max(200);
 const DUPLICATE_BOOKING_MESSAGE =
   'A booking already exists for this email on this event. Check your inbox.';
 
+/** The manage view's event-context projection — see `manageView`. */
+interface RescheduleContextRow {
+  code: string;
+  handle: string | null;
+  slug: string;
+  team_id: string | null;
+  team_slug: string | null;
+}
+
+/**
+ * Name the reschedule context by the event type that owns the booking (#122).
+ *
+ * A team event type is addressable ONLY as `account + team + slug`; the
+ * organizer's handle does not reach it, because a team event type has no
+ * `member_id` for the personal lookup to match on. Saying which kind it is —
+ * rather than always answering the personal shape — is what lets the manage
+ * page call the availability route that can actually resolve the event.
+ *
+ * `team_id` decides, not `team_slug`: a team booking has BOTH a team and an
+ * organizer — the join finds the team through the event type, while
+ * `host_member_id` still points at whichever organizer the scheduling method
+ * assigned — so the handle is present and would otherwise win.
+ *
+ * `team.slug` is nullable in both dialects. A team event type whose team has no
+ * slug is not addressable on any public route, so it answers NO context rather
+ * than falling through to the organizer's handle — that fallthrough would emit
+ * exactly the personal-shaped context this function exists to stop, and the
+ * picker would silently go empty again. An absent picker beats a wrong one.
+ */
+function rescheduleContextOf(ctx: RescheduleContextRow | undefined): BookingView['reschedule'] {
+  if (!ctx?.slug) return undefined;
+  if (ctx.team_id)
+    return ctx.team_slug
+      ? { kind: 'team', accountCode: ctx.code, teamSlug: ctx.team_slug, slug: ctx.slug }
+      : undefined;
+  if (ctx.handle) return { kind: 'personal', accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug };
+  return undefined;
+}
+
 @Injectable()
 export class BookingService {
   constructor(
@@ -328,18 +367,24 @@ export class BookingService {
     );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
-    const ctx = await this.db.get<{
-      code: string;
-      handle: string | null;
-      slug: string;
-    }>(
+    const ctx = await this.db.get<RescheduleContextRow>(
       // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
       // page's reschedule link never resurrects a legacy alias.
-      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug
+      //
+      // The team join is what makes a TEAM booking reschedulable at all (#122).
+      // A team event type carries `team_id` and NO `member_id`, so describing it
+      // by the assigned organizer's handle names an event type the personal
+      // availability lookup cannot find — the picker came back empty and the
+      // invitee's only remaining option was to cancel. Joined off `et.team_id`
+      // rather than `bk.team_id`: the EVENT TYPE decides which public route
+      // serves it, and it is the event type the picker has to resolve.
+      sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug,
+                 et.team_id AS team_id, tm.slug AS team_slug
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
           LEFT JOIN member m ON m.id = bk.host_member_id
+          LEFT JOIN team tm ON tm.id = et.team_id
           WHERE bk.id = ${b.id} LIMIT 1`,
     );
     return {
@@ -357,8 +402,7 @@ export class BookingService {
       location: details?.location ?? null,
       locationKind: isLocationKind(details?.location_kind) ? details.location_kind : null,
       meetingUrl: ref?.meeting_url ?? null,
-      reschedule:
-        ctx?.handle && ctx.slug ? { accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug } : undefined,
+      reschedule: rescheduleContextOf(ctx),
     };
   }
 

@@ -84,6 +84,13 @@ export interface BookingMessages {
     cancelThis: string;
     noOpenTimes: string;
     joinMeeting: string;
+    /** Shown in place of the date line when the booking's start instant did not
+     *  parse — a readable line instead of a thrown render (#123). */
+    timeUnreadable: string;
+    /** Shown when the manage link no longer opens a booking — usually because
+     *  the token rotated on an earlier reschedule (#123). */
+    linkInvalidTitle: string;
+    linkInvalidBody: string;
   };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
@@ -1041,6 +1048,10 @@ export const en: BookingMessages = {
     cancelThis: 'Cancel this booking',
     noOpenTimes: 'No open times in the next 3 weeks.',
     joinMeeting: 'Join the meeting',
+    timeUnreadable: 'We could not read the time for this booking. Check your confirmation email.',
+    linkInvalidTitle: 'This link is no longer active',
+    linkInvalidBody:
+      'Manage links change each time a booking is rescheduled, so an older email carries a link that no longer opens. Your booking has not been affected — open the most recent confirmation or reschedule email to manage it.',
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
@@ -1913,6 +1924,10 @@ export const es: BookingMessages = {
     cancelThis: 'Cancelar esta reserva',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     joinMeeting: 'Unirse a la reunión',
+    timeUnreadable: 'No pudimos leer la hora de esta reserva. Revisa tu correo de confirmación.',
+    linkInvalidTitle: 'Este enlace ya no está activo',
+    linkInvalidBody:
+      'Los enlaces de gestión cambian cada vez que se reprograma una reserva, así que un correo anterior lleva un enlace que ya no abre. Tu reserva no se ha visto afectada: abre el correo de confirmación o de reprogramación más reciente para gestionarla.',
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
