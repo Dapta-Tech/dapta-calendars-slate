@@ -59,6 +59,8 @@ interface HubSpotErrorBody {
 export class HubSpotCrmProvider implements CrmProvider {
   readonly enabled = true;
   readonly name = 'hubspot';
+  /** The port's checklist source (#93) — the same list this adapter needs. */
+  readonly requiredScopes: readonly string[] = HUBSPOT_REQUIRED_SCOPES;
 
   constructor(
     private readonly baseUrl: string = HUBSPOT_API_BASE_URL,

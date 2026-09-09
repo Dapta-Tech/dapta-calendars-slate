@@ -25,7 +25,12 @@ import {
   type AccountRole,
   type Db,
 } from '@slate/db';
-import { CrmAuthError, DisabledCrmProvider, type CrmProvider } from '@slate/crm';
+import {
+  CrmAuthError,
+  DisabledCrmProvider,
+  HUBSPOT_REQUIRED_SCOPES,
+  type CrmProvider,
+} from '@slate/crm';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import { AdminService } from './admin.service';
 import { CrmEffects } from './crm-effects';
@@ -53,6 +58,7 @@ class FakeAuth {
 class ProbeCrm implements CrmProvider {
   readonly enabled = true;
   readonly name = 'hubspot';
+  readonly requiredScopes = HUBSPOT_REQUIRED_SCOPES;
   rejectWith: Error | null = null;
   verifyCredential(): Promise<void> {
     return this.rejectWith ? Promise.reject(this.rejectWith) : Promise.resolve();
@@ -250,5 +256,88 @@ describe('admin integrations routes (H1a, #92)', () => {
 
     as('owner', accountId);
     expect((await host.listIntegrations(REQ))[0]!.status).toBe('connected');
+  });
+
+  // --- Capabilities (H1b / #93) -------------------------------------------
+  //
+  // `connectIntegration` refuses on two DEPLOYMENT states — no adapter, no
+  // encryption key — and a browser cannot discover either one except by pasting
+  // a credential and being turned away, after being sent off to create a
+  // private app. This route is how the UI asks first.
+
+  it('refuses a plain member on capabilities too', async () => {
+    as('member');
+    await expect(host.integrationCapabilities(REQ)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('reports the configured provider when an adapter and a key are present', async () => {
+    await expect(host.integrationCapabilities(REQ)).resolves.toEqual({
+      provider: 'hubspot',
+      enabled: true,
+      canStoreCredentials: true,
+      requiredScopes: ['crm.objects.contacts.read', 'crm.objects.contacts.write'],
+    });
+  });
+
+  // The checklist the connect dialog renders comes from the ADAPTER, not from a
+  // copy catalog. That is what stops the setup instructions a host follows from
+  // drifting away from the permissions the adapter actually needs — and what
+  // stops a translator from "translating" a provider identifier.
+  it('carries the adapter\'s own required scopes, not a second copy of them', async () => {
+    const caps = await host.integrationCapabilities(REQ);
+    expect(caps.requiredScopes).toEqual([...HUBSPOT_REQUIRED_SCOPES]);
+  });
+
+  it('reports no provider when this deployment enabled none', async () => {
+    const admin = new AdminService(
+      db,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      ENV,
+      new CrmEffects(new DisabledCrmProvider(), db, ENV),
+    );
+    const bare = new HostController(admin, {} as never, auth as unknown as AuthService, {} as never);
+    await expect(bare.integrationCapabilities(REQ)).resolves.toMatchObject({
+      provider: null,
+      enabled: false,
+      requiredScopes: [],
+    });
+  });
+
+  it('reports that credentials cannot be stored when no key is configured', async () => {
+    const admin = new AdminService(
+      db,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      loadServerEnv({ NODE_ENV: 'test', CRM_PROVIDER: 'hubspot' } as NodeJS.ProcessEnv),
+      new CrmEffects(crm, db, ENV),
+    );
+    const noKey = new HostController(admin, {} as never, auth as unknown as AuthService, {} as never);
+    await expect(noKey.integrationCapabilities(REQ)).resolves.toMatchObject({
+      enabled: true,
+      canStoreCredentials: false,
+    });
+  });
+
+  // The property worth a test rather than a code review: this route answers
+  // WHETHER, never WHAT. A key or a stored credential leaking through a
+  // capabilities probe would typecheck cleanly and be invisible.
+  it('never carries the encryption key or a stored credential', async () => {
+    await host.connectIntegration(REQ, {
+      provider: 'hubspot',
+      token: TOKEN,
+      label: 'Acme portal',
+    });
+    const body = JSON.stringify(await host.integrationCapabilities(REQ));
+    expect(body).not.toContain(TOKEN);
+    expect(body).not.toContain(KEY_B64);
+    const cipher = (await db.get<{ token_cipher: string }>(
+      sql`SELECT token_cipher FROM account_integration WHERE account_id = ${accountId}`,
+    ))!.token_cipher;
+    expect(body).not.toContain(cipher);
   });
 });

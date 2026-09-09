@@ -352,6 +352,22 @@ export class HostController {
   }
 
   /**
+   * What this DEPLOYMENT can do, for a UI that must not offer an action which
+   * cannot succeed (H1b / #93).
+   *
+   * Declared BEFORE `integrations/:provider`-shaped routes so a literal segment
+   * is never eaten by a parameter. (`:provider` is only on DELETE today, so
+   * there is no live collision — the ordering is here so adding a GET one later
+   * cannot quietly shadow this.)
+   */
+  @Get('integrations/capabilities')
+  async integrationCapabilities(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    return this.admin.integrationCapabilities(p);
+  }
+
+  /**
    * Connect a pasted private-app token. Fail-closed: the credential is VERIFIED
    * by using it before anything is stored, so a bad token is rejected here
    * rather than surfacing as a silently failing booking a week later.

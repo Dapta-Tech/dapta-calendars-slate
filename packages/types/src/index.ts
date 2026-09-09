@@ -793,3 +793,36 @@ export interface IntegrationStatusView {
    */
   lastErrorDetail: { category?: string | null; requiredGranularScopes?: string[] } | null;
 }
+
+/**
+ * `GET /v1/integrations/capabilities` — what THIS DEPLOYMENT can do, as opposed
+ * to what this account has done (H1b / #93).
+ *
+ * Both of the reasons connecting can be impossible are deployment
+ * configuration: no adapter is selected (`CRM_PROVIDER=disabled`), or the
+ * operator never set an encryption key. A browser has no other way to learn
+ * either one — it would have to submit a credential and be refused, AFTER
+ * sending the host off to create a private app. So the UI asks first and
+ * disables the action, rather than offering a button whose only outcome is an
+ * error.
+ *
+ * Deployment configuration, not account data — but the route still resolves a
+ * principal and asserts admin, so nothing answers unauthenticated and no
+ * principal learns anything about another account.
+ */
+export interface IntegrationCapabilities {
+  /** The configured CRM's name, or null when no adapter is selected. */
+  provider: string | null;
+  /** Whether an adapter is selected at all (`CRM_PROVIDER` is not `disabled`). */
+  enabled: boolean;
+  /** Whether `INTEGRATION_ENCRYPTION_KEY` is present and parses. */
+  canStoreCredentials: boolean;
+  /**
+   * The provider scope names a credential must carry, spelled as the provider
+   * spells them. The connect dialog renders this as its checklist, so the
+   * instructions a host follows come from the ADAPTER rather than from a copy
+   * catalog — one list, which cannot drift and cannot be "translated". Empty
+   * when no adapter is selected.
+   */
+  requiredScopes: string[];
+}

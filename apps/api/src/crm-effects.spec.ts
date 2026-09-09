@@ -58,6 +58,10 @@ const ENV: ServerEnv = loadServerEnv({
 class FakeCrmProvider implements CrmProvider {
   readonly enabled = true;
   readonly name = 'hubspot';
+  readonly requiredScopes: readonly string[] = [
+    'crm.objects.contacts.read',
+    'crm.objects.contacts.write',
+  ];
   readonly contacts: CrmContactInput[] = [];
   readonly meetings: CrmMeetingInput[] = [];
   readonly updates: CrmMeetingUpdate[] = [];

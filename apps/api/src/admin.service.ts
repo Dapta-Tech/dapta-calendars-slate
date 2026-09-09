@@ -71,7 +71,11 @@ import {
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
 import { CrmAuthError } from '@slate/crm';
-import type { IntegrationConnectInput, IntegrationStatusView } from '@slate/types';
+import type {
+  IntegrationCapabilities,
+  IntegrationConnectInput,
+  IntegrationStatusView,
+} from '@slate/types';
 import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
@@ -358,6 +362,38 @@ export class AdminService {
   async listIntegrations(p: HostPrincipal): Promise<IntegrationStatusView[]> {
     const rows = await listAccountIntegrations(this.db, p.accountId);
     return rows.map(toIntegrationView);
+  }
+
+  /**
+   * What this DEPLOYMENT can do — not what this account has done (H1b / #93).
+   *
+   * `connectIntegration` refuses on two deployment states: no adapter selected
+   * (`CRM_DISABLED`) and no encryption key (`INTEGRATION_KEY_MISSING`). Neither
+   * is discoverable from a browser except by pasting a credential and being
+   * turned away, which is a bad trade when the paste is preceded by a trip to
+   * the provider's portal. So the UI asks up front and disables Connect.
+   *
+   * Booleans only. The key itself, its length, and the provider's own config
+   * stay on this side — the answer says WHETHER, never WHAT.
+   */
+  integrationCapabilities(_p: HostPrincipal): IntegrationCapabilities {
+    const provider = this.crm?.provider;
+    const enabled = provider?.enabled === true;
+    let canStoreCredentials = false;
+    try {
+      loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+      canStoreCredentials = true;
+    } catch {
+      /* absent or malformed — either way the answer is the same: no */
+    }
+    return {
+      provider: enabled ? (provider?.name ?? null) : null,
+      enabled,
+      canStoreCredentials,
+      // From the ADAPTER, never from a copy catalog: the checklist a host works
+      // through and the scopes the adapter actually needs are one list.
+      requiredScopes: enabled ? [...(provider?.requiredScopes ?? [])] : [],
+    };
   }
 
   /**

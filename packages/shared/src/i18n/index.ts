@@ -237,6 +237,8 @@ export interface BookingMessages {
       members: string;
       developer: string;
       notifications: string;
+      /** Tab label. The tab's own copy lives at `admin.integrations`. */
+      integrations: string;
     };
     eventTypes: {
       title: string;
@@ -738,6 +740,72 @@ export interface BookingMessages {
       deletedToast: string;
       toggledToast: string;
     };
+    /**
+     * Integrations tab (H1b / #93) — connect one CRM credential per account.
+     *
+     * NOTE WHAT IS ABSENT: the required-scope names. They are provider
+     * identifiers the host matches character-for-character on a checkbox in
+     * someone else's UI, so they come from the adapter itself
+     * (`CrmProvider.requiredScopes`, surfaced on the capabilities reply) rather
+     * than from here. Putting them in a locale catalog would let the setup
+     * instructions drift from what the adapter needs, and would invite a
+     * translator to "translate" an identifier. Only the prose lives here.
+     */
+    integrations: {
+      pageLead: string;
+      loadError: string;
+      hubspotName: string;
+      hubspotDesc: string;
+      /** Deployment states in which connecting cannot succeed (#93, story 20). */
+      disabledTitle: string;
+      disabledBody: string;
+      noKeyTitle: string;
+      noKeyBody: string;
+      /** The probe itself failed — say that, never diagnose a cause we did not learn. */
+      unknownTitle: string;
+      unknownBody: string;
+      statusConnected: string;
+      statusUnhealthy: string;
+      statusDisconnected: string;
+      statusNotConnected: string;
+      notConnectedBody: string;
+      endingIn: string;
+      lastChecked: string;
+      neverChecked: string;
+      disconnectedBody: string;
+      unhealthyLead: string;
+      unhealthyScopes: string;
+      unhealthyKeepsCredential: string;
+      unhealthyUnknown: string;
+      connect: string;
+      connecting: string;
+      reconnect: string;
+      disconnect: string;
+      disconnecting: string;
+      disconnectConfirm: string;
+      disconnectNothingDeleted: string;
+      confirmDisconnect: string;
+      cancel: string;
+      dialogTitle: string;
+      dialogLead: string;
+      scopesTitle: string;
+      scopesLead: string;
+      tokenLabel: string;
+      tokenPlaceholder: string;
+      tokenHelp: string;
+      labelLabel: string;
+      labelPlaceholder: string;
+      labelHelp: string;
+      errorRejected: string;
+      errorMissingScopes: string;
+      errorUnverified: string;
+      errorNoKey: string;
+      errorDisabled: string;
+      errorGeneric: string;
+      nothingStored: string;
+      connectedToast: string;
+      disconnectedToast: string;
+    };
     bookingPageHeader: {
       title: string;
       subtitle: string;
@@ -1062,6 +1130,7 @@ export const en: BookingMessages = {
       members: 'Members',
       developer: 'Developer',
       notifications: 'Notifications',
+      integrations: 'Integrations',
     },
     eventTypes: {
       title: 'Events',
@@ -1555,6 +1624,72 @@ export const en: BookingMessages = {
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
     },
+    integrations: {
+      pageLead:
+        'Connect your CRM once for the whole workspace. From then on, every booking anyone here accepts becomes a contact and a meeting on that contact, automatically.',
+      loadError: 'We could not load the current connection. Refresh to try again.',
+      hubspotName: 'HubSpot',
+      hubspotDesc:
+        'Accepted bookings become a contact and an associated meeting. Reschedules and cancellations update the same meeting, never a second one.',
+      disabledTitle: 'Not enabled on this deployment',
+      disabledBody:
+        'Whoever runs this installation has not switched a CRM on. Ask them to set CRM_PROVIDER, then come back.',
+      noKeyTitle: 'Credentials cannot be stored here yet',
+      noKeyBody:
+        'This installation has no encryption key, so a token could only be kept in the clear. We refuse to do that. Ask whoever runs it to set INTEGRATION_ENCRYPTION_KEY, then come back.',
+      unknownTitle: 'We could not check this connection',
+      unknownBody:
+        'Something went wrong reading this installation\u2019s settings, so we are not offering to connect until we know it would work. Refresh to try again.',
+      statusConnected: 'Connected',
+      statusUnhealthy: 'Needs attention',
+      statusDisconnected: 'Disconnected',
+      statusNotConnected: 'Not connected',
+      notConnectedBody: 'Nothing is being sent to HubSpot from this workspace.',
+      endingIn: 'Token ending in {last4}',
+      lastChecked: 'Last checked {date}',
+      neverChecked: 'Not used yet — the next accepted booking is the first check.',
+      disconnectedBody:
+        'The credential was removed. Existing bookings still point at their meetings, so reconnecting the same portal picks up where this left off.',
+      unhealthyLead: 'Bookings have stopped reaching HubSpot.',
+      unhealthyScopes: 'HubSpot says these scopes are missing from your private app:',
+      unhealthyKeepsCredential:
+        'The token is still here. Grant the scopes in HubSpot and the next accepted booking goes through on its own — there is nothing to re-paste.',
+      unhealthyUnknown: 'HubSpot rejected the last write and did not say why.',
+      connect: 'Connect',
+      connecting: 'Connecting…',
+      reconnect: 'Reconnect',
+      disconnect: 'Disconnect',
+      disconnecting: 'Disconnecting…',
+      disconnectConfirm: 'Stop sending bookings to HubSpot?',
+      disconnectNothingDeleted:
+        'Nothing is deleted inside HubSpot. Contacts and meetings already there stay exactly as they are.',
+      confirmDisconnect: 'Yes, disconnect',
+      cancel: 'Cancel',
+      dialogTitle: 'Connect HubSpot',
+      dialogLead:
+        'In HubSpot, go to Settings → Integrations → Private Apps and create an app. Grant it the two scopes below, then paste its access token here.',
+      scopesTitle: 'Scopes this app needs',
+      scopesLead: 'Tick each one off as you grant it in HubSpot. All of them are required.',
+      tokenLabel: 'Access token',
+      tokenPlaceholder: 'Paste the private app token',
+      tokenHelp:
+        'We check the token against HubSpot before storing it, and we never show it again after that.',
+      labelLabel: 'Portal name (optional)',
+      labelPlaceholder: 'e.g. Acme sales portal',
+      labelHelp: 'Only so this connection is recognizable later.',
+      errorRejected:
+        'HubSpot rejected that token. Check that the private app is active and has both scopes.',
+      errorMissingScopes: 'HubSpot says these scopes are missing:',
+      errorUnverified:
+        'We could not reach HubSpot to check that token. Try again in a moment.',
+      errorNoKey:
+        'This installation cannot store credentials: no encryption key is configured.',
+      errorDisabled: 'No CRM is enabled on this installation.',
+      errorGeneric: 'Something went wrong. Try again.',
+      nothingStored: 'Nothing was saved.',
+      connectedToast: 'HubSpot connected.',
+      disconnectedToast: 'HubSpot disconnected.',
+    },
     bookingPageHeader: {
       title: 'Booking Page',
       subtitle: 'Style your public page. Preview updates live — what you see is what visitors get.',
@@ -1860,6 +1995,7 @@ export const es: BookingMessages = {
       members: 'Miembros',
       developer: 'Desarrollador',
       notifications: 'Notificaciones',
+      integrations: 'Integraciones',
     },
     eventTypes: {
       title: 'Eventos',
@@ -2352,6 +2488,72 @@ export const es: BookingMessages = {
       revokedToast: 'Clave revocada.',
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
+    },
+    integrations: {
+      pageLead:
+        'Conecta tu CRM una vez para todo el espacio de trabajo. A partir de ahí, cada reserva que alguien acepte aquí se convierte en un contacto y en una reunión sobre ese contacto, automáticamente.',
+      loadError: 'No pudimos cargar la conexión actual. Recarga para reintentar.',
+      hubspotName: 'HubSpot',
+      hubspotDesc:
+        'Las reservas aceptadas se convierten en un contacto y una reunión asociada. Los cambios de horario y las cancelaciones actualizan esa misma reunión, nunca crean una segunda.',
+      disabledTitle: 'No está habilitado en esta instalación',
+      disabledBody:
+        'Quien administra esta instalación no ha activado ningún CRM. Pídele que configure CRM_PROVIDER y vuelve.',
+      noKeyTitle: 'Todavía no se pueden guardar credenciales aquí',
+      noKeyBody:
+        'Esta instalación no tiene clave de cifrado, así que un token solo podría guardarse sin proteger. Nos negamos a hacerlo. Pide a quien la administra que configure INTEGRATION_ENCRYPTION_KEY y vuelve.',
+      unknownTitle: 'No pudimos comprobar esta conexión',
+      unknownBody:
+        'Algo falló al leer la configuración de esta instalación, así que no ofrecemos conectar hasta saber que funcionaría. Recarga para reintentar.',
+      statusConnected: 'Conectado',
+      statusUnhealthy: 'Requiere atención',
+      statusDisconnected: 'Desconectado',
+      statusNotConnected: 'Sin conectar',
+      notConnectedBody: 'Este espacio de trabajo no está enviando nada a HubSpot.',
+      endingIn: 'Token terminado en {last4}',
+      lastChecked: 'Última comprobación: {date}',
+      neverChecked: 'Aún sin usar — la próxima reserva aceptada será la primera comprobación.',
+      disconnectedBody:
+        'Se eliminó la credencial. Las reservas existentes siguen apuntando a sus reuniones, así que reconectar el mismo portal retoma justo donde quedó.',
+      unhealthyLead: 'Las reservas dejaron de llegar a HubSpot.',
+      unhealthyScopes: 'HubSpot indica que a tu aplicación privada le faltan estos permisos:',
+      unhealthyKeepsCredential:
+        'El token sigue aquí. Concede los permisos en HubSpot y la próxima reserva aceptada pasará sola — no hay nada que volver a pegar.',
+      unhealthyUnknown: 'HubSpot rechazó la última escritura y no dijo por qué.',
+      connect: 'Conectar',
+      connecting: 'Conectando…',
+      reconnect: 'Reconectar',
+      disconnect: 'Desconectar',
+      disconnecting: 'Desconectando…',
+      disconnectConfirm: '¿Dejar de enviar reservas a HubSpot?',
+      disconnectNothingDeleted:
+        'No se borra nada dentro de HubSpot. Los contactos y las reuniones que ya están ahí se quedan tal cual.',
+      confirmDisconnect: 'Sí, desconectar',
+      cancel: 'Cancelar',
+      dialogTitle: 'Conectar HubSpot',
+      dialogLead:
+        'En HubSpot, entra en Configuración → Integraciones → Aplicaciones privadas y crea una aplicación. Concédele los dos permisos de abajo y pega aquí su token de acceso.',
+      scopesTitle: 'Permisos que necesita la aplicación',
+      scopesLead: 'Marca cada uno a medida que lo concedes en HubSpot. Todos son obligatorios.',
+      tokenLabel: 'Token de acceso',
+      tokenPlaceholder: 'Pega el token de la aplicación privada',
+      tokenHelp:
+        'Comprobamos el token con HubSpot antes de guardarlo, y no volvemos a mostrarlo nunca más.',
+      labelLabel: 'Nombre del portal (opcional)',
+      labelPlaceholder: 'p. ej. Portal de ventas de Acme',
+      labelHelp: 'Solo para reconocer esta conexión más adelante.',
+      errorRejected:
+        'HubSpot rechazó ese token. Comprueba que la aplicación privada esté activa y tenga los dos permisos.',
+      errorMissingScopes: 'HubSpot indica que faltan estos permisos:',
+      errorUnverified:
+        'No pudimos contactar con HubSpot para comprobar ese token. Inténtalo de nuevo en un momento.',
+      errorNoKey:
+        'Esta instalación no puede guardar credenciales: no hay clave de cifrado configurada.',
+      errorDisabled: 'No hay ningún CRM habilitado en esta instalación.',
+      errorGeneric: 'Algo salió mal. Inténtalo de nuevo.',
+      nothingStored: 'No se guardó nada.',
+      connectedToast: 'HubSpot conectado.',
+      disconnectedToast: 'HubSpot desconectado.',
     },
     bookingPageHeader: {
       title: 'Página de reservas',
