@@ -263,7 +263,7 @@ carves CRM out of the vendor-neutral rule, which governs **calendar** providers 
 | Var | Default | Required when | Secret? |
 |---|---|---|---|
 | `CRM_PROVIDER` | `disabled` | set to `hubspot` to enable the write-out | no |
-| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential from the dashboard; boot never reads it | **yes** |
+| `INTEGRATION_ENCRYPTION_KEY` | — | to CONNECT a credential, or to CREATE a webhook; boot never reads it | **yes** |
 | `HUBSPOT_PRIVATE_APP_TOKEN` | — | only as a deployment-wide fallback for accounts that connect nothing | **yes** |
 | `CRM_HTTP_TIMEOUT_MS` | `10000` | never — raise only if the CRM legitimately runs slow | no |
 
@@ -275,6 +275,24 @@ this key means every stored credential must be re-pasted**; rotating it requires
 re-connecting each integration, since nothing re-encrypts in place yet.
 Connecting without a key is refused with `INTEGRATION_KEY_MISSING` rather than
 storing a token in plaintext.
+
+**The same key also protects webhook signing secrets.** `webhook.secret` rides
+the same envelope, bound to `(account, webhook)` rather than `(account,
+provider)`, and is decrypted only at signing time. The consequences for a
+deployment that has no key are deliberately asymmetric:
+
+- Webhooks that **already exist** with a plaintext secret keep delivering,
+  signed exactly as before. Nothing about them changes.
+- **Creating** a webhook is refused with the same `INTEGRATION_KEY_MISSING`,
+  because the only alternative is minting a fresh signing secret and writing it
+  to disk in the clear.
+- A webhook whose secret is **already encrypted** refuses to deliver rather than
+  falling back to an unsigned POST — a key that has gone missing is a
+  deployment fault, and the outbox retries it with backoff until it is fixed.
+
+Once a key is present, a legacy plaintext secret is re-encrypted in place the
+first time that webhook signs a delivery. The signature the subscriber verifies
+is byte-identical before and after, so no subscriber needs to be told.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
