@@ -174,6 +174,19 @@ describe('team booking — manage view reschedule context (#122)', () => {
     expect(after.reschedule).toMatchObject({ kind: 'team', teamSlug: 'sales' });
   });
 
+  it('answers NO context when the team has no slug, rather than the organizer', async () => {
+    const svc = service();
+    const { booking, token } = await bookTeam(svc, (await teamSlots(svc))[0]!);
+
+    // `team.slug` is nullable in both dialects. Such a team is not addressable
+    // on any public route — and falling back to the organizer's handle would
+    // emit exactly the personal-shaped context that caused #122, sending the
+    // page to a lookup that cannot see a team event type.
+    await db.run(sql`UPDATE team SET slug = NULL WHERE slug = 'sales'`);
+
+    expect((await manageView(svc, booking.uid, token)).reschedule).toBeUndefined();
+  });
+
   it('still describes a PERSONAL booking by its handle', async () => {
     const svc = service();
     // A personal event with no intake questions — the seeded `intro-call` asks
@@ -220,7 +233,16 @@ describe('team booking — manage view reschedule context (#122)', () => {
     expect(new Date(moved.startUtc).getTime()).toBe(new Date(target).getTime());
   });
 
-  it('parses a v1 personal context, which carried no `kind` (additive contract)', () => {
+});
+
+/**
+ * Pure contract assertions — deliberately OUTSIDE the suite above, which builds
+ * a SQLite database in `beforeEach`. These say something about the schema only,
+ * so they must not be able to fail for a reason the schema had nothing to do
+ * with (a missing fixture, a native-module mismatch).
+ */
+describe('reschedule context contract (#122)', () => {
+  it('parses a v1 personal context, which carried no `kind` (additive)', () => {
     // A body written before the discriminant existed still means personal, so
     // an in-flight response or a cached page keeps routing to the same place.
     const v1 = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call' };
@@ -228,5 +250,25 @@ describe('team booking — manage view reschedule context (#122)', () => {
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.kind).toBeUndefined();
     expect(bookingViewSchema.shape.reschedule.safeParse(v1).success).toBe(true);
+  });
+
+  it('keeps the branches disjoint, so neither shape can read as the other', () => {
+    const team = { kind: 'team', accountCode: 'acme', teamSlug: 'sales', slug: 'team-demo' };
+    const parsedTeam = rescheduleContextSchema.safeParse(team);
+    expect(parsedTeam.success).toBe(true);
+    expect(parsedTeam.success && parsedTeam.data).not.toHaveProperty('handle');
+
+    // A team context is NOT accepted as a personal one just because `kind` is
+    // optional on that branch — the personal branch requires `handle`.
+    expect(rescheduleContextSchema.safeParse({ ...team, kind: undefined }).success).toBe(false);
+    // …and a personal body cannot claim the team literal without a team slug.
+    expect(
+      rescheduleContextSchema.safeParse({
+        kind: 'team',
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+      }).success,
+    ).toBe(false);
   });
 });

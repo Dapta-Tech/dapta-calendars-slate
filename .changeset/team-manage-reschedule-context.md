@@ -1,5 +1,6 @@
 ---
 "@slate/types": minor
+"@slate/shared": minor
 ---
 
 Name the manage view's reschedule context by the kind of event type that owns
@@ -18,3 +19,9 @@ Additive. `kind` is optional on the personal branch, so a v1 body
 (`{ accountCode, handle, slug }`) still parses and still means personal, and the
 two branches stay disjoint on `handle` vs `teamSlug` even without the
 discriminant.
+
+`@slate/shared` gains three `BookingMessages.manage` keys (en + es): the line
+shown when a booking's start instant does not parse, and the title and body for
+a manage link that no longer opens one — the manage token rotates on every
+reschedule, so an older emailed link answers 403 by design and now says so
+instead of throwing.

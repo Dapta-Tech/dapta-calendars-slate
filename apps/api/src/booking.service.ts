@@ -62,6 +62,7 @@ interface RescheduleContextRow {
   code: string;
   handle: string | null;
   slug: string;
+  team_id: string | null;
   team_slug: string | null;
 }
 
@@ -74,14 +75,23 @@ interface RescheduleContextRow {
  * rather than always answering the personal shape — is what lets the manage
  * page call the availability route that can actually resolve the event.
  *
- * `team_slug` wins over `handle` because a team booking has BOTH: the join
- * finds the team through the event type, and `host_member_id` still points at
- * whichever organizer the scheduling method assigned.
+ * `team_id` decides, not `team_slug`: a team booking has BOTH a team and an
+ * organizer — the join finds the team through the event type, while
+ * `host_member_id` still points at whichever organizer the scheduling method
+ * assigned — so the handle is present and would otherwise win.
+ *
+ * `team.slug` is nullable in both dialects. A team event type whose team has no
+ * slug is not addressable on any public route, so it answers NO context rather
+ * than falling through to the organizer's handle — that fallthrough would emit
+ * exactly the personal-shaped context this function exists to stop, and the
+ * picker would silently go empty again. An absent picker beats a wrong one.
  */
 function rescheduleContextOf(ctx: RescheduleContextRow | undefined): BookingView['reschedule'] {
   if (!ctx?.slug) return undefined;
-  if (ctx.team_slug)
-    return { kind: 'team', accountCode: ctx.code, teamSlug: ctx.team_slug, slug: ctx.slug };
+  if (ctx.team_id)
+    return ctx.team_slug
+      ? { kind: 'team', accountCode: ctx.code, teamSlug: ctx.team_slug, slug: ctx.slug }
+      : undefined;
   if (ctx.handle) return { kind: 'personal', accountCode: ctx.code, handle: ctx.handle, slug: ctx.slug };
   return undefined;
 }
@@ -369,7 +379,7 @@ export class BookingService {
       // rather than `bk.team_id`: the EVENT TYPE decides which public route
       // serves it, and it is the event type the picker has to resolve.
       sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug,
-                 tm.slug AS team_slug
+                 et.team_id AS team_id, tm.slug AS team_slug
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
