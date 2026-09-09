@@ -290,7 +290,7 @@ describe('duplicate-booking guard (SQLite in-memory)', () => {
   });
 
   it('exempts an API-key write even when it reports onBehalf: false', async () => {
-    // The cal.com-compatibility surface is exactly this shape, which is why the
+    // The v2 compatibility surface is exactly this shape, which is why the
     // guard reads a flag of its own rather than inferring from `onBehalf`.
     const slug = 'guarded-apikey';
     await makePersonalEvent(slug, { guard: true });

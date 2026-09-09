@@ -153,7 +153,7 @@ export interface CreateBookingArgs {
   onBehalf?: boolean;
   /**
    * True when this write arrives through an API key (the machine API or the
-   * cal.com-compatibility surface). Only the duplicate-booking guard reads it
+   * v2 compatibility surface). Only the duplicate-booking guard reads it
    * — it is a SEPARATE flag from `onBehalf` because the compatibility surface
    * is an API-key write that deliberately reports `onBehalf: false`. See
    * `duplicate-guard.ts`.

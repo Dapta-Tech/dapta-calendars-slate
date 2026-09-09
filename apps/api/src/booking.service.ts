@@ -146,7 +146,7 @@ export class BookingService {
       metadata?: Record<string, unknown>;
       /**
        * True when the caller is an API key (the machine API or the
-       * cal.com-compatibility surface). Read ONLY by the duplicate-booking
+       * v2 compatibility surface). Read ONLY by the duplicate-booking
        * guard (#69), which exempts host-initiated and API-key writes. It is
        * separate from `onBehalf` because the compatibility surface is an
        * API-key write that deliberately reports `onBehalf: false`.

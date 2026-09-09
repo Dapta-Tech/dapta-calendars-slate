@@ -31,9 +31,19 @@ import type { Db } from './client';
  * mailbox; most providers do not, so collapsing them eventually blocks a
  * legitimately distinct person — a real cost for a defence a throwaway address
  * defeats anyway (#69).
+ *
+ * JS `trim()` strips every kind of whitespace; SQL `trim()` strips spaces only.
+ * The two meet only on rows whose `email_normalized` is NULL, and the migration
+ * backfills those with the SQL expression — so an address carrying a tab or a
+ * newline could compare unequal there. Both write paths validate the address
+ * upstream, so this is a note rather than a case to handle.
+ *
+ * Accepts a loose value because the team write path has no zod contract yet: a
+ * caller can reach it with the field missing, and an exception here would be a
+ * 500 where the insert's NOT NULL already gives a clearer failure.
  */
-export function normalizeAttendeeEmail(email: string): string {
-  return email.trim().toLowerCase();
+export function normalizeAttendeeEmail(email: string | null | undefined): string {
+  return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
 
 /**
@@ -107,7 +117,7 @@ export async function hasUpcomingBookingForEmail(
  *   `onBehalf`    a host creating a booking from their own dashboard
  *   `apiKeyWrite` a server-side integration writing through the public API
  *
- * `onBehalf` alone would get this wrong. The cal.com-compatibility surface is
+ * `onBehalf` alone would get this wrong. The v2 compatibility surface is
  * an API-key write that deliberately passes `onBehalf: false` (its bookings
  * are attributed to the invitee), and the team write path has no `onBehalf`
  * argument at all — so keying only on it would leave both of those guarded,

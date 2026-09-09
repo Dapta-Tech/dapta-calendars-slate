@@ -961,9 +961,10 @@ export function EventTypeForm({
             {m.duplicateGuard.label}
           </label>
         </div>
-        {preventDuplicateBookings ? (
-          <p className="text-xs text-muted-foreground">{m.duplicateGuard.hint}</p>
-        ) : null}
+        {/* Always visible, not gated on the checkbox: the hint carries the
+            caveat that the guard confirms an address has a booking, and a
+            caveat shown only after you tick the box informs nothing. */}
+        <p className="text-xs text-muted-foreground">{m.duplicateGuard.hint}</p>
       </div>
 
       {/* Intake questions */}

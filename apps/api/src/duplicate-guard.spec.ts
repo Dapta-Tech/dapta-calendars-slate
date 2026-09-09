@@ -130,7 +130,7 @@ describe('duplicate-booking guard — API mapping', () => {
     });
 
     expect('error' in (await svc.book(body(slots[0]!.startUtc)))).toBe(false);
-    // The cal.com-compatibility surface's exact call shape: an API-key write
+    // The v2 compatibility surface's exact call shape: an API-key write
     // that deliberately reports `onBehalf: false`.
     const viaKey = await svc.book(body(slots[1]!.startUtc), false, { apiKeyWrite: true });
     expect('error' in viaKey).toBe(false);

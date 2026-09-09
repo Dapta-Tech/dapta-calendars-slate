@@ -679,8 +679,8 @@ export async function createTeamBooking(
     metadata?: Record<string, unknown>;
     idempotencyKey?: string;
     /**
-     * True when this write arrives through an API key (the cal.com
-     * -compatibility surface is the only caller today). Only the
+     * True when this write arrives through an API key (the v2
+     * compatibility surface is the only caller today). Only the
      * duplicate-booking guard reads it — the team path has no `onBehalf`
      * notion, so this is the whole of its exemption. See `duplicate-guard.ts`.
      */
