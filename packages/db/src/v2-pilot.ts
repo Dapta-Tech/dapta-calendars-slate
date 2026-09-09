@@ -4,7 +4,13 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { bookingStartOutOfRange, isSlotBookable, jsonParam, parseJsonColumn } from './repository';
+import {
+  bookingStartOutOfRange,
+  isSlotBookable,
+  jsonParam,
+  parseJsonColumn,
+  scopedIdempotencyKey,
+} from './repository';
 
 export interface CalendarConnectionRow {
   id: string;
@@ -423,7 +429,7 @@ export async function rescheduleBookingV2(
     }>(
       sql`SELECT uid, rescheduled_from_uid FROM booking
           WHERE account_id = ${args.accountId}
-            AND idempotency_key = ${args.idempotencyKey}
+            AND idempotency_key = ${scopedIdempotencyKey(args.accountId, args.idempotencyKey)}
           LIMIT 1`,
     );
     if (existing)
@@ -535,7 +541,9 @@ export async function rescheduleBookingV2(
       ${source.meeting_url}, ${source.attendee_time_zone}, ${responsesExpr},
       ${metadataExpr}, NULL, NULL, 1, ${previousStartUtc}, ${source.uid}, NULL,
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
-      ${source.recurring_event_id}, ${args.idempotencyKey ?? null}, ${now}, ${now})`;
+      ${source.recurring_event_id},
+      ${args.idempotencyKey ? scopedIdempotencyKey(args.accountId, args.idempotencyKey) : null},
+      ${now}, ${now})`;
   const copyAttendees = sql`INSERT INTO booking_attendee
     (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     SELECT ${newId} || ':' || id, ${newId}, name,
@@ -610,7 +618,7 @@ export async function rescheduleBookingV2(
       const existing = await db.get<{ uid: string }>(
         sql`SELECT uid FROM booking
             WHERE account_id = ${args.accountId}
-              AND idempotency_key = ${args.idempotencyKey}
+              AND idempotency_key = ${scopedIdempotencyKey(args.accountId, args.idempotencyKey)}
             LIMIT 1`,
       );
       if (existing)
@@ -629,7 +637,7 @@ export async function rescheduleBookingV2(
       const existing = await db.get<{ uid: string }>(
         sql`SELECT uid FROM booking
             WHERE account_id = ${args.accountId}
-              AND idempotency_key = ${args.idempotencyKey}
+              AND idempotency_key = ${scopedIdempotencyKey(args.accountId, args.idempotencyKey)}
             LIMIT 1`,
       );
       if (existing)

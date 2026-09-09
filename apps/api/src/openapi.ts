@@ -1048,7 +1048,9 @@ export const openapiSpec = {
               type: 'string',
               description: 'Consume a held reservation (slot hold).',
             },
-            idempotencyKey: { type: 'string', description: 'Dedupes retries.' },
+            // No `idempotencyKey` (#104): this route is unauthenticated and the
+            // server drops the field. Retry dedupe is an API-key feature — the
+            // machine and v2 surfaces take it as an `Idempotency-Key` header.
           },
         }),
         responses: {

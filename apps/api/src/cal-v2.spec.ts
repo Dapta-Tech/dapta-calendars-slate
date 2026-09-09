@@ -252,6 +252,40 @@ describe("Cal-compatible v2 R1 contract", () => {
     expect(response.data.eventType.slug).toBe("team-demo");
   });
 
+  it("replays a team booking on a repeated idempotency key", async () => {
+    // The team write goes through `createTeamBooking`, a different insert from
+    // the personal path, and the replay read is this service's own query
+    // (#104). Both namespace the stored key by account; if only one did, the
+    // lookup would silently miss and the retry would 409 instead of replaying.
+    const body = {
+      eventTypeId: teamEventTypeId,
+      start: await firstStart(teamEventTypeId),
+      attendee: {
+        name: "Team Retry",
+        email: "team-retry@example.com",
+        timeZone: "America/Bogota",
+        language: "en",
+      },
+    };
+    const first = await controller.book(
+      request,
+      CAL_V2_BOOKINGS_VERSION,
+      "flow-run-77:team-create",
+      body,
+    );
+    const replay = await controller.book(
+      request,
+      CAL_V2_BOOKINGS_VERSION,
+      "flow-run-77:team-create",
+      body,
+    );
+    expect(replay).toEqual(first);
+    const count = await db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM booking WHERE uid = ${first.data.uid}`,
+    );
+    expect(Number(count?.count)).toBe(1);
+  });
+
   it("reuses the original booking for the same idempotency key and rejects a changed request", async () => {
     const start = await firstStart();
     const body = {

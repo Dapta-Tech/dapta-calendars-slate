@@ -659,6 +659,31 @@ export function bookingStartOutOfRange(startMs: number, now = Date.now()): strin
   return null;
 }
 
+/**
+ * The value actually stored in `booking.idempotency_key` (#104).
+ *
+ * That column carries a GLOBAL `UNIQUE`, so a raw caller-supplied key belongs
+ * to whichever tenant writes it first: a second account reusing the same
+ * string collides on insert and can never book with it, and a replay lookup
+ * that forgot its account would hand one tenant's booking to another. Both
+ * halves are closed by never storing the raw key — the account id is folded in
+ * here, and every read of the column goes through the same function so the
+ * write and the lookup cannot drift apart.
+ *
+ * The prefix needs no escaping, but the reason is narrower than it looks. Keys
+ * are opaque, so within one account the mapping is trivially injective; what
+ * the UNIQUE column needs is injectivity ACROSS accounts, and that holds only
+ * because an account id never contains the separator. Ids are `randomUUID()`
+ * (see `insertAccountWithShortCode` in `short-links.ts`), so it never does.
+ * Were that to change, `a:b` + `c` and `a` + `b:c` would collide.
+ *
+ * Callers still hold the raw key (it is what the client retries with); only
+ * storage and lookup are namespaced.
+ */
+export function scopedIdempotencyKey(accountId: string, key: string): string {
+  return `${accountId}:${key}`;
+}
+
 export async function createBooking(
   db: Db,
   args: CreateBookingArgs,
@@ -729,9 +754,11 @@ export async function createBooking(
     if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
   }
 
-  // Idempotency: return the prior booking for a repeated key.
+  // Idempotency: return the prior booking for a repeated key. Scoped to the
+  // account resolved above (#104) — a key only ever replays its own tenant's
+  // booking.
   if (args.idempotencyKey) {
-    const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
+    const prior = await findBookingByIdempotencyKey(db, account.id, args.idempotencyKey);
     // Replay: return the existing booking, do NOT re-mint the token, and flag it
     // deduplicated (B3 — contract).
     if (prior) return { ok: true, booking: prior.record, manageToken: '', deduplicated: true };
@@ -862,7 +889,8 @@ export async function createBooking(
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
-      ${args.idempotencyKey ?? null}, ${now}, ${now})`;
+      ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
+      ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
@@ -929,8 +957,16 @@ export async function createBooking(
   }
 }
 
+/**
+ * Replay lookup for a repeated idempotency key — ALWAYS account-scoped (#104).
+ * This route is reachable without a credential, and the row it returns carries
+ * the host, the attendee and the meeting time, so a key alone must never be
+ * enough to read a booking. The account filter is the guarantee;
+ * `scopedIdempotencyKey` matches how the value was written.
+ */
 async function findBookingByIdempotencyKey(
   db: Db,
+  accountId: string,
   key: string,
 ): Promise<{ record: BookingRecord } | undefined> {
   const row = await db.get<{
@@ -951,7 +987,8 @@ async function findBookingByIdempotencyKey(
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         LEFT JOIN booking_attendee a ON a.booking_id = b.id
-        WHERE b.idempotency_key = ${key} LIMIT 1`,
+        WHERE b.account_id = ${accountId}
+          AND b.idempotency_key = ${scopedIdempotencyKey(accountId, key)} LIMIT 1`,
   );
   if (!row) return undefined;
   return {

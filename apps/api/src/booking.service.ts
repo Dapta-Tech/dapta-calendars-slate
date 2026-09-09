@@ -32,9 +32,19 @@ import {
   type PublicProfile,
   type TeamProfile,
 } from '@slate/types';
+import { z } from 'zod';
 import { DB, ENV } from './tokens';
 
 export type ServiceError = { error: string; message: string; status: number };
+
+/**
+ * The bound `createBookingSchema` used to apply to `idempotencyKey` before the
+ * field moved off the request body (#104). It is re-stated here rather than
+ * dropped: the value lands in a UNIQUE-indexed column, and an unbounded string
+ * reaches Postgres as an index-row-size error that the booking path does not
+ * classify. Every caller that hands the service a key inherits the check.
+ */
+const contextIdempotencyKeySchema = z.string().min(1).max(200);
 
 /**
  * The duplicate-booking guard's public message (#69), shared by the personal
@@ -160,6 +170,15 @@ export class BookingService {
        * API-key write that deliberately reports `onBehalf: false`.
        */
       apiKeyWrite?: boolean;
+      /**
+       * Retry-dedupe key. CONTEXT, never the request body (#104): `POST
+       * /v1/bookings` is unauthenticated, and a key set there would land in a
+       * column the whole deployment shares. Only a controller that has
+       * authenticated an API key may set it — today the machine API (from its
+       * `Idempotency-Key` header) and the v2 compatibility surface. The
+       * repository namespaces it by account before storing.
+       */
+      idempotencyKey?: string;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -175,7 +194,9 @@ export class BookingService {
         answers: input.answers,
         metadata: context?.metadata,
         reservationUid: input.reservationUid,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: context?.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(context.idempotencyKey)
+          : undefined,
         onBehalf,
         apiKeyWrite: context?.apiKeyWrite,
       },
@@ -356,7 +377,9 @@ export class BookingService {
       reason: opts.reason,
       manageToken: opts.token,
       byHost: opts.byHost,
-      idempotencyKey: opts.idempotencyKey,
+      idempotencyKey: opts.idempotencyKey
+        ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
+        : undefined,
       accountId: opts.accountId,
     });
     if (!out.ok) return this.mapMutation(out.reason);
@@ -425,7 +448,9 @@ export class BookingService {
         newStartMs: new Date(opts.newStartUtc).getTime(),
         manageToken: opts.token,
         byHost: opts.byHost,
-        idempotencyKey: opts.idempotencyKey,
+        idempotencyKey: opts.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
+          : undefined,
       },
       // Fail-closed external conflict check on the target slot — the same
       // policy as create (no-op when the provider is disabled).
@@ -566,7 +591,6 @@ export class BookingService {
       additionalAttendees?: Array<BookingView['attendee']>;
       answers?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
-      idempotencyKey?: string;
     },
     /**
      * Caller-supplied context, NEVER request body. `PublicController` passes
@@ -575,8 +599,13 @@ export class BookingService {
      * unauthenticated booker turn the duplicate-booking guard off by adding a
      * JSON key. It is a separate argument for that reason — only a controller
      * that has authenticated an API key may set it.
+     *
+     * `idempotencyKey` sits here for the same reason (#104), and to match the
+     * personal `book()` path — leaving it on `body` above while removing it
+     * from the personal payload would keep the hazard alive on one route and
+     * invite the next edit to that controller to reopen it.
      */
-    context?: { apiKeyWrite?: boolean },
+    context?: { apiKeyWrite?: boolean; idempotencyKey?: string },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -589,7 +618,9 @@ export class BookingService {
         additionalAttendees: body.additionalAttendees,
         answers: body.answers,
         metadata: body.metadata,
-        idempotencyKey: body.idempotencyKey,
+        idempotencyKey: context?.idempotencyKey
+          ? contextIdempotencyKeySchema.parse(context.idempotencyKey)
+          : undefined,
         apiKeyWrite: context?.apiKeyWrite,
       },
       this.calendar.provider,

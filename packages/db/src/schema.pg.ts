@@ -224,6 +224,9 @@ export const booking = pgTable('booking', {
   reschedulingReason: text('rescheduling_reason'),
   rescheduledByEmail: text('rescheduled_by_email'),
   recurringEventId: text('recurring_event_id'),
+  /** Namespaced by account before it is stored (#104) — this `unique` is
+   *  GLOBAL, so a raw caller-supplied key would be claimable across
+   *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
