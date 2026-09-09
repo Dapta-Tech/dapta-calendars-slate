@@ -620,6 +620,13 @@ export function EventTypeForm({
   const [seats, setSeats] = useState<number | ''>(initial?.seatsPerTimeSlot ?? '');
   const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
+  // Duplicate-booking guard (#69). Hydrated from the event so that EDITING one
+  // cannot silently switch it back off — the class of defect QA2 fix 2 already
+  // corrected on this form for notice/interval/buffers. A new event starts off,
+  // which is also what every event that predates this reads as.
+  const [preventDuplicateBookings, setPreventDuplicate] = useState(
+    initial?.preventDuplicateBookings ?? false,
+  );
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
   // Reminders + follow-up (#68). Editing opens on the effective list the API
   // returns (a never-configured event surfaces the shipped 24h + 1h with the
@@ -744,6 +751,9 @@ export function EventTypeForm({
         seatsPerTimeSlot: seats === '' ? null : Number(seats),
         scheduleId: scheduleId || null,
         requiresConfirmation,
+        // Travels on create AND edit, personal AND team events — both public
+        // write paths honour it, so the editor must not offer it on only one.
+        preventDuplicateBookings,
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
         reminders,
@@ -930,15 +940,30 @@ export function EventTypeForm({
         </div>
       ) : null}
 
-      <div className="flex gap-6">
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
-          {m.requiresConfirmation}
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-          {m.hiddenLabel}
-        </label>
+      {/* Booking-policy booleans. The duplicate-booking guard (#69) joins the
+          row a host already reads for this class of setting, rather than
+          opening a section of its own. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
+            {m.requiresConfirmation}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+            {m.hiddenLabel}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox
+              checked={preventDuplicateBookings}
+              onChange={(e) => setPreventDuplicate(e.target.checked)}
+            />
+            {m.duplicateGuard.label}
+          </label>
+        </div>
+        {preventDuplicateBookings ? (
+          <p className="text-xs text-muted-foreground">{m.duplicateGuard.hint}</p>
+        ) : null}
       </div>
 
       {/* Intake questions */}

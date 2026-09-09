@@ -42,6 +42,11 @@ import {
   type BookingFieldDef,
 } from './repository';
 import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
+import {
+  duplicateGuardApplies,
+  hasUpcomingBookingForEmail,
+  normalizeAttendeeEmail,
+} from './duplicate-guard';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
@@ -367,13 +372,15 @@ interface TeamEventType {
   after_event_buffer: number;
   scheduling_type: string | null;
   booking_fields: unknown;
+  /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
+  prevent_duplicate_bookings: number;
 }
 
 async function getTeamEventType(db: Db, accountId: string, teamId: string, slug: string) {
   return db.get<TeamEventType>(
     sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
-               booking_fields
+               booking_fields, prevent_duplicate_bookings
         FROM event_type
         WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug} AND hidden = 0
         LIMIT 1`,
@@ -603,7 +610,14 @@ export type TeamBookingOutcome =
   | { ok: true; uid: string; hostMemberId: string; manageToken: string }
   | {
       ok: false;
-      reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID' | 'CALENDAR_UNAVAILABLE';
+      reason:
+        | 'NOT_FOUND'
+        | 'SLOT_TAKEN'
+        | 'INVALID'
+        | 'CALENDAR_UNAVAILABLE'
+        /** The event type's duplicate-booking guard refused this email (#69).
+         *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
+        | 'DUPLICATE_BOOKING';
       message?: string;
     };
 
@@ -664,6 +678,13 @@ export async function createTeamBooking(
     answers?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
     idempotencyKey?: string;
+    /**
+     * True when this write arrives through an API key (the cal.com
+     * -compatibility surface is the only caller today). Only the
+     * duplicate-booking guard reads it — the team path has no `onBehalf`
+     * notion, so this is the whole of its exemption. See `duplicate-guard.ts`.
+     */
+    apiKeyWrite?: boolean;
   },
   /** Wired CalendarProvider — candidate hosts are conflict-checked against
    *  their external calendars, fail-closed (see createBooking). */
@@ -682,6 +703,21 @@ export async function createTeamBooking(
   // Start-instant sanity (QA fix 8) — same range policy as createBooking.
   const rangeErr = bookingStartOutOfRange(args.startMs);
   if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
+  // Duplicate-booking guard (#69/AB1), the TEAM half — the personal path in
+  // repository.ts is the other. Instrumenting only one of the two is how this
+  // feature ships half-built, so the two call sites stay in step. Checked
+  // before host resolution: there is nothing to gain from picking a
+  // round-robin host for a booking that is about to be refused.
+  if (
+    duplicateGuardApplies({
+      preventDuplicateBookings: et.prevent_duplicate_bookings,
+      apiKeyWrite: args.apiKeyWrite,
+    }) &&
+    (await hasUpcomingBookingForEmail(db, et.id, args.attendee.email))
+  ) {
+    return { ok: false, reason: 'DUPLICATE_BOOKING' };
+  }
 
   // QA fix 13 (team surface): the public team-booking path must land on a
   // slot the team's CONFIGURATION offers (per-host rules combined by the
@@ -790,13 +826,15 @@ export async function createTeamBooking(
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${args.idempotencyKey ?? null}, ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
+      ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
     (attendee) => sql`
-      INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${normalizeAttendeeEmail(attendee.email)},
         ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
   );
   // Multi-host bookings (collective / fixed_round_robin) record every assigned
@@ -1166,8 +1204,9 @@ export async function addAttendeeToBooking(
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   await db.run(
-    sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
-        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email}, ${attendee.timeZone},
+    sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email},
+          ${normalizeAttendeeEmail(attendee.email)}, ${attendee.timeZone},
           ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
   );
   return { ok: true };

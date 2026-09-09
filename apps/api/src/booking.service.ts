@@ -133,6 +133,14 @@ export class BookingService {
         phone?: string;
       }>;
       metadata?: Record<string, unknown>;
+      /**
+       * True when the caller is an API key (the machine API or the
+       * cal.com-compatibility surface). Read ONLY by the duplicate-booking
+       * guard (#69), which exempts host-initiated and API-key writes. It is
+       * separate from `onBehalf` because the compatibility surface is an
+       * API-key write that deliberately reports `onBehalf: false`.
+       */
+      apiKeyWrite?: boolean;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -150,6 +158,7 @@ export class BookingService {
         reservationUid: input.reservationUid,
         idempotencyKey: input.idempotencyKey,
         onBehalf,
+        apiKeyWrite: context?.apiKeyWrite,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
       this.calendar.provider,
@@ -178,6 +187,16 @@ export class BookingService {
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
+        };
+      // Duplicate-booking guard (#69). The message names NO date, time or host:
+      // revealing the existing slot would hand a third party's schedule to
+      // anyone who guesses an email, and the person it belongs to already has
+      // the confirmation in their inbox.
+      if (outcome.reason === 'DUPLICATE_BOOKING')
+        return {
+          error: 'DUPLICATE_BOOKING',
+          message: 'A booking already exists for this email on this event. Check your inbox.',
           status: 409,
         };
       return {
@@ -527,6 +546,9 @@ export class BookingService {
       answers?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
       idempotencyKey?: string;
+      /** API-key caller — exempt from the duplicate-booking guard (#69). The
+       *  team path has no `onBehalf` notion, so this is the whole exemption. */
+      apiKeyWrite?: boolean;
     },
   ): Promise<{ uid: string; hostMemberId: string; manageUrl?: string } | ServiceError> {
     const out = await createTeamBooking(
@@ -541,6 +563,7 @@ export class BookingService {
         answers: body.answers,
         metadata: body.metadata,
         idempotencyKey: body.idempotencyKey,
+        apiKeyWrite: body.apiKeyWrite,
       },
       this.calendar.provider,
     );
@@ -556,6 +579,14 @@ export class BookingService {
         return {
           error: 'CALENDAR_UNAVAILABLE',
           message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
+        };
+      // Duplicate-booking guard (#69) — same slot-free wording as the personal
+      // path in `book()` above; the two must not drift.
+      if (out.reason === 'DUPLICATE_BOOKING')
+        return {
+          error: 'DUPLICATE_BOOKING',
+          message: 'A booking already exists for this email on this event. Check your inbox.',
           status: 409,
         };
       return {

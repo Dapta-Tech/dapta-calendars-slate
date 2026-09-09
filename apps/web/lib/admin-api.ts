@@ -243,6 +243,8 @@ export interface EventType {
   slotInterval: number | null;
   schedulingType: string | null;
   requiresConfirmation: boolean;
+  /** Duplicate-booking guard (#69) — false on every event nobody switched on. */
+  preventDuplicateBookings: boolean;
   seatsPerTimeSlot: number | null;
   bookingFields: unknown[];
   /** Reminders + follow-up owned by this event (#68) — always the EFFECTIVE

@@ -542,6 +542,11 @@ export const eventTypeInputSchema = z.object({
   afterEventBuffer: z.number().int().min(0).optional(),
   slotInterval: z.number().int().positive().nullable().optional(),
   requiresConfirmation: z.boolean().optional(),
+  /** Duplicate-booking guard (#69): when true, one normalized email may hold
+   *  at most one UPCOMING booking on this event type. Omitted ⇒ unchanged;
+   *  absent on create ⇒ off, which is also what every pre-existing event type
+   *  reads as. Host-initiated and API-key writes are never subject to it. */
+  preventDuplicateBookings: z.boolean().optional(),
   seatsPerTimeSlot: z.number().int().positive().nullable().optional(),
   bookingFields: z.array(bookingFieldSchema).optional(),
   /** Reminders + follow-up, owned by the event type rather than the account

@@ -162,7 +162,10 @@ export class MachineController {
           idempotencyKey,
         },
         true,
-        { additionalAttendees: body.attendees.slice(1) },
+        // `apiKeyWrite` is stated rather than left to `onBehalf` above: it is
+        // the flag the duplicate-booking guard (#69) exempts on, and the
+        // reason this caller is exempt is that it holds an API key.
+        { additionalAttendees: body.attendees.slice(1), apiKeyWrite: true },
       ),
     );
     // Machine envelope: attendees[] (plural).

@@ -752,6 +752,10 @@ export class CalV2Service {
               answers: input.bookingFieldsResponses,
               metadata: internalMetadata,
               idempotencyKey: storedKey,
+              // API-key surface ⇒ exempt from the duplicate-booking guard
+              // (#69). Note this path reports `onBehalf: false` below, which
+              // is why the guard reads a separate flag.
+              apiKeyWrite: true,
             },
           )
         : await this.bookings.book(
@@ -768,7 +772,10 @@ export class CalV2Service {
               idempotencyKey: storedKey,
             },
             false,
-            { additionalAttendees, metadata: internalMetadata },
+            // `onBehalf: false` above is deliberate (these bookings are
+            // attributed to the invitee), so the duplicate-booking guard's
+            // API-key exemption (#69) has to be stated separately.
+            { additionalAttendees, metadata: internalMetadata, apiKeyWrite: true },
           );
 
     if (isServiceError(outcome)) {

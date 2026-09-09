@@ -51,6 +51,18 @@ export interface BookingMessages {
     with: string;
     seatsLeft: string;
     full: string;
+    /**
+     * Duplicate-booking guard (#69 / AB1). Its own block, and its own card on
+     * the booking page: a `DUPLICATE_BOOKING` is a 409 like a taken slot, but
+     * the block is on the address rather than the time, so `slotTaken` +
+     * `pickAnother` would send the booker to do the one thing that cannot
+     * help. `body` names NO date, time or host — see `duplicate-guard.ts`.
+     */
+    duplicateGuard: {
+      title: string;
+      body: string;
+      changeEmail: string;
+    };
   };
   manage: {
     title: string;
@@ -240,6 +252,15 @@ export interface BookingMessages {
       noSchedules: string;
       requiresConfirmation: string;
       hiddenLabel: string;
+      /**
+       * Duplicate-booking guard (#69 / AB1) — the editor half. Never call it a
+       * rate limit or an abuse control in either locale: it counts an email
+       * nobody verifies, so it prevents accidents (CONTEXT.md).
+       */
+      duplicateGuard: {
+        label: string;
+        hint: string;
+      };
       intakeQuestions: string;
       /** Reorder + reserved-name hard block (QA3 fixes 3, 6). */
       moveUp: string;
@@ -843,6 +864,12 @@ export const en: BookingMessages = {
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
+    // Duplicate-booking guard (#69 / AB1). No date, no time, no host.
+    duplicateGuard: {
+      title: 'You already have a booking',
+      body: 'A booking already exists for this email on this event. Check your inbox for the confirmation.',
+      changeEmail: 'Use a different email',
+    },
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -1015,6 +1042,11 @@ export const en: BookingMessages = {
       noSchedules: 'No schedules yet — create one in Availability',
       requiresConfirmation: 'Requires confirmation',
       hiddenLabel: 'Hidden',
+      // Duplicate-booking guard (#69 / AB1) — the host-facing switch.
+      duplicateGuard: {
+        label: 'One booking per person',
+        hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected.',
+      },
       intakeQuestions: 'Intake questions',
       moveUp: 'Move up',
       moveDown: 'Move down',
@@ -1611,6 +1643,12 @@ export const es: BookingMessages = {
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
+    // Duplicate-booking guard (#69 / AB1). Sin fecha, sin hora, sin anfitrión.
+    duplicateGuard: {
+      title: 'Ya tienes una reserva',
+      body: 'Ya existe una reserva con este correo en este evento. Revisa tu bandeja de entrada para ver la confirmación.',
+      changeEmail: 'Usar otro correo',
+    },
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -1783,6 +1821,11 @@ export const es: BookingMessages = {
       noSchedules: 'Aún no hay horarios — crea uno en Disponibilidad',
       requiresConfirmation: 'Requiere confirmación',
       hiddenLabel: 'Oculto',
+      // Duplicate-booking guard (#69 / AB1) — el interruptor del anfitrión.
+      duplicateGuard: {
+        label: 'Una reserva por persona',
+        hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados.',
+      },
       intakeQuestions: 'Preguntas del formulario',
       moveUp: 'Subir',
       moveDown: 'Bajar',
