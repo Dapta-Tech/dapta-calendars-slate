@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE } from '@slate/shared';
-import { setSession } from '@/lib/auth-session';
+import { setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
@@ -49,11 +49,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(new URL('/login?error=callback', origin));
   }
 
+  // The blob's `session_id` is the identity service's OWN row id, not the
+  // upstream provider's. The only place the upstream id exists is a claim inside
+  // the token it just minted, and it is the id a later revoke has to send — the
+  // IAM's UUID resolves to nothing upstream, so a sign-out would revoke nothing.
+  // The blob's id stays as a fallback, so a token minted without the claim is
+  // no worse off than before.
   await setSession({
     provider: 'workos',
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
-    sessionId: tokens.session_id,
+    sessionId: workosSessionIdFromJwt(tokens.access_token) ?? tokens.session_id,
   });
 
   // O2 — claim the campaign click parked at the front door (#94/#65). This is
