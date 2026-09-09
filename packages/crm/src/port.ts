@@ -60,6 +60,15 @@ export interface CrmProvider {
   readonly name: string;
 
   /**
+   * The provider scope names a credential must carry, as the provider spells
+   * them. The connect dialog renders this as its checklist (H1b / #93), so the
+   * setup instructions a host follows and the permissions the adapter actually
+   * needs are ONE list — they cannot drift, and no locale catalog can edit
+   * them. Empty on a disabled provider.
+   */
+  readonly requiredScopes: readonly string[];
+
+  /**
    * Connect-time probe: prove the credential works by USING it, before anything
    * is stored. Fail-closed — a token that cannot read is never persisted.
    * Throws `CrmAuthError` on 401/403.
@@ -130,6 +139,8 @@ export class CrmPropertyError extends Error {
 export class DisabledCrmProvider implements CrmProvider {
   readonly enabled = false;
   readonly name = 'disabled';
+  /** Nothing to grant when nothing is wired. */
+  readonly requiredScopes: readonly string[] = [];
   /**
    * REJECTS rather than throwing synchronously. These methods are typed
    * `Promise<…>`, and a caller that does `provider.createMeeting(…).catch(…)`

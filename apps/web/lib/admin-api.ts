@@ -5,7 +5,13 @@
  * its configured provider expects and ignores the other. A `401` throws an
  * ApiError the /admin gate turns into a redirect to /login.
  */
-import type { EventLocationDto, EventReminder, OnboardingState } from '@slate/types';
+import type {
+  EventLocationDto,
+  EventReminder,
+  IntegrationCapabilities,
+  IntegrationStatusView,
+  OnboardingState,
+} from '@slate/types';
 import { getSession, refreshOrSignOut, signOutAndRedirect } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -21,6 +27,15 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
+    /**
+     * The rest of the error body, for replies that answer with DATA rather than
+     * prose. A refused CRM credential carries `requiredGranularScopes` — the
+     * scope NAME list the provider returned (#74) — and without this the
+     * connect dialog could not name the exact checkbox that was missed, because
+     * the field was already being discarded here. Never assume a shape: read it
+     * defensively at the call site.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -73,9 +88,20 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     }
   }
   if (!res.ok) {
-    const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    // Surface the HTTP status (was discarded) so the UI can handle 409/410/400.
-    throw new ApiError(res.status, j.message ?? j.error ?? `${method} ${path} → ${res.status}`, j.error);
+    const j = (await res.json().catch(() => ({}))) as {
+      message?: string;
+      error?: string;
+      [k: string]: unknown;
+    };
+    // Surface the HTTP status (was discarded) so the UI can handle 409/410/400,
+    // and the rest of the body so a reply that answers structurally (a refused
+    // credential naming the scopes it lacked) does not arrive as prose alone.
+    throw new ApiError(
+      res.status,
+      j.message ?? j.error ?? `${method} ${path} → ${res.status}`,
+      j.error,
+      j,
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json().catch(() => ({}))) as T;
@@ -245,6 +271,16 @@ export const adminApi = {
   webhookDeliveries: (id: string) =>
     req<{ items: WebhookDeliveryRow[] }>('GET', `/v1/webhooks/${id}/deliveries`),
   deleteWebhook: (id: string) => req<void>('DELETE', `/v1/webhooks/${id}`),
+
+  // CRM integrations (H1b / #93). The token travels IN only — `connect` answers
+  // with the same token-free status view the list returns, never the credential.
+  listIntegrations: () => req<IntegrationStatusView[]>('GET', '/v1/integrations'),
+  integrationCapabilities: () =>
+    req<IntegrationCapabilities>('GET', '/v1/integrations/capabilities'),
+  connectIntegration: (b: { provider: string; token: string; label?: string }) =>
+    req<IntegrationStatusView>('POST', '/v1/integrations', b),
+  disconnectIntegration: (provider: string) =>
+    req<{ disconnected: boolean }>('DELETE', `/v1/integrations/${provider}`),
 
   // Branding
   profile: (code: string, handle: string) => req<Profile>('GET', `/v1/profiles/${code}/${handle}`),

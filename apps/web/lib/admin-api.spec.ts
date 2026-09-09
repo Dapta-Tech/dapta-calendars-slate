@@ -113,4 +113,44 @@ describe('adminApi 401 handling', () => {
   it('is an ApiError for callers that catch it', () => {
     expect(new ApiError(410, 'gone', 'GONE')).toBeInstanceOf(Error);
   });
+
+  // A reply that answers with DATA rather than prose has to survive this client
+  // (H1b / #93). A refused CRM credential names the scopes the private app was
+  // missing; before this, everything but `message` and `error` was dropped here
+  // and the connect dialog could not render them — a silent failure, since the
+  // catalog's generic copy would still have rendered something plausible.
+  it('keeps the rest of an error body, so a structured refusal survives', async () => {
+    fetchMock.mockResolvedValue({
+      status: 422,
+      ok: false,
+      json: async () => ({
+        error: 'INTEGRATION_REJECTED',
+        message: 'That token was rejected.',
+        category: 'MISSING_SCOPES',
+        requiredGranularScopes: ['crm.objects.contacts.write'],
+      }),
+    });
+
+    await expect(
+      adminApi.connectIntegration({ provider: 'hubspot', token: 'pat-fake-0000' }),
+    ).rejects.toMatchObject({
+      status: 422,
+      code: 'INTEGRATION_REJECTED',
+      details: { requiredGranularScopes: ['crm.objects.contacts.write'] },
+    });
+  });
+
+  it('sends the pasted token in the body and never in the URL', async () => {
+    // A token in a path or a query string lands in every access log and proxy
+    // trace between here and the API. It travels in a POST body only.
+    fetchMock.mockResolvedValue({ status: 201, ok: true, json: async () => ({}) });
+
+    await adminApi.connectIntegration({ provider: 'hubspot', token: 'pat-fake-0000' });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).not.toContain('pat-fake-0000');
+    expect(url).toMatch(/\/v1\/integrations$/);
+    expect(init.method).toBe('POST');
+    expect(init.body).toContain('pat-fake-0000');
+  });
 });
