@@ -9,6 +9,7 @@ import {
 import {
   claimDueOutbox,
   deliverWebhookEvent,
+  loadEncryptionKey,
   markOutboxDone,
   markOutboxFailed,
   markOutboxRetry,
@@ -63,6 +64,24 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     // no CRM handler simply has no `crm` rows to drain.
     @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
+
+  /**
+   * The webhook signing key (#75), resolved once and cached — including the
+   * "no key" answer, which is a normal state for a deployment whose webhook
+   * secrets are all legacy plaintext. Cached because the worker asks per
+   * delivery and the answer cannot change without a restart.
+   */
+  private cachedWebhookKey: Buffer | null | undefined;
+  private webhookKey(): Buffer | null {
+    if (this.cachedWebhookKey === undefined) {
+      try {
+        this.cachedWebhookKey = loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+      } catch {
+        this.cachedWebhookKey = null;
+      }
+    }
+    return this.cachedWebhookKey;
+  }
 
   onModuleInit(): void {
     if (!this.env.OUTBOX_WORKER_ENABLED || this.env.NODE_ENV === 'test') return;
@@ -154,7 +173,15 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
         throw new Error('webhook outbox row missing webhook_id/payload');
       await deliverWebhookEvent(
         this.db,
-        { webhookId: row.webhookId, body: row.payload },
+        {
+          webhookId: row.webhookId,
+          body: row.payload,
+          // #75: null is a valid state (a deployment with only legacy plaintext
+          // secrets). An ENCRYPTED secret with no key throws inside, which the
+          // catch below turns into a normal retry — so a key removed by mistake
+          // shows up as retrying deliveries, never as unsigned ones.
+          key: this.webhookKey(),
+        },
         this.fetchImpl,
       );
       return;

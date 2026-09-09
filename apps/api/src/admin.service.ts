@@ -779,8 +779,41 @@ export class AdminService {
   listWebhookDeliveries(p: HostPrincipal, webhookId: string) {
     return listWebhookDeliveries(this.db, p.accountId, webhookId);
   }
+  /**
+   * The encryption key, or null when this deployment has none (#75).
+   *
+   * Null is a legitimate READ state — a deployment that predates the envelope
+   * still has plaintext secrets that must keep signing — so the signing paths
+   * take `Buffer | null`. Only the WRITE path refuses (see `createWebhook`).
+   */
+  private webhookKeyOrNull(): Buffer | null {
+    try {
+      return loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Create a webhook. REFUSES when there is no encryption key (#75).
+   *
+   * Webhooks used to work with no key at all, so this is a deliberate trim to
+   * clone-and-run, made for the same reason `connectIntegration` refuses: the
+   * only alternative is minting a fresh signing secret and writing it to disk in
+   * the clear with nobody told. Refusing is loud, coded, and one
+   * `openssl rand -base64 32` away from fixed — a silent plaintext write is none
+   * of those. Webhooks that already exist are untouched and keep delivering.
+   */
   createWebhook(p: HostPrincipal, body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
-    return createWebhook(this.db, { accountId: p.accountId, ...body });
+    const key = this.webhookKeyOrNull();
+    if (!key) {
+      throw new ServiceUnavailableException({
+        error: 'INTEGRATION_KEY_MISSING',
+        message:
+          'This deployment cannot store a webhook signing secret: INTEGRATION_ENCRYPTION_KEY is not configured.',
+      });
+    }
+    return createWebhook(this.db, { accountId: p.accountId, ...body, key });
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);
@@ -789,7 +822,7 @@ export class AdminService {
     return updateWebhook(this.db, p.accountId, id, patch);
   }
   pingWebhook(p: HostPrincipal, id: string) {
-    return pingWebhook(this.db, p.accountId, id);
+    return pingWebhook(this.db, p.accountId, id, this.webhookKeyOrNull());
   }
 
   /** Resolve the account code for a principal (for host on-behalf booking). */

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   createDb,
   migrate,
@@ -8,6 +9,7 @@ import {
   createWebhook,
   getAvailability,
   listOutbox,
+  loadEncryptionKey,
   type Db,
 } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
@@ -29,7 +31,17 @@ class RecordingEmailProvider implements EmailProvider {
   }
 }
 
-const ENV = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+/**
+ * W (#75): webhook secrets are enveloped at rest, so the worker that signs a
+ * delivery has to hold the same key the row was sealed with — the env carries it
+ * here exactly as a real deployment's `.env` does.
+ */
+const WEBHOOK_KEY_B64 = randomBytes(32).toString('base64');
+const WEBHOOK_KEY = loadEncryptionKey(WEBHOOK_KEY_B64);
+const ENV = loadServerEnv({
+  NODE_ENV: 'test',
+  INTEGRATION_ENCRYPTION_KEY: WEBHOOK_KEY_B64,
+} as NodeJS.ProcessEnv);
 /** Let the services' void-ed fire-and-forget enqueues settle before draining. */
 const settle = async () => {
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
@@ -150,6 +162,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.cancelled'],
+      key: WEBHOOK_KEY,
     });
     const res = await booking.book({
       accountCode: 'acme',
@@ -179,6 +192,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.cancelled'],
+      key: WEBHOOK_KEY,
     });
     const uid = await bookAccepted();
     email.sent.length = 0;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import {
   createDb,
@@ -13,6 +13,7 @@ import {
   listOutbox,
   countOutbox,
   backoffMs,
+  loadEncryptionKey,
   type Db,
 } from '@slate/db';
 import type {
@@ -70,7 +71,16 @@ class FlakyCalendarProvider implements CalendarProvider {
   }
 }
 
-const ENV = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+/**
+ * W (#75): webhook secrets are enveloped at rest. The worker signs from the key
+ * in its env, so the spec's env has to carry the one the rows were sealed with.
+ */
+const WEBHOOK_KEY_B64 = randomBytes(32).toString('base64');
+const WEBHOOK_KEY = loadEncryptionKey(WEBHOOK_KEY_B64);
+const ENV = loadServerEnv({
+  NODE_ENV: 'test',
+  INTEGRATION_ENCRYPTION_KEY: WEBHOOK_KEY_B64,
+} as NodeJS.ProcessEnv);
 
 describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
   let db: Db;
@@ -179,6 +189,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
         accountId,
         subscriberUrl: 'https://198.51.100.10/hook',
         eventTriggers: ['booking.created'],
+        key: WEBHOOK_KEY,
       });
       // Delivery always fails.
       worker.fetchImpl = (async () => {
@@ -224,6 +235,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
       secret: 's3cret',
+      key: WEBHOOK_KEY,
     });
     const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
     worker.fetchImpl = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
@@ -255,6 +267,7 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.created'],
+      key: WEBHOOK_KEY,
     });
     worker.fetchImpl = (async () => ({ ok: false, status: 500 }) as Response) as unknown as typeof fetch;
 
