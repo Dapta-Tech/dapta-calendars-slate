@@ -224,6 +224,9 @@ export const booking = sqliteTable('booking', {
   reschedulingReason: text('rescheduling_reason'),
   rescheduledByEmail: text('rescheduled_by_email'),
   recurringEventId: text('recurring_event_id'),
+  /** Namespaced by account before it is stored (#104) — this `unique` is
+   *  GLOBAL, so a raw caller-supplied key would be claimable across
+   *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),

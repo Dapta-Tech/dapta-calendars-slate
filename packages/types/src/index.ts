@@ -310,8 +310,12 @@ export const createBookingSchema = z.object({
   answers: intakeAnswersSchema.optional(),
   /** Consume a held reservation (slot hold) if one exists. */
   reservationUid: z.string().max(200).optional(),
-  /** Idempotency key to dedupe retries. */
-  idempotencyKey: z.string().max(200).optional(),
+  // NO `idempotencyKey` here, deliberately (#104). This schema is what the
+  // UNAUTHENTICATED `POST /v1/bookings` parses, and the booking page never
+  // sends a key — only the API-key surfaces do. It reaches the service as
+  // caller-supplied context instead, the same channel `metadata` and
+  // `additionalAttendees` use and for the same reason. Since the schema drops
+  // unknown keys, adding the field back here is the whole of the exposure.
 });
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 

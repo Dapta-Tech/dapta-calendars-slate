@@ -39,6 +39,7 @@ import {
   loadReservationBusy,
   parseJsonColumn,
   resolveScheduleTimeZone,
+  scopedIdempotencyKey,
   type BookingFieldDef,
 } from './repository';
 import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
@@ -824,7 +825,8 @@ export async function createTeamBooking(
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
-      ${args.idempotencyKey ?? null}, ${now}, ${now})`;
+      ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
+      ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},

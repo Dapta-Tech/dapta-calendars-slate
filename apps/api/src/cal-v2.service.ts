@@ -8,6 +8,7 @@ import {
   getMemberById,
   jsonParam,
   parseJsonColumn,
+  scopedIdempotencyKey,
   sql,
 } from "@slate/db";
 import { isValidTimeZone, zoneOffsetMinutes, zonedDayKey } from "@slate/shared";
@@ -446,9 +447,13 @@ export class CalV2Service {
     uid: string;
     response?: Record<string, unknown>;
   } | null> {
+    // These rows are written by `createBooking` / `createTeamBooking`, which
+    // namespace the stored key by account (#104) — so the lookup has to apply
+    // the same transform or the replay silently misses and re-books.
     const prior = await this.db.get<{ uid: string; metadata: unknown }>(
       sql`SELECT uid, metadata FROM booking
-          WHERE account_id = ${accountId} AND idempotency_key = ${storedKey} LIMIT 1`,
+          WHERE account_id = ${accountId}
+            AND idempotency_key = ${scopedIdempotencyKey(accountId, storedKey)} LIMIT 1`,
     );
     if (!prior) return null;
     const metadata = parseJsonColumn<StoredMetadata>(prior.metadata, {});
@@ -769,13 +774,20 @@ export class CalV2Service {
                 language: input.attendee.language as "en" | "es",
               },
               answers: input.bookingFieldsResponses,
-              idempotencyKey: storedKey,
             },
             false,
             // `onBehalf: false` above is deliberate (these bookings are
             // attributed to the invitee), so the duplicate-booking guard's
-            // API-key exemption (#69) has to be stated separately.
-            { additionalAttendees, metadata: internalMetadata, apiKeyWrite: true },
+            // API-key exemption (#69) has to be stated separately. The
+            // idempotency key is context for the same reason it is on the
+            // team call below: the public controller forwards an unvalidated
+            // body into the first parameter (#104).
+            {
+              additionalAttendees,
+              metadata: internalMetadata,
+              apiKeyWrite: true,
+              idempotencyKey: storedKey,
+            },
           );
 
     if (isServiceError(outcome)) {

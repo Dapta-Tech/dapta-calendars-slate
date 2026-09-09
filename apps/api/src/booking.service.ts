@@ -160,6 +160,15 @@ export class BookingService {
        * API-key write that deliberately reports `onBehalf: false`.
        */
       apiKeyWrite?: boolean;
+      /**
+       * Retry-dedupe key. CONTEXT, never the request body (#104): `POST
+       * /v1/bookings` is unauthenticated, and a key set there would land in a
+       * column the whole deployment shares. Only a controller that has
+       * authenticated an API key may set it — today the machine API (from its
+       * `Idempotency-Key` header) and the v2 compatibility surface. The
+       * repository namespaces it by account before storing.
+       */
+      idempotencyKey?: string;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -175,7 +184,7 @@ export class BookingService {
         answers: input.answers,
         metadata: context?.metadata,
         reservationUid: input.reservationUid,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey: context?.idempotencyKey,
         onBehalf,
         apiKeyWrite: context?.apiKeyWrite,
       },
