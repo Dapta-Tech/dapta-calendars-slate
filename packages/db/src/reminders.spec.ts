@@ -183,10 +183,18 @@ describePg('per-event reminders on real Postgres', () => {
   beforeAll(async () => {
     db = await createDb(url);
     await migrate(db);
-    await seed(db);
-    accountId = (await db.get<{ account_id: string }>(
+    // Seed only if the demo account is missing. `seed()` deletes and re-inserts
+    // it wholesale, and several files share one Postgres — re-seeding here
+    // could wipe the account another file is mid-test on. This block only
+    // needs an account id.
+    const existing = await db.get<{ account_id: string }>(
       sql`SELECT account_id FROM member WHERE handle='alex-rivera'`,
-    ))!.account_id;
+    );
+    if (!existing) await seed(db);
+    accountId = (existing ??
+      (await db.get<{ account_id: string }>(
+        sql`SELECT account_id FROM member WHERE handle='alex-rivera'`,
+      ))!).account_id;
   });
 
   afterAll(async () => {

@@ -433,8 +433,12 @@ export class EmailEffects {
       // Explicit tenant check rather than an incidental one: `booking.uid` is
       // unique, so this can only ever be the same account — say so.
       if (current && n.accountId && current.accountId !== n.accountId) {
-        this.log.warn(`skip queued ${kind} for ${n.uid} — account mismatch`);
-        return;
+        // Not a routine gate — a booking's account cannot change, so this is an
+        // anomaly and deserves the loud record (`skipped` with a reason) rather
+        // than a quiet `done` that looks like a delivered row.
+        throw new OutboxSkipError(
+          `queued ${kind} for ${n.uid} does not belong to the payload's account — skipped`,
+        );
       }
       const row = current?.reminders.find((r) => r.id === n.reminderId);
       if (!row || !row.enabled) {

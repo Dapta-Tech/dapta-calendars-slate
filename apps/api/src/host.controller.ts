@@ -462,12 +462,12 @@ export class HostController {
   async updateNotificationSetting(
     @Req() req: ReqLike,
     @Param('key') key: string,
-    @Body() body: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
+    @Body() body: { enabled?: boolean; subject?: string | null; body?: string | null },
   ) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     assertAccountTemplateKey(key);
-    const patch = parseNotificationPatch(key, body);
+    const patch = parseNotificationPatch(body);
     return this.admin.updateNotificationSetting(p, key, patch);
   }
 
@@ -531,10 +531,15 @@ function cleanTemplateField(v: string | null | undefined, max: number): string |
   return trimmed;
 }
 
+/**
+ * The account-wide template patch. Lead times are deliberately absent: they
+ * live on the event type now (#68), and `assertAccountTemplateKey` has already
+ * rejected the only two keys that ever carried one — so there is nothing left
+ * for this to key off, and no lead field to accept.
+ */
 function parseNotificationPatch(
-  key: string,
-  body: { enabled?: unknown; subject?: unknown; body?: unknown; reminderLeadMinutes?: unknown },
-): { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null } {
+  body: { enabled?: unknown; subject?: unknown; body?: unknown },
+): { enabled?: boolean; subject?: string | null; body?: string | null } {
   const patch: ReturnType<typeof parseNotificationPatch> = {};
   if (body?.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean')
@@ -545,8 +550,5 @@ function parseNotificationPatch(
     patch.subject = cleanTemplateField(body.subject as string | null, MAX_SUBJECT);
   if (body?.body !== undefined)
     patch.body = cleanTemplateField(body.body as string | null, MAX_BODY);
-  // `reminderLeadMinutes` is deliberately NOT parsed: lead times live on the
-  // event type now (#68), and `assertAccountTemplateKey` has already rejected
-  // the only two keys that ever carried one.
   return patch;
 }
