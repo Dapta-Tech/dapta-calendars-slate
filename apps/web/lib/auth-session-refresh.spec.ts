@@ -12,6 +12,7 @@ import {
   encodeSession,
   hostFetch,
   refreshUpstreamSession,
+  SessionUnavailableError,
   type Session,
 } from './auth-session';
 
@@ -72,10 +73,13 @@ describe('refreshUpstreamSession', () => {
     // The IAM rotates the refresh token on every call, so the whole returned
     // session has to be stored — keeping the old one guarantees the next 401.
     await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({
-      provider: 'workos',
-      accessToken: jwtWith({ workos_session_id: 'session_NEW' }),
-      refreshToken: 'refresh-2',
-      sessionId: 'session_NEW',
+      outcome: 'refreshed',
+      session: {
+        provider: 'workos',
+        accessToken: jwtWith({ workos_session_id: 'session_NEW' }),
+        refreshToken: 'refresh-2',
+        sessionId: 'session_NEW',
+      },
     });
   });
 
@@ -85,40 +89,87 @@ describe('refreshUpstreamSession', () => {
       json: async () => ({ access_token: jwtWith({ sub: 'u' }), refresh_token: 'refresh-2' }),
     });
 
-    await expect(refreshUpstreamSession(workosSession)).resolves.toMatchObject({ sessionId: 'session_OLD' });
+    await expect(refreshUpstreamSession(workosSession)).resolves.toMatchObject({
+      session: { sessionId: 'session_OLD' },
+    });
   });
 
   it('keeps the old refresh token when the IAM omits a rotated one', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ access_token: jwtWith({}) }) });
 
-    await expect(refreshUpstreamSession(workosSession)).resolves.toMatchObject({ refreshToken: 'refresh-1' });
+    await expect(refreshUpstreamSession(workosSession)).resolves.toMatchObject({
+      session: { refreshToken: 'refresh-1' },
+    });
   });
 
-  it('resolves null on a 401 from the IAM: the refresh token is dead, sign in again', async () => {
+  // #114: the three outcomes are the whole point. `expired` is the ONLY one
+  // that may cost anybody their session.
+  it('reports expired on a 401 or a 403: the refresh token is dead, sign in again', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'expired' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await expect(refreshUpstreamSession(workosSession)).resolves.toBeNull();
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'expired' });
+  });
+
+  it('reports unavailable on a 5xx — the service failed, the credential did not', async () => {
+    for (const status of [500, 502, 503, 504]) {
+      fetchMock.mockResolvedValue({ ok: false, status });
+      await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'unavailable' });
+    }
+  });
+
+  it('reports unavailable on a rejected fetch instead of throwing', async () => {
+    fetchMock.mockRejectedValue(new Error('iam down'));
+
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'unavailable' });
+  });
+
+  it('reports unavailable when the five-second budget aborts the call', async () => {
+    // What a hung identity service actually produces: the AbortSignal fires and
+    // fetch rejects. Signing out on it would end a session over a slow deploy.
+    fetchMock.mockRejectedValue(
+      Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    );
+
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'unavailable' });
+  });
+
+  it('reports unavailable on a non-401/403 4xx: our call was refused, not the credential', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 400 });
+
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'unavailable' });
+  });
+
+  it('reports unavailable on a 200 whose body carries no access token', async () => {
+    // The IAM ACCEPTED the refresh token and then failed to answer with one, so
+    // nothing here says the credential is dead.
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
+
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'unavailable' });
+  });
+
+  it('never retries internally — one call, one five-second budget', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503 });
+
+    await refreshUpstreamSession(workosSession);
+
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves null on a rejected fetch instead of throwing', async () => {
-    fetchMock.mockRejectedValue(new Error('iam down'));
-
-    await expect(refreshUpstreamSession(workosSession)).resolves.toBeNull();
-  });
-
-  it('resolves null on a body with no access token', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ success: true }) });
-
-    await expect(refreshUpstreamSession(workosSession)).resolves.toBeNull();
-  });
-
-  it('skips the IAM entirely for a local session, a missing refresh token, or no IAM', async () => {
-    await expect(refreshUpstreamSession({ provider: 'local', email: 'a@b.c' })).resolves.toBeNull();
-    await expect(refreshUpstreamSession({ provider: 'workos', accessToken: 'tok' })).resolves.toBeNull();
-    await expect(refreshUpstreamSession(null)).resolves.toBeNull();
+  it('reports expired without calling the IAM when there is nothing to spend', async () => {
+    // A local session, a session with no refresh token, no session, no IAM: the
+    // credential is absent rather than unreachable, so signing out is honest.
+    await expect(refreshUpstreamSession({ provider: 'local', email: 'a@b.c' })).resolves.toEqual({
+      outcome: 'expired',
+    });
+    await expect(refreshUpstreamSession({ provider: 'workos', accessToken: 'tok' })).resolves.toEqual({
+      outcome: 'expired',
+    });
+    await expect(refreshUpstreamSession(null)).resolves.toEqual({ outcome: 'expired' });
     vi.stubEnv('IAM_BASE_URL', '');
-    await expect(refreshUpstreamSession(workosSession)).resolves.toBeNull();
+    await expect(refreshUpstreamSession(workosSession)).resolves.toEqual({ outcome: 'expired' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -206,6 +257,41 @@ describe('hostFetch 401 refresh path', () => {
     expect(revoke?.[1]).toMatchObject({
       body: JSON.stringify({ workos_session_id: 'session_OLD', session_id: 'session_OLD' }),
     });
+  });
+
+  // #114. The single failure this unit exists to remove: an identity service
+  // that cannot answer must not cost a healthy session.
+  it('throws a retryable failure when the IAM is down, leaving the session intact', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ status: 401 }) // original API call
+      .mockResolvedValueOnce({ ok: false, status: 503 }); // IAM refresh: unreachable
+
+    await expect(hostFetch('/v1/me')).rejects.toBeInstanceOf(SessionUnavailableError);
+
+    // The three things a sign-out would have done, none of which happened.
+    expect(cookieJar.delete).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/auth/logout'))).toBe(false);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('carries the retryable copy and never a "sign in again"', async () => {
+    fetchMock.mockResolvedValueOnce({ status: 401 }).mockRejectedValueOnce(new Error('iam down'));
+
+    await expect(hostFetch('/v1/me')).rejects.toMatchObject({
+      code: 'SESSION_REFRESH_UNAVAILABLE',
+      retryable: true,
+      message: expect.stringContaining('still signed in'),
+    });
+  });
+
+  it('spends one refresh attempt on an unavailable IAM, never a loop', async () => {
+    fetchMock.mockResolvedValueOnce({ status: 401 }).mockResolvedValue({ ok: false, status: 500 });
+
+    await expect(hostFetch('/v1/me')).rejects.toBeInstanceOf(SessionUnavailableError);
+
+    const refreshCalls = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth/refresh'));
+    expect(refreshCalls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // the API call and the one refresh
   });
 
   it('never refreshes twice: a 401 on the retried request goes straight to logout', async () => {

@@ -674,6 +674,19 @@ export interface BookingMessages {
       error: string;
       retry: string;
     };
+    /**
+     * The identity service could not be reached while renewing a session
+     * (#114). Distinct from `login.error` on purpose: nothing is wrong with the
+     * person's credentials and they are still signed in, so the copy must not
+     * imply they need to sign in again.
+     */
+    session: {
+      unavailableTitle: string;
+      unavailableBody: string;
+      retry: string;
+      /** The way out when the failure turns out not to be transient. */
+      signOut: string;
+    };
     settingsGeneral: {
       displayName: string;
       publicHandle: string;
@@ -1529,6 +1542,13 @@ export const en: BookingMessages = {
       workosSubtitle: 'You’ll be redirected to sign in securely.',
       error: 'Something went wrong signing in. Please try again.',
       retry: 'Try again',
+    },
+    session: {
+      unavailableTitle: 'We couldn’t renew your session',
+      unavailableBody:
+        'You’re still signed in. The sign-in service didn’t answer just now, so nothing was changed. Wait a moment and try again.',
+      retry: 'Try again',
+      signOut: 'Sign out instead',
     },
     settingsGeneral: {
       displayName: 'Display name',
@@ -2394,6 +2414,13 @@ export const es: BookingMessages = {
       workosSubtitle: 'Te redirigiremos para iniciar sesión de forma segura.',
       error: 'Algo salió mal al iniciar sesión. Inténtalo de nuevo.',
       retry: 'Reintentar',
+    },
+    session: {
+      unavailableTitle: 'No pudimos renovar tu sesión',
+      unavailableBody:
+        'Tu sesión sigue activa. El servicio de inicio de sesión no respondió ahora mismo, así que no se cambió nada. Espera un momento e inténtalo de nuevo.',
+      retry: 'Reintentar',
+      signOut: 'Cerrar sesión',
     },
     settingsGeneral: {
       displayName: 'Nombre visible',

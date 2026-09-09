@@ -11,10 +11,25 @@ const refreshOrSignOut = vi.fn();
 const signOutAndRedirect = vi.fn((_session: unknown): never => {
   throw new Error('NEXT_REDIRECT:/login?signedout=1');
 });
+// Hoisted, because the mock factory runs while `./admin-api` is being imported
+// — before this file's own body executes — and the client tells the retryable
+// failure apart from a redirect with `instanceof`, so it has to be given the
+// very class it will compare against.
+const { SessionUnavailableError } = vi.hoisted(() => ({
+  SessionUnavailableError: class SessionUnavailableError extends Error {
+    readonly retryable = true;
+    readonly code = 'SESSION_REFRESH_UNAVAILABLE';
+    constructor(message: string) {
+      super(message);
+      this.name = 'SessionUnavailableError';
+    }
+  },
+}));
 vi.mock('./auth-session', () => ({
   getSession: () => getSession(),
   refreshOrSignOut: () => refreshOrSignOut(),
   signOutAndRedirect: (session: unknown) => signOutAndRedirect(session),
+  SessionUnavailableError,
 }));
 
 import { adminApi, ApiError } from './admin-api';
@@ -63,6 +78,46 @@ describe('adminApi 401 handling', () => {
 
     expect(refreshOrSignOut).toHaveBeenCalledTimes(1); // one refresh, never a loop
     expect(signOutAndRedirect).toHaveBeenCalledWith(fresh);
+  });
+
+  // #114. A 401 that meets an unreachable identity service is NOT a sign-out.
+  it('surfaces a retryable 503 ApiError when the identity service cannot be reached', async () => {
+    fetchMock.mockResolvedValue({ status: 401 });
+    refreshOrSignOut.mockRejectedValue(
+      new SessionUnavailableError('You’re still signed in. Wait a moment and try again.'),
+    );
+
+    await expect(adminApi.me()).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 503,
+      code: 'SESSION_REFRESH_UNAVAILABLE',
+      message: 'You’re still signed in. Wait a moment and try again.',
+    });
+
+    // Never a sign-out, and never a second attempt on a service that just failed.
+    expect(signOutAndRedirect).not.toHaveBeenCalled();
+    expect(refreshOrSignOut).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a 503 the /admin gate reads as "not a sign-out"', async () => {
+    // The gate redirects to /login on `ApiError && status === 401` and rethrows
+    // everything else to the error boundary. This has to land on the second path.
+    fetchMock.mockResolvedValue({ status: 401 });
+    refreshOrSignOut.mockRejectedValue(new SessionUnavailableError('try again'));
+
+    const err = await adminApi.me().catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).not.toBe(401);
+  });
+
+  it('re-throws a redirect from the refresh untouched', async () => {
+    // Only the retryable failure is re-wrapped; a `redirect()` must reach Next.
+    fetchMock.mockResolvedValue({ status: 401 });
+    refreshOrSignOut.mockRejectedValue(new Error('NEXT_REDIRECT:/api/auth/refresh'));
+
+    await expect(adminApi.me()).rejects.toThrow('NEXT_REDIRECT:/api/auth/refresh');
   });
 
   it('passes a 204 through after a retry instead of parsing a body', async () => {
