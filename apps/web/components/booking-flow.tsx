@@ -77,7 +77,18 @@ export function BookingFlow({
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
   const [holdError, setHoldError] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
+  /**
+   * The error result the booker has already acknowledged, held BY IDENTITY
+   * rather than as a boolean.
+   *
+   * `useActionState` keeps the previous state until the next action resolves,
+   * so a boolean cannot tell "this error is still current" from "this error is
+   * last attempt's, still on screen while the new one is in flight". Comparing
+   * objects can: `bookAction` returns a fresh object per attempt, so a stale
+   * result stays dismissed and a genuinely new one always renders — during the
+   * request, and after picking a different slot.
+   */
+  const [dismissedResult, setDismissedResult] = useState<BookResult | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   // CONTROLLED values for every visible input: React 19 resets uncontrolled
   // form fields when the action returns, so a server-side 400 used to wipe
@@ -129,7 +140,10 @@ export function BookingFlow({
 
   async function pick(slot: DisplaySlot) {
     setSelected(slot.startUtc);
-    setDismissed(false);
+    // The last attempt's error stays dismissed: picking a slot used to clear
+    // the flag while `result` still held that error, so choosing a new time
+    // after a conflict re-rendered the conflict card straight back.
+    setDismissedResult(result);
     setHoldError(null);
     setHold(null);
     // Team events resolve their host set at booking time (round-robin picks one,
@@ -147,7 +161,7 @@ export function BookingFlow({
     setSelected(null);
     setHold(null);
     setHoldError(null);
-    setDismissed(true);
+    setDismissedResult(result);
   }
 
   /**
@@ -157,7 +171,7 @@ export function BookingFlow({
    * hold and everything they typed, so correcting a typo'd email is one edit.
    */
   function dismissDuplicate() {
-    setDismissed(true);
+    setDismissedResult(result);
   }
 
   // --- Confirmed ----------------------------------------------------------
@@ -211,14 +225,14 @@ export function BookingFlow({
   // Left to fall through, it would render "that time was just taken" over a
   // "pick another slot" button, telling the booker to do the one thing that
   // cannot possibly help: the block is on their email, not on the time.
-  const duplicate = result && !result.ok && !dismissed && result.error === 'DUPLICATE_BOOKING';
-  const conflict =
-    result &&
-    !result.ok &&
-    !dismissed &&
-    !duplicate &&
-    (result.status === 409 || result.status === 410);
-  const intakeError = result && !result.ok && !dismissed && result.status === 400;
+  // `result !== dismissedResult` is the freshness test: an error the booker has
+  // acknowledged stays hidden until the NEXT attempt produces a different
+  // object, so nothing here can render last attempt's failure over an in-flight
+  // request or over a newly picked slot.
+  const live = result && !result.ok && result !== dismissedResult;
+  const duplicate = live && result.error === 'DUPLICATE_BOOKING';
+  const conflict = live && !duplicate && (result.status === 409 || result.status === 410);
+  const intakeError = live && result.status === 400;
 
   // --- Duplicate booking (409 DUPLICATE_BOOKING) --------------------------
   // The copy names NO date, time or host: revealing the existing slot would
@@ -337,12 +351,6 @@ export function BookingFlow({
             // to cause) instead of round-tripping a guaranteed 400.
             onSubmit={(e) => {
               if (!validateAll()) e.preventDefault();
-              // Un-dismiss on every real submit. `dismissDuplicate` keeps the
-              // slot rather than routing back through `pick()`, which is the
-              // only other place this resets — without this line the NEXT
-              // failure on this slot (another duplicate, a taken slot, a 400)
-              // would render nothing at all.
-              else setDismissed(false);
             }}
             className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
           >

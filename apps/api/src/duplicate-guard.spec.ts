@@ -188,4 +188,34 @@ describe('duplicate-booking guard — API mapping', () => {
       response: { error: 'DUPLICATE_BOOKING' },
     });
   });
+
+  it('team path: an unauthenticated booker cannot block someone else by naming them a co-attendee', async () => {
+    // `additionalAttendees` land in `booking_attendee`, which is what the guard
+    // matches on — so if the public route forwarded that field, anyone could
+    // POST a victim's address and lock them out of the event. The route must
+    // pass an explicit pick, not the raw body.
+    const svc = service();
+    const controller = new PublicController(svc);
+    const t = await teamEvent('ab1-team-injection');
+    const w = WINDOW();
+    const avail = await svc.teamAvailability('acme', t.teamSlug, t.slug, w.from, w.to);
+    const slots = avail!.slots;
+
+    await controller.teamBook('acme', t.teamSlug, {
+      slug: t.slug,
+      startUtc: slots[0]!.startUtc,
+      attendee: { name: 'Mallory', email: 'mallory@example.com', timeZone: 'America/New_York' },
+      additionalAttendees: [
+        { name: 'Victim', email: 'victim@example.com', timeZone: 'America/New_York' },
+      ],
+    } as never);
+
+    // The victim was never written as an attendee, so their own booking lands.
+    const victim = await controller.teamBook('acme', t.teamSlug, {
+      slug: t.slug,
+      startUtc: slots[1]!.startUtc,
+      attendee: { name: 'Victim', email: 'victim@example.com', timeZone: 'America/New_York' },
+    } as never);
+    expect(victim).toMatchObject({ uid: expect.any(String) });
+  });
 });

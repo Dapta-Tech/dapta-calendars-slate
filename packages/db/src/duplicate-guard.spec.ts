@@ -7,7 +7,7 @@ import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
 import { createTeamBooking, getTeamAvailability } from './parity';
 import { createEventType, createTeam, getEventTypeById, updateEventType } from './crud';
-import { normalizeAttendeeEmail } from './duplicate-guard';
+import { hasUpcomingBookingForEmail, normalizeAttendeeEmail } from './duplicate-guard';
 
 /**
  * Duplicate-booking guard (#69, unit AB1 / #95).
@@ -122,6 +122,20 @@ describe('duplicate-booking guard (SQLite in-memory)', () => {
     });
 
   // --- The normalizer -----------------------------------------------------
+
+  it('is account-scoped — the right event type under the wrong account matches nothing', async () => {
+    // The helper is exported from @slate/db, so it must not let a caller
+    // holding only an event-type id read across tenants (invariant 4).
+    const slug = 'scoped';
+    const eventTypeId = await makePersonalEvent(slug, { guard: true });
+    const slots = await personalSlots(slug);
+    expect((await bookPersonal(slug, slots[0]!, 'pat@example.com')).ok).toBe(true);
+
+    expect(await hasUpcomingBookingForEmail(db, accountId, eventTypeId, 'pat@example.com')).toBe(true);
+    expect(
+      await hasUpcomingBookingForEmail(db, randomUUID(), eventTypeId, 'pat@example.com'),
+    ).toBe(false);
+  });
 
   it('normalizes case and surrounding whitespace, and keeps +tags intact', () => {
     expect(normalizeAttendeeEmail('  ALEX@Example.com ')).toBe('alex@example.com');

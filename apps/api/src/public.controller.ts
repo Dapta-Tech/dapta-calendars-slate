@@ -150,6 +150,23 @@ export class PublicController {
     @Param('teamSlug') teamSlug: string,
     @Body() body: { slug: string; startUtc: string; attendee: never; answers?: Record<string, unknown> },
   ) {
-    return unwrap(await this.svc.teamBook(accountCode, teamSlug, body));
+    // Forward an EXPLICIT pick, never the raw body. Nest hands this handler the
+    // parsed request object as-is and the app installs no global
+    // ValidationPipe, so the type annotation above strips nothing at runtime —
+    // whatever `teamBook` reads, an anonymous caller can set. `metadata` and
+    // `idempotencyKey` are for the API-key surface, and `additionalAttendees`
+    // become `booking_attendee` rows that the duplicate-booking guard (#69)
+    // matches on, so accepting it here would let anyone name a victim and
+    // block that address from booking this event. The personal path is already
+    // safe by construction: `book()` runs the payload through
+    // `createBookingSchema`, which drops unknown keys.
+    return unwrap(
+      await this.svc.teamBook(accountCode, teamSlug, {
+        slug: body?.slug,
+        startUtc: body?.startUtc,
+        attendee: body?.attendee,
+        answers: body?.answers,
+      }),
+    );
   }
 }
