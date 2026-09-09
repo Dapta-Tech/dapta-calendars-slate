@@ -288,11 +288,29 @@ deployment that has no key are deliberately asymmetric:
   to disk in the clear.
 - A webhook whose secret is **already encrypted** refuses to deliver rather than
   falling back to an unsigned POST — a key that has gone missing is a
-  deployment fault, and the outbox retries it with backoff until it is fixed.
+  deployment fault, and an unsigned delivery would strip the very guarantee the
+  subscriber authenticates on.
 
 Once a key is present, a legacy plaintext secret is re-encrypted in place the
 first time that webhook signs a delivery. The signature the subscriber verifies
 is byte-identical before and after, so no subscriber needs to be told.
+
+> **Treat this key as unrecoverable state, not config.** Once a deployment sets
+> a valid key, every legacy plaintext secret is drained on its next delivery.
+> From that point, **losing or rotating the key means every webhook subscriber
+> must be reconfigured with a new secret** — nothing re-encrypts in place yet,
+> and there is no command that reads a secret back. This is the same rotation
+> caveat the CRM credentials carry, with a worse blast radius: a CRM token can
+> be re-pasted from the provider's portal, but a signing secret exists only
+> here. Back the key up the way you back up the database.
+
+> **A key outage drops webhook events, and the drop is permanent.** A refused
+> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
+> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
+> marked `failed` — which is terminal, with no re-drive path. In practice a
+> deployment whose key is removed or corrupted loses every webhook event
+> enqueued in the following ~15 seconds, and restoring the key does **not**
+> replay them. Fix a key problem before it has been wrong for one drain cycle.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
