@@ -25,7 +25,12 @@ describePg('repository (real Postgres — the tested truth)', () => {
   beforeAll(async () => {
     db = await createDb(url);
     await migrate(db);
-    await seed(db);
+    // Seed ONLY if the demo account is missing. `seed()` deletes and re-inserts
+    // it wholesale, and several spec files share one Postgres — the same guard
+    // `reminders.spec.ts` and `duplicate-guard.pg.spec.ts` document. File-level
+    // sequencing (vitest.config.ts) is what makes the check itself safe.
+    const existing = await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`);
+    if (!existing) await seed(db);
   });
 
   afterAll(async () => {
