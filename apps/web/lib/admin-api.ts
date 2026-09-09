@@ -4,6 +4,12 @@
  * provider, `x-slate-email` for the local dev provider. The API reads whichever
  * its configured provider expects and ignores the other. A `401` throws an
  * ApiError the /admin gate turns into a redirect to /login.
+ *
+ * One failure is deliberately NOT a sign-out (#114): when a `401` is followed by
+ * an identity service that cannot be reached, this throws
+ * `SESSION_REFRESH_UNAVAILABLE` as a `503` ApiError. It is a status no caller
+ * treats as "sign in again", so the session survives and the page shows
+ * something the person can retry.
  */
 import type {
   EventLocationDto,
@@ -12,7 +18,12 @@ import type {
   IntegrationStatusView,
   OnboardingState,
 } from '@slate/types';
-import { getSession, refreshOrSignOut, signOutAndRedirect } from './auth-session';
+import {
+  getSession,
+  refreshOrSignOut,
+  SessionUnavailableError,
+  signOutAndRedirect,
+} from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -75,7 +86,24 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     //
     // In an action, wrap the caller's catch with `unstable_rethrow` so the
     // redirects thrown from here aren't swallowed.
-    await refreshOrSignOut();
+    //
+    // A `SessionUnavailableError` means the identity service never answered, so
+    // the credential was never shown to be dead (#114). It becomes a `503`
+    // ApiError rather than a sign-out: this client's whole contract is that a
+    // failure arrives as an ApiError, so an action's catch renders the retryable
+    // copy it carries, with the session still in the jar. Redirects are
+    // re-thrown untouched.
+    //
+    // Reachable from an ACTION or a ROUTE HANDLER only. A render never gets
+    // here: `refreshOrSignOut` probes cookie-writability BEFORE the network
+    // call, and a Server Component fails that probe and redirects to
+    // /api/auth/refresh, which renders the retryable page itself.
+    try {
+      await refreshOrSignOut();
+    } catch (e) {
+      if (e instanceof SessionUnavailableError) throw new ApiError(503, e.message, e.code);
+      throw e;
+    }
     res = await call();
     if (res.status === 401) {
       // The just-minted token is being rejected too, so this was never expiry.

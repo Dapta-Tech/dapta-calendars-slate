@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// The retryable branch renders the i18n copy, which reads the locale cookie.
+const localeCookie = vi.fn(() => undefined as { value: string } | undefined);
+vi.mock('next/headers', () => ({ cookies: async () => ({ get: localeCookie }) }));
+
 const getSession = vi.fn();
 const setSession = vi.fn();
 const refreshUpstreamSession = vi.fn();
@@ -28,14 +32,20 @@ const token = (expOffsetSec: number) =>
 const staleSession = { provider: 'workos', accessToken: token(-30), refreshToken: 'refresh-1' };
 const freshSession = { provider: 'workos', accessToken: token(3600), refreshToken: 'refresh-2' };
 
+/** The three outcomes `refreshUpstreamSession` can report (#114). */
+const refreshed = (session: unknown) => ({ outcome: 'refreshed', session });
+const EXPIRED = { outcome: 'expired' } as const;
+const UNAVAILABLE = { outcome: 'unavailable' } as const;
+
 describe('GET /api/auth/refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSession.mockResolvedValue(staleSession);
+    localeCookie.mockReturnValue(undefined);
   });
 
   it('stores the refreshed session and returns to /admin', async () => {
-    refreshUpstreamSession.mockResolvedValue(freshSession);
+    refreshUpstreamSession.mockResolvedValue(refreshed(freshSession));
 
     const res = await GET(req());
 
@@ -44,8 +54,8 @@ describe('GET /api/auth/refresh', () => {
     expect(res.headers.get('location')).toBe('https://calendars.example.com/admin');
   });
 
-  it('hands off to the logout route when the refresh fails, without touching the cookie', async () => {
-    refreshUpstreamSession.mockResolvedValue(null);
+  it('hands off to the logout route when the refresh token is dead, without touching the cookie', async () => {
+    refreshUpstreamSession.mockResolvedValue(EXPIRED);
 
     const res = await GET(req());
 
@@ -55,11 +65,94 @@ describe('GET /api/auth/refresh', () => {
 
   it('hands off to the logout route when there is no session at all', async () => {
     getSession.mockResolvedValue(null);
-    refreshUpstreamSession.mockResolvedValue(null);
+    refreshUpstreamSession.mockResolvedValue(EXPIRED);
 
     const res = await GET(req());
 
     expect(res.headers.get('location')).toBe(LOGOUT);
+  });
+
+  // #114. The render-side path is the one with no retry affordance of its own,
+  // so it gets a terminal page rather than a redirect: /admin would 401 and come
+  // straight back here, and /login auto-redirects into the very service that has
+  // just failed to answer.
+  it('answers 503 and signs nobody out when the identity service is unreachable', async () => {
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+    const res = await GET(req());
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('location')).toBeNull();
+    expect(setSession).not.toHaveBeenCalled();
+  });
+
+  it('renders the retryable copy with a way back, in the reader’s language', async () => {
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+    const en = await (await GET(req())).text();
+
+    expect(en).toContain('still signed in');
+    expect(en).toContain('href="/admin"');
+    expect(en).toContain('lang="en"');
+
+    localeCookie.mockReturnValue({ value: 'es' });
+    const es = await (await GET(req())).text();
+
+    expect(es).toContain('Tu sesión sigue activa');
+    expect(es).toContain('lang="es"');
+  });
+
+  it('marks the 503 uncacheable and retryable', async () => {
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+    const res = await GET(req());
+
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('retry-after')).toBe('5');
+    expect(res.headers.get('content-type')).toContain('text/html');
+  });
+
+  // `unavailable` is not always transient — a non-401/403 4xx is a contract
+  // drift no amount of waiting fixes — so the page has to offer a way off it
+  // that is not "know that /api/auth/logout can be typed by hand".
+  it('offers a deliberate sign-out beside the retry', async () => {
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+    const en = await (await GET(req())).text();
+    expect(en).toContain('href="/api/auth/logout"');
+    expect(en).toContain('Sign out instead');
+
+    localeCookie.mockReturnValue({ value: 'es' });
+    expect(await (await GET(req())).text()).toContain('Cerrar sesión');
+  });
+
+  it('never auto-retries: no meta refresh and no script on the page', async () => {
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+    const html = await (await GET(req())).text();
+
+    expect(html).not.toContain('http-equiv');
+    expect(html).not.toContain('<script');
+  });
+
+  it('escapes the copy it interpolates into the markup', async () => {
+    // The strings are the catalog's, not a person's, but this route hand-builds
+    // HTML — the escaping is the whole defence and nothing else asserts it.
+    refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+    const messages = (await import('@slate/shared')).getMessages('en').admin.session;
+    const original = messages.unavailableBody;
+    messages.unavailableBody = `<script>alert("x")</script> & 'quoted'`;
+
+    try {
+      const html = await (await GET(req())).text();
+
+      expect(html).not.toContain('<script>alert');
+      expect(html).toContain('&#60;script&#62;');
+      expect(html).toContain('&#38;');
+      expect(html).toContain('&#39;quoted&#39;');
+    } finally {
+      messages.unavailableBody = original;
+    }
   });
 
   // The ceiling. This route is reached by a browser redirect and remembers
@@ -77,7 +170,7 @@ describe('GET /api/auth/refresh', () => {
   });
 
   it('signs out when the IAM hands back a token that is already dead', async () => {
-    refreshUpstreamSession.mockResolvedValue({ ...freshSession, accessToken: token(-1) });
+    refreshUpstreamSession.mockResolvedValue(refreshed({ ...freshSession, accessToken: token(-1) }));
 
     const res = await GET(req());
 
@@ -89,7 +182,7 @@ describe('GET /api/auth/refresh', () => {
   // than the arrival guard demands gets stored, 401s, comes back, and is
   // refreshed again — one rotation per lap, forever.
   it('signs out on a refreshed token with too little life left to survive the next arrival', async () => {
-    refreshUpstreamSession.mockResolvedValue({ ...freshSession, accessToken: token(30) });
+    refreshUpstreamSession.mockResolvedValue(refreshed({ ...freshSession, accessToken: token(30) }));
 
     const res = await GET(req());
 
@@ -101,7 +194,7 @@ describe('GET /api/auth/refresh', () => {
     // The freshness guard only reads a workos token; a local session has none,
     // so it falls through to the refresh, which declines it, and lands on logout.
     getSession.mockResolvedValue({ provider: 'local', email: 'a@b.c' });
-    refreshUpstreamSession.mockResolvedValue(null);
+    refreshUpstreamSession.mockResolvedValue(EXPIRED);
 
     const res = await GET(req());
 
@@ -109,7 +202,7 @@ describe('GET /api/auth/refresh', () => {
   });
 
   it('takes no redirect target from the query — an open redirect on the auth path', async () => {
-    refreshUpstreamSession.mockResolvedValue(freshSession);
+    refreshUpstreamSession.mockResolvedValue(refreshed(freshSession));
 
     const res = await GET(req('/api/auth/refresh?next=https://evil.example'));
 

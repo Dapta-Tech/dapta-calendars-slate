@@ -2,6 +2,8 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { getMessages } from '@slate/shared';
+import { getLocale } from './locale';
 import { SESSION_COOKIE } from './session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -23,6 +25,48 @@ export type Session =
 
 /** The workos branch alone — what a refresh can ever produce. */
 export type WorkosSession = Extract<Session, { provider: 'workos' }>;
+
+/**
+ * What a refresh attempt actually learned (#114). The three outcomes are NOT
+ * interchangeable, and collapsing them into one falsy value is what let a
+ * five-second identity-service blip sign a host out and revoke a healthy
+ * upstream session:
+ *
+ *  - `refreshed`   — a new access token (and a rotated refresh token) to store.
+ *  - `expired`     — the credential itself is dead, or there was never one to
+ *                    spend. Clear, revoke, sign out. Exactly today's behaviour.
+ *  - `unavailable` — nothing was learned about the credential because the
+ *                    identity service could not answer. The session is still
+ *                    good: do NOT clear the cookie, do NOT revoke upstream.
+ */
+export type SessionRefresh =
+  | { outcome: 'refreshed'; session: WorkosSession }
+  | { outcome: 'expired' }
+  | { outcome: 'unavailable' };
+
+/**
+ * The identity service could not be reached, so the session could not be
+ * refreshed — and equally could not be shown to be dead. Thrown by
+ * `refreshOrSignOut` in place of a sign-out, so the caller surfaces something
+ * the person can retry while their session stays exactly where it was.
+ *
+ * Carries a localized message: the admin API client re-wraps it as a `503`
+ * ApiError, so an action's toast reads it directly.
+ */
+export class SessionUnavailableError extends Error {
+  /** Marks this as "try again", never "sign in again". */
+  readonly retryable = true;
+  readonly code = 'SESSION_REFRESH_UNAVAILABLE';
+  constructor(message: string) {
+    super(message);
+    this.name = 'SessionUnavailableError';
+  }
+}
+
+/** The retryable copy, in the admin surface's language (i18n EN + ES). */
+export async function sessionUnavailableMessage(): Promise<string> {
+  return getMessages(await getLocale()).admin.session.unavailableBody;
+}
 
 export const authProvider = (): 'local' | 'workos' =>
   process.env.AUTH_PROVIDER === 'workos' ? 'workos' : 'local';
@@ -200,14 +244,36 @@ export function accessTokenExpired(accessToken: string, skewSec = 60): boolean {
  * single-flight in — and the IAM's rotation grace window is what makes that
  * safe, with both racers ending on valid tokens.
  *
- * Returns null and never throws on anything short of success: a 401 (the
- * refresh token is expired or revoked), a down IAM, a timeout, a local session,
- * or a session that never carried a refresh token. Callers treat null as
- * "sign in again".
+ * Never throws. Every outcome is reported as a `SessionRefresh` (#114), and
+ * which one it is decides whether anybody gets signed out:
+ *
+ *  - `expired` — the identity service answered `401` or `403`, or there was
+ *    nothing to spend in the first place (a local session, a session carrying no
+ *    refresh token, no IAM configured). The credential is dead or absent, so
+ *    signing out is the honest answer.
+ *  - `unavailable` — a rejected fetch, the five-second timeout, or any other
+ *    non-OK status. Nothing here says the refresh token is bad, so nothing may
+ *    be cleared or revoked on the strength of it.
+ *
+ * A non-401/403 4xx counts as `unavailable` on purpose. It means the identity
+ * service rejected the SHAPE of our call, not the credential — a contract drift
+ * on our side or theirs — and answering that by revoking a healthy upstream
+ * session would destroy something recoverable to report a bug we can fix. The
+ * once-only retry discipline at every call site is what keeps the retryable
+ * state from becoming a lap.
+ *
+ * A `200` whose body carries no access token is `unavailable` for the same
+ * reason: the identity service ACCEPTED the refresh token and then failed to
+ * answer with one. It never said the credential was dead.
+ *
+ * No internal retry. The five-second budget is a ceiling on a path a person is
+ * already waiting on — a render or an action — and a second attempt inside it
+ * would double the worst case a hung identity service can cost. The retry that
+ * matters is the person's, once they see something that says "try again".
  */
-export async function refreshUpstreamSession(session: Session | null): Promise<WorkosSession | null> {
+export async function refreshUpstreamSession(session: Session | null): Promise<SessionRefresh> {
   const iam = process.env.IAM_BASE_URL?.replace(/\/$/, '');
-  if (!iam || session?.provider !== 'workos' || !session.refreshToken) return null;
+  if (!iam || session?.provider !== 'workos' || !session.refreshToken) return { outcome: 'expired' };
   const res = await fetch(`${iam}/auth/refresh`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -215,20 +281,35 @@ export async function refreshUpstreamSession(session: Session | null): Promise<W
     cache: 'no-store',
     signal: AbortSignal.timeout(IAM_TIMEOUT_MS),
   }).catch(() => null);
-  if (!res?.ok) return null;
+  // The only two statuses read as a verdict on the credential. Everything below
+  // is the identity service failing to answer, which says nothing about it.
+  //
+  // `401` is the honest one: the service was asked to spend this refresh token
+  // and refused it. `403` is a JUDGEMENT CALL, and the weaker end of this
+  // contract — the identity service uses it for a revoked session, but a WAF, a
+  // gateway policy or a CDN in front of it can also answer `403` without the
+  // credential being involved at all, and this treats that as dead. It is the
+  // status the ticket specifies and no worse than what shipped, but it is the
+  // one door left open to the class of harm #114 closes. Narrowing it wants a
+  // body signal (an `invalid_grant`-style code) the service does not send yet.
+  if (res && (res.status === 401 || res.status === 403)) return { outcome: 'expired' };
+  if (!res?.ok) return { outcome: 'unavailable' };
   const out = (await res.json().catch(() => null)) as {
     access_token?: unknown;
     refresh_token?: unknown;
   } | null;
-  if (typeof out?.access_token !== 'string' || !out.access_token) return null;
+  if (typeof out?.access_token !== 'string' || !out.access_token) return { outcome: 'unavailable' };
   return {
-    provider: 'workos',
-    accessToken: out.access_token,
-    refreshToken:
-      typeof out.refresh_token === 'string' && out.refresh_token
-        ? out.refresh_token
-        : session.refreshToken,
-    sessionId: workosSessionIdFromJwt(out.access_token) ?? session.sessionId,
+    outcome: 'refreshed',
+    session: {
+      provider: 'workos',
+      accessToken: out.access_token,
+      refreshToken:
+        typeof out.refresh_token === 'string' && out.refresh_token
+          ? out.refresh_token
+          : session.refreshToken,
+      sessionId: workosSessionIdFromJwt(out.access_token) ?? session.sessionId,
+    },
   };
 }
 
@@ -299,10 +380,14 @@ export async function signOutAndRedirect(session: Session | null): Promise<never
  * (`hostFetch`) and the admin API client (`admin-api.ts`). It refreshes the
  * session in place and returns, and the caller then retries its request ONCE.
  *
- * It returns ONLY on success. Every other outcome throws a redirect:
- *  - to `/api/auth/refresh` when this context cannot write cookies, so the one
- *    route handler that can does the exchange instead;
- *  - to `/login` when there is nothing to refresh or the refresh token is dead.
+ * It returns ONLY on success. Every other outcome throws:
+ *  - a redirect to `/api/auth/refresh` when this context cannot write cookies,
+ *    so the one route handler that can does the exchange instead;
+ *  - a `SessionUnavailableError` when the identity service could not answer
+ *    (#114) — the session is untouched and the caller surfaces something
+ *    retryable, because a blip is not proof that anyone's credential is dead;
+ *  - a redirect to `/login` when there is nothing to refresh or the refresh
+ *    token really is dead.
  *
  * Both callers get the same contract because both serve both contexts: an
  * action reaching `admin-api.ts` refreshes inline, exactly as `hostFetch` does,
@@ -314,9 +399,16 @@ export async function refreshOrSignOut(): Promise<void> {
   if (session?.provider === 'workos') {
     if (!(await sessionCookieIsWritable())) redirect('/api/auth/refresh');
     const refreshed = await refreshUpstreamSession(session);
-    if (refreshed) {
-      await setSession(refreshed);
+    if (refreshed.outcome === 'refreshed') {
+      await setSession(refreshed.session);
       return;
+    }
+    // The identity service never answered, so it never said this credential was
+    // dead. Clearing the cookie and revoking upstream here is the exact harm
+    // #114 exists to remove: a deploy or a restart that lands on a token expiry
+    // would end a session that had nothing wrong with it.
+    if (refreshed.outcome === 'unavailable') {
+      throw new SessionUnavailableError(await sessionUnavailableMessage());
     }
   }
   await signOutAndRedirect(session);
@@ -326,11 +418,16 @@ export async function refreshOrSignOut(): Promise<void> {
  * Authenticated host fetch for SERVER ACTIONS (AUTH-WEB-CONTRACT §1 + §4):
  * attaches identity, and on a `401` first tries to refresh the session IN PLACE
  * before treating it as a logout — an expiring token is the ordinary end of a
- * token's life, not a reason to sign anyone out. Only when the refresh fails,
- * or the retried request 401s again, does it clear + revoke and bounce to
- * /login. The thrown redirect must be re-thrown past any action catch (use
- * `unstable_rethrow(e)` first in the catch). Intended for an action or a route
- * handler — it may write the cookie.
+ * token's life, not a reason to sign anyone out. Only when the refresh token is
+ * genuinely dead, or the retried request 401s again, does it clear + revoke and
+ * bounce to /login. The thrown redirect must be re-thrown past any action catch
+ * (use `unstable_rethrow(e)` first in the catch). Intended for an action or a
+ * route handler — it may write the cookie.
+ *
+ * When the identity service cannot be reached at all, `refreshOrSignOut` throws
+ * a `SessionUnavailableError` and it propagates from here untouched (#114): the
+ * caller shows a retryable failure and the session stays signed in. Still one
+ * refresh and one retry — the throw ends the attempt rather than extending it.
  */
 export async function hostFetch(path: string, init?: RequestInit): Promise<Response> {
   const call = async (): Promise<Response> =>
