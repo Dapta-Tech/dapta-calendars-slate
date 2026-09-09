@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState, useTransition } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
 import { useToast } from '@/components/toast';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Select } from '@/components/ui/select';
 import { inviteMemberByEmailAction, removeMemberAction, setMemberRoleAction } from './actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -22,13 +24,15 @@ export function TeamMembersPanel({
   teamId,
   members,
   messages: m,
+  locale,
 }: {
   teamId: string;
   members: Member[];
   messages: TeamsMessages;
+  /** Active admin locale — the Select's and ConfirmDialog's own copy. */
+  locale?: Locale;
 }) {
   const [pending, start] = useTransition();
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'owner' | 'member'>('member');
@@ -36,7 +40,19 @@ export function TeamMembersPanel({
   // Whether the current error is the 'not an account member' case — it gets a CTA to the real invite flow (QA fix 7).
   const [inviteNoMatch, setInviteNoMatch] = useState(false);
   const { success, error } = useToast();
+  const { confirm, dialog } = useConfirmDialog(locale);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Two options, spelled once — the row picker and the invite picker offer the
+  // same choice and must not drift apart. Memoised so `Select`'s own filter memo
+  // is not invalidated on every render of this panel.
+  const roleOptions = useMemo(
+    () => [
+      { value: 'member', label: m.roleMember },
+      { value: 'owner', label: m.roleOwner },
+    ],
+    [m.roleMember, m.roleOwner],
+  );
 
   const ownerCount = members.filter((mem) => mem.role === 'owner').length;
 
@@ -57,13 +73,24 @@ export function TeamMembersPanel({
   const run = (p: Promise<{ ok: boolean; message?: string }>, ok: string) =>
     start(async () => {
       const r = await p;
-      if (r.ok) {
-        success(ok);
-        setConfirmRemove(null);
-      } else {
-        error(r.message ?? m.genericError);
-      }
+      if (r.ok) success(ok);
+      else error(r.message ?? m.genericError);
     });
+
+  // Removing a member used to swap the Remove button for two smaller buttons in
+  // the same list row: no focus trap, no announcement, no question. Now it is a
+  // dialog and it names the person.
+  const askRemove = async (member: Member) => {
+    const ok = await confirm({
+      title: m.removeTitle,
+      message: t(m.removeBody, { name: member.display_name ?? member.email ?? m.memberPending }),
+      confirmLabel: m.remove,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (!ok) return;
+    run(removeMemberAction(teamId, member.member_id), m.memberRemoved);
+  };
 
   const submitInvite = () =>
     start(async () => {
@@ -136,19 +163,21 @@ export function TeamMembersPanel({
                 >
                   {isOwner ? m.roleOwner : m.roleMember}
                 </span>
-                <select
-                  value={isOwner ? 'owner' : 'member'}
-                  disabled={pending || isLastOwner}
-                  title={isLastOwner ? m.lastOwnerTitle : undefined}
-                  aria-label={m.role}
-                  onChange={(e) => run(setMemberRoleAction(teamId, member.member_id, e.target.value as 'owner' | 'member'), m.roleUpdated)}
-                  className="min-h-[44px] rounded-md border border-input bg-background px-2 py-2 text-sm disabled:opacity-60"
-                >
-                  <option value="owner">{m.roleOwner}</option>
-                  <option value="member">{m.roleMember}</option>
-                </select>
+                <div className="w-36 shrink-0">
+                  <Select
+                    value={isOwner ? 'owner' : 'member'}
+                    options={roleOptions}
+                    disabled={pending || isLastOwner}
+                    title={isLastOwner ? m.lastOwnerTitle : undefined}
+                    ariaLabel={m.role}
+                    locale={locale}
+                    onChange={(v) =>
+                      run(setMemberRoleAction(teamId, member.member_id, v as 'owner' | 'member'), m.roleUpdated)
+                    }
+                  />
+                </div>
                 {/* Owner-lock: owners show a lock (no remove affordance); demote to
-                    member first to remove. Members get a styled remove-confirm. */}
+                    member first to remove. Members get the ConfirmDialog. */}
                 {isOwner ? (
                   <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
                     <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
@@ -157,25 +186,11 @@ export function TeamMembersPanel({
                     </svg>
                     <span className="sr-only">{m.ownerLock}</span>
                   </span>
-                ) : confirmRemove === member.member_id ? (
-                  <span className="flex items-center gap-1 text-sm">
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => run(removeMemberAction(teamId, member.member_id), m.memberRemoved)}
-                      className="inline-flex min-h-[44px] items-center rounded-md border border-destructive px-3 py-2 text-destructive disabled:opacity-60"
-                    >
-                      {m.remove}
-                    </button>
-                    <button type="button" onClick={() => setConfirmRemove(null)} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2">
-                      {m.cancel}
-                    </button>
-                  </span>
                 ) : (
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => setConfirmRemove(member.member_id)}
+                    onClick={() => void askRemove(member)}
                     aria-label={`${m.remove} · ${member.display_name ?? member.email ?? ''}`}
                     className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
                   >
@@ -218,17 +233,18 @@ export function TeamMembersPanel({
                   className="rounded-md border border-input bg-background px-3 py-2"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm">
+              {/* A <div>, not a <label>: the Select's trigger is a <button>, which
+                  is not a labelable element. The name rides on `ariaLabel`. */}
+              <div className="flex flex-col gap-1 text-sm">
                 <span className="text-muted-foreground">{m.role}</span>
-                <select
+                <Select
                   value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'owner' | 'member')}
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="member">{m.roleMember}</option>
-                  <option value="owner">{m.roleOwner}</option>
-                </select>
-              </label>
+                  options={roleOptions}
+                  ariaLabel={m.role}
+                  locale={locale}
+                  onChange={(v) => setInviteRole(v as 'owner' | 'member')}
+                />
+              </div>
               {inviteErr ? (
                 <p role="alert" className="text-sm text-destructive">
                   {inviteErr}
@@ -261,6 +277,7 @@ export function TeamMembersPanel({
           </div>
         </div>
       ) : null}
+      {dialog}
     </div>
   );
 }

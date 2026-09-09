@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
 import type { Team } from '@/lib/admin-api';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { deleteTeamAction } from './actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -24,16 +25,38 @@ export function TeamCard({
   memberCount,
   accountCode,
   messages: m,
+  locale,
 }: {
   team: Team;
   memberCount: number;
   accountCode: string;
   messages: TeamsMessages;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
 }) {
   const [pending, start] = useTransition();
-  const [confirming, setConfirming] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirmDialog(locale);
   const publicPath = accountCode && team.slug ? `/${accountCode}/team/${team.slug}` : null;
+
+  // Deleting a team used to swap the Delete button for two smaller buttons in
+  // the same corner of the row — nothing trapped focus, nothing was announced,
+  // and the question was never actually asked. Now it is asked, and it names
+  // the team.
+  const askDelete = async () => {
+    const ok = await confirm({
+      title: m.deleteTitle,
+      message: t(m.deleteBody, { name: team.name }),
+      confirmLabel: m.delete,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (!ok) return;
+    start(async () => {
+      const r = await deleteTeamAction(team.id);
+      if (!r.ok) setErr(r.message ?? m.deleteError);
+    });
+  };
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
@@ -60,37 +83,18 @@ export function TeamCard({
         >
           {m.manage}
         </Link>
-        {confirming ? (
-          <span className="flex items-center gap-1 text-sm">
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                start(async () => {
-                  const r = await deleteTeamAction(team.id);
-                  if (!r.ok) setErr(r.message ?? m.deleteError);
-                  setConfirming(false);
-                })
-              }
-              className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
-            >
-              {m.delete}
-            </button>
-            <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-2 py-1">
-              {m.cancel}
-            </button>
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setConfirming(true)}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
-          >
-            {m.delete}
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => void askDelete()}
+          aria-label={`${m.delete} · ${team.name}`}
+          className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
+        >
+          {m.delete}
+        </button>
       </div>
       {err ? <p className="w-full text-xs text-destructive">{err}</p> : null}
+      {dialog}
     </div>
   );
 }
