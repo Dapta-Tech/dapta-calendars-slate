@@ -317,13 +317,23 @@ describe('error visibility (SQLite in-memory)', () => {
     expect(r!.slots).toEqual([]);
     expect(r!.emptyReason).toBe('CALENDAR_UNAVAILABLE');
 
+    // The SECOND real slot, not `startMs + 1h`. `team-demo` is a 30-minute
+    // event on a 30-minute grid with a 120-minute booking notice, inside
+    // 09:00–17:00 New York, so the last bookable slot of a day is 16:30. Once
+    // the wall clock reaches ~13:30 New York the notice pushes `slots[0]` to
+    // 16:00 or 16:30, and an hour later is 17:00 or 17:30 — a time that was
+    // never bookable. The booking then fails `INVALID` ("That time is not
+    // available") BEFORE it ever reaches the calendar check, and this test's
+    // whole point is what the calendar check does, so it failed for an hour
+    // every weekday afternoon. Taking a slot the availability read actually
+    // returned makes the assertion about the calendar again.
     const out = await createTeamBooking(
       db,
       {
         accountCode: 'acme',
         teamSlug: 'sales',
         slug: 'team-demo',
-        startMs: startMs + 3600_000,
+        startMs: new Date(healthy!.slots[1]!).getTime(),
         attendee: { name: 'Sam Guest', email: 'sam2@example.com', timeZone: 'America/New_York' },
       },
       new FailingCalendarProvider(),
