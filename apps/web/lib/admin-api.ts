@@ -126,6 +126,12 @@ export const adminApi = {
     req<{ ok: true; claimed: boolean }>('POST', '/v1/me/onboarding/qualification', { answers }),
   submitOnboardingSetup: (templateId: string) =>
     req<{ id: string; slug: string }>('POST', '/v1/me/onboarding/setup', { templateId }),
+  // O2 growth (#94). Fire-and-forget from the UI's point of view: the verdict
+  // describes what the funnel recorded, and nothing the browser can act on
+  // depends on it. The sibling attribution claim deliberately does NOT live
+  // here — it runs in the auth callback with a bare fetch, because this
+  // client's 401 guard would clear the session that callback just created.
+  onboardingEarly: () => req<{ enqueued: boolean }>('POST', '/v1/me/onboarding/early'),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
   // Vanity account slug (premium — included with the Dapta AI subscription).

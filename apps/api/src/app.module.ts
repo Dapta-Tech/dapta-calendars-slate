@@ -18,7 +18,9 @@ import { AdminService } from './admin.service';
 import { OnboardingService } from './onboarding.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
+import { GrowthService } from './growth.service';
 import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
@@ -119,9 +121,11 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
     CalV2RequestIdInterceptor,
     AdminService,
     OnboardingService,
+    GrowthService,
     AuthService,
     CalendarEffects,
     EmailEffects,
+    DaptaSyncEffects,
     // Drains the durable outbox (calendar write-out + webhook delivery + booking
     // emails) with retry+backoff — no silent loss on a provider outage (B1/B7/DM1).
     OutboxWorker,

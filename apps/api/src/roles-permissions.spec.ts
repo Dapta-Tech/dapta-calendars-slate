@@ -107,7 +107,7 @@ describe('permission matrix — guarded routes (real controllers)', () => {
     };
     crud = new AdminCrudController(db, auth as unknown as AuthService);
     // Onboarding is likewise past the guard on every route asserted here.
-    host = new HostController(adminStub as never, {} as never, auth as unknown as AuthService);
+    host = new HostController(adminStub as never, {} as never, auth as unknown as AuthService, {} as never);
   });
 
   // --- Member management (admin/owner only; admins can't touch owners) ------

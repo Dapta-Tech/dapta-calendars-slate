@@ -19,6 +19,7 @@ import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notificati
 import { loadServerEnv } from '@slate/config/env';
 import { AdminService } from './admin.service';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects, OutboxSkipError } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
 import { BookingService } from './booking.service';
@@ -344,6 +345,7 @@ describe('notification settings — toggles + templates through the outbox', () 
       ENV,
       new CalendarEffects(new DisabledCalendarProvider(), db),
       signedEffects,
+      new DaptaSyncEffects(ENV),
     );
     await worker.drainOnce(2000);
     const after = (await listOutbox(db, { kind: 'email' })).find((r) => r.id === rowId)!;

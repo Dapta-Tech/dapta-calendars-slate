@@ -78,6 +78,17 @@ export const serverEnvSchema = z.object({
   // slow upstream must degrade to "ask less" quickly rather than stall a signup.
   ONBOARDING_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
 
+  // O2 growth — the contact sync into the OPERATOR'S OWN marketing CRM
+  // (#94/#65). Not the customer-facing CRM integration a host connects to their
+  // own account (#63): different system, different purpose. UNSET sends nothing
+  // — the outbox rows are still enqueued and the worker records them as
+  // skipped, so a fork reports nothing anywhere and nothing accumulates as
+  // failures. URL-only, never a hardcoded host or flow id (publish gate).
+  DAPTA_SYNC_URL: z.string().url().optional(),
+  DAPTA_SYNC_TOKEN: z.string().optional(),
+  // Bounded so a slow marketing endpoint can never hold an outbox worker tick.
+  DAPTA_SYNC_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
   // Auth — unset selects the local dev stub.
   AUTH_PROVIDER: z.enum(['local', 'workos']).default('local'),
 
