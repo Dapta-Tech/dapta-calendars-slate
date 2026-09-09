@@ -7,8 +7,11 @@ import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } fro
 import {
   LOCATION_KINDS,
   MAX_REMINDERS_PER_EVENT,
+  MAX_REMINDER_BODY,
   MAX_REMINDER_LEAD_MINUTES,
+  MAX_REMINDER_SUBJECT,
   MIN_REMINDER_LEAD_MINUTES,
+  defaultEventReminders,
   type EventReminder,
   type LocationKind,
 } from '@slate/types';
@@ -138,16 +141,19 @@ function ReminderCard({
         </label>
         <input
           type="number"
-          min={1}
+          // The floor is 5 MINUTES, so it is only 5 in the minutes unit — an
+          // input advertising min=1 that silently snaps to 5 is a small lie.
+          min={lead.unit === 'minutes' ? MIN_REMINDER_LEAD_MINUTES : 1}
+          max={lead.unit === 'days' ? 28 : lead.unit === 'hours' ? 672 : MAX_REMINDER_LEAD_MINUTES}
           value={lead.value}
           onChange={(e) => onChange({ leadMinutes: joinLead(Number(e.target.value) || 1, lead.unit) })}
-          aria-label={m.sendLabel}
+          aria-label={`${m.sendLabel} — ${m.unitMinutes}/${m.unitHours}/${m.unitDays}`}
           className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
         />
         <select
           value={lead.unit}
           onChange={(e) => onChange({ leadMinutes: joinLead(lead.value, e.target.value as LeadUnit) })}
-          aria-label={m.sendLabel}
+          aria-label={row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
           className="rounded-md border border-input bg-background px-2 py-1 text-sm"
         >
           <option value="minutes">{m.unitMinutes}</option>
@@ -176,6 +182,7 @@ function ReminderCard({
         onChange={(e) => onChange({ subject: e.target.value || null })}
         placeholder={m.subjectLabel}
         aria-label={m.subjectLabel}
+        maxLength={MAX_REMINDER_SUBJECT}
         className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
       />
       <textarea
@@ -185,6 +192,9 @@ function ReminderCard({
         onChange={(e) => onChange({ body: e.target.value || null })}
         placeholder={m.bodyLabel}
         aria-label={m.bodyLabel}
+        // Stop at the contract's limit rather than letting the save come back
+        // as a bare 400 from the other side of the wire.
+        maxLength={MAX_REMINDER_BODY}
         rows={3}
         className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
       />
@@ -607,10 +617,15 @@ export function EventTypeForm({
   const [scheduleId, setScheduleId] = useState<string>(initial?.scheduleId ?? '');
   const [requiresConfirmation, setRequiresConf] = useState(initial?.requiresConfirmation ?? false);
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
-  // Reminders + follow-up (#68). The API always returns the effective list —
-  // a never-configured event surfaces the shipped 24h + 1h with the follow-up
-  // off — so the editor opens on what this event actually sends.
-  const [reminders, setReminders] = useState<EventReminder[]>(initial?.reminders ?? []);
+  // Reminders + follow-up (#68). Editing opens on the effective list the API
+  // returns (a never-configured event surfaces the shipped 24h + 1h with the
+  // follow-up off). CREATE has no `initial`, so it seeds the same shipped list
+  // — the form both shows what the new event will send and submits it, instead
+  // of displaying "no reminders" and then storing that empty list as a
+  // deliberate "none".
+  const [reminders, setReminders] = useState<EventReminder[]>(
+    initial?.reminders ?? defaultEventReminders(),
+  );
   const [fields, setFields] = useState<IntakeField[]>(
     (initial?.bookingFields as IntakeField[] | undefined)?.map((f) => ({
       name: f.name,

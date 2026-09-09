@@ -217,6 +217,32 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(1);
   });
 
+  it('a host who muted their own reminder copies stays muted after the move', async () => {
+    // `host_reminder` used to be independently toggleable and has left Settings
+    // → Notifications. The stored key survives as a legacy MUTE on the host
+    // side: it can silence, never enable, so nobody starts receiving mail they
+    // had turned off (#68 decision 9).
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+    const uid = await book();
+    await settle();
+    const rows = await emailRows(uid, 'reminder');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(
+      rows.map((r) => (JSON.parse(r.payload!) as { audience: string }).audience),
+    ).not.toContain('host');
+
+    // Muting AFTER scheduling silences the queued row at delivery too.
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: true });
+    const uid2 = await book();
+    await settle();
+    const hostRow = (await emailRows(uid2, 'reminder')).find(
+      (r) => (JSON.parse(r.payload!) as { audience?: string }).audience === 'host',
+    )!;
+    await upsertNotificationSetting(db, accountId, 'host_reminder', { enabled: false });
+    await effects.deliver('reminder', hostRow.payload!, hostRow.accountId);
+    expect(email.sent.filter((m) => m.subject.startsWith('Reminder:'))).toHaveLength(0);
+  });
+
   it('a reminder DELETED from the event type silences the rows it scheduled', async () => {
     const uid = await book();
     await settle();

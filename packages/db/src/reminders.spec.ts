@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from './index';
 import { createEventType, getEventTypeById, updateEventType } from './crud';
 import {
@@ -126,6 +126,23 @@ describe('per-event reminders — parse, defaults, and the copy-forward', () => 
     expect(view!.reminders).toEqual(defaultEventReminders());
   });
 
+  it('create honours an EXPLICIT empty list — so a create surface must send the shipped one', async () => {
+    // `[] ?? default` is `[]`: an empty list on create is a deliberate "no
+    // reminders", not "unspecified". That is correct here and is exactly why
+    // the event-type form seeds its state with `defaultEventReminders()` rather
+    // than `[]` — a create screen that submits what it displays.
+    const created = await createEventType(db, accountId, memberId, {
+      slug: 'deliberately-silent',
+      title: 'Deliberately silent',
+      lengthMinutes: 30,
+      reminders: [],
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    expect(parseEventReminders(await storedColumn(created.value.id))).toEqual([]);
+    expect(created.value.reminders).toEqual([]);
+  });
+
   it('the cap holds on write: at most 10 reminders and one follow-up are stored', async () => {
     await updateEventType(db, accountId, eventTypeId, {
       reminders: [
@@ -144,5 +161,86 @@ describe('per-event reminders — parse, defaults, and the copy-forward', () => 
     const rows = parseEventReminders(await storedColumn())!;
     expect(rows.filter((r) => r.kind === 'reminder')).toHaveLength(10);
     expect(rows.filter((r) => r.kind === 'follow_up')).toHaveLength(1);
+  });
+});
+
+/**
+ * The copy-forward is the one piece of this change that runs ONCE against a
+ * live production database, and it reads a JSON column on one table to write a
+ * JSON column on another — the exact place the two dialects differ (`jsonb`
+ * round-trips as a JS value on Postgres, as text on SQLite). The suite above
+ * proves it on SQLite; this proves it on the engine that is the source of
+ * truth. Skipped unless DATABASE_URL points at Postgres, like repository.pg.
+ */
+const url = process.env.DATABASE_URL ?? '';
+const isPg = url.startsWith('postgres://') || url.startsWith('postgresql://');
+const describePg = isPg ? describe : describe.skip;
+
+describePg('per-event reminders on real Postgres', () => {
+  let db: Db;
+  let accountId: string;
+
+  beforeAll(async () => {
+    db = await createDb(url);
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ account_id: string }>(
+      sql`SELECT account_id FROM member WHERE handle='alex-rivera'`,
+    ))!.account_id;
+  });
+
+  afterAll(async () => {
+    if (db) await db.close();
+  });
+
+  it('reads and writes the jsonb column, and copies an account forward', async () => {
+    // A fresh event type in its own account-scoped slug, set back to NULL so it
+    // looks exactly like a row that predates this migration.
+    const created = await createEventType(db, accountId, null, {
+      slug: `pg-copy-forward-${Date.now()}`,
+      title: 'PG copy-forward',
+      lengthMinutes: 30,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const id = created.value.id;
+    // jsonb round-trip: what went in comes back as a JS array, not a string.
+    expect(parseEventReminders(
+      (await db.get<{ reminders: unknown }>(sql`SELECT reminders FROM event_type WHERE id = ${id}`))!.reminders,
+    )).toEqual(defaultEventReminders());
+
+    await db.run(sql`UPDATE event_type SET reminders = NULL WHERE id = ${id}`);
+    await upsertNotificationSetting(db, accountId, 'attendee_reminder', {
+      reminderLeadMinutes: [4320, 45],
+      subject: 'PG: {{event_title}}',
+    });
+
+    await applyReminderCopyForward(db);
+
+    const rows = parseEventReminders(
+      (await db.get<{ reminders: unknown }>(sql`SELECT reminders FROM event_type WHERE id = ${id}`))!.reminders,
+    )!;
+    const reminders = rows.filter((r) => r.kind === 'reminder');
+    expect(reminders.map((r) => r.leadMinutes)).toEqual([4320, 45]);
+    expect(reminders.every((r) => r.subject === 'PG: {{event_title}}')).toBe(true);
+    expect(rows.find((r) => r.kind === 'follow_up')!.enabled).toBe(false);
+
+    // Idempotent on Postgres too: a host's later edit survives a second run.
+    await updateEventType(db, accountId, id, {
+      reminders: [{ id: 'mine', kind: 'reminder', enabled: true, leadMinutes: 15, subject: null, body: null }],
+    });
+    await applyReminderCopyForward(db);
+    const after = parseEventReminders(
+      (await db.get<{ reminders: unknown }>(sql`SELECT reminders FROM event_type WHERE id = ${id}`))!.reminders,
+    )!;
+    expect(after).toHaveLength(1);
+    expect(after[0]!.id).toBe('mine');
+
+    // An EMPTY list must survive the jsonb round-trip as empty, not as NULL —
+    // that is what keeps "deliberately none" distinct from "never configured".
+    await updateEventType(db, accountId, id, { reminders: [] });
+    expect(parseEventReminders(
+      (await db.get<{ reminders: unknown }>(sql`SELECT reminders FROM event_type WHERE id = ${id}`))!.reminders,
+    )).toEqual([]);
   });
 });

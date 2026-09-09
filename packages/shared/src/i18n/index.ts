@@ -307,7 +307,6 @@ export interface BookingMessages {
         bodyLabel: string;
         defaultCopyHint: string;
         remove: string;
-        followUpTitle: string;
         followUpHint: string;
         variablesLabel: string;
         formVariablesLabel: string;
@@ -1066,7 +1065,6 @@ export const en: BookingMessages = {
         bodyLabel: 'Message',
         defaultCopyHint: 'Leave empty to use the standard wording.',
         remove: 'Remove',
-        followUpTitle: 'Follow-up',
         followUpHint: 'A thank-you sent once the meeting is over. Off unless you turn it on.',
         variablesLabel: 'Variables',
         formVariablesLabel: 'From this event’s questions',
@@ -1832,7 +1830,6 @@ export const es: BookingMessages = {
         bodyLabel: 'Mensaje',
         defaultCopyHint: 'Déjalo vacío para usar el texto estándar.',
         remove: 'Quitar',
-        followUpTitle: 'Seguimiento',
         followUpHint:
           'Un agradecimiento que se envía cuando la reunión termina. Desactivado salvo que lo actives.',
         variablesLabel: 'Variables',

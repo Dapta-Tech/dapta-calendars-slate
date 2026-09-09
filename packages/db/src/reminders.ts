@@ -15,61 +15,39 @@
  *   [...]  exactly these
  * Collapsing NULL and [] would hand a host back the reminder they just deleted.
  *
- * This module is pure storage plus its own defaults; it deliberately does NOT
+ * This module is pure storage; it deliberately does NOT
  * know the shipped template COPY (that lives in @slate/notifications, the
  * rendering side) — a reminder with a NULL subject/body resolves to the shipped
  * template in the host's locale at enqueue time.
  */
 import { sql } from 'drizzle-orm';
+import {
+  DEFAULT_FOLLOW_UP_LEAD_MINUTES,
+  DEFAULT_REMINDER_LEAD_MINUTES,
+  MAX_REMINDERS_PER_EVENT,
+  MAX_REMINDER_LEAD_MINUTES,
+  MIN_REMINDER_LEAD_MINUTES,
+  defaultEventReminders,
+  type EventReminder,
+} from '@slate/types';
 import type { Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 
-/** At most this many `reminder` rows on one event type (#68 decision 7). */
-export const MAX_REMINDERS_PER_EVENT = 10;
-/** Lead bounds, inherited from the account screen this replaces. */
-export const MIN_REMINDER_LEAD_MINUTES = 5;
-export const MAX_REMINDER_LEAD_MINUTES = 28 * 24 * 60;
-
-/** Shipped reminder leads on a NEW event type: 24h and 1h, both on (#68 d4). */
-export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
-/** Shipped follow-up lead: 1h after the meeting ends — and OFF (#68 d5). */
-export const DEFAULT_FOLLOW_UP_LEAD_MINUTES = 60;
-
-export type EventReminderKind = 'reminder' | 'follow_up';
-
-export interface EventReminder {
-  /** Unique WITHIN this event type's list — what the deliver-time gate reads. */
-  id: string;
-  /** `reminder` fires BEFORE start; `follow_up` fires AFTER the end. */
-  kind: EventReminderKind;
-  enabled: boolean;
-  leadMinutes: number;
-  /** NULL = the shipped default template, resolved in the host's locale. */
-  subject: string | null;
-  body: string | null;
-}
-
-/** What a brand-new event type is born with: 24h + 1h on, follow-up off. */
-export function defaultEventReminders(): EventReminder[] {
-  return [
-    ...DEFAULT_REMINDER_LEAD_MINUTES.map((leadMinutes, i) => ({
-      id: `r${i + 1}`,
-      kind: 'reminder' as const,
-      enabled: true,
-      leadMinutes,
-      subject: null,
-      body: null,
-    })),
-    {
-      id: 'f1',
-      kind: 'follow_up' as const,
-      enabled: false,
-      leadMinutes: DEFAULT_FOLLOW_UP_LEAD_MINUTES,
-      subject: null,
-      body: null,
-    },
-  ];
-}
+// The caps, the lead bounds and the shipped list live in the CONTRACT package
+// so the API, the storage and the editor cannot disagree about them — a cap
+// the API enforces and the storage silently truncates differently is a bug
+// nothing fails on. Re-exported here because this module is where the rest of
+// the codebase already reaches for reminder storage.
+export {
+  DEFAULT_FOLLOW_UP_LEAD_MINUTES,
+  DEFAULT_REMINDER_LEAD_MINUTES,
+  MAX_REMINDERS_PER_EVENT,
+  MAX_REMINDER_LEAD_MINUTES,
+  MIN_REMINDER_LEAD_MINUTES,
+  defaultEventReminders,
+};
+export type { EventReminder };
+export type EventReminderKind = EventReminder['kind'];
 
 function coerceRow(raw: unknown, index: number): EventReminder | null {
   if (raw == null || typeof raw !== 'object') return null;
@@ -183,14 +161,12 @@ function remindersFromAccount(src: AccountReminderSource): EventReminder[] {
  * a second run is a cheap no-op and a host's later edits are never overwritten.
  */
 export async function applyReminderCopyForward(db: Db): Promise<void> {
-  const pending = await db.all<{ id: string; account_id: string }>(
-    sql`SELECT id, account_id FROM event_type WHERE reminders IS NULL`,
+  const pending = await db.all<{ account_id: string }>(
+    sql`SELECT DISTINCT account_id FROM event_type WHERE reminders IS NULL`,
   );
   if (pending.length === 0) return;
 
-  const accountIds = [...new Set(pending.map((r) => r.account_id))];
-  const sources = new Map<string, AccountReminderSource>();
-  for (const accountId of accountIds) {
+  for (const { account_id: accountId } of pending) {
     const rows = await db.all<{
       email_key: string;
       enabled: number;
@@ -205,7 +181,7 @@ export async function applyReminderCopyForward(db: Db): Promise<void> {
     );
     const reminder = rows.find((r) => r.email_key === 'attendee_reminder');
     const followUp = rows.find((r) => r.email_key === 'follow_up');
-    sources.set(accountId, {
+    const source: AccountReminderSource = {
       // An ABSENT row means the account was on the shipped defaults — the same
       // fallback the enqueue path used before this change.
       leads: parseLeads(reminder?.reminder_lead_minutes, DEFAULT_REMINDER_LEAD_MINUTES),
@@ -217,15 +193,13 @@ export async function applyReminderCopyForward(db: Db): Promise<void> {
       followUpEnabled: followUp ? Number(followUp.enabled) !== 0 : false,
       followUpSubject: followUp?.subject ?? null,
       followUpBody: followUp?.body ?? null,
-    });
-  }
-
-  for (const row of pending) {
-    const src = sources.get(row.account_id);
-    if (!src) continue;
+    };
+    // Every event type of one account inherits the SAME list, so this is one
+    // statement per account rather than one per event type — the fixup runs in
+    // the boot path, before the API listens.
     await db.run(
-      sql`UPDATE event_type SET reminders = ${jsonParam(db, remindersFromAccount(src))}
-          WHERE id = ${row.id} AND reminders IS NULL`,
+      sql`UPDATE event_type SET reminders = ${jsonParam(db, remindersFromAccount(source))}
+          WHERE account_id = ${accountId} AND reminders IS NULL`,
     );
   }
 }

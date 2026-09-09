@@ -180,6 +180,39 @@ export const eventRemindersSchema = z
     }
   });
 
+/** Shipped reminder leads on a NEW event type: 24h and 1h, both on (#68 d4). */
+export const DEFAULT_REMINDER_LEAD_MINUTES = [24 * 60, 60];
+/** Shipped follow-up lead: 1h after the meeting ends — and OFF (#68 d5). */
+export const DEFAULT_FOLLOW_UP_LEAD_MINUTES = 60;
+
+/**
+ * What a brand-new event type is born with. It lives in the CONTRACT package
+ * because both ends need the same answer: the storage pre-fills a created row
+ * with it, and the editor's create surface has to render the list the event is
+ * about to get — a create form showing "no reminders" while the API stores 24h
+ * + 1h (or worse, saving the empty list it displayed) is the same bug twice.
+ */
+export function defaultEventReminders(): EventReminder[] {
+  return [
+    ...DEFAULT_REMINDER_LEAD_MINUTES.map((leadMinutes, i) => ({
+      id: `r${i + 1}`,
+      kind: 'reminder' as const,
+      enabled: true,
+      leadMinutes,
+      subject: null,
+      body: null,
+    })),
+    {
+      id: 'f1',
+      kind: 'follow_up' as const,
+      enabled: false,
+      leadMinutes: DEFAULT_FOLLOW_UP_LEAD_MINUTES,
+      subject: null,
+      body: null,
+    },
+  ];
+}
+
 /** The `{{form.<field name>}}` namespace (#68 decision 2) — the prefix keeps a
  *  question named `location` from shadowing the built-in `{{location}}`. The
  *  editor already sanitizes field names to this charset. */

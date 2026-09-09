@@ -24,3 +24,9 @@ mail moves. `attendee_reminder`, `host_reminder` and `follow_up` are no longer
 listed or editable in Settings → Notifications; the 9 transactional keys are
 unchanged. The host side of a reminder keeps its shipped template — the row's
 subject and body are the invitee copy.
+
+Two consequences worth stating. Host-side reminder *copy* stops being editable
+(its lead time and its on/off become per-event, which is the upgrade). And a
+stored `host_reminder: disabled` survives as a legacy **mute** on the host side —
+it can silence, never enable — so a host who had turned their own copies off does
+not start receiving them again; an account that never touched it is unaffected.

@@ -151,15 +151,15 @@ export class EmailEffects {
 
   /**
    * Schedule REMINDER emails for a confirmed booking — one `email`/`reminder`
-   * outbox row per ENABLED side per lead time, each due at `start − lead` (a
-   * FUTURE next_attempt_at so the worker leaves it dormant until then). Lead
-   * times come from the account's reminder setting (default 24h + 1h). Leads
-   * whose fire time is already in the past are skipped (never send a stale
-   * reminder). Never rejects.
+   * outbox row per side per ENABLED reminder on the booking's EVENT TYPE (#68),
+   * each due at `start − lead` (a FUTURE next_attempt_at so the worker leaves
+   * it dormant until then). A booking with no event type falls back to the
+   * shipped 24h + 1h. Leads whose fire time is already in the past are skipped
+   * (never send a stale reminder). Never rejects.
    */
   async enqueueReminders(
     uid: string,
-    opts: { manageUrl?: string; leadMinutes?: number[]; now?: number } = {},
+    opts: { manageUrl?: string; now?: number } = {},
   ): Promise<void> {
     try {
       const ctx = await loadBookingNotificationContext(this.db, uid);
@@ -168,21 +168,8 @@ export class EmailEffects {
       const now = opts.now ?? Date.now();
       const startMs = new Date(ctx.startUtc).getTime();
       // Each ENABLED reminder on the EVENT TYPE is its own row: its own lead,
-      // its own copy, its own id. `leadMinutes` stays as a caller override for
-      // tests and scripts; it borrows the first reminder's copy.
-      const rows = opts.leadMinutes
-        ? opts.leadMinutes.map((leadMinutes, i) => ({
-            ...(ctx.reminders.find((r) => r.kind === 'reminder') ?? {
-              id: `r${i + 1}`,
-              kind: 'reminder' as const,
-              enabled: true,
-              subject: null,
-              body: null,
-            }),
-            id: `r${i + 1}`,
-            leadMinutes,
-          }))
-        : ctx.reminders.filter((r) => r.kind === 'reminder' && r.enabled);
+      // its own copy, its own id.
+      const rows = ctx.reminders.filter((r) => r.kind === 'reminder' && r.enabled);
       for (const side of KIND_SIDES.reminder) {
         for (const row of rows) {
           const n = this.sideNotification('reminder', ctx, side, settings, { manageUrl: opts.manageUrl }, row);
@@ -228,7 +215,7 @@ export class EmailEffects {
    */
   async enqueueFollowUps(
     uid: string,
-    opts: { manageUrl?: string; leadMinutes?: number[]; now?: number } = {},
+    opts: { manageUrl?: string; now?: number } = {},
   ): Promise<void> {
     try {
       const ctx = await loadBookingNotificationContext(this.db, uid);
@@ -239,18 +226,7 @@ export class EmailEffects {
       // The event type carries at most one follow-up row, off unless the host
       // turned it on (#68 decision 5).
       const stored = ctx.reminders.find((r) => r.kind === 'follow_up');
-      const rows = opts.leadMinutes
-        ? opts.leadMinutes.map((leadMinutes, i) => ({
-            id: stored?.id ?? `f${i + 1}`,
-            kind: 'follow_up' as const,
-            enabled: true,
-            leadMinutes,
-            subject: stored?.subject ?? null,
-            body: stored?.body ?? null,
-          }))
-        : stored && stored.enabled
-          ? [stored]
-          : [];
+      const rows = stored && stored.enabled ? [stored] : [];
       for (const side of KIND_SIDES.follow_up) {
         for (const row of rows) {
           const n = this.sideNotification('follow_up', ctx, side, settings, { manageUrl: opts.manageUrl }, row);
@@ -337,6 +313,17 @@ export class EmailEffects {
   ): BookingNotification | null {
     if (reminder) {
       if (!reminder.enabled) return null;
+      // The reminder row is the switch (#68 decision 6) — with ONE exception it
+      // would be wrong to drop. `host_reminder` used to be independently
+      // toggleable, and a host who muted their own copies must not start
+      // receiving them again because the setting moved. The stored account key
+      // survives as a legacy MUTE on the host side only: it can silence, never
+      // enable, and an account that never touched it (the overwhelming default)
+      // is unaffected.
+      if (side.audience === 'host' && settings.get('host_reminder')?.enabled === false) {
+        this.log.log(`skip ${kind}/host for ${ctx.uid} — host copies muted on the account`);
+        return null;
+      }
     } else {
       const setting =
         settings.get(side.key) ??
@@ -443,12 +430,27 @@ export class EmailEffects {
       // off, or deleted outright, silences the mail it scheduled. Skipping is a
       // decision, not a failure: the row is marked done and never retried.
       const current = await loadBookingNotificationContext(this.db, n.uid);
+      // Explicit tenant check rather than an incidental one: `booking.uid` is
+      // unique, so this can only ever be the same account — say so.
+      if (current && n.accountId && current.accountId !== n.accountId) {
+        this.log.warn(`skip queued ${kind} for ${n.uid} — account mismatch`);
+        return;
+      }
       const row = current?.reminders.find((r) => r.id === n.reminderId);
       if (!row || !row.enabled) {
         this.log.log(
           `skip queued ${kind} ${n.reminderId} for ${n.uid} — ${row ? 'switched off' : 'deleted'} on the event type`,
         );
         return;
+      }
+      // The legacy host-side mute, re-checked here for the same reason every
+      // other reminder gate is: a row can sit for weeks after the host muted.
+      if (kind === 'reminder' && n.audience === 'host' && n.accountId) {
+        const settings = await getNotificationSettings(this.db, n.accountId);
+        if (settings.get('host_reminder')?.enabled === false) {
+          this.log.log(`skip queued reminder for ${n.uid} — host copies muted on the account`);
+          return;
+        }
       }
     }
     if (kind === 'follow_up' && !n.reminderId && n.accountId) {
