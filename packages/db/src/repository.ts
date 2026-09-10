@@ -271,6 +271,17 @@ export async function isSlotBookable(
   args: {
     eventTypeId: string;
     hostMemberId: string;
+    /**
+     * This host's OWN schedule for the event (`event_type_host.schedule_id`),
+     * for a TEAM event type whose hosts each bring their own hours. Pass it and
+     * the resolution becomes `override ?? member default` — precisely what the
+     * team availability projection does, so the picker and a reschedule cannot
+     * read different hours for the same host. OMIT it (personal events, and
+     * every caller that predates teams) and the event type's own `schedule_id`
+     * leads, exactly as before. `null` is meaningful and NOT the same as
+     * omitted: it says "this host has no override", i.e. use the member default.
+     */
+    hostScheduleId?: string | null;
     startMs: number;
     excludeBookingId?: string;
     now?: Date;
@@ -282,8 +293,9 @@ export async function isSlotBookable(
   if (!eventType || !member) return false;
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
+  const scheduleId = args.hostScheduleId !== undefined ? args.hostScheduleId : eventType.schedule_id;
   const schedule =
-    (await resolveScheduleTimeZone(db, eventType.schedule_id)) ??
+    (await resolveScheduleTimeZone(db, scheduleId)) ??
     (await resolveScheduleTimeZone(db, member.default_schedule_id));
   const scheduleTimeZone = schedule?.timeZone ?? member.time_zone;
   const rules: AvailabilityRule[] = schedule ? await loadAvailabilityRules(db, schedule.id) : [];

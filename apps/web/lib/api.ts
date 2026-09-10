@@ -106,6 +106,31 @@ export async function postTeamBooking(
   return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
 }
 
+/**
+ * Slots ONE booking can be moved to, token-gated (#127).
+ *
+ * The manage page's picker asks this for a TEAM booking rather than the public
+ * team availability route. That route answers what the event offers a NEW
+ * invitee, and for a round-robin team event that is the UNION across hosts —
+ * any host free is enough, because create time still gets to choose who takes
+ * it. A reschedule does not choose again: the booking keeps the host set it was
+ * assigned, so the union listed times the reschedule then refused with a 400.
+ * This asks the narrower question the write actually answers.
+ */
+export function getRescheduleAvailability(params: {
+  uid: string;
+  token: string;
+  from: string;
+  to: string;
+  timeZone?: string;
+}): Promise<AvailabilityResponse | null> {
+  const qs = new URLSearchParams({ token: params.token, from: params.from, to: params.to });
+  if (params.timeZone) qs.set('timeZone', params.timeZone);
+  return getJson<AvailabilityResponse>(
+    `/v1/bookings/${encodeURIComponent(params.uid)}/availability?${qs.toString()}`,
+  );
+}
+
 export function getAvailability(params: {
   accountCode: string;
   handle: string;

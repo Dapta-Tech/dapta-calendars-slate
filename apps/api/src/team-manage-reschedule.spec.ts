@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, migrate, seed, sql, createEventType, type Db } from '@slate/db';
+import { randomUUID } from 'node:crypto';
+import { createBooking, createDb, createEventType, createTeam, migrate, seed, sql, type Db } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import { loadServerEnv } from '@slate/config/env';
@@ -233,6 +234,230 @@ describe('team booking — manage view reschedule context (#122)', () => {
     expect(new Date(moved.startUtc).getTime()).toBe(new Date(target).getTime());
   });
 
+});
+
+/**
+ * #129 + #127 — what a reschedule MEANS per scheduling method, at the service
+ * seam the manage page actually drives.
+ *
+ * #129: a collective booking assigns every host, and `createTeamBooking` guards
+ * overlap for all of them. The reschedule path checked the organizer alone, so
+ * a manage-token holder could POST a move that double-booked a co-host — one
+ * create time would have refused, and one the Postgres `booking_no_overlap`
+ * EXCLUDE cannot catch, because a co-host conflict is a different tuple.
+ *
+ * #127: the same host set, read from the picker's side. The public team route
+ * answers what the event offers a NEW invitee — for round-robin the UNION
+ * across hosts — while the reschedule keeps the assigned organizer, so the
+ * picker listed times the write refused with a 400. The manage page now asks
+ * `rescheduleAvailability`, scoped to the booking's own hosts.
+ */
+describe('team reschedule — the assigned host set (#129, #127)', () => {
+  let db: Db;
+  let accountId: string;
+  let alexId: string;
+  let jordanId: string;
+
+  const service = () =>
+    new BookingService(
+      db,
+      ENV,
+      new CalendarEffects(new DisabledCalendarProvider(), db),
+      new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
+    );
+
+  const WINDOW = () => ({
+    from: new Date().toISOString(),
+    to: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+  });
+
+  const attendee = { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' };
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
+    alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    jordanId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='jordan-lee'`))!.id;
+  });
+
+  /** A team + team event of the given method, hosted by Alex and Jordan. */
+  async function makeTeamEvent(slug: string, schedulingType: 'round_robin' | 'collective') {
+    const team = await createTeam(db, accountId, { name: slug, slug: `${slug}-team` });
+    if (!team.ok) throw new Error('team create failed');
+    const ev = await createEventType(db, accountId, null, {
+      slug,
+      title: slug,
+      lengthMinutes: 30,
+      schedulingType,
+      scheduleId: null,
+      teamId: team.value.id,
+    });
+    if (!ev.ok) throw new Error('event create failed');
+    for (const memberId of [alexId, jordanId]) {
+      await db.run(
+        sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${ev.value.id}, ${memberId}, ${0}, ${null}, ${100}, ${null}, ${Date.now()})`,
+      );
+    }
+    return { teamSlug: `${slug}-team`, slug };
+  }
+
+  async function bookTeamEvent(svc: BookingService, t: { teamSlug: string; slug: string }, startUtc: string) {
+    const out = await svc.teamBook('acme', t.teamSlug, { slug: t.slug, startUtc, attendee });
+    if ('error' in out) throw new Error(`teamBook failed: ${out.error}`);
+    const token = new URL(out.manageUrl!).searchParams.get('token');
+    if (!token) throw new Error('teamBook returned no manage token');
+    return { booking: out, token };
+  }
+
+  const publicSlots = async (svc: BookingService, t: { teamSlug: string; slug: string }) => {
+    const w = WINDOW();
+    const r = await svc.teamAvailability('acme', t.teamSlug, t.slug, w.from, w.to);
+    return (r?.slots ?? []).map((s) => s.startUtc);
+  };
+
+  /**
+   * Instants BOTH hosts are free at — a collective probe over the same two
+   * hosts, whose availability is their intersection. A round-robin event's own
+   * slots are a UNION, so a target taken from them can be a time only one host
+   * is free at, and the divergence the #127 spec sets up would collapse to
+   * "both busy" instead of "one free".
+   */
+  const bothFreeSlots = async (svc: BookingService, probeSlug: string) =>
+    publicSlots(svc, await makeTeamEvent(probeSlug, 'collective'));
+
+  const pickerSlots = async (svc: BookingService, uid: string, token: string) => {
+    const w = WINDOW();
+    const r = await svc.rescheduleAvailability(uid, token, w.from, w.to);
+    return (r?.slots ?? []).map((s) => s.startUtc);
+  };
+
+  /** Occupy a member at `startUtc` with a personal booking of their own. */
+  async function occupy(memberId: string, handle: string, slug: string, startUtc: string) {
+    await createEventType(db, accountId, memberId, { slug, title: slug, lengthMinutes: 30, scheduleId: null });
+    const busy = await createBooking(db, {
+      accountCode: 'acme',
+      handle,
+      slug,
+      startMs: new Date(startUtc).getTime(),
+      attendee: { name: 'Other', email: `other-${slug}@example.com`, timeZone: 'America/New_York' },
+    });
+    if (!busy.ok) throw new Error('could not occupy the host');
+  }
+
+  const startOf = (uid: string) =>
+    db.get<{ start_ms: number; host_member_id: string }>(
+      sql`SELECT start_ms, host_member_id FROM booking WHERE uid = ${uid}`,
+    );
+
+  it('refuses a collective move that would double-book a co-host (#129)', async () => {
+    const svc = service();
+    const collab = await makeTeamEvent('collab', 'collective');
+    const slots = await publicSlots(svc, collab);
+    const { booking, token } = await bookTeamEvent(svc, collab, slots[0]!);
+    const target = slots[1]!;
+
+    const row = (await startOf(booking.uid))!;
+    const coHostId = row.host_member_id === alexId ? jordanId : alexId;
+    await occupy(coHostId, coHostId === alexId ? 'alex-rivera' : 'jordan-lee', 'cohost-busy', target);
+
+    const moved = await svc.reschedule(booking.uid, { newStartUtc: target, token });
+    expect('error' in moved).toBe(true);
+    // Refused, and NOT half-applied: the booking is where it was.
+    expect(Number((await startOf(booking.uid))!.start_ms)).toBe(new Date(slots[0]!).getTime());
+  });
+
+  it('moves a clean collective booking and keeps every assigned host on it (#129)', async () => {
+    const svc = service();
+    const collab = await makeTeamEvent('collab', 'collective');
+    const slots = await publicSlots(svc, collab);
+    const { booking, token } = await bookTeamEvent(svc, collab, slots[0]!);
+    const target = slots[1]!;
+
+    const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${booking.uid}`))!.id;
+    const hostsOf = async () =>
+      (await db.all<{ member_id: string }>(sql`SELECT member_id FROM booking_host WHERE booking_id = ${bookingId}`))
+        .map((r) => r.member_id)
+        .sort();
+    const before = await hostsOf();
+    expect(before).toEqual([alexId, jordanId].sort());
+
+    const moved = await svc.reschedule(booking.uid, { newStartUtc: target, token });
+    if ('error' in moved) throw new Error(`reschedule failed: ${String(moved.error)}`);
+    expect(new Date(moved.startUtc).getTime()).toBe(new Date(target).getTime());
+    expect(await hostsOf()).toEqual(before);
+  });
+
+  it('round-robin: the manage picker stops offering what the write refuses (#127)', async () => {
+    const svc = service();
+    const rr = await makeTeamEvent('rr', 'round_robin');
+    const slots = await bothFreeSlots(svc, 'rr-probe');
+    const { booking, token } = await bookTeamEvent(svc, rr, slots[0]!);
+    const target = slots[1]!;
+
+    // Make the hosts diverge — with identical seeded schedules the union and
+    // the organizer's own hours coincide and the bug cannot show.
+    const row = (await startOf(booking.uid))!;
+    await occupy(
+      row.host_member_id,
+      row.host_member_id === alexId ? 'alex-rivera' : 'jordan-lee',
+      'organizer-busy',
+      target,
+    );
+
+    // The public team route still lists it (union: the other host is free) —
+    // which is exactly what the manage page used to ask, and the 400 it showed.
+    expect(await publicSlots(svc, rr)).toContain(target);
+    expect('error' in (await svc.reschedule(booking.uid, { newStartUtc: target, token }))).toBe(true);
+
+    // The booking-scoped picker does not offer it, and what it does offer moves.
+    const offered = await pickerSlots(svc, booking.uid, token);
+    expect(offered).not.toContain(target);
+    expect(offered.length).toBeGreaterThan(0);
+    const moved = await svc.reschedule(booking.uid, { newStartUtc: offered[0]!, token });
+    if ('error' in moved) throw new Error(`reschedule failed: ${String(moved.error)}`);
+    expect(new Date(moved.startUtc).getTime()).toBe(new Date(offered[0]!).getTime());
+  });
+
+  it('token-gates the reschedule picker, and hides whether the uid exists', async () => {
+    const svc = service();
+    const rr = await makeTeamEvent('rr', 'round_robin');
+    const { booking, token } = await bookTeamEvent(svc, rr, (await publicSlots(svc, rr))[0]!);
+    const w = WINDOW();
+    expect(await svc.rescheduleAvailability(booking.uid, 'not-the-token', w.from, w.to)).toBeNull();
+    expect(await svc.rescheduleAvailability('no-such-uid', token, w.from, w.to)).toBeNull();
+  });
+
+  it('still answers a PERSONAL booking\u2019s picker, host-scoped as before', async () => {
+    const svc = service();
+    const ev = await createEventType(db, accountId, alexId, {
+      slug: 'personal-picker',
+      title: 'personal-picker',
+      lengthMinutes: 30,
+      scheduleId: null,
+    });
+    if (!ev.ok) throw new Error('event create failed');
+    const avail = await svc.availability({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'personal-picker',
+      ...WINDOW(),
+    });
+    const startUtc = avail!.slots[0]!.startUtc;
+    const out = await svc.book({ accountCode: 'acme', handle: 'alex-rivera', slug: 'personal-picker', startUtc, attendee });
+    if ('error' in out) throw new Error(`book failed: ${out.error}`);
+    const token = new URL(out.manageUrl!).searchParams.get('token')!;
+
+    const offered = await pickerSlots(svc, out.uid, token);
+    expect(offered.length).toBeGreaterThan(0);
+    // Its own instant is not on offer, and every listed time actually moves it.
+    expect(offered).not.toContain(startUtc);
+    const moved = await svc.reschedule(out.uid, { newStartUtc: offered[0]!, token });
+    if ('error' in moved) throw new Error(`reschedule failed: ${String(moved.error)}`);
+    expect(new Date(moved.startUtc).getTime()).toBe(new Date(offered[0]!).getTime());
+  });
 });
 
 /**

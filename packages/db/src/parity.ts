@@ -32,6 +32,7 @@ import {
   getAccountByCode,
   getAvailability,
   getEventType,
+  getEventTypeRowById,
   getMember,
   isSlotBookable,
   jsonParam,
@@ -389,6 +390,21 @@ async function getTeamEventType(db: Db, accountId: string, teamId: string, slug:
   );
 }
 
+/**
+ * The slot-math half of an event type — everything `computeSlots` needs and
+ * nothing more. Named apart from `TeamEventType` so the reschedule picker can
+ * hand over an `event_type` row loaded BY ID: a booking knows its event type's
+ * id, never the account/team/slug triple `getTeamEventType` resolves from.
+ */
+type SlotShapedEventType = Pick<
+  TeamEventType,
+  | 'length_minutes'
+  | 'slot_interval'
+  | 'minimum_booking_notice'
+  | 'before_event_buffer'
+  | 'after_event_buffer'
+>;
+
 interface EventHostRow {
   member_id: string;
   is_fixed: number;
@@ -413,7 +429,7 @@ async function getEventHosts(db: Db, eventTypeId: string): Promise<EventHostRow[
 async function hostFreeSlotMs(
   db: Db,
   host: EventHostRow,
-  et: TeamEventType,
+  et: SlotShapedEventType,
   fromMs: number,
   toMs: number,
   now: Date,
@@ -624,11 +640,14 @@ export type TeamBookingOutcome =
     };
 
 /** True (as a 1-row SELECT) if `memberId` already holds an overlapping booking —
- * whether as the primary host_member_id OR an assigned co-host (booking_host). */
-function memberOverlapSql(memberId: string, startMs: number, endMs: number) {
+ * whether as the primary host_member_id OR an assigned co-host (booking_host).
+ * `exceptBookingId` drops ONE booking from the check: a reschedule asks this of
+ * the booking it is moving, which must never block its own move. */
+function memberOverlapSql(memberId: string, startMs: number, endMs: number, exceptBookingId?: string) {
+  const except = exceptBookingId ? sql` AND b.id <> ${exceptBookingId}` : sql``;
   return sql`SELECT b.id FROM booking b
     WHERE b.status IN ('accepted','pending')
-      AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}
+      AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}${except}
       AND (b.host_member_id = ${memberId}
            OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))
     LIMIT 1`;
@@ -979,6 +998,30 @@ function manageHashOf(metadata: unknown): string | null {
   return meta._manage?.tokenHash ?? null;
 }
 
+/**
+ * The host set a booking was CREATED with: its organizer plus every
+ * `booking_host` row, organizer first and de-duplicated.
+ *
+ * `createTeamBooking` writes a `booking_host` row per host only for the
+ * multi-host methods (collective / fixed_round_robin) — round-robin's single
+ * host is carried by `host_member_id` alone, and a personal booking has no
+ * rows either. So for those this answers exactly `[organizer]`, and every
+ * guard reading it behaves precisely as the single-host code it replaced.
+ */
+async function loadAssignedHostIds(
+  db: Db,
+  bookingId: string,
+  organizerId: string | null,
+): Promise<string[]> {
+  const rows = await db.all<{ member_id: string }>(
+    sql`SELECT member_id FROM booking_host WHERE booking_id = ${bookingId}`,
+  );
+  const ids: string[] = [];
+  if (organizerId) ids.push(organizerId);
+  for (const r of rows) if (r.member_id && !ids.includes(r.member_id)) ids.push(r.member_id);
+  return ids;
+}
+
 export type MutationOutcome =
   | {
       ok: true;
@@ -1045,19 +1088,47 @@ export async function rescheduleBooking(
     };
   }
 
-  // B6: the new time must be a REAL bookable slot — enforce the host's schedule
+  // #129: a reschedule answers to the SAME host set the booking was CREATED
+  // with, never to the organizer alone. `createTeamBooking` records a
+  // `booking_host` row per assigned host and guards overlap for every one of
+  // them; this path validated `booking.host_member_id` only, so a collective
+  // co-host could be double-booked by a move that create time would have
+  // refused — and the Postgres `booking_no_overlap` EXCLUDE cannot catch it,
+  // because a co-host conflict is a different tuple. The app-level guard is the
+  // only line here, so it has to cover everyone who is actually attending.
+  //
+  // #127: that host set is IMMUTABLE across a reschedule. The invitee keeps the
+  // people the scheduling method matched them with, and the manage picker asks
+  // `getBookingRescheduleAvailability` — scoped to this same set — so the
+  // picker and this write agree by construction rather than by coincidence.
+  const assignedHostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  // A team host may carry its own schedule (`event_type_host.schedule_id`), and
+  // that override — not the event type's own schedule — is what the team
+  // availability projection resolves against. Validate through the same one, or
+  // a host with an override has the picker and the write reading different
+  // hours. A personal event has no host rows, so this stays empty and
+  // `isSlotBookable` resolves the event type's schedule exactly as before.
+  const hostScheduleIds = new Map<string, string | null>();
+  if (b.event_type_id)
+    for (const h of await getEventHosts(db, b.event_type_id))
+      hostScheduleIds.set(h.member_id, h.schedule_id);
+
+  // B6: the new time must be a REAL bookable slot — enforce each host's schedule
   // rules, min-notice, buffers, and not-in-the-past (the old path only checked
   // booking-overlap, so a manage-link holder could move a meeting to any
   // instant). Skipped only when the booking has no host/event to validate against.
-  if (b.host_member_id && b.event_type_id) {
-    const bookable = await isSlotBookable(db, {
-      eventTypeId: b.event_type_id,
-      hostMemberId: b.host_member_id,
-      startMs: args.newStartMs,
-      excludeBookingId: b.id,
-      now: args.now,
-    });
-    if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+  if (b.event_type_id) {
+    for (const hostMemberId of assignedHostIds) {
+      const bookable = await isSlotBookable(db, {
+        eventTypeId: b.event_type_id,
+        hostMemberId,
+        hostScheduleId: hostScheduleIds.get(hostMemberId),
+        startMs: args.newStartMs,
+        excludeBookingId: b.id,
+        now: args.now,
+      });
+      if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+    }
   }
 
   const duration = Number(b.end_ms) - Number(b.start_ms);
@@ -1068,13 +1139,15 @@ export async function rescheduleBooking(
   // calendar rejects the move, and an UNREADABLE calendar blocks it visibly
   // instead of moving the meeting onto a conflict we couldn't see (fail-closed).
   // This path previously skipped the check entirely, so a reschedule could
-  // double-book the host over an external event.
-  if (b.host_member_id) {
+  // double-book the host over an external event. Run per ASSIGNED host, as the
+  // create path conflict-checks every candidate: a co-host's external calendar
+  // is as good a reason to refuse the move as the organizer's.
+  for (const hostMemberId of assignedHostIds) {
     try {
       const externalBusy = await loadExternalBusy(
         db,
         calendar,
-        b.host_member_id,
+        hostMemberId,
         args.newStartMs,
         newEndMs,
         b.event_type_id,
@@ -1095,9 +1168,14 @@ export async function rescheduleBooking(
   if (args.idempotencyKey) newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
   const metaExpr = jsonParam(db, newMeta);
 
-  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
-    AND status = 'accepted' AND id <> ${b.id}
-    AND start_ms < ${newEndMs} AND end_ms > ${args.newStartMs} LIMIT 1`;
+  // The same guard `createTeamBooking` runs, per assigned host, inside the same
+  // transaction as the move: a member is busy whether they hold the conflicting
+  // booking as its organizer or as an assigned co-host, and a pending booking
+  // holds its slot just as an accepted one does. Both are what create enforces;
+  // the old single-host, accepted-only check was strictly weaker.
+  const overlapChecks = assignedHostIds.map((id) =>
+    memberOverlapSql(id, args.newStartMs, newEndMs, b.id),
+  );
   // Restore the reschedule audit trail: since this is an in-place move (uid
   // stable, no mint-new row), record where it came FROM (the previous start) in
   // `from_reschedule` — the old system's back-pointer analog. `rescheduled=1`
@@ -1106,7 +1184,7 @@ export async function rescheduleBooking(
     rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
     updated_at = ${now} WHERE id = ${b.id}`;
 
-  const moved = await runGuardedUpdate(db, overlapSql, updateSql);
+  const moved = await runGuardedUpdate(db, overlapChecks, updateSql);
   if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
@@ -1118,14 +1196,21 @@ export async function rescheduleBooking(
   };
 }
 
+/**
+ * Run `updateSql` only if EVERY overlap check comes back empty, both inside one
+ * transaction (SQLite sync txn / Postgres async txn). Takes a LIST because a
+ * team booking has a host set, not a host: a collective move has to answer for
+ * each of its co-hosts, and checking them one transaction at a time would leave
+ * the window this guard exists to close.
+ */
 async function runGuardedUpdate(
   db: Db,
-  overlapSql: ReturnType<typeof sql>,
+  overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
 ): Promise<boolean> {
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
-      if (db.sqlite!.drizzle.get(overlapSql)) return false;
+      for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
       db.sqlite!.drizzle.run(updateSql);
       return true;
     });
@@ -1133,14 +1218,117 @@ async function runGuardedUpdate(
   const pg = db.pg!.drizzle;
   try {
     return await pg.transaction(async (tx) => {
-      const rows = (await tx.execute(overlapSql)) as unknown as unknown[];
-      if (rows.length > 0) return false;
+      for (const check of overlapChecks) {
+        const rows = (await tx.execute(check)) as unknown as unknown[];
+        if (rows.length > 0) return false;
+      }
       await tx.execute(updateSql);
       return true;
     });
   } catch {
     return false;
   }
+}
+
+/**
+ * Availability for RESCHEDULING one existing booking — the picker's half of
+ * #127, and the only availability read the manage page's reschedule form uses
+ * for a team booking.
+ *
+ * The public TEAM route answers what the EVENT offers to a new invitee, which
+ * for `round_robin` is the UNION across hosts: a time is listed if ANY host is
+ * free, because create time is still free to pick who takes it. A reschedule is
+ * not free to: the booking already has an assigned host set, `rescheduleBooking`
+ * keeps it (#127, option a — the invitee keeps the people they were matched
+ * with), and so the picker was offering times the write then refused with
+ * `INVALID_SLOT`. Same mismatch, differently shaped, for the rotating half of
+ * `fixed_round_robin`.
+ *
+ * So this asks a narrower question — "when can THIS booking move to?" — and
+ * answers it from the booking's OWN host set (`loadAssignedHostIds`),
+ * INTERSECTED: everyone still attending has to be free, whatever method
+ * originally assigned them. That is the same set, resolved by the same helper,
+ * that the write validates and guards against, so picker and write cannot
+ * drift apart.
+ *
+ * Token-gated like every other manage read, and deliberately answers `null` for
+ * a bad token exactly as it does for an unknown uid — this is a public route,
+ * and telling the two apart would turn it into a uid prober.
+ *
+ * The booking being moved is NOT excluded from its own hosts' busy sets: its
+ * current instant stays off the list (a "move" to where it already is has no
+ * meaning), and every slot this omits is one the write would have accepted —
+ * never the reverse, which is the direction that produces the bug above.
+ */
+export async function getBookingRescheduleAvailability(
+  db: Db,
+  args: {
+    uid: string;
+    manageToken?: string;
+    byHost?: boolean;
+    accountId?: string;
+    fromMs: number;
+    toMs: number;
+    displayTimeZone?: string;
+    now?: Date;
+  },
+  /** Wired provider — each assigned host's external busy is subtracted. */
+  calendar?: CalendarProvider,
+): Promise<TeamAvailabilityResult | null> {
+  const b = await resolveBooking(db, args.uid, args.accountId);
+  if (!b || !b.event_type_id) return null;
+  if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata))) return null;
+  const et = await getEventTypeRowById(db, b.event_type_id);
+  if (!et) return null;
+  const assignedHostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  if (assignedHostIds.length === 0) return null;
+
+  const eventHosts = new Map((await getEventHosts(db, et.id)).map((h) => [h.member_id, h]));
+  const now = args.now ?? new Date();
+  const hostSets: Array<{
+    isFixed: boolean;
+    free: Set<number>;
+    reason: AvailabilityEmptyReason | null;
+  }> = [];
+  for (const memberId of assignedHostIds) {
+    // A host removed from the event type since the booking was made still owes
+    // this meeting, so it keeps validating them — against the event type's own
+    // schedule, since their per-host override is gone with the host row.
+    const host: EventHostRow = eventHosts.get(memberId) ?? {
+      member_id: memberId,
+      is_fixed: 1,
+      priority: null,
+      weight: null,
+      schedule_id: et.schedule_id,
+    };
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
+    hostSets.push({ isFixed: true, free, reason });
+  }
+  const slots = intersectInstants(hostSets.map((h) => h.free)).map((ms) => new Date(ms).toISOString());
+  const tz = await db.get<{ time_zone: string | null }>(
+    sql`SELECT COALESCE(t.time_zone, m.time_zone) AS time_zone
+        FROM booking b
+        LEFT JOIN event_type et ON et.id = b.event_type_id
+        LEFT JOIN team t ON t.id = et.team_id
+        LEFT JOIN member m ON m.id = b.host_member_id
+        WHERE b.id = ${b.id} LIMIT 1`,
+  );
+  return {
+    eventType: {
+      slug: et.slug,
+      title: et.title,
+      lengthMinutes: et.length_minutes,
+      bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
+      schedulingType: et.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(et.locations, null)),
+    },
+    timeZone: args.displayTimeZone ?? tz?.time_zone ?? 'UTC',
+    slots,
+    // Everyone assigned must be free, so ONE broken host empties the window —
+    // the collective rule, whatever method did the assigning.
+    emptyReason:
+      slots.length === 0 ? teamEmptyReason('collective', assignedHostIds.length, hostSets) : undefined,
+  };
 }
 
 export async function cancelBooking(
@@ -1229,7 +1417,7 @@ export async function confirmBooking(db: Db, uid: string, accountId?: string): P
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
     WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, overlapSql, updateSql);
+  const ok = await runGuardedUpdate(db, [overlapSql], updateSql);
   if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,

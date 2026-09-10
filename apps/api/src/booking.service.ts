@@ -8,6 +8,7 @@ import {
   getAccountByCode,
   getAvailability,
   getPublicProfile,
+  getBookingRescheduleAvailability,
   getTeamAvailability,
   getTeamProfile,
   rescheduleBooking,
@@ -404,6 +405,46 @@ export class BookingService {
       meetingUrl: ref?.meeting_url ?? null,
       reschedule: rescheduleContextOf(ctx),
     };
+  }
+
+  /**
+   * Availability for moving ONE booking, token-gated (#127).
+   *
+   * The manage page's picker asks this for a TEAM booking instead of the public
+   * team route. That route answers what the event offers a NEW invitee — for
+   * round-robin, the union across hosts — while a reschedule keeps the host set
+   * the booking already has, so the picker was listing times the write refused.
+   * This reads the booking's own assigned hosts and intersects them, which is
+   * the set `rescheduleBooking` validates and guards against.
+   *
+   * Answers `null` for an unknown uid AND for a bad token alike: this is an
+   * unauthenticated route, so the two must not be distinguishable.
+   */
+  async rescheduleAvailability(
+    uid: string,
+    token: string,
+    from: string,
+    to: string,
+    timeZone?: string,
+  ): Promise<AvailabilityResponse | null> {
+    const result = await getBookingRescheduleAvailability(
+      this.db,
+      {
+        uid,
+        manageToken: token,
+        fromMs: new Date(from).getTime(),
+        toMs: new Date(to).getTime(),
+        displayTimeZone: timeZone,
+      },
+      this.calendar.provider,
+    );
+    if (!result) return null;
+    return availabilityResponseSchema.parse({
+      eventType: result.eventType,
+      timeZone: safeTimeZone(result.timeZone),
+      slots: result.slots.map((startUtc) => ({ startUtc })),
+      emptyReason: result.emptyReason,
+    });
   }
 
   async cancel(

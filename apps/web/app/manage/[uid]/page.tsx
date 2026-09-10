@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { formatBookingLocation, formatSlotDateTime, getMessages, t } from '@slate/shared';
-import { getManageView, getAvailability, getTeamAvailability } from '@/lib/api';
+import { getManageView, getAvailability, getRescheduleAvailability } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { ManageActions } from './manage-actions';
 import { MadeWithBadge } from '@/components/made-with-badge';
@@ -85,6 +85,15 @@ export default async function ManagePage({
   // misses it entirely: it answered nothing, the picker rendered its empty
   // state, and a team invitee could cancel but never reschedule (#122). The
   // context says which kind it is rather than leaving the page to infer it.
+  //
+  // A TEAM booking then asks the BOOKING-scoped route rather than the public
+  // team one (#127). The public route answers what the event offers a NEW
+  // invitee, and for round-robin that is the union across hosts — while the
+  // reschedule keeps the host this booking was assigned, so the union offered
+  // times the write refused with a 400 the page showed as a reschedule error.
+  // The booking-scoped read asks about this booking's own hosts, which is the
+  // set the write validates. The personal branch is unchanged: one host, and
+  // the public availability route already answers for exactly that host.
   const now = new Date();
   // Named `range`, not `window`: this module is a server component today, but a
   // binding that shadows the global `window` is a trap for whoever next adds a
@@ -97,12 +106,7 @@ export default async function ManagePage({
   const avail = !rs
     ? null
     : rs.kind === 'team'
-      ? await getTeamAvailability({
-          accountCode: rs.accountCode,
-          teamSlug: rs.teamSlug,
-          slug: rs.slug,
-          ...range,
-        })
+      ? await getRescheduleAvailability({ uid, token, ...range })
       : await getAvailability({
           accountCode: rs.accountCode,
           handle: rs.handle,
