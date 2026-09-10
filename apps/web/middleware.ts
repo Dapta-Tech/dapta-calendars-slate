@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
 import { PATH_HEADER } from '@/lib/theme';
+import { framingHeaders } from '@/lib/framing';
 import { requestOrigin } from '@/lib/request-origin';
 
 /**
@@ -57,6 +58,12 @@ function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
   // result is the honest representation, and the funnel reads it as such.
   if (!attribution) return res;
 
+  // `SameSite=Lax` means this does NOT park from inside a third-party iframe,
+  // which the inline embed (E) made a first-class context. That is the right
+  // trade rather than an oversight: `None` would require `Secure` and would
+  // send the cookie on every cross-site request, and an embedded booking page
+  // is the host's acquisition surface, not ours. So an embed's campaign click
+  // is simply not attributed, and the funnel reads that as organic.
   res.cookies.set(ATTRIBUTION_COOKIE, JSON.stringify(attribution), {
     httpOnly: true,
     sameSite: 'lax',
@@ -92,7 +99,18 @@ export function middleware(req: NextRequest) {
   // overwritten here rather than trusted into the theme decision.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set(PATH_HEADER, req.nextUrl.pathname);
-  return parkAttribution(req, NextResponse.next({ request: { headers: requestHeaders } }));
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+
+  // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public
+  // booking routes is the promise the embed rests on; `'self'` on the admin,
+  // on `/manage/[uid]` and on the login/onboarding surfaces is the half that
+  // makes the promise safe to make. Before this the repo declared neither, so
+  // the dashboard was frameable by any site — by omission.
+  for (const [name, value] of Object.entries(framingHeaders(req.nextUrl.pathname))) {
+    res.headers.set(name, value);
+  }
+
+  return parkAttribution(req, res);
 }
 
 export const config = {

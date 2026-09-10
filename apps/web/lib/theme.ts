@@ -65,7 +65,16 @@ export function parseTheme(value: string | undefined | null): Theme | null {
 /** Surfaces that are the PRODUCT — the console a signed-in host looks at.
  *  `/api` holds route handlers, which never render a layout; it is listed so an
  *  unmatched path under that namespace renders its 404 in the product's theme
- *  rather than on the booking canvas. */
+ *  rather than on the booking canvas.
+ *
+ *  THIS ARRAY IS ALSO A SECURITY BOUNDARY. `lib/framing.ts` reads it to decide
+ *  `frame-ancestors`, so removing an entry does not only change a palette — it
+ *  opens that path to framing by any site, which is invisible on screen in a
+ *  way the theming failure is not. `framing.spec.ts` pins every entry to
+ *  `'self'` so a deletion breaks a test rather than a header. The reverse also
+ *  holds: every prefix here must be an unclaimable vanity slug
+ *  (`RESERVED_PUBLIC_SLUGS` in `@slate/engine`), or an account can serve a
+ *  booking page from a path this list calls the product. */
 const PRODUCT_PREFIXES = ['/admin', '/login', '/onboarding', '/api'];
 
 /**

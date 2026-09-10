@@ -13,7 +13,8 @@ export default async function BookingPageSettings() {
     getLocale(),
     adminApi.vanityStatus().catch(() => ({ vanitySlug: null, shortCode: '', canClaim: false })),
   ]);
-  const t = getMessages(locale).admin;
+  const msgs = getMessages(locale);
+  const t = msgs.admin;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
   // The literal used to live here. If DEFAULT_ACCENT ever moves, a hardcoded
@@ -40,6 +41,7 @@ export default async function BookingPageSettings() {
       <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
         messages={t.studio}
+        embedMessages={msgs.embed}
         // The preview draws a month grid, and month names, weekday initials and
         // which day a week starts on are all locale decisions — so the preview
         // needs the locale itself, not only the resolved copy.

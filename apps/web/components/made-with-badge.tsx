@@ -20,7 +20,10 @@ export function MadeWithBadge({
   if (!href) return null;
   const m = getMessages(locale).growth;
   return (
-    <footer className="flex justify-center px-6 pb-8 pt-4">
+    // `bp-embed-footer` is inert outside an embed — it exists so the inline
+    // embed can trim this footer's padding without the badge itself knowing
+    // anything about embed mode (globals.css, `.dc-embed`).
+    <footer className="bp-embed-footer flex justify-center px-6 pb-8 pt-4">
       <a
         href={href}
         target="_blank"

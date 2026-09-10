@@ -55,6 +55,19 @@ describe('short-links (pure rules)', () => {
         expect(isReservedPublicSlug(v.toUpperCase())).toBe(true);
       }
     });
+
+    /**
+     * Every top-level path the web app treats as the PRODUCT has to be
+     * unclaimable, or an account serves its booking page from a path the
+     * framing rule reads as the dashboard — and its embed renders a blocked
+     * frame on every host site, with no error anywhere. `onboarding` was the
+     * one entry in that list nothing here covered.
+     */
+    it('blocks every top-level product path, so none can shadow the framing rule', () => {
+      for (const v of ['admin', 'login', 'onboarding', 'api', 'manage']) {
+        expect(validateVanitySlug(v)).toBe('reserved');
+      }
+    });
   });
 
   describe('vanity entitlement gate (open-core policy)', () => {
