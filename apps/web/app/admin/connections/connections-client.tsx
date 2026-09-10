@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { t, type BookingMessages } from '@slate/shared';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
 import type { Connection, ConnectionTestResult } from '@/lib/admin-api';
 import { FieldHelp } from '@/components/field-help';
+import { Modal } from '@/components/modal';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
+import { Radio } from '@/components/ui/radio';
+import { Select } from '@/components/ui/select';
 import {
   connectCalendarAction,
   createConnectionAction,
@@ -336,14 +343,17 @@ function ConnectDialog({
   // Clean up timers/popup if the dialog unmounts.
   useEffect(() => () => reset(), [reset]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-hidden tabIndex={-1} onClick={() => finish(false)} className="absolute inset-0 bg-background/80" />
-      <div role="dialog" aria-modal="true" aria-label={m.dialogTitle} className="relative w-full max-w-md rounded-xl border border-border bg-popover p-6 shadow-lg">
-        <h2 className="mb-1 text-lg font-semibold">{m.dialogTitle}</h2>
-        <p className="mb-4 text-sm text-muted-foreground">{m.dialogSubtitle}</p>
+    // Was a hand-rolled `fixed inset-0` stack: no focus trap, no scroll lock, no
+    // focus restore — beside a `Modal` that has all three.
+    <Modal
+      open={open}
+      onClose={() => finish(false)}
+      title={m.dialogTitle}
+      labelId="connect-calendar-title"
+    >
+      <div>
+        <p className="mb-4 -mt-2 text-sm text-muted-foreground">{m.dialogSubtitle}</p>
 
         {stage === 'choose' ? (
           <div className="flex flex-col gap-2">
@@ -358,7 +368,7 @@ function ConnectDialog({
                   type="button"
                   disabled={pending}
                   onClick={() => selectProvider(key)}
-                  className="flex items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary disabled:opacity-60"
+                  className="flex min-h-[44px] items-center gap-3 rounded-md border border-border px-4 py-3 text-sm transition-colors hover:border-primary-edge focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
                     <ProviderIcon provider={key} />
@@ -373,7 +383,8 @@ function ConnectDialog({
                       </span>
                     ) : null}
                   </span>
-                  <span aria-hidden className="text-muted-foreground">→</span>
+                  {/* Was a bare `→` character. Same job, done by the icon set. */}
+                  <i aria-hidden className="pi pi-chevron-right text-muted-foreground" style={{ fontSize: 12 }} />
                 </button>
               );
             })}
@@ -392,46 +403,35 @@ function ConnectDialog({
             <p className="text-sm font-medium text-foreground">{m.emailStepTitle}</p>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-muted-foreground">{m.emailStepLabel}</span>
-              <input
+              <Input
                 type="email"
                 required
-                autoFocus
                 value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-2"
                 placeholder="name@example.com"
+                data-modal-autofocus
+                className="min-h-[44px]"
+                onChange={(e) => setEmailInput(e.target.value)}
               />
             </label>
             <p className="text-xs text-muted-foreground">{m.emailStepHelp}</p>
-            <div className="mt-1 flex justify-between">
-              <button
-                type="button"
-                onClick={() => setStage('choose')}
-                className="rounded-md border border-border px-4 py-2 text-sm"
-              >
+            <div className="mt-1 flex flex-wrap justify-between gap-2">
+              <Button variant="outline" size="lg" onClick={() => setStage('choose')}>
+                <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
                 {m.emailStepBack}
-              </button>
-              <button
-                type="submit"
-                disabled={pending || !emailInput.trim()}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60"
-              >
+              </Button>
+              <Button type="submit" size="lg" disabled={pending || !emailInput.trim()}>
                 {m.emailStepContinue}
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
           <div className="flex flex-col items-center gap-3 rounded-md border border-border bg-muted/30 p-5 text-center">
-            <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" aria-hidden />
+            <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary-edge" aria-hidden />
             <span className="text-sm font-medium text-foreground">{m.connectWaiting}</span>
             <p className="text-sm text-muted-foreground">{msg ?? m.connectHint}</p>
-            <button
-              type="button"
-              onClick={checkForNew}
-              className="rounded-md border border-border px-4 py-2 text-sm hover:border-primary"
-            >
+            <Button variant="outline" size="lg" onClick={checkForNew}>
               {m.connectDone}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -444,25 +444,34 @@ function ConnectDialog({
           </p>
         ) : null}
 
-        {/* Advanced: manual reference add, kept OUT of the list surface (R30). */}
+        {/* Advanced: manual reference add, kept OUT of the list surface (R30).
+            The `▾`/`▸` glyph pair is now the icon set's own chevrons, on a real
+            disclosure button that announces its state. */}
         <div className="mt-5 border-t border-border pt-4">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="lg"
+            aria-expanded={showManual}
             onClick={() => setShowManual((v) => !v)}
-            className="text-xs text-muted-foreground hover:text-foreground"
+            className="-ml-3 text-xs text-muted-foreground"
           >
-            {showManual ? '▾' : '▸'} {m.manualTitle}
-          </button>
+            <i
+              aria-hidden
+              className={`pi ${showManual ? 'pi-chevron-down' : 'pi-chevron-right'}`}
+              style={{ fontSize: 11 }}
+            />
+            {m.manualTitle}
+          </Button>
           {showManual ? <ManualAddForm m={m} onAdded={() => finish(true)} /> : null}
         </div>
 
         <div className="mt-5 flex justify-end">
-          <button type="button" onClick={() => finish(false)} className="rounded-md border border-border px-4 py-2 text-sm">
+          <Button variant="outline" size="lg" onClick={() => finish(false)}>
             {m.close}
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -470,6 +479,10 @@ function ConnectDialog({
 function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => void }) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  // `Select` is controlled and has no `name`, so the picked provider reaches the
+  // FormData through a hidden input — the same shape `general-form.tsx` uses for
+  // its timezone.
+  const [provider, setProvider] = useState('google');
   return (
     <form
       className="mt-3 flex flex-col gap-3"
@@ -483,32 +496,35 @@ function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => 
     >
       <p className="text-xs text-muted-foreground">{m.manualDesc}</p>
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-sm">
+        {/* A <div>, not a <label>: the picker's trigger is a <button>. Wide
+            enough for the longest provider label — at 144px "Google Calendar"
+            truncated on the trigger — and full-width at 360px, where it takes
+            its own line rather than sharing one with the id field. */}
+        <div className="flex w-full flex-col gap-1 text-sm sm:w-48">
           <span className="text-muted-foreground">{m.provider}</span>
-          <select name="provider" className="rounded-md border border-input bg-background px-3 py-2">
-            <option value="google">google</option>
-            <option value="outlook">outlook</option>
-          </select>
-        </label>
-        <label className="flex flex-1 flex-col gap-1 text-sm">
+          <Select
+            value={provider}
+            options={PROVIDERS.map(({ key, labelKey }) => ({ value: key, label: m[labelKey] }))}
+            ariaLabel={m.provider}
+            onChange={setProvider}
+          />
+          <input type="hidden" name="provider" value={provider} />
+        </div>
+        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{m.calendarId}</span>
-          <input name="externalId" required className="rounded-md border border-input bg-background px-3 py-2" />
+          <Input name="externalId" required className="min-h-[44px]" />
         </label>
       </div>
-      <div className="flex flex-wrap items-center gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          <input type="checkbox" name="checkConflicts" defaultChecked /> {m.conflictCheck.toLowerCase()}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
+          <Checkbox name="checkConflicts" defaultChecked /> {m.conflictCheck.toLowerCase()}
         </label>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" name="isDestination" /> {m.destination.toLowerCase()}
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
+          <Checkbox name="isDestination" /> {m.destination.toLowerCase()}
         </label>
-        <button
-          type="submit"
-          disabled={pending}
-          className="ml-auto rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground disabled:opacity-60"
-        >
-          {pending ? '…' : m.addConnection}
-        </button>
+        <Button type="submit" size="lg" disabled={pending} className="ml-auto">
+          {pending ? m.addingConnection : m.addConnection}
+        </Button>
       </div>
       {err ? <p className="text-sm text-destructive">{err}</p> : null}
     </form>
@@ -593,11 +609,12 @@ function useConnectionHealth(c: Connection, enabled: boolean, m: ConnectionsMess
   return { state, detail, pending, label, checkedCaption, probe };
 }
 
-/** The pill button ONLY (no caption underneath) — sized to the SAME control
- *  height as "Test"/"Disconnect" next to it: text-xs + py-1.5 (16px line +
- *  12px padding) equals text-sm + py-1 (20px line + 8px padding), both 28px
- *  content boxes (+1px border), so the three sit on one clean baseline
- *  instead of the pill reading shorter/taller than its neighbors. */
+/** The pill button ONLY (no caption underneath).
+ *
+ *  A2 (#112): the three controls in this cluster used to be built to a shared
+ *  28px content box so they'd share a baseline — an alignment recipe that was
+ *  also, unavoidably, a 30px touch target. They now share `h-11` instead: same
+ *  single baseline, on the 44px step the mobile bar asks for. */
 function HealthPillButton({
   health,
   enabled,
@@ -608,9 +625,11 @@ function HealthPillButton({
   m: ConnectionsMessages;
 }) {
   const { state, detail, pending, label, probe } = health;
+  // `bg-primary-edge` on an 8px dot, per F's size rule: the `.bg-primary` rim in
+  // globals.css would leave 6px of fill inside a 1px ring and read as a donut.
   const dot =
     state === 'ok'
-      ? 'bg-primary'
+      ? 'bg-primary-edge'
       : state === 'error'
         ? 'bg-destructive'
         : state === 'checking'
@@ -625,10 +644,10 @@ function HealthPillButton({
       // Detail is in the accessible name too, so screen-reader / touch users
       // get the reason without a hover-only tooltip.
       aria-label={`${label}${detail ? `: ${detail}` : ''}${enabled ? ` — ${m.recheck}` : ''}`}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1.5 text-xs text-muted-foreground transition-colors enabled:hover:border-primary disabled:cursor-default"
+      className="inline-flex h-11 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring enabled:hover:border-primary-edge disabled:cursor-default"
     >
       {state === 'checking' ? (
-        <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary" aria-hidden />
+        <span className="h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-primary-edge" aria-hidden />
       ) : (
         <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
       )}
@@ -654,9 +673,11 @@ function TestResultBanner({
 }) {
   if (result.ok) {
     return (
+      // Solid `border-primary-edge`, not `border-primary/40`: a washed accent
+      // line measures 1.6:1 on paper (pinned in the shared token spec).
       <p
         role="status"
-        className="flex items-start gap-2 rounded-md border border-primary/40 bg-primary/10 p-3 text-sm text-primary"
+        className="flex items-start gap-2 rounded-md border border-primary-edge bg-primary/10 p-3 text-sm text-primary"
       >
         <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0" aria-hidden>
           <path d="M20 6 9 17l-5-5" />
@@ -676,7 +697,7 @@ function TestResultBanner({
         ? m.testFailNotReady
         : m.testFailReadFailed;
   return (
-    <p role="alert" className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+    <p role="alert" className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
       <span className="flex items-start gap-2">
         <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0" aria-hidden>
           <path d="M18 6 6 18M6 6l12 12" />
@@ -686,13 +707,9 @@ function TestResultBanner({
           {result.healthDetail && result.healthDetail !== reason ? ` (${result.healthDetail})` : ''}
         </span>
       </span>
-      <button
-        type="button"
-        onClick={onReconnect}
-        className="shrink-0 rounded-md border border-destructive px-2.5 py-1 text-xs font-medium transition-colors hover:bg-destructive/10"
-      >
+      <Button variant="destructive" size="lg" onClick={onReconnect} className="shrink-0">
         {m.testReconnect}
-      </button>
+      </Button>
     </p>
   );
 }
@@ -730,8 +747,10 @@ function ConnectionRow({
 
   return (
     <li
-      className={`flex flex-col gap-4 rounded-lg border p-4 transition-colors ${
-        c.isDestination ? 'border-primary/60 bg-primary/5' : 'border-border bg-card'
+      className={`flex flex-col gap-4 rounded-xl border p-4 transition-colors ${
+        // The destination row's border SAYS something ("events land here"), so it
+        // is the solid edge token — a `/60` accent line is 1.6:1 on paper.
+        c.isDestination ? 'border-primary-edge bg-primary/5' : 'border-border bg-card'
       }`}
     >
       {/* Identity + health + disconnect */}
@@ -772,30 +791,38 @@ function ConnectionRow({
             inside the pill's own flex column. flex-wrap + justify-end lets
             the cluster wrap gracefully (pill first, buttons below) instead of
             overflowing at 360px. */}
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        {/* NOT `shrink-0`. That was safe while the three controls were 28px tall
+            and narrow; at the 44px step the cluster is wider than a 360px card,
+            and an unshrinkable box wider than its parent is exactly what pushes
+            a page into horizontal scroll. It starts left-aligned under the
+            identity block at 360 and returns to the right edge from `sm` up. */}
+        <div className="flex min-w-0 flex-col items-start gap-1 sm:items-end">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             <HealthPillButton health={health} enabled={enabled} m={m} />
             {/* "Test / Run check" — the trust-building self-test (R22: instant
                 loading label, never a spinner-only dead state). */}
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="lg"
               disabled={busy || pending || !enabled}
               onClick={runTest}
-              className="rounded-md border border-border px-3 py-1 text-sm transition-colors hover:border-primary disabled:opacity-60"
             >
               {pending ? m.testRunning : m.testButton}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="destructive"
+              size="lg"
               disabled={busy}
+              aria-label={`${m.disconnect} · ${connectionLabel(c, m)}`}
               onClick={() => onDisconnect(c.id)}
-              className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
             >
               {m.disconnect}
-            </button>
+            </Button>
           </div>
           {health.state === 'error' && health.detail ? (
-            <span className="max-w-[220px] text-right text-xs leading-tight text-destructive">{health.detail}</span>
+            <span className="max-w-full text-xs leading-tight text-destructive sm:max-w-[220px] sm:text-right">
+              {health.detail}
+            </span>
           ) : null}
           {health.checkedCaption ? (
             <span className="text-xs leading-tight text-muted-foreground">{health.checkedCaption}</span>
@@ -807,12 +834,14 @@ function ConnectionRow({
 
       {/* Per-calendar controls: destination is radio-exclusive (R20), conflicts
           is an independent checkbox. Labels match the mission wording. */}
-      <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-md border border-border bg-background/60 px-3 py-2.5 text-sm">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
+      {/* `accent-primary` on a native control paints the browser's own box in the
+          accent and nothing else — it is not a themed control, it is a tinted OS
+          one. Both are P's primitives now, which carry the `--primary-edge`
+          checked treatment that keeps them legible on paper. */}
+      <div className="flex flex-wrap gap-x-6 gap-y-1 rounded-md border border-border bg-background/60 px-3 py-1 text-sm">
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
+          <Radio
             name="destination-calendar"
-            className="accent-primary"
             checked={c.isDestination}
             disabled={busy}
             onChange={() => onSetDestination(c.id)}
@@ -820,10 +849,8 @@ function ConnectionRow({
           <span className={c.isDestination ? 'font-medium text-foreground' : 'text-foreground'}>{m.addEventsHere}</span>
           <FieldHelp text={m.addEventsHereHelp} />
         </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            className="accent-primary"
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
+          <Checkbox
             checked={c.checkConflicts}
             disabled={busy}
             onChange={(e) => onToggleConflicts(c.id, e.target.checked)}
@@ -851,7 +878,7 @@ function SummaryStrip({ connections, m }: { connections: Connection[]; m: Connec
         : m.summaryConflictsMany.replace('{n}', String(conflictCount));
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:gap-6">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3 text-sm sm:flex-row sm:items-center sm:gap-6">
       <span className="flex items-center gap-2">
         <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-primary" aria-hidden>
           <circle cx="12" cy="12" r="9" />
@@ -890,6 +917,7 @@ export function ConnectionsClient({
   status,
   messages: m,
   defaultEmail,
+  locale,
 }: {
   title: string;
   subtitle: string;
@@ -898,6 +926,8 @@ export function ConnectionsClient({
   messages: ConnectionsMessages;
   /** Best-effort prefill for the connect dialog's "which account?" prompt. */
   defaultEmail?: string | null;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Optimistic mirror of the server list so the destination radio and conflict
@@ -910,6 +940,7 @@ export function ConnectionsClient({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [, startToggle] = useTransition();
+  const { confirm, dialog } = useConfirmDialog(locale);
   // Don't clobber an in-flight optimistic toggle when an unrelated action
   // revalidates first; reseed from server only when nothing is pending.
   const pendingRef = useRef<string | null>(null);
@@ -968,7 +999,24 @@ export function ConnectionsClient({
   // the sole/destination calendar is allowed — the list can legitimately go to
   // zero rows, which renders the empty "connect a calendar" state below
   // (availability-only fallback, no error).
-  const disconnect = useCallback((id: string) => run(id, null, () => deleteConnectionAction(id)), [run]);
+  //
+  // A2 (#112): it used to happen on the FIRST click. Disconnecting stops
+  // conflict checking and stops new bookings being written out — two silent
+  // consequences a host would only discover by double-booking — so it asks
+  // first, and the question names the account.
+  const askDisconnect = useCallback(
+    async (id: string) => {
+      const row = rows.find((r) => r.id === id);
+      const ok = await confirm({
+        title: m.disconnectTitle,
+        message: t(m.disconnectBody, { account: row ? connectionLabel(row, m) : m.accountUnknown }),
+        confirmLabel: m.disconnect,
+        destructive: true,
+      });
+      if (ok) run(id, null, () => deleteConnectionAction(id));
+    },
+    [confirm, m, rows, run],
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -981,13 +1029,9 @@ export function ConnectionsClient({
         subtitle={subtitle}
         action={
           rows.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-            >
+            <Button size="lg" onClick={() => setDialogOpen(true)}>
               {m.connectAnother}
-            </button>
+            </Button>
           ) : undefined
         }
       />
@@ -1026,7 +1070,7 @@ export function ConnectionsClient({
                   error={rowError?.id === c.id ? rowError.message : null}
                   onSetDestination={setDestination}
                   onToggleConflicts={toggleConflicts}
-                  onDisconnect={disconnect}
+                  onDisconnect={(id) => void askDisconnect(id)}
                   onReconnect={() => setDialogOpen(true)}
                 />
               ))}
@@ -1034,7 +1078,7 @@ export function ConnectionsClient({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border p-10 text-center">
+        <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-border p-6 text-center sm:p-10">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
             <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
               <rect x="3" y="4.5" width="18" height="16" rx="2" />
@@ -1055,13 +1099,9 @@ export function ConnectionsClient({
               </li>
             ))}
           </ul>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="mt-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
+          <Button size="lg" className="mt-1" onClick={() => setDialogOpen(true)}>
             {m.connectButton}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1073,6 +1113,7 @@ export function ConnectionsClient({
         m={m}
         defaultEmail={defaultEmail}
       />
+      {dialog}
     </div>
   );
 }

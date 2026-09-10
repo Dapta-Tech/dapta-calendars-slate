@@ -4,6 +4,7 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BookingMessages } from '@slate/shared';
 import { useToast } from '@/components/toast';
+import { Button } from '@/components/ui/button';
 import { createScheduleAction } from './actions';
 
 type AvailabilityMessages = BookingMessages['admin']['availability'];
@@ -28,13 +29,11 @@ export function NewScheduleButton({ messages: m }: { messages: AvailabilityMessa
     });
 
   return (
-    <button
-      type="button"
-      onClick={create}
-      disabled={pending}
-      className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
-    >
+    // `Button` already carries the disabled recipe this used to inline, including
+    // the `disabled:shadow-none` that stops a disabled accent fill from wearing
+    // the rim `globals.css` puts on every `bg-primary`.
+    <Button size="lg" onClick={create} disabled={pending}>
       {pending ? m.saving : m.newSchedule}
-    </button>
+    </Button>
   );
 }

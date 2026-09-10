@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { authProvider } from '@/lib/auth-session';
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/cn';
 import { LoginForm } from './login-form';
 
 // Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
@@ -25,10 +27,16 @@ export default async function LoginPage({
   if (workos && !error && !signedout) redirect('/api/auth/login');
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6">
-      <div className="flex items-center gap-2">
-        <span className="rounded-md bg-primary px-2.5 py-1 text-base font-semibold text-primary-foreground">
-          {productName.charAt(0)}
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-10">
+      {/* The one screen a signed-out person sees, so it carries the Dapta mark
+          rather than a letter chip (#112 / #70). The mark is FIXED-COLOUR
+          artwork — a near-white D — so it sits on `--brand-ink`, the constant
+          dark tile the sheet carries for exactly this, and stays legible on
+          paper. The textual wordmark rides beside it until `L` ships a
+          purpose-built Calendars logo. */}
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-ink">
+          <img src="/dapta-mark.png" alt="" width={28} height={28} className="h-7 w-7 object-contain" />
         </span>
         <span className="text-2xl font-semibold tracking-tight">{productName}</span>
       </div>
@@ -53,7 +61,7 @@ export default async function LoginPage({
           // keeping the silent SSO for arrivals from the platform.
           <Link
             href="/api/auth/login?prompt=login"
-            className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition-transform active:scale-[0.99]"
+            className={cn(buttonVariants({ size: 'lg' }), 'w-full')}
           >
             {m.workosCta}
           </Link>

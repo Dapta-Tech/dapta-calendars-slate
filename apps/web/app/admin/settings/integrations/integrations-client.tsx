@@ -5,6 +5,7 @@ import type { BookingMessages, Locale } from '@slate/shared';
 import type { IntegrationCapabilities, IntegrationStatusView } from '@slate/types';
 import { Modal } from '@/components/modal';
 import { Button } from '@/components/ui/button';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/toast';
@@ -122,7 +123,7 @@ function ProviderCard({
   const { success, error } = useToast();
   const [pending, start] = useTransition();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  const { confirm, dialog } = useConfirmDialog(locale);
   const titleId = useId();
   const noteId = useId();
 
@@ -132,6 +133,21 @@ function ProviderCard({
   // ever answer CRM_DISABLED.
   const avail = availability(capabilities, provider);
   const connectable = canConnect(capabilities, provider);
+
+  // A2 (#112): the inline confirm panel this replaces was the best of the four
+  // in the settings cluster and still not a dialog — nothing trapped focus and
+  // nothing announced the question. It keeps its exact copy, including the line
+  // promising nothing is deleted inside the portal.
+  async function askDisconnect() {
+    const ok = await confirm({
+      title: m.disconnectConfirm,
+      message: m.disconnectNothingDeleted,
+      confirmLabel: m.confirmDisconnect,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (ok) disconnect();
+  }
 
   function disconnect() {
     start(async () => {
@@ -143,7 +159,6 @@ function ProviderCard({
         error(m.errorGeneric);
         return;
       }
-      setConfirming(false);
       // Mirrors the server's soft delete: the row SURVIVES with its label and
       // last4 (#63), so the card must show "disconnected", not "never
       // connected". Dropping it here would offer Connect where Reconnect
@@ -189,44 +204,19 @@ function ProviderCard({
           </Button>
         )}
 
-        {canDisconnect(row) && !confirming ? (
+        {canDisconnect(row) ? (
           <Button
             variant="destructive"
             className={TOUCH}
             disabled={pending}
-            onClick={() => setConfirming(true)}
+            onClick={() => void askDisconnect()}
           >
-            {m.disconnect}
+            {pending ? m.disconnecting : m.disconnect}
           </Button>
         ) : null}
       </div>
 
-      {confirming ? (
-        // Inline confirm, following the members tab. Disconnecting unplugs the
-        // whole workspace's CRM, so it is never a single click.
-        <div className="flex flex-col gap-2 rounded-md border border-destructive/60 bg-destructive/5 p-3">
-          <p className="text-sm font-medium text-foreground">{m.disconnectConfirm}</p>
-          <p className="text-sm text-muted-foreground">{m.disconnectNothingDeleted}</p>
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Button
-              variant="destructive"
-              className={TOUCH}
-              disabled={pending}
-              onClick={disconnect}
-            >
-              {pending ? m.disconnecting : m.confirmDisconnect}
-            </Button>
-            <Button
-              variant="outline"
-              className={TOUCH}
-              disabled={pending}
-              onClick={() => setConfirming(false)}
-            >
-              {m.cancel}
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      {dialog}
 
       <ConnectDialog
         open={dialogOpen}
@@ -259,15 +249,22 @@ function StatusBadge({ state, m }: { state: ConnectionState; m: Msgs }) {
         : state === 'disconnected'
           ? m.statusDisconnected
           : m.statusNotConnected;
+  // Solid edge, not `/50`: a translucent accent line measures 1.6:1 on paper and
+  // cannot identify a state (WCAG 1.4.11) — see the wash block in
+  // `packages/shared/src/tokens.spec.ts`, which pins the number.
   const tone =
     state === 'connected'
-      ? 'border-primary-edge/50 bg-primary/10 text-foreground'
+      ? 'border-primary-edge bg-primary/10 text-foreground'
       : state === 'unhealthy'
         ? 'border-destructive bg-destructive/10 text-destructive'
         : 'border-border bg-muted/50 text-muted-foreground';
+  // `bg-primary-edge`, not `bg-primary`: globals.css rims every accent fill so
+  // its SHAPE clears 3:1 on paper, and a 1px rim on a 6px dot leaves 4px of fill
+  // and reads as a donut. Below ~10px the accent is a MARK, and the edge colour
+  // carries the whole shape (F's size rule, #80).
   const dot =
     state === 'connected'
-      ? 'bg-primary'
+      ? 'bg-primary-edge'
       : state === 'unhealthy'
         ? 'bg-destructive'
         : 'bg-muted-foreground';

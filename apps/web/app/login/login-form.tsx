@@ -2,6 +2,8 @@
 
 import { useActionState } from 'react';
 import type { BookingMessages } from '@slate/shared';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { signInAction } from './actions';
 
 /** Local dev login: email → session (sent as x-slate-email). A successful
@@ -12,7 +14,7 @@ export function LoginForm({ messages: m }: { messages: BookingMessages['admin'][
     <form action={action} className="flex flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.emailLabel}</span>
-        <input
+        <Input
           name="email"
           type="email"
           required
@@ -20,7 +22,7 @@ export function LoginForm({ messages: m }: { messages: BookingMessages['admin'][
           autoComplete="email"
           placeholder={m.emailPlaceholder}
           aria-invalid={state?.error ? true : undefined}
-          className="rounded-md border border-input bg-background px-3 py-2.5"
+          className="min-h-[44px]"
         />
       </label>
       {state?.error ? (
@@ -28,13 +30,9 @@ export function LoginForm({ messages: m }: { messages: BookingMessages['admin'][
           {m.emailInvalid}
         </p>
       ) : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition-transform active:scale-[0.99] disabled:opacity-60"
-      >
+      <Button type="submit" size="lg" disabled={pending} className="w-full">
         {m.continue}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -25,7 +25,10 @@ export function SettingsChrome({
   if (isStudio) return <>{children}</>;
 
   return (
-    <div className="mx-auto max-w-5xl px-8 py-10">
+    // 16px of gutter at 360px, the full 32 from `sm` up (mobile bar, R28). The
+    // padding is set once here so every settings tab inherits it and no child
+    // has to remember.
+    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
       <header className="mb-6 flex flex-col gap-1">
         <h1 className="text-3xl font-semibold tracking-tight">{messages.title}</h1>
         <p className="text-muted-foreground">{messages.subtitle}</p>

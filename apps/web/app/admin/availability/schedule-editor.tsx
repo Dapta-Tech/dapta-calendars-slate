@@ -1,13 +1,16 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { commonTimeZones, validateDayRanges, type BookingMessages, type TimeRange } from '@slate/shared';
+import { t, validateDayRanges, type BookingMessages, type Locale, type TimeRange } from '@slate/shared';
 import { useToast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { FormHeader } from '@/components/ui/page-header';
 import { TimeField } from '@/components/ui/time-field';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import type { Schedule } from '@/lib/admin-api';
 import { deleteScheduleAction, saveScheduleFullAction, type RuleInput } from './actions';
 
@@ -34,11 +37,14 @@ export function ScheduleEditor({
   messages: m,
   backHref,
   backLabel,
+  locale,
 }: {
   schedule: Schedule;
   messages: AvailabilityMessages;
   backHref: string;
   backLabel: string;
+  /** Active admin locale — the picker's and ConfirmDialog's own copy. */
+  locale?: Locale;
 }) {
   const router = useRouter();
   const [name, setName] = useState(schedule.name);
@@ -47,10 +53,9 @@ export function ScheduleEditor({
   const [overrides, setOverrides] = useState<Override[]>(() =>
     schedule.rules.filter((r) => r.date).map((r) => ({ date: r.date!, start: r.startTime, end: r.endTime })),
   );
-  const [confirmDel, setConfirmDel] = useState(false);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
-  const zones = useMemo(() => commonTimeZones(timeZone), [timeZone]);
+  const { confirm, dialog } = useConfirmDialog(locale);
 
   const setRanges = (d: number, ranges: TimeRange[]) =>
     setWeek((w) => w.map((r, i) => (i === d ? ranges : r)));
@@ -80,7 +85,17 @@ export function ScheduleEditor({
       else error(res.message ?? m.saveError);
     });
 
-  const remove = () =>
+  // A2 (#112): the sticky header used to grow a Yes/No pair where the Delete
+  // button had just been, which is the worst place to put an irreversible
+  // second click. It asks through the dialog now, and names the schedule.
+  const askRemove = async () => {
+    const ok = await confirm({
+      title: m.deleteTitle,
+      message: t(m.deleteBody, { name: name.trim() || schedule.name }),
+      confirmLabel: m.deleteSchedule,
+      destructive: true,
+    });
+    if (!ok) return;
     start(async () => {
       const r = await deleteScheduleAction(schedule.id);
       if (!r.ok) error(r.message ?? m.deleteError);
@@ -89,29 +104,14 @@ export function ScheduleEditor({
         router.push(backHref);
       }
     });
+  };
 
   const actions = (
     <>
-      {confirmDel ? (
-        <span className="flex items-center gap-1 text-sm">
-          <span className="hidden text-muted-foreground sm:inline">{m.deletePrompt}</span>
-          <button type="button" onClick={remove} disabled={pending} className="rounded-md border border-destructive px-3 py-2 text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60">
-            {m.yes}
-          </button>
-          <button type="button" onClick={() => setConfirmDel(false)} className="rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent">
-            {m.no}
-          </button>
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setConfirmDel(true)}
-          className="rounded-md border border-destructive px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
-        >
-          {m.deleteSchedule}
-        </button>
-      )}
-      <Button type="submit" disabled={pending || !!firstError}>
+      <Button variant="destructive" size="lg" disabled={pending} onClick={() => void askRemove()}>
+        {m.deleteSchedule}
+      </Button>
+      <Button type="submit" size="lg" disabled={pending || !!firstError}>
         {pending ? m.saving : m.save}
       </Button>
     </>
@@ -123,31 +123,27 @@ export function ScheduleEditor({
         backHref={backHref}
         backLabel={backLabel}
         actions={actions}
+        gutter="responsive"
         title={
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             aria-label={m.scheduleNameLabel}
-            className="w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-2xl font-semibold tracking-tight hover:border-border focus:border-input focus-visible:outline-none"
+            className="min-h-[44px] w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-2xl font-semibold tracking-tight hover:border-border focus:border-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         }
       />
 
       <div className="flex flex-col gap-4">
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        {m.timezone}
-        <select
-          value={timeZone}
-          onChange={(e) => setTimeZone(e.target.value)}
-          className="rounded-md border border-input bg-background px-2 py-1.5 text-foreground"
-        >
-          {zones.map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* The full IANA list with its GMT hints, not the short curated one this
+          used to offer: the profile and the manual-booking form already give the
+          whole list, and a schedule that cannot be set to a zone the profile can
+          be set to is the inconsistency. A <div>, not a <label>, because the
+          picker's trigger is a <button> and buttons are not labelable. */}
+      <div className="flex max-w-sm flex-col gap-1 text-sm">
+        <span className="text-muted-foreground">{m.timezone}</span>
+        <TimeZoneSelect value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
+      </div>
 
       <div className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted-foreground">{m.weeklyHours}</span>
@@ -156,9 +152,13 @@ export function ScheduleEditor({
           const on = ranges.length > 0;
           const err = dayError(d);
           return (
+            // A 128px day label plus two 128px time fields plus a remove button is
+            // ~300px of FIXED width, inside 328px of content at 360px — before the
+            // gaps. Below `sm` the day owns its own line and the ranges sit under
+            // it; from `sm` up the row is exactly what it was.
             <div key={d} className="flex flex-col gap-1 border-b border-border/50 py-2 last:border-b-0">
-              <div className="flex flex-wrap items-start gap-3">
-                <label className="flex w-32 shrink-0 cursor-pointer items-center gap-2 py-1.5 text-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3">
+                <label className="flex min-h-[44px] shrink-0 cursor-pointer items-center gap-2 text-sm sm:w-32">
                   <Checkbox checked={on} onChange={(e) => toggleDay(d, e.target.checked)} />
                   {dayName}
                 </label>
@@ -167,41 +167,40 @@ export function ScheduleEditor({
                     {ranges.map((r, ri) => (
                       <div key={ri} className="flex items-center gap-2">
                         <TimeField
-                          className="w-32"
+                          className="min-w-0 flex-1 sm:w-32 sm:flex-none"
                           aria-label={`${dayName} start`}
                           value={r.start}
                           onChange={(v) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, start: v } : x)))}
                         />
                         <span className="text-muted-foreground">–</span>
                         <TimeField
-                          className="w-32"
+                          className="min-w-0 flex-1 sm:w-32 sm:flex-none"
                           aria-label={`${dayName} end`}
                           value={r.end}
                           onChange={(v) => setRanges(d, ranges.map((x, j) => (j === ri ? { ...x, end: v } : x)))}
                         />
-                        <button
-                          type="button"
-                          aria-label={m.removeRange}
+                        {/* Was a bare `×` in a 32px box. A real icon, on the 44px step. */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${m.removeRange} · ${dayName}`}
                           onClick={() => setRanges(d, ranges.filter((_, j) => j !== ri))}
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive"
+                          className="h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive"
                         >
-                          ×
-                        </button>
+                          <i aria-hidden className="pi pi-times" style={{ fontSize: 13 }} />
+                        </Button>
                       </div>
                     ))}
-                    <button
-                      type="button"
-                      onClick={() => addRange(d)}
-                      className="self-start text-xs text-primary hover:underline"
-                    >
+                    <Button variant="ghost" size="lg" onClick={() => addRange(d)} className="-ml-3 self-start">
+                      <i aria-hidden className="pi pi-plus" style={{ fontSize: 12 }} />
                       {m.addRange}
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <span className="py-1.5 text-sm text-muted-foreground">{m.unavailable}</span>
                 )}
               </div>
-              {err ? <span className="pl-32 text-xs text-destructive">{err}</span> : null}
+              {err ? <span className="text-xs text-destructive sm:pl-32">{err}</span> : null}
             </div>
           );
         })}
@@ -210,43 +209,49 @@ export function ScheduleEditor({
       <div className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-muted-foreground">{m.dateOverrides}</span>
         {overrides.map((o, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <input
+          <div key={i} className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <Input
               type="date"
               value={o.date}
+              aria-label={m.dateOverrides}
+              className="min-h-[44px] w-auto shrink-0"
               onChange={(e) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))}
-              className="rounded-md border border-input bg-background px-2 py-1"
             />
             <TimeField
-              className="w-32"
+              className="min-w-0 flex-1 sm:w-32 sm:flex-none"
               value={o.start}
               onChange={(v) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, start: v } : x)))}
             />
             <span className="text-muted-foreground">–</span>
             <TimeField
-              className="w-32"
+              className="min-w-0 flex-1 sm:w-32 sm:flex-none"
               value={o.end}
               onChange={(v) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, end: v } : x)))}
             />
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={m.removeOverride}
               onClick={() => setOverrides((os) => os.filter((_, j) => j !== i))}
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 shrink-0 text-muted-foreground hover:text-destructive"
             >
-              ×
-            </button>
+              <i aria-hidden className="pi pi-times" style={{ fontSize: 13 }} />
+            </Button>
           </div>
         ))}
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="lg"
           onClick={() => setOverrides((os) => [...os, { date: '', start: '09:00', end: '17:00' }])}
-          className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary"
+          className="self-start text-muted-foreground"
         >
+          <i aria-hidden className="pi pi-plus" style={{ fontSize: 12 }} />
           {m.addOverride}
-        </button>
+        </Button>
         <p className="text-xs text-muted-foreground">{m.overrideNote}</p>
       </div>
       </div>
+      {dialog}
     </form>
   );
 }

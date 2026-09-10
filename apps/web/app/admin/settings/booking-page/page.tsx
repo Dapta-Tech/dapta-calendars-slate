@@ -36,11 +36,12 @@ export default async function BookingPageSettings() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-8 py-10">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-10">
       <h1 className="mb-1 text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
       <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
         messages={t.studio}
+        opensNewTab={t.common.opensNewTab}
         embedMessages={msgs.embed}
         // The preview draws a month grid, and month names, weekday initials and
         // which day a week starts on are all locale decisions — so the preview

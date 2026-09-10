@@ -1,11 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
+import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
 import { inviteMemberByEmailAction, removeMemberAction, setMemberRoleAction } from './actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -41,7 +45,6 @@ export function TeamMembersPanel({
   const [inviteNoMatch, setInviteNoMatch] = useState(false);
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Two options, spelled once — the row picker and the invite picker offer the
   // same choice and must not drift apart. Memoised so `Select`'s own filter memo
@@ -56,19 +59,8 @@ export function TeamMembersPanel({
 
   const ownerCount = members.filter((mem) => mem.role === 'owner').length;
 
-  // Close on Escape and restore focus to the trigger when the dialog closes.
-  const closeDialog = () => {
-    setAddOpen(false);
-    triggerRef.current?.focus();
-  };
-  useEffect(() => {
-    if (!addOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDialog();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [addOpen]);
+  // `Modal` owns Escape and the focus restore now; this only clears the state.
+  const closeDialog = () => setAddOpen(false);
 
   const run = (p: Promise<{ ok: boolean; message?: string }>, ok: string) =>
     start(async () => {
@@ -115,24 +107,22 @@ export function TeamMembersPanel({
     });
 
   return (
-    <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-semibold text-muted-foreground">{m.members}</span>
-        <button
-          ref={triggerRef}
-          type="button"
+        <Button
+          size="lg"
           onClick={() => {
             setInviteErr(null);
             setAddOpen(true);
           }}
-          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
         >
           {m.addMember}
-        </button>
+        </Button>
       </div>
 
       {members.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
           {m.noMembers}
         </p>
       ) : (
@@ -141,19 +131,28 @@ export function TeamMembersPanel({
             const isOwner = member.role === 'owner';
             const isLastOwner = isOwner && ownerCount === 1;
             return (
-              <li key={member.member_id} className="flex flex-wrap items-center gap-3 py-3">
-                {/* Member avatar — an initials monogram (members carry no image URL). */}
-                <span
-                  aria-hidden
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-xs font-semibold text-muted-foreground"
-                >
-                  {initialOf(member)}
+              // Identity on its own line at 360px; the pill, the picker and the
+              // remove control below it, rather than seven things wrapping through
+              // a 328px row.
+              <li
+                key={member.member_id}
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:flex-wrap sm:items-center"
+              >
+                <span className="flex min-w-0 flex-1 items-center gap-3">
+                  {/* Member avatar — an initials monogram (members carry no image URL). */}
+                  <span
+                    aria-hidden
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-xs font-semibold text-muted-foreground"
+                  >
+                    {initialOf(member)}
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{member.display_name ?? member.member_id.slice(0, 8)}</span>
+                    {/* Email line (or a Pending label when the member hasn't a resolved email). */}
+                    <span className="truncate text-xs text-muted-foreground">{member.email ?? m.memberPending}</span>
+                  </span>
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{member.display_name ?? member.member_id.slice(0, 8)}</span>
-                  {/* Email line (or a Pending label when the member hasn't a resolved email). */}
-                  <span className="truncate text-xs text-muted-foreground">{member.email ?? m.memberPending}</span>
-                </span>
+                <span className="flex flex-wrap items-center gap-2">
                 {/* Role pill (owner = accent) with an inline change select; the last
                     owner's role is locked so the team can't be left ownerless. */}
                 <span
@@ -180,103 +179,90 @@ export function TeamMembersPanel({
                     member first to remove. Members get the ConfirmDialog. */}
                 {isOwner ? (
                   <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-                      <rect x="5" y="11" width="14" height="9" rx="2" />
-                      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                    </svg>
+                    <i aria-hidden className="pi pi-lock" style={{ fontSize: 13 }} />
                     <span className="sr-only">{m.ownerLock}</span>
                   </span>
                 ) : (
-                  <button
-                    type="button"
+                  <Button
+                    variant="destructive"
+                    size="lg"
                     disabled={pending}
                     onClick={() => void askRemove(member)}
                     aria-label={`${m.remove} · ${member.display_name ?? member.email ?? ''}`}
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
                   >
                     {m.remove}
-                  </button>
+                  </Button>
                 )}
+                </span>
               </li>
             );
           })}
         </ul>
       )}
 
-      {/* Invite-by-email dialog (old-app parity): email + role chosen at add time. */}
-      {addOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" aria-hidden tabIndex={-1} onClick={closeDialog} className="absolute inset-0 bg-background/80" />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="invite-dialog-title"
-            className="relative w-full max-w-sm rounded-xl border border-border bg-popover p-6 shadow-lg"
-          >
-            <h2 id="invite-dialog-title" className="mb-1 text-lg font-semibold">{m.inviteTitle}</h2>
-            <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitInvite();
-              }}
-              className="flex flex-col gap-3"
-            >
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted-foreground">{m.emailLabel}</span>
-                <input
-                  type="email"
-                  autoFocus
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder={m.emailPlaceholder}
-                  className="rounded-md border border-input bg-background px-3 py-2"
-                />
-              </label>
-              {/* A <div>, not a <label>: the Select's trigger is a <button>, which
-                  is not a labelable element. The name rides on `ariaLabel`. */}
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="text-muted-foreground">{m.role}</span>
-                <Select
-                  value={inviteRole}
-                  options={roleOptions}
-                  ariaLabel={m.role}
-                  locale={locale}
-                  onChange={(v) => setInviteRole(v as 'owner' | 'member')}
-                />
-              </div>
-              {inviteErr ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {inviteErr}
-                  {inviteNoMatch ? (
-                    <>
-                      {' '}
-                      <Link
-                        href="/admin/settings/members"
-                        className="font-medium underline underline-offset-4"
-                      >
-                        {m.inviteFromMembers} →
-                      </Link>
-                    </>
-                  ) : null}
-                </p>
-              ) : null}
-              <div className="mt-1 flex justify-end gap-2">
-                <button type="button" onClick={closeDialog} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm">
-                  {m.cancel}
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending || !inviteEmail}
-                  className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-                >
-                  {m.sendInvite}
-                </button>
-              </div>
-            </form>
+      {/* Invite-by-email dialog (old-app parity): email + role chosen at add time.
+          Was a hand-rolled `fixed inset-0` stack; `Modal` owns the focus trap,
+          the scroll lock, Escape and the focus restore. */}
+      <Modal open={addOpen} onClose={closeDialog} title={m.inviteTitle} labelId="invite-dialog-title">
+        <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitInvite();
+          }}
+          className="flex flex-col gap-3"
+        >
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">{m.emailLabel}</span>
+            <Input
+              type="email"
+              value={inviteEmail}
+              placeholder={m.emailPlaceholder}
+              data-modal-autofocus
+              className="min-h-[44px]"
+              onChange={(e) => setInviteEmail(e.target.value)}
+            />
+          </label>
+          {/* A <div>, not a <label>: the Select's trigger is a <button>, which
+              is not a labelable element. The name rides on `ariaLabel`. */}
+          <div className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">{m.role}</span>
+            <Select
+              value={inviteRole}
+              options={roleOptions}
+              ariaLabel={m.role}
+              locale={locale}
+              onChange={(v) => setInviteRole(v as 'owner' | 'member')}
+            />
           </div>
-        </div>
-      ) : null}
+          {inviteErr ? (
+            <div role="alert" className="flex flex-col items-start gap-1">
+              <p className="text-sm text-destructive">{inviteErr}</p>
+              {/* The recovery path out of "that email is not on your account".
+                  It was an underlined link with an arrow stapled to it, inside
+                  the error sentence; it is now a control of its own, below the
+                  message, where a control belongs. */}
+              {inviteNoMatch ? (
+                <Link
+                  href="/admin/settings/members"
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), '-ml-3')}
+                >
+                  <i aria-hidden className="pi pi-users" style={{ fontSize: 13 }} />
+                  {m.inviteFromMembers}
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="mt-1 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="lg" onClick={closeDialog}>
+              {m.cancel}
+            </Button>
+            <Button type="submit" size="lg" disabled={pending || !inviteEmail}>
+              {m.sendInvite}
+            </Button>
+          </div>
+        </form>
+      </Modal>
       {dialog}
     </div>
   );

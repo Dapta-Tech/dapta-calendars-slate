@@ -19,7 +19,8 @@ export default async function ConnectionsPage() {
     // editable) saves a step; never required for the flow to work.
     adminApi.me().catch(() => null),
   ]);
-  const admin = getMessages(await getLocale()).admin;
+  const locale = await getLocale();
+  const admin = getMessages(locale).admin;
   const messages = {
     ...admin.connections,
     pageDesc: admin.connections.pageDesc.replace('{product}', PRODUCT_NAME),
@@ -35,7 +36,7 @@ export default async function ConnectionsPage() {
   // admin list page (Bookings/Event types/Teams) so the body's right edge
   // lines up under the header action, not a narrower column underneath it.
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-4 py-8 sm:px-8 sm:py-10">
       <ConnectionsClient
         title={admin.nav.calendars}
         subtitle={messages.pageDesc}
@@ -43,6 +44,7 @@ export default async function ConnectionsPage() {
         status={{ enabled: token.enabled, message: token.message }}
         messages={messages}
         defaultEmail={me?.email ?? null}
+        locale={locale}
       />
     </div>
   );

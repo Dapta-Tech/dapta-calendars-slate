@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
 import type { Team } from '@/lib/admin-api';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { cn } from '@/lib/cn';
 import { deleteTeamAction } from './actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
@@ -59,7 +61,7 @@ export function TeamCard({
   };
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
       <Link href={`/admin/teams/${team.id}`} className="flex min-w-0 items-center gap-3">
         {team.logoUrl ? (
           <img src={team.logoUrl} alt="" className="h-10 w-10 shrink-0 rounded-md border border-border object-cover" />
@@ -76,22 +78,23 @@ export function TeamCard({
           {publicPath ? <span className="truncate text-xs text-muted-foreground">{publicPath}</span> : null}
         </span>
       </Link>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Link
           href={`/admin/teams/${team.id}`}
-          className="rounded-md border border-border px-3 py-1.5 text-sm transition-colors hover:border-primary"
+          className={cn(buttonVariants({ variant: 'outline', size: 'lg' }))}
+          aria-label={`${m.manage} · ${team.name}`}
         >
           {m.manage}
         </Link>
-        <button
-          type="button"
+        <Button
+          variant="destructive"
+          size="lg"
           disabled={pending}
           onClick={() => void askDelete()}
           aria-label={`${m.delete} · ${team.name}`}
-          className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
         >
           {m.delete}
-        </button>
+        </Button>
       </div>
       {err ? <p className="w-full text-xs text-destructive">{err}</p> : null}
       {dialog}

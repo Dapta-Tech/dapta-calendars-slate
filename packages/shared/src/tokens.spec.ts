@@ -315,3 +315,164 @@ describe('token sheet structure', () => {
     expect(BASE['--acc-l']).toBeDefined();
   });
 });
+
+// --- The law, on translucent grounds ---------------------------------------
+
+/* A2 (#112). Everything above measures a SOLID token on a SOLID ground. The admin
+   is not built that way: a status pill is `bg-primary/10` under `text-primary`, an
+   error banner is `bg-destructive/10` under `text-destructive`, a control strip is
+   `bg-muted/40` under `text-muted-foreground`, and a connection's controls sit on
+   `bg-background/60` over the card. Tailwind's `/N` modifier makes each of those a
+   DIFFERENT colour from the token it names, and none of them was ever measured.
+
+   The compositing this needs already exists — `over()` is what resolves the
+   hairline and the input edge — so this is arithmetic on values that are already
+   parsed. No second source of truth for colour, no browser, no screenshot.
+
+   The alphas listed here are the ones the screens actually paint. A new wash at a
+   new opacity means a new entry here; that is the point of the list. */
+
+/** A token at `alpha`, composited over a ground token, as the viewer sees it. */
+function washOver(
+  token: string,
+  alpha: number,
+  ground: string,
+  vars: Record<string, string>,
+): string {
+  const fg = resolve(token, vars);
+  const bg = resolve(ground, vars);
+  const a = fg.a * alpha;
+  return toHex({
+    r: bg.r + (fg.r - bg.r) * a,
+    g: bg.g + (fg.g - bg.g) * a,
+    b: bg.b + (fg.b - bg.b) * a,
+    a: 1,
+  });
+}
+
+/** A token painted onto an already-composited hex — the second layer of a wash. */
+function onPainted(token: string, paintedHex: string, vars: Record<string, string>): string {
+  const fg = resolve(token, vars);
+  if (fg.a >= 1) return toHex(fg);
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(paintedHex);
+  if (!m) throw new Error(`not a composited hex: ${paintedHex}`);
+  const bg = {
+    r: parseInt(m[1]!, 16),
+    g: parseInt(m[2]!, 16),
+    b: parseInt(m[3]!, 16),
+  };
+  return toHex({
+    r: bg.r + (fg.r - bg.r) * fg.a,
+    g: bg.g + (fg.g - bg.g) * fg.a,
+    b: bg.b + (fg.b - bg.b) * fg.a,
+    a: 1,
+  });
+}
+
+/** The ratio of a solid token against a WASHED ground, both composited first. */
+function ratioOnWash(
+  token: string,
+  wash: [string, number],
+  ground: string,
+  vars: Record<string, string>,
+): number {
+  const painted = washOver(wash[0], wash[1], ground, vars);
+  return contrastRatio(onPainted(token, painted, vars), painted);
+}
+
+/** Every ground a wash lands on in the admin: the page, and a card on it. */
+const WASH_GROUNDS = ['--background', '--card'] as const;
+
+describe.each(Object.entries(THEMES))('the law on translucent grounds — %s', (_theme, vars) => {
+  it('the accent wash carries accent letters at AA', () => {
+    // The "invited" pill on Members, the "connected" badge on Integrations, and
+    // the studio's unsaved-changes chip. `text-primary` resolves to
+    // `--primary-ink` (globals.css overrides the utility), so that is what is
+    // measured — not the fill it is sitting on.
+    for (const ground of WASH_GROUNDS) {
+      for (const alpha of [0.1, 0.15]) {
+        expect(
+          ratioOnWash('--primary-ink', ['--primary', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(AA);
+      }
+    }
+  });
+
+  it('the destructive wash carries destructive letters at AA', () => {
+    // Every error banner and every failed/disabled pill in the settings cluster.
+    for (const ground of WASH_GROUNDS) {
+      for (const alpha of [0.05, 0.1]) {
+        expect(
+          ratioOnWash('--destructive', ['--destructive', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(AA);
+      }
+    }
+  });
+
+  it('the raised-deck washes carry both text voices at AA', () => {
+    // `bg-muted/30|/40|/50|/60` — the connect dialog's waiting panel, the sync
+    // note, the summary strip, the empty-state medallion.
+    for (const ground of WASH_GROUNDS) {
+      for (const alpha of [0.3, 0.4, 0.5, 0.6]) {
+        expect(
+          ratioOnWash('--muted-foreground', ['--muted', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(AA);
+        expect(
+          ratioOnWash('--foreground', ['--muted', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(AA);
+      }
+    }
+  });
+
+  it('a page wash inside a card carries both text voices at AA', () => {
+    // `bg-background/60` — the per-connection controls strip, a panel of page
+    // colour floating on the card it belongs to.
+    expect(
+      ratioOnWash('--muted-foreground', ['--background', 0.6], '--card', vars),
+    ).toBeGreaterThanOrEqual(AA);
+    expect(
+      ratioOnWash('--foreground', ['--background', 0.6], '--card', vars),
+    ).toBeGreaterThanOrEqual(AA);
+  });
+
+  it('a SOLID line drawn around a washed panel still clears 3:1', () => {
+    // The banner and badge borders in the settings cluster, drawn around the
+    // washes above rather than on bare card. Solid, because a TRANSLUCENT accent
+    // line does not survive paper — see the light-only assertion below, which is
+    // what forced every state-bearing border in A2's screens to drop its `/40`.
+    for (const ground of WASH_GROUNDS) {
+      for (const alpha of [0.05, 0.1, 0.15]) {
+        expect(
+          ratioOnWash('--primary-edge', ['--primary', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(NON_TEXT);
+        expect(
+          ratioOnWash('--destructive', ['--destructive', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(NON_TEXT);
+      }
+    }
+  });
+});
+
+/* Deliberately OUTSIDE the per-theme block: this is a statement about the LIGHT
+   palette specifically, and running it under `describe.each` would have measured
+   light twice and dark never — dark, where the accent is already the page's
+   brightest value, would fail it and should. */
+describe('why no border in these screens is a washed accent', () => {
+  it('a washed accent line cannot carry state on paper, at any alpha the admin uses', () => {
+    // Pinned as a fact, not a preference. `border-primary/40` measures 1.6:1 on
+    // white: below the 3:1 a control-state indicator owes WCAG 1.4.11, and no
+    // alpha in the admin's range fixes it, because `--primary-edge` is already
+    // the darkest legible step of the hue. Every border in A2's screens that says
+    // something (connected, destination, failed) is therefore solid, and a washed
+    // border only ever decorates a panel whose TEXT carries the meaning.
+    //
+    // If a future palette makes this pass, the constraint has gone away and the
+    // comment above is stale — which is the failure this assertion exists to catch.
+    const light = THEMES.light!;
+    for (const alpha of [0.4, 0.5, 0.6]) {
+      expect(
+        contrastRatio(washOver('--primary-edge', alpha, '--card', light), over('--card', '--card', light)),
+      ).toBeLessThan(NON_TEXT);
+    }
+  });
+});

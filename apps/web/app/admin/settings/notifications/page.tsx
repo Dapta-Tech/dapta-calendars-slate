@@ -26,7 +26,7 @@ export default async function NotificationsSettings() {
         <h2 className="text-lg font-semibold">{m.notifications.title}</h2>
         <p className="text-sm text-muted-foreground">{m.notifications.subtitle}</p>
       </div>
-      <NotificationsClient data={data} messages={m.notifications} />
+      <NotificationsClient data={data} messages={m.notifications} locale={locale} />
     </div>
   );
 }
