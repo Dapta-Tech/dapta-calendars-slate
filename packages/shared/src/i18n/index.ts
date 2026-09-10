@@ -220,6 +220,9 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
+       *  new tab. The icon says it visually; this says it out loud. */
+      opensNewTab: string;
       switcher: {
         trigger: string;
         menuLabel: string;
@@ -490,6 +493,12 @@ export interface BookingMessages {
       saving: string;
       scheduleNameLabel: string;
       removeRange: string;
+      /** A2 (#112) — the delete confirmation, as a real dialog. The inline
+       *  yes/no pair it replaces never trapped focus and never announced the
+       *  question it was asking. */
+      deleteTitle: string;
+      deleteBody: string;
+      removeOverride: string;
       savedToast: string;
       deletedToast: string;
       saveError: string;
@@ -678,6 +687,11 @@ export interface BookingMessages {
       /** Single-owner model (QA2 fix 6b): explicit transfer flow. */
       transferOwnership: string;
       transferConfirm: string;
+      /** A2 (#112) — both destructive asks move onto ConfirmDialog. */
+      removeTitle: string;
+      removeBody: string;
+      transferTitle: string;
+      transferBody: string;
       ownershipTransferred: string;
       roleUpdated: string;
       statusUpdated: string;
@@ -718,6 +732,9 @@ export interface BookingMessages {
       conflictCheck: string;
       disconnect: string;
       disconnectError: string;
+      /** A2 (#112) — disconnecting stops conflict checks and write-out, so it asks. */
+      disconnectTitle: string;
+      disconnectBody: string;
       /** Muted fallback label when a connection's account email couldn't be
        *  determined (never repeats the provider name — see connectionLabel). */
       accountUnknown: string;
@@ -726,6 +743,8 @@ export interface BookingMessages {
       provider: string;
       calendarId: string;
       addConnection: string;
+      /** In-flight label on the manual-add submit (A2, #112). */
+      addingConnection: string;
       healthSyncing: string;
       healthRecorded: string;
       yourCalendars: string;
@@ -827,6 +846,9 @@ export interface BookingMessages {
       usingCustom: string;
       reset: string;
       resetDone: string;
+      /** A2 (#112) — reset throws away copy the host wrote, so it asks first. */
+      resetTitle: string;
+      resetBody: string;
       save: string;
       saving: string;
       saved: string;
@@ -841,6 +863,13 @@ export interface BookingMessages {
       apiKeys: string;
       noKeys: string;
       revoke: string;
+      /** A2 (#112) — revoking a key and deleting a webhook were one click each. */
+      revokeTitle: string;
+      revokeBody: string;
+      deleteWebhookTitle: string;
+      deleteWebhookBody: string;
+      deliveryOk: string;
+      deliveryFailed: string;
       revoked: string;
       copyOnce: string;
       name: string;
@@ -858,6 +887,9 @@ export interface BookingMessages {
       ping: string;
       deliveries: string;
       noDeliveries: string;
+      /** In-flight labels — these two replace a bare ellipsis (A2, #112). */
+      creating: string;
+      loading: string;
       delete: string;
       active: string;
       cancel: string;
@@ -1225,6 +1257,7 @@ export const en: BookingMessages = {
       language: 'Language',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
+      opensNewTab: 'Opens in a new tab',
       switcher: {
         trigger: 'Switch product',
         menuLabel: 'Dapta products',
@@ -1244,7 +1277,7 @@ export const en: BookingMessages = {
       subtitle: 'Your scheduling at a glance.',
       bookingLink: 'Your booking link',
       copy: 'Copy',
-      copied: 'Copied ✓',
+      copied: 'Copied',
       open: 'Open',
       statEventTypes: 'Events',
       statUpcoming: 'Upcoming bookings',
@@ -1460,6 +1493,9 @@ export const en: BookingMessages = {
       saving: 'Saving…',
       scheduleNameLabel: 'Schedule name',
       removeRange: 'Remove range',
+      deleteTitle: 'Delete this schedule?',
+      deleteBody: '“{name}” will be removed. Event types using it fall back to your default availability.',
+      removeOverride: 'Remove date override',
       savedToast: 'Availability saved.',
       deletedToast: 'Schedule deleted.',
       saveError: 'Could not save availability.',
@@ -1570,8 +1606,8 @@ export const en: BookingMessages = {
       memberRemoved: 'Member removed.',
       memberAdded: 'Member added.',
       genericError: 'Something went wrong.',
-      backToTeams: '← Teams',
-      viewPublicTeam: 'View public team page →',
+      backToTeams: 'Teams',
+      viewPublicTeam: 'View public team page',
       roundRobin: 'round-robin scheduling',
       members: 'Members',
       teamEventTypes: 'Team events',
@@ -1586,7 +1622,7 @@ export const en: BookingMessages = {
       ownerLock: 'Team admins can’t be removed — change their role first.',
       memberPending: 'Pending',
       noAccountMember: 'No account member with that email — they need to sign up first.',
-      inviteFromMembers: 'Invite them from Settings → Members',
+      inviteFromMembers: 'Invite them from Members settings',
       createTitle: 'New team',
       createSubtitle: 'Round-robin bookings across a group of hosts. You can add members after creating.',
       bioLabel: 'Bio',
@@ -1598,7 +1634,7 @@ export const en: BookingMessages = {
       imageTooLarge: 'Image must be 1MB or smaller.',
       imageInvalidType: 'Please choose an image file.',
       creating: 'Creating…',
-      backToTeamsList: '← Teams',
+      backToTeamsList: 'Teams',
       imageReadError: 'Could not read that file.',
       nameHelp: 'Shown at the top of the team’s public booking page.',
       slugHelp: 'Used in the public URL. Lowercase letters, numbers and dashes.',
@@ -1637,6 +1673,10 @@ export const en: BookingMessages = {
       lastOwnerTitle: 'A workspace must keep at least one owner',
       transferOwnership: 'Transfer ownership',
       transferConfirm: 'Yes, transfer — I become an admin',
+      removeTitle: 'Remove this member?',
+      removeBody: '{name} loses access to this workspace. Their past bookings stay.',
+      transferTitle: 'Transfer ownership?',
+      transferBody: '{name} becomes the owner and you become an admin. Only they can hand it back.',
       ownershipTransferred: 'Ownership transferred.',
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
@@ -1676,12 +1716,15 @@ export const en: BookingMessages = {
       conflictCheck: 'Conflict check',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
+      disconnectTitle: 'Disconnect this calendar?',
+      disconnectBody: '{account} stops being checked for conflicts, and new bookings will not be written to it.',
       accountUnknown: 'Account unknown',
       manualTitle: 'Link a calendar manually',
       manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
       provider: 'Provider',
       calendarId: 'Calendar id / email',
       addConnection: 'Add connection',
+      addingConnection: 'Adding…',
       healthSyncing: 'Syncing',
       healthRecorded: 'Recorded only',
       yourCalendars: 'Your calendars',
@@ -1798,6 +1841,8 @@ export const en: BookingMessages = {
       usingCustom: 'Using a custom template',
       reset: 'Reset to default',
       resetDone: 'Template reset to default.',
+      resetTitle: 'Reset this template?',
+      resetBody: 'Your subject and body are discarded and the shipped copy comes back. This cannot be undone.',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved.',
@@ -1814,6 +1859,12 @@ export const en: BookingMessages = {
       apiKeys: 'API keys',
       noKeys: 'No API keys.',
       revoke: 'Revoke',
+      revokeTitle: 'Revoke this key?',
+      revokeBody: '“{name}” stops working immediately. Anything using it will start failing.',
+      deleteWebhookTitle: 'Delete this webhook?',
+      deleteWebhookBody: 'No more events will be sent to {url}. Its signing secret is gone for good.',
+      deliveryOk: 'Delivered',
+      deliveryFailed: 'Failed',
       revoked: 'revoked',
       copyOnce: 'Copy this now — it won’t be shown again:',
       name: 'Name',
@@ -1831,6 +1882,8 @@ export const en: BookingMessages = {
       ping: 'Ping',
       deliveries: 'Deliveries',
       noDeliveries: 'No deliveries yet — they appear when a real booking event fires this webhook.',
+      creating: 'Creating…',
+      loading: 'Loading…',
       delete: 'Delete',
       active: 'active',
       cancel: 'Cancel',
@@ -1882,7 +1935,7 @@ export const en: BookingMessages = {
       cancel: 'Cancel',
       dialogTitle: 'Connect HubSpot',
       dialogLead:
-        'In HubSpot, go to Settings → Integrations → Private Apps and create an app. Grant it the two scopes below, then paste its access token here.',
+        'In HubSpot, open Settings, then Integrations, then Private Apps, and create an app. Grant it the two scopes below, then paste its access token here.',
       scopesTitle: 'Scopes this app needs',
       scopesLead: 'Tick each one off as you grant it in HubSpot. All of them are required.',
       tokenLabel: 'Access token',
@@ -1932,7 +1985,7 @@ export const en: BookingMessages = {
       vanityIncluded: 'Custom links are included with your Dapta AI subscription.',
       vanityIncludedLink: 'Learn more',
       bio: 'Bio',
-      tryHandle: 'Try {handle} →',
+      tryHandle: 'Try {handle}',
       accent: 'Accent',
       contrast: 'Contrast {ratio}:1',
       adjustedNote: ' · adjusted to {hex} for legibility (AA)',
@@ -1953,7 +2006,7 @@ export const en: BookingMessages = {
       hide: 'Hide',
       noEvents: 'No events yet.',
       orderVisibilityNote: 'Order + visibility apply to your public page.',
-      configureEventTypes: 'Configure events →',
+      configureEventTypes: 'Configure events',
       showLandingPage: 'Show the landing page (list of events)',
       sendVisitorsTo: 'Send visitors directly to',
       chooseEvent: 'Choose an event…',
@@ -1968,8 +2021,8 @@ export const en: BookingMessages = {
       desktop: 'desktop',
       mobile: 'mobile',
       checking: 'Checking…',
-      available: '✓ Available',
-      taken: '✗ Taken',
+      available: 'Available',
+      taken: 'Taken',
       invalid: 'Invalid (3–40 chars, a–z 0–9 -)',
       uploadImage: 'Upload image',
       clear: 'Clear',
@@ -2179,6 +2232,7 @@ export const es: BookingMessages = {
       language: 'Idioma',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
+      opensNewTab: 'Se abre en una pestaña nueva',
       switcher: {
         trigger: 'Cambiar producto',
         menuLabel: 'Productos Dapta',
@@ -2198,7 +2252,7 @@ export const es: BookingMessages = {
       subtitle: 'Tu agenda de un vistazo.',
       bookingLink: 'Tu enlace de reservas',
       copy: 'Copiar',
-      copied: 'Copiado ✓',
+      copied: 'Copiado',
       open: 'Abrir',
       statEventTypes: 'Eventos',
       statUpcoming: 'Próximas reservas',
@@ -2418,6 +2472,9 @@ export const es: BookingMessages = {
       saving: 'Guardando…',
       scheduleNameLabel: 'Nombre del horario',
       removeRange: 'Quitar rango',
+      deleteTitle: '¿Eliminar este horario?',
+      deleteBody: 'Se eliminará «{name}». Los eventos que lo usan volverán a tu disponibilidad predeterminada.',
+      removeOverride: 'Quitar excepción de fecha',
       savedToast: 'Disponibilidad guardada.',
       deletedToast: 'Horario eliminado.',
       saveError: 'No se pudo guardar la disponibilidad.',
@@ -2526,8 +2583,8 @@ export const es: BookingMessages = {
       memberRemoved: 'Miembro eliminado.',
       memberAdded: 'Miembro añadido.',
       genericError: 'Algo salió mal.',
-      backToTeams: '← Equipos',
-      viewPublicTeam: 'Ver página pública del equipo →',
+      backToTeams: 'Equipos',
+      viewPublicTeam: 'Ver página pública del equipo',
       roundRobin: 'programación por turnos',
       members: 'Miembros',
       teamEventTypes: 'Eventos del equipo',
@@ -2542,7 +2599,7 @@ export const es: BookingMessages = {
       ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       memberPending: 'Pendiente',
       noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
-      inviteFromMembers: 'Invítalo desde Configuración → Miembros',
+      inviteFromMembers: 'Invítalo desde la configuración de Miembros',
       createTitle: 'Nuevo equipo',
       createSubtitle: 'Reparte reservas por turnos entre un grupo de anfitriones. Puedes añadir miembros después de crearlo.',
       bioLabel: 'Biografía',
@@ -2554,7 +2611,7 @@ export const es: BookingMessages = {
       imageTooLarge: 'La imagen debe pesar 1MB o menos.',
       imageInvalidType: 'Elige un archivo de imagen.',
       creating: 'Creando…',
-      backToTeamsList: '← Equipos',
+      backToTeamsList: 'Equipos',
       imageReadError: 'No se pudo leer el archivo.',
       nameHelp: 'Se muestra en la parte superior de la página pública del equipo.',
       slugHelp: 'Se usa en la URL pública. Minúsculas, números y guiones.',
@@ -2593,6 +2650,10 @@ export const es: BookingMessages = {
       lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
       transferOwnership: 'Transferir propiedad',
       transferConfirm: 'Sí, transferir — yo paso a admin',
+      removeTitle: '¿Quitar a esta persona?',
+      removeBody: '{name} perderá el acceso a este espacio. Sus reservas anteriores se conservan.',
+      transferTitle: '¿Transferir la propiedad?',
+      transferBody: '{name} pasará a ser propietario y tú pasarás a administrador. Solo esa persona puede devolvértela.',
       ownershipTransferred: 'Propiedad transferida.',
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
@@ -2632,12 +2693,15 @@ export const es: BookingMessages = {
       conflictCheck: 'Verificar conflictos',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
+      disconnectTitle: '¿Desconectar este calendario?',
+      disconnectBody: 'Dejaremos de comprobar conflictos en {account} y las nuevas reservas no se escribirán ahí.',
       accountUnknown: 'Cuenta desconocida',
       manualTitle: 'Vincular un calendario manualmente',
       manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
       provider: 'Proveedor',
       calendarId: 'Id de calendario / correo',
       addConnection: 'Añadir conexión',
+      addingConnection: 'Añadiendo…',
       healthSyncing: 'Sincronizando',
       healthRecorded: 'Solo registrado',
       yourCalendars: 'Tus calendarios',
@@ -2754,6 +2818,8 @@ export const es: BookingMessages = {
       usingCustom: 'Usando una plantilla personalizada',
       reset: 'Restablecer predeterminada',
       resetDone: 'Plantilla restablecida.',
+      resetTitle: '¿Restablecer esta plantilla?',
+      resetBody: 'Se descartarán tu asunto y tu cuerpo y volverá el texto original. Esto no se puede deshacer.',
       save: 'Guardar',
       saving: 'Guardando…',
       saved: 'Guardado.',
@@ -2770,6 +2836,12 @@ export const es: BookingMessages = {
       apiKeys: 'Claves API',
       noKeys: 'No hay claves API.',
       revoke: 'Revocar',
+      revokeTitle: '¿Revocar esta clave?',
+      revokeBody: '«{name}» dejará de funcionar de inmediato. Lo que la use empezará a fallar.',
+      deleteWebhookTitle: '¿Eliminar este webhook?',
+      deleteWebhookBody: 'No se enviarán más eventos a {url}. Su secreto de firma se pierde definitivamente.',
+      deliveryOk: 'Entregado',
+      deliveryFailed: 'Falló',
       revoked: 'revocada',
       copyOnce: 'Cópiala ahora — no se volverá a mostrar:',
       name: 'Nombre',
@@ -2787,6 +2859,8 @@ export const es: BookingMessages = {
       ping: 'Probar',
       deliveries: 'Entregas',
       noDeliveries: 'Aún no hay entregas — aparecerán cuando un evento real de reserva dispare este webhook.',
+      creating: 'Creando…',
+      loading: 'Cargando…',
       delete: 'Eliminar',
       active: 'activo',
       cancel: 'Cancelar',
@@ -2838,7 +2912,7 @@ export const es: BookingMessages = {
       cancel: 'Cancelar',
       dialogTitle: 'Conectar HubSpot',
       dialogLead:
-        'En HubSpot, entra en Configuración → Integraciones → Aplicaciones privadas y crea una aplicación. Concédele los dos permisos de abajo y pega aquí su token de acceso.',
+        'En HubSpot, abre Configuración, luego Integraciones y luego Aplicaciones privadas, y crea una aplicación. Concédele los dos permisos de abajo y pega aquí su token de acceso.',
       scopesTitle: 'Permisos que necesita la aplicación',
       scopesLead: 'Marca cada uno a medida que lo concedes en HubSpot. Todos son obligatorios.',
       tokenLabel: 'Token de acceso',
@@ -2888,7 +2962,7 @@ export const es: BookingMessages = {
       vanityIncluded: 'Los enlaces personalizados están incluidos con tu suscripción de Dapta AI.',
       vanityIncludedLink: 'Saber más',
       bio: 'Biografía',
-      tryHandle: 'Prueba {handle} →',
+      tryHandle: 'Prueba {handle}',
       accent: 'Color de acento',
       contrast: 'Contraste {ratio}:1',
       adjustedNote: ' · ajustado a {hex} para mejor legibilidad (AA)',
@@ -2909,7 +2983,7 @@ export const es: BookingMessages = {
       hide: 'Ocultar',
       noEvents: 'Aún no hay eventos.',
       orderVisibilityNote: 'El orden y la visibilidad se aplican a tu página pública.',
-      configureEventTypes: 'Configurar eventos →',
+      configureEventTypes: 'Configurar eventos',
       showLandingPage: 'Mostrar la página de inicio (lista de eventos)',
       sendVisitorsTo: 'Enviar a los visitantes directamente a',
       chooseEvent: 'Elige un evento…',
@@ -2924,8 +2998,8 @@ export const es: BookingMessages = {
       desktop: 'escritorio',
       mobile: 'móvil',
       checking: 'Comprobando…',
-      available: '✓ Disponible',
-      taken: '✗ Ocupado',
+      available: 'Disponible',
+      taken: 'Ocupado',
       invalid: 'No válido (3–40 caracteres, a–z 0–9 -)',
       uploadImage: 'Subir imagen',
       clear: 'Quitar',
