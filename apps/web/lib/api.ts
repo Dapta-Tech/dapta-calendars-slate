@@ -106,6 +106,42 @@ export async function postTeamBooking(
   return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
 }
 
+/**
+ * Slots ONE booking can be moved to, token-gated (#127).
+ *
+ * The manage page's picker asks this for a TEAM booking rather than the public
+ * team availability route. That route answers what the event offers a NEW
+ * invitee, and for a round-robin team event that is the UNION across hosts —
+ * any host free is enough, because create time still gets to choose who takes
+ * it. A reschedule does not choose again: the booking keeps the host set it was
+ * assigned, so the union listed times the reschedule then refused with a 400.
+ * This asks the narrower question the write actually answers.
+ */
+export async function getRescheduleAvailability(params: {
+  uid: string;
+  token: string;
+  from: string;
+  to: string;
+  timeZone?: string;
+}): Promise<AvailabilityResponse | null> {
+  const qs = new URLSearchParams({ from: params.from, to: params.to });
+  if (params.timeZone) qs.set('timeZone', params.timeZone);
+  // The manage token travels in the HEADER, not `?token=`. The query form is
+  // supported for links already in the wild (emails, calendar invites); this is
+  // a new server-to-server call, so it can keep the token out of access logs
+  // and Referer from the start.
+  const res = await fetch(
+    `${API_URL}/v1/bookings/${encodeURIComponent(params.uid)}/availability?${qs.toString()}`,
+    { headers: { 'x-manage-token': params.token }, cache: 'no-store' },
+  );
+  // 404 = no such booking, or a manage link that no longer opens one. Both mean
+  // "no times to offer" and the page renders its empty picker, exactly as it
+  // does for an event with nothing free.
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API reschedule availability failed: ${res.status}`);
+  return (await res.json()) as AvailabilityResponse;
+}
+
 export function getAvailability(params: {
   accountCode: string;
   handle: string;

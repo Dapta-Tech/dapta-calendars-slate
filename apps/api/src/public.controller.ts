@@ -95,6 +95,31 @@ export class PublicController {
     return unwrap(await this.svc.manageView(uid, manageToken({ headerToken, queryToken })));
   }
 
+  /**
+   * Slots this booking can MOVE to — the manage page's reschedule picker for a
+   * team booking (#127). Scoped to the host set the booking already has, which
+   * is the set the reschedule write validates against; the public team route
+   * answers the wider question ("what does this event offer a new invitee?")
+   * and for round-robin that union lists times this booking cannot take.
+   *
+   * Token-gated, and a bad token answers the same 404 an unknown uid does.
+   */
+  @Get('bookings/:uid/availability')
+  async rescheduleAvailability(
+    @Param('uid') uid: string,
+    @Headers('x-manage-token') headerToken: string | undefined,
+    @Query() q: Record<string, string>,
+  ) {
+    const token = manageToken({ headerToken, queryToken: q.token });
+    try {
+      const r = await this.svc.rescheduleAvailability(uid, token, q);
+      if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Booking not found.' });
+      return r;
+    } catch (err) {
+      badReq(err);
+    }
+  }
+
   @Post('bookings/:uid/cancel')
   @HttpCode(200)
   async cancel(

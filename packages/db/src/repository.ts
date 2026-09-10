@@ -271,6 +271,17 @@ export async function isSlotBookable(
   args: {
     eventTypeId: string;
     hostMemberId: string;
+    /**
+     * This host's OWN schedule for the event (`event_type_host.schedule_id`),
+     * for a TEAM event type whose hosts each bring their own hours. Pass it and
+     * the resolution becomes `override ?? member default` — precisely what the
+     * team availability projection does, so the picker and a reschedule cannot
+     * read different hours for the same host. OMIT it (personal events, and
+     * every caller that predates teams) and the event type's own `schedule_id`
+     * leads, exactly as before. `null` is meaningful and NOT the same as
+     * omitted: it says "this host has no override", i.e. use the member default.
+     */
+    hostScheduleId?: string | null;
     startMs: number;
     excludeBookingId?: string;
     now?: Date;
@@ -282,18 +293,26 @@ export async function isSlotBookable(
   if (!eventType || !member) return false;
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
+  const scheduleId = args.hostScheduleId !== undefined ? args.hostScheduleId : eventType.schedule_id;
   const schedule =
-    (await resolveScheduleTimeZone(db, eventType.schedule_id)) ??
+    (await resolveScheduleTimeZone(db, scheduleId)) ??
     (await resolveScheduleTimeZone(db, member.default_schedule_id));
   const scheduleTimeZone = schedule?.timeZone ?? member.time_zone;
   const rules: AvailabilityRule[] = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
 
   // Host busy over the target window, minus the booking being rescheduled.
-  const exclude = args.excludeBookingId ? sql` AND id <> ${args.excludeBookingId}` : sql``;
-  const rows = await db.all<{ start_ms: number; end_ms: number }>(
-    sql`SELECT start_ms, end_ms FROM booking
-        WHERE host_member_id = ${args.hostMemberId} AND status IN ('accepted','pending')
-              AND start_ms < ${endMs} AND end_ms > ${args.startMs}${exclude}`,
+  // Through `loadBusyForHost` so this reads the SAME definition of busy the
+  // availability projections do — a member is busy for a booking whether they
+  // hold it as its organizer or as an assigned co-host. Its own query matched
+  // `host_member_id` only, so a co-host's commitment was invisible here and
+  // only the transactional overlap guard refused the move.
+  const busyRows = await loadBusyForHost(
+    db,
+    args.hostMemberId,
+    args.startMs,
+    endMs,
+    undefined,
+    args.excludeBookingId,
   );
   // Fail-closed: an unreachable external calendar makes the target slot NOT
   // bookable (never move a meeting onto a conflict we couldn't see).
@@ -304,7 +323,7 @@ export async function isSlotBookable(
     return false;
   }
   const busy: Interval[] = [
-    ...rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) })),
+    ...busyRows,
     ...(await loadReservationBusy(db, args.hostMemberId, args.startMs, endMs, args.now?.getTime())),
     ...externalBusy,
   ];
@@ -446,14 +465,21 @@ export async function loadBusyForHost(
    * Pass the event's id to exclude its bookings from the host busy set.
    */
   excludeEventTypeId?: string,
+  /**
+   * The booking being MOVED. A reschedule must not let a booking's current
+   * instant — or the buffers around it — block its own move, so both the write
+   * and the reschedule picker drop it from the host's busy set.
+   */
+  excludeBookingId?: string,
 ): Promise<Interval[]> {
   const exclude = excludeEventTypeId ? sql` AND b.event_type_id <> ${excludeEventTypeId}` : sql``;
+  const excludeBooking = excludeBookingId ? sql` AND b.id <> ${excludeBookingId}` : sql``;
   // A member is busy for a booking whether they're the primary host_member_id OR
   // an assigned co-host (collective / fixed_round_robin) recorded in booking_host.
   const rows = await db.all<{ start_ms: number; end_ms: number }>(
     sql`SELECT b.start_ms, b.end_ms FROM booking b
         WHERE b.status IN ('accepted','pending')
-              AND b.start_ms < ${toMs} AND b.end_ms > ${fromMs}${exclude}
+              AND b.start_ms < ${toMs} AND b.end_ms > ${fromMs}${exclude}${excludeBooking}
               AND (b.host_member_id = ${hostMemberId}
                    OR EXISTS (SELECT 1 FROM booking_host bh
                               WHERE bh.booking_id = b.id AND bh.member_id = ${hostMemberId}))`,

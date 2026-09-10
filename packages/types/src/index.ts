@@ -240,6 +240,23 @@ export const availabilityQuerySchema = z.object({
 });
 export type AvailabilityQuery = z.infer<typeof availabilityQuerySchema>;
 
+/**
+ * Query for the booking-scoped reschedule picker
+ * (`GET /v1/bookings/{uid}/availability`, #127). The booking names its own
+ * event and hosts, so only the window is asked for — and it is PARSED rather
+ * than read raw: an unparseable instant reaching the slot engine is a 500 out
+ * of a public route, and the manage link that leads here is in an email.
+ */
+export const rescheduleAvailabilityQuerySchema = z.object({
+  /** Inclusive window start (ISO-8601 UTC). */
+  from: isoUtcSchema,
+  /** Exclusive window end (ISO-8601 UTC); the service caps the span. */
+  to: isoUtcSchema,
+  /** IANA tz to express slots against (display only; slots are absolute). */
+  timeZone: timeZoneSchema.optional(),
+});
+export type RescheduleAvailabilityQuery = z.infer<typeof rescheduleAvailabilityQuerySchema>;
+
 export const slotSchema = z.object({
   /** Slot start instant (ISO-8601 UTC). */
   startUtc: isoUtcSchema,
