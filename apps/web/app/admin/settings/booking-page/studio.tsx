@@ -11,10 +11,13 @@ import {
   clampAccent,
   accentWasAdjusted,
   accentLabelContrast,
+  buildMonthGrid,
+  formatDayHeading,
   onAccent,
   matchTheme,
   monogram,
   t,
+  weekStartsOnFor,
   type BookingMessages,
   type PublicBranding,
 } from '@slate/shared';
@@ -97,6 +100,8 @@ export interface StudioInit {
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
+  /** 'en' | 'es' — the booking-flow preview's month grid is locale-shaped. */
+  locale: string;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -545,6 +550,7 @@ export function Studio(init: StudioInit) {
                   displayName={displayName}
                   avatarUrl={avatarUrl}
                   accent={accent}
+                  locale={init.locale}
                   m={m}
                 />
               )}
@@ -631,19 +637,48 @@ function BookingPreview({
   displayName,
   avatarUrl,
   accent,
+  locale,
   m,
 }: {
   displayName: string;
   avatarUrl: string;
   accent: string;
+  locale: string;
   m: StudioMessages;
 }) {
+  // The sample MONTH is fixed; how it READS is not. Month names, weekday
+  // initials and which day a week starts on are locale decisions, and the
+  // public page makes them — a Spanish admin previewing a Sunday-first English
+  // grid is being shown a page that does not exist. Built from the same
+  // helpers the real calendar uses, on a fixed key, so it is localized and
+  // still renders identically on the server and after hydration.
+  const grid = useMemo(
+    () =>
+      buildMonthGrid(PREVIEW_MONTH_KEY, {
+        availableDayKeys: PREVIEW_AVAILABLE,
+        todayKey: PREVIEW_TODAY,
+        locale,
+        weekStartsOn: weekStartsOnFor(locale),
+      }),
+    [locale],
+  );
+  const selectedLabel = useMemo(
+    () => formatDayHeading(PREVIEW_SELECTED_INSTANT, 'UTC', locale),
+    [locale],
+  );
+
   return (
     <div aria-hidden="true" className="flex flex-col gap-4">
       {/* Event panel */}
       <div className="flex items-center gap-3">
         {avatarUrl ? (
-          <img src={avatarUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
+          <img
+            src={avatarUrl}
+            alt=""
+            width={40}
+            height={40}
+            className="h-10 w-10 rounded-full object-cover"
+          />
         ) : (
           <div
             className="flex h-10 w-10 items-center justify-center text-base font-semibold"
@@ -666,12 +701,18 @@ function BookingPreview({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
+      {/* One column, always. The preview box is `max-w-md` on desktop and
+          360px on mobile, so a viewport-width `sm:` breakpoint inside it is
+          always true and the "mobile" preview would render the two-column
+          desktop layout at ~28px per calendar cell — a preview of a page that
+          does not exist. The public page stacks these two regions below `lg`,
+          and every width this box takes is below `lg`. */}
+      <div className="flex flex-col gap-4">
         {/* Month calendar */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
-              {PREVIEW_MONTH}
+              {grid.label}
             </span>
             <div className="flex gap-1">
               {/* The same chevron the public page draws, so the preview shows
@@ -685,28 +726,36 @@ function BookingPreview({
             </div>
           </div>
           <div className="bp-cal-grid">
-            {PREVIEW_WEEKDAYS.map((d, i) => (
-              <div key={`${d}-${i}`} className="bp-cal-weekday">
-                {d}
+            <div className="bp-cal-week">
+              {grid.weekdayLabels.map((d, i) => (
+                <div key={`${d}-${i}`} className="bp-cal-weekday">
+                  {d}
+                </div>
+              ))}
+            </div>
+            {grid.weeks.map((week) => (
+              <div className="bp-cal-week" key={week[0]!.dayKey}>
+                {week.map((day) => (
+                  <span
+                    key={day.dayKey}
+                    className="bp-cal-day"
+                    data-state={
+                      !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty'
+                    }
+                    data-today={day.isToday ? 'true' : undefined}
+                    data-selected={day.dayKey === PREVIEW_SELECTED ? 'true' : undefined}
+                  >
+                    {day.dayOfMonth}
+                  </span>
+                ))}
               </div>
-            ))}
-            {PREVIEW_DAYS.map((day) => (
-              <span
-                key={day.n}
-                className="bp-cal-day"
-                data-state={day.state}
-                data-today={day.today ? 'true' : undefined}
-                aria-selected={day.selected || undefined}
-              >
-                {day.n}
-              </span>
             ))}
           </div>
         </div>
 
         {/* Day column */}
         <div className="bp-daycol flex min-w-0 flex-col gap-2">
-          <span className="text-xs font-semibold text-muted-foreground">{PREVIEW_DAY_HEADING}</span>
+          <span className="text-xs font-semibold text-muted-foreground">{selectedLabel}</span>
           <div className="bp-slots">
             {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
               <span key={s} className="bp-slot text-sm" aria-pressed={i === 0}>
@@ -722,44 +771,30 @@ function BookingPreview({
 
 // Fixed sample data for the preview. Deliberately not derived from `new Date()`
 // — a preview that changes shape at midnight is a preview that fails to render
-// the same way twice, and this one is server-rendered before it hydrates.
-const PREVIEW_MONTH = 'September 2026';
-const PREVIEW_WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const PREVIEW_DAY_HEADING = 'Mon, Sep 14';
-const PREVIEW_DAYS: Array<{
-  n: number;
-  state: 'available' | 'empty' | 'outside';
-  today?: boolean;
-  selected?: boolean;
-}> = [
-  { n: 30, state: 'outside' },
-  { n: 31, state: 'outside' },
-  { n: 1, state: 'empty' },
-  { n: 2, state: 'empty' },
-  { n: 3, state: 'empty' },
-  { n: 4, state: 'empty' },
-  { n: 5, state: 'empty' },
-  { n: 6, state: 'empty' },
-  { n: 7, state: 'empty' },
-  { n: 8, state: 'empty' },
-  { n: 9, state: 'empty' },
-  { n: 10, state: 'available', today: true },
-  { n: 11, state: 'available' },
-  { n: 12, state: 'empty' },
-  { n: 13, state: 'empty' },
-  { n: 14, state: 'available', selected: true },
-  { n: 15, state: 'available' },
-  { n: 16, state: 'available' },
-  { n: 17, state: 'available' },
-  { n: 18, state: 'available' },
-  { n: 19, state: 'empty' },
-  { n: 20, state: 'empty' },
-  { n: 21, state: 'available' },
-  { n: 22, state: 'available' },
-  { n: 23, state: 'available' },
-  { n: 24, state: 'available' },
-  { n: 25, state: 'available' },
-  { n: 26, state: 'empty' },
+// the same way twice, and this one is server-rendered before it hydrates. The
+// KEYS are fixed; how they read is the locale's business, which is why they go
+// through `buildMonthGrid` rather than being spelled out in English.
+const PREVIEW_MONTH_KEY = '2026-09';
+const PREVIEW_TODAY = '2026-09-10';
+const PREVIEW_SELECTED = '2026-09-14';
+/** UTC noon of the selected day — the day column's heading. */
+const PREVIEW_SELECTED_INSTANT = '2026-09-14T12:00:00.000Z';
+const PREVIEW_AVAILABLE = [
+  '2026-09-10',
+  '2026-09-11',
+  '2026-09-14',
+  '2026-09-15',
+  '2026-09-16',
+  '2026-09-17',
+  '2026-09-18',
+  '2026-09-21',
+  '2026-09-22',
+  '2026-09-23',
+  '2026-09-24',
+  '2026-09-25',
+  '2026-09-28',
+  '2026-09-29',
+  '2026-09-30',
 ];
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {

@@ -97,6 +97,13 @@ export interface CalendarDay {
   dayKey: string;
   /** 1..31, for the label. */
   dayOfMonth: number;
+  /**
+   * The spoken date ("Monday, September 14") for the cell's accessible name —
+   * the visible label is a bare number, which is not a date. Built here rather
+   * than in the component because this function already owns the day loop and
+   * can share ONE `Intl.DateTimeFormat` across all 42 cells.
+   */
+  label: string;
   /** False for the leading/trailing cells borrowed from the neighbouring months. */
   inMonth: boolean;
   isToday: boolean;
@@ -166,12 +173,25 @@ export function buildMonthGrid(
   // Whole weeks only, so every row has seven cells and the grid never ragged-ends.
   const cellCount = Math.ceil((lead + daysInMonth) / 7) * 7;
 
+  // One formatter for the whole grid. Constructing an `Intl.DateTimeFormat`
+  // per cell costs 42 of them on every render — every day pick, every month
+  // step, every timezone switch.
+  const spoken = new Intl.DateTimeFormat(locale, {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
   const weeks: CalendarDay[][] = [];
   for (let i = 0; i < cellCount; i++) {
     const dayKey = addDays(first, i - lead);
+    const [dy, dm, dd] = dayKey.split('-').map(Number);
     const day: CalendarDay = {
       dayKey,
       dayOfMonth: Number(dayKey.slice(8)),
+      // Noon, so no zone can shift the label onto the neighbouring day.
+      label: spoken.format(new Date(Date.UTC(dy!, dm! - 1, dd!, 12))),
       inMonth: monthKeyOf(dayKey) === monthKey,
       isToday: dayKey === todayKey,
       isPast: dayKey < todayKey,

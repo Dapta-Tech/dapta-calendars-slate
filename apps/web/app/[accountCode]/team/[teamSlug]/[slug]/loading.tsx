@@ -1,11 +1,15 @@
 import { Skeleton } from '@/components/skeleton';
 
 /**
- * The three-region event page's skeleton (BP). It mirrors the real grid —
- * panel, month, day column — at the same breakpoints, so the page does not
- * visibly re-lay-out the moment the slots arrive.
+ * The team event page's skeleton (BP) — panel, month, day column, at the same
+ * breakpoints as the real grid so the page does not visibly re-lay-out the
+ * moment the slots arrive.
+ *
+ * The team route had no `loading.tsx` at all; with both routes now rendering
+ * the same layout, the personal one having a skeleton and this one having none
+ * is a difference with no reason behind it.
  */
-export default function BookingLoading() {
+export default function TeamBookingLoading() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
       {/* `bp-canvas` too, not just the outer `max-w-6xl`: the canvas caps at

@@ -15,11 +15,16 @@ import { Select, type SelectOption } from '@/components/ui/select';
  * Escape that does not also close the dialog behind it. This one lost them.
  *
  * What is left here is the only part that was ever about timezones: build the
- * option list and its GMT-offset hints. Everything else is `Select`'s. The
- * public contract is unchanged (`value` / `onChange` / `locale` / `id` /
- * `ariaLabel` / `className`) and the rendering matches what it rendered before
- * — zone on the left, offset on the right, on the trigger and on every row —
- * so the admin's two timezone fields are untouched by this.
+ * option list and its GMT-offset hints. Everything else is `Select`'s, and the
+ * rendering matches what it rendered before — zone on the left, offset on the
+ * right, on the trigger and on every row — so the admin's two timezone fields
+ * are untouched by this.
+ *
+ * One prop changed meaning: `className` used to style the ROOT wrapper and now
+ * follows `Select`'s convention of styling the TRIGGER, since the panel is
+ * positioned off `Select`'s own wrapper. Size this control from its parent
+ * container, as `Select` documents — a width passed here would leave the panel
+ * wider than the trigger it hangs from. Neither admin call site passes one.
  */
 
 /** Current UTC offset for a zone, e.g. "GMT-7" — picking is much easier with

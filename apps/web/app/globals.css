@@ -362,7 +362,7 @@ body {
    region inside page scroll is a touch trap: the finger lands in the inner box
    and the page stops moving. Below `md` the list just flows in the page. */
 @media (min-width: 768px) {
-  .bp-daycol-scroll {
+  .branded-surface .bp-daycol-scroll {
     max-height: 26rem;
     overflow-y: auto;
     /* Room for the scrollbar so a chip's rim is never clipped by it. */
@@ -370,18 +370,26 @@ body {
   }
 }
 
-.bp-cal-grid {
+/* Rows own their own seven-column track rather than `display: contents` on a
+   shared one. `contents` has a long history of dropping elements out of the
+   accessibility tree, and the row structure is the whole reason this claims
+   grid semantics — so the layout must not depend on removing the rows from it.
+   Every row is seven equal fractions of the same width, so the columns line up
+   without a shared track. (The cells themselves are `display: contents`
+   wrappers carrying `role="gridcell"`; a wrapper that vanishes from layout is
+   fine, one that vanishes from the a11y tree is not, and only the latter is at
+   issue with `contents`.) */
+.branded-surface .bp-cal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.branded-surface .bp-cal-week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.25rem;
 }
-/* The rows exist for ARIA, not for layout: `display: contents` hands the cells
-   straight to the seven-column track above, so the grid keeps its shape while
-   a screen reader gets the row structure a date picker owes it. */
-.bp-cal-week {
-  display: contents;
-}
-.bp-cal-weekday {
+.branded-surface .bp-cal-weekday {
   min-width: 0;
   padding-block: 0.25rem;
   text-align: center;
@@ -394,7 +402,7 @@ body {
 /* A day cell is a slot chip by another name — same hit target, same radius
    axis, same accent rim on hover — so the grid cannot drift from the column
    beside it. */
-.bp-cal-day {
+.branded-surface .bp-cal-day {
   position: relative;
   display: flex;
   align-items: center;
@@ -411,33 +419,33 @@ body {
     border-color 120ms var(--ease-standard, ease);
 }
 /* Bookable. */
-.bp-cal-day[data-state='available'] {
+.branded-surface .bp-cal-day[data-state='available'] {
   border-color: var(--border);
   background: var(--card);
   font-weight: 600;
   cursor: pointer;
 }
-.bp-cal-day[data-state='available']:hover {
+.branded-surface .bp-cal-day[data-state='available']:hover {
   border-color: var(--accent, var(--primary));
 }
-.bp-cal-day[data-state='available']:active {
+.branded-surface .bp-cal-day[data-state='available']:active {
   transform: scale(0.97);
 }
 /* Nothing to book — visibly a date, not a control. `disabled` already takes it
    out of the tab order; this takes it out of the eye's. */
-.bp-cal-day[data-state='empty'] {
+.branded-surface .bp-cal-day[data-state='empty'] {
   color: var(--muted-foreground);
   opacity: 0.45;
   cursor: default;
 }
-.bp-cal-day[data-state='outside'] {
+.branded-surface .bp-cal-day[data-state='outside'] {
   color: var(--muted-foreground);
   opacity: 0.25;
   cursor: default;
 }
 /* Today: a dot under the number, so "today" and "selected" can both be true at
    once and still be told apart. */
-.bp-cal-day[data-today='true']::after {
+.branded-surface .bp-cal-day[data-today='true']::after {
   content: '';
   position: absolute;
   bottom: 0.3rem;
@@ -449,15 +457,15 @@ body {
   background: currentColor;
 }
 /* Selected day — the same two treatments the slotSelect axis gives a chip. */
-.bp-cal-day[aria-selected='true'],
-.branded-surface.sel-soft .bp-cal-day[aria-selected='true'] {
+.branded-surface .bp-cal-day[data-selected='true'],
+.branded-surface.sel-soft .bp-cal-day[data-selected='true'] {
   background: var(--accent-soft, var(--muted));
   border-color: var(--accent, var(--primary));
   box-shadow: inset 0 0 0 1px var(--accent, var(--primary));
   color: var(--foreground);
   font-weight: 700;
 }
-.branded-surface.sel-solid .bp-cal-day[aria-selected='true'] {
+.branded-surface.sel-solid .bp-cal-day[data-selected='true'] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-contrast);
@@ -465,7 +473,7 @@ body {
   font-weight: 700;
 }
 /* Month arrows + the 12h/24h toggle: same rim and target as everything else. */
-.bp-icon-btn {
+.branded-surface .bp-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -476,10 +484,10 @@ body {
   background: var(--card);
   transition: border-color 120ms var(--ease-standard, ease);
 }
-.bp-icon-btn:hover:not(:disabled) {
+.branded-surface .bp-icon-btn:hover:not(:disabled) {
   border-color: var(--accent, var(--primary));
 }
-.bp-icon-btn:disabled {
+.branded-surface .bp-icon-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

@@ -40,6 +40,10 @@ export default async function BookingPageSettings() {
       <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
         messages={t.studio}
+        // The preview draws a month grid, and month names, weekday initials and
+        // which day a week starts on are all locale decisions — so the preview
+        // needs the locale itself, not only the resolved copy.
+        locale={locale}
         accountCode={me?.accountCode ?? ''}
         vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
         subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}

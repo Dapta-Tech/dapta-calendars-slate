@@ -76,6 +76,10 @@ export interface BookingMessages {
     detailsRegion: string;
     calendarRegion: string;
     timesRegion: string;
+    /** The attendee form's landmark, once a time has been chosen. */
+    yourDetails: string;
+    /** Term for the team scheduling method shown in the panel. */
+    method: string;
     previousMonth: string;
     nextMonth: string;
     /** Marks the current day in the grid; visually a dot, here for the label. */
@@ -1040,6 +1044,8 @@ export const en: BookingMessages = {
     detailsRegion: 'Event details',
     calendarRegion: 'Choose a date',
     timesRegion: 'Choose a time',
+    yourDetails: 'Your details',
+    method: 'Scheduling',
     previousMonth: 'Previous month',
     nextMonth: 'Next month',
     today: 'Today',
@@ -1936,6 +1942,8 @@ export const es: BookingMessages = {
     detailsRegion: 'Detalles del evento',
     calendarRegion: 'Elige una fecha',
     timesRegion: 'Elige un horario',
+    yourDetails: 'Tus datos',
+    method: 'Agendamiento',
     previousMonth: 'Mes anterior',
     nextMonth: 'Mes siguiente',
     today: 'Hoy',

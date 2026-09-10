@@ -102,6 +102,25 @@ describe('month calendar grid (BP)', () => {
     expect(grid.label.startsWith('S')).toBe(true);
   });
 
+  // The visible label is a bare number; the accessible name has to be a date,
+  // and it has to be the LOCALE's date.
+  it('gives every cell a spoken date in the requested locale', () => {
+    const en = buildMonthGrid('2026-09', { availableDayKeys: [], todayKey: '2026-09-10' });
+    const byKeyEn = new Map(en.weeks.flat().map((d) => [d.dayKey, d]));
+    expect(byKeyEn.get('2026-09-14')!.label).toBe('Monday, September 14');
+    const es = buildMonthGrid('2026-09', {
+      availableDayKeys: [],
+      todayKey: '2026-09-10',
+      locale: 'es',
+      weekStartsOn: 1,
+    });
+    const byKeyEs = new Map(es.weeks.flat().map((d) => [d.dayKey, d]));
+    expect(byKeyEs.get('2026-09-14')!.label).toMatch(/lunes/);
+    // Noon, not midnight: a midnight instant lands on the previous day in
+    // every zone west of Greenwich and would label the cell one day early.
+    expect(byKeyEn.get('2026-09-01')!.label).toBe('Tuesday, September 1');
+  });
+
   it('marks today, the past, and the days that actually have slots', () => {
     const grid = buildMonthGrid('2026-09', {
       availableDayKeys: new Set(['2026-09-11', '2026-09-14']),

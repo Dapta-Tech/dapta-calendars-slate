@@ -7,6 +7,14 @@
  *
  * The contract (all JSON, `Authorization: Bearer <token>`):
  *   POST   /v1/free-busy                                 → { busy: [{startUtc,endUtc}] }
+ *
+ * FREE-BUSY WINDOW. The requested range can be up to **60 days** wide — the
+ * public availability read's own cap, and what the booking page's month
+ * calendar asks for so a visitor can page through months without a refetch.
+ * A backend that rejects or truncates a range that wide will make public
+ * booking pages show no times at all, because the free-busy path is
+ * FAIL-CLOSED by design: an error there returns zero slots rather than slots
+ * that might already be taken. Accept 60 days, or page the range internally.
  *   POST   /v1/events                                    → { externalEventId, externalCalendarId?, meetingUrl? }
  *   PATCH  /v1/events/:externalEventId                   → { externalEventId, ... }
  *

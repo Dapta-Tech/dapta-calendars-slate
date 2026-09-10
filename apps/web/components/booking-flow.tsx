@@ -126,8 +126,14 @@ export function BookingFlow({
    * persisted, because this page stores nothing.
    */
   const [hour12, setHour12] = useState(() => !locale.toLowerCase().startsWith('es'));
-  /** The month on screen. Only the visitor's navigation moves it. */
-  const [month, setMonth] = useState(() => monthKeyOf(zonedTodayKey(initialTimeZone, new Date(nowUtc))));
+  /**
+   * The month the visitor has navigated to, or `null` for "wherever the times
+   * start". Held as the NAVIGATION rather than as the answer, because the
+   * answer also depends on the timezone: switching zones can move today across
+   * a month boundary, and a month pinned at mount would then sit outside its
+   * own bounds with both arrows pointing away from it.
+   */
+  const [navMonth, setNavMonth] = useState<string | null>(null);
   /** The day the visitor explicitly picked; `null` means "use the default". */
   const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -203,10 +209,12 @@ export function BookingFlow({
    * day the column then has nothing for, which is the classic way a booking
    * calendar lies to someone.
    */
-  const { dayMap, availableDayKeys, todayKey, minMonth, maxMonth } = useMemo(() => {
+  const { dayMap, availableDayKeys, todayKey, minMonth, maxMonth, firstMonth } = useMemo(() => {
     const map = new Map(days.map((d) => [d.dayKey, d]));
     const today = zonedTodayKey(timeZone, new Date(nowUtc));
     const last = days.length ? days[days.length - 1]!.dayKey : today;
+    const first = days.length ? days[0]!.dayKey : today;
+    const min = monthKeyOf(today);
     return {
       dayMap: map,
       availableDayKeys: new Set(map.keys()),
@@ -214,10 +222,24 @@ export function BookingFlow({
       // No previous month before the one holding today, and no next month past
       // the last day the page actually has a slot for. A visitor is never sent
       // to a month this page has no answer for.
-      minMonth: monthKeyOf(today),
+      minMonth: min,
       maxMonth: monthKeyOf(last < today ? today : last),
+      // Open on the month the times actually start in. A host fully booked
+      // this month, or whose availability begins next month, would otherwise
+      // open on a grid of greyed-out days with nothing saying that "next" is
+      // the answer.
+      firstMonth: monthKeyOf(first) < min ? min : monthKeyOf(first),
     };
   }, [days, timeZone, nowUtc]);
+
+  /**
+   * The month on screen: the visitor's navigation, clamped into the bounds the
+   * data actually supports, falling back to the first month with times in it.
+   */
+  const month = useMemo(() => {
+    const wanted = navMonth ?? firstMonth;
+    return wanted < minMonth ? minMonth : wanted > maxMonth ? maxMonth : wanted;
+  }, [navMonth, firstMonth, minMonth, maxMonth]);
 
   /**
    * The day whose times are on screen. `pickedDay` is only the visitor's
@@ -255,10 +277,15 @@ export function BookingFlow({
   }
 
   /**
-   * Drop the slot and the hold and go back to the times. Reached two ways: the
-   * retry on a 409/410, and the explicit "back to times" on the form — which is
-   * the same action, so it is the same function rather than a second one that
-   * would eventually forget to release something.
+   * Forget the slot and go back to the times. Reached two ways: the retry on a
+   * 409/410, and the explicit "back to times" on the form.
+   *
+   * It forgets the hold; it does not RELEASE it. There is no release endpoint —
+   * `reserve()` has no counterpart — so the reservation sits until its TTL,
+   * exactly as it already did when the booker simply picked a different slot.
+   * BP makes leaving the form a first-class exit and so makes that more
+   * visible, but it is not new behaviour and not this unit's to fix; a release
+   * needs an API route. Tracked separately.
    */
   function retry() {
     setSelected(null);
@@ -443,9 +470,8 @@ export function BookingFlow({
 
   // --- A slot is chosen: panel + form -------------------------------------
   // The calendar folds away rather than shrinking the form into a 17rem
-  // gutter. Getting back to the times is one button, and it releases the hold
-  // on the way — the same `retry` a 409 uses, so a hold can never be orphaned
-  // by whichever exit the booker takes.
+  // gutter. Getting back to the times is one button, running the same `retry`
+  // a 409 uses so there is one exit path rather than two that can drift.
   if (selected) {
     return (
       <div className="bp-canvas grid gap-8 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
@@ -459,7 +485,7 @@ export function BookingFlow({
             {bp.backToTimes}
           </button>
         </div>
-        <aside aria-label={m.selectTime} className="md:sticky md:top-6 md:self-start">
+        <aside aria-label={bp.yourDetails} className="md:sticky md:top-6 md:self-start">
           <form
             action={formAction}
             noValidate
@@ -659,7 +685,7 @@ export function BookingFlow({
             minMonthKey={minMonth}
             maxMonthKey={maxMonth}
             onMonthChange={(next) => {
-              setMonth(next);
+              setNavMonth(next);
               // Drop the explicit pick so the new month falls back to its own
               // first bookable day, rather than showing a column of times from
               // a month that is no longer on screen.
@@ -678,11 +704,25 @@ export function BookingFlow({
               </h2>
               {/* 12h / 24h. A two-button radio group, not a switch: neither
                   format is "on", and a switch would have to pick one to be the
-                  default state of. */}
+                  default state of. A radio group is one tab stop with arrows
+                  moving between the options (APG), so the roving tabindex and
+                  the arrow handler are part of the role, not decoration. */}
               <div
                 role="radiogroup"
                 aria-label={bp.timeFormat}
                 className="flex rounded-md border border-border p-0.5 text-xs"
+                onKeyDown={(e) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+                  e.preventDefault();
+                  const group = e.currentTarget;
+                  setHour12((v) => !v);
+                  // Focus follows the selection, or it would sit on the button
+                  // that just became `tabIndex={-1}` and the next Tab would
+                  // leave from nowhere.
+                  requestAnimationFrame(() =>
+                    group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(),
+                  );
+                }}
               >
                 {([true, false] as const).map((is12) => (
                   <button
@@ -690,6 +730,7 @@ export function BookingFlow({
                     type="button"
                     role="radio"
                     aria-checked={hour12 === is12}
+                    tabIndex={hour12 === is12 ? 0 : -1}
                     onClick={() => setHour12(is12)}
                     // 44px, like every other control on the page: a segmented
                     // toggle is a touch target too, and this one sits at the
@@ -728,7 +769,6 @@ export function BookingFlow({
                         key={s.startUtc}
                         type="button"
                         onClick={() => pick(s)}
-                        aria-pressed={selected === s.startUtc}
                         disabled={full}
                         className="bp-slot text-sm disabled:opacity-50"
                       >

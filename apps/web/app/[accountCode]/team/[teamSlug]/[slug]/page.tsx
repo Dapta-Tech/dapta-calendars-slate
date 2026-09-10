@@ -46,9 +46,12 @@ export default async function TeamBookingPage({
   const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
-  // 60 days — the month calendar's window, and the service's own clamp. Which
-  // slots a team event offers is unchanged (#127 owns that question); this
-  // only asks for more of the days it was already prepared to answer for.
+  // 60 days, matching the personal route — the month calendar's window. Note
+  // this route has no server-side clamp of its own: `availability()` caps at
+  // `from + 60 days`, `teamAvailability()` passes the range through. So this
+  // number is the whole bound on the team path, not a request against one.
+  // Which slots a team event offers is unchanged (#127 owns that question);
+  // this only asks for more of the days it was already prepared to answer for.
   const to = new Date(now.getTime() + 60 * 86_400_000).toISOString();
 
   const [team, availability] = await Promise.all([

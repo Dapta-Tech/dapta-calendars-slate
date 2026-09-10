@@ -1,11 +1,11 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import {
   buildMonthGrid,
-  formatDayKeyLong,
   monogram,
   shiftMonth,
+  t,
   type BookingMessages,
   type CalendarMonth,
 } from '@slate/shared';
@@ -136,7 +136,16 @@ export function EventPanel({
     <section aria-label={m.bookingPage.detailsRegion} className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
         {avatarUrl ? (
-          <img src={avatarUrl} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
+          // Intrinsic size given so the row does not reflow when the image
+          // lands. Not `next/image`: the URL is host-supplied (or a data URL)
+          // and the optimizer would need a remote allowlist per account.
+          <img
+            src={avatarUrl}
+            alt=""
+            width={44}
+            height={44}
+            className="h-11 w-11 shrink-0 rounded-full object-cover"
+          />
         ) : (
           // B1's initial tile: the same monogram the profile page and the studio
           // preview draw, so a host with no photo is not a hole on one surface
@@ -177,7 +186,7 @@ export function EventPanel({
           <dt className="sr-only">{m.bookingPage.duration}</dt>
           <dd className="flex items-center gap-2">
             <ClockIcon />
-            <span>{m.booking.durationMinutes.replace('{minutes}', String(lengthMinutes))}</span>
+            <span>{t(m.booking.durationMinutes, { minutes: lengthMinutes })}</span>
           </dd>
         </div>
 
@@ -195,7 +204,7 @@ export function EventPanel({
 
         {methodLabel ? (
           <div className="flex items-center gap-2">
-            <dt className="sr-only">{m.bookingPage.detailsRegion}</dt>
+            <dt className="sr-only">{m.bookingPage.method}</dt>
             <dd className="text-muted-foreground">{methodLabel}</dd>
           </div>
         ) : null}
@@ -250,14 +259,91 @@ export function MonthCalendar({
   onMonthChange: (monthKey: string) => void;
   onSelectDay: (dayKey: string) => void;
 }) {
-  const grid: CalendarMonth = buildMonthGrid(monthKey, {
-    availableDayKeys,
-    todayKey,
-    locale,
-    weekStartsOn,
-  });
+  const grid: CalendarMonth = useMemo(
+    () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn }),
+    [monthKey, availableDayKeys, todayKey, locale, weekStartsOn],
+  );
   const canGoBack = monthKey > minMonthKey;
   const canGoForward = monthKey < maxMonthKey;
+
+  const days = useMemo(() => grid.weeks.flat(), [grid]);
+  const bookable = useMemo(
+    () => days.filter((d) => d.inMonth && d.hasSlots).map((d) => d.dayKey),
+    [days],
+  );
+
+  /**
+   * The grid's single tab stop (APG). `role="grid"` is a contract: one Tab
+   * lands in the calendar, arrows move within it. Without this every bookable
+   * day is its own tab stop — with a 60-day window that is up to forty Tab
+   * presses between the timezone picker and the times beside it.
+   *
+   * Only bookable days can hold the cursor, because only they can be
+   * activated; the rest are `disabled` and out of the tab order anyway.
+   */
+  const cursor =
+    selectedDayKey && bookable.includes(selectedDayKey) ? selectedDayKey : (bookable[0] ?? null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  /** Move the cursor `delta` bookable days and take focus with it. */
+  const step = (delta: number) => {
+    if (!cursor) return;
+    const i = bookable.indexOf(cursor);
+    const next = bookable[Math.min(Math.max(i + delta, 0), bookable.length - 1)];
+    if (!next || next === cursor) return;
+    onSelectDay(next);
+    // The cell is re-rendered with the new cursor before focus moves.
+    requestAnimationFrame(() =>
+      gridRef.current?.querySelector<HTMLElement>(`[data-day="${next}"]`)?.focus(),
+    );
+  };
+
+  const onGridKeyDown = (e: React.KeyboardEvent) => {
+    // Arrows walk BOOKABLE days rather than calendar days: stepping onto a
+    // day with nothing on it would move focus to a disabled control and strand
+    // the keyboard there. A week is seven calendar days, so up/down step by the
+    // nearest thing the visitor means — a row — through what is pickable.
+    switch (e.key) {
+      case 'ArrowRight':
+        e.preventDefault();
+        step(1);
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        step(-1);
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        step(7);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        step(-7);
+        break;
+      case 'Home':
+        e.preventDefault();
+        step(-bookable.length);
+        break;
+      case 'End':
+        e.preventDefault();
+        step(bookable.length);
+        break;
+      case 'PageDown':
+        if (canGoForward) {
+          e.preventDefault();
+          onMonthChange(shiftMonth(monthKey, 1));
+        }
+        break;
+      case 'PageUp':
+        if (canGoBack) {
+          e.preventDefault();
+          onMonthChange(shiftMonth(monthKey, -1));
+        }
+        break;
+      default:
+        break;
+    }
+  };
 
   return (
     <section aria-label={m.bookingPage.calendarRegion} className="flex flex-col gap-3">
@@ -287,10 +373,20 @@ export function MonthCalendar({
         </div>
       </div>
 
-      {/* A real ARIA grid: rows carry `display: contents` so the seven-column
-          track still comes from the grid container, and a screen reader gets
-          the row/column structure a date picker is supposed to have. */}
-      <div className="bp-cal-grid" role="grid" aria-label={grid.label}>
+      {/* A real ARIA grid. Each row is its own seven-column track rather than
+          `display: contents` on a shared one: `contents` has a long history of
+          dropping elements out of the accessibility tree, and the row structure
+          is the entire reason for claiming grid semantics here. `gridcell` sits
+          on the CELL and a real button lives inside it — putting the role on
+          the button would replace its implicit one and announce a control as a
+          table cell. */}
+      <div
+        ref={gridRef}
+        className="bp-cal-grid"
+        role="grid"
+        aria-label={grid.label}
+        onKeyDown={onGridKeyDown}
+      >
         <div role="row" className="bp-cal-week">
           {grid.weekdayLabels.map((label, i) => (
             <div key={`${label}-${i}`} role="columnheader" className="bp-cal-weekday">
@@ -302,28 +398,42 @@ export function MonthCalendar({
           <div role="row" className="bp-cal-week" key={week[0]!.dayKey}>
             {week.map((day) => {
               const state = !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty';
-              const bookable = state === 'available';
-              // The number alone reads as "14"; the accessible name has to be
-              // a date, and has to say when that date is today.
-              const spoken = formatDayKeyLong(day.dayKey, locale);
+              const canPick = state === 'available';
+              const isSelected = canPick && day.dayKey === selectedDayKey;
               return (
-                <button
+                <div
                   key={day.dayKey}
-                  type="button"
                   role="gridcell"
-                  className="bp-cal-day"
-                  data-state={state}
-                  data-today={day.isToday ? 'true' : undefined}
-                  // A day with nothing on it is a date, not a control:
-                  // `disabled` keeps it out of the tab order so a keyboard user
-                  // moves through the days they can actually book.
-                  disabled={!bookable}
-                  aria-selected={bookable ? day.dayKey === selectedDayKey : undefined}
-                  aria-label={day.isToday ? `${spoken}, ${m.bookingPage.today}` : spoken}
-                  onClick={() => onSelectDay(day.dayKey)}
+                  aria-selected={canPick ? isSelected : undefined}
+                  className="contents"
                 >
-                  {day.dayOfMonth}
-                </button>
+                  <button
+                    type="button"
+                    data-day={day.dayKey}
+                    className="bp-cal-day"
+                    data-state={state}
+                    data-today={day.isToday ? 'true' : undefined}
+                    // The style hook, separate from the ARIA one: `aria-selected`
+                    // belongs on the gridcell, and painting the button off its
+                    // parent's attribute would silently stop working for any
+                    // caller that renders a cell without the wrapper.
+                    data-selected={isSelected ? 'true' : undefined}
+                    // A day with nothing on it is a date, not a control:
+                    // `disabled` keeps it out of the tab order so a keyboard
+                    // user moves through the days they can actually book.
+                    disabled={!canPick}
+                    // Roving tabindex: exactly one cell is tabbable, and the
+                    // arrow handler above moves both it and focus.
+                    tabIndex={canPick && day.dayKey === cursor ? 0 : -1}
+                    // The visible label is "14", which is not a date.
+                    aria-label={
+                      day.isToday ? `${day.label}, ${m.bookingPage.today}` : day.label
+                    }
+                    onClick={() => onSelectDay(day.dayKey)}
+                  >
+                    {day.dayOfMonth}
+                  </button>
+                </div>
               );
             })}
           </div>
