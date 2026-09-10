@@ -3,6 +3,7 @@ import type { ServerEnv } from '@slate/config/env';
 import {
   CrmAuthError,
   CrmPropertyError,
+  buildMappedProperties,
   prefixCancelledTitle,
   renderMeetingBody,
   type CrmProvider,
@@ -24,6 +25,7 @@ import {
   type Db,
 } from '@slate/db';
 import { OutboxSkipError } from './email-effects';
+import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { CRM, DB, ENV } from './tokens';
 
 /** The CRM lifecycle transitions the outbox can carry. */
@@ -63,6 +65,13 @@ export class CrmEffects {
     @Inject(CRM) private readonly crm: CrmProvider,
     @Inject(DB) private readonly db: Db,
     @Optional() @Inject(ENV) private readonly env?: ServerEnv,
+    // H2 (#108): the shared, cached property list. LAST and @Optional() so the
+    // specs that construct this service positionally keep working — absent, an
+    // event type with mappings simply delivers without them, which is exactly
+    // what every event type did before H2.
+    @Optional()
+    @Inject(CrmPropertyCatalogService)
+    private readonly properties?: CrmPropertyCatalogService,
   ) {}
 
   /** The wired provider — handed to the admin service for the connect-time probe. */
@@ -240,12 +249,8 @@ export class CrmEffects {
       return;
     }
     try {
-      const contact = await this.crm.resolveContact({
-        token: credential.token,
-        email: ctx.invitee.email,
-        firstName: ctx.invitee.firstName,
-        lastName: ctx.invitee.lastName,
-      });
+      const mapped = await this.mappedProperties(ctx, credential.token);
+      const contact = await this.resolveContactTolerantOfUnknownProperties(ctx, credential.token, mapped);
       const meeting = await this.createMeetingTolerantOfUnknownProperties(ctx, credential.token, contact.contactId);
       await fillBookingReference(this.db, claimId, {
         externalEventId: meeting.meetingId,
@@ -389,6 +394,93 @@ export class CrmEffects {
     }
     this.log.debug(`crm reschedule for ${ctx.uid}: adopted meeting ${meetingId} from its predecessor`);
     return meetingId;
+  }
+
+  /**
+   * H2 (#108): the host's mapped answers, coerced onto this portal's property
+   * types. `{}` for every event type nobody has configured — which is all of
+   * them until a host opens the mapping section.
+   *
+   * The property CATALOG is only read when there is something to map, so an
+   * unmapped event type costs exactly what it cost before H2: nothing.
+   *
+   * Mapped properties are BEST-EFFORT. If the catalog cannot be read, the
+   * booking is delivered without them and the catalog service logs why — losing
+   * the contact and its meeting because a property list was briefly unreachable
+   * is the worse failure, and a mapped value is already omitted on an
+   * enumeration mismatch and stripped on an unknown property.
+   */
+  private async mappedProperties(
+    ctx: CrmWriteContext,
+    token: string,
+  ): Promise<Record<string, string>> {
+    const mappings = ctx.crmPropertyMappings?.[this.crm.name] ?? [];
+    if (mappings.length === 0 || !this.properties) return {};
+    const properties = await this.properties.propertiesForDelivery(ctx.accountId, token);
+    if (properties.length === 0) return {};
+    return buildMappedProperties(mappings, properties, {
+      answers: ctx.responses,
+      fields: ctx.bookingFields,
+      attendee: ctx.attendee,
+      event: {
+        eventTypeTitle: ctx.eventTypeTitle,
+        startUtc: ctx.startUtc,
+        lengthMinutes: ctx.lengthMinutes,
+        hostName: ctx.hostName,
+        hostEmail: ctx.hostEmail,
+      },
+    });
+  }
+
+  /**
+   * Resolve the contact; on `PROPERTY_DOESNT_EXIST`, shed mapped properties and
+   * retry — bounded at three calls, the last of which carries none.
+   *
+   * The bound is three rather than the meeting body's two because a contact
+   * write carries N optional properties where the body carries exactly one. The
+   * final attempt is guaranteed minimal, so the contact and its meeting ALWAYS
+   * land: a property a host deleted in the portal must not cost the booking its
+   * CRM record. The editor already draws that mapping in red.
+   */
+  private async resolveContactTolerantOfUnknownProperties(
+    ctx: CrmWriteContext,
+    token: string,
+    properties: Record<string, string>,
+  ): Promise<{ contactId: string }> {
+    const input = {
+      token,
+      email: ctx.invitee.email,
+      firstName: ctx.invitee.firstName,
+      lastName: ctx.invitee.lastName,
+    };
+    try {
+      return await this.crm.resolveContact({ ...input, properties });
+    } catch (err) {
+      if (!(err instanceof CrmPropertyError) || Object.keys(properties).length === 0) throw err;
+      const named = err.propertyName;
+      const remaining = named
+        ? Object.fromEntries(
+            Object.entries(properties).filter(([k]) => k.toLowerCase() !== named.toLowerCase()),
+          )
+        : {};
+      this.log.warn(
+        `crm rejected property ${named ?? '(unnamed)'} on the contact for ${ctx.uid}; retrying with ${Object.keys(remaining).length} mapped propert${Object.keys(remaining).length === 1 ? 'y' : 'ies'}`,
+      );
+      try {
+        return await this.crm.resolveContact({ ...input, properties: remaining });
+      } catch (retryErr) {
+        if (!(retryErr instanceof CrmPropertyError) || Object.keys(remaining).length === 0) {
+          throw retryErr;
+        }
+        // A SECOND unknown property means the portal is shaped in a way these
+        // mappings do not match. Land the contact with none rather than peeling
+        // them off one at a time — the booking matters more than the mapping.
+        this.log.warn(
+          `crm rejected a second property on the contact for ${ctx.uid}; delivering with no mapped properties`,
+        );
+        return await this.crm.resolveContact({ ...input, properties: {} });
+      }
+    }
   }
 
   /**

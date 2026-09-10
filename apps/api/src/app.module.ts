@@ -20,6 +20,7 @@ import { OnboardingService } from './onboarding.service';
 import { AuthService } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
+import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
@@ -136,6 +137,7 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
     AuthService,
     CalendarEffects,
     CrmEffects,
+    CrmPropertyCatalogService,
     EmailEffects,
     DaptaSyncEffects,
     // Drains the durable outbox (calendar write-out + CRM write-out + webhook
