@@ -496,8 +496,11 @@ function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => 
     >
       <p className="text-xs text-muted-foreground">{m.manualDesc}</p>
       <div className="flex flex-wrap items-end gap-3">
-        {/* A <div>, not a <label>: the picker's trigger is a <button>. */}
-        <div className="flex w-36 flex-col gap-1 text-sm">
+        {/* A <div>, not a <label>: the picker's trigger is a <button>. Wide
+            enough for the longest provider label — at 144px "Google Calendar"
+            truncated on the trigger — and full-width at 360px, where it takes
+            its own line rather than sharing one with the id field. */}
+        <div className="flex w-full flex-col gap-1 text-sm sm:w-48">
           <span className="text-muted-foreground">{m.provider}</span>
           <Select
             value={provider}
