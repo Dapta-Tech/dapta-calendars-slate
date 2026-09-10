@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
 import { PATH_HEADER } from '@/lib/theme';
+import { framingHeaders } from '@/lib/framing';
 import { requestOrigin } from '@/lib/request-origin';
 
 /**
@@ -92,7 +93,18 @@ export function middleware(req: NextRequest) {
   // overwritten here rather than trusted into the theme decision.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set(PATH_HEADER, req.nextUrl.pathname);
-  return parkAttribution(req, NextResponse.next({ request: { headers: requestHeaders } }));
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+
+  // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public
+  // booking routes is the promise the embed rests on; `'self'` on the admin,
+  // on `/manage/[uid]` and on the login/onboarding surfaces is the half that
+  // makes the promise safe to make. Before this the repo declared neither, so
+  // the dashboard was frameable by any site — by omission.
+  for (const [name, value] of Object.entries(framingHeaders(req.nextUrl.pathname))) {
+    res.headers.set(name, value);
+  }
+
+  return parkAttribution(req, res);
 }
 
 export const config = {
