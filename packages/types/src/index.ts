@@ -472,12 +472,18 @@ export type ReserveSlotInput = z.infer<typeof reserveSlotSchema>;
  * visitor a button that frees other people's holds, because anyone can name a
  * slot.
  *
- * Deliberately not `.uuid()`: the release answers the same success for a uid
- * that names nothing as for a real one, and a format check would be the one
- * input shape that answers differently.
+ * Deliberately not `.uuid()`. A well-formed uid that names nothing answers the
+ * same success a real one does, so the route reveals nothing about which holds
+ * exist; only a MISSING or empty field is a 400, which says nothing either. A
+ * uuid check would make the release the one place that answers differently
+ * based on how a uid is spelled.
+ *
+ * The `max` matches `createBookingSchema.reservationUid` — the same value
+ * reaching the same column on the booking path — so the two cannot disagree
+ * about what a uid may be.
  */
 export const releaseSlotSchema = z.object({
-  reservationUid: z.string().min(1).max(64),
+  reservationUid: z.string().min(1).max(200),
 });
 export type ReleaseSlotInput = z.infer<typeof releaseSlotSchema>;
 

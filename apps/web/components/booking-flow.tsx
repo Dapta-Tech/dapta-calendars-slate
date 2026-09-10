@@ -265,7 +265,10 @@ export function BookingFlow({
     setDismissedResult(result);
     setHoldError(null);
     // Moving to another time orphans the hold on this one — give it back (#135).
-    if (hold) void releaseAction(hold.uid);
+    // AWAITED, unlike the one in `retry()`: `reserveSlot` re-checks the engine
+    // before holding, so a release still in flight would make re-picking the
+    // slot you just left answer INVALID_SLOT.
+    if (hold) await releaseAction(hold.uid);
     setHold(null);
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.

@@ -27,3 +27,8 @@ delegates to it.
 
 `@slate/types` also gains `releaseSlotSchema` for the new
 `POST /v1/reservations/release` route. No schema change, no migration.
+
+One behaviour change an API consumer can see: `GET /v2/slots` resolves a TEAM
+event through `teamAvailability`, so a query wider than 60 days is now clamped
+there rather than answered in full. The personal branch has always clamped, so
+this makes the two agree.

@@ -313,6 +313,11 @@ export class CalV2PilotService {
     const toMs = new Date(input.to).getTime();
     if (toMs <= fromMs)
       v2Error(400, "INVALID_REQUEST", "to must be after from.");
+    // 31 days, deliberately NOT `MAX_AVAILABILITY_WINDOW_DAYS` (#136). That
+    // constant bounds the SLOT engine's window and clamps rather than rejects;
+    // this is raw calendar free-busy under a different published contract,
+    // which answers a documented `RANGE_TOO_LARGE` instead. Two numbers because
+    // they are two contracts — not drift.
     if (toMs - fromMs > 31 * 86_400_000)
       v2Error(
         400,

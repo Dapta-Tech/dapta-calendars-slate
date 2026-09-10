@@ -1007,6 +1007,31 @@ export const openapiSpec = {
         },
       },
     },
+    '/v1/public/teams/{accountCode}/{teamSlug}/availability': {
+      get: {
+        summary: 'Public team availability (round-robin / collective)',
+        description:
+          'The team counterpart to GET /v1/availability. The window is capped at ' +
+          '60 days from `from`: a wider range is clamped, not rejected. `from` and ' +
+          '`to` must be ISO-8601 instants with an offset.',
+        parameters: [
+          { name: 'accountCode', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'teamSlug', in: 'path', required: true, schema: { type: 'string' } },
+          ...['slug', 'from', 'to', 'timeZone'].map((name) => ({
+            name,
+            in: 'query',
+            required: name !== 'timeZone',
+            schema: { type: 'string' },
+          })),
+        ],
+        responses: {
+          '200': { description: 'Availability with slots[{startUtc}]' },
+          '400': { description: 'BAD_REQUEST (missing slug, or an unparseable from/to)' },
+          '404': { description: 'NOT_FOUND (no such team event)' },
+          '429': { description: 'RATE_LIMITED' },
+        },
+      },
+    },
     '/v1/reservations': {
       post: {
         summary: 'Place a 10-minute hold on a slot',
