@@ -3,6 +3,7 @@ import type { ServerEnv } from '@slate/config/env';
 import {
   CrmAuthError,
   CrmPropertyError,
+  CrmRequestError,
   buildMappedProperties,
   prefixCancelledTitle,
   renderMeetingBody,
@@ -27,6 +28,19 @@ import {
 import { OutboxSkipError } from './email-effects';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { CRM, DB, ENV } from './tokens';
+
+/**
+ * Could shedding the mapped properties plausibly make this write succeed?
+ *
+ * A named unknown property, obviously. And every other 400: the provider is
+ * saying the REQUEST is wrong, and the only optional part of a contact write is
+ * the mapped bag. 429 and 5xx are excluded on purpose — those a retry can fix,
+ * so they belong to the outbox's backoff rather than to this shedding.
+ */
+function shedMappedProperties(err: unknown): boolean {
+  if (err instanceof CrmPropertyError) return true;
+  return err instanceof CrmRequestError && err.status === 400;
+}
 
 /** The CRM lifecycle transitions the outbox can carry. */
 export type CrmAction = 'booking_write_out' | 'booking_cancel' | 'booking_reschedule';
@@ -433,14 +447,24 @@ export class CrmEffects {
   }
 
   /**
-   * Resolve the contact; on `PROPERTY_DOESNT_EXIST`, shed mapped properties and
-   * retry — bounded at three calls, the last of which carries none.
+   * Resolve the contact; on any rejection the mapped properties could have
+   * caused, shed them and retry — bounded at three calls, the last carrying
+   * none.
+   *
+   * SHEDDABLE IS EVERY 400, not only `PROPERTY_DOESNT_EXIST`. Before H2 the
+   * found-contact path made zero writes and so could not fail at all; now it
+   * PATCHes, and a portal-side validation rule — a value too long, a number
+   * outside a configured range, a required-format property — comes back as a
+   * plain 400 with some other category. Letting that class through would cost
+   * the booking its entire CRM record over one mapped answer, which is exactly
+   * the trade "mapped properties are best-effort, the booking is not" refuses.
+   * 429 and 5xx still propagate and take the outbox's backoff, because those a
+   * retry CAN fix.
    *
    * The bound is three rather than the meeting body's two because a contact
    * write carries N optional properties where the body carries exactly one. The
    * final attempt is guaranteed minimal, so the contact and its meeting ALWAYS
-   * land: a property a host deleted in the portal must not cost the booking its
-   * CRM record. The editor already draws that mapping in red.
+   * land. The editor already draws a broken mapping in red.
    */
   private async resolveContactTolerantOfUnknownProperties(
     ctx: CrmWriteContext,
@@ -456,27 +480,27 @@ export class CrmEffects {
     try {
       return await this.crm.resolveContact({ ...input, properties });
     } catch (err) {
-      if (!(err instanceof CrmPropertyError) || Object.keys(properties).length === 0) throw err;
-      const named = err.propertyName;
+      if (!shedMappedProperties(err) || Object.keys(properties).length === 0) throw err;
+      const named = err instanceof CrmPropertyError ? err.propertyName : null;
       const remaining = named
         ? Object.fromEntries(
             Object.entries(properties).filter(([k]) => k.toLowerCase() !== named.toLowerCase()),
           )
         : {};
       this.log.warn(
-        `crm rejected property ${named ?? '(unnamed)'} on the contact for ${ctx.uid}; retrying with ${Object.keys(remaining).length} mapped propert${Object.keys(remaining).length === 1 ? 'y' : 'ies'}`,
+        `crm rejected the contact write for ${ctx.uid} (${named ? `property ${named}` : 'no property named'}); retrying with ${Object.keys(remaining).length} mapped propert${Object.keys(remaining).length === 1 ? 'y' : 'ies'}`,
       );
       try {
         return await this.crm.resolveContact({ ...input, properties: remaining });
       } catch (retryErr) {
-        if (!(retryErr instanceof CrmPropertyError) || Object.keys(remaining).length === 0) {
+        if (!shedMappedProperties(retryErr) || Object.keys(remaining).length === 0) {
           throw retryErr;
         }
-        // A SECOND unknown property means the portal is shaped in a way these
-        // mappings do not match. Land the contact with none rather than peeling
-        // them off one at a time — the booking matters more than the mapping.
+        // A SECOND rejection means the portal is shaped in a way these mappings
+        // do not match. Land the contact with none rather than peeling them off
+        // one at a time — the booking matters more than the mapping.
         this.log.warn(
-          `crm rejected a second property on the contact for ${ctx.uid}; delivering with no mapped properties`,
+          `crm rejected the contact write for ${ctx.uid} a second time; delivering with no mapped properties`,
         );
         return await this.crm.resolveContact({ ...input, properties: {} });
       }

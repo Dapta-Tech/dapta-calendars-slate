@@ -55,7 +55,7 @@ import {
   teamMemberInputSchema,
   type CrmPropertyMappings,
 } from '@slate/types';
-import { isCompatible, type MappableField } from '@slate/crm/mapping';
+import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
@@ -108,12 +108,17 @@ export class AdminCrudController {
    * it an incompatible pair saves cleanly and then silently delivers nothing,
    * one booking at a time, in an outbox nobody watches.
    *
-   * Two cases are deliberately ALLOWED rather than refused:
+   * Three cases are deliberately ALLOWED rather than refused, all for the same
+   * reason: none of them is a pair that would deliver WRONGLY, and refusing any
+   * of them blocks an edit that has nothing to do with the CRM.
    *
+   *   - a mapping whose QUESTION is gone. Deleting, renaming or retyping an
+   *     intake question orphans its mapping, and that is an ordinary edit — the
+   *     one thing it must not do is make the event type unsaveable. The editor
+   *     flags the row and drops it from the payload; here it is simply skipped.
    *   - a property the portal does not have. That is the broken-mapping state
    *     the editor already draws in red, and refusing it would make an
-   *     unrelated edit to the event type unsaveable because somebody deleted a
-   *     property in the CRM.
+   *     unrelated edit unsaveable because somebody deleted a property in the CRM.
    *   - no reachable catalog at all (CRM off, nothing connected, portal down).
    *     Blocking an event-type save because the CRM is briefly unreachable is a
    *     far worse trade than accepting a mapping the picker already filtered.
@@ -132,6 +137,10 @@ export class AdminCrudController {
     const byName = new Map(catalog.properties.map((p) => [p.name.toLowerCase(), p]));
 
     for (const row of rows) {
+      // An ORPHANED source is not an incompatible one. `isCompatible` cannot
+      // tell them apart — it returns false for both — so the distinction has
+      // to be drawn here, before the refusal.
+      if (!sourceExists(row.source, fields)) continue;
       for (const target of row.properties) {
         const property = byName.get(target.toLowerCase());
         if (!property) continue;

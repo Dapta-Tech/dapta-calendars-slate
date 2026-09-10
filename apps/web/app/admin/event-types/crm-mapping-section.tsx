@@ -6,6 +6,8 @@ import {
   candidateProperties,
   claimedProperties,
   enumerationDiff,
+  isCompatible,
+  sourceExists,
   suggestMappings,
   type MappableField,
 } from '@slate/crm/mapping';
@@ -38,9 +40,10 @@ import type { EventTypeMessages } from './event-type-form';
  *   1. No CRM adapter on this deployment → the section does not render. A bare
  *      fork sees nothing, exactly as it did before this feature existed.
  *   2. Adapter, but this account has connected nothing → an empty state that
- *      links to Integrations. The mappings a host already saved are still
- *      shown, because they SURVIVE a disconnect (#64) — reconnecting the same
- *      portal resumes without reconfiguration.
+ *      links to Integrations. The table is NOT drawn: with no property list
+ *      there is nothing to pick from. Saved mappings are untouched by this —
+ *      they survive a disconnect (#64), so reconnecting the same portal brings
+ *      them straight back — they are simply not editable meanwhile.
  *   3. Connected → the table.
  *
  * Everything the picker filters on comes from `@slate/crm/mapping`, the same
@@ -288,6 +291,11 @@ function MappingRow({
   const source = row.source;
   const field =
     source.kind === 'question' ? fields.find((f) => f.name === source.name) : undefined;
+  // The question this maps from was deleted, renamed, or had its label cleared.
+  // Flagged rather than silently removed, so a rename in progress does not make
+  // the host's configuration vanish under them — and dropped from the payload,
+  // so the save is never refused because of it.
+  const orphaned = !sourceExists(source, fields);
 
   // Compatible AND unclaimed, computed from the LIVE question list — changing a
   // question's type re-filters this picker on the next render.
@@ -351,6 +359,12 @@ function MappingRow({
                 <span className="text-xs text-destructive" role="alert">
                   {m.missingProperty}
                 </span>
+              ) : target !== '' && !orphaned && !isCompatible(source, byName.get(target.toLowerCase())!, fields) ? (
+                // Still in the portal, but its type no longer fits — a save
+                // WILL be refused, so say so here rather than at the 400.
+                <span className="text-xs text-destructive" role="alert">
+                  {m.incompatibleProperty}
+                </span>
               ) : null}
             </div>
           ))}
@@ -373,7 +387,13 @@ function MappingRow({
           ×
         </button>
       </div>
-      <EnumerationDiffLine field={field} targets={row.properties} byName={byName} m={m} />
+      {orphaned ? (
+        <span className="text-xs text-destructive" role="alert">
+          {m.missingQuestion}
+        </span>
+      ) : (
+        <EnumerationDiffLine field={field} targets={row.properties} byName={byName} m={m} />
+      )}
     </div>
   );
 }

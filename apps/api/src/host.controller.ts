@@ -431,7 +431,13 @@ export class HostController {
         message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
       });
     }
-    return this.admin.connectIntegration(p, parsed.data);
+    const status = await this.admin.connectIntegration(p, parsed.data);
+    // Drop the cached property list, exactly as a disconnect does. A reconnect
+    // may point at a DIFFERENT portal, and until this the picker — and, worse,
+    // DELIVERY — would keep coercing against the previous portal's schema for
+    // the rest of the five-minute window.
+    this.crmProperties?.invalidate(p.accountId);
+    return status;
   }
 
   /** Disconnect: the credential is scrubbed, nothing is deleted in the CRM. */

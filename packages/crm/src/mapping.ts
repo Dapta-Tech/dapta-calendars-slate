@@ -79,6 +79,23 @@ export function targetShapeForSource(
   return questionTargetShape(field);
 }
 
+/**
+ * True when the mapping's source still exists on this event type.
+ *
+ * ORPHANED is not the same as INCOMPATIBLE, and conflating them is a real bug:
+ * a host who deletes or renames a mapped question would otherwise be unable to
+ * save the event type at all, with an error about property types that names
+ * nothing they can act on. An orphan is dropped; an incompatible pair is
+ * refused.
+ */
+export function sourceExists(
+  source: CrmMappingSource,
+  fields: readonly MappableField[],
+): boolean {
+  if (source.kind !== 'question') return true;
+  return fields.some((f) => f.name === source.name);
+}
+
 function questionTargetShape(field: MappableField): TargetShape {
   switch (field.type) {
     case 'text':

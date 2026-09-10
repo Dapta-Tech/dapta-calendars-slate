@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
   createBooking,
@@ -14,6 +14,7 @@ import {
 } from '@slate/db';
 import {
   CrmPropertyError,
+  CrmRequestError,
   DisabledCrmProvider,
   type CrmContactInput,
   type CrmContactResult,
@@ -116,6 +117,10 @@ class FakeCrm implements CrmProvider {
   /** Property names the "portal" will reject once each, in order. */
   rejectProperties: string[] = [];
   listFails: Error | null = null;
+  /** Fail EVERY contact write with this until the bag is empty. */
+  failContactWith: Error | null = null;
+  /** Held open to keep a property fetch in flight while a test invalidates. */
+  listGate: Promise<void> | null = null;
 
   verifyCredential(): Promise<void> {
     return Promise.resolve();
@@ -127,12 +132,18 @@ class FakeCrm implements CrmProvider {
       this.rejectProperties = this.rejectProperties.filter((p) => p !== bad);
       return Promise.reject(new CrmPropertyError(`Property "${bad}" does not exist`, bad));
     }
+    // A portal-side rule that rejects the VALUE, not the property name. Only
+    // an empty bag gets through, which is what the shedding must reach.
+    if (this.failContactWith && Object.keys(input.properties ?? {}).length > 0) {
+      return Promise.reject(this.failContactWith);
+    }
     return Promise.resolve({ contactId: 'contact-1', created: false });
   }
-  listContactProperties(): Promise<CrmProperty[]> {
+  async listContactProperties(): Promise<CrmProperty[]> {
     this.propertyCalls++;
-    if (this.listFails) return Promise.reject(this.listFails);
-    return Promise.resolve(PORTAL);
+    if (this.listGate) await this.listGate;
+    if (this.listFails) throw this.listFails;
+    return PORTAL;
   }
   createMeeting(input: CrmMeetingInput): Promise<{ meetingId: string }> {
     this.meetings.push(input);
@@ -383,12 +394,24 @@ describe('CRM property mapping (H2, #108)', () => {
     });
 
     it('serves the cache, and Refresh goes back to the portal', async () => {
-      await catalog.catalog(accountId);
-      await catalog.catalog(accountId);
-      expect(crm.propertyCalls).toBe(1);
+      // Only Date is faked; setImmediate and promise scheduling stay real.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        await catalog.catalog(accountId);
+        await catalog.catalog(accountId);
+        expect(crm.propertyCalls).toBe(1);
 
-      await catalog.catalog(accountId, { refresh: true });
-      expect(crm.propertyCalls).toBe(2);
+        // Inside the refresh floor a forced refresh is served from the cache —
+        // that is what stops the button being an amplifier.
+        await catalog.catalog(accountId, { refresh: true });
+        expect(crm.propertyCalls).toBe(1);
+
+        vi.setSystemTime(Date.now() + 20_000);
+        await catalog.catalog(accountId, { refresh: true });
+        expect(crm.propertyCalls).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('collapses concurrent reads into ONE upstream call', async () => {
@@ -420,9 +443,12 @@ describe('CRM property mapping (H2, #108)', () => {
     });
 
     it('keeps serving the last good list when the portal goes down', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
       await catalog.catalog(accountId);
       crm.listFails = new Error('upstream 503');
+      vi.setSystemTime(Date.now() + 20_000); // past the refresh floor
       const out = await catalog.catalog(accountId, { refresh: true });
+      vi.useRealTimers();
 
       // A stale list beats no list: the host can still see their mappings, and
       // the reason tells the editor to say so.
@@ -563,5 +589,262 @@ describe('save-time mapping compatibility (H2, #108)', () => {
       },
     });
     expect(ok).toBeTruthy();
+  });
+});
+
+/**
+ * The findings from the pre-PR review, pinned so they cannot come back.
+ */
+describe('H2 review fixes (#108)', () => {
+  let db: Db;
+  let accountId: string;
+  let otherAccountId: string;
+  let memberId: string;
+  let crm: FakeCrm;
+  let catalog: CrmPropertyCatalogService;
+  let crud: AdminCrudController;
+  let auth: FakeAuth;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = 'acme'`))!.id;
+    memberId = (await db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE handle = 'alex-rivera'`,
+    ))!.id;
+    otherAccountId = 'account-two';
+    await db.run(
+      sql`INSERT INTO account (id, code, name, created_at)
+          VALUES (${otherAccountId}, 'other', 'Other Co', ${Date.now()})`,
+    );
+    crm = new FakeCrm();
+    catalog = new CrmPropertyCatalogService(crm, db, ENV);
+    auth = new FakeAuth();
+    auth.current = { memberId, accountId, role: 'owner' } as HostPrincipal;
+    crud = new AdminCrudController(db, auth as unknown as AuthService, undefined, catalog);
+    await upsertAccountIntegration(db, { accountId, provider: 'hubspot', token: TOKEN, key: KEY });
+  });
+
+  // --- B1: an orphaned mapping must never block a save --------------------
+
+  describe('a mapping whose question is gone', () => {
+    const mapped = {
+      hubspot: [{ source: { kind: 'question', name: 'budget' }, properties: ['annualrevenue'] }],
+    };
+
+    it('does not refuse the save when the question was DELETED', async () => {
+      const created = (await crud.createEventType({} as never, {
+        slug: 'orphan',
+        title: 'Orphan',
+        lengthMinutes: 30,
+        bookingFields: [{ name: 'budget', label: 'Budget', type: 'number' }],
+        crmPropertyMappings: mapped,
+      })) as { id: string };
+
+      // The host removes the question. The mapping is now orphaned, and this
+      // save carries an unrelated edit (the title) that must still land.
+      const out = await crud.updateEventType({} as never, created.id, {
+        title: 'Renamed',
+        bookingFields: [],
+        crmPropertyMappings: mapped,
+      });
+      expect((out as { title: string }).title).toBe('Renamed');
+    });
+
+    it('does not refuse the save when the question was RENAMED', async () => {
+      const created = (await crud.createEventType({} as never, {
+        slug: 'renamed',
+        title: 'Renamed source',
+        lengthMinutes: 30,
+        bookingFields: [{ name: 'budget', label: 'Budget', type: 'number' }],
+        crmPropertyMappings: mapped,
+      })) as { id: string };
+
+      const out = await crud.updateEventType({} as never, created.id, {
+        bookingFields: [{ name: 'presupuesto', label: 'Budget', type: 'number' }],
+        crmPropertyMappings: mapped,
+      });
+      expect(out).toBeTruthy();
+    });
+
+    it('does not refuse the save when the question was RETYPED', async () => {
+      const created = (await crud.createEventType({} as never, {
+        slug: 'retyped',
+        title: 'Retyped',
+        lengthMinutes: 30,
+        bookingFields: [{ name: 'role', label: 'Role', type: 'text' }],
+        crmPropertyMappings: {
+          hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['jobtitle'] }],
+        },
+      })) as { id: string };
+
+      // text -> number makes `jobtitle` (a string property) incompatible. The
+      // pair is still refused — that IS the guard working — but the message
+      // must be the compatibility one, not a silent orphan.
+      await expect(
+        crud.updateEventType({} as never, created.id, {
+          bookingFields: [{ name: 'role', label: 'Role', type: 'number' }],
+          crmPropertyMappings: {
+            hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['jobtitle'] }],
+          },
+        }),
+      ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+    });
+
+    it('still delivers nothing for the orphan, without failing the booking', async () => {
+      const effects = new CrmEffects(crm, db, ENV, catalog);
+      const created = await createEventType(db, accountId, memberId, {
+        slug: 'orphan-delivery',
+        title: 'Orphan delivery',
+        lengthMinutes: 30,
+        // The mapping names `budget`; the event has no such question.
+        bookingFields: [{ name: 'role', label: 'Role', type: 'text' }],
+        crmPropertyMappings: {
+          hubspot: [
+            { source: { kind: 'question', name: 'budget' }, properties: ['annualrevenue'] },
+            { source: { kind: 'question', name: 'role' }, properties: ['jobtitle'] },
+          ],
+        },
+      });
+      expect(created.ok).toBe(true);
+
+      const avail = await getAvailability(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'orphan-delivery',
+        fromMs: Date.now(),
+        toMs: Date.now() + 10 * 86_400_000,
+      });
+      const booked = await createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'orphan-delivery',
+        startMs: new Date(avail!.slots[0]!.startUtc).getTime(),
+        attendee: { name: 'Ada', email: 'ada@example.com', timeZone: 'America/New_York' },
+        answers: { role: 'CTO' },
+      });
+      expect(booked.ok).toBe(true);
+
+      effects.onBookingAccepted((booked as { booking: { uid: string } }).booking.uid);
+      await new Promise((r) => setImmediate(r));
+      await new OutboxWorker(
+        db,
+        ENV,
+        new CalendarEffects(new DisabledCalendar() as never, db),
+        new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
+        new DaptaSyncEffects(ENV),
+        effects,
+      ).drainOnce(Date.now());
+
+      expect(crm.contacts.at(-1)!.properties).toEqual({ jobtitle: 'CTO' });
+      expect(crm.meetings).toHaveLength(1);
+    });
+  });
+
+  // --- S2: any 400 on the contact write sheds, rather than losing the record
+
+  it('sheds mapped properties on a NON-property 400 and still lands the booking', async () => {
+    crm.failContactWith = new CrmRequestError('hubspot POST → 400 (VALIDATION_ERROR)', 400, 'VALIDATION_ERROR');
+    const effects = new CrmEffects(crm, db, ENV, catalog);
+    const created = await createEventType(db, accountId, memberId, {
+      slug: 'validation-400',
+      title: 'Validation 400',
+      lengthMinutes: 30,
+      bookingFields: [{ name: 'role', label: 'Role', type: 'text' }],
+      crmPropertyMappings: {
+        hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['jobtitle'] }],
+      },
+    });
+    expect(created.ok).toBe(true);
+
+    const avail = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'validation-400',
+      fromMs: Date.now(),
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const booked = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'validation-400',
+      startMs: new Date(avail!.slots[0]!.startUtc).getTime(),
+      attendee: { name: 'Ada', email: 'ada@example.com', timeZone: 'America/New_York' },
+      answers: { role: 'a'.repeat(500) },
+    });
+    expect(booked.ok).toBe(true);
+
+    effects.onBookingAccepted((booked as { booking: { uid: string } }).booking.uid);
+    await new Promise((r) => setImmediate(r));
+    await new OutboxWorker(
+      db,
+      ENV,
+      new CalendarEffects(new DisabledCalendar() as never, db),
+      new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
+      new DaptaSyncEffects(ENV),
+      effects,
+    ).drainOnce(Date.now());
+
+    // Before this fix the whole write-out failed and the booking got NO CRM
+    // record at all, over one mapped answer a portal rule rejected.
+    expect(crm.contacts.at(-1)!.properties).toEqual({});
+    expect(crm.meetings).toHaveLength(1);
+  });
+
+  it('still RETRIES a 429 rather than shedding — that one a retry can fix', async () => {
+    crm.failContactWith = new CrmRequestError('hubspot POST → 429', 429, null);
+    const effects = new CrmEffects(crm, db, ENV, catalog);
+    await expect(
+      // Reaching the port directly: a 429 must propagate, not be swallowed.
+      effects['resolveContactTolerantOfUnknownProperties'](
+        { uid: 'u', invitee: { email: 'a@b.co', firstName: null, lastName: null } } as never,
+        't',
+        { jobtitle: 'CTO' },
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+  });
+
+  // --- S3 / S4 / cross-account -------------------------------------------
+
+  it('never serves one account the other account’s properties', async () => {
+    await upsertAccountIntegration(db, {
+      accountId: otherAccountId,
+      provider: 'hubspot',
+      token: 'pat-live-other-0000-9999',
+      key: KEY,
+    });
+    const mine = await catalog.catalog(accountId);
+    const theirs = await catalog.catalog(otherAccountId);
+    expect(mine.properties.length).toBeGreaterThan(0);
+    // Two accounts, two cache entries, two fetches — never one list shared.
+    expect(crm.propertyCalls).toBe(2);
+    expect(theirs.properties).not.toBe(mine.properties);
+  });
+
+  it('throttles a forced refresh so Refresh cannot amplify onto the vendor', async () => {
+    await catalog.catalog(accountId);
+    expect(crm.propertyCalls).toBe(1);
+    for (let i = 0; i < 10; i++) await catalog.catalog(accountId, { refresh: true });
+    // The floor holds every one of them off; the cached list is served instead.
+    expect(crm.propertyCalls).toBe(1);
+  });
+
+  it('drops a fetch that was in flight when the account was invalidated', async () => {
+    let release!: () => void;
+    crm.listGate = new Promise<void>((r) => (release = r));
+    const inFlight = catalog.catalog(accountId);
+    // Wait until the provider call is genuinely OPEN. Invalidating before it
+    // starts would bump the epoch the fetch then captures, which tests nothing.
+    while (crm.propertyCalls === 0) await new Promise((r) => setImmediate(r));
+    // A reconnect to a DIFFERENT portal lands mid-fetch.
+    catalog.invalidate(accountId);
+    release();
+    await inFlight;
+    // The stale result must not have been cached, so the next read goes back
+    // to the provider rather than serving the previous portal's schema.
+    crm.listGate = null;
+    await catalog.catalog(accountId);
+    expect(crm.propertyCalls).toBe(2);
   });
 });

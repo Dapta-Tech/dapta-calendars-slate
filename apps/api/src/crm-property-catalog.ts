@@ -34,9 +34,27 @@ import { CRM, DB, ENV } from './tokens';
  */
 const TTL_MS = 5 * 60_000;
 
+/**
+ * The floor between two forced refreshes of the same account.
+ *
+ * `?refresh=1` deliberately bypasses the TTL, and host routes are auth-only —
+ * no rate-limit guard — so any plain member could otherwise drive the whole
+ * workspace's vendor quota by holding down the Refresh button. Short enough to
+ * be invisible to a host who just created a property in their CRM, long enough
+ * that the button cannot be turned into an amplifier.
+ */
+const REFRESH_FLOOR_MS = 15_000;
+
 interface CacheEntry {
   properties: CrmPropertyView[];
   fetchedAt: number;
+  /**
+   * The epoch this entry was fetched under. A fetch already in flight when the
+   * account is invalidated must not write its result back afterwards — that
+   * would resurrect the previous portal's schema seconds after a disconnect or
+   * a reconnect to a different portal.
+   */
+  epoch: number;
 }
 
 @Injectable()
@@ -49,6 +67,10 @@ export class CrmPropertyCatalogService {
    * same account, must not fan out onto the vendor's rate limit.
    */
   private readonly inFlight = new Map<string, Promise<CrmPropertyView[]>>();
+  /** Bumped on every invalidation; see `CacheEntry.epoch`. */
+  private readonly epochs = new Map<string, number>();
+  /** When each account last went to the provider, for the refresh floor. */
+  private readonly lastFetchAttempt = new Map<string, number>();
 
   constructor(
     @Inject(CRM) private readonly crm: CrmProvider,
@@ -77,7 +99,12 @@ export class CrmPropertyCatalogService {
     }
 
     const cached = this.cache.get(accountId);
-    if (!opts.refresh && cached && Date.now() - cached.fetchedAt < TTL_MS) {
+    // A forced refresh still respects the floor: within it, the cached list is
+    // served exactly as a non-refresh read would be.
+    const throttled =
+      opts.refresh &&
+      Date.now() - (this.lastFetchAttempt.get(accountId) ?? 0) < REFRESH_FLOOR_MS;
+    if ((!opts.refresh || throttled) && cached && Date.now() - cached.fetchedAt < TTL_MS) {
       return {
         provider: this.crm.name,
         connected: true,
@@ -157,19 +184,39 @@ export class CrmPropertyCatalogService {
     }
   }
 
-  /** Drop an account's cached list — used when a credential is disconnected. */
+  /**
+   * Drop an account's cached list.
+   *
+   * Called when a credential is DISCONNECTED and when one is CONNECTED: a
+   * reconnect may point at a different portal, and serving the previous one's
+   * property names for another five minutes would draw a picker full of things
+   * that are not there — and, worse, have DELIVERY coerce against the wrong
+   * schema.
+   *
+   * Bumping the epoch is what makes this safe against a fetch already in
+   * flight: that fetch will find its epoch stale and decline to write its
+   * result back.
+   */
   invalidate(accountId: string): void {
     this.cache.delete(accountId);
+    this.epochs.set(accountId, (this.epochs.get(accountId) ?? 0) + 1);
   }
 
   /** One fetch per account at a time, cached on success. */
   private fetch(accountId: string, token: string): Promise<CrmPropertyView[]> {
     const existing = this.inFlight.get(accountId);
     if (existing) return existing;
+    const epoch = this.epochs.get(accountId) ?? 0;
+    this.lastFetchAttempt.set(accountId, Date.now());
     const run = (async () => {
       const raw = await this.crm.listContactProperties({ token });
       const properties = offerable(raw);
-      this.cache.set(accountId, { properties, fetchedAt: Date.now() });
+      // Only cache if nothing invalidated this account while we were away. A
+      // disconnect or a reconnect during the round trip means this result
+      // describes a portal the account may no longer be pointed at.
+      if ((this.epochs.get(accountId) ?? 0) === epoch) {
+        this.cache.set(accountId, { properties, fetchedAt: Date.now(), epoch });
+      }
       return properties;
     })().finally(() => this.inFlight.delete(accountId));
     this.inFlight.set(accountId, run);

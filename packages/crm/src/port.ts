@@ -173,6 +173,30 @@ export class CrmPropertyError extends Error {
 }
 
 /**
+ * Any other non-2xx the provider returned, carrying the status so a caller can
+ * decide what is retryable.
+ *
+ * The status is the whole point. A 429 or 5xx is transient and takes the
+ * outbox's backoff; a 400 is the provider telling us the REQUEST is wrong, and
+ * no amount of backoff will change that — so a 400 on a write whose only
+ * optional part is the mapped properties should shed them rather than burn the
+ * row's retries and leave the booking with no CRM record at all.
+ *
+ * Deliberately carries status and category only. An error body can echo the
+ * invitee details we just sent, and `last_error` is a durable column.
+ */
+export class CrmRequestError extends Error {
+  override readonly name = 'CrmRequestError';
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly category: string | null = null,
+  ) {
+    super(message);
+  }
+}
+
+/**
  * The OSS default. `enabled === false`, so `CrmEffects` enqueues nothing and a
  * bare clone behaves exactly as it did before this package existed. Every
  * method throws rather than silently succeeding: reaching one means something

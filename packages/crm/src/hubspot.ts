@@ -27,6 +27,7 @@
 import {
   CrmAuthError,
   CrmPropertyError,
+  CrmRequestError,
   type CrmContactInput,
   type CrmContactResult,
   type CrmMeetingInput,
@@ -319,12 +320,16 @@ export class HubSpotCrmProvider implements CrmProvider {
       );
     }
 
-    // Everything else (429, 5xx, transport) takes the outbox's backoff. The
-    // vendor does not document Retry-After on these, so backoff is defensive
-    // regardless. Status and category only: an error body can echo the invitee
-    // details we just sent, and `last_error` is a durable column.
-    throw new Error(
+    // Everything else (400s the property branch did not claim, 429, 5xx) is
+    // raised WITH ITS STATUS, so the caller can tell a transient failure from a
+    // request the provider will never accept. 429 and 5xx take the outbox's
+    // backoff; a 400 is a caller decision. Status and category only: an error
+    // body can echo the invitee details we just sent, and `last_error` is a
+    // durable column.
+    throw new CrmRequestError(
       `hubspot ${method} ${path} → ${res.status}${parsed?.category ? ` (${parsed.category})` : ''}`,
+      res.status,
+      parsed?.category ?? null,
     );
   }
 }

@@ -421,6 +421,10 @@ export interface BookingMessages {
         optionsNone: string;
         /** A stored target the portal no longer has. */
         missingProperty: string;
+        /** A stored target that exists but no longer fits this answer's type. */
+        incompatibleProperty: string;
+        /** The mapped QUESTION was deleted or renamed; the row is dropped on save. */
+        missingQuestion: string;
         /** Actions. */
         refresh: string;
         refreshing: string;
@@ -1371,6 +1375,10 @@ export const en: BookingMessages = {
         optionsNone:
           'None of this question’s options match this property, so nothing will be sent. Rename them to match, or pick another property.',
         missingProperty: 'This property is no longer in your portal.',
+        incompatibleProperty:
+          'This property no longer fits this answer’s type, so the save will be refused. Pick another one.',
+        missingQuestion:
+          'The question this maps from no longer exists. This row is dropped when you save.',
         refresh: 'Refresh properties',
         refreshing: 'Refreshing…',
         suggest: 'Suggest mappings',
@@ -2307,6 +2315,10 @@ export const es: BookingMessages = {
         optionsNone:
           'Ninguna opción de esta pregunta coincide con la propiedad, así que no se enviará nada. Renómbralas para que coincidan o elige otra propiedad.',
         missingProperty: 'Esta propiedad ya no está en tu portal.',
+        incompatibleProperty:
+          'Esta propiedad ya no encaja con el tipo de esta respuesta, así que el guardado se rechazará. Elige otra.',
+        missingQuestion:
+          'La pregunta de la que proviene ya no existe. Esta fila se descarta al guardar.',
         refresh: 'Actualizar propiedades',
         refreshing: 'Actualizando…',
         suggest: 'Sugerir asignaciones',

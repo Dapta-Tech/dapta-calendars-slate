@@ -17,6 +17,7 @@ import {
   type EventReminder,
   type LocationKind,
 } from '@slate/types';
+import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
 import { connectionDisplayLabel } from '@/lib/connection-label';
@@ -797,7 +798,7 @@ export function EventTypeForm({
                 // Other providers' mappings are preserved verbatim — this
                 // editor only ever owns the wired one's list.
                 ...(initial?.crmPropertyMappings ?? {}),
-                [crmProvider]: crmMappings.filter((row) => row.properties.length > 0),
+                [crmProvider]: deliverableMappings(crmMappings, fields),
               },
             }
           : {}),
@@ -1158,6 +1159,30 @@ export function EventTypeForm({
 
 const inputCls =
   'w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * The mapping rows a save may actually carry.
+ *
+ * Two kinds of row are dropped rather than sent, because sending either one
+ * makes the WHOLE event type unsaveable:
+ *
+ *   - a row with an unchosen target. "+ Add another property" appends an empty
+ *     slot, and the contract requires every target to be a non-empty string —
+ *     so an untouched slot would 400 the save, taking the title, the questions
+ *     and the reminders down with it.
+ *   - a row whose QUESTION no longer exists. Deleting, renaming or retyping an
+ *     intake question orphans its mapping; the row is flagged in the section so
+ *     the host sees it going, and it must not block an ordinary edit.
+ */
+function deliverableMappings(
+  rows: CrmPropertyMapping[],
+  fields: IntakeField[],
+): CrmPropertyMapping[] {
+  return rows
+    .filter((row) => sourceExists(row.source, fields))
+    .map((row) => ({ ...row, properties: row.properties.filter((p) => p.trim() !== '') }))
+    .filter((row) => row.properties.length > 0);
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
