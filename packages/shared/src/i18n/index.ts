@@ -1066,6 +1066,32 @@ export interface BookingMessages {
     /** Prefixed onto the meeting title when the booking is cancelled. */
     cancelledTitlePrefix: string;
   };
+  /**
+   * The inline embed (E). Every string here is read by a HOST inside the admin
+   * — the embedded booking page itself carries no copy of its own, because it
+   * is the same page under a different padding.
+   */
+  embed: {
+    /** The icon button beside open-public and copy-link on an event-type row. */
+    action: string;
+    /** Dialog heading. */
+    title: string;
+    /** One line saying what the snippet is and where it goes. */
+    intro: string;
+    /** Label over the read-only snippet box. */
+    snippetLabel: string;
+    copy: string;
+    copied: string;
+    close: string;
+    /** The accent control's label, and its two states. */
+    accentLabel: string;
+    accentInherit: string;
+    accentCustom: string;
+    /** Says the frame resizes itself, so nobody hunts for a height setting. */
+    resizeNote: string;
+    /** Names the URL params a host can hand-add for the other axes. */
+    advancedNote: string;
+  };
 }
 
 export const en: BookingMessages = {
@@ -2018,6 +2044,20 @@ export const en: BookingMessages = {
     yes: 'Yes',
     no: 'No',
     cancelledTitlePrefix: '[Canceled] ',
+  },
+  embed: {
+    action: 'Embed on your site',
+    title: 'Embed on your site',
+    intro: 'Paste this where the booking page should appear. It sizes itself to fit, and the booking page still loads even if this script is blocked.',
+    snippetLabel: 'Embed code',
+    copy: 'Copy code',
+    copied: 'Copied',
+    close: 'Done',
+    accentLabel: 'Accent color',
+    accentInherit: 'Use my booking page style',
+    accentCustom: 'Pick a color for this embed',
+    resizeNote: 'The frame grows and shrinks with the page, so you do not need to set a height.',
+    advancedNote: 'To change more of the look, add any of these to the embed address: template, card_style, corners, buttons, density, font, slot_layout, day_group, slot_select. A value we do not recognize is ignored.',
   },
 };
 
@@ -2974,6 +3014,20 @@ export const es: BookingMessages = {
     yes: 'Sí',
     no: 'No',
     cancelledTitlePrefix: '[Cancelada] ',
+  },
+  embed: {
+    action: 'Insertar en tu sitio',
+    title: 'Insertar en tu sitio',
+    intro: 'Pega esto donde quieras que aparezca la página de reservas. Se ajusta de alto solo, y la página de reservas se carga igual aunque este script quede bloqueado.',
+    snippetLabel: 'Código para insertar',
+    copy: 'Copiar código',
+    copied: 'Copiado',
+    close: 'Listo',
+    accentLabel: 'Color de acento',
+    accentInherit: 'Usar el estilo de mi página de reservas',
+    accentCustom: 'Elegir un color para esta inserción',
+    resizeNote: 'El marco crece y se reduce con la página, así que no necesitas fijar una altura.',
+    advancedNote: 'Para cambiar más el aspecto, agrega cualquiera de estos a la dirección insertada: template, card_style, corners, buttons, density, font, slot_layout, day_group, slot_select. Un valor que no reconozcamos se ignora.',
   },
 };
 

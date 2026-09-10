@@ -22,7 +22,8 @@ export default async function EventTypesPage() {
       teams.map(async (team) => ({ team, eventTypes: await adminApi.teamEventTypes(team.id) })),
     )
   ).filter((g) => g.eventTypes.length > 0);
-  const admin = getMessages(await getLocale()).admin;
+  const msgs = getMessages(await getLocale());
+  const admin = msgs.admin;
   const m = admin.eventTypes;
 
   return (
@@ -65,7 +66,9 @@ export default async function EventTypesPage() {
                 id={et.id}
                 hidden={et.hidden}
                 publicPath={me.handle ? `/${me.accountCode}/${me.handle}/${et.slug}` : null}
+                title={et.title}
                 messages={m}
+                embedMessages={msgs.embed}
               />
               <Link
                 href={`/admin/event-types/${et.id}`}
@@ -128,7 +131,9 @@ export default async function EventTypesPage() {
                           publicPath={
                             team.slug ? `/${me.accountCode}/team/${team.slug}/${et.slug}` : null
                           }
+                          title={et.title}
                           messages={m}
+                          embedMessages={msgs.embed}
                         />
                         <Link
                           href={`/admin/event-types/${et.id}`}
