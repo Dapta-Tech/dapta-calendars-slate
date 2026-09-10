@@ -592,6 +592,160 @@ export const memberViewSchema = z.object({
 });
 export type MemberViewDto = z.infer<typeof memberViewSchema>;
 
+// --- CRM property mapping (H2 / #108) -------------------------------------
+//
+// Per event type, a host wires intake questions (plus a few attendee details
+// and a closed catalog of event metadata) onto CONTACT properties that already
+// exist in the connected portal. Nothing here can create a property: the
+// picker offers what the portal has, which is what keeps the free tier's ~10
+// custom-property cap out of this feature (#64).
+//
+// `email` / `firstname` / `lastname` are NOT sources and NOT targets. They are
+// identity, owned by H1a, and ADR 0005 is the whole argument for why a mapped
+// answer overwrites while identity never does. The refusal lives in the
+// CONTRACT rather than only in the editor, so no UI mistake can produce a
+// mapping that renames a contact.
+
+/** Attendee details a booking always collects, beyond identity. */
+export const CRM_ATTENDEE_SOURCE_FIELDS = ['phone', 'notes', 'timeZone', 'language'] as const;
+export type CrmAttendeeSourceField = (typeof CRM_ATTENDEE_SOURCE_FIELDS)[number];
+
+/**
+ * The CLOSED event-metadata catalog. Deliberately small, and deliberately
+ * without the event-type slug or the host time zone (noise in a CRM) or the
+ * conference URL (it expires when the call ends).
+ *
+ * `manageUrl` is absent on purpose and is the one narrowing of #64's list: the
+ * manage token is stored HASHED (`@slate/engine`'s `manage-token`), so the raw
+ * token exists only in the create response and a link rebuilt at delivery time
+ * would be dead. Carrying the raw token into the outbox to fix that would put a
+ * live booking-management credential in a durable table.
+ */
+export const CRM_EVENT_SOURCE_FIELDS = [
+  'eventTypeTitle',
+  'startUtc',
+  'lengthMinutes',
+  'hostName',
+  'hostEmail',
+] as const;
+export type CrmEventSourceField = (typeof CRM_EVENT_SOURCE_FIELDS)[number];
+
+/** Where a mapped value comes from. `guests` is not a source — guests are not contacts. */
+export const crmMappingSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('question'), name: z.string().min(1).max(64) }),
+  z.object({ kind: z.literal('attendee'), field: z.enum(CRM_ATTENDEE_SOURCE_FIELDS) }),
+  z.object({ kind: z.literal('event'), field: z.enum(CRM_EVENT_SOURCE_FIELDS) }),
+]);
+export type CrmMappingSource = z.infer<typeof crmMappingSourceSchema>;
+
+/** The contact properties a booking must never rewrite (ADR 0005). */
+export const CRM_IDENTITY_PROPERTIES = ['email', 'firstname', 'lastname'] as const;
+
+/** At most this many mappings on one event type, and targets per mapping. */
+export const MAX_CRM_MAPPINGS_PER_EVENT = 50;
+export const MAX_CRM_TARGETS_PER_MAPPING = 10;
+
+export const crmPropertyMappingSchema = z.object({
+  source: crmMappingSourceSchema,
+  /** One source may feed SEVERAL properties (phone → `phone` + `mobilephone`). */
+  properties: z
+    .array(z.string().trim().min(1).max(200))
+    .min(1)
+    .max(MAX_CRM_TARGETS_PER_MAPPING),
+});
+export type CrmPropertyMapping = z.infer<typeof crmPropertyMappingSchema>;
+
+/** A stable key for a source, for de-duplication and as a React key. */
+export function crmSourceKey(s: CrmMappingSource): string {
+  return s.kind === 'question' ? `question:${s.name}` : `${s.kind}:${s.field}`;
+}
+
+/**
+ * Provider-keyed, so a second CRM costs nothing later (#64).
+ *
+ * Two rules are enforced HERE rather than in the editor, because the editor is
+ * not the only thing that can POST an event type:
+ *
+ *  1. A destination property is claimed by AT MOST ONE source. Two sources
+ *     writing the same property has no defined winner, so it is refused rather
+ *     than silently resolved by array order.
+ *  2. An identity property is never a target.
+ */
+export const crmPropertyMappingsSchema = z
+  .record(z.string().min(1).max(40), z.array(crmPropertyMappingSchema).max(MAX_CRM_MAPPINGS_PER_EVENT))
+  .superRefine((byProvider, ctx) => {
+    for (const [provider, mappings] of Object.entries(byProvider)) {
+      const claimed = new Set<string>();
+      const sources = new Set<string>();
+      mappings.forEach((mapping, i) => {
+        const key = crmSourceKey(mapping.source);
+        if (sources.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [provider, i, 'source'],
+            message: `Duplicate source: ${key} is mapped more than once.`,
+          });
+        }
+        sources.add(key);
+        mapping.properties.forEach((property, j) => {
+          const name = property.toLowerCase();
+          if ((CRM_IDENTITY_PROPERTIES as readonly string[]).includes(name)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [provider, i, 'properties', j],
+              message: `${property} is an identity property and can never be a mapping target.`,
+            });
+          }
+          if (claimed.has(name)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: [provider, i, 'properties', j],
+              message: `${property} is already mapped from another source.`,
+            });
+          }
+          claimed.add(name);
+        });
+      });
+    }
+  });
+export type CrmPropertyMappings = z.infer<typeof crmPropertyMappingsSchema>;
+
+/**
+ * One contact property as the PICKER sees it — the subset of the provider's
+ * schema a browser needs to choose and to diff enumeration options. The flags
+ * the filter reads (`archived`, `calculated`, `hidden`, read-only) are applied
+ * server-side and never reach here: an unusable property is absent, not
+ * present-and-disabled.
+ */
+export const crmPropertyViewSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  /** `string` | `number` | `bool` | `date` | `datetime` | `enumeration`. */
+  type: z.string(),
+  /** `text` | `textarea` | `phonenumber` | `select` | `radio` | `checkbox` | … */
+  fieldType: z.string(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })).default([]),
+});
+export type CrmPropertyView = z.infer<typeof crmPropertyViewSchema>;
+
+/**
+ * `GET /v1/integrations/crm/contact-properties` — the picker's source list.
+ *
+ * Degrades to an empty list plus a REASON rather than erroring, mirroring
+ * `IntegrationCapabilities`: the safe direction is to withhold the picker, not
+ * to offer one that cannot work.
+ */
+export const crmPropertyCatalogSchema = z.object({
+  provider: z.string().nullable(),
+  /** Whether this ACCOUNT has a usable credential (vs. the deployment's ability). */
+  connected: z.boolean(),
+  properties: z.array(crmPropertyViewSchema),
+  /** When the cached list was fetched, for the Refresh affordance. */
+  fetchedAt: z.number().nullable(),
+  reason: z.enum(['disabled', 'not_connected', 'unavailable']).nullable(),
+});
+export type CrmPropertyCatalog = z.infer<typeof crmPropertyCatalogSchema>;
+
 // --- Event-type CRUD ------------------------------------------------------
 
 export const eventTypeInputSchema = z.object({
@@ -648,6 +802,10 @@ export const eventTypeInputSchema = z.object({
   /** PHASE 2 — the connected_calendar id this event writes booked events to;
    *  null clears the override (falls back to the member-level destination). */
   destinationCalendarId: z.string().nullable().optional(),
+  /** H2 (#108) — per-event CRM property mappings, provider-keyed. Omitted ⇒
+   *  unchanged; `null` ⇒ cleared. Every already-saved event type reads as
+   *  null, which is "never configured" and delivers exactly as it does today. */
+  crmPropertyMappings: crmPropertyMappingsSchema.nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

@@ -339,3 +339,173 @@ describe('provider selection', () => {
     await expect(new DisabledCrmProvider().verifyCredential()).rejects.toThrow(/CRM_PROVIDER/);
   });
 });
+
+/**
+ * H2 (#108) — the ONE refinement to H1a's step 1, asserted on the wire.
+ *
+ * These are the assertions that make ADR 0005 a property of the code rather
+ * than of the UI: a FOUND contact is PATCHed with mapped properties and never
+ * its identity, and an ABSENT one gets identity plus the mapping in one call.
+ */
+describe('contact property mapping (H2, #108)', () => {
+  const mapped = { annualrevenue: '50000', phone: '+573001112222' };
+
+  it('PATCHes a FOUND contact with the mapped properties, and identity never', async () => {
+    const { fetchImpl, calls } = stub([
+      { status: 200, body: { results: [{ id: '77' }] } }, // search hit
+      { status: 200, body: {} }, // the PATCH
+    ]);
+    const crm = new HubSpotCrmProvider(undefined, 5000, fetchImpl);
+    const out = await crm.resolveContact({
+      token: 't',
+      email: 'lead@example.com',
+      firstName: 'Bob',
+      lastName: 'Smith',
+      properties: mapped,
+    });
+
+    expect(out).toEqual({ contactId: '77', created: false });
+    const patch = calls[1]!;
+    expect(patch.method).toBe('PATCH');
+    expect(patch.url).toContain('/crm/v3/objects/contacts/77');
+    expect(patch.body).toEqual({ properties: mapped });
+    // The whole point: a returning invitee typing "Bob" must not rename
+    // "Robert Smith".
+    const body = patch.body!.properties as Record<string, string>;
+    expect(body).not.toHaveProperty('email');
+    expect(body).not.toHaveProperty('firstname');
+    expect(body).not.toHaveProperty('lastname');
+  });
+
+  it('makes NO second call for a found contact with nothing mapped (H1a unchanged)', async () => {
+    const { fetchImpl, calls } = stub([{ status: 200, body: { results: [{ id: '77' }] } }]);
+    const crm = new HubSpotCrmProvider(undefined, 5000, fetchImpl);
+    await crm.resolveContact({ token: 't', email: 'a@b.co', firstName: null, lastName: null });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe('POST');
+    expect(calls[0]!.url).toContain('/search');
+  });
+
+  it('creates an ABSENT contact with identity PLUS the mapping, in one call', async () => {
+    const { fetchImpl, calls } = stub([
+      { status: 200, body: { results: [] } }, // search miss
+      { status: 201, body: { id: '99' } }, // create
+    ]);
+    const crm = new HubSpotCrmProvider(undefined, 5000, fetchImpl);
+    const out = await crm.resolveContact({
+      token: 't',
+      email: 'new@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      properties: mapped,
+    });
+
+    expect(out).toEqual({ contactId: '99', created: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body).toEqual({
+      properties: {
+        ...mapped,
+        email: 'new@example.com',
+        firstname: 'Ada',
+        lastname: 'Lovelace',
+      },
+    });
+  });
+
+  it('drops an identity key smuggled into the mapped bag, on both paths', async () => {
+    const smuggled = { firstname: 'Bob', FIRSTNAME: 'Bob', annualrevenue: '1' };
+
+    const found = stub([{ status: 200, body: { results: [{ id: '5' }] } }, { status: 200 }]);
+    await new HubSpotCrmProvider(undefined, 5000, found.fetchImpl).resolveContact({
+      token: 't',
+      email: 'a@b.co',
+      firstName: 'Robert',
+      lastName: null,
+      properties: smuggled,
+    });
+    expect(found.calls[1]!.body).toEqual({ properties: { annualrevenue: '1' } });
+
+    const absent = stub([{ status: 200, body: { results: [] } }, { status: 201, body: { id: '6' } }]);
+    await new HubSpotCrmProvider(undefined, 5000, absent.fetchImpl).resolveContact({
+      token: 't',
+      email: 'a@b.co',
+      firstName: 'Robert',
+      lastName: null,
+      properties: smuggled,
+    });
+    expect(absent.calls[1]!.body).toEqual({
+      properties: { annualrevenue: '1', email: 'a@b.co', firstname: 'Robert' },
+    });
+  });
+
+  it('reads the property schema and carries every exclusion flag', async () => {
+    const { fetchImpl, calls } = stub([
+      {
+        status: 200,
+        body: {
+          results: [
+            {
+              name: 'annualrevenue',
+              label: 'Annual revenue',
+              type: 'number',
+              fieldType: 'number',
+              modificationMetadata: { readOnlyValue: false },
+            },
+            {
+              name: 'hs_computed',
+              label: 'Computed',
+              type: 'string',
+              fieldType: 'text',
+              calculated: true,
+              modificationMetadata: { readOnlyValue: true },
+            },
+            {
+              name: 'tier',
+              label: 'Tier',
+              type: 'enumeration',
+              fieldType: 'select',
+              options: [
+                { value: 'a', label: 'A' },
+                { value: 'secret', label: 'Secret', hidden: true },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const crm = new HubSpotCrmProvider(undefined, 5000, fetchImpl);
+    const properties = await crm.listContactProperties({ token: 't' });
+
+    // Asked of the API, so a portal with a long history of retired fields does
+    // not ship them all down the wire.
+    expect(calls[0]!.url).toContain('/crm/v3/properties/contacts?archived=false');
+    expect(properties).toHaveLength(3);
+    expect(properties[1]).toMatchObject({ calculated: true, readOnlyValue: true });
+    // A hidden OPTION is dropped: it cannot be written, so offering it would
+    // produce a mapping that 400s.
+    expect(properties[2]!.options).toEqual([{ value: 'a', label: 'A' }]);
+  });
+
+  it('is unreachable on the disabled provider', async () => {
+    await expect(new DisabledCrmProvider().listContactProperties()).rejects.toThrow(
+      /no CRM provider is configured/,
+    );
+  });
+
+  it('honours CRM_API_BASE_URL so the integration can be exercised against a stub', async () => {
+    const { fetchImpl, calls } = stub([{ status: 200, body: { results: [] } }]);
+    const crm = resolveCrmProvider(
+      { CRM_PROVIDER: 'hubspot', CRM_API_BASE_URL: 'http://127.0.0.1:4444/' },
+      fetchImpl,
+    );
+    await crm.listContactProperties({ token: 't' });
+    expect(calls[0]!.url).toBe('http://127.0.0.1:4444/crm/v3/properties/contacts?archived=false');
+  });
+
+  it('defaults to the vendor host when no base URL is set', async () => {
+    const { fetchImpl, calls } = stub([{ status: 200, body: { results: [] } }]);
+    const crm = resolveCrmProvider({ CRM_PROVIDER: 'hubspot' }, fetchImpl);
+    await crm.listContactProperties({ token: 't' });
+    expect(calls[0]!.url.startsWith('https://api.hubapi.com/')).toBe(true);
+  });
+});

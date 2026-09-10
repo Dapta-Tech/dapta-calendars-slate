@@ -133,7 +133,16 @@ export interface CreateBookingArgs {
   memberId?: string;
   slug: string;
   startMs: number;
-  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+  attendee: {
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+    /** Notification language (`en` | `es`). Persisted since H2 (#108); the
+     *  contract has always accepted it and this layer used to drop it. */
+    language?: string;
+  };
   /** Additional creation-time guests/attendees, inserted in the booking transaction. */
   additionalAttendees?: Array<{
     name: string;
@@ -141,6 +150,7 @@ export interface CreateBookingArgs {
     timeZone: string;
     notes?: string;
     phone?: string;
+    language?: string;
   }>;
   /** Answers to the event type's custom intake fields. */
   answers?: Record<string, unknown>;
@@ -842,17 +852,19 @@ export async function createBooking(
       );
       if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
       await db.run(
-        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
               ${normalizeAttendeeEmail(args.attendee.email)},
-              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
+              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
+              ${args.attendee.language ?? null}, ${Date.now()})`,
       );
       for (const attendee of args.additionalAttendees ?? []) {
         await db.run(
-          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
               VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
                 ${normalizeAttendeeEmail(attendee.email)},
-                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
+                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
+                ${attendee.language ?? null}, ${Date.now()})`,
         );
       }
       if (args.reservationUid)
@@ -918,16 +930,18 @@ export async function createBooking(
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
       ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
       ${normalizeAttendeeEmail(args.attendee.email)},
-      ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+      ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
+      ${args.attendee.language ?? null}, ${now})`;
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
     (attendee) => sql`
-      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
         ${normalizeAttendeeEmail(attendee.email)},
-        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
+        ${attendee.language ?? null}, ${now})`,
   );
 
   const record: BookingRecord = {

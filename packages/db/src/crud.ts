@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { parseEventLocation, type EventLocation, type EventLocationInput } from '@slate/engine';
+import type { CrmPropertyMappings } from '@slate/types';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 import {
@@ -71,6 +72,9 @@ export interface EventTypeView {
   /** PHASE 2 — the connected_calendar this event writes booked events to; null
    *  ⇒ falls back to the host's member-level `is_destination` calendar. */
   destinationCalendarId: string | null;
+  /** H2 (#108) — CRM contact property mappings, provider-keyed. NULL ⇒ never
+   *  configured, which is what every event type predating this reads as. */
+  crmPropertyMappings: CrmPropertyMappings | null;
 }
 
 interface EventTypeDbRow {
@@ -95,12 +99,14 @@ interface EventTypeDbRow {
   booking_fields: unknown;
   reminders: unknown;
   destination_calendar_id: string | null;
+  crm_property_mappings: unknown;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
-  seats_per_time_slot, booking_fields, reminders, destination_calendar_id`;
+  seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
+  crm_property_mappings`;
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
@@ -139,6 +145,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     })),
     conflictCalendarIds: conflictCalendars.map((c) => c.connected_calendar_id),
     destinationCalendarId: r.destination_calendar_id,
+    crmPropertyMappings: parseJsonColumn<CrmPropertyMappings | null>(r.crm_property_mappings, null),
   };
 }
 
@@ -254,6 +261,9 @@ export interface EventTypeInputRepo {
   /** PHASE 2 — the connected_calendar this event writes to; null clears the
    *  override (falls back to the host's member-level destination). */
   destinationCalendarId?: string | null;
+  /** H2 (#108) — CRM contact property mappings, provider-keyed. UNDEFINED ⇒
+   *  unchanged; `null` ⇒ cleared back to "never configured". */
+  crmPropertyMappings?: CrmPropertyMappings | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -292,7 +302,7 @@ export async function createEventType(
           length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
-          destination_calendar_id, created_at)
+          destination_calendar_id, crm_property_mappings, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -302,7 +312,8 @@ export async function createEventType(
           ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
-          ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId}, ${now})`,
+          ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
+          ${jsonParam(db, input.crmPropertyMappings ?? null)}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -344,6 +355,10 @@ export async function updateEventType(
     set('prevent_duplicate_bookings', sql`${input.preventDuplicateBookings ? 1 : 0}`);
   if (input.seatsPerTimeSlot !== undefined) set('seats_per_time_slot', sql`${input.seatsPerTimeSlot ?? null}`);
   if (input.bookingFields !== undefined) set('booking_fields', jsonParam(db, input.bookingFields ?? null));
+  // `null` is a deliberate "no mappings" and lands as NULL, which reads back as
+  // never-configured; UNDEFINED leaves whatever the event already had.
+  if (input.crmPropertyMappings !== undefined)
+    set('crm_property_mappings', jsonParam(db, input.crmPropertyMappings ?? null));
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
   // back the reminder they just deleted.

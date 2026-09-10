@@ -12,17 +12,29 @@
 export * from './port';
 export * from './hubspot';
 export * from './meeting-body';
+export * from './mapping';
 
 import { DisabledCrmProvider, type CrmProvider } from './port';
-import { HubSpotCrmProvider } from './hubspot';
+import { HubSpotCrmProvider, HUBSPOT_API_BASE_URL } from './hubspot';
 
-/** Env-driven selection (mirrors `resolveCalendarProvider`). */
+/**
+ * Env-driven selection (mirrors `resolveCalendarProvider`).
+ *
+ * `CRM_API_BASE_URL` defaults to the vendor's public host and exists for two
+ * real cases: a self-hoster whose egress goes through a proxy, and exercising
+ * the integration end-to-end against a stub without stubbing anything in
+ * product code. It is the same knob `CALENDAR_API_BASE_URL` already is.
+ */
 export function resolveCrmProvider(
-  env: { CRM_PROVIDER?: string; CRM_HTTP_TIMEOUT_MS?: number },
+  env: { CRM_PROVIDER?: string; CRM_HTTP_TIMEOUT_MS?: number; CRM_API_BASE_URL?: string },
   fetchImpl?: typeof fetch,
 ): CrmProvider {
   if (env.CRM_PROVIDER === 'hubspot') {
-    return new HubSpotCrmProvider(undefined, env.CRM_HTTP_TIMEOUT_MS ?? 10_000, fetchImpl);
+    return new HubSpotCrmProvider(
+      env.CRM_API_BASE_URL?.trim() || HUBSPOT_API_BASE_URL,
+      env.CRM_HTTP_TIMEOUT_MS ?? 10_000,
+      fetchImpl,
+    );
   }
   return new DisabledCrmProvider();
 }

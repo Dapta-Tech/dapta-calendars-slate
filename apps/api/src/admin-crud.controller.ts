@@ -53,9 +53,12 @@ import {
   scheduleInputSchema,
   teamInputSchema,
   teamMemberInputSchema,
+  type CrmPropertyMappings,
 } from '@slate/types';
+import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
+import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { DB } from './tokens';
@@ -87,7 +90,68 @@ export class AdminCrudController {
     // Optional so the existing CRUD specs can construct this controller with
     // two arguments. A roster write must never depend on the growth funnel.
     @Optional() @Inject(GrowthService) private readonly growth?: GrowthService,
+    // H2 (#108): the portal's property schema, for the save-time compatibility
+    // check. LAST and @Optional() for the same reason — absent, the check is
+    // skipped and the picker's own filtering is the only guard, which is what
+    // every spec that constructs this controller positionally expects.
+    @Optional()
+    @Inject(CrmPropertyCatalogService)
+    private readonly crmProperties?: CrmPropertyCatalogService,
   ) {}
+
+  /**
+   * Refuse a mapping this portal could not deliver (#64).
+   *
+   * The picker already filters to compatible properties, so reaching this needs
+   * a hand-written request or a stale editor — but "unreachable beats
+   * diagnosable" is the whole reason #64 put a check on the server too. Without
+   * it an incompatible pair saves cleanly and then silently delivers nothing,
+   * one booking at a time, in an outbox nobody watches.
+   *
+   * Three cases are deliberately ALLOWED rather than refused, all for the same
+   * reason: none of them is a pair that would deliver WRONGLY, and refusing any
+   * of them blocks an edit that has nothing to do with the CRM.
+   *
+   *   - a mapping whose QUESTION is gone. Deleting, renaming or retyping an
+   *     intake question orphans its mapping, and that is an ordinary edit — the
+   *     one thing it must not do is make the event type unsaveable. The editor
+   *     flags the row and drops it from the payload; here it is simply skipped.
+   *   - a property the portal does not have. That is the broken-mapping state
+   *     the editor already draws in red, and refusing it would make an
+   *     unrelated edit unsaveable because somebody deleted a property in the CRM.
+   *   - no reachable catalog at all (CRM off, nothing connected, portal down).
+   *     Blocking an event-type save because the CRM is briefly unreachable is a
+   *     far worse trade than accepting a mapping the picker already filtered.
+   */
+  private async assertMappingsAreDeliverable(
+    accountId: string,
+    mappings: CrmPropertyMappings | null | undefined,
+    fields: readonly MappableField[],
+  ): Promise<void> {
+    if (!mappings || !this.crmProperties) return;
+    const rows = Object.values(mappings).flat();
+    if (rows.length === 0) return;
+
+    const catalog = await this.crmProperties.catalog(accountId);
+    if (!catalog.connected || catalog.properties.length === 0) return;
+    const byName = new Map(catalog.properties.map((p) => [p.name.toLowerCase(), p]));
+
+    for (const row of rows) {
+      // An ORPHANED source is not an incompatible one. `isCompatible` cannot
+      // tell them apart — it returns false for both — so the distinction has
+      // to be drawn here, before the refusal.
+      if (!sourceExists(row.source, fields)) continue;
+      for (const target of row.properties) {
+        const property = byName.get(target.toLowerCase());
+        if (!property) continue;
+        if (isCompatible(row.source, property, fields)) continue;
+        throw new BadRequestException({
+          error: 'CRM_MAPPING_INCOMPATIBLE',
+          message: `${target} cannot receive this answer: the property's type does not match the answer's.`,
+        });
+      }
+    }
+  }
 
   // --- Members (workspace roster) ---------------------------------------
   // The whole roster (role + status) is admin/owner-only — it doubles as the
@@ -187,6 +251,11 @@ export class AdminCrudController {
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
+    await this.assertMappingsAreDeliverable(
+      p.accountId,
+      input.crmPropertyMappings,
+      (input.bookingFields ?? []) as MappableField[],
+    );
     return unwrapCrud(await createEventType(this.db, p.accountId, p.memberId, input));
   }
 
@@ -197,6 +266,14 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
+    // Validated against the questions this save LEAVES BEHIND: a partial update
+    // that omits `bookingFields` keeps the event's existing ones, and checking
+    // against an empty list would refuse every question mapping on such a save.
+    await this.assertMappingsAreDeliverable(
+      p.accountId,
+      input.crmPropertyMappings,
+      (input.bookingFields ?? existing.bookingFields ?? []) as MappableField[],
+    );
     return unwrapCrud(await updateEventType(this.db, p.accountId, id, input));
   }
 

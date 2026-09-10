@@ -66,6 +66,9 @@ class ProbeCrm implements CrmProvider {
   resolveContact(): Promise<never> {
     return Promise.reject(new Error('not used'));
   }
+  listContactProperties(): Promise<never> {
+    return Promise.reject(new Error('not used'));
+  }
   createMeeting(): Promise<never> {
     return Promise.reject(new Error('not used'));
   }

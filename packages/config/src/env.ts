@@ -165,6 +165,12 @@ export const serverEnvSchema = z.object({
   HUBSPOT_PRIVATE_APP_TOKEN: z.string().optional(),
   // Bounded so a slow CRM can never hold an outbox worker tick.
   CRM_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  // Where the CRM adapter sends its requests. Defaults to the vendor's own
+  // public host, so nobody needs to set this. It exists for a self-hoster whose
+  // egress runs through a proxy, and for exercising the integration end-to-end
+  // against a stub — which is what keeps stubs out of product code. Mirrors
+  // CALENDAR_API_BASE_URL.
+  CRM_API_BASE_URL: z.string().url().optional(),
 
   // Outbox worker (B7/DM1): drains durable side-effects (calendar write-out,
   // webhook delivery) with retry+backoff. Enabled by default; the poll interval

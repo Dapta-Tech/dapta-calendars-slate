@@ -77,6 +77,12 @@ class FakeCrmProvider implements CrmProvider {
     this.contacts.push(input);
     return Promise.resolve({ contactId: 'contact-1', created: !this.known.has(input.email) });
   }
+  // H2 (#108). These specs never map anything, so the property list is empty —
+  // which is what an unmapped event type reads, and what proves H1a's behavior
+  // is unchanged by the mapping seam.
+  listContactProperties(): Promise<[]> {
+    return Promise.resolve([]);
+  }
   createMeeting(input: CrmMeetingInput): Promise<{ meetingId: string }> {
     if (this.failCreateWith) {
       const err = this.failCreateWith;

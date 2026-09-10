@@ -1,0 +1,33 @@
+-- H2 (#108 / #64): per-event-type intake question -> CRM contact property
+-- mappings. Purely additive -- one nullable column on an existing table, no
+-- default, no backfill -- so this file is order-independent against anything a
+-- concurrent unit ships and its number may safely collide (#71, Mechanical
+-- conventions).
+--
+-- NULL means "never configured", which is what every event type that predates
+-- this reads as: no mapping is evaluated, no property list is fetched, and the
+-- CRM write-out behaves exactly as H1a shipped it.
+--
+-- A COLUMN rather than a table, per #64: it mirrors how `booking_fields`
+-- already lives on this row, needs no join on the booking hot path, and the
+-- editor rewrites the whole document on every save anyway.
+--
+-- Shape (provider-keyed so a second CRM costs nothing later):
+--
+--   {"hubspot": [
+--     {"source": {"kind": "question", "name": "budget"},
+--      "properties": ["annualrevenue"]},
+--     {"source": {"kind": "attendee", "field": "phone"},
+--      "properties": ["phone", "mobilephone"]}
+--   ]}
+--
+-- Two rules the CONTRACT enforces rather than the column: a destination
+-- property is claimed by at most one source, and `email` / `firstname` /
+-- `lastname` are never targets (ADR 0005).
+ALTER TABLE event_type ADD COLUMN IF NOT EXISTS crm_property_mappings JSONB;
+
+-- The attendee's notification language (`en` | `es`). `attendeeSchema` has
+-- always accepted it and this layer has always dropped it, so H2's
+-- attendee-language mapping would have had nothing to deliver. NULLABLE: every
+-- booking taken before now, and every caller that omits it.
+ALTER TABLE booking_attendee ADD COLUMN IF NOT EXISTS language TEXT;

@@ -12,6 +12,7 @@ import {
   Param,
   Patch,
   Post,
+  Optional,
   Query,
   Req,
 } from '@nestjs/common';
@@ -22,12 +23,14 @@ import {
   integrationConnectSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
+  type CrmPropertyCatalog,
 } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import { checkWebhookUrl } from '@slate/db';
 import { isAccountTemplateKey, isEmailTemplateKey, type EmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
+import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { OnboardingService } from './onboarding.service';
 import { GrowthService } from './growth.service';
 import { AuthService, type ReqLike } from './auth.service';
@@ -46,6 +49,13 @@ export class HostController {
     @Inject(OnboardingService) private readonly onboarding: OnboardingService,
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(GrowthService) private readonly growth: GrowthService,
+    // H2 (#108). LAST and @Optional() so the many specs that construct this
+    // controller positionally keep working; absent, the mapping picker reports
+    // the CRM as disabled, which is the same safe direction every other
+    // capability read takes.
+    @Optional()
+    @Inject(CrmPropertyCatalogService)
+    private readonly crmProperties?: CrmPropertyCatalogService,
   ) {}
 
   /**
@@ -368,6 +378,35 @@ export class HostController {
   }
 
   /**
+   * The account's CRM contact properties, for the mapping picker (H2 / #108).
+   *
+   * Deliberately NOT `assertAdmin`, unlike every route around it. The admin
+   * owns the CREDENTIAL; the host owns the MAPPING (#64) — restricting mappings
+   * to admins would mean nobody maps in a ten-host workspace, because the admin
+   * does not know other hosts' questions. What comes back is portal metadata
+   * (names, labels, types, options) and never a credential.
+   *
+   * Declared with the other literal `integrations/...` segments, above the
+   * `:provider` parameter route, so a parameter can never eat it.
+   *
+   * `?refresh=1` skips the five-minute cache — the "I just created the property
+   * in HubSpot" flow, which the never-create rule makes mandatory.
+   */
+  @Get('integrations/crm/contact-properties')
+  async crmContactProperties(
+    @Req() req: ReqLike,
+    @Query('refresh') refresh?: string,
+  ): Promise<CrmPropertyCatalog> {
+    const p = await this.auth.resolveHost(req);
+    if (!this.crmProperties) {
+      return { provider: null, connected: false, properties: [], fetchedAt: null, reason: 'disabled' };
+    }
+    return this.crmProperties.catalog(p.accountId, {
+      refresh: refresh === '1' || refresh === 'true',
+    });
+  }
+
+  /**
    * Connect a pasted private-app token. Fail-closed: the credential is VERIFIED
    * by using it before anything is stored, so a bad token is rejected here
    * rather than surfacing as a silently failing booking a week later.
@@ -392,7 +431,13 @@ export class HostController {
         message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
       });
     }
-    return this.admin.connectIntegration(p, parsed.data);
+    const status = await this.admin.connectIntegration(p, parsed.data);
+    // Drop the cached property list, exactly as a disconnect does. A reconnect
+    // may point at a DIFFERENT portal, and until this the picker — and, worse,
+    // DELIVERY — would keep coercing against the previous portal's schema for
+    // the rest of the five-minute window.
+    this.crmProperties?.invalidate(p.accountId);
+    return status;
   }
 
   /** Disconnect: the credential is scrubbed, nothing is deleted in the CRM. */
@@ -400,7 +445,13 @@ export class HostController {
   async disconnectIntegration(@Req() req: ReqLike, @Param('provider') provider: string) {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
-    return this.admin.disconnectIntegration(p, provider);
+    const res = await this.admin.disconnectIntegration(p, provider);
+    // Drop the cached property list. Mappings SURVIVE a disconnect (#64), but a
+    // reconnect may point at a DIFFERENT portal, and serving the old portal's
+    // properties for another five minutes would draw a picker full of names
+    // that are not there.
+    this.crmProperties?.invalidate(p.accountId);
+    return res;
   }
 
   // Connections.

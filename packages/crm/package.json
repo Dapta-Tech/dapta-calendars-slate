@@ -7,12 +7,18 @@
   "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./mapping": { "types": "./dist/mapping.d.ts", "import": "./dist/mapping.js" }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@slate/types": "workspace:*"
   },
   "devDependencies": {
     "@slate/config": "workspace:*",

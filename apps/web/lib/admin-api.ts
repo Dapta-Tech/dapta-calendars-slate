@@ -14,6 +14,8 @@
 import type {
   EventLocationDto,
   EventReminder,
+  CrmPropertyCatalog,
+  CrmPropertyMappings,
   IntegrationCapabilities,
   IntegrationStatusView,
   OnboardingState,
@@ -309,6 +311,14 @@ export const adminApi = {
     req<IntegrationStatusView>('POST', '/v1/integrations', b),
   disconnectIntegration: (provider: string) =>
     req<{ disconnected: boolean }>('DELETE', `/v1/integrations/${provider}`),
+  // H2 (#108): the mapping picker's property list. Portal METADATA — names,
+  // labels, types, options — and never a credential. Any host who can edit an
+  // event type may read it; the admin owns the token, the host owns the mapping.
+  crmContactProperties: (refresh = false) =>
+    req<CrmPropertyCatalog>(
+      'GET',
+      `/v1/integrations/crm/contact-properties${refresh ? '?refresh=1' : ''}`,
+    ),
 
   // Branding
   profile: (code: string, handle: string) => req<Profile>('GET', `/v1/profiles/${code}/${handle}`),
@@ -348,6 +358,9 @@ export interface EventType {
   /** PHASE 2 — the connected_calendar this event writes to; null ⇒ falls back
    *  to the host's member-level destination calendar. */
   destinationCalendarId: string | null;
+  /** H2 (#108) — CRM contact property mappings, provider-keyed. Null on every
+   *  event nobody has configured, which is what "never configured" reads as. */
+  crmPropertyMappings: CrmPropertyMappings | null;
 }
 export interface Schedule {
   id: string;

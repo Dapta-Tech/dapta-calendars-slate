@@ -402,6 +402,74 @@ export interface BookingMessages {
         enabledLabel: string;
         noReminders: string;
       };
+      /**
+       * H2 (#108) — the intake-question → CRM contact property mapping section.
+       * Never call a mapped write a "sync": it is one-directional, and it
+       * OVERWRITES the property on every accepted booking (ADR 0005).
+       */
+      crmMapping: {
+        sectionTitle: string;
+        /** {provider} interpolates the CRM's own name. */
+        sectionHint: string;
+        /** The read-only identity row, and why it is shown rather than absent. */
+        identityTitle: string;
+        identityHint: string;
+        identityEmail: string;
+        identityFirstName: string;
+        identityLastName: string;
+        /** Empty states. */
+        notConnectedTitle: string;
+        notConnectedBody: string;
+        notConnectedLink: string;
+        unavailable: string;
+        noProperties: string;
+        /** The table itself. */
+        sourceLabel: string;
+        propertyLabel: string;
+        sourcePlaceholder: string;
+        propertyPlaceholder: string;
+        addMapping: string;
+        removeMapping: string;
+        addTarget: string;
+        noMappings: string;
+        /** {max} interpolates the per-event cap. */
+        capReached: string;
+        /** Source group headings in the source picker. */
+        groupQuestions: string;
+        groupAttendee: string;
+        groupEvent: string;
+        /** Attendee + event metadata source names. */
+        attendeePhone: string;
+        attendeeNotes: string;
+        attendeeTimeZone: string;
+        attendeeLanguage: string;
+        eventTypeTitle: string;
+        eventStart: string;
+        eventLength: string;
+        eventHostName: string;
+        eventHostEmail: string;
+        /** Enumeration reconciliation, shown at configure time. */
+        optionsMatch: string;
+        /** {matched}, {total} and {values} interpolate the diff. */
+        optionsPartial: string;
+        optionsNone: string;
+        /** A stored target the portal no longer has. */
+        missingProperty: string;
+        /** A stored target that exists but no longer fits this answer's type. */
+        incompatibleProperty: string;
+        /** The mapped QUESTION was deleted or renamed; the row is dropped on save. */
+        missingQuestion: string;
+        /** Actions. */
+        refresh: string;
+        refreshing: string;
+        suggest: string;
+        suggestNone: string;
+        /** {n} interpolates how many rows were pre-filled. */
+        suggestFilled: string;
+        suggestNotSaved: string;
+        /** The never-create rule, as the picker's empty hint. */
+        createInProviderHint: string;
+      };
     };
     availability: {
       title: string;
@@ -1316,6 +1384,62 @@ export const en: BookingMessages = {
         enabledLabel: 'Send this reminder',
         noReminders: 'No reminders — invitees get no nudge before this event.',
       },
+      crmMapping: {
+        sectionTitle: 'Send answers to your CRM',
+        sectionHint:
+          'Pick which answers land on which {provider} contact properties. Each mapped property is overwritten on every accepted booking, so it always shows this contact’s most recent answer.',
+        identityTitle: 'Always sent',
+        identityHint:
+          'Name and email identify the contact, so they cannot be mapped. A contact your CRM already knows keeps the name it has.',
+        identityEmail: 'Email',
+        identityFirstName: 'First name',
+        identityLastName: 'Last name',
+        notConnectedTitle: 'No CRM is connected yet',
+        notConnectedBody: 'Connect one in Settings to start mapping answers onto contact properties.',
+        notConnectedLink: 'Go to Integrations',
+        unavailable:
+          'We could not reach your CRM to read its properties. Showing the last list we loaded — press Refresh to try again.',
+        noProperties:
+          'This portal has no contact properties we can write to. Create one in your CRM, then press Refresh.',
+        sourceLabel: 'Answer',
+        propertyLabel: 'Contact property',
+        sourcePlaceholder: 'Choose an answer',
+        propertyPlaceholder: 'Choose a property',
+        addMapping: '+ Map an answer',
+        removeMapping: 'Remove this mapping',
+        addTarget: '+ Add another property',
+        noMappings: 'No answers are sent to your CRM yet.',
+        capReached: 'You can map up to {max} answers on one event.',
+        groupQuestions: 'Intake questions',
+        groupAttendee: 'Attendee details',
+        groupEvent: 'Event details',
+        attendeePhone: 'Phone',
+        attendeeNotes: 'Notes',
+        attendeeTimeZone: 'Time zone',
+        attendeeLanguage: 'Language',
+        eventTypeTitle: 'Event name',
+        eventStart: 'Booking start',
+        eventLength: 'Length in minutes',
+        eventHostName: 'Assigned host',
+        eventHostEmail: 'Assigned host email',
+        optionsMatch: 'All options match this property.',
+        optionsPartial: '{matched} of {total} options match. These will not be sent: {values}',
+        optionsNone:
+          'None of this question’s options match this property, so nothing will be sent. Rename them to match, or pick another property.',
+        missingProperty: 'This property is no longer in your portal.',
+        incompatibleProperty:
+          'This property no longer fits this answer’s type, so the save will be refused. Pick another one.',
+        missingQuestion:
+          'The question this maps from no longer exists. This row is dropped when you save.',
+        refresh: 'Refresh properties',
+        refreshing: 'Refreshing…',
+        suggest: 'Suggest mappings',
+        suggestNone: 'Nothing to suggest — no answer matched a property in your portal.',
+        suggestFilled: 'Filled in {n}. Review them, then save.',
+        suggestNotSaved: 'Suggestions are not saved until you press Save.',
+        createInProviderHint:
+          'We never create properties. If the one you want is missing, create it in your CRM and press Refresh.',
+      },
     },
     availability: {
       title: 'Availability',
@@ -2215,6 +2339,64 @@ export const es: BookingMessages = {
         danglingWarn: 'Estas variables ya no coinciden con ninguna pregunta y llegarán vacías: {tokens}',
         enabledLabel: 'Enviar este recordatorio',
         noReminders: 'Sin recordatorios: nadie recibirá aviso antes de este evento.',
+      },
+      crmMapping: {
+        sectionTitle: 'Enviar respuestas a tu CRM',
+        sectionHint:
+          'Elige qué respuestas llegan a qué propiedades de contacto en {provider}. Cada propiedad asignada se sobrescribe en cada reserva aceptada, así que siempre muestra la respuesta más reciente de ese contacto.',
+        identityTitle: 'Siempre se envía',
+        identityHint:
+          'El nombre y el correo identifican al contacto, por eso no se pueden asignar. Un contacto que tu CRM ya conoce conserva el nombre que tiene.',
+        identityEmail: 'Correo',
+        identityFirstName: 'Nombre',
+        identityLastName: 'Apellido',
+        notConnectedTitle: 'Todavía no hay ningún CRM conectado',
+        notConnectedBody:
+          'Conecta uno en Ajustes para empezar a asignar respuestas a propiedades de contacto.',
+        notConnectedLink: 'Ir a Integraciones',
+        unavailable:
+          'No pudimos conectar con tu CRM para leer sus propiedades. Mostramos la última lista que cargamos: pulsa Actualizar para reintentar.',
+        noProperties:
+          'Este portal no tiene propiedades de contacto en las que podamos escribir. Crea una en tu CRM y pulsa Actualizar.',
+        sourceLabel: 'Respuesta',
+        propertyLabel: 'Propiedad de contacto',
+        sourcePlaceholder: 'Elige una respuesta',
+        propertyPlaceholder: 'Elige una propiedad',
+        addMapping: '+ Asignar una respuesta',
+        removeMapping: 'Quitar esta asignación',
+        addTarget: '+ Añadir otra propiedad',
+        noMappings: 'Todavía no se envía ninguna respuesta a tu CRM.',
+        capReached: 'Puedes asignar hasta {max} respuestas en un evento.',
+        groupQuestions: 'Preguntas del formulario',
+        groupAttendee: 'Datos del invitado',
+        groupEvent: 'Datos del evento',
+        attendeePhone: 'Teléfono',
+        attendeeNotes: 'Notas',
+        attendeeTimeZone: 'Zona horaria',
+        attendeeLanguage: 'Idioma',
+        eventTypeTitle: 'Nombre del evento',
+        eventStart: 'Inicio de la reserva',
+        eventLength: 'Duración en minutos',
+        eventHostName: 'Anfitrión asignado',
+        eventHostEmail: 'Correo del anfitrión asignado',
+        optionsMatch: 'Todas las opciones coinciden con esta propiedad.',
+        optionsPartial:
+          '{matched} de {total} opciones coinciden. Estas no se enviarán: {values}',
+        optionsNone:
+          'Ninguna opción de esta pregunta coincide con la propiedad, así que no se enviará nada. Renómbralas para que coincidan o elige otra propiedad.',
+        missingProperty: 'Esta propiedad ya no está en tu portal.',
+        incompatibleProperty:
+          'Esta propiedad ya no encaja con el tipo de esta respuesta, así que el guardado se rechazará. Elige otra.',
+        missingQuestion:
+          'La pregunta de la que proviene ya no existe. Esta fila se descarta al guardar.',
+        refresh: 'Actualizar propiedades',
+        refreshing: 'Actualizando…',
+        suggest: 'Sugerir asignaciones',
+        suggestNone: 'Nada que sugerir: ninguna respuesta coincidió con una propiedad de tu portal.',
+        suggestFilled: 'Se rellenaron {n}. Revísalas y guarda.',
+        suggestNotSaved: 'Las sugerencias no se guardan hasta que pulses Guardar.',
+        createInProviderHint:
+          'Nunca creamos propiedades. Si falta la que quieres, créala en tu CRM y pulsa Actualizar.',
       },
     },
     availability: {

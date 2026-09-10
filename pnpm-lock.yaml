@@ -87,6 +87,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@slate/crm':
+        specifier: workspace:*
+        version: link:../../packages/crm
       '@slate/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -187,6 +190,10 @@ importers:
         version: 8.63.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
 
   packages/crm:
+    dependencies:
+      '@slate/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@slate/config':
         specifier: workspace:*
