@@ -11,6 +11,7 @@ import {
   getBookingRescheduleAvailability,
   getTeamAvailability,
   getTeamProfile,
+  releaseSlot,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
@@ -27,8 +28,11 @@ import {
   availabilityQuerySchema,
   availabilityResponseSchema,
   rescheduleAvailabilityQuerySchema,
+  clampAvailabilityWindow,
   createBookingSchema,
+  releaseSlotSchema,
   reserveSlotSchema,
+  teamAvailabilityQuerySchema,
   type AvailabilityResponse,
   type BookingView,
   type PublicProfile,
@@ -126,9 +130,11 @@ export class BookingService {
   async availability(raw: unknown): Promise<AvailabilityResponse | null> {
     const q = availabilityQuerySchema.parse(raw);
     const fromMs = new Date(q.from).getTime();
-    // Cap the search window at 60 days (contract §Engine) — clamp `to` rather
-    // than reject, so an over-wide agent query still returns a bounded result.
-    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
+    // Cap the search window (contract §Engine) — clamp `to` rather than reject,
+    // so an over-wide agent query still returns a bounded result. The bound is
+    // `MAX_AVAILABILITY_WINDOW_MS` in `@slate/types`, shared with every other
+    // availability path so they cannot drift apart again (#136).
+    const toMs = clampAvailabilityWindow(fromMs, new Date(q.to).getTime());
     const result = await getAvailability(
       this.db,
       {
@@ -189,6 +195,25 @@ export class BookingService {
       reservationUid: held.uid,
       expiresAt: new Date(held.releaseAtMs).toISOString(),
     };
+  }
+
+  /**
+   * Give a soft hold back (#135) — the counterpart `reserve()` never had. A
+   * booker who picks a time and then goes back to compare another day used to
+   * leave the hold standing for its full TTL, hiding that slot from every other
+   * visitor.
+   *
+   * Answers the SAME body every time. A uid that names nothing, an expired hold
+   * and a hold the booking write already consumed are indistinguishable from a
+   * real release, so an anonymous caller cannot use this to probe whether a
+   * hold exists, and a release racing a booking that succeeded cannot read as a
+   * failure. The uid is the authorisation; see `releaseSlot` for why the slot
+   * coordinates are not accepted instead.
+   */
+  async release(raw: unknown): Promise<{ released: true }> {
+    const input = releaseSlotSchema.parse(raw);
+    await releaseSlot(this.db, input.reservationUid);
+    return { released: true };
   }
 
   async book(
@@ -426,9 +451,9 @@ export class BookingService {
     // reaches `computeSlots` as a `RangeError` thrown out of a public route.
     const q = rescheduleAvailabilityQuerySchema.parse(raw);
     const fromMs = new Date(q.from).getTime();
-    // Same 60-day cap `availability()` applies (contract §Engine) — clamped
-    // rather than rejected, so an over-wide query still answers something.
-    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
+    // Same cap `availability()` applies (contract §Engine) — clamped rather
+    // than rejected, so an over-wide query still answers something.
+    const toMs = clampAvailabilityWindow(fromMs, new Date(q.to).getTime());
     const result = await getBookingRescheduleAvailability(
       this.db,
       {
@@ -642,20 +667,36 @@ export class BookingService {
   async teamAvailability(
     accountCode: string,
     teamSlug: string,
-    slug: string,
-    from: string,
-    to: string,
+    // Typed as possibly-absent because they ARE: these come off an
+    // unauthenticated query string. The schema below is what makes them
+    // present, so the controller no longer needs a presence check of its own —
+    // and cannot forget one.
+    slug: string | undefined,
+    from: string | undefined,
+    to: string | undefined,
     timeZone?: string,
   ): Promise<AvailabilityResponse | null> {
+    // PARSED and CLAMPED, exactly as the personal path is (#136). This route is
+    // unauthenticated, and it used to do neither: `new Date('x').getTime()` is
+    // `NaN`, and a `NaN` window reaches `computeSlots` as a `RangeError` thrown
+    // out of a public route, while an unbounded one asks for slot generation
+    // across every host of a collective event for however long the caller
+    // named. Rate limiting counts requests, not window width, so it absorbs
+    // neither. The parse happens here rather than in the controller so that
+    // EVERY caller inherits it — the `/v2/slots` team branch reaches this method
+    // too.
+    const q = teamAvailabilityQuerySchema.parse({ slug, from, to, timeZone });
+    const fromMs = new Date(q.from).getTime();
+    const toMs = clampAvailabilityWindow(fromMs, new Date(q.to).getTime());
     const result = await getTeamAvailability(
       this.db,
       {
         accountCode,
         teamSlug,
-        slug,
-        fromMs: new Date(from).getTime(),
-        toMs: new Date(to).getTime(),
-        displayTimeZone: timeZone,
+        slug: q.slug,
+        fromMs,
+        toMs,
+        displayTimeZone: q.timeZone,
       },
       this.calendar.provider,
     );

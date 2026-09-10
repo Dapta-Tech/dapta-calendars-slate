@@ -79,7 +79,15 @@ export default async function EditEventType({
           publicPath ? (
             // Visibility stays on the form's own "Hidden" checkbox — only the
             // open/copy shortcuts live up here.
-            <EventRowActions id={et.id} hidden={et.hidden} publicPath={publicPath} messages={m} hideToggle />
+            <EventRowActions
+              id={et.id}
+              hidden={et.hidden}
+              publicPath={publicPath}
+              title={et.title}
+              messages={m}
+              embedMessages={msgs.embed}
+              hideToggle
+            />
           ) : undefined
         }
       />

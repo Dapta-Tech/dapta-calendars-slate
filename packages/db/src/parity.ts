@@ -61,8 +61,36 @@ const DEFAULT_HOLD_MS = 10 * 60_000;
 /** Cap on concurrent unexpired holds per booking page (per host member). */
 const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
-export async function releaseReservation(db: Db, uid: string): Promise<void> {
+/**
+ * Give a soft hold back (#135) — the counterpart to {@link reserveSlot}, which
+ * had none: an abandoned pick used to sit until its TTL while
+ * `loadReservationBusy` hid that slot from every other visitor.
+ *
+ * The uid IS the authorisation. It is a `randomUUID()` handed only to the
+ * caller that placed the hold, so no further scoping is needed — and none is
+ * offered: deleting by `(account, handle, slug, slot_start_ms)` would let any
+ * visitor free anybody's hold, because anyone can name a slot.
+ *
+ * Deliberately TOTAL and silent. A uid that names nothing, a hold that already
+ * expired, and a hold the booking write already consumed all take the same path
+ * as a real release and report nothing back, so a caller cannot use this to
+ * probe whether a hold exists, and a release racing a booking that succeeded
+ * cannot read as a failure.
+ *
+ * It can only ever delete a `slot_reservation` row. A confirmed meeting lives
+ * in `booking` and is not reachable from here, so a release can never cancel
+ * one — including when the uid handed in is a booking uid rather than a
+ * reservation uid.
+ */
+export async function releaseSlot(db: Db, uid: string): Promise<void> {
+  if (!uid) return;
   await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${uid}`);
+}
+
+/** @deprecated Use {@link releaseSlot} — same delete, and the name pairs with
+ *  `reserveSlot`. Kept because `@slate/db` is a published package. */
+export async function releaseReservation(db: Db, uid: string): Promise<void> {
+  await releaseSlot(db, uid);
 }
 
 export async function sweepExpiredReservations(db: Db, now = Date.now()): Promise<void> {

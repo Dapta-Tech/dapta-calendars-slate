@@ -76,6 +76,30 @@ export class PublicController {
     }
   }
 
+  /**
+   * Give a soft hold back when the booker leaves the form (#135). Sits beside
+   * `POST /v1/reservations` and inherits the same per-IP `RateLimitGuard` from
+   * the controller.
+   *
+   * A POST with the uid in the BODY rather than `DELETE /v1/reservations/{uid}`:
+   * the uid is the only thing authorising the release, and a path segment lands
+   * in access logs and `Referer` — the same reason `manageToken()` above prefers
+   * a header or a body field over `?token=`.
+   *
+   * Always 200 with the same body. Releasing a hold that is not yours, or one
+   * that already expired or was consumed by a booking, is a no-op that reports
+   * success, so this is never an oracle for whether a hold exists.
+   */
+  @Post('reservations/release')
+  @HttpCode(200)
+  async releaseReservation(@Body() body: unknown) {
+    try {
+      return await this.svc.release(body);
+    } catch (err) {
+      badReq(err);
+    }
+  }
+
   @Post('bookings')
   @HttpCode(201)
   async book(@Body() body: unknown) {
@@ -161,11 +185,17 @@ export class PublicController {
     @Param('teamSlug') teamSlug: string,
     @Query() q: Record<string, string>,
   ) {
-    if (!q.slug || !q.from || !q.to)
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'slug, from, to required' });
-    const r = await this.svc.teamAvailability(accountCode, teamSlug, q.slug, q.from, q.to, q.timeZone);
-    if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Team event not found.' });
-    return r;
+    // The service parses this query with `teamAvailabilityQuerySchema` and
+    // clamps the window (#136). The presence check that used to stand here
+    // bounded nothing and let an unparseable `from` through as a `NaN`; a zod
+    // failure now answers 400 through `badReq`, as the personal route does.
+    try {
+      const r = await this.svc.teamAvailability(accountCode, teamSlug, q.slug, q.from, q.to, q.timeZone);
+      if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Team event not found.' });
+      return r;
+    } catch (err) {
+      badReq(err);
+    }
   }
 
   @Post('public/teams/:accountCode/:teamSlug/bookings')

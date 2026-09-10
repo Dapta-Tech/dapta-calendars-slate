@@ -29,6 +29,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/cn';
+import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
@@ -105,6 +106,9 @@ export interface StudioInit {
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
+  /** Copy for the embed dialog (E) — the landing page's snippet lives beside
+   *  the link it embeds, which is here. */
+  embedMessages: BookingMessages['embed'];
   /** 'en' | 'es' — the booking-flow preview's month grid is locale-shaped. */
   locale: string;
   /** Screen-reader suffix for the link that opens the public page (A2, #112). */
@@ -131,7 +135,15 @@ export function Studio(init: StudioInit) {
     const ordered = init.eventOrder.filter((s) => all.includes(s));
     return [...ordered, ...all.filter((s) => !ordered.includes(s))];
   });
+  const [embedOpen, setEmbedOpen] = useState(false);
   const [eventPending, startEvent] = useTransition();
+
+  /**
+   * The host's public landing path, derived once so the copyable link and the
+   * embed snippet cannot describe two different pages. Live: editing the handle
+   * or the vanity slug above updates both immediately.
+   */
+  const landingPath = `/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`;
   const router = useRouter();
   const toast = useToast();
 
@@ -326,7 +338,10 @@ export function Studio(init: StudioInit) {
                 update the path immediately. */}
             <Field label={m.yourLink}>
               <CopyLink
-                path={`/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`}
+                // `landingPath` is E's derived const — the same expression this
+                // used to inline, hoisted so the copyable link and the embed
+                // snippet cannot describe two different pages.
+                path={landingPath}
                 labels={{
                   copy: m.linkCopy,
                   copied: m.linkCopied,
@@ -335,6 +350,31 @@ export function Studio(init: StudioInit) {
                 }}
               />
             </Field>
+            {/* The landing page's embed snippet, beside the link it embeds
+                (#67). Event types get theirs from the row actions.
+
+                Deliberately OUTSIDE the `Field` above: that component wraps its
+                children in a `<label>`, and a control inside a label takes the
+                label's whole text as its accessible name — so putting this here
+                renamed the neighbouring Copy button to "Your link Copy Open
+                Embed on your site". A button is not what a field label labels. */}
+            <div className="flex flex-col">
+              <button
+                type="button"
+                onClick={() => setEmbedOpen(true)}
+                className="inline-flex items-center gap-1.5 self-start text-sm text-primary hover:underline"
+              >
+                <EmbedIcon />
+                {init.embedMessages.action}
+              </button>
+              <EmbedSnippetModal
+                open={embedOpen}
+                onClose={() => setEmbedOpen(false)}
+                publicPath={landingPath}
+                title={displayName || init.displayName || handle || init.handle}
+                messages={init.embedMessages}
+              />
+            </div>
             {init.vanity.canClaim ? (
               <Field label={m.vanityLabel}>
                 <Input

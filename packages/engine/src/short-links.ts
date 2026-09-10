@@ -36,12 +36,20 @@ export function isShortCode(value: string): boolean {
  * Slugs that can never be claimed as a vanity account slug (or generated as a
  * short code): top-level routes, infra paths, and confusables. Superset of the
  * per-account handle blocklists so an account slug can't shadow app routes.
+ *
+ * Shadowing an app route is no longer only a routing problem. `apps/web` decides
+ * a page's `frame-ancestors` from its path, and treats the product's top-level
+ * prefixes as never-frameable. An account that claimed one of those as its
+ * vanity slug would serve its own booking page from a path the framing rule
+ * reads as the product, and its embed would render a blocked frame on every
+ * host site with no error anywhere. Every entry in that prefix list must
+ * therefore appear here — `onboarding` was the one that did not.
  */
 export const RESERVED_PUBLIC_SLUGS = new Set([
   'about', 'admin', 'api', 'app', 'apps', 'assets', 'auth', 'availability', 'billing', 'blog', 'booking',
   'bookings', 'calendar', 'calendars', 'connections', 'contact', 'dashboard', 'demo', 'dev',
   'docs', 'events', 'event-types', 'favicon', 'health', 'help', 'home', 'internal', 'login',
-  'logout', 'mail', 'manage', 'me', 'null', 'oauth', 'pricing', 'privacy', 'public', 'reserved',
+  'logout', 'mail', 'manage', 'me', 'null', 'oauth', 'onboarding', 'pricing', 'privacy', 'public', 'reserved',
   'robots', 'root', 'settings', 'signin', 'signup', 'sitemap', 'static', 'status', 'support',
   'team', 'teams', 'terms', 'test', 'undefined', 'v1', 'v2', 'webhooks', 'www',
 ]);

@@ -98,7 +98,9 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
                     ? `/${me.accountCode}/team/${team.slug}/${et.slug}`
                     : null
                 }
+                title={et.title}
                 messages={msgs.admin.eventTypes}
+                embedMessages={msgs.embed}
               />
             </span>
           </li>

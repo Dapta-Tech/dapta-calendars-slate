@@ -1007,6 +1007,31 @@ export const openapiSpec = {
         },
       },
     },
+    '/v1/public/teams/{accountCode}/{teamSlug}/availability': {
+      get: {
+        summary: 'Public team availability (round-robin / collective)',
+        description:
+          'The team counterpart to GET /v1/availability. The window is capped at ' +
+          '60 days from `from`: a wider range is clamped, not rejected. `from` and ' +
+          '`to` must be ISO-8601 instants with an offset.',
+        parameters: [
+          { name: 'accountCode', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'teamSlug', in: 'path', required: true, schema: { type: 'string' } },
+          ...['slug', 'from', 'to', 'timeZone'].map((name) => ({
+            name,
+            in: 'query',
+            required: name !== 'timeZone',
+            schema: { type: 'string' },
+          })),
+        ],
+        responses: {
+          '200': { description: 'Availability with slots[{startUtc}]' },
+          '400': { description: 'BAD_REQUEST (missing slug, or an unparseable from/to)' },
+          '404': { description: 'NOT_FOUND (no such team event)' },
+          '429': { description: 'RATE_LIMITED' },
+        },
+      },
+    },
     '/v1/reservations': {
       post: {
         summary: 'Place a 10-minute hold on a slot',
@@ -1023,6 +1048,32 @@ export const openapiSpec = {
         responses: {
           '201': { description: '{reservationUid,expiresAt}' },
           '400': { description: 'INVALID_SLOT' },
+          '429': { description: 'RATE_LIMITED' },
+        },
+      },
+    },
+    '/v1/reservations/release': {
+      post: {
+        summary: 'Give a held slot back',
+        description:
+          'Releases a hold placed by POST /v1/reservations so the slot is offered ' +
+          'to other visitors again, rather than waiting out its ten-minute TTL. ' +
+          'The reservation uid is the authorisation — releasing a hold you do not ' +
+          'hold, one that already expired, or one a booking already consumed all ' +
+          'answer the same 200, so this is never a way to learn whether a hold exists.',
+        requestBody: jsonBody({
+          type: 'object',
+          required: ['reservationUid'],
+          properties: {
+            reservationUid: {
+              type: 'string',
+              description: 'The uid returned by POST /v1/reservations.',
+            },
+          },
+        }),
+        responses: {
+          '200': { description: '{released:true} — always, when the body parses' },
+          '400': { description: 'BAD_REQUEST (no reservationUid)' },
           '429': { description: 'RATE_LIMITED' },
         },
       },

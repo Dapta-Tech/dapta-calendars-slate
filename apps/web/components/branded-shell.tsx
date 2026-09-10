@@ -19,10 +19,18 @@ import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 export function BrandedShell({
   brandColor,
   style,
+  className,
   children,
 }: {
   brandColor: string | null;
   style: Record<string, unknown> | null;
+  /**
+   * Appended to the branding classes. The embed (E) hangs `dc-embed` here so
+   * its CSS can out-specify a `.branded-surface` rule without `!important`:
+   * both classes land on the same element, so `.branded-surface.dc-embed …`
+   * beats `.branded-surface …` on its own.
+   */
+  className?: string;
   children: ReactNode;
 }) {
   const axes = (style ?? {}) as Record<string, string>;
@@ -45,7 +53,7 @@ export function BrandedShell({
   });
 
   return (
-    <div className={cls} style={vars}>
+    <div className={className ? `${cls} ${className}` : cls} style={vars}>
       {children}
     </div>
   );
