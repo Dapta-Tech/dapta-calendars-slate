@@ -12,10 +12,8 @@ import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/page-header';
 import { Radio } from '@/components/ui/radio';
-import { Select } from '@/components/ui/select';
 import {
   connectCalendarAction,
-  createConnectionAction,
   deleteConnectionAction,
   discoverConnectionsAction,
   pingConnectionAction,
@@ -123,6 +121,19 @@ const CONNECT_SIGNAL_STORAGE_KEY = 'slate-connect-signal-at';
  *  timestamp comparison (client open-time vs. the vendor's own updatedAt). */
 const CONNECT_CLOCK_SKEW_GRACE_MS = 10_000;
 
+/** Explicit checks that may come back empty before the dialog stops waiting.
+ *  Two: the first can legitimately race a slow write-through, the second
+ *  cannot — by then the answer is "this account was never connected". */
+const MAX_MANUAL_CHECKS = 2;
+
+/** …but a COUNT alone is not enough to conclude that. Two clicks can land
+ *  seconds apart while the consent screen is still open, and giving up there
+ *  would tell the user their connection failed while it is still being
+ *  authorized. Elapsed time is the second half of the condition. Measured from
+ *  `connectOpenedAtRef`, which already carries the skew grace, so the real
+ *  wall-clock floor is this minus CONNECT_CLOCK_SKEW_GRACE_MS. */
+const MIN_WAIT_BEFORE_GIVING_UP_MS = 30_000;
+
 function parseTimestamp(v: string | null | undefined): number | null {
   if (!v) return null;
   const t = new Date(v).getTime();
@@ -154,7 +165,10 @@ function ConnectDialog({
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [showManual, setShowManual] = useState(false);
+  // An EXPLICIT check is a different thing from the background poll: it is a
+  // click, so it must always change something on screen. This drives the
+  // button's in-flight label; the poll never touches it.
+  const [checking, setChecking] = useState(false);
   const [pendingProvider, setPendingProvider] = useState<string | null>(null);
   const [emailInput, setEmailInput] = useState('');
   const popupRef = useRef<Window | null>(null);
@@ -176,6 +190,15 @@ function ConnectDialog({
   // opened — a brand-new connection with no timestamp fields at all (an older
   // wire) still gets caught as "an id that wasn't here before".
   const baselineIdsRef = useRef<Set<string>>(new Set());
+  // Consecutive EXPLICIT checks that found nothing. Two is the point at which
+  // waiting has stopped being useful: the popup is long done, and the likely
+  // cause is a different account, which more polling can never fix.
+  const failedChecksRef = useRef(0);
+  // The dialog is never unmounted — it renders behind `open`. So a check that
+  // resolves AFTER the user closed it would otherwise write an error into a
+  // dialog that is gone, and the next open would show it. Every check carries
+  // the generation it started in; `reset` bumps it.
+  const runIdRef = useRef(0);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -189,6 +212,9 @@ function ConnectDialog({
     setStage('choose');
     setMsg(null);
     setErr(null);
+    setChecking(false);
+    failedChecksRef.current = 0;
+    runIdRef.current += 1;
     setPendingProvider(null);
     setEmailInput('');
   }, [stopPolling]);
@@ -202,30 +228,130 @@ function ConnectDialog({
     [reset, onClose, router],
   );
 
-  // Poll for the just-(re)connected account. Success is EITHER: a row of the
+  // A FAILED OAuth attempt: stop waiting (the popup already closed itself or
+  // is showing its own dead end), go back to the picker, and show the reason
+  // — instead of polling forever against a discover call that will never see
+  // a new/updated connection because nothing actually connected.
+  const failNow = useCallback(
+    (message: string | null, { closePopup = true }: { closePopup?: boolean } = {}) => {
+      stopPolling();
+      // `closePopup: false` is for the give-up path: we have concluded that
+      // nothing is coming, but we did not SEE the attempt fail, and closing a
+      // window the user is still signing into would destroy a live
+      // authorization. The OAuth-failure signal path still closes, because
+      // there the popup has already reached its own dead end.
+      if (closePopup && popupRef.current && !popupRef.current.closed) popupRef.current.close();
+      if (closePopup) popupRef.current = null;
+      setStage('choose');
+      setErr(message || m.connectFailed);
+    },
+    [stopPolling, m.connectFailed],
+  );
+
+  /** The provider's own label, for a message that names what is being waited on. */
+  const providerLabel = useCallback(
+    (provider: string) => {
+      const known = PROVIDERS.find((p) => p.key === providerKind(provider) || p.key === provider);
+      return known ? m[known.labelKey] : provider;
+    },
+    [m],
+  );
+
+  // Look for the just-(re)connected account. Success is EITHER: a row of the
   // active provider kind whose updatedAt/lastActiveAt lands at/after the
   // moment the popup opened (catches a RECONNECT of an existing account, the
   // real fix for "already connected but reconnect hangs"), OR a row whose id
   // wasn't present before the popup opened (catches a brand-new connection on
   // a wire that doesn't report timestamps).
-  const checkForNew = useCallback(() => {
-    void discoverConnectionsAction(activeProvider.current, activeEmail.current).then((r) => {
-      if (!r.ok) return;
-      const kind = providerKind(activeProvider.current);
-      const openedAt = connectOpenedAtRef.current;
-      const match = r.connections.find((c) => {
-        if (providerKind(c.provider) !== kind) return false;
-        if (!baselineIdsRef.current.has(c.id)) return true;
-        const updated = parseTimestamp(c.updatedAt);
-        const active = parseTimestamp(c.lastActiveAt);
-        return (updated != null && updated >= openedAt) || (active != null && active >= openedAt);
-      });
-      if (match) {
-        setMsg(m.connectSuccess);
-        finish(true);
+  //
+  // `manual` is the whole point of this function's shape. The 2.5s poll runs
+  // behind a spinner that already says "waiting", so it stays silent on a
+  // miss — a poll that narrated every tick would be noise. A CLICK is a
+  // question, and a question with no answer is what made this button read as
+  // broken: discovery's own `{ ok: false, message }` was dropped on the floor
+  // and a no-match did nothing at all, in every failure path there is.
+  const checkForNew = useCallback(
+    (manual = false) => {
+      if (manual) {
+        setErr(null);
+        setChecking(true);
       }
-    });
-  }, [finish, m.connectSuccess]);
+      const run = ++runIdRef.current;
+      // Every path below is guarded by `stale`: the dialog can be closed while
+      // this is in flight, and writing into it afterwards leaves an error that
+      // surfaces on the NEXT open.
+      const stale = () => run !== runIdRef.current;
+      void discoverConnectionsAction(activeProvider.current, activeEmail.current)
+        .then((r) => {
+          if (stale()) return;
+          const label = providerLabel(activeProvider.current);
+          const email = activeEmail.current;
+          if (!r.ok) {
+            // Discovery itself failed. `r.message` is raw server prose — it can
+            // be an untranslated `POST /path → 500` — so the user gets the
+            // catalog string and the detail goes to the console for whoever is
+            // actually debugging.
+            if (manual) {
+              console.warn('[connections] discovery failed:', r.message);
+              setErr(m.connectCheckFailed);
+            }
+            return;
+          }
+          const kind = providerKind(activeProvider.current);
+          const openedAt = connectOpenedAtRef.current;
+          const match = r.connections.find((c) => {
+            if (providerKind(c.provider) !== kind) return false;
+            if (!baselineIdsRef.current.has(c.id)) return true;
+            const updated = parseTimestamp(c.updatedAt);
+            const active = parseTimestamp(c.lastActiveAt);
+            return (updated != null && updated >= openedAt) || (active != null && active >= openedAt);
+          });
+          if (match) {
+            setMsg(m.connectSuccess);
+            finish(true);
+            return;
+          }
+          if (!manual) return;
+          // No email means no account to name, which is also the state in which
+          // the message would read "…connection for  yet". Unreachable today
+          // (the email step requires a value) — say the generic thing anyway.
+          if (!email) {
+            setErr(m.connectCheckFailed);
+            return;
+          }
+          failedChecksRef.current += 1;
+          const waitedLongEnough =
+            Date.now() - connectOpenedAtRef.current > MIN_WAIT_BEFORE_GIVING_UP_MS;
+          if (failedChecksRef.current >= MAX_MANUAL_CHECKS && waitedLongEnough) {
+            // Naming the account is the useful part: authorizing a DIFFERENT
+            // account than the one typed at the email step writes to a
+            // different connection subject, which this call can never see, and
+            // nothing on screen said so.
+            failNow(t(m.connectGaveUp, { provider: label, email }), { closePopup: false });
+            return;
+          }
+          setErr(t(m.connectNotSeenYet, { provider: label, email }));
+        })
+        .catch(() => {
+          // The action call itself rejected — a dropped network, a transport
+          // error. Without this the button would go quiet again, which is the
+          // exact defect this change exists to remove.
+          if (manual && !stale()) setErr(m.connectCheckFailed);
+        })
+        .finally(() => {
+          if (manual && !stale()) setChecking(false);
+        });
+    },
+    [
+      finish,
+      failNow,
+      providerLabel,
+      m.connectSuccess,
+      m.connectCheckFailed,
+      m.connectGaveUp,
+      m.connectNotSeenYet,
+    ],
+  );
 
   // Step 1 of 2: pick a provider, then ask which account (the email step) —
   // never opens the popup yet, so no gesture is spent here.
@@ -250,6 +376,7 @@ function ConnectDialog({
       connections.filter((c) => providerKind(c.provider) === kind).map((c) => c.id),
     );
     connectOpenedAtRef.current = Date.now() - CONNECT_CLOCK_SKEW_GRACE_MS;
+    failedChecksRef.current = 0;
     // Open the popup NOW, in the gesture, so it is not blocked.
     const popup = window.open('about:blank', 'slate-connect', 'width=520,height=720');
     if (!popup) {
@@ -270,7 +397,7 @@ function ConnectDialog({
       popup.location.href = r.connectUrl;
       // Detect completion by polling the server (revalidated by the action).
       stopPolling();
-      pollRef.current = setInterval(checkForNew, 2500);
+      pollRef.current = setInterval(() => checkForNew(false), 2500);
     });
   };
 
@@ -280,7 +407,7 @@ function ConnectDialog({
     window.addEventListener('keydown', onKey);
     // A refocus of our window is a strong signal the popup flow finished.
     const onFocus = () => {
-      if (stage === 'waiting') checkForNew();
+      if (stage === 'waiting') checkForNew(false);
     };
     window.addEventListener('focus', onFocus);
     return () => {
@@ -288,21 +415,6 @@ function ConnectDialog({
       window.removeEventListener('focus', onFocus);
     };
   }, [open, stage, checkForNew, finish]);
-
-  // A FAILED OAuth attempt: stop waiting (the popup already closed itself or
-  // is showing its own dead end), go back to the picker, and show the reason
-  // — instead of polling forever against a discover call that will never see
-  // a new/updated connection because nothing actually connected.
-  const failNow = useCallback(
-    (message: string | null) => {
-      stopPolling();
-      if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-      popupRef.current = null;
-      setStage('choose');
-      setErr(message || m.connectFailed);
-    },
-    [stopPolling, m.connectFailed],
-  );
 
   // Instant completion signal from `/admin/connections/connected` (the OAuth
   // popup's landing page) — checks right away instead of waiting up to 2.5s
@@ -323,7 +435,7 @@ function ConnectDialog({
         }
       }
       if (parsed && parsed.ok === false) failNow(parsed.message ?? null);
-      else checkForNew();
+      else checkForNew(false);
     };
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
@@ -429,13 +541,29 @@ function ConnectDialog({
             <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary-edge" aria-hidden />
             <span className="text-sm font-medium text-foreground">{m.connectWaiting}</span>
             <p className="text-sm text-muted-foreground">{msg ?? m.connectHint}</p>
-            <Button variant="outline" size="lg" onClick={checkForNew}>
-              {m.connectDone}
+            {/* `aria-busy`, not `disabled`: disabling the button the user just
+                pressed drops focus to <body>, and the answer this change exists
+                to produce would never reach a screen reader. The handler
+                guards against the double-click instead. */}
+            <Button
+              variant="outline"
+              size="lg"
+              aria-busy={checking}
+              onClick={() => {
+                if (checking) return;
+                checkForNew(true);
+              }}
+            >
+              {checking ? m.connectChecking : m.connectDone}
             </Button>
           </div>
         )}
 
-        {err ? <p className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">{err}</p> : null}
+        {err ? (
+          <p role="alert" className="mt-4 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            {err}
+          </p>
+        ) : null}
 
         {!enabled ? (
           <p className="mt-4 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -444,27 +572,6 @@ function ConnectDialog({
           </p>
         ) : null}
 
-        {/* Advanced: manual reference add, kept OUT of the list surface (R30).
-            The `▾`/`▸` glyph pair is now the icon set's own chevrons, on a real
-            disclosure button that announces its state. */}
-        <div className="mt-5 border-t border-border pt-4">
-          <Button
-            variant="ghost"
-            size="lg"
-            aria-expanded={showManual}
-            onClick={() => setShowManual((v) => !v)}
-            className="-ml-3 text-xs text-muted-foreground"
-          >
-            <i
-              aria-hidden
-              className={`pi ${showManual ? 'pi-chevron-down' : 'pi-chevron-right'}`}
-              style={{ fontSize: 11 }}
-            />
-            {m.manualTitle}
-          </Button>
-          {showManual ? <ManualAddForm m={m} onAdded={() => finish(true)} /> : null}
-        </div>
-
         <div className="mt-5 flex justify-end">
           <Button variant="outline" size="lg" onClick={() => finish(false)}>
             {m.close}
@@ -472,62 +579,6 @@ function ConnectDialog({
         </div>
       </div>
     </Modal>
-  );
-}
-
-/** Advanced manual-add: record a calendar reference by id (adapter/testing use). */
-function ManualAddForm({ m, onAdded }: { m: ConnectionsMessages; onAdded: () => void }) {
-  const [pending, start] = useTransition();
-  const [err, setErr] = useState<string | null>(null);
-  // `Select` is controlled and has no `name`, so the picked provider reaches the
-  // FormData through a hidden input — the same shape `general-form.tsx` uses for
-  // its timezone.
-  const [provider, setProvider] = useState('google');
-  return (
-    <form
-      className="mt-3 flex flex-col gap-3"
-      action={(form) =>
-        start(async () => {
-          const r = await createConnectionAction(null, form);
-          if (r.ok) onAdded();
-          else setErr(r.message ?? m.disconnectError);
-        })
-      }
-    >
-      <p className="text-xs text-muted-foreground">{m.manualDesc}</p>
-      <div className="flex flex-wrap items-end gap-3">
-        {/* A <div>, not a <label>: the picker's trigger is a <button>. Wide
-            enough for the longest provider label — at 144px "Google Calendar"
-            truncated on the trigger — and full-width at 360px, where it takes
-            its own line rather than sharing one with the id field. */}
-        <div className="flex w-full flex-col gap-1 text-sm sm:w-48">
-          <span className="text-muted-foreground">{m.provider}</span>
-          <Select
-            value={provider}
-            options={PROVIDERS.map(({ key, labelKey }) => ({ value: key, label: m[labelKey] }))}
-            ariaLabel={m.provider}
-            onChange={setProvider}
-          />
-          <input type="hidden" name="provider" value={provider} />
-        </div>
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-          <span className="text-muted-foreground">{m.calendarId}</span>
-          <Input name="externalId" required className="min-h-[44px]" />
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
-          <Checkbox name="checkConflicts" defaultChecked /> {m.conflictCheck.toLowerCase()}
-        </label>
-        <label className="flex min-h-[44px] cursor-pointer items-center gap-2">
-          <Checkbox name="isDestination" /> {m.destination.toLowerCase()}
-        </label>
-        <Button type="submit" size="lg" disabled={pending} className="ml-auto">
-          {pending ? m.addingConnection : m.addConnection}
-        </Button>
-      </div>
-      {err ? <p className="text-sm text-destructive">{err}</p> : null}
-    </form>
   );
 }
 

@@ -12,7 +12,7 @@ studio's `available`/`taken` drop the `✓`/`✗` now that those states render a
 icon. New keys cover eight destructive confirmations that either faked a dialog
 with two inline buttons or asked nothing at all, plus the labels the new icon
 controls need (`common.opensNewTab`, `availability.removeOverride`,
-`developer.creating`/`loading`, `connections.addingConnection`).
+`developer.creating`/`loading`).
 
 The token sheet's contrast law now also covers TRANSLUCENT grounds. Every
 assertion before this measured a solid token on a solid ground, while the admin
