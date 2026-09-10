@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import Link from 'next/link';
-import { formatLocation, getMessages, t } from '@slate/shared';
+import { getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -54,11 +53,15 @@ export default async function BookingPage({
   const { accountCode, handle, slug } = await params;
   const { lang } = await searchParams;
   const locale = await publicLocale(lang);
-  const messages = getMessages(locale);
 
   const now = new Date();
   const from = now.toISOString();
-  const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
+  // 60 days, not 21: the month calendar (BP) needs a whole month per view, and
+  // the availability service clamps its own window at 60 days from `from`
+  // anyway, so this is the widest single read the contract allows. Asking for
+  // more would silently get 60; asking for 21 left the calendar unable to
+  // fill its own grid.
+  const to = new Date(now.getTime() + 60 * 86_400_000).toISOString();
 
   const [profile, availability] = await Promise.all([
     getProfile(accountCode, handle),
@@ -73,31 +76,18 @@ export default async function BookingPage({
     permanentRedirect(`/${code}/${handle}/${slug}${lang ? `?lang=${lang}` : ''}`);
   }
 
+  // The event's own description lives on the public listing, not on the
+  // availability contract — the same row `generateMetadata` above already
+  // reads, so the panel costs no extra call.
+  const listing = profile.eventTypes.find((e) => e.slug === slug);
+  const hostName = profile.member.displayName ?? profile.member.handle;
+
   return (
     <BrandedShell brandColor={profile.member.brandColor} style={profile.member.style}>
-      <main className="mx-auto max-w-4xl px-6 py-12">
-        <header className="mb-8 flex flex-col gap-1">
-        <Link
-          href={`/${code}/${handle}`}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← {profile.member.displayName ?? profile.member.handle}
-        </Link>
-        <h1 className="text-3xl font-semibold tracking-tight">{availability.eventType.title}</h1>
-        <p className="text-sm text-muted-foreground">
-          {availability.eventType.lengthMinutes} min · with{' '}
-          {profile.member.displayName ?? profile.member.handle}
-        </p>
-        {/* The Where, so an invitee knows how they are meeting BEFORE booking.
-            Generic wording only: the repo names no conferencing platform. */}
-        {formatLocation(availability.eventType.location, messages) ? (
-          <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{messages.location.whereLabel}:</span>{' '}
-            {formatLocation(availability.eventType.location, messages)}
-          </p>
-        ) : null}
-      </header>
-
+      {/* No link back to the profile page. `/{account}/{handle}` is its own
+          entry point — the "Your booking link" the studio hands out — not the
+          parent of every event page, and nothing here points at it. */}
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
         <BookingFlow
           accountCode={accountCode}
           ownerSlug={handle}
@@ -107,6 +97,13 @@ export default async function BookingPage({
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
           locale={locale}
+          eventTitle={availability.eventType.title}
+          lengthMinutes={availability.eventType.lengthMinutes}
+          description={listing?.description ?? null}
+          hostName={hostName}
+          avatarUrl={profile.member.avatarUrl}
+          location={availability.eventType.location}
+          nowUtc={from}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />

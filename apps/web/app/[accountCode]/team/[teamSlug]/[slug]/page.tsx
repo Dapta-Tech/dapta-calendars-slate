@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import Link from 'next/link';
-import { formatLocation, getMessages, schedulingMethodLabel, t } from '@slate/shared';
+import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -47,7 +46,10 @@ export default async function TeamBookingPage({
   const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
-  const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
+  // 60 days — the month calendar's window, and the service's own clamp. Which
+  // slots a team event offers is unchanged (#127 owns that question); this
+  // only asks for more of the days it was already prepared to answer for.
+  const to = new Date(now.getTime() + 60 * 86_400_000).toISOString();
 
   const [team, availability] = await Promise.all([
     getTeamProfile(accountCode, teamSlug),
@@ -59,27 +61,14 @@ export default async function TeamBookingPage({
   const code = team!.account.code;
   if (accountCode !== code) permanentRedirect(`/${code}/team/${teamSlug}/${slug}`);
 
+  const listing = team.eventTypes.find((e) => e.slug === slug);
+
   return (
     <BrandedShell brandColor={null} style={null}>
-      <main className="mx-auto max-w-3xl px-6 py-12">
-        <header className="mb-8 flex flex-col gap-1">
-          <Link href={`/${code}/team/${teamSlug}`} className="text-sm text-muted-foreground hover:text-foreground">
-            ← {team.team.name}
-          </Link>
-          <h1 className="text-3xl font-semibold tracking-tight">{availability.eventType.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {availability.eventType.lengthMinutes} min · {team.team.name} ·{' '}
-            {schedulingMethodLabel(messages, availability.eventType.schedulingType)}
-          </p>
-          {/* The Where, same as the personal booking page. */}
-          {formatLocation(availability.eventType.location, messages) ? (
-            <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{messages.location.whereLabel}:</span>{' '}
-              {formatLocation(availability.eventType.location, messages)}
-            </p>
-          ) : null}
-        </header>
-
+      {/* No link back to the team page, for the same reason the personal event
+          page no longer links to a profile: the team page is an entry point,
+          not this page's parent. */}
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
         <BookingFlow
           accountCode={accountCode}
           ownerSlug={teamSlug}
@@ -90,6 +79,16 @@ export default async function TeamBookingPage({
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
           locale={locale}
+          eventTitle={availability.eventType.title}
+          lengthMinutes={availability.eventType.lengthMinutes}
+          description={listing?.description ?? null}
+          // The team is the host here: its name and logo are what an invitee
+          // is booking with, and B1's initial tile covers a team with no logo.
+          hostName={team.team.name}
+          avatarUrl={team.team.logoUrl}
+          location={availability.eventType.location}
+          methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
+          nowUtc={from}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />

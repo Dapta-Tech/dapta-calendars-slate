@@ -2,15 +2,20 @@
 
 import { useActionState, useMemo, useState } from 'react';
 import {
-  groupSlotsByDay,
+  formatLocation,
   formatSlotDateTime,
   getMessages,
+  groupSlotsByDay,
   isReservedFieldName,
+  monthKeyOf,
   t,
   validateBookingFieldValue,
+  weekStartsOnFor,
+  zonedTodayKey,
   type DisplaySlot,
   type Slot,
 } from '@slate/shared';
+import { EventPanel, MonthCalendar } from '@/components/booking-page-parts';
 
 /** Mirror of the server's attendee-email rule — catches the 400 before a
  *  round-trip, so a typo never costs the visitor their filled-in form. */
@@ -39,6 +44,28 @@ interface Props {
   mode?: 'personal' | 'team';
   /** Visitor locale ('en' | 'es') for EN/ES copy. */
   locale?: string;
+
+  // --- The event panel (BP) ---------------------------------------------
+  // These moved out of the two route headers when the page became three
+  // regions. They are props rather than a second fetch because the routes
+  // already hold every one of them from the reads they do today.
+  eventTitle: string;
+  lengthMinutes: number;
+  description?: string | null;
+  /** Host display name, or the team name on a team event. */
+  hostName: string;
+  avatarUrl?: string | null;
+  /** Raw location — the label comes from `formatLocation`, the icon from the kind. */
+  location?: { kind: string; detail?: string | null } | null;
+  /** Team scheduling method label; personal events pass nothing. */
+  methodLabel?: string | null;
+  /**
+   * The instant the server rendered at. "Today", and therefore the first month
+   * and which days are past, are derived from THIS rather than from `new
+   * Date()`, so the server's HTML and the client's hydration cannot disagree
+   * about the date when a render straddles midnight.
+   */
+  nowUtc: string;
 }
 
 interface Hold {
@@ -47,11 +74,18 @@ interface Hold {
 }
 
 /**
- * The interactive island: pick a timezone, pick a slot (which places a soft
- * HOLD), fill the form, book. Slots are absolute UTC instants (tz switch
- * regroups with no refetch). Errors surface by HTTP status: 409 slot-taken and
- * 410 hold-expired both offer a Retry (R22 error+retry). Branding renders via
- * the ancestor `.branded-surface` classes + `--bp-*` vars (preview == prod).
+ * The interactive island: pick a timezone, pick a day, pick a slot (which
+ * places a soft HOLD), fill the form, book. Slots are absolute UTC instants (a
+ * tz switch regroups the calendar AND the column with no refetch). Errors
+ * surface by HTTP status: 409 slot-taken and 410 hold-expired both offer a
+ * Retry (R22 error+retry). Branding renders via the ancestor `.branded-surface`
+ * classes + `--bp-*` vars (preview == prod).
+ *
+ * The layout is the three regions every invitee already knows (BP): the event
+ * panel, a month calendar, and the chosen day's times. Once a time is picked
+ * the calendar folds away and the form takes its room — the form is the same
+ * form, re-parented, not rewritten, and so are the confirmation and every
+ * failure card below it.
  */
 export function BookingFlow({
   accountCode,
@@ -63,9 +97,19 @@ export function BookingFlow({
   initialTimeZone,
   mode = 'personal',
   locale = 'en',
+  eventTitle,
+  lengthMinutes,
+  description,
+  hostName,
+  avatarUrl,
+  location,
+  methodLabel,
+  nowUtc,
 }: Props) {
-  const m = getMessages(locale).booking;
-  const pm = getMessages(locale).phonePicker;
+  const messages = getMessages(locale);
+  const m = messages.booking;
+  const bp = messages.bookingPage;
+  const pm = messages.phonePicker;
   // Reserved names (name/email/notes) are fixed attendee fields this form
   // always asks by itself — a legacy custom question reusing one would ask
   // the attendee twice (QA3 fix 3).
@@ -74,6 +118,18 @@ export function BookingFlow({
     [bookingFields],
   );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
+  /**
+   * 12h/24h, defaulted from the LOCALE rather than from the browser. Reading
+   * `Intl.DateTimeFormat().resolvedOptions().hourCycle` on the client would
+   * disagree with what the server rendered and hydrate-mismatch every slot
+   * label on the page. The toggle overrides it for the session; nothing is
+   * persisted, because this page stores nothing.
+   */
+  const [hour12, setHour12] = useState(() => !locale.toLowerCase().startsWith('es'));
+  /** The month on screen. Only the visitor's navigation moves it. */
+  const [month, setMonth] = useState(() => monthKeyOf(zonedTodayKey(initialTimeZone, new Date(nowUtc))));
+  /** The day the visitor explicitly picked; `null` means "use the default". */
+  const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
   const [holdError, setHoldError] = useState<string | null>(null);
@@ -136,7 +192,48 @@ export function BookingFlow({
     return ok;
   }
 
-  const days = useMemo(() => groupSlotsByDay(slots, timeZone), [slots, timeZone]);
+  const days = useMemo(
+    () => groupSlotsByDay(slots, timeZone, { locale, hour12 }),
+    [slots, timeZone, locale, hour12],
+  );
+
+  /**
+   * Everything the calendar needs, derived from the SAME day buckets the
+   * column renders. Two readings of one list — so the grid can never offer a
+   * day the column then has nothing for, which is the classic way a booking
+   * calendar lies to someone.
+   */
+  const { dayMap, availableDayKeys, todayKey, minMonth, maxMonth } = useMemo(() => {
+    const map = new Map(days.map((d) => [d.dayKey, d]));
+    const today = zonedTodayKey(timeZone, new Date(nowUtc));
+    const last = days.length ? days[days.length - 1]!.dayKey : today;
+    return {
+      dayMap: map,
+      availableDayKeys: new Set(map.keys()),
+      todayKey: today,
+      // No previous month before the one holding today, and no next month past
+      // the last day the page actually has a slot for. A visitor is never sent
+      // to a month this page has no answer for.
+      minMonth: monthKeyOf(today),
+      maxMonth: monthKeyOf(last < today ? today : last),
+    };
+  }, [days, timeZone, nowUtc]);
+
+  /**
+   * The day whose times are on screen. `pickedDay` is only the visitor's
+   * explicit choice; when it does not survive a timezone switch (the day keys
+   * move) or a month change, this falls back to the first bookable day in the
+   * month being viewed. Deriving it instead of syncing it in an effect is what
+   * keeps a tz switch from blanking the column for a frame.
+   */
+  const selectedDay = useMemo(() => {
+    if (pickedDay && dayMap.has(pickedDay) && monthKeyOf(pickedDay) === month) return pickedDay;
+    return days.find((d) => monthKeyOf(d.dayKey) === month)?.dayKey ?? null;
+  }, [pickedDay, dayMap, days, month]);
+
+  const dayColumn = selectedDay ? (dayMap.get(selectedDay) ?? null) : null;
+  const locationLabel = formatLocation(location ?? null, messages);
+  const weekStartsOn = weekStartsOnFor(locale);
 
   async function pick(slot: DisplaySlot) {
     setSelected(slot.startUtc);
@@ -157,6 +254,12 @@ export function BookingFlow({
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
 
+  /**
+   * Drop the slot and the hold and go back to the times. Reached two ways: the
+   * retry on a 409/410, and the explicit "back to times" on the form — which is
+   * the same action, so it is the same function rather than a second one that
+   * would eventually forget to release something.
+   */
   function retry() {
     setSelected(null);
     setHold(null);
@@ -192,13 +295,15 @@ export function BookingFlow({
      */
     const when = Number.isNaN(Date.parse(b.startUtc ?? ''))
       ? null
-      : formatSlotDateTime(b.startUtc, timeZone);
+      : formatSlotDateTime(b.startUtc, timeZone, locale, hour12);
     // Dropped rather than interpolated empty: both strings end in the address,
     // so a missing one renders "A confirmation was sent to ." — worse than
     // saying nothing.
     const attendeeEmail = b.attendee?.email;
     return (
-      <div>
+      // A confirmation is one column of prose; the wide three-region canvas
+      // above it would stretch a two-line sentence across the whole screen.
+      <div className="mx-auto max-w-2xl">
         <section className="bp-card border border-border bg-card p-6 text-card-foreground">
           <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
           <p className="text-muted-foreground">{when ? `${b.title} — ${when}` : b.title}</p>
@@ -257,7 +362,7 @@ export function BookingFlow({
   // person it belongs to already has the confirmation in their inbox.
   if (duplicate) {
     return (
-      <section className="bp-card border border-destructive bg-card p-6">
+      <section className="bp-card mx-auto max-w-2xl border border-destructive bg-card p-6">
         <h2 className="mb-1 text-lg font-semibold">{m.duplicateGuard.title}</h2>
         <p className="mb-4 text-sm text-muted-foreground">{m.duplicateGuard.body}</p>
         <button
@@ -277,7 +382,7 @@ export function BookingFlow({
   if (conflict) {
     const calUnavailable = result!.error === 'CALENDAR_UNAVAILABLE';
     return (
-      <section className="bp-card border border-destructive bg-card p-6">
+      <section className="bp-card mx-auto max-w-2xl border border-destructive bg-card p-6">
         <h2 className="mb-1 text-lg font-semibold">
           {calUnavailable ? m.calendarUnavailableTitle : result!.status === 410 ? m.holdExpired : m.slotTaken}
         </h2>
@@ -295,72 +400,66 @@ export function BookingFlow({
     );
   }
 
-  return (
-    <div className="bp-canvas grid gap-8 md:grid-cols-[1fr_320px]">
-      <section aria-label="Available times">
-        <div className="mb-4 flex items-center gap-2">
-          <label htmlFor="tz" className="text-sm text-muted-foreground">
-            {m.timezone}
-          </label>
-          {/* Themed combobox, not the native <select>: the OS popup for ~400
-              zones is un-brandable and covers the screen (QA2 fix 1). */}
-          <TimeZoneSelect
-            id="tz"
-            value={timeZone}
-            onChange={setTimeZone}
-            locale={locale}
-            ariaLabel={m.timezone}
-            className="w-64 max-w-full"
-          />
+  // Every slot the page holds is empty for one of three reasons, and the copy
+  // has always distinguished them. Hoisted so both the calendar-less empty
+  // state and the day column can say the right one.
+  const emptyCopy =
+    emptyReason === 'CALENDAR_UNAVAILABLE'
+      ? m.timesUnavailable
+      : emptyReason
+        ? m.noTimesNow
+        : m.noSlots;
+
+  const timeZoneControl = (
+    // Themed combobox, not the native <select>: the OS popup for ~400 zones is
+    // un-brandable and covers the screen (QA2 fix 1). It renders through P's
+    // `Select` — the width comes from this wrapper, per that component's
+    // convention, so the panel and the trigger stay the same width.
+    <div className="w-full">
+      <TimeZoneSelect
+        id="tz"
+        value={timeZone}
+        onChange={setTimeZone}
+        locale={locale}
+        ariaLabel={m.timezone}
+      />
+    </div>
+  );
+
+  const panel = (
+    <EventPanel
+      m={messages}
+      hostName={hostName}
+      avatarUrl={avatarUrl}
+      eventTitle={eventTitle}
+      description={description}
+      lengthMinutes={lengthMinutes}
+      location={location}
+      locationLabel={locationLabel}
+      methodLabel={methodLabel}
+      timeZoneControl={timeZoneControl}
+    />
+  );
+
+  // --- A slot is chosen: panel + form -------------------------------------
+  // The calendar folds away rather than shrinking the form into a 17rem
+  // gutter. Getting back to the times is one button, and it releases the hold
+  // on the way — the same `retry` a 409 uses, so a hold can never be orphaned
+  // by whichever exit the booker takes.
+  if (selected) {
+    return (
+      <div className="bp-canvas grid gap-8 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-4">
+          {panel}
+          <button
+            type="button"
+            onClick={retry}
+            className="self-start text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            {bp.backToTimes}
+          </button>
         </div>
-
-        {days.length === 0 ? (
-          <p className="text-muted-foreground">
-            {emptyReason === 'CALENDAR_UNAVAILABLE'
-              ? m.timesUnavailable
-              : emptyReason
-                ? m.noTimesNow
-                : m.noSlots}
-          </p>
-        ) : (
-          // Page-scroll, no inner scroll region (Design Quality Bar §2): the list
-          // flows in the page so there's no native scrollbar or mid-row cut, and
-          // the day headers stay sticky for context.
-          <div className="flex flex-col gap-4">
-            {days.map((day) => (
-              <div key={day.dayKey} className="bp-day">
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">{day.heading}</h3>
-                <div className="bp-slots">
-                  {day.slots.map((s) => {
-                    const isGroup = (s.capacity ?? 1) > 1;
-                    const full = isGroup && (s.spotsLeft ?? 1) <= 0;
-                    return (
-                      <button
-                        key={s.startUtc}
-                        type="button"
-                        onClick={() => pick(s)}
-                        aria-pressed={selected === s.startUtc}
-                        disabled={full}
-                        className="bp-slot text-sm disabled:opacity-50"
-                      >
-                        <span className="whitespace-nowrap">{s.label}</span>
-                        {isGroup ? (
-                          <span className="whitespace-nowrap text-xs text-muted-foreground">
-                            {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <aside aria-label="Your details" className="md:sticky md:top-6 md:self-start">
-        {selected ? (
+        <aside aria-label={m.selectTime} className="md:sticky md:top-6 md:self-start">
           <form
             action={formAction}
             noValidate
@@ -379,11 +478,19 @@ export function BookingFlow({
             <input type="hidden" name="timeZone" value={timeZone} />
             {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
 
-            <p className="text-sm text-muted-foreground">{formatSlotDateTime(selected, timeZone)}</p>
+            <p className="text-sm font-medium">
+              {formatSlotDateTime(selected, timeZone, locale, hour12)}
+            </p>
             {hold ? (
               <p className="text-xs text-muted-foreground">
                 {t(m.heldUntil, {
-                  time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(hold.expiresAt)),
+                  time: new Intl.DateTimeFormat(locale, {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    // The countdown follows the same 12h/24h choice as the slot
+                    // the booker just picked; two clocks on one card is a bug.
+                    ...(hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
+                  }).format(new Date(hold.expiresAt)),
                 })}
               </p>
             ) : holdError ? (
@@ -523,12 +630,123 @@ export function BookingFlow({
               {pending ? m.confirming : m.confirm}
             </button>
           </form>
-        ) : (
-          <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-            {m.selectTime}
-          </p>
-        )}
-      </aside>
+        </aside>
+      </div>
+    );
+  }
+
+  // --- Nothing chosen yet: panel + month calendar + the day's times --------
+  return (
+    <div className="bp-canvas grid gap-6 md:grid-cols-2 lg:grid-cols-[16rem_minmax(0,1fr)_17rem] lg:gap-8">
+      <div className="md:col-span-2 lg:col-span-1">{panel}</div>
+
+      {days.length === 0 ? (
+        // No calendar at all when the page has no times to put in one: an empty
+        // month grid of greyed-out days is a worse answer than the sentence
+        // that says why, and the reason codes already distinguish the three
+        // cases (config error, calendar unreachable, genuinely nothing).
+        <p className="text-muted-foreground md:col-span-2 lg:col-span-2">{emptyCopy}</p>
+      ) : (
+        <>
+          <MonthCalendar
+            m={messages}
+            monthKey={month}
+            availableDayKeys={availableDayKeys}
+            todayKey={todayKey}
+            selectedDayKey={selectedDay}
+            locale={locale}
+            weekStartsOn={weekStartsOn}
+            minMonthKey={minMonth}
+            maxMonthKey={maxMonth}
+            onMonthChange={(next) => {
+              setMonth(next);
+              // Drop the explicit pick so the new month falls back to its own
+              // first bookable day, rather than showing a column of times from
+              // a month that is no longer on screen.
+              setPickedDay(null);
+            }}
+            onSelectDay={setPickedDay}
+          />
+
+          <section
+            aria-label={bp.timesRegion}
+            className="bp-daycol flex min-w-0 flex-col gap-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                {dayColumn ? t(bp.timesOn, { day: dayColumn.heading }) : bp.timesRegion}
+              </h2>
+              {/* 12h / 24h. A two-button radio group, not a switch: neither
+                  format is "on", and a switch would have to pick one to be the
+                  default state of. */}
+              <div
+                role="radiogroup"
+                aria-label={bp.timeFormat}
+                className="flex rounded-md border border-border p-0.5 text-xs"
+              >
+                {([true, false] as const).map((is12) => (
+                  <button
+                    key={String(is12)}
+                    type="button"
+                    role="radio"
+                    aria-checked={hour12 === is12}
+                    onClick={() => setHour12(is12)}
+                    // 44px, like every other control on the page: a segmented
+                    // toggle is a touch target too, and this one sits at the
+                    // top of the column a thumb reaches for first.
+                    className={`min-h-[44px] rounded-sm px-3 font-medium ${
+                      hour12 === is12 ? '' : 'text-muted-foreground'
+                    }`}
+                    // The accent and ITS OWN contrast colour, not the product's
+                    // `accent-foreground`: on a branded page those are two
+                    // different palettes, and pairing one's fill with the
+                    // other's letters is how a host's accent ends up unreadable.
+                    style={
+                      hour12 === is12
+                        ? { background: 'var(--accent)', color: 'var(--accent-contrast)' }
+                        : undefined
+                    }
+                  >
+                    {is12 ? bp.hour12 : bp.hour24}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {!dayColumn ? (
+              <p className="text-sm text-muted-foreground">
+                {selectedDay ? bp.noTimesOnDay : bp.pickADay}
+              </p>
+            ) : (
+              <div className="bp-daycol-scroll">
+                <div className="bp-slots">
+                  {dayColumn.slots.map((s) => {
+                    const isGroup = (s.capacity ?? 1) > 1;
+                    const full = isGroup && (s.spotsLeft ?? 1) <= 0;
+                    return (
+                      <button
+                        key={s.startUtc}
+                        type="button"
+                        onClick={() => pick(s)}
+                        aria-pressed={selected === s.startUtc}
+                        disabled={full}
+                        className="bp-slot text-sm disabled:opacity-50"
+                      >
+                        <span className="whitespace-nowrap">{s.label}</span>
+                        {isGroup ? (
+                          <span className="whitespace-nowrap text-xs text-muted-foreground">
+                            {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
