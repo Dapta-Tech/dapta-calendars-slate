@@ -1278,6 +1278,10 @@ export async function getBookingRescheduleAvailability(
   const b = await resolveBooking(db, args.uid, args.accountId);
   if (!b || !b.event_type_id) return null;
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata))) return null;
+  // Only an accepted booking can move — `rescheduleBooking` answers GONE for
+  // every other status, so listing times for one would offer a picker whose
+  // every option is already refused.
+  if (b.status !== 'accepted') return null;
   const et = await getEventTypeRowById(db, b.event_type_id);
   if (!et) return null;
   const assignedHostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);

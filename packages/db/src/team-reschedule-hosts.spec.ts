@@ -336,6 +336,22 @@ describe('team reschedule — the assigned host set (SQLite in-memory)', () => {
     expect(moved.ok).toBe(true);
   });
 
+  it('answers nothing once the booking is no longer movable', async () => {
+    const rr = await makeTeamEvent('rr', 'round_robin', [{ memberId: alexId }, { memberId: jordanId }]);
+    const booked = await book(rr, (await publicSlots(rr))[0]!);
+    expect((await pickerSlots(booked.uid, booked.manageToken)).length).toBeGreaterThan(0);
+    // `rescheduleBooking` answers GONE for anything but `accepted`, so a picker
+    // here would offer a list every option of which is already refused.
+    await db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${booked.uid}`);
+    expect(
+      await getBookingRescheduleAvailability(db, {
+        uid: booked.uid,
+        manageToken: booked.manageToken,
+        ...WINDOW(),
+      }),
+    ).toBeNull();
+  });
+
   it('answers nothing for a bad manage token, exactly as for an unknown uid', async () => {
     const rr = await makeTeamEvent('rr', 'round_robin', [{ memberId: alexId }, { memberId: jordanId }]);
     const booked = await book(rr, (await publicSlots(rr))[0]!);
