@@ -491,3 +491,34 @@ body {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* --- Inline embed (E) -----------------------------------------------------
+   `dc-embed` rides on the same element as `.branded-surface`, so these rules
+   out-specify the page-wide ones without `!important` and without touching
+   them. Only reachable under `?embed=1`; a page opened directly never carries
+   the class. */
+
+/* The day column's scroller is switched OFF inside a frame. On a real page a
+   fixed-height inner scroller is right: the window height is fixed and the
+   column should not push the footer off screen. Inside an auto-resizing iframe
+   it is wrong twice — the frame grows to fit its content, so there is nothing
+   for the scroller to save, and a fixed-height scroll region inside a frame
+   inside a scrolling host page is the same touch trap this rule already
+   refuses below `md`, with one more layer on it. Let the FRAME grow instead.
+
+   This is also what makes the height reporter honest: with the scroller on, the
+   document's scroll height is the clipped height, so the number posted to the
+   parent would hide slots behind a scrollbar the host never asked for. */
+.branded-surface.dc-embed .bp-daycol-scroll {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+/* The badge keeps its place in the embed (#67 — a host's own site is the
+   growth loop's best placement), but not 3rem of dead space under it: inside a
+   frame that is just height the host page pays for. */
+.dc-embed .bp-embed-footer {
+  padding-top: 0.5rem;
+  padding-bottom: 1rem;
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useMemo, useState } from 'react';
+import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import {
   formatLocation,
   formatSlotDateTime,
@@ -26,6 +26,7 @@ import { type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
+import { postBookingScheduled } from '@/lib/embed-messages';
 
 interface Props {
   accountCode: string;
@@ -66,6 +67,12 @@ interface Props {
    * about the date when a render straddles midnight.
    */
   nowUtc: string;
+  /**
+   * Inline embed mode (E). Changes two things and nothing else: a completed
+   * booking is announced to the host page, and the confirmation's Manage link
+   * opens a new tab instead of navigating the frame.
+   */
+  embed?: boolean;
 }
 
 interface Hold {
@@ -105,6 +112,7 @@ export function BookingFlow({
   location,
   methodLabel,
   nowUtc,
+  embed = false,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
@@ -162,6 +170,31 @@ export function BookingFlow({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
+
+  /**
+   * The one host-facing message (E, #67): `dapta-calendars.booking_scheduled`,
+   * posted to the framing page when a booking lands.
+   *
+   * Keyed on the booking's uid rather than fired from the confirmation branch,
+   * because that branch re-renders on every state change below it — a host
+   * counting conversions must not count one booking several times. The payload
+   * is PII-free by construction (see `postBookingScheduled`): `targetOrigin` is
+   * `'*'`, so any page framing this one receives it.
+   */
+  const announcedUid = useRef<string | null>(null);
+  const booked = result?.ok && result.booking ? result.booking : null;
+  const bookedUid = booked?.uid ?? null;
+  const bookedStart = booked?.startUtc ?? null;
+  useEffect(() => {
+    if (!embed || !bookedUid || !bookedStart) return;
+    // The uid is the booking's IDENTITY. `useActionState` hands back a fresh
+    // object on every attempt and this branch re-renders on every state change
+    // below it, so guarding on the value rather than on the object is what
+    // keeps a host's conversion counter from counting one booking twice.
+    if (announcedUid.current === bookedUid) return;
+    announcedUid.current = bookedUid;
+    postBookingScheduled({ uid: bookedUid, startUtc: bookedStart, eventTypeSlug: slug });
+  }, [embed, bookedUid, bookedStart, slug]);
 
   /** Full client-side gate, replacing native validation (noValidate): native
    *  bubbles doubled up with the inline errors and can't be themed. Returns
@@ -342,8 +375,14 @@ export function BookingFlow({
             </p>
           ) : null}
           {b.manageUrl ? (
+            // Inside a frame this must open a new tab. Left to navigate the
+            // frame it drops the invitee into the manage page inside a short
+            // box with nothing to get back with — and `/manage/[uid]` is
+            // `frame-ancestors 'self'`, so it would refuse to render there at
+            // all on the very click that was supposed to help them.
             <a
               href={b.manageUrl}
+              {...(embed ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
             >
               {getMessages(locale).manage.title} →
