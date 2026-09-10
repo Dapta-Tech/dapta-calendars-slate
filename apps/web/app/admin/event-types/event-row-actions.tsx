@@ -72,7 +72,7 @@ export function EventRowActions({
     }
   };
 
-  return (
+  const actions = (
     <span className="flex items-center gap-1.5">
       {!hideToggle ? (
         <Switch
@@ -114,15 +114,26 @@ export function EventRowActions({
           >
             <EmbedIcon />
           </button>
-          <EmbedSnippetModal
-            open={embedOpen}
-            onClose={() => setEmbedOpen(false)}
-            publicPath={publicPath}
-            title={title}
-            messages={embedMessages}
-          />
         </>
       ) : null}
     </span>
+  );
+
+  // The dialog is a sibling of the row's inline `<span>`, not a child of it: it
+  // renders a `fixed`-position `<div>`, and a div inside a span is invalid
+  // nesting even though the layout happens not to care.
+  return publicPath ? (
+    <>
+      {actions}
+      <EmbedSnippetModal
+        open={embedOpen}
+        onClose={() => setEmbedOpen(false)}
+        publicPath={publicPath}
+        title={title}
+        messages={embedMessages}
+      />
+    </>
+  ) : (
+    actions
   );
 }

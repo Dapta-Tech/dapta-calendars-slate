@@ -56,9 +56,16 @@ export interface EmbedMode {
   /** True when this render is inside a host page's iframe. */
   embed: boolean;
   /**
-   * Appearance overrides from the URL, already validated. Empty unless
-   * `embed` is true — a plain public URL ignores them silently, so nobody can
-   * forge a restyled link to a host's booking page and pass it around (#67).
+   * Appearance overrides from the URL, already validated. Empty unless `embed`
+   * is true.
+   *
+   * The gate is the PARAMETER, not "is this in a frame" — a server cannot tell.
+   * So `…?embed=1&brand_color=cc0000` opened directly in a tab is a restyled
+   * booking page on the real domain, and that is accepted: the booking still
+   * lands on the real host's calendar, the overrides are appearance-only, and
+   * the page is `noindex` under embed. What the gate buys is that a link
+   * WITHOUT the parameter — the one a host actually shares — cannot be
+   * restyled by whoever passes it on (#67).
    */
   brandColor: string | null;
   style: Record<string, string>;
@@ -173,7 +180,42 @@ export function embedSrcPath(publicPath: string, brandColor?: string | null): st
   const accent = parseAccentParam(brandColor ?? undefined);
   const qs = new URLSearchParams({ [EMBED_PARAM]: '1' });
   if (accent) qs.set(EMBED_ACCENT_PARAM, accent);
-  return `${publicPath}?${qs.toString()}`;
+  return `${encodePath(publicPath)}?${qs.toString()}`;
+}
+
+/**
+ * Percent-encode each segment of a public path.
+ *
+ * The path is not always server-derived: the studio builds it live from the
+ * handle and vanity fields as they are typed, and those are raw input until the
+ * save round-trip. A space or a quote in there produced a snippet with a broken
+ * or unusable `src`. Segments are encoded individually so the separators
+ * survive. Callers pass RAW segments — an already-encoded path would be encoded
+ * twice, and nothing in this app has one.
+ */
+function encodePath(path: string): string {
+  return path
+    .split('/')
+    .map((segment) => (segment ? encodeURIComponent(segment) : segment))
+    .join('/');
+}
+
+/**
+ * Escape a value for an HTML double-quoted attribute.
+ *
+ * The snippet is text a host pastes into their own page, so it has to be valid
+ * there — this is not an XSS boundary in the admin (React escapes the textarea
+ * that displays it), it is the difference between a snippet that works and one
+ * that silently breaks out of an attribute on somebody else's site. `&` matters
+ * as much as `"`: an accent override puts a bare `&` in the `src`, and a title
+ * like `Sales & Marketing` puts one in the `title`.
+ */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /**
@@ -196,11 +238,11 @@ export function embedSnippet({
   brandColor?: string | null;
   title: string;
 }): string {
-  const src = `${origin}${embedSrcPath(publicPath, brandColor)}`;
+  const src = escapeAttr(`${origin}${embedSrcPath(publicPath, brandColor)}`);
   return [
     `<iframe data-dapta-calendars src="${src}"`,
-    `        title="${title.replace(/"/g, '&quot;')}" loading="lazy"`,
+    `        title="${escapeAttr(title)}" loading="lazy"`,
     `        style="width:100%;border:0;min-height:700px;"></iframe>`,
-    `<script src="${origin}/embed.js" async></script>`,
+    `<script src="${escapeAttr(origin)}/embed.js" async></script>`,
   ].join('\n');
 }

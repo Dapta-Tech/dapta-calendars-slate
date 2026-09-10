@@ -31,8 +31,13 @@ import { postResize } from '@/lib/embed-messages';
  */
 export function EmbedResizeReporter() {
   useEffect(() => {
-    const root =
-      document.querySelector<HTMLElement>(`.${EMBED_ROOT_CLASS}`) ?? document.documentElement;
+    // No fallback to `documentElement` on purpose. That is precisely the
+    // measurement this file exists to avoid, so falling back to it would fail
+    // into the bug rather than out of it — a frame that grows and never
+    // shrinks. If the root is missing the mode is not really on, and posting
+    // nothing is the correct answer.
+    const root = document.querySelector<HTMLElement>(`.${EMBED_ROOT_CLASS}`);
+    if (!root) return;
     let frame = 0;
     let last = -1;
 
@@ -52,6 +57,11 @@ export function EmbedResizeReporter() {
     // Coalesce to one post per frame. A month change re-lays out the grid, the
     // day column and the panel; without this that is three messages for one
     // visible change.
+    //
+    // Nothing damps a host-side feedback loop — a height change that makes the
+    // host's scrollbar appear, narrowing the frame, changing the content
+    // height. That is inherent to every iframe resizer; what bounds it here is
+    // the `height === last` short-circuit above and the cap on the wire.
     const schedule = () => {
       if (frame) return;
       frame = requestAnimationFrame(measure);

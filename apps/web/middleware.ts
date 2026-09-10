@@ -58,6 +58,12 @@ function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
   // result is the honest representation, and the funnel reads it as such.
   if (!attribution) return res;
 
+  // `SameSite=Lax` means this does NOT park from inside a third-party iframe,
+  // which the inline embed (E) made a first-class context. That is the right
+  // trade rather than an oversight: `None` would require `Secure` and would
+  // send the cookie on every cross-site request, and an embedded booking page
+  // is the host's acquisition surface, not ours. So an embed's campaign click
+  // is simply not attributed, and the funnel reads that as organic.
   res.cookies.set(ATTRIBUTION_COOKIE, JSON.stringify(attribution), {
     httpOnly: true,
     sameSite: 'lax',

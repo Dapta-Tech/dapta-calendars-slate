@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { Modal } from '@/components/modal';
 import { embedSnippet } from '@/lib/embed';
@@ -45,6 +45,11 @@ export function EmbedSnippetModal({
   const [origin, setOrigin] = useState('');
   useEffect(() => setOrigin(window.location.origin), []);
 
+  // Per instance. The event-types list mounts one of these per row, and only
+  // the open one is in the DOM — but a shared literal id is a duplicate waiting
+  // for the first caller that renders two at once.
+  const labelId = useId();
+
   const snippet = useMemo(
     () =>
       embedSnippet({
@@ -71,7 +76,7 @@ export function EmbedSnippetModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={m.title} labelId="embed-snippet-title">
+    <Modal open={open} onClose={onClose} title={m.title} labelId={labelId}>
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">{m.intro}</p>
 

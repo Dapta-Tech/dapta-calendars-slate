@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { bookingPageStyleSchema } from '@slate/types';
 import {
+  EMBED_STYLE_PARAMS,
   embedSnippet,
   embedSrcPath,
   isEmbedRequest,
@@ -182,5 +184,56 @@ describe('embedSrcPath / embedSnippet', () => {
       title: 'The "quick" chat',
     });
     expect(s).toContain('title="The &quot;quick&quot; chat"');
+  });
+
+  it('escapes the ampersand a two-param src always has', () => {
+    const s = embedSnippet({
+      origin: 'https://cal.example.com',
+      publicPath: '/acme/alex/intro',
+      brandColor: '#1a73e8',
+      title: 'Sales & Marketing',
+    });
+    expect(s).toContain('?embed=1&amp;brand_color=%231a73e8"');
+    expect(s).toContain('title="Sales &amp; Marketing"');
+  });
+
+  /**
+   * The studio builds this path from the handle field as it is TYPED, so it is
+   * raw input until the save round-trip — a space or a quote used to produce a
+   * snippet with a broken `src`.
+   */
+  it('encodes a path segment a host is still typing', () => {
+    expect(embedSrcPath('/acme/alex rivera')).toBe('/acme/alex%20rivera?embed=1');
+    const s = embedSnippet({
+      origin: 'https://cal.example.com',
+      publicPath: '/acme/al"ex',
+      title: 'x',
+    });
+    expect(s).toContain('/acme/al%22ex?embed=1"');
+    expect(s).not.toContain('al"ex');
+  });
+});
+
+/**
+ * The override map has to stay exactly the APPEARANCE half of the style
+ * contract. A tenth axis added upstream would otherwise be silently
+ * un-overridable, and a behaviour key added to the map would let a URL change
+ * what the page does rather than how it looks.
+ */
+describe('EMBED_STYLE_PARAMS covers the appearance half of the contract', () => {
+  const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio'];
+  // `theme` arrives with B2 (#109). Listed so that unit deletes this line
+  // rather than discovering the assertion.
+  const NOT_YET_SHIPPED: string[] = ['theme'];
+
+  it('maps every appearance axis and no behaviour key', () => {
+    const inContract = Object.keys(bookingPageStyleSchema.shape);
+    const expected = inContract
+      .filter((k) => !BEHAVIOUR_KEYS.includes(k) && !NOT_YET_SHIPPED.includes(k))
+      .sort();
+    expect(Object.values(EMBED_STYLE_PARAMS).slice().sort()).toEqual(expected);
+    for (const key of BEHAVIOUR_KEYS) {
+      expect(Object.values(EMBED_STYLE_PARAMS)).not.toContain(key);
+    }
   });
 });
