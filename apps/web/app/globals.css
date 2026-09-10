@@ -326,6 +326,24 @@ body {
   background: var(--accent);
   color: var(--accent-contrast);
 }
+/* The quiet sibling of `.bp-btn`: a real control for a secondary action (the
+   manage link on the confirmation) rather than an underlined word with a `→`
+   after it. Takes the same radius axis, so it follows the host's Buttons
+   setting exactly as the primary does. */
+.branded-surface .bp-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem; /* 44px hit target (R28) */
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius);
+  padding-inline: 1rem;
+  font-weight: 500;
+  transition: border-color 120ms var(--ease-standard, ease);
+}
+.branded-surface .bp-btn-outline:hover {
+  border-color: var(--accent);
+}
 /* template: banded shows a cover band; split widens the canvas */
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;

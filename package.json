@@ -23,6 +23,7 @@
     "db:reset": "pnpm --filter @slate/db reset",
     "db:setup": "pnpm run db:migrate && pnpm run db:seed",
     "changeset": "changeset",
+    "glyph-gate": "node scripts/glyph-gate.mjs",
     "publish-gate": "bash scripts/publish-gate.sh",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
   },

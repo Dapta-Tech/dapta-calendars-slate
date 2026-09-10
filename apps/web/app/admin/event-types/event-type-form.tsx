@@ -21,7 +21,8 @@ import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
 import { connectionDisplayLabel } from '@/lib/connection-label';
-import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/cn';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { FormHeader } from '@/components/ui/page-header';
@@ -405,12 +406,12 @@ function CalendarsForEventSection({
 }) {
   if (connections.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-border bg-background/60 p-3 text-sm text-muted-foreground">
-        {m.calendarLinkNone}{' '}
-        <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
-          {m.calendarLinkConnect} →
+      <div className="flex flex-col items-start gap-3 rounded-md border border-dashed border-border bg-background/60 p-3 text-sm text-muted-foreground">
+        <p>{m.calendarLinkNone}</p>
+        <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+          {m.calendarLinkConnect}
         </Link>
-      </p>
+      </div>
     );
   }
   return (
@@ -419,9 +420,9 @@ function CalendarsForEventSection({
         <span className="text-sm font-semibold text-muted-foreground">{m.calendarsSectionTitle}</span>
         <Link
           href="/admin/connections"
-          className="shrink-0 text-xs font-medium text-primary underline underline-offset-4"
+          className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'shrink-0')}
         >
-          {m.calendarsManageLink} →
+          {m.calendarsManageLink}
         </Link>
       </div>
       <p className="text-xs text-muted-foreground">{m.calendarsSectionHint}</p>
@@ -557,12 +558,12 @@ function LocationField({
       ) : null}
 
       {missingDestination ? (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          {m.locationNoDestinationWarning}{' '}
-          <Link href="/admin/connections" className="font-medium text-primary underline underline-offset-4">
-            {m.calendarLinkConnect} →
+        <div className="flex flex-col items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          <p>{m.locationNoDestinationWarning}</p>
+          <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+            {m.calendarLinkConnect}
           </Link>
-        </p>
+        </div>
       ) : null}
     </div>
   );
