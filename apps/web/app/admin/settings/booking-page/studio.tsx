@@ -31,6 +31,7 @@ import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/cn';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { resolveAvatarUrl } from '@/lib/avatar';
 import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
@@ -97,6 +98,10 @@ export interface StudioInit {
   handle: string;
   bio: string;
   avatarUrl: string;
+  /** The connected account's photo. The preview's FALLBACK, never the input's
+   *  value — the field holds the host's own choice and saving must not turn a
+   *  synced URL into a stored one. */
+  connectedAvatarUrl: string;
   coverUrl: string;
   accent: string;
   axes: Axes;
@@ -124,6 +129,11 @@ export function Studio(init: StudioInit) {
   const [vanity, setVanity] = useState(init.vanity.vanitySlug ?? '');
   const [bio, setBio] = useState(init.bio);
   const [avatarUrl, setAvatarUrl] = useState(init.avatarUrl);
+  // What the PUBLIC page will draw, through the same helper it uses. The input
+  // above stays bound to `avatarUrl`; only the preview resolves the fallback,
+  // so a preview showing a letter while the live page shows a face cannot
+  // happen and an empty field still saves as empty.
+  const previewAvatarUrl = resolveAvatarUrl(avatarUrl, init.connectedAvatarUrl) ?? '';
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
@@ -460,6 +470,13 @@ export function Studio(init: StudioInit) {
             </Field>
             <Field label={m.photoAvatar}>
               <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" m={m} />
+              {/* The public page falls back to the connected account's photo,
+                  and a host who never opens this field would otherwise have no
+                  idea where the face on their page came from — or that leaving
+                  this empty is what keeps it. */}
+              {!avatarUrl.trim() && previewAvatarUrl ? (
+                <p className="text-xs text-muted-foreground">{m.photoFromConnectedAccount}</p>
+              ) : null}
             </Field>
             <Field label={m.coverImage}>
               <ImageInput value={coverUrl} onChange={setCoverUrl} preview="cover" m={m} />
@@ -674,7 +691,7 @@ export function Studio(init: StudioInit) {
                 <ProfilePreview
                   displayName={displayName}
                   bio={bio}
-                  avatarUrl={avatarUrl}
+                  avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
                   accent={accent}
                   eventTypes={init.eventTypes}
@@ -683,7 +700,7 @@ export function Studio(init: StudioInit) {
               ) : (
                 <BookingPreview
                   displayName={displayName}
-                  avatarUrl={avatarUrl}
+                  avatarUrl={previewAvatarUrl}
                   accent={accent}
                   locale={init.locale}
                   m={m}
@@ -723,7 +740,12 @@ function ProfilePreview({
       )}
       <div className="mb-4 flex items-center gap-3">
         {avatarUrl ? (
-          <img src={avatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+          <img
+            src={avatarUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-12 w-12 rounded-full object-cover"
+          />
         ) : (
           <div
             className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
@@ -812,6 +834,7 @@ function BookingPreview({
             alt=""
             width={40}
             height={40}
+            referrerPolicy="no-referrer"
             className="h-10 w-10 rounded-full object-cover"
           />
         ) : (

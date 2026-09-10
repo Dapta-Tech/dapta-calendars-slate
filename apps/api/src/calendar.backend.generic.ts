@@ -31,7 +31,7 @@
  *     changed. Returning `null` is the right answer for a backend that keeps the
  *     same room across a move: a null NEVER overwrites the stored URL.
  *   DELETE /v1/connections/:ref/events/:externalEventId  → 204
- *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,isPrimary?}] }
+ *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,avatarUrl?,isPrimary?}] }
  *   GET    /v1/connections/:ref                          → { ok, detail }
  *   POST   /v1/connect                                   → { connectUrl }
  *
@@ -147,6 +147,7 @@ export class GenericRestWire implements CalendarWire {
         id: String(c['id']),
         name: typeof c['name'] === 'string' ? c['name'] : String(c['id']),
         primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
+        avatarUrl: typeof c['avatarUrl'] === 'string' ? c['avatarUrl'] : null,
         isPrimary: c['isPrimary'] === true,
         readOnly: c['readOnly'] !== false,
         accessRole:
@@ -230,6 +231,7 @@ export class GenericRestWire implements CalendarWire {
           connectionRef: String(c['connectionRef']),
           provider: typeof c['provider'] === 'string' ? c['provider'] : 'unknown',
           primaryEmail: typeof c['primaryEmail'] === 'string' ? c['primaryEmail'] : null,
+          avatarUrl: typeof c['avatarUrl'] === 'string' ? c['avatarUrl'] : null,
           name: typeof c['name'] === 'string' ? c['name'] : null,
         }))
     );

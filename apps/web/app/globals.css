@@ -348,6 +348,37 @@ body {
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;
 }
+/* Centre a short public page in the viewport, and scroll normally when it is
+   taller than one.
+
+   The height goes on the SHELL, not on `<main>`: `MadeWithBadge` is an in-flow
+   sibling of `<main>`, roughly 77px of footer, so a 100dvh `<main>` would make
+   every public page exactly one badge taller than the viewport — a scrollbar on
+   a page that fits, on every configured deployment and on none of the bare
+   forks where the badge does not render. The shell holds both, so the floor
+   applies to the whole page and the footer is inside it.
+
+   `margin-block: auto` on `<main>` rather than `justify-content: center` on the
+   shell: centring a flex child that overflows pushes its top off the top edge,
+   where no browser lets you scroll back to it, while `auto` margins collapse to
+   zero once the child fills the box and degrade to a plain top-anchored page.
+   The footer keeps its own margins and sits under the centred main.
+
+   `100dvh`, not `100vh`, so mobile browser chrome does not add a scrollbar to a
+   page that fits.
+
+   NOT applied in embed mode: `EmbedResizeReporter` measures this subtree and
+   reports it to the host page, and a viewport-height floor would report the
+   viewport instead of the content — an iframe that grows to 100vh forever. */
+.bp-viewport {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+.bp-viewport > main {
+  margin-block: auto;
+}
+
 /* The three-region event page (BP) needs room for panel + month + day column,
    so the canvas carries its own cap and `split` widens it — which is what the
    axis has always claimed to do. */

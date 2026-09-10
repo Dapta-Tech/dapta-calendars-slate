@@ -64,6 +64,8 @@ export interface DiscoveredConnection {
   connectionRef: string;
   provider: string;
   primaryEmail?: string | null;
+  /** The connected account's profile photo, when the backend reports one. */
+  avatarUrl?: string | null;
   name?: string | null;
   /** The vendor's own connection id (may equal connectionRef; kept distinct
    *  in case a wire ever needs to encode connectionRef differently). */

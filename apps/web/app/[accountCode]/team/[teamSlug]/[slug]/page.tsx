@@ -94,7 +94,7 @@ export default async function TeamBookingPage({
     <BrandedShell
       brandColor={accentOverride}
       style={mergeEmbedStyle(null, styleOverrides)}
-      className={embed ? EMBED_ROOT_CLASS : undefined}
+      className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       {/* No link back to the team page, for the same reason the personal event
           page no longer links to a profile: the team page is an entry point,
@@ -103,7 +103,7 @@ export default async function TeamBookingPage({
         className={
           embed
             ? 'mx-auto max-w-6xl px-4 py-4'
-            : 'mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
+            : 'mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
         }
       >
         <BookingFlow

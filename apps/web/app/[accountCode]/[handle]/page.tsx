@@ -8,6 +8,7 @@ import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -34,8 +35,7 @@ export async function generateMetadata({
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
   const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
   const title = `${name} — ${profile.account.name}`;
-  const avatar = profile.member.avatarUrl;
-  const images = avatar && /^https?:\/\//i.test(avatar) ? [avatar] : undefined;
+  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
   return {
     title,
     description,
@@ -84,6 +84,7 @@ export default async function ProfilePage({
   // it, so a second, differently-grounded clamp here would paint a tile that
   // does not match the accent everything around it resolved to.
   const accent = clampAccent(accentOverride ?? m.brandColor ?? DEFAULT_ACCENT, BOOKING_CANVAS);
+  const headerAvatar = resolveAvatarUrl(m.avatarUrl, m.connectedAvatarUrl);
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
 
@@ -99,17 +100,22 @@ export default async function ProfilePage({
     <BrandedShell
       brandColor={accentOverride ?? m.brandColor}
       style={mergeEmbedStyle(m.style, styleOverrides)}
-      className={embed ? EMBED_ROOT_CLASS : undefined}
+      className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
-      <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto max-w-2xl px-6 py-12'}>
+      <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto w-full max-w-2xl px-6 py-12'}>
         {m.coverUrl ? (
           <img src={m.coverUrl} alt="" className="bp-cover mb-4 h-32 w-full rounded-md object-cover" />
         ) : (
           <div className="bp-cover mb-4 h-24 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
         )}
         <header className="mb-8 flex items-center gap-4">
-          {m.avatarUrl ? (
-            <img src={m.avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover" />
+          {headerAvatar ? (
+            <img
+              src={headerAvatar}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="h-16 w-16 rounded-full object-cover"
+            />
           ) : (
             <div
               className="flex h-16 w-16 items-center justify-center text-2xl font-semibold"

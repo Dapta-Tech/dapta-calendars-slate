@@ -298,6 +298,10 @@ export const connectedCalendar = sqliteTable('connected_calendar', {
   provider: text('provider').notNull(),
   externalId: text('external_id').notNull(),
   primaryEmail: text('primary_email'),
+  /** The connected account's own profile photo, when the calendar backend
+   *  reports one. A FALLBACK for the public page, never written onto the
+   *  member — what a host uploads in the studio always wins. */
+  avatarUrl: text('avatar_url'),
   isDestination: integer('is_destination').notNull().default(0),
   checkConflicts: integer('check_conflicts').notNull().default(1),
   createdAt: integer('created_at').notNull(),

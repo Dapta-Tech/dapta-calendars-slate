@@ -571,6 +571,9 @@ export const publicProfileSchema = z.object({
     displayName: z.string().nullable(),
     timeZone: z.string(),
     avatarUrl: z.string().nullable(),
+    /** The connected calendar account's photo. Optional on the wire so an older
+     *  API still parses; the surfaces treat absent and null the same. */
+    connectedAvatarUrl: z.string().nullable().optional(),
     coverUrl: z.string().nullable(),
     brandColor: z.string().nullable(),
     layout: z.string().nullable(),
