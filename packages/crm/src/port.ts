@@ -22,6 +22,16 @@ export interface CrmContactInput {
   email: string;
   firstName: string | null;
   lastName: string | null;
+  /**
+   * H2 (#108): the host's MAPPED answers, already coerced to the strings this
+   * provider wants. Absent or empty on an event type with no mappings, which
+   * is every event type until a host configures one.
+   *
+   * These OVERWRITE whatever the properties held; identity never does
+   * (ADR 0005). The adapter is what enforces the second half — an identity
+   * property in this bag is dropped, no matter who assembled it.
+   */
+  properties?: Record<string, string>;
 }
 
 export interface CrmContactResult {
@@ -52,6 +62,29 @@ export interface CrmMeetingUpdate {
 }
 
 export type CrmMeetingOutcome = 'scheduled' | 'canceled';
+
+/**
+ * One contact property as the provider's schema describes it (H2 / #108).
+ *
+ * The four exclusion flags travel RAW rather than pre-filtered: the port
+ * reports what the portal says, and the caller decides what is offerable. That
+ * keeps "which properties are unusable" one rule in one place instead of a
+ * policy baked into every adapter.
+ */
+export interface CrmProperty {
+  name: string;
+  label: string;
+  /** `string` | `number` | `bool` | `date` | `datetime` | `enumeration`. */
+  type: string;
+  /** `text` | `textarea` | `phonenumber` | `select` | `radio` | `checkbox` | … */
+  fieldType: string;
+  options: { value: string; label: string }[];
+  archived: boolean;
+  calculated: boolean;
+  hidden: boolean;
+  /** The provider computes this value; a write to it is refused. */
+  readOnlyValue: boolean;
+}
 
 export interface CrmProvider {
   /** True when a real CRM is wired. False = the OSS default; nothing is enqueued. */
@@ -85,6 +118,15 @@ export interface CrmProvider {
    * extra call per booking is nothing at pilot volume (#63).
    */
   resolveContact(input: CrmContactInput): Promise<CrmContactResult>;
+
+  /**
+   * The contact properties this portal exposes (H2 / #108).
+   *
+   * Reads the SAME endpoint `verifyCredential` already probes, so mapping needs
+   * no scope a connected credential does not already carry. Unfiltered — the
+   * caller drops archived / calculated / hidden / read-only and identity.
+   */
+  listContactProperties(input: { token: string }): Promise<CrmProperty[]>;
 
   /** Create the meeting ASSOCIATED to the contact in the same call. */
   createMeeting(input: CrmMeetingInput): Promise<{ meetingId: string }>;
@@ -154,6 +196,9 @@ export class DisabledCrmProvider implements CrmProvider {
     return this.unreachable();
   }
   resolveContact(): Promise<CrmContactResult> {
+    return this.unreachable();
+  }
+  listContactProperties(): Promise<CrmProperty[]> {
     return this.unreachable();
   }
   createMeeting(): Promise<{ meetingId: string }> {

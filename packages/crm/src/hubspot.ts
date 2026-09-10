@@ -31,6 +31,7 @@ import {
   type CrmContactResult,
   type CrmMeetingInput,
   type CrmMeetingUpdate,
+  type CrmProperty,
   type CrmProvider,
 } from './port';
 
@@ -49,6 +50,40 @@ export const HUBSPOT_REQUIRED_SCOPES = [
 
 /** Contact ↔ meeting, `HUBSPOT_DEFINED`. Verified inline-on-create in #74. */
 const MEETING_TO_CONTACT_ASSOCIATION_TYPE_ID = 200;
+
+/**
+ * The three properties a booking must never rewrite (ADR 0005).
+ *
+ * The mapping UI does not offer them and the zod contract refuses them, so this
+ * is the third guard on the same rule. It is here rather than only upstream
+ * because THIS is the function that builds the PATCH body: whatever assembled
+ * the bag, an identity property cannot reach the wire from it.
+ */
+const IDENTITY_PROPERTIES = new Set(['email', 'firstname', 'lastname']);
+
+/** Drop identity from a mapped-property bag. See `IDENTITY_PROPERTIES`. */
+function withoutIdentity(properties: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(properties ?? {})) {
+    if (IDENTITY_PROPERTIES.has(k.toLowerCase())) continue;
+    if (v == null || v === '') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** The subset of the vendor's property schema this adapter reads. */
+interface HubSpotProperty {
+  name?: string;
+  label?: string;
+  type?: string;
+  fieldType?: string;
+  options?: { value?: string; label?: string; hidden?: boolean }[];
+  archived?: boolean;
+  calculated?: boolean;
+  hidden?: boolean;
+  modificationMetadata?: { readOnlyValue?: boolean };
+}
 
 interface HubSpotErrorBody {
   category?: string;
@@ -89,7 +124,21 @@ export class HubSpotCrmProvider implements CrmProvider {
     await this.request(token, 'GET', '/crm/v3/properties/contacts');
   }
 
+  /**
+   * H2 (#108) refines H1a's step 1 in exactly ONE place, and nowhere else.
+   *
+   *   - FOUND  → PATCH with the mapped properties only. H1a wrote nothing here;
+   *              it now writes exactly what the host mapped, and still never
+   *              identity. A contact the CRM already knows keeps its own name.
+   *   - ABSENT → create with identity PLUS the mapped properties, in the same
+   *              call — one round trip, not two.
+   *
+   * That asymmetry IS ADR 0005: identity is inferred from whatever the invitee
+   * typed and must not become CRM truth, while a mapped answer is a host
+   * deliberately wiring this question to that property.
+   */
   async resolveContact(input: CrmContactInput): Promise<CrmContactResult> {
+    const mapped = withoutIdentity(input.properties);
     const found = await this.request<{ results?: { id?: string }[] }>(
       input.token,
       'POST',
@@ -103,24 +152,72 @@ export class HubSpotCrmProvider implements CrmProvider {
       },
     );
     const existingId = found?.results?.[0]?.id;
-    // A contact the CRM already knows keeps its own name. We take the id and
-    // write NOTHING — #63's central identity rule.
-    if (existingId) return { contactId: String(existingId), created: false };
+    if (existingId) {
+      const contactId = String(existingId);
+      // No mappings ⇒ no call at all, which is H1a's behavior unchanged for
+      // every event type nobody has configured.
+      if (Object.keys(mapped).length > 0) {
+        await this.request(
+          input.token,
+          'PATCH',
+          `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`,
+          { properties: mapped },
+        );
+      }
+      return { contactId, created: false };
+    }
 
     const created = await this.request<{ id?: string }>(
       input.token,
       'POST',
       '/crm/v3/objects/contacts',
       {
-        properties: pruneEmpty({
-          email: input.email,
-          firstname: input.firstName,
-          lastname: input.lastName,
-        }),
+        properties: {
+          ...mapped,
+          // Identity LAST so a mapped property can never shadow it even if the
+          // bag somehow carried one; `withoutIdentity` already removed them.
+          ...pruneEmpty({
+            email: input.email,
+            firstname: input.firstName,
+            lastname: input.lastName,
+          }),
+        },
       },
     );
     if (!created?.id) throw new Error('hubspot contact create returned no id');
     return { contactId: String(created.id), created: true };
+  }
+
+  /**
+   * The portal's contact properties, for the mapping picker (H2 / #108).
+   *
+   * `archived=false` is asked of the API rather than filtered here so the
+   * response stays small on a portal with a long history of retired fields; the
+   * flag is still carried on each row, because the caller — not the adapter —
+   * owns the offerability rule.
+   */
+  async listContactProperties({ token }: { token: string }): Promise<CrmProperty[]> {
+    const res = await this.request<{ results?: HubSpotProperty[] }>(
+      token,
+      'GET',
+      '/crm/v3/properties/contacts?archived=false',
+    );
+    return (res?.results ?? []).map((r) => ({
+      name: String(r.name ?? ''),
+      // A property with no label is unpickable by a human; falling back to the
+      // internal name keeps it selectable instead of rendering a blank row.
+      label: String(r.label || r.name || ''),
+      type: String(r.type ?? ''),
+      fieldType: String(r.fieldType ?? ''),
+      options: (r.options ?? [])
+        .filter((o) => !o.hidden)
+        .map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })),
+      archived: r.archived === true,
+      calculated: r.calculated === true,
+      hidden: r.hidden === true,
+      readOnlyValue: r.modificationMetadata?.readOnlyValue === true,
+    }))
+    .filter((p) => p.name !== '');
   }
 
   /**
