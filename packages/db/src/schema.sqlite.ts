@@ -167,6 +167,9 @@ export const eventType = sqliteTable('event_type', {
   /** Per-event calendar write destination override; NULL = fall back to the
    *  host's member-level `is_destination` calendar (calendar-refs.ts). */
   destinationCalendarId: text('destination_calendar_id'),
+  /** H2 (#108): CRM contact property mappings, keyed by provider, as JSON text.
+   *  NULL = never configured. The Postgres twin is `jsonb`. */
+  crmPropertyMappings: text('crm_property_mappings'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -248,6 +251,9 @@ export const bookingAttendee = sqliteTable('booking_attendee', {
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),
+  /** Attendee notification language (`en` | `es`), persisted since H2 (#108).
+   *  See the Postgres twin for why it was previously dropped. */
+  language: text('language'),
   createdAt: integer('created_at').notNull(),
 });
 

@@ -167,6 +167,16 @@ export const eventType = pgTable('event_type', {
   /** Per-event calendar write destination override; NULL = fall back to the
    *  host's member-level `is_destination` calendar (calendar-refs.ts). */
   destinationCalendarId: text('destination_calendar_id'),
+  /**
+   * H2 (#108): intake question -> CRM contact property mappings, keyed by
+   * provider. NULL = never configured, which is what every event type that
+   * predates this reads as and delivers exactly as it did before.
+   *
+   * A COLUMN rather than a table (#64): it mirrors how `booking_fields`
+   * already lives, needs no join on the booking hot path, and the editor
+   * rewrites it wholesale anyway.
+   */
+  crmPropertyMappings: jsonb('crm_property_mappings'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -248,6 +258,14 @@ export const bookingAttendee = pgTable('booking_attendee', {
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),
+  /**
+   * The attendee's chosen notification language (`en` | `es`), as `attendeeSchema`
+   * has always accepted it. Persisted since H2 (#108), which maps it onto a CRM
+   * contact property: the value arrived on every API booking and was dropped at
+   * this layer, so a mapping onto it could never have delivered anything.
+   * NULLABLE — every booking taken before this, and every caller that omits it.
+   */
+  language: text('language'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

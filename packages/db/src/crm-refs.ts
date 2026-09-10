@@ -13,6 +13,7 @@
  * context.
  */
 import { sql } from 'drizzle-orm';
+import type { CrmPropertyMappings } from '@slate/types';
 import type { Db } from './client';
 import { parseJsonColumn, type BookingFieldDef } from './repository';
 
@@ -52,6 +53,35 @@ export interface CrmWriteContext {
    * holding a stale meeting at the old time plus a second one at the new.
    */
   rescheduledFromUid: string | null;
+
+  // --- H2 (#108): everything the property mapping reads. ------------------
+  //
+  // Loaded UNCONDITIONALLY because it all comes off rows this query already
+  // joins — the mapping costs an extra column, not an extra round trip. What
+  // is conditional is the PROPERTY CATALOG, which is only fetched when
+  // `crmPropertyMappings` is non-empty (see `CrmEffects.writeOut`).
+
+  /** The event type's mappings, provider-keyed. NULL ⇒ never configured. */
+  crmPropertyMappings: CrmPropertyMappings | null;
+  /**
+   * The question DEFINITIONS, not just their labels. The mapping needs each
+   * answer's declared type and its option list to know whether a value can
+   * become a number, a boolean, or one of an enumeration's values.
+   */
+  bookingFields: BookingFieldDef[];
+  /** Raw answers keyed by question name — the label pairing is `answers`. */
+  responses: Record<string, unknown>;
+  /** Attendee details beyond identity, all mappable. */
+  attendee: {
+    phone: string | null;
+    notes: string | null;
+    timeZone: string | null;
+    language: string | null;
+  };
+  /** The closed event-metadata catalog (#64), minus the manage link. */
+  eventTypeTitle: string | null;
+  lengthMinutes: number | null;
+  hostEmail: string | null;
 }
 
 /**
@@ -100,10 +130,16 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
     booking_fields: unknown;
     host_name: string | null;
     host_locale: string | null;
+    crm_property_mappings: unknown;
+    event_type_title: string | null;
+    length_minutes: number | null;
+    host_email: string | null;
   }>(
     sql`SELECT b.id, b.uid, b.account_id, b.title, b.start_ms, b.end_ms, b.status, b.responses,
                b.rescheduled_from_uid,
-               et.booking_fields, m.display_name AS host_name, m.locale AS host_locale
+               et.booking_fields, et.crm_property_mappings,
+               et.title AS event_type_title, et.length_minutes,
+               m.display_name AS host_name, m.locale AS host_locale, m.email AS host_email
         FROM booking b
         LEFT JOIN event_type et ON et.id = b.event_type_id
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -113,8 +149,16 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
 
   // The INVITEE only. `booking_guest` rows are deliberately not contacts (#63):
   // N extra calls per booking, and the guest is not the lead.
-  const attendee = await db.get<{ name: string; email: string }>(
-    sql`SELECT name, email FROM booking_attendee WHERE booking_id = ${b.id}
+  const attendee = await db.get<{
+    name: string;
+    email: string;
+    phone: string | null;
+    notes: string | null;
+    time_zone: string | null;
+    language: string | null;
+  }>(
+    sql`SELECT name, email, phone, notes, time_zone, language FROM booking_attendee
+        WHERE booking_id = ${b.id}
         ORDER BY id LIMIT 1`,
   );
   if (!attendee?.email) return null;
@@ -138,6 +182,18 @@ export async function loadBookingForCrmWrite(db: Db, uid: string): Promise<CrmWr
     invitee: { email: attendee.email, ...splitName(attendee.name) },
     hostName: b.host_name,
     hostLocale: b.host_locale,
+    crmPropertyMappings: parseJsonColumn<CrmPropertyMappings | null>(b.crm_property_mappings, null),
+    bookingFields: fields,
+    responses,
+    attendee: {
+      phone: attendee.phone,
+      notes: attendee.notes,
+      timeZone: attendee.time_zone,
+      language: attendee.language,
+    },
+    eventTypeTitle: b.event_type_title,
+    lengthMinutes: b.length_minutes == null ? null : Number(b.length_minutes),
+    hostEmail: b.host_email,
     answers,
     rescheduledFromUid: b.rescheduled_from_uid,
   };
