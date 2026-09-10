@@ -385,12 +385,14 @@ export function BookingFlow({
             // box with nothing to get back with — and `/manage/[uid]` is
             // `frame-ancestors 'self'`, so it would refuse to render there at
             // all on the very click that was supposed to help them.
+            // A public-page control: it is styled from the booking page's own
+            // tokens, not the admin button set, so a host's brand still owns it.
             <a
               href={b.manageUrl}
               {...(embed ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-              className="mt-4 inline-block text-sm text-primary underline underline-offset-4"
+              className="bp-btn-outline mt-4 text-sm"
             >
-              {getMessages(locale).manage.title} →
+              {getMessages(locale).manage.title}
             </a>
           ) : null}
         </section>

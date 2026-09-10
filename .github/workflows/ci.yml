@@ -25,6 +25,7 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm glyph-gate
       - run: pnpm build:packages
       - run: pnpm lint
       - run: pnpm typecheck

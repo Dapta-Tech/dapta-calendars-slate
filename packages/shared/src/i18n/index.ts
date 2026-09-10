@@ -118,6 +118,10 @@ export interface BookingMessages {
     cancelThis: string;
     noOpenTimes: string;
     joinMeeting: string;
+    /** Appended to the join link for screen readers. It opens in a new tab, and
+     *  saying so is the whole point — so it cannot be hardcoded English on a
+     *  page whose locale comes from the invitee's own link. */
+    joinMeetingOpensNewTab: string;
     /** Shown in place of the date line when the booking's start instant did not
      *  parse — a readable line instead of a thrown render (#123). */
     timeUnreadable: string;
@@ -1230,6 +1234,7 @@ export const en: BookingMessages = {
     cancelThis: 'Cancel this booking',
     noOpenTimes: 'No open times in the next 3 weeks.',
     joinMeeting: 'Join the meeting',
+    joinMeetingOpensNewTab: ' (opens in a new tab)',
     timeUnreadable: 'We could not read the time for this booking. Check your confirmation email.',
     linkInvalidTitle: 'This link is no longer active',
     linkInvalidBody:
@@ -1412,7 +1417,7 @@ export const en: BookingMessages = {
       calendarLinkConflictsOnly: 'Checked against {n} calendar(s) for conflicts. No calendar is set to receive new events.',
       calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
       calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
-      calendarLinkConnect: 'Connect one',
+      calendarLinkConnect: 'Connect a calendar',
       calendarsSectionTitle: 'Calendars for this event',
       calendarsSectionHint: 'Choose which connected calendars this event checks for conflicts, and where booked events are added.',
       calendarsCheckConflicts: 'Check for conflicts',
@@ -1574,11 +1579,11 @@ export const en: BookingMessages = {
       createBooking: 'Create booking',
       createdTitle: 'Booking created',
       createdNote: 'The attendee has been notified.',
-      backToBookings: '← Back to bookings',
+      backToBookings: 'Back to bookings',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
-      noHandleLink: 'Set your handle in Booking Page settings',
+      noHandleLink: 'Set your handle',
       slotTaken: 'That time was just taken — pick another slot.',
       scheduleMissingNotice: 'This event’s schedule is missing — pick a schedule in the event settings.',
       scheduleMissingLink: 'Open event settings',
@@ -2219,6 +2224,7 @@ export const es: BookingMessages = {
     cancelThis: 'Cancelar esta reserva',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     joinMeeting: 'Unirse a la reunión',
+    joinMeetingOpensNewTab: ' (se abre en una pestaña nueva)',
     timeUnreadable: 'No pudimos leer la hora de esta reserva. Revisa tu correo de confirmación.',
     linkInvalidTitle: 'Este enlace ya no está activo',
     linkInvalidBody:
@@ -2401,7 +2407,7 @@ export const es: BookingMessages = {
       calendarLinkConflictsOnly: 'Verificado contra {n} calendario(s) para conflictos. Ningún calendario está configurado para recibir eventos nuevos.',
       calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
       calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
-      calendarLinkConnect: 'Conectar uno',
+      calendarLinkConnect: 'Conectar un calendario',
       calendarsSectionTitle: 'Calendarios para este evento',
       calendarsSectionHint: 'Elige qué calendarios conectados verifica este evento para conflictos, y dónde se añaden los eventos reservados.',
       calendarsCheckConflicts: 'Verificar conflictos',
@@ -2567,11 +2573,11 @@ export const es: BookingMessages = {
       createBooking: 'Crear reserva',
       createdTitle: 'Reserva creada',
       createdNote: 'Se ha notificado al invitado.',
-      backToBookings: '← Volver a reservas',
+      backToBookings: 'Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
-      noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
+      noHandleLink: 'Definir mi identificador',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
       scheduleMissingNotice:
         'Falta el horario de este evento — elige un horario en la configuración del evento.',

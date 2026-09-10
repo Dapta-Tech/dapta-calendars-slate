@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type ReactNode } from 'rea
 import Link from 'next/link';
 import { isReservedFieldName, type BookingMessages, type Locale } from '@slate/shared';
 import type { EventType } from '@/lib/admin-api';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DateTimePicker } from '@/components/ui/date-time-picker';
 import { Input } from '@/components/ui/input';
 import { PhoneField } from '@/components/ui/phone-field';
@@ -227,7 +227,8 @@ export function HostBookingForm({
       <div className="rounded-md border border-border bg-card p-6">
         <h2 className="mb-2 text-xl font-semibold">{m.createdTitle}</h2>
         <p className="mb-4 text-sm text-muted-foreground">{m.createdNote}</p>
-        <Link href="/admin/bookings" className="text-sm text-primary underline underline-offset-4">
+        <Link href="/admin/bookings" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
+          <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
           {m.backToBookings}
         </Link>
       </div>

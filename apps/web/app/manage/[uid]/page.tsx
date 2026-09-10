@@ -5,6 +5,7 @@ import { getManageView, getAvailability, getRescheduleAvailability } from '@/lib
 import { publicLocale } from '@/lib/locale';
 import { ManageActions } from './manage-actions';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { buttonVariants } from '@/components/ui/button';
 
 // Token-gated personal page: never indexed, and the title stays generic so no
 // booking detail leaks into link previews or crawlers.
@@ -142,8 +143,14 @@ export default async function ManagePage({
         ) : null}
         {meetingUrl ? (
           <p className="text-sm">
-            <a href={meetingUrl} className="text-primary underline underline-offset-4" target="_blank" rel="noopener noreferrer">
-              {m.joinMeeting} →<span className="sr-only"> (opens in a new tab)</span>
+            <a
+              href={meetingUrl}
+              className={buttonVariants({ variant: 'outline', size: 'lg' })}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {m.joinMeeting}
+              <span className="sr-only">{m.joinMeetingOpensNewTab}</span>
             </a>
           </p>
         ) : null}
