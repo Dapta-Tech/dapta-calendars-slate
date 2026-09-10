@@ -1,7 +1,14 @@
 'use server';
 
 import { createBookingSchema } from '@slate/types';
-import { postBooking, postTeamBooking, postReservation, type BookResult, type ReserveResult } from '@/lib/api';
+import {
+  postBooking,
+  postTeamBooking,
+  postReservation,
+  postReservationRelease,
+  type BookResult,
+  type ReserveResult,
+} from '@/lib/api';
 
 /**
  * Server Action: hold a slot. MUST stay a server action (not a direct client
@@ -17,6 +24,19 @@ export async function reserveAction(input: {
   startUtc: string;
 }): Promise<ReserveResult> {
   return postReservation(input);
+}
+
+/**
+ * Server Action: give a soft hold back when the booker leaves the form (#135).
+ * Must be a server action for the same reason `reserveAction` is — the API base
+ * is read at RUNTIME here, not baked into the client bundle at build time.
+ *
+ * Answers nothing. The release is authorised by the uid alone and reports the
+ * same success whether or not a hold was there, so there is no result for the
+ * caller to act on.
+ */
+export async function releaseAction(reservationUid: string): Promise<void> {
+  await postReservationRelease(reservationUid);
 }
 
 /**

@@ -1027,6 +1027,32 @@ export const openapiSpec = {
         },
       },
     },
+    '/v1/reservations/release': {
+      post: {
+        summary: 'Give a held slot back',
+        description:
+          'Releases a hold placed by POST /v1/reservations so the slot is offered ' +
+          'to other visitors again, rather than waiting out its ten-minute TTL. ' +
+          'The reservation uid is the authorisation — releasing a hold you do not ' +
+          'hold, one that already expired, or one a booking already consumed all ' +
+          'answer the same 200, so this is never a way to learn whether a hold exists.',
+        requestBody: jsonBody({
+          type: 'object',
+          required: ['reservationUid'],
+          properties: {
+            reservationUid: {
+              type: 'string',
+              description: 'The uid returned by POST /v1/reservations.',
+            },
+          },
+        }),
+        responses: {
+          '200': { description: '{released:true} — always, when the body parses' },
+          '400': { description: 'BAD_REQUEST (no reservationUid)' },
+          '429': { description: 'RATE_LIMITED' },
+        },
+      },
+    },
     '/v1/bookings': {
       post: {
         summary: 'Create a booking (consumes a hold; intake-validated)',

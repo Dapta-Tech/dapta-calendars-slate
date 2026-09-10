@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
+import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -46,13 +47,11 @@ export default async function TeamBookingPage({
   const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
-  // 60 days, matching the personal route — the month calendar's window. Note
-  // this route has no server-side clamp of its own: `availability()` caps at
-  // `from + 60 days`, `teamAvailability()` passes the range through. So this
-  // number is the whole bound on the team path, not a request against one.
-  // Which slots a team event offers is unchanged (#127 owns that question);
-  // this only asks for more of the days it was already prepared to answer for.
-  const to = new Date(now.getTime() + 60 * 86_400_000).toISOString();
+  // The month calendar's window, matching the personal route. `teamAvailability()`
+  // now clamps to this same bound server-side (#136) — it used to pass the range
+  // through, which made this number the whole bound on an unauthenticated path.
+  // Which slots a team event offers is unchanged (#127 owns that question).
+  const to = new Date(now.getTime() + MAX_AVAILABILITY_WINDOW_MS).toISOString();
 
   const [team, availability] = await Promise.all([
     getTeamProfile(accountCode, teamSlug),

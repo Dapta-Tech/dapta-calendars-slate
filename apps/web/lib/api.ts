@@ -203,6 +203,28 @@ export async function postReservation(body: {
 }
 
 /**
+ * Give a soft hold back (#135) — the counterpart to `postReservation`.
+ *
+ * Best-effort and silent: it resolves whatever happens. The booker is already
+ * on their way back to the times when this fires, there is nothing they could
+ * do about a failure, and the ten-minute TTL is the backstop that made the hold
+ * safe before any release existed. The API answers the same 200 for a uid that
+ * names nothing, so there is no outcome worth branching on.
+ */
+export async function postReservationRelease(reservationUid: string): Promise<void> {
+  try {
+    await fetch(`${API_URL}/v1/reservations/release`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reservationUid }),
+      cache: 'no-store',
+    });
+  } catch {
+    // Swallowed on purpose — see above.
+  }
+}
+
+/**
  * The manage read has three outcomes and the page renders something different
  * for each, so it answers a result rather than `BookingView | null` (#123).
  *

@@ -21,7 +21,7 @@ import { EventPanel, MonthCalendar } from '@/components/booking-page-parts';
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
-import { bookAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
@@ -264,6 +264,8 @@ export function BookingFlow({
     // after a conflict re-rendered the conflict card straight back.
     setDismissedResult(result);
     setHoldError(null);
+    // Moving to another time orphans the hold on this one — give it back (#135).
+    if (hold) void releaseAction(hold.uid);
     setHold(null);
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.
@@ -280,15 +282,15 @@ export function BookingFlow({
    * Forget the slot and go back to the times. Reached two ways: the retry on a
    * 409/410, and the explicit "back to times" on the form.
    *
-   * It forgets the hold; it does not RELEASE it. There is no release endpoint —
-   * `reserve()` has no counterpart — so the reservation sits until its TTL,
-   * exactly as it already did when the booker simply picked a different slot.
-   * BP makes leaving the form a first-class exit and so makes that more
-   * visible, but it is not new behaviour and not this unit's to fix; a release
-   * needs an API route. Tracked separately.
+   * It RELEASES the hold (#135) rather than only forgetting it: "back to times"
+   * is how a booker compares Tuesday against Thursday, so a hold left standing
+   * for its full ten-minute TTL would hide that slot from every other visitor
+   * for no reason. Fire-and-forget — the release answers the same success
+   * whether or not the hold was still there, and the booker is already gone.
    */
   function retry() {
     setSelected(null);
+    if (hold) void releaseAction(hold.uid);
     setHold(null);
     setHoldError(null);
     setDismissedResult(result);

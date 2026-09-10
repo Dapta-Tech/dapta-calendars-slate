@@ -71,10 +71,11 @@ import {
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
 import { CrmAuthError } from '@slate/crm';
-import type {
-  IntegrationCapabilities,
-  IntegrationConnectInput,
-  IntegrationStatusView,
+import {
+  clampAvailabilityWindow,
+  type IntegrationCapabilities,
+  type IntegrationConnectInput,
+  type IntegrationStatusView,
 } from '@slate/types';
 import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
@@ -907,8 +908,9 @@ export class AdminService {
     if (!accountCode) return null;
     const fromMs = new Date(q.from).getTime();
     if (!Number.isFinite(fromMs)) return null;
-    // Same 60-day window cap as the public endpoint (contract §Engine).
-    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
+    // Same window cap as the public endpoints, from the one shared constant
+    // (contract §Engine, #136).
+    const toMs = clampAvailabilityWindow(fromMs, new Date(q.to).getTime());
     if (!Number.isFinite(toMs)) return null;
     const result = await getAvailability(
       this.db,

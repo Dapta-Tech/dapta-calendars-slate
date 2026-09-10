@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, t } from '@slate/shared';
+import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getAvailability, getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -56,12 +57,11 @@ export default async function BookingPage({
 
   const now = new Date();
   const from = now.toISOString();
-  // 60 days, not 21: the month calendar (BP) needs a whole month per view, and
-  // the availability service clamps its own window at 60 days from `from`
-  // anyway, so this is the widest single read the contract allows. Asking for
-  // more would silently get 60; asking for 21 left the calendar unable to
-  // fill its own grid.
-  const to = new Date(now.getTime() + 60 * 86_400_000).toISOString();
+  // The widest single read the contract allows, not 21 days: the month calendar
+  // (BP) needs a whole month per view, and the availability service clamps its
+  // own window to this same bound (#136), so asking for more silently gets this
+  // and asking for 21 left the calendar unable to fill its own grid.
+  const to = new Date(now.getTime() + MAX_AVAILABILITY_WINDOW_MS).toISOString();
 
   const [profile, availability] = await Promise.all([
     getProfile(accountCode, handle),

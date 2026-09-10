@@ -241,6 +241,62 @@ export const availabilityQuerySchema = z.object({
 export type AvailabilityQuery = z.infer<typeof availabilityQuerySchema>;
 
 /**
+ * Maximum span of a single availability query, in days — ONE definition (#136).
+ *
+ * `availability()`, the booking-scoped reschedule picker, the public TEAM route
+ * and the admin "my availability" read all clamp to this, and the external
+ * free-busy contract (`SELF-HOSTING.md`, the header of
+ * `apps/api/src/calendar.backend.generic.ts`) documents the same number. It used
+ * to be a `60 * 86_400_000` literal repeated at each site, and the team path
+ * simply never grew one: that route is unauthenticated, so a caller could ask
+ * for a decade of slots across every host of a collective event in a single
+ * request, and rate limiting counts requests rather than window width.
+ *
+ * It lives in the contracts package rather than in the engine because it bounds
+ * what a caller may ASK for; it is not a scheduling rule.
+ */
+export const MAX_AVAILABILITY_WINDOW_DAYS = 60;
+/** {@link MAX_AVAILABILITY_WINDOW_DAYS} in milliseconds. */
+export const MAX_AVAILABILITY_WINDOW_MS = MAX_AVAILABILITY_WINDOW_DAYS * 86_400_000;
+
+/**
+ * Clamp an availability window end to {@link MAX_AVAILABILITY_WINDOW_MS} past
+ * its start. Clamps rather than rejects, so an over-wide agent query still
+ * answers a bounded result instead of a 400.
+ *
+ * Both arguments must already be finite — every caller parses its window with a
+ * zod schema first, because `Math.min` propagates a `NaN` rather than catching
+ * it and a `NaN` window reaches `computeSlots` as a `RangeError` thrown out of
+ * a public route.
+ */
+export function clampAvailabilityWindow(fromMs: number, toMs: number): number {
+  return Math.min(toMs, fromMs + MAX_AVAILABILITY_WINDOW_MS);
+}
+
+/**
+ * Query for the public TEAM availability route
+ * (`GET /v1/public/teams/{accountCode}/{teamSlug}/availability`, #136).
+ *
+ * The account and team come from the URL; the event and the window come from
+ * the query, and they are PARSED rather than read raw. The controller used to
+ * check only that `slug`, `from` and `to` were present, so an unparseable
+ * `from` became `NaN` and travelled into the slot engine instead of being
+ * rejected at the edge — the same class of defect as #104, on a route that is
+ * unauthenticated by design.
+ */
+export const teamAvailabilityQuerySchema = z.object({
+  /** Team event-type slug. */
+  slug: z.string().min(1),
+  /** Inclusive window start (ISO-8601 UTC). */
+  from: isoUtcSchema,
+  /** Exclusive window end (ISO-8601 UTC); the service caps the span. */
+  to: isoUtcSchema,
+  /** IANA tz to express slots against (display only; slots are absolute). */
+  timeZone: timeZoneSchema.optional(),
+});
+export type TeamAvailabilityQuery = z.infer<typeof teamAvailabilityQuerySchema>;
+
+/**
  * Query for the booking-scoped reschedule picker
  * (`GET /v1/bookings/{uid}/availability`, #127). The booking names its own
  * event and hosts, so only the window is asked for — and it is PARSED rather
@@ -406,6 +462,24 @@ export const reserveSlotSchema = z.object({
   startUtc: isoUtcSchema,
 });
 export type ReserveSlotInput = z.infer<typeof reserveSlotSchema>;
+
+/**
+ * Give a soft hold back (#135) — the counterpart to {@link reserveSlotSchema}.
+ *
+ * The reservation uid is the only input, and it IS the authorisation: it is a
+ * `randomUUID()` handed only to the caller that placed the hold. Keying the
+ * release on `(accountCode, handle, slug, startUtc)` instead would hand every
+ * visitor a button that frees other people's holds, because anyone can name a
+ * slot.
+ *
+ * Deliberately not `.uuid()`: the release answers the same success for a uid
+ * that names nothing as for a real one, and a format check would be the one
+ * input shape that answers differently.
+ */
+export const releaseSlotSchema = z.object({
+  reservationUid: z.string().min(1).max(64),
+});
+export type ReleaseSlotInput = z.infer<typeof releaseSlotSchema>;
 
 /**
  * Which availability route the manage page's reschedule picker must ask (#122).
