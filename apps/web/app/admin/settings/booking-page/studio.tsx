@@ -358,15 +358,21 @@ export function Studio(init: StudioInit) {
                 label's whole text as its accessible name — so putting this here
                 renamed the neighbouring Copy button to "Your link Copy Open
                 Embed on your site". A button is not what a field label labels. */}
+            {/* A2 (#112): E landed this as a button wearing link styling
+                (`text-primary hover:underline`) at ~20px tall, in a control rail
+                where the sweep had just made every other control a `Button` on
+                the 44px step. Same handler, same icon, same copy — it is the
+                ghost variant now, so it reads as the control it always was. */}
             <div className="flex flex-col">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="lg"
                 onClick={() => setEmbedOpen(true)}
-                className="inline-flex items-center gap-1.5 self-start text-sm text-primary hover:underline"
+                className="-ml-3 self-start"
               >
                 <EmbedIcon />
                 {init.embedMessages.action}
-              </button>
+              </Button>
               <EmbedSnippetModal
                 open={embedOpen}
                 onClose={() => setEmbedOpen(false)}
