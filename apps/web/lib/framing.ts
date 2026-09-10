@@ -38,7 +38,28 @@ export type FrameAncestors = "'self'" | '*';
  * mirror-image default would let a new admin route quietly become frameable,
  * which nobody notices.
  */
+/**
+ * The decision is made on the PATH ALONE, not on `?embed=1`.
+ *
+ * The middleware has the query in hand and could open the booking routes only
+ * for an embedded render, which would be the narrower policy. It does not,
+ * because #67 chose to say "a public booking page is embeddable" rather than
+ * "an embedded booking page is embeddable" — a host who hand-writes an iframe
+ * without the mode, or frames a page whose 308 has not resolved yet, still gets
+ * a page rather than a blocked frame. The residual exposure is a full-chrome
+ * booking page being framed, where the attacker's payoff is a victim who types
+ * their own name and email into a real booking form on the real host's
+ * calendar.
+ *
+ * If this is ever tightened to `embed=1`, the header then varies by query, so
+ * whatever caches these responses has to include the query in its key. It does
+ * today, but that becomes load-bearing rather than incidental.
+ */
 export function frameAncestorsFor(path: string): FrameAncestors {
+  // Reads `isProductPath`, which means that function's prefix list is now a
+  // security boundary as well as a palette switch. Its own comment says so, and
+  // `framing.spec.ts` pins every entry to `'self'` so removing one breaks a
+  // test rather than a header.
   if (isProductPath(path)) return "'self'";
   if (SELF_ONLY_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) return "'self'";
   return '*';
