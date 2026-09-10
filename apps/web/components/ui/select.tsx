@@ -46,6 +46,12 @@ import { cn } from '@/lib/cn';
 export interface SelectOption {
   value: string;
   label: string;
+  /**
+   * Secondary text pinned to the right of the row and of the trigger — the GMT
+   * offset beside a timezone, and nothing else so far. It is part of what the
+   * option MEANS, not decoration, so it is matched by the search filter too.
+   */
+  hint?: string;
   disabled?: boolean;
 }
 
@@ -61,6 +67,8 @@ export function Select({
   title,
   className,
   locale = 'en',
+  searchPlaceholder,
+  noResultsText,
 }: {
   /** The selected option's value. */
   value: string;
@@ -79,8 +87,20 @@ export function Select({
   className?: string;
   /** 'en' | 'es' — resolves the search / no-results copy. */
   locale?: string;
+  /**
+   * Override the generic search / empty copy for a domain that has better
+   * words for it ("Search timezone…"). A caller with no better words leaves
+   * these alone and gets the `select` catalog block, which is the point of the
+   * primitive owning its own copy.
+   */
+  searchPlaceholder?: string;
+  noResultsText?: string;
 }) {
-  const m = getMessages(locale).select;
+  const generic = getMessages(locale).select;
+  const m = {
+    search: searchPlaceholder ?? generic.search,
+    noResults: noResultsText ?? generic.noResults,
+  };
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -99,7 +119,10 @@ export function Select({
     const q = query.trim().toLowerCase();
     if (!q) return options;
     return options.filter(
-      (o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q),
+      (o) =>
+        o.label.toLowerCase().includes(q) ||
+        o.value.toLowerCase().includes(q) ||
+        (o.hint ?? '').toLowerCase().includes(q),
     );
   }, [options, query, searchable]);
 
@@ -215,6 +238,9 @@ export function Select({
         <span className={cn('truncate', !selected && 'text-muted-foreground')}>
           {selected ? selected.label : (placeholder ?? '')}
         </span>
+        {selected?.hint ? (
+          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{selected.hint}</span>
+        ) : null}
         <svg
           aria-hidden
           viewBox="0 0 24 24"
@@ -313,6 +339,16 @@ export function Select({
                     )}
                   >
                     <span className="truncate">{o.label}</span>
+                    {o.hint ? (
+                      <span
+                        className={cn(
+                          'ml-auto shrink-0 text-xs',
+                          isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground',
+                        )}
+                      >
+                        {o.hint}
+                      </span>
+                    ) : null}
                   </button>
                 </li>
               );
