@@ -15,6 +15,8 @@
  * booking pages show no times at all, because the free-busy path is
  * FAIL-CLOSED by design: an error there returns zero slots rather than slots
  * that might already be taken. Accept 60 days, or page the range internally.
+ * The number itself is `MAX_AVAILABILITY_WINDOW_DAYS` in `@slate/types` — one
+ * definition shared by every availability path (#136).
  *   POST   /v1/events                                    → { externalEventId, externalCalendarId?, meetingUrl? }
  *   PATCH  /v1/events/:externalEventId                   → { externalEventId, ... }
  *
