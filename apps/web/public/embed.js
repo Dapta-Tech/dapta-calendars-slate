@@ -25,6 +25,10 @@
   var SELECTOR = 'iframe[data-dapta-calendars]';
   /* A frame taller than this is a runaway measurement, not a booking page. */
   var MAX_HEIGHT = 20000;
+  /* Below this, treat the reading as noise and leave the snippet's floor in
+     place. Nothing this script sizes is a 40px page, and the floor is the only
+     thing standing between a bad measurement and a collapsed frame. */
+  var MIN_TRUSTED_HEIGHT = 120;
 
   if (typeof window === 'undefined' || !window.addEventListener) return;
 
@@ -52,6 +56,12 @@
         var frame = frames[i];
         if (frame.contentWindow === event.source) {
           frame.style.height = height + 'px';
+          /* The snippet's `min-height` is the PRE-JS floor: it holds the box
+             open until a real measurement arrives, and after that it is only a
+             way for a short page to sit under dead space it does not fill — a
+             landing page with one event is about 400px against a 700px floor.
+             Release it once, and only for a height big enough to be real. */
+          if (height >= MIN_TRUSTED_HEIGHT) frame.style.minHeight = '0px';
           return;
         }
       }
