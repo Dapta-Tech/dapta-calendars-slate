@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/page-header';
+import { cn } from '@/lib/cn';
 import { TeamCard } from './teams-client';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +19,7 @@ export default async function TeamsPage() {
   const accountCode = me?.accountCode ?? '';
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-4 py-8 sm:px-8 sm:py-10">
       {/* One CTA per screen: top-right Create only with rows; the empty state
           owns the sole centered CTA. */}
       <PageHeader
@@ -25,10 +27,7 @@ export default async function TeamsPage() {
         subtitle={m.subtitle}
         action={
           teams.length > 0 ? (
-            <Link
-              href="/admin/teams/new"
-              className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-            >
+            <Link href="/admin/teams/new" className={cn(buttonVariants({ size: 'lg' }))}>
               {m.newTeam}
             </Link>
           ) : undefined
@@ -48,16 +47,13 @@ export default async function TeamsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-6 text-center sm:p-10">
           <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
             <circle cx="9" cy="8" r="3.2" />
             <path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 20a5.5 5.5 0 0 0-3-4.9" />
           </svg>
           <p className="max-w-sm text-sm text-muted-foreground">{m.emptyList}</p>
-          <Link
-            href="/admin/teams/new"
-            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-          >
+          <Link href="/admin/teams/new" className={cn(buttonVariants({ size: 'lg' }))}>
             {m.newTeam}
           </Link>
         </div>

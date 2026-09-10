@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 
 /** Must match the constants in connections-client.tsx (the opener side). */
 const CONNECT_SIGNAL_CHANNEL = 'slate-connect-signal';
@@ -92,13 +93,9 @@ export function ConnectedClient({
         <p className="mt-1 text-sm text-muted-foreground">{error ? m.errorBody : m.body}</p>
       </div>
       {showFallback ? (
-        <button
-          type="button"
-          onClick={() => window.close()}
-          className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm transition-colors hover:border-primary"
-        >
+        <Button variant="outline" size="lg" onClick={() => window.close()}>
           {m.close}
-        </button>
+        </Button>
       ) : null}
     </main>
   );

@@ -1,50 +1,66 @@
 'use client';
 
-import { useState, useTransition } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { useTransition } from 'react';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
 import { useToast } from '@/components/toast';
+import { Button } from '@/components/ui/button';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { deleteScheduleAction } from './actions';
 
 type AvailabilityMessages = BookingMessages['admin']['availability'];
 
-/** Inline confirm-gated delete for a schedule list row. */
-export function DeleteScheduleButton({ id, messages: m }: { id: string; messages: AvailabilityMessages }) {
+/**
+ * Delete a schedule from its list row.
+ *
+ * A2 (#112): this used to swap itself for a Yes/No pair in the same corner of
+ * the row. Nothing trapped focus, nothing was announced, and the pair appeared
+ * where the pointer already was — so the second click landed on "Yes" as often
+ * as it landed on the button the person meant. It now asks through the real
+ * dialog, and the question names the schedule.
+ */
+export function DeleteScheduleButton({
+  id,
+  name,
+  messages: m,
+  locale,
+}: {
+  id: string;
+  name: string;
+  messages: AvailabilityMessages;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
+}) {
   const [pending, start] = useTransition();
-  const [confirming, setConfirming] = useState(false);
   const { success, error } = useToast();
+  const { confirm, dialog } = useConfirmDialog(locale);
 
-  if (confirming) {
-    return (
-      <span className="flex items-center gap-1 text-sm">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() =>
-            start(async () => {
-              const r = await deleteScheduleAction(id);
-              setConfirming(false);
-              if (r.ok) success(m.deletedToast);
-              else error(r.message ?? m.deleteError);
-            })
-          }
-          className="rounded-md border border-destructive px-2 py-1.5 text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
-        >
-          {m.yes}
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-2 py-1.5 transition-colors hover:bg-accent">
-          {m.no}
-        </button>
-      </span>
-    );
-  }
+  const ask = async () => {
+    const ok = await confirm({
+      title: m.deleteTitle,
+      message: t(m.deleteBody, { name }),
+      confirmLabel: m.deleteSchedule,
+      destructive: true,
+    });
+    if (!ok) return;
+    start(async () => {
+      const r = await deleteScheduleAction(id);
+      if (r.ok) success(m.deletedToast);
+      else error(r.message ?? m.deleteError);
+    });
+  };
 
   return (
-    <button
-      type="button"
-      onClick={() => setConfirming(true)}
-      className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
-    >
-      {m.deleteSchedule}
-    </button>
+    <>
+      <Button
+        variant="destructive"
+        size="lg"
+        disabled={pending}
+        aria-label={`${m.deleteSchedule} · ${name}`}
+        onClick={() => void ask()}
+      >
+        {m.deleteSchedule}
+      </Button>
+      {dialog}
+    </>
   );
 }
