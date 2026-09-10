@@ -405,6 +405,21 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
+#### The free-busy window is up to 60 days
+
+`POST /v1/free-busy` is called with the same range the public availability read was
+asked for, and that read caps itself at **60 days**. The booking page's month
+calendar asks for the full window so a visitor can page between months without a
+refetch, so 60 days is the normal request, not an edge case.
+
+**Your backend must accept a 60-day range.** This path is deliberately
+*fail-closed*: if free-busy errors, the availability read returns zero slots and
+`emptyReason: CALENDAR_UNAVAILABLE` rather than times that might already be taken.
+A backend that rejects or silently truncates a wide range therefore turns every
+public booking page into "times are temporarily unavailable". If your upstream
+calendar API has a narrower limit, page the range inside your backend and merge the
+results — do not pass the limit through.
+
 #### Conferencing links
 
 `POST /v1/events` and `PATCH /v1/events/:id` both carry

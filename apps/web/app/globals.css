@@ -330,6 +330,164 @@ body {
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;
 }
+/* The three-region event page (BP) needs room for panel + month + day column,
+   so the canvas carries its own cap and `split` widens it — which is what the
+   axis has always claimed to do. */
+.bp-canvas {
+  margin-inline: auto;
+  max-width: 64rem;
+}
 .branded-surface.tpl-split .bp-canvas {
-  max-width: 44rem;
+  max-width: 72rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * BP: month calendar + day column. Everything here is token-driven, so both
+ * themes and all nine branding axes reach it the same way the slot chips do.
+ * ------------------------------------------------------------------------ */
+
+/* The slot-layout axis, re-scoped inside the day column. The page-wide rule is
+   3 columns (4 above 640px); in a ~16rem column that is a 65px cell holding a
+   `white-space: nowrap` "10:30 AM", which overflows on every wide screen. Here
+   `list` is one per row and `grid` is two — both axes stay visibly different,
+   neither can overflow, and no other surface changes. */
+.branded-surface .bp-daycol .bp-slots,
+.branded-surface.slots-list .bp-daycol .bp-slots {
+  grid-template-columns: 1fr;
+}
+.branded-surface.slots-grid .bp-daycol .bp-slots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* The day column's own scroller — desktop only. Nesting a fixed-height scroll
+   region inside page scroll is a touch trap: the finger lands in the inner box
+   and the page stops moving. Below `md` the list just flows in the page. */
+@media (min-width: 768px) {
+  .branded-surface .bp-daycol-scroll {
+    max-height: 26rem;
+    overflow-y: auto;
+    /* Room for the scrollbar so a chip's rim is never clipped by it. */
+    padding-right: 0.25rem;
+  }
+}
+
+/* Rows own their own seven-column track rather than `display: contents` on a
+   shared one. `contents` has a long history of dropping elements out of the
+   accessibility tree, and the row structure is the whole reason this claims
+   grid semantics — so the layout must not depend on removing the rows from it.
+   Every row is seven equal fractions of the same width, so the columns line up
+   without a shared track. (The cells themselves are `display: contents`
+   wrappers carrying `role="gridcell"`; a wrapper that vanishes from layout is
+   fine, one that vanishes from the a11y tree is not, and only the latter is at
+   issue with `contents`.) */
+.branded-surface .bp-cal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.branded-surface .bp-cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+.branded-surface .bp-cal-weekday {
+  min-width: 0;
+  padding-block: 0.25rem;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+/* A day cell is a slot chip by another name — same hit target, same radius
+   axis, same accent rim on hover — so the grid cannot drift from the column
+   beside it. */
+.branded-surface .bp-cal-day {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 2.75rem; /* 44px hit target (R28) */
+  aspect-ratio: 1 / 1;
+  border: 1px solid transparent;
+  border-radius: var(--bp-btn-radius, 0.5rem);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  transition:
+    transform 120ms var(--ease-standard, ease),
+    border-color 120ms var(--ease-standard, ease);
+}
+/* Bookable. */
+.branded-surface .bp-cal-day[data-state='available'] {
+  border-color: var(--border);
+  background: var(--card);
+  font-weight: 600;
+  cursor: pointer;
+}
+.branded-surface .bp-cal-day[data-state='available']:hover {
+  border-color: var(--accent, var(--primary));
+}
+.branded-surface .bp-cal-day[data-state='available']:active {
+  transform: scale(0.97);
+}
+/* Nothing to book — visibly a date, not a control. `disabled` already takes it
+   out of the tab order; this takes it out of the eye's. */
+.branded-surface .bp-cal-day[data-state='empty'] {
+  color: var(--muted-foreground);
+  opacity: 0.45;
+  cursor: default;
+}
+.branded-surface .bp-cal-day[data-state='outside'] {
+  color: var(--muted-foreground);
+  opacity: 0.25;
+  cursor: default;
+}
+/* Today: a dot under the number, so "today" and "selected" can both be true at
+   once and still be told apart. */
+.branded-surface .bp-cal-day[data-today='true']::after {
+  content: '';
+  position: absolute;
+  bottom: 0.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: currentColor;
+}
+/* Selected day — the same two treatments the slotSelect axis gives a chip. */
+.branded-surface .bp-cal-day[data-selected='true'],
+.branded-surface.sel-soft .bp-cal-day[data-selected='true'] {
+  background: var(--accent-soft, var(--muted));
+  border-color: var(--accent, var(--primary));
+  box-shadow: inset 0 0 0 1px var(--accent, var(--primary));
+  color: var(--foreground);
+  font-weight: 700;
+}
+.branded-surface.sel-solid .bp-cal-day[data-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: none;
+  font-weight: 700;
+}
+/* Month arrows + the 12h/24h toggle: same rim and target as everything else. */
+.branded-surface .bp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius, 0.5rem);
+  background: var(--card);
+  transition: border-color 120ms var(--ease-standard, ease);
+}
+.branded-surface .bp-icon-btn:hover:not(:disabled) {
+  border-color: var(--accent, var(--primary));
+}
+.branded-surface .bp-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

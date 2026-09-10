@@ -11,10 +11,13 @@ import {
   clampAccent,
   accentWasAdjusted,
   accentLabelContrast,
+  buildMonthGrid,
+  formatDayHeading,
   onAccent,
   matchTheme,
   monogram,
   t,
+  weekStartsOnFor,
   type BookingMessages,
   type PublicBranding,
 } from '@slate/shared';
@@ -22,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
 import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
@@ -96,6 +100,8 @@ export interface StudioInit {
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
+  /** 'en' | 'es' — the booking-flow preview's month grid is locale-shaped. */
+  locale: string;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -540,7 +546,13 @@ export function Studio(init: StudioInit) {
                   m={m}
                 />
               ) : (
-                <BookingPreview accent={accent} m={m} />
+                <BookingPreview
+                  displayName={displayName}
+                  avatarUrl={avatarUrl}
+                  accent={accent}
+                  locale={init.locale}
+                  m={m}
+                />
               )}
             </div>
           </div>
@@ -608,27 +620,182 @@ function ProfilePreview({
   );
 }
 
-function BookingPreview({ accent: _accent, m }: { accent: string; m: StudioMessages }) {
+/**
+ * The booking-flow preview, rebuilt to BP's three regions — event panel, month
+ * calendar, day column — so the axes this studio exists to demonstrate land on
+ * the markup the public page actually ships (`bp-card`, `bp-cal-*`, `bp-daycol`,
+ * `bp-slots`, `bp-slot`, `bp-icon-btn`).
+ *
+ * It is still a MOCK, not the live island: `BookingFlow` needs slots, server
+ * actions and a real account, and this preview deliberately has none of those.
+ * The whole thing stays out of the tab order and the a11y tree for the reason
+ * it always did — nothing here can be clicked, so nothing here should invite a
+ * click. The sample dates are fixed rather than derived from today, so the
+ * preview renders identically on the server and after hydration.
+ */
+function BookingPreview({
+  displayName,
+  avatarUrl,
+  accent,
+  locale,
+  m,
+}: {
+  displayName: string;
+  avatarUrl: string;
+  accent: string;
+  locale: string;
+  m: StudioMessages;
+}) {
+  // The sample MONTH is fixed; how it READS is not. Month names, weekday
+  // initials and which day a week starts on are locale decisions, and the
+  // public page makes them — a Spanish admin previewing a Sunday-first English
+  // grid is being shown a page that does not exist. Built from the same
+  // helpers the real calendar uses, on a fixed key, so it is localized and
+  // still renders identically on the server and after hydration.
+  const grid = useMemo(
+    () =>
+      buildMonthGrid(PREVIEW_MONTH_KEY, {
+        availableDayKeys: PREVIEW_AVAILABLE,
+        todayKey: PREVIEW_TODAY,
+        locale,
+        weekStartsOn: weekStartsOnFor(locale),
+      }),
+    [locale],
+  );
+  const selectedLabel = useMemo(
+    () => formatDayHeading(PREVIEW_SELECTED_INSTANT, 'UTC', locale),
+    [locale],
+  );
+
   return (
-    <div>
-      <div className="bp-card mb-4">
-        <div className="font-medium">{m.introCall}</div>
-        <div className="text-sm text-muted-foreground">30 {m.minSuffix}</div>
+    <div aria-hidden="true" className="flex flex-col gap-4">
+      {/* Event panel */}
+      <div className="flex items-center gap-3">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            width={40}
+            height={40}
+            className="h-10 w-10 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="flex h-10 w-10 items-center justify-center text-base font-semibold"
+            style={{
+              background: 'var(--accent)',
+              color: onAccent(clampAccent(accent, BOOKING_CANVAS)),
+              borderRadius: 'var(--bp-radius)',
+            }}
+          >
+            {monogram(displayName)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="truncate font-medium">
+            {m.introCall}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            30 {m.minSuffix} · {displayName}
+          </div>
+        </div>
       </div>
-      {/* Decorative theme preview only — these sample times aren't real
-          availability and never will be (no onClick). Excluded from the tab
-          order / a11y tree so keyboard and screen-reader users don't land on
-          a button that visually invites a click but can never do anything. */}
-      <div className="bp-slots" aria-hidden="true">
-        {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-          <button key={s} type="button" tabIndex={-1} aria-pressed={i === 0} className="bp-slot text-sm">
-            {s}
-          </button>
-        ))}
+
+      {/* One column, always. The preview box is `max-w-md` on desktop and
+          360px on mobile, so a viewport-width `sm:` breakpoint inside it is
+          always true and the "mobile" preview would render the two-column
+          desktop layout at ~28px per calendar cell — a preview of a page that
+          does not exist. The public page stacks these two regions below `lg`,
+          and every width this box takes is below `lg`. */}
+      <div className="flex flex-col gap-4">
+        {/* Month calendar */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
+              {grid.label}
+            </span>
+            <div className="flex gap-1">
+              {/* The same chevron the public page draws, so the preview shows
+                  the control that ships rather than a stand-in for it. */}
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="left" />
+              </span>
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="right" />
+              </span>
+            </div>
+          </div>
+          <div className="bp-cal-grid">
+            <div className="bp-cal-week">
+              {grid.weekdayLabels.map((d, i) => (
+                <div key={`${d}-${i}`} className="bp-cal-weekday">
+                  {d}
+                </div>
+              ))}
+            </div>
+            {grid.weeks.map((week) => (
+              <div className="bp-cal-week" key={week[0]!.dayKey}>
+                {week.map((day) => (
+                  <span
+                    key={day.dayKey}
+                    className="bp-cal-day"
+                    data-state={
+                      !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty'
+                    }
+                    data-today={day.isToday ? 'true' : undefined}
+                    data-selected={day.dayKey === PREVIEW_SELECTED ? 'true' : undefined}
+                  >
+                    {day.dayOfMonth}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Day column */}
+        <div className="bp-daycol flex min-w-0 flex-col gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">{selectedLabel}</span>
+          <div className="bp-slots">
+            {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
+              <span key={s} className="bp-slot text-sm" aria-pressed={i === 0}>
+                {s}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+// Fixed sample data for the preview. Deliberately not derived from `new Date()`
+// — a preview that changes shape at midnight is a preview that fails to render
+// the same way twice, and this one is server-rendered before it hydrates. The
+// KEYS are fixed; how they read is the locale's business, which is why they go
+// through `buildMonthGrid` rather than being spelled out in English.
+const PREVIEW_MONTH_KEY = '2026-09';
+const PREVIEW_TODAY = '2026-09-10';
+const PREVIEW_SELECTED = '2026-09-14';
+/** UTC noon of the selected day — the day column's heading. */
+const PREVIEW_SELECTED_INSTANT = '2026-09-14T12:00:00.000Z';
+const PREVIEW_AVAILABLE = [
+  '2026-09-10',
+  '2026-09-11',
+  '2026-09-14',
+  '2026-09-15',
+  '2026-09-16',
+  '2026-09-17',
+  '2026-09-18',
+  '2026-09-21',
+  '2026-09-22',
+  '2026-09-23',
+  '2026-09-24',
+  '2026-09-25',
+  '2026-09-28',
+  '2026-09-29',
+  '2026-09-30',
+];
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   const map: Record<HandleState, { text: string; cls: string } | null> = {
