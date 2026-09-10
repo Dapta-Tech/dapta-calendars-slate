@@ -727,6 +727,18 @@ export interface BookingMessages {
       connectSuccess: string;
       connectCancelled: string;
       connectFailed: string;
+      /** In-flight label on "I've finished connecting" — an explicit check must
+       *  always change something on screen, so it says it is working. */
+      connectChecking: string;
+      /** The check ran and the connection is not there. Names the provider AND
+       *  the account being looked for: the usual real cause is that a different
+       *  account was authorized than the one typed at the email step. */
+      connectNotSeenYet: string;
+      /** Two failed manual checks in a row — stop waiting and say why. */
+      connectGaveUp: string;
+      /** The check could not run at all (transport, or a server error whose own
+       *  message is raw English and must not be shown). */
+      connectCheckFailed: string;
       popupBlocked: string;
       destination: string;
       conflictCheck: string;
@@ -738,13 +750,6 @@ export interface BookingMessages {
       /** Muted fallback label when a connection's account email couldn't be
        *  determined (never repeats the provider name — see connectionLabel). */
       accountUnknown: string;
-      manualTitle: string;
-      manualDesc: string;
-      provider: string;
-      calendarId: string;
-      addConnection: string;
-      /** In-flight label on the manual-add submit (A2, #112). */
-      addingConnection: string;
       healthSyncing: string;
       healthRecorded: string;
       yourCalendars: string;
@@ -1737,6 +1742,12 @@ export const en: BookingMessages = {
       connectSuccess: 'Calendar connected.',
       connectCancelled: 'Connect cancelled — no calendar was linked.',
       connectFailed: 'Could not start the connect flow. Please try again.',
+      connectChecking: 'Checking…',
+      connectNotSeenYet:
+        'No {provider} connection for {email} yet. Finish the popup window, then check again.',
+      connectGaveUp:
+        'Still no {provider} connection for {email}. If you signed in with a different account, start again and enter that address.',
+      connectCheckFailed: 'Could not check for the connection. Try again in a moment.',
       popupBlocked: 'Your browser blocked the popup. Allow popups for this site and try again.',
       destination: 'Destination',
       conflictCheck: 'Conflict check',
@@ -1745,12 +1756,6 @@ export const en: BookingMessages = {
       disconnectTitle: 'Disconnect this calendar?',
       disconnectBody: '{account} stops being checked for conflicts, and new bookings will not be written to it.',
       accountUnknown: 'Account unknown',
-      manualTitle: 'Link a calendar manually',
-      manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
-      provider: 'Provider',
-      calendarId: 'Calendar id / email',
-      addConnection: 'Add connection',
-      addingConnection: 'Adding…',
       healthSyncing: 'Syncing',
       healthRecorded: 'Recorded only',
       yourCalendars: 'Your calendars',
@@ -2728,6 +2733,12 @@ export const es: BookingMessages = {
       connectSuccess: 'Calendario conectado.',
       connectCancelled: 'Conexión cancelada: no se vinculó ningún calendario.',
       connectFailed: 'No se pudo iniciar la conexión. Inténtalo de nuevo.',
+      connectChecking: 'Comprobando…',
+      connectNotSeenYet:
+        'Todavía no hay una conexión de {provider} para {email}. Termina en la ventana emergente y vuelve a comprobar.',
+      connectGaveUp:
+        'Sigue sin haber una conexión de {provider} para {email}. Si iniciaste sesión con otra cuenta, empieza de nuevo y escribe esa dirección.',
+      connectCheckFailed: 'No se pudo comprobar la conexión. Inténtalo de nuevo en un momento.',
       popupBlocked: 'Tu navegador bloqueó la ventana emergente. Permite ventanas emergentes e inténtalo de nuevo.',
       destination: 'Destino',
       conflictCheck: 'Verificar conflictos',
@@ -2736,12 +2747,6 @@ export const es: BookingMessages = {
       disconnectTitle: '¿Desconectar este calendario?',
       disconnectBody: 'Dejaremos de comprobar conflictos en {account} y las nuevas reservas no se escribirán ahí.',
       accountUnknown: 'Cuenta desconocida',
-      manualTitle: 'Vincular un calendario manualmente',
-      manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
-      provider: 'Proveedor',
-      calendarId: 'Id de calendario / correo',
-      addConnection: 'Añadir conexión',
-      addingConnection: 'Añadiendo…',
       healthSyncing: 'Sincronizando',
       healthRecorded: 'Solo registrado',
       yourCalendars: 'Tus calendarios',

@@ -267,6 +267,9 @@ export const adminApi = {
 
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),
+  // No caller since the manual-add form was removed (#144). Kept because the
+  // endpoint is part of the host API a self-hoster scripts against, and this is
+  // its typed client — not because anything in the app still reaches it.
   createConnection: (b: unknown) => req('POST', '/v1/connections', b),
   connectionToken: (provider?: string, email?: string) =>
     req<{ enabled: boolean; token: string | null; connectUrl: string | null; message: string }>(
