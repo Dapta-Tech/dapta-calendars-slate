@@ -64,6 +64,36 @@ export interface BookingMessages {
       changeEmail: string;
     };
   };
+  /**
+   * The three-region public event page (BP): event panel, month calendar, day
+   * column. Its own block rather than more keys on `booking`, because these
+   * words belong to the LAYOUT — region names, month navigation, the 12h/24h
+   * toggle — while `booking` owns the flow (pick, hold, confirm, fail) that
+   * runs inside it and is also used by surfaces with no calendar at all.
+   */
+  bookingPage: {
+    /** Landmark names, read by a screen reader as it moves between regions. */
+    detailsRegion: string;
+    calendarRegion: string;
+    timesRegion: string;
+    previousMonth: string;
+    nextMonth: string;
+    /** Marks the current day in the grid; visually a dot, here for the label. */
+    today: string;
+    /** The day column before any day is chosen. */
+    pickADay: string;
+    /** A chosen day that turns out to have nothing bookable on it. */
+    noTimesOnDay: string;
+    /** Heading over the day column: "Times on Mon, Sep 14". */
+    timesOn: string;
+    timeFormat: string;
+    hour12: string;
+    hour24: string;
+    /** Label for the duration chip (one duration today, a selector later). */
+    duration: string;
+    /** Leaves the filled-in form and goes back to the slot list. */
+    backToTimes: string;
+  };
   manage: {
     title: string;
     reschedule: string;
@@ -1006,6 +1036,22 @@ export const en: BookingMessages = {
       changeEmail: 'Use a different email',
     },
   },
+  bookingPage: {
+    detailsRegion: 'Event details',
+    calendarRegion: 'Choose a date',
+    timesRegion: 'Choose a time',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
+    today: 'Today',
+    pickADay: 'Pick a day to see the times available.',
+    noTimesOnDay: 'No times available on this day.',
+    timesOn: 'Times on {day}',
+    timeFormat: 'Time format',
+    hour12: '12h',
+    hour24: '24h',
+    duration: 'Duration',
+    backToTimes: 'Back to times',
+  },
   scheduling: {
     round_robin: 'Round-robin',
     collective: 'Collective',
@@ -1885,6 +1931,22 @@ export const es: BookingMessages = {
       body: 'Ya existe una reserva con este correo en este evento. Revisa tu bandeja de entrada para ver la confirmación.',
       changeEmail: 'Usar otro correo',
     },
+  },
+  bookingPage: {
+    detailsRegion: 'Detalles del evento',
+    calendarRegion: 'Elige una fecha',
+    timesRegion: 'Elige un horario',
+    previousMonth: 'Mes anterior',
+    nextMonth: 'Mes siguiente',
+    today: 'Hoy',
+    pickADay: 'Elige un día para ver los horarios disponibles.',
+    noTimesOnDay: 'No hay horarios disponibles este día.',
+    timesOn: 'Horarios del {day}',
+    timeFormat: 'Formato de hora',
+    hour12: '12 h',
+    hour24: '24 h',
+    duration: 'Duración',
+    backToTimes: 'Volver a los horarios',
   },
   scheduling: {
     round_robin: 'Por turnos',
