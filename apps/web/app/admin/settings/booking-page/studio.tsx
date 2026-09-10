@@ -460,7 +460,10 @@ export function Studio(init: StudioInit) {
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {(Object.keys(AXIS_OPTIONS) as (keyof Axes)[]).map((k) => (
                   // A <div>, not a <label>: the picker's trigger is a <button>.
-                  <div key={k} className="flex flex-col gap-1 text-sm">
+                  // The axis probe rides on this wrapper — it was on the
+                  // `<select>` this replaces, and a hidden span would have been
+                  // a worse target than a real element in the layout.
+                  <div key={k} data-testid={`bp-${k}-${axes[k]}`} className="flex flex-col gap-1 text-sm">
                     <span className="text-muted-foreground">{m[AXIS_LABEL[k]]}</span>
                     <Select
                       value={axes[k]}
@@ -477,9 +480,6 @@ export function Studio(init: StudioInit) {
                       locale={init.locale}
                       onChange={(v) => setAxis(k, v)}
                     />
-                    {/* The axis probes read this; it moves to a wrapper so the
-                        selector survives the control becoming a listbox. */}
-                    <span hidden data-testid={`bp-${k}-${axes[k]}`} />
                   </div>
                 ))}
               </div>
@@ -562,7 +562,15 @@ export function Studio(init: StudioInit) {
                   <span className="text-muted-foreground">{m.sendVisitorsTo}</span>
                   <Select
                     value={defaultEventSlug}
-                    options={init.eventTypes.map((et) => ({ value: et.slug, label: et.title }))}
+                    // The empty row stays an OPTION, not just the placeholder:
+                    // without it a host who picks the wrong event cannot get
+                    // back to "none" without toggling the landing page off and
+                    // on again. The invalid-empty state is what the message
+                    // below is for.
+                    options={[
+                      { value: '', label: m.chooseEvent },
+                      ...init.eventTypes.map((et) => ({ value: et.slug, label: et.title })),
+                    ]}
                     placeholder={m.chooseEvent}
                     ariaLabel={m.sendVisitorsTo}
                     locale={init.locale}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
 import type { AccountMember, AccountRole, MemberStatus } from '@/lib/admin-api';
 import { Modal } from '@/components/modal';
@@ -53,7 +53,6 @@ export function MembersClient({
   const [inviteErr, setInviteErr] = useState<string | null>(null);
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const isOwnerCaller = callerRole === 'owner';
   const activeOwners = members.filter((x) => x.role === 'owner' && x.status === 'active').length;
@@ -95,10 +94,10 @@ export function MembersClient({
     if (ok) run(transferOwnershipAction(member.id), m.ownershipTransferred);
   };
 
-  const closeDialog = () => {
-    setAddOpen(false);
-    triggerRef.current?.focus();
-  };
+  // `Modal` restores focus to whatever was focused when it opened — the trigger
+  // — so this only clears the state. (`team-members-panel.tsx` does the same;
+  // the two used to disagree.)
+  const closeDialog = () => setAddOpen(false);
 
   const submitInvite = () =>
     start(async () => {
@@ -126,7 +125,6 @@ export function MembersClient({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-semibold text-muted-foreground">{m.rosterLabel}</span>
         <Button
-          ref={triggerRef}
           size="lg"
           onClick={() => {
             setInviteErr(null);

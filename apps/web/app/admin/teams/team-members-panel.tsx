@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
@@ -45,7 +45,6 @@ export function TeamMembersPanel({
   const [inviteNoMatch, setInviteNoMatch] = useState(false);
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
-  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Two options, spelled once — the row picker and the invite picker offer the
   // same choice and must not drift apart. Memoised so `Select`'s own filter memo
@@ -112,7 +111,6 @@ export function TeamMembersPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-semibold text-muted-foreground">{m.members}</span>
         <Button
-          ref={triggerRef}
           size="lg"
           onClick={() => {
             setInviteErr(null);
@@ -203,8 +201,8 @@ export function TeamMembersPanel({
       )}
 
       {/* Invite-by-email dialog (old-app parity): email + role chosen at add time.
-          Was a hand-rolled `fixed inset-0` stack with no focus trap; `Modal` owns
-          the trap, the Escape key and the focus restore. */}
+          Was a hand-rolled `fixed inset-0` stack; `Modal` owns the focus trap,
+          the scroll lock, Escape and the focus restore. */}
       <Modal open={addOpen} onClose={closeDialog} title={m.inviteTitle} labelId="invite-dialog-title">
         <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
         <form

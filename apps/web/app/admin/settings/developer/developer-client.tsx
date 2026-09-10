@@ -195,7 +195,14 @@ function WebhookItem({
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <code className="min-w-0 flex-1 break-all font-mono text-xs">{w.subscriber_url}</code>
         <span className="flex flex-wrap items-center gap-2">
-          <label className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground">
+          {/* A <span>, not a <label>. `Switch` renders `<button role="switch">`,
+              and a button is NOT a labelable element — wrapping it in a label
+              would neither make the word clickable nor make it the control's
+              programmatic name. The name is the `aria-label`, which also carries
+              the URL so a screen reader knows WHICH webhook it is toggling; the
+              word beside it is the visible caption, as on the notifications
+              rows. */}
+          <span className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground">
             <Switch
               checked={w.active === 1}
               disabled={pending}
@@ -209,7 +216,7 @@ function WebhookItem({
               }
             />
             {m.active}
-          </label>
+          </span>
           <Button variant="outline" size="lg" disabled={pending} onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}>
             {m.ping}
           </Button>

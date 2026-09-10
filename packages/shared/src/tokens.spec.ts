@@ -380,17 +380,6 @@ function ratioOnWash(
   return contrastRatio(onPainted(token, painted, vars), painted);
 }
 
-/** The ratio of a SOLID line against a washed panel it is drawn around. */
-function lineOnWash(
-  token: string,
-  wash: [string, number],
-  ground: string,
-  vars: Record<string, string>,
-): number {
-  const painted = washOver(wash[0], wash[1], ground, vars);
-  return contrastRatio(onPainted(token, painted, vars), painted);
-}
-
 /** Every ground a wash lands on in the admin: the page, and a card on it. */
 const WASH_GROUNDS = ['--background', '--card'] as const;
 
@@ -449,29 +438,41 @@ describe.each(Object.entries(THEMES))('the law on translucent grounds — %s', (
   it('a SOLID line drawn around a washed panel still clears 3:1', () => {
     // The banner and badge borders in the settings cluster, drawn around the
     // washes above rather than on bare card. Solid, because a TRANSLUCENT accent
-    // line does not survive paper — see the next assertion, which is what forced
-    // every state-bearing border in A2's screens to drop its `/40`.
+    // line does not survive paper — see the light-only assertion below, which is
+    // what forced every state-bearing border in A2's screens to drop its `/40`.
     for (const ground of WASH_GROUNDS) {
       for (const alpha of [0.05, 0.1, 0.15]) {
-        expect(lineOnWash('--primary-edge', ['--primary', alpha], ground, vars)).toBeGreaterThanOrEqual(NON_TEXT);
-        expect(lineOnWash('--destructive', ['--destructive', alpha], ground, vars)).toBeGreaterThanOrEqual(NON_TEXT);
+        expect(
+          ratioOnWash('--primary-edge', ['--primary', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(NON_TEXT);
+        expect(
+          ratioOnWash('--destructive', ['--destructive', alpha], ground, vars),
+        ).toBeGreaterThanOrEqual(NON_TEXT);
       }
     }
   });
+});
 
-  it('a WASHED accent line cannot carry state, which is why none of them do', () => {
+/* Deliberately OUTSIDE the per-theme block: this is a statement about the LIGHT
+   palette specifically, and running it under `describe.each` would have measured
+   light twice and dark never — dark, where the accent is already the page's
+   brightest value, would fail it and should. */
+describe('why no border in these screens is a washed accent', () => {
+  it('a washed accent line cannot carry state on paper, at any alpha the admin uses', () => {
     // Pinned as a fact, not a preference. `border-primary/40` measures 1.6:1 on
-    // paper: below the 3:1 a control-state indicator owes WCAG 1.4.11, and there
-    // is no alpha in the admin's range that fixes it — the accent's line token is
-    // already the darkest legible step of the hue. Every border in A2's screens
-    // that says something (connected, failed, selected) is therefore solid, and a
-    // washed border only ever decorates a panel whose TEXT carries the meaning.
+    // white: below the 3:1 a control-state indicator owes WCAG 1.4.11, and no
+    // alpha in the admin's range fixes it, because `--primary-edge` is already
+    // the darkest legible step of the hue. Every border in A2's screens that says
+    // something (connected, destination, failed) is therefore solid, and a washed
+    // border only ever decorates a panel whose TEXT carries the meaning.
     //
     // If a future palette makes this pass, the constraint has gone away and the
     // comment above is stale — which is the failure this assertion exists to catch.
     const light = THEMES.light!;
-    expect(
-      contrastRatio(washOver('--primary-edge', 0.4, '--card', light), over('--card', '--card', light)),
-    ).toBeLessThan(NON_TEXT);
+    for (const alpha of [0.4, 0.5, 0.6]) {
+      expect(
+        contrastRatio(washOver('--primary-edge', alpha, '--card', light), over('--card', '--card', light)),
+      ).toBeLessThan(NON_TEXT);
+    }
   });
 });
