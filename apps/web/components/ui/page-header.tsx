@@ -45,17 +45,30 @@ export function FormHeader({
   backLabel,
   title,
   actions,
+  gutter = 'lg',
 }: {
   backHref: string;
   backLabel: string;
   title: ReactNode;
   actions?: ReactNode;
+  /**
+   * Which container padding this header bleeds to. `lg` is the original
+   * `px-8`-everywhere container; `responsive` matches a `px-4 sm:px-8` one —
+   * the shape A2 (#112) gives its pages so 360px keeps a 16px gutter instead of
+   * 32. The bleed and the container must agree or the sticky bar stops short of
+   * the page edge, so this is a prop rather than a guess.
+   */
+  gutter?: 'lg' | 'responsive';
 }) {
+  const bleed =
+    gutter === 'responsive' ? '-mx-4 px-4 sm:-mx-8 sm:px-8' : '-mx-8 px-8';
   return (
-    <div className="sticky top-0 z-20 -mx-8 mb-6 border-b border-border bg-background/90 px-8 pb-4 pt-6 backdrop-blur supports-[backdrop-filter]:bg-background/75">
+    <div
+      className={`sticky top-0 z-20 mb-6 border-b border-border bg-background/90 pb-4 pt-6 backdrop-blur supports-[backdrop-filter]:bg-background/75 ${bleed}`}
+    >
       <Link
         href={backHref}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-ml-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
         {backLabel}
