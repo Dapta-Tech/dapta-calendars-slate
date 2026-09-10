@@ -22,6 +22,7 @@ import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
 import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
@@ -540,7 +541,12 @@ export function Studio(init: StudioInit) {
                   m={m}
                 />
               ) : (
-                <BookingPreview accent={accent} m={m} />
+                <BookingPreview
+                  displayName={displayName}
+                  avatarUrl={avatarUrl}
+                  accent={accent}
+                  m={m}
+                />
               )}
             </div>
           </div>
@@ -608,27 +614,153 @@ function ProfilePreview({
   );
 }
 
-function BookingPreview({ accent: _accent, m }: { accent: string; m: StudioMessages }) {
+/**
+ * The booking-flow preview, rebuilt to BP's three regions — event panel, month
+ * calendar, day column — so the axes this studio exists to demonstrate land on
+ * the markup the public page actually ships (`bp-card`, `bp-cal-*`, `bp-daycol`,
+ * `bp-slots`, `bp-slot`, `bp-icon-btn`).
+ *
+ * It is still a MOCK, not the live island: `BookingFlow` needs slots, server
+ * actions and a real account, and this preview deliberately has none of those.
+ * The whole thing stays out of the tab order and the a11y tree for the reason
+ * it always did — nothing here can be clicked, so nothing here should invite a
+ * click. The sample dates are fixed rather than derived from today, so the
+ * preview renders identically on the server and after hydration.
+ */
+function BookingPreview({
+  displayName,
+  avatarUrl,
+  accent,
+  m,
+}: {
+  displayName: string;
+  avatarUrl: string;
+  accent: string;
+  m: StudioMessages;
+}) {
   return (
-    <div>
-      <div className="bp-card mb-4">
-        <div className="font-medium">{m.introCall}</div>
-        <div className="text-sm text-muted-foreground">30 {m.minSuffix}</div>
+    <div aria-hidden="true" className="flex flex-col gap-4">
+      {/* Event panel */}
+      <div className="flex items-center gap-3">
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
+        ) : (
+          <div
+            className="flex h-10 w-10 items-center justify-center text-base font-semibold"
+            style={{
+              background: 'var(--accent)',
+              color: onAccent(clampAccent(accent, BOOKING_CANVAS)),
+              borderRadius: 'var(--bp-radius)',
+            }}
+          >
+            {monogram(displayName)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="truncate font-medium">
+            {m.introCall}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            30 {m.minSuffix} · {displayName}
+          </div>
+        </div>
       </div>
-      {/* Decorative theme preview only — these sample times aren't real
-          availability and never will be (no onClick). Excluded from the tab
-          order / a11y tree so keyboard and screen-reader users don't land on
-          a button that visually invites a click but can never do anything. */}
-      <div className="bp-slots" aria-hidden="true">
-        {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-          <button key={s} type="button" tabIndex={-1} aria-pressed={i === 0} className="bp-slot text-sm">
-            {s}
-          </button>
-        ))}
+
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
+        {/* Month calendar */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
+              {PREVIEW_MONTH}
+            </span>
+            <div className="flex gap-1">
+              {/* The same chevron the public page draws, so the preview shows
+                  the control that ships rather than a stand-in for it. */}
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="left" />
+              </span>
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="right" />
+              </span>
+            </div>
+          </div>
+          <div className="bp-cal-grid">
+            {PREVIEW_WEEKDAYS.map((d, i) => (
+              <div key={`${d}-${i}`} className="bp-cal-weekday">
+                {d}
+              </div>
+            ))}
+            {PREVIEW_DAYS.map((day) => (
+              <span
+                key={day.n}
+                className="bp-cal-day"
+                data-state={day.state}
+                data-today={day.today ? 'true' : undefined}
+                aria-selected={day.selected || undefined}
+              >
+                {day.n}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Day column */}
+        <div className="bp-daycol flex min-w-0 flex-col gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">{PREVIEW_DAY_HEADING}</span>
+          <div className="bp-slots">
+            {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
+              <span key={s} className="bp-slot text-sm" aria-pressed={i === 0}>
+                {s}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+// Fixed sample data for the preview. Deliberately not derived from `new Date()`
+// — a preview that changes shape at midnight is a preview that fails to render
+// the same way twice, and this one is server-rendered before it hydrates.
+const PREVIEW_MONTH = 'September 2026';
+const PREVIEW_WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const PREVIEW_DAY_HEADING = 'Mon, Sep 14';
+const PREVIEW_DAYS: Array<{
+  n: number;
+  state: 'available' | 'empty' | 'outside';
+  today?: boolean;
+  selected?: boolean;
+}> = [
+  { n: 30, state: 'outside' },
+  { n: 31, state: 'outside' },
+  { n: 1, state: 'empty' },
+  { n: 2, state: 'empty' },
+  { n: 3, state: 'empty' },
+  { n: 4, state: 'empty' },
+  { n: 5, state: 'empty' },
+  { n: 6, state: 'empty' },
+  { n: 7, state: 'empty' },
+  { n: 8, state: 'empty' },
+  { n: 9, state: 'empty' },
+  { n: 10, state: 'available', today: true },
+  { n: 11, state: 'available' },
+  { n: 12, state: 'empty' },
+  { n: 13, state: 'empty' },
+  { n: 14, state: 'available', selected: true },
+  { n: 15, state: 'available' },
+  { n: 16, state: 'available' },
+  { n: 17, state: 'available' },
+  { n: 18, state: 'available' },
+  { n: 19, state: 'empty' },
+  { n: 20, state: 'empty' },
+  { n: 21, state: 'available' },
+  { n: 22, state: 'available' },
+  { n: 23, state: 'available' },
+  { n: 24, state: 'available' },
+  { n: 25, state: 'available' },
+  { n: 26, state: 'empty' },
+];
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   const map: Record<HandleState, { text: string; cls: string } | null> = {
