@@ -12,10 +12,13 @@ import {
   MAX_REMINDER_SUBJECT,
   MIN_REMINDER_LEAD_MINUTES,
   defaultEventReminders,
+  type CrmPropertyCatalog,
+  type CrmPropertyMapping,
   type EventReminder,
   type LocationKind,
 } from '@slate/types';
 import type { Connection, EventType } from '@/lib/admin-api';
+import { CrmMappingSection } from './crm-mapping-section';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -24,7 +27,7 @@ import { FormHeader } from '@/components/ui/page-header';
 import { useToast } from '@/components/toast';
 import { saveEventTypeAction, type ActionResult, type EventTypePayload } from './actions';
 
-type EventTypeMessages = BookingMessages['admin']['eventTypes'];
+export type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
 const FIELD_TYPES = ['text', 'textarea', 'email', 'phone', 'number', 'select', 'checkbox', 'guests'];
 const SCHEDULING_METHODS = ['round_robin', 'collective', 'fixed_round_robin'] as const;
@@ -37,6 +40,13 @@ interface IntakeField {
   required: boolean;
   /** Phone questions: country the selector starts on (QA4 fix 1b). */
   defaultCountry?: string;
+  /**
+   * select/checkbox choices. The editor has no control for these yet — they
+   * arrive through the API — but they are carried through so the CRM mapping
+   * section can reconcile them against an enumeration property's options, and
+   * so a save cannot silently drop the options an event already had.
+   */
+  options?: string[];
 }
 
 interface HostRow {
@@ -571,6 +581,8 @@ export function EventTypeForm({
   backLabel,
   heading,
   headerExtras,
+  crmCatalog,
+  locale = 'en',
 }: {
   initial?: EventType;
   schedules?: Array<{ id: string; name: string }>;
@@ -598,7 +610,18 @@ export function EventTypeForm({
   /** Rendered in the header next to Save — the edit surface mounts the
    *  open-public/copy-link quick actions here (QA4 fix 3). */
   headerExtras?: ReactNode;
+  /**
+   * H2 (#108) — the account's CRM contact properties, read server-side.
+   * Omitted, or with a null `provider`, means no CRM adapter is wired on this
+   * deployment and the mapping section does not render at all.
+   */
+  crmCatalog?: CrmPropertyCatalog;
+  /** Resolves the Select primitives' own search/no-results copy. */
+  locale?: 'en' | 'es';
 }) {
+  // Declared before the state that reads it: the mapping list is stored keyed
+  // by provider, and with no adapter wired there is no key to read.
+  const crmProvider = crmCatalog?.provider ?? null;
   const router = useRouter();
   const [title, setTitle] = useState(initial?.title ?? '');
   const [slug, setSlug] = useState(initial?.slug ?? '');
@@ -644,7 +667,14 @@ export function EventTypeForm({
       type: f.type,
       required: !!f.required,
       defaultCountry: f.defaultCountry,
+      options: f.options,
     })) ?? [],
+  );
+  // H2 (#108) — CRM property mappings for THIS provider. Kept as a flat list
+  // in the editor and re-keyed by provider on save, so the section never has to
+  // know which CRM is wired.
+  const [crmMappings, setCrmMappings] = useState<CrmPropertyMapping[]>(
+    () => (crmProvider ? (initial?.crmPropertyMappings?.[crmProvider] ?? []) : []),
   );
   const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
   // PHASE 2 — per-event calendar selection (personal events only). Prefill
@@ -757,6 +787,20 @@ export function EventTypeForm({
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
         reminders,
+        // Re-keyed by provider, and only sent when an adapter is wired: a
+        // deployment with no CRM must not rewrite this column at all, so an
+        // event configured on a CRM-enabled deployment keeps its mappings if it
+        // is later edited on one where the CRM is off.
+        ...(crmProvider
+          ? {
+              crmPropertyMappings: {
+                // Other providers' mappings are preserved verbatim — this
+                // editor only ever owns the wired one's list.
+                ...(initial?.crmPropertyMappings ?? {}),
+                [crmProvider]: crmMappings.filter((row) => row.properties.length > 0),
+              },
+            }
+          : {}),
         ...(isTeamEvent
           ? {
               // teamId travels on CREATE only — an existing event never
@@ -1090,6 +1134,21 @@ export function EventTypeForm({
         fieldNames={fields.filter((f) => f.name && !isReservedFieldName(f.name)).map((f) => f.name)}
         m={m.reminders}
       />
+
+      {/* CRM property mapping (H2 / #108) — last, so Reminders keeps its
+          adjacency to the intake questions its {{form.*}} variables read.
+          Absent entirely when no CRM adapter is wired on this deployment. */}
+      {crmCatalog && crmProvider ? (
+        <CrmMappingSection
+          provider={crmProvider}
+          catalog={crmCatalog}
+          fields={fields.filter((f) => f.name)}
+          mappings={crmMappings}
+          onChange={setCrmMappings}
+          m={m.crmMapping}
+          locale={locale}
+        />
+      ) : null}
 
       {res && !res.ok ? <p className="text-sm text-destructive">{res.message}</p> : null}
       </div>

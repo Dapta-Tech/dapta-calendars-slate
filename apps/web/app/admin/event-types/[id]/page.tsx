@@ -1,5 +1,6 @@
-import { notFound } from 'next/navigation';
+import { notFound, unstable_rethrow } from 'next/navigation';
 import { getMessages } from '@slate/shared';
+import type { CrmPropertyCatalog } from '@slate/types';
 import { adminApi, ApiError } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventRowActions } from '../event-row-actions';
@@ -17,16 +18,18 @@ export default async function EditEventType({
   const { id } = await params;
   const { from } = await searchParams;
   // getEventType throws ApiError on 404 (stale/deleted id) — render a clean 404.
-  const [et, schedules, connections] = await Promise.all([
+  const [et, schedules, connections, crm, locale] = await Promise.all([
     adminApi.getEventType(id).catch((e) => {
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
     }),
     adminApi.listSchedules(),
     adminApi.listConnections(),
+    crmCatalog(),
+    getLocale(),
   ]);
   if (!et) notFound();
-  const msgs = getMessages(await getLocale());
+  const msgs = getMessages(locale);
   const m = msgs.admin.eventTypes;
 
   // Team events get the scheduling-method selector + per-host controls; load the
@@ -70,6 +73,8 @@ export default async function EditEventType({
         backHref={backToTeam ? `/admin/teams/${fromTeamId}` : '/admin/event-types'}
         backLabel={backToTeam ? msgs.admin.teams.title : m.title}
         heading={et.title}
+        crmCatalog={crm}
+        locale={locale}
         headerExtras={
           publicPath ? (
             // Visibility stays on the form's own "Hidden" checkbox — only the
@@ -80,4 +85,21 @@ export default async function EditEventType({
       />
     </div>
   );
+}
+
+/**
+ * The CRM contact-property catalog for the mapping section (H2 / #108).
+ *
+ * Failed SEPARATELY from everything else on the page, and to `null`: the
+ * mapping section is one part of the editor, and a CRM that cannot be reached
+ * must not blank the form a host came here to edit. `null` renders no section
+ * at all, which is also what a deployment with no adapter gets.
+ */
+async function crmCatalog(): Promise<CrmPropertyCatalog | undefined> {
+  try {
+    return await adminApi.crmContactProperties();
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return undefined;
+  }
 }

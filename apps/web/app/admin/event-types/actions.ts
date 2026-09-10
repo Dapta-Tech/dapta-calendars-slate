@@ -3,7 +3,12 @@
 import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
-import type { EventLocationDto, EventReminder } from '@slate/types';
+import type {
+  CrmPropertyCatalog,
+  CrmPropertyMappings,
+  EventLocationDto,
+  EventReminder,
+} from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -39,6 +44,9 @@ export interface EventTypePayload {
   /** PHASE 2 — per-event calendar selection (personal events only). */
   conflictCalendarIds?: string[];
   destinationCalendarId?: string | null;
+  /** H2 (#108) — CRM contact property mappings, provider-keyed. `null` clears
+   *  them; omitted leaves whatever the event already had. */
+  crmPropertyMappings?: CrmPropertyMappings | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {
@@ -54,6 +62,26 @@ export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionRe
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/**
+ * Re-read the CRM contact properties, skipping the five-minute cache (H2 /
+ * #108) — the "I just created the property in my CRM" flow, which the
+ * never-create rule makes mandatory.
+ *
+ * A server action rather than a browser fetch: the property list is read with
+ * the account's stored credential, and nothing about that ever needs to reach a
+ * client. A failure degrades to the same empty-plus-reason shape the API
+ * already returns, so the section renders its "could not reach" line instead of
+ * throwing away the host's unsaved mappings.
+ */
+export async function refreshCrmPropertiesAction(): Promise<CrmPropertyCatalog> {
+  try {
+    return await adminApi.crmContactProperties(true);
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { provider: null, connected: false, properties: [], fetchedAt: null, reason: 'unavailable' };
   }
 }
 
