@@ -25,6 +25,8 @@ import {
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import type { CrmPropertyMappings } from '@slate/types';
+import { AdminCrudController } from './admin-crud.controller';
+import type { AuthService, HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
@@ -65,6 +67,18 @@ const PORTAL: CrmProperty[] = [
     options: [
       { value: 'smb', label: 'SMB' },
       { value: 'mid', label: 'Mid-market' },
+    ],
+  }),
+  base({
+    // A MULTI-select, so the single/multi enumeration split has something to
+    // be wrong against.
+    name: 'stack',
+    label: 'Tech stack',
+    type: 'enumeration',
+    fieldType: 'checkbox',
+    options: [
+      { value: 'react', label: 'React' },
+      { value: 'vue', label: 'Vue' },
     ],
   }),
   base({ name: 'last_booking_at', label: 'Last booking', type: 'datetime' }),
@@ -132,6 +146,14 @@ class FakeCrm implements CrmProvider {
 class DisabledCalendar {
   readonly enabled = false;
   readonly conferencingLabel = null;
+}
+
+/** Resolves whichever principal the test set. */
+class FakeAuth {
+  current!: HostPrincipal;
+  resolveHost(): Promise<HostPrincipal> {
+    return Promise.resolve(this.current);
+  }
 }
 
 describe('CRM property mapping (H2, #108)', () => {
@@ -355,6 +377,7 @@ describe('CRM property mapping (H2, #108)', () => {
         'jobtitle',
         'last_booking_at',
         'phone',
+        'stack',
         'tier',
       ]);
     });
@@ -404,7 +427,7 @@ describe('CRM property mapping (H2, #108)', () => {
       // A stale list beats no list: the host can still see their mappings, and
       // the reason tells the editor to say so.
       expect(out.reason).toBe('unavailable');
-      expect(out.properties).toHaveLength(5);
+      expect(out.properties).toHaveLength(6);
     });
 
     it('drops the cached list on invalidate, so a reconnect cannot serve the old portal', async () => {
@@ -413,5 +436,132 @@ describe('CRM property mapping (H2, #108)', () => {
       await catalog.catalog(accountId);
       expect(crm.propertyCalls).toBe(2);
     });
+  });
+});
+
+/**
+ * The SAVE-TIME compatibility refusal (#64).
+ *
+ * The picker already filters, so reaching this needs a hand-written request or
+ * a stale editor. It exists anyway because "unreachable beats diagnosable":
+ * without it, an incompatible pair saves cleanly and then quietly delivers
+ * nothing, one booking at a time, in an outbox nobody watches.
+ */
+describe('save-time mapping compatibility (H2, #108)', () => {
+  let db: Db;
+  let accountId: string;
+  let memberId: string;
+  let crud: AdminCrudController;
+  let auth: FakeAuth;
+  let crm: FakeCrm;
+  let catalog: CrmPropertyCatalogService;
+
+  const QUESTIONS = [
+    { name: 'budget', label: 'Budget', type: 'number' },
+    { name: 'role', label: 'Role', type: 'text' },
+    { name: 'friends', label: 'Guests', type: 'guests' },
+  ];
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code = 'acme'`))!.id;
+    memberId = (await db.get<{ id: string }>(
+      sql`SELECT id FROM member WHERE handle = 'alex-rivera'`,
+    ))!.id;
+    crm = new FakeCrm();
+    catalog = new CrmPropertyCatalogService(crm, db, ENV);
+    auth = new FakeAuth();
+    auth.current = { memberId, accountId, role: 'owner' } as HostPrincipal;
+    crud = new AdminCrudController(
+      db,
+      auth as unknown as AuthService,
+      undefined,
+      catalog,
+    );
+    await upsertAccountIntegration(db, { accountId, provider: 'hubspot', token: TOKEN, key: KEY });
+  });
+
+  const body = (mappings: unknown, slug = 'compat') => ({
+    slug,
+    title: 'Compat',
+    lengthMinutes: 30,
+    bookingFields: QUESTIONS,
+    crmPropertyMappings: mappings,
+  });
+
+  it('refuses a text answer aimed at a number property', async () => {
+    await expect(
+      crud.createEventType({} as never, body({
+        hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['annualrevenue'] }],
+      })),
+    ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+  });
+
+  it('refuses a single-choice answer aimed at a multi-select', async () => {
+    await expect(
+      crud.createEventType({} as never, body({
+        hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['stack'] }],
+      })),
+    ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+  });
+
+  it('refuses `guests`, which is not a contact (#63)', async () => {
+    await expect(
+      crud.createEventType({} as never, body({
+        hubspot: [{ source: { kind: 'question', name: 'friends' }, properties: ['jobtitle'] }],
+      })),
+    ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+  });
+
+  it('accepts a compatible pair', async () => {
+    const out = await crud.createEventType({} as never, body({
+      hubspot: [
+        { source: { kind: 'question', name: 'budget' }, properties: ['annualrevenue'] },
+        { source: { kind: 'question', name: 'role' }, properties: ['jobtitle'] },
+      ],
+    }));
+    expect((out as { crmPropertyMappings: unknown }).crmPropertyMappings).toBeTruthy();
+  });
+
+  it('ALLOWS a target the portal no longer has', async () => {
+    // The broken-mapping state the editor draws in red. Refusing here would
+    // make an unrelated edit unsaveable because somebody deleted a property.
+    const out = await crud.createEventType({} as never, body({
+      hubspot: [{ source: { kind: 'question', name: 'budget' }, properties: ['deleted_in_portal'] }],
+    }));
+    expect(out).toBeTruthy();
+  });
+
+  it('ALLOWS anything when the portal cannot be reached', async () => {
+    crm.listFails = new Error('upstream 503');
+    const out = await crud.createEventType({} as never, body({
+      hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['annualrevenue'] }],
+    }));
+    // Blocking an event-type save because the CRM is briefly down is the worse
+    // trade — the picker already filtered, and delivery omits what it cannot
+    // coerce.
+    expect(out).toBeTruthy();
+  });
+
+  it('checks a PARTIAL update against the questions the save leaves behind', async () => {
+    const created = (await crud.createEventType({} as never, body({}, 'partial'))) as { id: string };
+    // No `bookingFields` in this payload: the event keeps the three it has, so
+    // the mapping must be judged against THOSE, not against an empty list.
+    await expect(
+      crud.updateEventType({} as never, created.id, {
+        crmPropertyMappings: {
+          hubspot: [{ source: { kind: 'question', name: 'role' }, properties: ['annualrevenue'] }],
+        },
+      }),
+    ).rejects.toMatchObject({ response: { error: 'CRM_MAPPING_INCOMPATIBLE' } });
+
+    const ok = await crud.updateEventType({} as never, created.id, {
+      crmPropertyMappings: {
+        hubspot: [{ source: { kind: 'question', name: 'budget' }, properties: ['annualrevenue'] }],
+      },
+    });
+    expect(ok).toBeTruthy();
   });
 });
