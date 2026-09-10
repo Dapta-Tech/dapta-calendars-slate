@@ -110,12 +110,14 @@ export class PublicController {
     @Headers('x-manage-token') headerToken: string | undefined,
     @Query() q: Record<string, string>,
   ) {
-    if (!q.from || !q.to)
-      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'from, to required' });
     const token = manageToken({ headerToken, queryToken: q.token });
-    const r = await this.svc.rescheduleAvailability(uid, token, q.from, q.to, q.timeZone);
-    if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Booking not found.' });
-    return r;
+    try {
+      const r = await this.svc.rescheduleAvailability(uid, token, q);
+      if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Booking not found.' });
+      return r;
+    } catch (err) {
+      badReq(err);
+    }
   }
 
   @Post('bookings/:uid/cancel')

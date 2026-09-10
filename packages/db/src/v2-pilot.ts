@@ -463,10 +463,24 @@ export async function rescheduleBookingV2(
       ),
     ),
   ];
+  // A team host may carry its own schedule (`event_type_host.schedule_id`), and
+  // that override — not the event type's own schedule — is what the team
+  // availability projection resolves against. Validate through the same one, or
+  // a host with an override has the picker and this write reading different
+  // hours. A personal event has no host rows, so this stays empty and
+  // `isSlotBookable` resolves the event type's schedule exactly as before.
+  const hostScheduleIds = new Map<string, string | null>();
+  if (source.event_type_id)
+    for (const row of await db.all<{ member_id: string; schedule_id: string | null }>(
+      sql`SELECT member_id, schedule_id FROM event_type_host WHERE event_type_id = ${source.event_type_id}`,
+    ))
+      hostScheduleIds.set(row.member_id, row.schedule_id);
+
   for (const hostMemberId of hostIds) {
     const bookable = await isSlotBookable(db, {
       eventTypeId: source.event_type_id,
       hostMemberId,
+      hostScheduleId: hostScheduleIds.get(hostMemberId),
       startMs: args.newStartMs,
       excludeBookingId: source.id,
     });

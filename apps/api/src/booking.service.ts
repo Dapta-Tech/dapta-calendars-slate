@@ -26,6 +26,7 @@ import { EmailEffects } from './email-effects';
 import {
   availabilityQuerySchema,
   availabilityResponseSchema,
+  rescheduleAvailabilityQuerySchema,
   createBookingSchema,
   reserveSlotSchema,
   type AvailabilityResponse,
@@ -420,21 +421,22 @@ export class BookingService {
    * Answers `null` for an unknown uid AND for a bad token alike: this is an
    * unauthenticated route, so the two must not be distinguishable.
    */
-  async rescheduleAvailability(
-    uid: string,
-    token: string,
-    from: string,
-    to: string,
-    timeZone?: string,
-  ): Promise<AvailabilityResponse | null> {
+  async rescheduleAvailability(uid: string, token: string, raw: unknown): Promise<AvailabilityResponse | null> {
+    // PARSED, not read raw: `new Date('x').getTime()` is NaN, and a NaN window
+    // reaches `computeSlots` as a `RangeError` thrown out of a public route.
+    const q = rescheduleAvailabilityQuerySchema.parse(raw);
+    const fromMs = new Date(q.from).getTime();
+    // Same 60-day cap `availability()` applies (contract §Engine) — clamped
+    // rather than rejected, so an over-wide query still answers something.
+    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
     const result = await getBookingRescheduleAvailability(
       this.db,
       {
         uid,
         manageToken: token,
-        fromMs: new Date(from).getTime(),
-        toMs: new Date(to).getTime(),
-        displayTimeZone: timeZone,
+        fromMs,
+        toMs,
+        displayTimeZone: q.timeZone,
       },
       this.calendar.provider,
     );

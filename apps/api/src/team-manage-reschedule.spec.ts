@@ -330,7 +330,7 @@ describe('team reschedule — the assigned host set (#129, #127)', () => {
 
   const pickerSlots = async (svc: BookingService, uid: string, token: string) => {
     const w = WINDOW();
-    const r = await svc.rescheduleAvailability(uid, token, w.from, w.to);
+    const r = await svc.rescheduleAvailability(uid, token, { from: w.from, to: w.to });
     return (r?.slots ?? []).map((s) => s.startUtc);
   };
 
@@ -426,8 +426,10 @@ describe('team reschedule — the assigned host set (#129, #127)', () => {
     const rr = await makeTeamEvent('rr', 'round_robin');
     const { booking, token } = await bookTeamEvent(svc, rr, (await publicSlots(svc, rr))[0]!);
     const w = WINDOW();
-    expect(await svc.rescheduleAvailability(booking.uid, 'not-the-token', w.from, w.to)).toBeNull();
-    expect(await svc.rescheduleAvailability('no-such-uid', token, w.from, w.to)).toBeNull();
+    expect(await svc.rescheduleAvailability(booking.uid, 'not-the-token', { from: w.from, to: w.to })).toBeNull();
+    expect(await svc.rescheduleAvailability('no-such-uid', token, { from: w.from, to: w.to })).toBeNull();
+    // A malformed window is a 400, not a 500 out of the slot engine.
+    await expect(svc.rescheduleAvailability(booking.uid, token, { from: 'x', to: 'y' })).rejects.toThrow();
   });
 
   it('still answers a PERSONAL booking\u2019s picker, host-scoped as before', async () => {

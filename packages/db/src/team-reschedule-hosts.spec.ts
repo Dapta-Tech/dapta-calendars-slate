@@ -54,6 +54,7 @@ describe('team reschedule — the assigned host set (SQLite in-memory)', () => {
     slug: string,
     schedulingType: 'round_robin' | 'collective' | 'fixed_round_robin',
     hosts: Array<{ memberId: string; isFixed?: boolean }>,
+    buffers?: { before?: number; after?: number },
   ) {
     const team = await createTeam(db, accountId, { name: slug, slug: `${slug}-team` });
     if (!team.ok) throw new Error('team create failed');
@@ -64,6 +65,8 @@ describe('team reschedule — the assigned host set (SQLite in-memory)', () => {
       schedulingType,
       scheduleId: null,
       teamId: team.value.id,
+      beforeEventBuffer: buffers?.before,
+      afterEventBuffer: buffers?.after,
     });
     if (!ev.ok) throw new Error('event create failed');
     const now = Date.now();
@@ -334,6 +337,44 @@ describe('team reschedule — the assigned host set (SQLite in-memory)', () => {
       manageToken: booked.manageToken,
     });
     expect(moved.ok).toBe(true);
+  });
+
+  it('offers the times either side of where the booking already sits', async () => {
+    // With buffers, a booking's own instant blanks out its neighbours. The
+    // write drops the booking being moved from the busy set
+    // (`excludeBookingId`), so it would accept a nudge — and a picker that did
+    // not drop it would refuse to offer the commonest reschedule there is.
+    const collab = await makeTeamEvent(
+      'collab',
+      'collective',
+      [{ memberId: alexId }, { memberId: jordanId }],
+      { before: 30, after: 30 },
+    );
+    const slots = await publicSlots(collab);
+    // Three CONSECUTIVE instants, so the booking's buffers reach both
+    // neighbours — the run has to be found rather than assumed, since the list
+    // crosses day boundaries.
+    const step = 30 * 60_000;
+    const i = slots.findIndex(
+      (ms, n) => slots[n + 1] === ms + step && slots[n + 2] === ms + 2 * step,
+    );
+    if (i < 0) throw new Error('the seeded schedule offered no three consecutive slots');
+    const [before, at, after] = [slots[i]!, slots[i + 1]!, slots[i + 2]!];
+
+    const booked = await book(collab, at);
+    const offered = await pickerSlots(booked.uid, booked.manageToken);
+    expect(offered).toContain(before);
+    expect(offered).toContain(after);
+    // …but never the instant it is already at.
+    expect(offered).not.toContain(at);
+
+    const moved = await rescheduleBooking(db, {
+      uid: booked.uid,
+      newStartMs: after,
+      manageToken: booked.manageToken,
+    });
+    expect(moved.ok).toBe(true);
+    expect(Number((await rowFor(booked.uid))!.start_ms)).toBe(after);
   });
 
   it('answers nothing once the booking is no longer movable', async () => {

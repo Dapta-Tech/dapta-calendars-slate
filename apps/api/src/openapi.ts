@@ -1078,6 +1078,23 @@ export const openapiSpec = {
         },
       },
     },
+    '/v1/bookings/{uid}/availability': {
+      get: {
+        summary:
+          'Slots this booking can move to (manage token; scoped to the host set the booking already has, so the picker cannot offer a time the reschedule refuses)',
+        parameters: [
+          { name: 'uid', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'from', in: 'query', required: true, schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', required: true, schema: { type: 'string', format: 'date-time' } },
+          { name: 'timeZone', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'AvailabilityResponse' },
+          '400': { description: 'BAD_REQUEST' },
+          '404': { description: 'Booking not found, or an invalid manage link' },
+        },
+      },
+    },
     '/v1/bookings/{uid}/cancel': {
       post: {
         summary: 'Attendee cancel (manage token; pending and accepted both cancel; idempotent)',

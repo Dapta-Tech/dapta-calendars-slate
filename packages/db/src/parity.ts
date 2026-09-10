@@ -433,11 +433,17 @@ async function hostFreeSlotMs(
   fromMs: number,
   toMs: number,
   now: Date,
-  calendar?: CalendarProvider,
-  /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
-   *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
-   *  fail-closed semantics stay the single owner of those outcomes. */
-  rulesOnly = false,
+  opts: {
+    /** Wired provider — this host's external busy is subtracted. */
+    calendar?: CalendarProvider;
+    /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
+     *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
+     *  fail-closed semantics stay the single owner of those outcomes. */
+    rulesOnly?: boolean;
+    /** The booking being MOVED, dropped from this host's busy set so it cannot
+     *  block its own reschedule — its buffers included. */
+    excludeBookingId?: string;
+  } = {},
 ): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
   const member = await db.get<{
     time_zone: string;
@@ -462,15 +468,15 @@ async function hostFreeSlotMs(
   // Fail-closed: an unreadable external calendar contributes NO free slots
   // (never offer times we couldn't conflict-check) and reports why.
   let busy: Interval[] = [];
-  if (!rulesOnly) {
+  if (!opts.rulesOnly) {
     let externalBusy: Interval[];
     try {
-      externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
+      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, fromMs, toMs);
     } catch {
       return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
     }
     busy = [
-      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
+      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs, undefined, opts.excludeBookingId)),
       ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
       ...externalBusy,
     ];
@@ -576,7 +582,7 @@ export async function getTeamAvailability(
     reason: AvailabilityEmptyReason | null;
   }> = [];
   for (const host of hosts) {
-    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, { calendar });
     hostSets.push({ isFixed: host.is_fixed === 1, free, reason });
   }
   const slots = combineTeamSlots(method, hostSets).map((ms) => new Date(ms).toISOString());
@@ -754,16 +760,9 @@ export async function createTeamBooking(
       reason: AvailabilityEmptyReason | null;
     }> = [];
     for (const host of await getEventHosts(db, et.id)) {
-      const { free, reason } = await hostFreeSlotMs(
-        db,
-        host,
-        et,
-        args.startMs,
-        endMsProbe,
-        now,
-        undefined,
-        true,
-      );
+      const { free, reason } = await hostFreeSlotMs(db, host, et, args.startMs, endMsProbe, now, {
+        rulesOnly: true,
+      });
       ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
     }
     const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets).includes(
@@ -924,20 +923,21 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
 }
 
 /**
- * Shared dual-enforced insert (SQLite sync txn / Postgres async txn + EXCLUDE).
- * Re-checks overlap for EVERY assigned host inside the transaction so a
- * collective/fixed-RR booking can't slip past a co-host who got booked
- * concurrently, then runs the ordered statement list (booking, attendee, and any
- * booking_host rows).
+ * The ONE guarded write (SQLite sync txn / Postgres async txn, alongside the
+ * Postgres EXCLUDE). Runs every overlap check inside the transaction and only
+ * then the ordered statement list; any hit, or any throw, leaves the tree
+ * untouched and answers false.
+ *
+ * One function rather than two because the create guard and the reschedule
+ * guard drifting apart IS #129: a booking became reschedulable onto an overlap
+ * that create time refused. Sharing the body makes that drift impossible to
+ * reintroduce by editing one side.
  */
-async function insertBookingGuarded(
+async function runGuarded(
   db: Db,
-  hostMemberIds: string[],
-  startMs: number,
-  endMs: number,
+  overlapChecks: Array<ReturnType<typeof sql>>,
   statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
-  const overlapChecks = hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs));
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
       for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
@@ -958,6 +958,25 @@ async function insertBookingGuarded(
   } catch {
     return false;
   }
+}
+
+/**
+ * Insert a booking, re-checking overlap for EVERY assigned host inside the
+ * transaction so a collective/fixed-RR booking can't slip past a co-host who
+ * got booked concurrently.
+ */
+function insertBookingGuarded(
+  db: Db,
+  hostMemberIds: string[],
+  startMs: number,
+  endMs: number,
+  statements: Array<ReturnType<typeof sql>>,
+): Promise<boolean> {
+  return runGuarded(
+    db,
+    hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
+    statements,
+  );
 }
 
 // --- Reschedule / cancel --------------------------------------------------
@@ -1197,37 +1216,17 @@ export async function rescheduleBooking(
 }
 
 /**
- * Run `updateSql` only if EVERY overlap check comes back empty, both inside one
- * transaction (SQLite sync txn / Postgres async txn). Takes a LIST because a
- * team booking has a host set, not a host: a collective move has to answer for
- * each of its co-hosts, and checking them one transaction at a time would leave
- * the window this guard exists to close.
+ * Move (or confirm) a booking under the same guard the insert runs. Takes a
+ * LIST of checks because a team booking has a host SET, not a host: a
+ * collective move has to answer for each of its co-hosts, and checking them one
+ * transaction at a time would leave open the window this guard exists to close.
  */
-async function runGuardedUpdate(
+function runGuardedUpdate(
   db: Db,
   overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
 ): Promise<boolean> {
-  if (db.dialect === 'sqlite') {
-    return db.sqlite!.txn<boolean>(() => {
-      for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
-      db.sqlite!.drizzle.run(updateSql);
-      return true;
-    });
-  }
-  const pg = db.pg!.drizzle;
-  try {
-    return await pg.transaction(async (tx) => {
-      for (const check of overlapChecks) {
-        const rows = (await tx.execute(check)) as unknown as unknown[];
-        if (rows.length > 0) return false;
-      }
-      await tx.execute(updateSql);
-      return true;
-    });
-  } catch {
-    return false;
-  }
+  return runGuarded(db, overlapChecks, [updateSql]);
 }
 
 /**
@@ -1253,20 +1252,23 @@ async function runGuardedUpdate(
  *
  * Token-gated like every other manage read, and deliberately answers `null` for
  * a bad token exactly as it does for an unknown uid — this is a public route,
- * and telling the two apart would turn it into a uid prober.
+ * and telling the two apart would turn it into a uid prober. There is no
+ * host/admin bypass: the manage token is the only key, so no caller can read
+ * another account's booking by asking nicely.
  *
- * The booking being moved is NOT excluded from its own hosts' busy sets: its
- * current instant stays off the list (a "move" to where it already is has no
- * meaning), and every slot this omits is one the write would have accepted —
- * never the reverse, which is the direction that produces the bug above.
+ * The booking being moved is dropped from its own hosts' busy sets, exactly as
+ * `rescheduleBooking` drops it (`excludeBookingId`). Otherwise a booking blocks
+ * its own move: with buffers, or an event longer than its slot interval, the
+ * times either side of where it already sits vanish from the picker — and
+ * nudging a meeting is the commonest reschedule there is. Its own instant is
+ * then removed from the result, since a "move" to where it already is has no
+ * meaning.
  */
 export async function getBookingRescheduleAvailability(
   db: Db,
   args: {
     uid: string;
-    manageToken?: string;
-    byHost?: boolean;
-    accountId?: string;
+    manageToken: string;
     fromMs: number;
     toMs: number;
     displayTimeZone?: string;
@@ -1275,9 +1277,9 @@ export async function getBookingRescheduleAvailability(
   /** Wired provider — each assigned host's external busy is subtracted. */
   calendar?: CalendarProvider,
 ): Promise<TeamAvailabilityResult | null> {
-  const b = await resolveBooking(db, args.uid, args.accountId);
+  const b = await resolveBooking(db, args.uid);
   if (!b || !b.event_type_id) return null;
-  if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata))) return null;
+  if (!verifyManageToken(args.manageToken, manageHashOf(b.metadata))) return null;
   // Only an accepted booking can move — `rescheduleBooking` answers GONE for
   // every other status, so listing times for one would offer a picker whose
   // every option is already refused.
@@ -1305,10 +1307,16 @@ export async function getBookingRescheduleAvailability(
       weight: null,
       schedule_id: et.schedule_id,
     };
-    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, {
+      calendar,
+      excludeBookingId: b.id,
+    });
     hostSets.push({ isFixed: true, free, reason });
   }
-  const slots = intersectInstants(hostSets.map((h) => h.free)).map((ms) => new Date(ms).toISOString());
+  const startMs = Number(b.start_ms);
+  const slots = intersectInstants(hostSets.map((h) => h.free))
+    .filter((ms) => ms !== startMs)
+    .map((ms) => new Date(ms).toISOString());
   const tz = await db.get<{ time_zone: string | null }>(
     sql`SELECT COALESCE(t.time_zone, m.time_zone) AS time_zone
         FROM booking b

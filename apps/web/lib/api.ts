@@ -117,18 +117,29 @@ export async function postTeamBooking(
  * assigned, so the union listed times the reschedule then refused with a 400.
  * This asks the narrower question the write actually answers.
  */
-export function getRescheduleAvailability(params: {
+export async function getRescheduleAvailability(params: {
   uid: string;
   token: string;
   from: string;
   to: string;
   timeZone?: string;
 }): Promise<AvailabilityResponse | null> {
-  const qs = new URLSearchParams({ token: params.token, from: params.from, to: params.to });
+  const qs = new URLSearchParams({ from: params.from, to: params.to });
   if (params.timeZone) qs.set('timeZone', params.timeZone);
-  return getJson<AvailabilityResponse>(
-    `/v1/bookings/${encodeURIComponent(params.uid)}/availability?${qs.toString()}`,
+  // The manage token travels in the HEADER, not `?token=`. The query form is
+  // supported for links already in the wild (emails, calendar invites); this is
+  // a new server-to-server call, so it can keep the token out of access logs
+  // and Referer from the start.
+  const res = await fetch(
+    `${API_URL}/v1/bookings/${encodeURIComponent(params.uid)}/availability?${qs.toString()}`,
+    { headers: { 'x-manage-token': params.token }, cache: 'no-store' },
   );
+  // 404 = no such booking, or a manage link that no longer opens one. Both mean
+  // "no times to offer" and the page renders its empty picker, exactly as it
+  // does for an event with nothing free.
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API reschedule availability failed: ${res.status}`);
+  return (await res.json()) as AvailabilityResponse;
 }
 
 export function getAvailability(params: {
