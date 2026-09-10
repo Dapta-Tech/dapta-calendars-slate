@@ -20,8 +20,8 @@ export default async function DeveloperSettings() {
     <div className="flex max-w-3xl flex-col gap-8">
       {/* Page-level lead: who this page is for (QA2 fix 4). */}
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
-      <ApiKeys keys={keys} messages={m} />
-      <Webhooks webhooks={webhooks} messages={m} />
+      <ApiKeys keys={keys} messages={m} locale={locale} />
+      <Webhooks webhooks={webhooks} messages={m} locale={locale} />
     </div>
   );
 }

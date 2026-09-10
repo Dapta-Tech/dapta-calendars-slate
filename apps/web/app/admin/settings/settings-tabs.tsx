@@ -29,7 +29,13 @@ export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages
   return (
     // Horizontal, scrollable settings sub-nav. Active = raised fill + medium
     // weight (DS recipe — no accent bar), matching the main sidebar nav.
-    <nav className="mb-6 flex gap-1 overflow-x-auto" aria-label="Settings">
+    // The negative inline margin + matching padding lets the strip scroll
+    // edge-to-edge at 360px instead of clipping inside the page gutter, and
+    // every tab sits on the 44px step because a tab is a touch target too.
+    <nav
+      className="-mx-4 mb-6 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0"
+      aria-label="Settings"
+    >
       {TABS.filter((tab) => isAdmin || !tab.adminOnly).map((tab) => {
         const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         return (
@@ -38,7 +44,7 @@ export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages
             href={tab.href}
             aria-current={active ? 'page' : undefined}
             className={[
-              'whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors active:scale-[0.99]',
+              'inline-flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-md px-3 text-sm transition-colors active:scale-[0.99]',
               active
                 ? 'bg-muted font-medium text-foreground'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',

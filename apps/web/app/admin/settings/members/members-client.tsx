@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { useRef, useState, useTransition } from 'react';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
 import type { AccountMember, AccountRole, MemberStatus } from '@/lib/admin-api';
+import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
+import { Button } from '@/components/ui/button';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import {
   inviteMemberAction,
   removeMemberAction,
@@ -23,54 +28,77 @@ const roleLabel = (m: Messages, role: AccountRole) =>
 const statusLabel = (m: Messages, s: MemberStatus) =>
   s === 'invited' ? m.statusInvited : s === 'disabled' ? m.statusDisabled : m.statusActive;
 
+/** Who this row is, for a dialog message and an accessible name. */
+const nameOf = (member: AccountMember) =>
+  member.displayName ?? member.email ?? member.id.slice(0, 8);
+
 export function MembersClient({
   members,
   callerId,
   callerRole,
   messages: m,
+  locale,
 }: {
   members: AccountMember[];
   callerId: string;
   callerRole: AccountRole;
   messages: Messages;
+  /** Active admin locale — the Select's and ConfirmDialog's own copy. */
+  locale?: Locale;
 }) {
   const [pending, start] = useTransition();
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
-  const [confirmTransfer, setConfirmTransfer] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [inviteErr, setInviteErr] = useState<string | null>(null);
   const { success, error } = useToast();
+  const { confirm, dialog } = useConfirmDialog(locale);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const isOwnerCaller = callerRole === 'owner';
   const activeOwners = members.filter((x) => x.role === 'owner' && x.status === 'active').length;
 
-  const closeDialog = () => {
-    setAddOpen(false);
-    triggerRef.current?.focus();
-  };
-  useEffect(() => {
-    if (!addOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDialog();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [addOpen]);
+  const roleOptions = [
+    { value: 'member', label: m.roleMember },
+    { value: 'admin', label: m.roleAdmin },
+  ];
 
   const run = (p: Promise<{ ok: boolean; message?: string }>, ok: string) =>
     start(async () => {
       const r = await p;
-      if (r.ok) {
-        success(ok);
-        setConfirmRemove(null);
-        setConfirmTransfer(null);
-      } else {
-        error(r.message ?? m.genericError);
-      }
+      if (r.ok) success(ok);
+      else error(r.message ?? m.genericError);
     });
+
+  // A2 (#112): both of these used to swap the trigger for two smaller buttons in
+  // the same corner of the row — nothing trapped focus, nothing was announced,
+  // and the question was never actually asked. Now it is asked, and it names the
+  // person it is about.
+  const askRemove = async (member: AccountMember) => {
+    const ok = await confirm({
+      title: m.removeTitle,
+      message: t(m.removeBody, { name: nameOf(member) }),
+      confirmLabel: m.remove,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (ok) run(removeMemberAction(member.id), m.memberRemoved);
+  };
+
+  const askTransfer = async (member: AccountMember) => {
+    const ok = await confirm({
+      title: m.transferTitle,
+      message: t(m.transferBody, { name: nameOf(member) }),
+      confirmLabel: m.transferConfirm,
+      cancelLabel: m.cancel,
+    });
+    if (ok) run(transferOwnershipAction(member.id), m.ownershipTransferred);
+  };
+
+  const closeDialog = () => {
+    setAddOpen(false);
+    triggerRef.current?.focus();
+  };
 
   const submitInvite = () =>
     start(async () => {
@@ -95,22 +123,21 @@ export function MembersClient({
   return (
     <div className="flex flex-col gap-4">
       {/* List/create pattern: the roster with the primary action top-right. */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-semibold text-muted-foreground">{m.rosterLabel}</span>
-        <button
+        <Button
           ref={triggerRef}
-          type="button"
+          size="lg"
           onClick={() => {
             setInviteErr(null);
             setAddOpen(true);
           }}
-          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
         >
           {m.invite}
-        </button>
+        </Button>
       </div>
 
-      <ul className="flex flex-col divide-y divide-border rounded-md border border-border bg-card">
+      <ul className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
         {members.map((member) => {
           const isSelf = member.id === callerId;
           const isOwner = member.role === 'owner';
@@ -128,221 +155,176 @@ export function MembersClient({
           // Single-owner model (QA2 fix 6b): ownership moves only via this
           // explicit action — owner-only, to an active non-owner member.
           const canTransfer = isOwnerCaller && !isSelf && !isOwner && member.status === 'active';
+          const label = nameOf(member);
+          // The dropdown can DEMOTE an owner (legacy multi-owner states) but
+          // never mint one — promotion is the transfer flow only.
+          const options = isOwner ? [...roleOptions, { value: 'owner', label: m.roleOwner }] : roleOptions;
 
           return (
-            <li key={member.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 py-4">
-              <span
-                aria-hidden
-                className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background bg-cover bg-center text-xs font-semibold text-muted-foreground"
-                style={member.avatarUrl ? { backgroundImage: `url(${JSON.stringify(member.avatarUrl)})` } : undefined}
-              >
-                {member.avatarUrl ? '' : initialOf(member)}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="flex items-center gap-2 truncate text-sm font-medium">
-                  {member.displayName ?? member.email ?? member.id.slice(0, 8)}
-                  {isSelf ? (
-                    <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                      {m.you}
-                    </span>
-                  ) : null}
+            // Two rows at 360px — identity above, controls below — instead of one
+            // wrapping line that put an avatar, two pills, a picker and three
+            // buttons through the same 328px.
+            <li key={member.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:px-5">
+              <span className="flex min-w-0 flex-1 items-center gap-3">
+                <span
+                  aria-hidden
+                  className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background bg-cover bg-center text-xs font-semibold text-muted-foreground"
+                  style={member.avatarUrl ? { backgroundImage: `url(${JSON.stringify(member.avatarUrl)})` } : undefined}
+                >
+                  {member.avatarUrl ? '' : initialOf(member)}
                 </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {member.email ?? m.noEmail}
-                </span>
-              </span>
-
-              {/* Status pill (invited / disabled stand out; active is quiet). */}
-              <span
-                className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
-                  member.status === 'invited'
-                    ? 'bg-primary/10 text-primary'
-                    : member.status === 'disabled'
-                      ? 'bg-destructive/10 text-destructive'
-                      : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {statusLabel(m, member.status)}
-              </span>
-
-              {/* Role pill + inline change select (owner-only options gated). */}
-              <span
-                className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
-                  isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {roleLabel(m, member.role)}
-              </span>
-              <select
-                value={member.role}
-                disabled={pending || lockRole}
-                title={isLastOwner ? m.lastOwnerTitle : undefined}
-                aria-label={`${m.roleLabel} · ${member.displayName ?? member.email ?? ''}`}
-                onChange={(e) => run(setMemberRoleAction(member.id, e.target.value as AccountRole), m.roleUpdated)}
-                className="min-h-[44px] rounded-md border border-input bg-background px-2 py-2 text-sm disabled:opacity-60"
-              >
-                <option value="member">{m.roleMember}</option>
-                <option value="admin">{m.roleAdmin}</option>
-                {/* The dropdown can DEMOTE an owner (legacy multi-owner states)
-                    but never mint one — promotion is the transfer flow only. */}
-                {isOwner ? <option value="owner">{m.roleOwner}</option> : null}
-              </select>
-
-              {/* Transfer ownership — explicit two-step, mirrors the remove confirm. */}
-              {canTransfer ? (
-                confirmTransfer === member.id ? (
-                  <span className="flex items-center gap-1 text-sm">
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => run(transferOwnershipAction(member.id), m.ownershipTransferred)}
-                      className="inline-flex min-h-[44px] items-center rounded-md border border-primary px-3 py-2 text-primary disabled:opacity-60"
-                    >
-                      {m.transferConfirm}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmTransfer(null)}
-                      className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2"
-                    >
-                      {m.cancel}
-                    </button>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex items-center gap-2 truncate text-sm font-medium">
+                    {label}
+                    {isSelf ? (
+                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                        {m.you}
+                      </span>
+                    ) : null}
                   </span>
-                ) : (
-                  <button
-                    type="button"
+                  <span className="truncate text-xs text-muted-foreground">
+                    {member.email ?? m.noEmail}
+                  </span>
+                </span>
+              </span>
+
+              <span className="flex flex-wrap items-center gap-2">
+                {/* Status pill (invited / disabled stand out; active is quiet). */}
+                <span
+                  className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
+                    member.status === 'invited'
+                      ? 'bg-primary/10 text-primary'
+                      : member.status === 'disabled'
+                        ? 'bg-destructive/10 text-destructive'
+                        : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {statusLabel(m, member.status)}
+                </span>
+
+                {/* Role pill + inline change picker (owner-only options gated).
+                    The picker is P's Select, not a native <select>: the OS popup
+                    it used to open is drawn in the user agent's own colours and
+                    is the one piece of another design language left on a themed
+                    page. `title` is why the primitive has one — a locked picker
+                    has to be able to say WHY. */}
+                <span
+                  className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
+                    isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {roleLabel(m, member.role)}
+                </span>
+                <Select
+                  value={member.role}
+                  options={options}
+                  disabled={pending || lockRole}
+                  title={isLastOwner ? m.lastOwnerTitle : undefined}
+                  ariaLabel={`${m.roleLabel} · ${label}`}
+                  locale={locale}
+                  className="w-36"
+                  onChange={(v) => run(setMemberRoleAction(member.id, v as AccountRole), m.roleUpdated)}
+                />
+
+                {canTransfer ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
                     disabled={pending}
-                    onClick={() => setConfirmTransfer(member.id)}
-                    aria-label={`${m.transferOwnership} · ${member.displayName ?? member.email ?? ''}`}
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-60"
+                    aria-label={`${m.transferOwnership} · ${label}`}
+                    onClick={() => void askTransfer(member)}
                   >
                     {m.transferOwnership}
-                  </button>
-                )
-              ) : null}
+                  </Button>
+                ) : null}
 
-              {/* Enable / disable (soft access revocation). */}
-              {canToggleStatus ? (
-                member.status === 'disabled' ? (
-                  <button
-                    type="button"
+                {/* Enable / disable (soft access revocation). */}
+                {canToggleStatus ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
                     disabled={pending}
-                    onClick={() => run(setMemberStatusAction(member.id, 'active'), m.statusUpdated)}
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+                    aria-label={`${member.status === 'disabled' ? m.enable : m.disable} · ${label}`}
+                    onClick={() =>
+                      run(
+                        setMemberStatusAction(member.id, member.status === 'disabled' ? 'active' : 'disabled'),
+                        m.statusUpdated,
+                      )
+                    }
                   >
-                    {m.enable}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => run(setMemberStatusAction(member.id, 'disabled'), m.statusUpdated)}
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
-                  >
-                    {m.disable}
-                  </button>
-                )
-              ) : null}
+                    {member.status === 'disabled' ? m.enable : m.disable}
+                  </Button>
+                ) : null}
 
-              {/* Remove — owners show a lock (demote first); members get a confirm. */}
-              {isOwner ? (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
-                    <rect x="5" y="11" width="14" height="9" rx="2" />
-                    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                  </svg>
-                  <span className="sr-only">{m.ownerLock}</span>
-                </span>
-              ) : canRemove ? (
-                confirmRemove === member.id ? (
-                  <span className="flex items-center gap-1 text-sm">
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => run(removeMemberAction(member.id), m.memberRemoved)}
-                      className="inline-flex min-h-[44px] items-center rounded-md border border-destructive px-3 py-2 text-destructive disabled:opacity-60"
-                    >
-                      {m.remove}
-                    </button>
-                    <button type="button" onClick={() => setConfirmRemove(null)} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2">
-                      {m.cancel}
-                    </button>
+                {/* Remove — owners show a lock (demote first); everyone else asks. */}
+                {isOwner ? (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
+                    <i aria-hidden className="pi pi-lock" style={{ fontSize: 13 }} />
+                    <span className="sr-only">{m.ownerLock}</span>
                   </span>
-                ) : (
-                  <button
-                    type="button"
+                ) : canRemove ? (
+                  <Button
+                    variant="destructive"
+                    size="lg"
                     disabled={pending}
-                    onClick={() => setConfirmRemove(member.id)}
-                    aria-label={`${m.remove} · ${member.displayName ?? member.email ?? ''}`}
-                    className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-60"
+                    aria-label={`${m.remove} · ${label}`}
+                    onClick={() => void askRemove(member)}
                   >
                     {m.remove}
-                  </button>
-                )
-              ) : null}
+                  </Button>
+                ) : null}
+              </span>
             </li>
           );
         })}
       </ul>
 
-      {/* Invite-by-email dialog: email + role (admin or member). */}
-      {addOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" aria-hidden tabIndex={-1} onClick={closeDialog} className="absolute inset-0 bg-background/80" />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="invite-member-title"
-            className="relative w-full max-w-sm rounded-xl border border-border bg-popover p-6 shadow-lg"
-          >
-            <h2 id="invite-member-title" className="mb-1 text-lg font-semibold">{m.inviteTitle}</h2>
-            <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitInvite();
-              }}
-              className="flex flex-col gap-3"
-            >
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted-foreground">{m.emailLabel}</span>
-                <input
-                  type="email"
-                  autoFocus
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder={m.emailPlaceholder}
-                  className="rounded-md border border-input bg-background px-3 py-2"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-muted-foreground">{m.roleLabel}</span>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="member">{m.roleMember}</option>
-                  <option value="admin">{m.roleAdmin}</option>
-                </select>
-              </label>
-              {inviteErr ? <p role="alert" className="text-sm text-destructive">{inviteErr}</p> : null}
-              <div className="mt-1 flex justify-end gap-2">
-                <button type="button" onClick={closeDialog} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm">
-                  {m.cancel}
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending || !inviteEmail}
-                  className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-                >
-                  {m.sendInvite}
-                </button>
-              </div>
-            </form>
+      {/* Invite-by-email dialog. Was a hand-rolled `fixed inset-0` stack with no
+          focus trap and no scroll lock, beside a Modal that has both. */}
+      <Modal open={addOpen} onClose={closeDialog} title={m.inviteTitle} labelId="invite-member-title">
+        <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitInvite();
+          }}
+          className="flex flex-col gap-3"
+        >
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">{m.emailLabel}</span>
+            <Input
+              type="email"
+              value={inviteEmail}
+              placeholder={m.emailPlaceholder}
+              data-modal-autofocus
+              className="min-h-[44px]"
+              onChange={(e) => setInviteEmail(e.target.value)}
+            />
+          </label>
+          {/* A <div>, not a <label>: the Select's trigger is a <button>, which is
+              not a labelable element. The name rides on `ariaLabel`. */}
+          <div className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground">{m.roleLabel}</span>
+            <Select
+              value={inviteRole}
+              options={roleOptions}
+              ariaLabel={m.roleLabel}
+              locale={locale}
+              onChange={(v) => setInviteRole(v as 'admin' | 'member')}
+            />
           </div>
-        </div>
-      ) : null}
+          {inviteErr ? <p role="alert" className="text-sm text-destructive">{inviteErr}</p> : null}
+          <div className="mt-1 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="lg" onClick={closeDialog}>
+              {m.cancel}
+            </Button>
+            <Button type="submit" size="lg" disabled={pending || !inviteEmail}>
+              {m.sendInvite}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+      {dialog}
     </div>
   );
 }

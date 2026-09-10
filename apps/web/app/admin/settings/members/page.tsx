@@ -42,7 +42,13 @@ export default async function MembersSettings() {
           );
         })}
       </ul>
-      <MembersClient members={members} callerId={me.memberId} callerRole={me.role} messages={m} />
+      <MembersClient
+        members={members}
+        callerId={me.memberId}
+        callerRole={me.role}
+        messages={m}
+        locale={locale}
+      />
     </div>
   );
 }

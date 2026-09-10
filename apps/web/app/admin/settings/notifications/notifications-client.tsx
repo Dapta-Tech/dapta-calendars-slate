@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import type { BookingMessages, NotificationEmailKey } from '@slate/shared';
+import type { BookingMessages, Locale, NotificationEmailKey } from '@slate/shared';
+import { Button } from '@/components/ui/button';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/toast';
 import {
@@ -30,7 +33,16 @@ export interface NotificationSettingsPayload {
   settings: NotificationSettingView[];
 }
 
-export function NotificationsClient({ data, messages: m }: { data: NotificationSettingsPayload; messages: Messages }) {
+export function NotificationsClient({
+  data,
+  messages: m,
+  locale,
+}: {
+  data: NotificationSettingsPayload;
+  messages: Messages;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
+}) {
   const [editing, setEditing] = useState<NotificationEmailKey | null>(null);
   const setting = data.settings.find((s) => s.key === editing) ?? null;
 
@@ -41,6 +53,7 @@ export function NotificationsClient({ data, messages: m }: { data: NotificationS
         setting={setting}
         variables={data.variables}
         m={m}
+        locale={locale}
         onBack={() => setEditing(null)}
       />
     );
@@ -81,7 +94,7 @@ function ToggleList({
 
 function Section({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-md border border-border bg-card p-4">
+    <section className="rounded-xl border border-border bg-card p-4">
       <div className="mb-1">
         <h3 className="text-sm font-semibold">{title}</h3>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
@@ -132,13 +145,16 @@ function Row({
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">{m.descriptions[s.key]}</p>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="lg"
           onClick={() => onEdit(s.key)}
-          className="mt-1 self-start text-xs text-primary hover:underline"
+          aria-label={`${m.editTemplate} · ${m.labels[s.key]}`}
+          className="mt-1 -ml-3 self-start"
         >
+          <i aria-hidden className="pi pi-pencil" style={{ fontSize: 13 }} />
           {m.editTemplate}
-        </button>
+        </Button>
       </div>
       <Switch checked={enabled} disabled={pending} onCheckedChange={toggle} aria-label={m.labels[s.key]} />
     </li>
@@ -151,11 +167,13 @@ function TemplateEditor({
   setting,
   variables,
   m,
+  locale,
   onBack,
 }: {
   setting: NotificationSettingView;
   variables: string[];
   m: Messages;
+  locale?: Locale;
   onBack: () => void;
 }) {
   const [subject, setSubject] = useState(setting.subject ?? setting.defaultSubject);
@@ -167,6 +185,7 @@ function TemplateEditor({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const toast = useToast();
   const router = useRouter();
+  const { confirm, dialog } = useConfirmDialog(locale);
 
   const snapshot = useMemo(() => JSON.stringify({ subject, body }), [subject, body]);
   const savedSnapshot = useRef(snapshot);
@@ -221,6 +240,18 @@ function TemplateEditor({
       }
     });
 
+  // A2 (#112): reset discards copy the host wrote, with no undo and no draft
+  // kept anywhere, so it asks before it throws the work away.
+  const askReset = async () => {
+    const ok = await confirm({
+      title: m.resetTitle,
+      message: m.resetBody,
+      confirmLabel: m.reset,
+      destructive: true,
+    });
+    if (ok) reset();
+  };
+
   const reset = () =>
     start(async () => {
       const r = await resetTemplateAction(setting.key);
@@ -243,10 +274,13 @@ function TemplateEditor({
     <div className="flex flex-col gap-4">
       {/* Header: back + state chip left, Reset/Save (single primary CTA) right */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground">
-            ← {m.back}
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Was `← Back` — a glyph doing a control's job. Same shape as
+              FormHeader's back affordance, on the 44px step. */}
+          <Button variant="ghost" size="lg" onClick={onBack} className="-ml-3">
+            <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
+            {m.back}
+          </Button>
           <span className="text-sm font-semibold">{m.labels[setting.key]}</span>
           <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             {isDefault ? m.usingDefault : m.usingCustom}
@@ -255,22 +289,17 @@ function TemplateEditor({
           {saveState === 'error' ? <span className="text-xs text-destructive">{saveMsg}</span> : null}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={reset}
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => void askReset()}
             disabled={pending || (isDefault && !setting.customized)}
-            className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-50"
           >
             {m.reset}
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={!isDirty || pending}
-            className="rounded-md bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
-          >
+          </Button>
+          <Button size="lg" onClick={save} disabled={!isDirty || pending} className="px-5">
             {pending ? m.saving : m.save}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -279,11 +308,11 @@ function TemplateEditor({
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-muted-foreground">{m.editorSubject}</span>
-            <input
+            <Input
               value={subject}
               maxLength={200}
               onChange={(e) => setSubject(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2"
+              className="min-h-[44px]"
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
@@ -294,18 +323,20 @@ function TemplateEditor({
               rows={10}
               maxLength={5000}
               onChange={(e) => setBody(e.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2 font-mono text-sm"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
           <div>
             <div className="mb-1 text-sm text-muted-foreground">{m.variables}</div>
+            {/* Insertable chips, on the 44px step like every other control the
+                thumb has to hit. */}
             <div className="flex flex-wrap gap-1.5">
               {variables.map((v) => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => insertVariable(v)}
-                  className="rounded-sm border border-border bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+                  className="inline-flex min-h-[44px] items-center rounded-md border border-border bg-muted px-2.5 font-mono text-xs text-muted-foreground transition-colors hover:border-primary-edge hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {`{{${v}}}`}
                 </button>
@@ -318,7 +349,7 @@ function TemplateEditor({
         {/* Preview side (server-rendered plain text — what the email says) */}
         <div className="lg:sticky lg:top-6 lg:self-start">
           <div className="mb-1 text-sm text-muted-foreground">{m.preview}</div>
-          <div className="rounded-md border border-border bg-card p-4">
+          <div className="rounded-xl border border-border bg-card p-4">
             {preview?.ok ? (
               <>
                 <div className="mb-3 border-b border-border pb-2 text-sm font-semibold">{preview.subject}</div>
@@ -335,6 +366,7 @@ function TemplateEditor({
           ) : null}
         </div>
       </div>
+      {dialog}
     </div>
   );
 }

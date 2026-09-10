@@ -19,7 +19,8 @@ export default async function AdminHome() {
     (b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > Date.now(),
   );
   const publicUrl = me?.handle ? `/${me.accountCode}/${me.handle}` : null;
-  const h = getMessages(await getLocale()).admin.home;
+  const admin = getMessages(await getLocale()).admin;
+  const h = admin.home;
   const firstName = me?.displayName?.split(' ')[0];
 
   return (
@@ -38,7 +39,19 @@ export default async function AdminHome() {
       {publicUrl && setupStatus.hasPublishedEventType ? (
         <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
           <span className="text-sm text-muted-foreground">{h.bookingLink}</span>
-          <CopyLink path={publicUrl} labels={{ copy: h.copy, copied: h.copied, open: h.open }} />
+          {/* `opensNewTab` only: `CopyLink`'s Open control is a real button that
+              opens a new tab now (A2, #112), and its screen-reader suffix must
+              not fall back to English on the Spanish catalog. The rest of this
+              screen is A1's (#111). */}
+          <CopyLink
+            path={publicUrl}
+            labels={{
+              copy: h.copy,
+              copied: h.copied,
+              open: h.open,
+              opensNewTab: admin.common.opensNewTab,
+            }}
+          />
         </div>
       ) : null}
 

@@ -24,6 +24,11 @@ import {
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
 import { BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
@@ -102,6 +107,8 @@ export interface StudioInit {
   messages: StudioMessages;
   /** 'en' | 'es' — the booking-flow preview's month grid is locale-shaped. */
   locale: string;
+  /** Screen-reader suffix for the link that opens the public page (A2, #112). */
+  opensNewTab: string;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -255,8 +262,8 @@ export function Studio(init: StudioInit) {
   return (
     <div className="flex flex-col gap-6">
       {/* Header: dirty chip + Reset/Save top-right */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span
             className={`rounded-sm px-2 py-1 text-xs ${
               isDirty ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
@@ -268,22 +275,17 @@ export function Studio(init: StudioInit) {
           {saved === 'err' ? <span className="text-sm text-destructive">{saveMsg}</span> : null}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            disabled={!isDirty || pending}
-            className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-50"
-          >
+          <Button variant="outline" size="lg" onClick={reset} disabled={!isDirty || pending}>
             {m.reset}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="lg"
             onClick={save}
             disabled={!isDirty || pending || handleBlocksSave}
-            className="rounded-md bg-primary px-5 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+            className="px-5"
           >
             {pending ? m.saving : m.save}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -293,23 +295,30 @@ export function Studio(init: StudioInit) {
           {/* PROFILE */}
           <Section title={m.profile}>
             <Field label={m.displayName}>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} />
+              <Input
+                value={displayName}
+                className={inputCls}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
             </Field>
             <Field label={m.publicHandle}>
-              <input
+              <Input
                 value={handle}
-                onChange={(e) => setHandle(e.target.value.toLowerCase())}
                 className={inputCls}
+                onChange={(e) => setHandle(e.target.value.toLowerCase())}
               />
               <HandleHint state={handleState} m={m} />
+              {/* Was `Try alex-2 →`. A suggestion you can accept is a control. */}
               {handleState === 'taken' && handleSuggestion ? (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  className="-ml-3 self-start"
                   onClick={() => setHandle(handleSuggestion)}
-                  className="self-start text-xs text-primary hover:underline"
                 >
+                  <i aria-hidden className="pi pi-replay" style={{ fontSize: 12 }} />
                   {t(m.tryHandle, { handle: handleSuggestion })}
-                </button>
+                </Button>
               ) : null}
             </Field>
             {/* The shareable link as ONE compact copyable unit (no raw hex —
@@ -318,16 +327,21 @@ export function Studio(init: StudioInit) {
             <Field label={m.yourLink}>
               <CopyLink
                 path={`/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`}
-                labels={{ copy: m.linkCopy, copied: m.linkCopied, open: m.linkOpen }}
+                labels={{
+                  copy: m.linkCopy,
+                  copied: m.linkCopied,
+                  open: m.linkOpen,
+                  opensNewTab: init.opensNewTab,
+                }}
               />
             </Field>
             {init.vanity.canClaim ? (
               <Field label={m.vanityLabel}>
-                <input
+                <Input
                   value={vanity}
-                  onChange={(e) => setVanity(e.target.value.toLowerCase())}
                   placeholder={init.vanity.shortCode}
                   className={inputCls}
+                  onChange={(e) => setVanity(e.target.value.toLowerCase())}
                 />
                 <span className="text-xs text-muted-foreground">{m.vanityHint}</span>
               </Field>
@@ -350,31 +364,47 @@ export function Studio(init: StudioInit) {
               </p>
             )}
             <Field label={m.bio}>
-              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} className={inputCls} />
+              <textarea
+                value={bio}
+                rows={2}
+                onChange={(e) => setBio(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
             </Field>
           </Section>
 
           {/* BRAND */}
           <Section title={m.brand}>
             <Field label={m.accent}>
-              <div className="mb-2 flex flex-wrap gap-2">
+              {/* Swatches on the 44px step: the coloured disc keeps its size and
+                  the hit box grows around it, so the row reads the same and a
+                  thumb can land on it. `aria-pressed` says which one is picked —
+                  the ring alone was colour-only state. */}
+              <div className="mb-2 flex flex-wrap gap-1">
                 {ACCENT_PRESETS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setAccent(c)}
                     aria-label={c}
-                    style={{ background: c }}
-                    className={`h-7 w-7 rounded-full border-2 ${
-                      accent.toLowerCase() === c ? 'border-foreground' : 'border-transparent'
-                    }`}
-                  />
+                    aria-pressed={accent.toLowerCase() === c}
+                    className="flex h-11 w-11 items-center justify-center rounded-md transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span
+                      aria-hidden
+                      style={{ background: c }}
+                      className={`h-7 w-7 rounded-full border-2 ${
+                        accent.toLowerCase() === c ? 'border-foreground' : 'border-transparent'
+                      }`}
+                    />
+                  </button>
                 ))}
                 <input
                   type="color"
+                  aria-label={m.accent}
                   value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : DEFAULT_ACCENT}
                   onChange={(e) => setAccent(e.target.value)}
-                  className="h-7 w-9 rounded-md border border-input bg-background"
+                  className="h-11 w-11 cursor-pointer rounded-md border border-input bg-background p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <p className="text-xs text-muted-foreground">
@@ -393,45 +423,64 @@ export function Studio(init: StudioInit) {
           {/* APPEARANCE */}
           <Section title={m.appearance}>
             <div className="mb-3 flex flex-wrap gap-2">
-              {ALL_BOOKING_THEMES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => applyTheme(t)}
-                  className={`rounded-md border px-3 py-1.5 text-sm capitalize transition-transform active:scale-[0.97] ${
-                    activeTheme === t ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
-                  }`}
+              {ALL_BOOKING_THEMES.map((themeName) => (
+                <Button
+                  key={themeName}
+                  variant={activeTheme === themeName ? 'default' : 'outline'}
+                  size="lg"
+                  aria-pressed={activeTheme === themeName}
+                  onClick={() => applyTheme(themeName)}
+                  className="capitalize"
                 >
-                  {t}
-                </button>
+                  {themeName}
+                </Button>
               ))}
               <span className="self-center text-xs text-muted-foreground">{activeTheme ? '' : m.custom}</span>
             </div>
-            <button
-              type="button"
+            {/* Was `▸ Customize appearance` — a text glyph standing in for a
+                disclosure icon, with no `aria-expanded` for anyone not seeing it. */}
+            <Button
+              variant="ghost"
+              size="lg"
+              aria-expanded={customizeOpen}
               onClick={() => setCustomizeOpen((o) => !o)}
-              className="text-sm text-muted-foreground hover:text-foreground"
+              className="-ml-3 self-start text-muted-foreground"
             >
-              {customizeOpen ? '▾' : '▸'} {m.customizeAppearance}
-            </button>
+              <i
+                aria-hidden
+                className={`pi ${customizeOpen ? 'pi-chevron-down' : 'pi-chevron-right'}`}
+                style={{ fontSize: 12 }}
+              />
+              {m.customizeAppearance}
+            </Button>
             {customizeOpen ? (
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              // One column at 360px: two `Select` triggers side by side inside a
+              // 400px control rail leaves ~150px each, which truncates every
+              // option label.
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {(Object.keys(AXIS_OPTIONS) as (keyof Axes)[]).map((k) => (
-                  <label key={k} className="flex flex-col gap-1 text-sm">
+                  // A <div>, not a <label>: the picker's trigger is a <button>.
+                  <div key={k} className="flex flex-col gap-1 text-sm">
                     <span className="text-muted-foreground">{m[AXIS_LABEL[k]]}</span>
-                    <select
+                    <Select
                       value={axes[k]}
-                      onChange={(e) => setAxis(k, e.target.value)}
-                      data-testid={`bp-${k}-${axes[k]}`}
-                      className="rounded-md border border-input bg-background px-2 py-1.5 capitalize"
-                    >
-                      {AXIS_OPTIONS[k].map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      // Capitalised here, not with a `capitalize` class: the
+                      // class styles the trigger and the panel rows are drawn in
+                      // a portal-ish subtree it does not reach, so the two halves
+                      // of the control would disagree. The values themselves are
+                      // untranslated axis identifiers, as they were before.
+                      options={AXIS_OPTIONS[k].map((o) => ({
+                        value: o,
+                        label: o.charAt(0).toUpperCase() + o.slice(1),
+                      }))}
+                      ariaLabel={m[AXIS_LABEL[k]]}
+                      locale={init.locale}
+                      onChange={(v) => setAxis(k, v)}
+                    />
+                    {/* The axis probes read this; it moves to a wrapper so the
+                        selector survives the control becoming a listbox. */}
+                    <span hidden data-testid={`bp-${k}-${axes[k]}`} />
+                  </div>
                 ))}
               </div>
             ) : null}
@@ -446,59 +495,83 @@ export function Studio(init: StudioInit) {
                 .map((et, i, arr) => (
                   <li
                     key={et.slug}
-                    className={`flex items-center gap-2 rounded-sm bg-muted px-2 py-1.5 ${et.hidden ? 'opacity-50' : ''}`}
+                    className={`flex items-center gap-1 rounded-md bg-muted px-2 py-1 ${et.hidden ? 'opacity-50' : ''}`}
                   >
-                    <span className="flex flex-col">
-                      <button type="button" aria-label={m.moveUp} disabled={i === 0} onClick={() => moveEvent(et.slug, -1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▲</button>
-                      <button type="button" aria-label={m.moveDown} disabled={i === arr.length - 1} onClick={() => moveEvent(et.slug, 1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▼</button>
-                    </span>
-                    <span className="flex-1 truncate">{et.title}</span>
-                    <button
-                      type="button"
+                    {/* Was a stacked `▲`/`▼` pair of bare glyphs with no hit box
+                        at all — roughly 10px of clickable text each. Side by
+                        side, on the 44px step, with real chevrons and names that
+                        say WHICH event they move. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.moveUp} · ${et.title}`}
+                      disabled={i === 0}
+                      onClick={() => moveEvent(et.slug, -1)}
+                      className="h-11 w-8 shrink-0 text-muted-foreground disabled:opacity-30"
+                    >
+                      <i aria-hidden className="pi pi-chevron-up" style={{ fontSize: 11 }} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.moveDown} · ${et.title}`}
+                      disabled={i === arr.length - 1}
+                      onClick={() => moveEvent(et.slug, 1)}
+                      className="h-11 w-8 shrink-0 text-muted-foreground disabled:opacity-30"
+                    >
+                      <i aria-hidden className="pi pi-chevron-down" style={{ fontSize: 11 }} />
+                    </Button>
+                    <span className="min-w-0 flex-1 truncate">{et.title}</span>
+                    <Button
+                      variant="outline"
+                      size="lg"
                       disabled={eventPending}
+                      aria-label={`${et.hidden ? m.show : m.hide} · ${et.title}`}
                       onClick={() => toggleHidden(et.id, !et.hidden)}
-                      className="rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-primary disabled:opacity-60"
+                      className="shrink-0 text-xs text-muted-foreground"
                     >
                       {et.hidden ? m.show : m.hide}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">{m.noEvents}</li> : null}
             </ul>
             <p className="mt-1 text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
-            <a href="/admin/event-types" className="mt-1 inline-block text-xs text-primary hover:underline">
+            {/* Was `Configure events →`. It leaves this screen, so it is a button
+                with the design language's own mark, not an arrow on a link. */}
+            <a
+              href="/admin/event-types"
+              className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mt-1 self-start')}
+            >
+              <i aria-hidden className="pi pi-cog" style={{ fontSize: 13 }} />
               {m.configureEventTypes}
             </a>
 
             {/* Landing (R25): show the picker, or send visitors straight to one event. */}
             <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
                   checked={landingEnabled}
                   onChange={(e) => setLandingEnabled(e.target.checked)}
                 />
                 {m.showLandingPage}
               </label>
               {!landingEnabled ? (
-                <label className="flex flex-col gap-1 text-sm">
+                // A <div>, not a <label>: the picker's trigger is a <button>.
+                <div className="flex flex-col gap-1 text-sm">
                   <span className="text-muted-foreground">{m.sendVisitorsTo}</span>
-                  <select
+                  <Select
                     value={defaultEventSlug}
-                    onChange={(e) => setDefaultEventSlug(e.target.value)}
-                    className={inputCls}
-                  >
-                    <option value="">{m.chooseEvent}</option>
-                    {init.eventTypes.map((et) => (
-                      <option key={et.slug} value={et.slug}>
-                        {et.title}
-                      </option>
-                    ))}
-                  </select>
+                    options={init.eventTypes.map((et) => ({ value: et.slug, label: et.title }))}
+                    placeholder={m.chooseEvent}
+                    ariaLabel={m.sendVisitorsTo}
+                    locale={init.locale}
+                    onChange={setDefaultEventSlug}
+                  />
                   {!defaultEventSlug ? (
                     <span className="text-xs text-destructive">{m.pickDefaultEvent}</span>
                   ) : null}
-                </label>
+                </div>
               ) : null}
             </div>
           </Section>
@@ -506,14 +579,17 @@ export function Studio(init: StudioInit) {
 
         {/* Live preview (sticky) */}
         <div className="lg:sticky lg:top-6 lg:self-start">
-          <div className="mb-3 flex items-center justify-between">
+          {/* Preview toolbar — studio CHROME, not the canvas. Both segmented
+              controls are on the 44px step and announce their state. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex rounded-md border border-border p-0.5 text-sm">
               {(['profile', 'booking'] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
+                  aria-pressed={surface === s}
                   onClick={() => setSurface(s)}
-                  className={`rounded-sm px-3 py-1 ${surface === s ? 'bg-accent' : ''}`}
+                  className={`inline-flex min-h-[44px] items-center rounded-sm px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${surface === s ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {s === 'booking' ? m.bookingFlow : m.previewProfile}
                 </button>
@@ -524,8 +600,9 @@ export function Studio(init: StudioInit) {
                 <button
                   key={d}
                   type="button"
+                  aria-pressed={device === d}
                   onClick={() => setDevice(d)}
-                  className={`rounded-sm px-3 py-1 capitalize ${device === d ? 'bg-accent' : ''}`}
+                  className={`inline-flex min-h-[44px] items-center rounded-sm px-3 capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${device === d ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {d === 'desktop' ? m.desktop : m.mobile}
                 </button>
@@ -533,7 +610,11 @@ export function Studio(init: StudioInit) {
             </div>
           </div>
 
-          <div className="rounded-md border border-border p-6" style={previewVars}>
+          {/* The FRAME is chrome; everything inside it is BP's canvas and is not
+              touched by this sweep (preview == prod, #134). `overflow-x-auto` so
+              the fixed 360px mobile preview scrolls inside its frame instead of
+              widening the studio at 360px. */}
+          <div className="overflow-x-auto rounded-xl border border-border p-4 sm:p-6" style={previewVars}>
             <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
               {surface === 'profile' ? (
                 <ProfilePreview
@@ -798,22 +879,29 @@ const PREVIEW_AVAILABLE = [
 ];
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
-  const map: Record<HandleState, { text: string; cls: string } | null> = {
+  // The `✓`/`✗` the available/taken copy used to carry are icons now, so the
+  // status reads the same in both locales without a glyph baked into a string.
+  const map: Record<HandleState, { text: string; cls: string; icon: string | null } | null> = {
     idle: null,
-    checking: { text: m.checking, cls: 'text-muted-foreground' },
-    available: { text: m.available, cls: 'text-primary' },
-    taken: { text: m.taken, cls: 'text-destructive' },
-    invalid: { text: m.invalid, cls: 'text-destructive' },
+    checking: { text: m.checking, cls: 'text-muted-foreground', icon: null },
+    available: { text: m.available, cls: 'text-primary', icon: 'pi-check-circle' },
+    taken: { text: m.taken, cls: 'text-destructive', icon: 'pi-times-circle' },
+    invalid: { text: m.invalid, cls: 'text-destructive', icon: 'pi-times-circle' },
   };
   const h = map[state];
-  return h ? <span className={`text-xs ${h.cls}`}>{h.text}</span> : null;
+  return h ? (
+    <span className={`flex items-center gap-1 text-xs ${h.cls}`}>
+      {h.icon ? <i aria-hidden className={`pi ${h.icon}`} style={{ fontSize: 11 }} /> : null}
+      {h.text}
+    </span>
+  ) : null;
 }
 
-const inputCls = 'rounded-md border border-input bg-background px-3 py-2 w-full';
+const inputCls = 'min-h-[44px] w-full';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
+    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
       <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
       {children}
     </section>
@@ -855,13 +943,22 @@ function ImageInput({
           className={preview === 'avatar' ? 'h-12 w-12 rounded-full object-cover' : 'h-16 w-full rounded-md object-cover'}
         />
       ) : null}
-      <div className="flex items-center gap-2">
-        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:border-primary">
+      <div className="flex flex-wrap items-center gap-2">
+        {/* The file input stays hidden inside its label — that is what makes the
+            label the control — but the label now wears the button recipe and the
+            44px step instead of a bespoke 28px chip. */}
+        <label
+          className={cn(
+            buttonVariants({ variant: 'outline', size: 'lg' }),
+            'cursor-pointer text-xs',
+          )}
+        >
+          <i aria-hidden className="pi pi-upload" style={{ fontSize: 12 }} />
           {m.uploadImage}
           <input
             type="file"
             accept="image/*"
-            className="hidden"
+            className="sr-only"
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (!f) return;
@@ -876,23 +973,24 @@ function ImageInput({
           />
         </label>
         {value ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="lg"
+            className="text-xs text-muted-foreground hover:text-destructive"
             onClick={() => {
               onChange('');
               setErr(null);
             }}
-            className="text-xs text-muted-foreground hover:text-destructive"
           >
             {m.clear}
-          </button>
+          </Button>
         ) : null}
       </div>
-      <input
+      <Input
         value={isData ? '' : value}
-        onChange={(e) => onChange(e.target.value)}
         placeholder={m.orPasteUrl}
         className={inputCls}
+        onChange={(e) => onChange(e.target.value)}
       />
       {err ? <span className="text-xs text-destructive">{err}</span> : null}
     </div>
