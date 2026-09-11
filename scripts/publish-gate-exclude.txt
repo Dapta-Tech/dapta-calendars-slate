@@ -7,6 +7,16 @@
 # mistake, so the gate must always scan them. If a documented placeholder
 # false-positives, allowlist that single FINDING (detector + file + line) in
 # publish-gate-allowlist.txt instead.
+#
+# The other two layers skip their own near-identical set: the internal-token
+# grep via --exclude-dir in publish-gate.sh, gitleaks via
+# publish-gate-gitleaks.toml. Adding a gitignored directory to one is usually a
+# sign it belongs in all three. The known deltas, so nobody reads them as drift:
+#   - .git/ is listed here and for the grep layer; gitleaks skips it natively.
+#   - deploy/ (the private overlay) is skipped by the grep and gitleaks layers
+#     but NOT here, so trufflehog still scans it. On a machine that has the
+#     overlay checked out that will report its real credentials; narrowing it is
+#     a deliberate separate decision, per the warning above.
 /node_modules/
 /\.git/
 /dist/
