@@ -40,6 +40,25 @@ const isoUtc = {
   description: 'ISO-8601 UTC instant.',
 } as const;
 
+/**
+ * The one-off invite-link header (#110), shared by every route that honours it.
+ *
+ * A HEADER rather than a query parameter because it is a credential: a query
+ * string lands in access logs and in `Referer` on every outbound click. Always
+ * optional — absent, the route behaves exactly as it did before this existed.
+ */
+const oneOffHeaderParam = {
+  name: 'X-One-Off-Token',
+  in: 'header',
+  required: false,
+  schema: { type: 'string' },
+  description:
+    'A one-off invite-link token (see GET /v1/public/one-off/{token}). Presenting a live ' +
+    'one lets this request reach the single event type that token opens, including one ' +
+    'hidden from the public booking page; a booking made with it consumes it. Ignored on ' +
+    'API-key writes, which are not subject to the grant.',
+};
+
 const jsonBody = (schema: unknown, required = true) => ({
   required,
   content: { 'application/json': { schema } },
@@ -994,12 +1013,15 @@ export const openapiSpec = {
     '/v1/availability': {
       get: {
         summary: 'Public availability (slots, seat-aware)',
-        parameters: ['accountCode', 'handle', 'slug', 'from', 'to', 'timeZone'].map((name) => ({
-          name,
-          in: 'query',
-          required: name !== 'to' && name !== 'timeZone',
-          schema: { type: 'string' },
-        })),
+        parameters: [
+          ...['accountCode', 'handle', 'slug', 'from', 'to', 'timeZone'].map((name) => ({
+            name,
+            in: 'query',
+            required: name !== 'to' && name !== 'timeZone',
+            schema: { type: 'string' },
+          })),
+          oneOffHeaderParam,
+        ],
         responses: {
           '200': {
             description: 'Availability with slots[{startUtc,spotsLeft?,capacity?}]',
@@ -1023,6 +1045,7 @@ export const openapiSpec = {
             required: name !== 'timeZone',
             schema: { type: 'string' },
           })),
+          oneOffHeaderParam,
         ],
         responses: {
           '200': { description: 'Availability with slots[{startUtc}]' },
@@ -1032,9 +1055,55 @@ export const openapiSpec = {
         },
       },
     },
+    '/v1/public/one-off/{token}': {
+      get: {
+        summary: 'Resolve a one-off invite link',
+        description:
+          'A one-off invite link is a grant a host mints over an event type they already ' +
+          'have: it books that event once and then stops working. This answers WHERE the ' +
+          'token points and nothing else — no host name, no event title, and no indication ' +
+          'of what other links exist. Present the token on the availability, reservation ' +
+          'and booking routes (see the X-One-Off-Token header) to read and book the event ' +
+          'it opens, including one hidden from the public booking page. ' +
+          'Rate-limited per IP like every public route.',
+        parameters: [
+          {
+            name: 'token',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: '43-character base64url token, as minted by the host.',
+          },
+        ],
+        responses: {
+          '200': {
+            description:
+              'The booking target: {kind:"personal",accountCode,handle,slug} or ' +
+              '{kind:"team",accountCode,teamSlug,slug}.',
+          },
+          '410': {
+            description:
+              'ONE_OFF_GONE — the link was real and is spent or revoked. A booking made ' +
+              'against it (pending included) consumes it permanently; cancelling that ' +
+              'booking does NOT bring it back.',
+          },
+          '404': {
+            description:
+              'The token names nothing. Deliberately indistinguishable from any other ' +
+              'missing route.',
+          },
+          '429': { description: 'RATE_LIMITED' },
+        },
+      },
+    },
     '/v1/reservations': {
       post: {
         summary: 'Place a 10-minute hold on a slot',
+        // One-off invite links (#110). Optional everywhere it appears: absent,
+        // nothing about the route changes. Present and live, it lets THIS
+        // request see the one hidden event type that token opens.
+        parameters: [oneOffHeaderParam],
+
         requestBody: jsonBody({
           type: 'object',
           required: ['accountCode', 'handle', 'slug', 'startUtc'],
@@ -1081,6 +1150,11 @@ export const openapiSpec = {
     '/v1/bookings': {
       post: {
         summary: 'Create a booking (consumes a hold; intake-validated)',
+        // One-off invite links (#110). Optional everywhere it appears: absent,
+        // nothing about the route changes. Present and live, it lets THIS
+        // request see the one hidden event type that token opens.
+        parameters: [oneOffHeaderParam],
+
         requestBody: jsonBody({
           type: 'object',
           required: ['accountCode', 'handle', 'slug', 'startUtc', 'attendee'],
@@ -1106,8 +1180,17 @@ export const openapiSpec = {
         }),
         responses: {
           '201': { description: 'BookingView (+ one-time manageUrl)' },
-          '409': { description: 'SLOT_TAKEN' },
-          '410': { description: 'RESERVATION_EXPIRED' },
+          '409': { description: 'SLOT_TAKEN | DUPLICATE_BOOKING' },
+          '410': {
+            description:
+              'RESERVATION_EXPIRED, or ONE_OFF_GONE when a presented one-off invite link ' +
+              'is already spent or revoked.',
+          },
+          '404': {
+            description:
+              'No such booking page — or a one-off invite token that names nothing, or ' +
+              'that opens a different event type than the one being booked.',
+          },
           '400': { description: 'INTAKE_INVALID' },
         },
       },

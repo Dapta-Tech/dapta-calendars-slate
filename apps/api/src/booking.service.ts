@@ -14,11 +14,12 @@ import {
   releaseSlot,
   rescheduleBooking,
   reserveSlot,
+  resolveOneOffLink,
   resolveBooking,
   parseJsonColumn,
   sql,
 } from '@slate/db';
-import { isLocationKind, verifyManageToken } from '@slate/engine';
+import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
@@ -35,6 +36,7 @@ import {
   teamAvailabilityQuerySchema,
   type AvailabilityResponse,
   type BookingView,
+  type OneOffLinkTargetView,
   type PublicProfile,
   type TeamProfile,
 } from '@slate/types';
@@ -62,6 +64,28 @@ const contextIdempotencyKeySchema = z.string().min(1).max(200);
  */
 const DUPLICATE_BOOKING_MESSAGE =
   'A booking already exists for this email on this event. Check your inbox.';
+
+/**
+ * The one-off link's two public messages (#69/AB2, #110), shared by the
+ * personal and team write paths so the two cannot drift, exactly as
+ * `DUPLICATE_BOOKING_MESSAGE` above is.
+ *
+ * Three distinct codes now leave these two paths, each with its own cause:
+ *
+ *   409 DUPLICATE_BOOKING  this email already holds an upcoming booking (AB1)
+ *   410 ONE_OFF_GONE       the link was real and is spent or revoked
+ *   404 ONE_OFF_NOT_FOUND  the token names nothing here
+ *
+ * The 404 is deliberately the SAME shape any missing route gives and says
+ * nothing about tokens. A message that admitted "that invite link is not valid"
+ * would confirm to anyone guessing that this deployment has such links and that
+ * this particular guess was wrong — which is the one thing the 410/404 split
+ * must not leak. The 410 may speak plainly, because reaching it requires
+ * holding a token that really was minted.
+ */
+export const ONE_OFF_GONE_MESSAGE =
+  'This invite link has already been used. Ask the organizer for a new one.';
+const ONE_OFF_NOT_FOUND_MESSAGE = 'Not found.';
 
 /** The manage view's event-context projection — see `manageView`. */
 interface RescheduleContextRow {
@@ -127,7 +151,62 @@ export class BookingService {
     return (p as PublicProfile | undefined) ?? null;
   }
 
-  async availability(raw: unknown): Promise<AvailabilityResponse | null> {
+  /**
+   * Where a one-off link points, or how it is dead (#110).
+   *
+   * Three outcomes, and they are the whole public contract for a token:
+   *   a target      the link is live and opens this event
+   *   `'gone'`      it was real and is consumed or revoked        → 410
+   *   `null`        it names nothing at all                        → 404
+   *
+   * The shape check runs FIRST and costs no query. A path segment is
+   * caller-controlled, and answering a junk value with the same 404 a missing
+   * route gives, without touching the database, is what keeps this route from
+   * being a cheap probe.
+   *
+   * Consumed and revoked are folded into one `'gone'` on purpose. The host's
+   * own list keeps them apart, because "someone booked this" and "I cancelled
+   * this" are different facts about a link they own; an anonymous caller
+   * learns only that the link is spent.
+   */
+  async oneOffTarget(token: string): Promise<OneOffLinkTargetView | 'gone' | null> {
+    if (!isOneOffTokenShape(token)) return null;
+    const resolved = await resolveOneOffLink(this.db, token);
+    if (!resolved) return null;
+    if (resolved.state !== 'live') return 'gone';
+    return resolved.target;
+  }
+
+  /**
+   * Does this one-off token open EXACTLY the event being asked about?
+   *
+   * The read routes address an event by its public coordinates, not by id, so
+   * this compares the coordinates the token resolves to against the ones the
+   * request names. Without the comparison a live token over any event would
+   * unhide every event on the deployment to a caller who presents it.
+   *
+   * FAILS CLOSED in every uncertain case: a bad shape, an unknown token, a dead
+   * one, or coordinates that do not match all return false, and the event type
+   * stays as invisible as it is to an anonymous caller. The one consequence
+   * worth naming is that the comparison is on the CANONICAL account code, which
+   * `resolveOneOffLink` returns — a caller who addressed the same event through
+   * a retired alias code gets `false` and a 404 rather than a hidden event.
+   * That is the safe direction, and the booking page never does it: it is handed
+   * the canonical code by `oneOffTarget` before it reads anything.
+   */
+  private async oneOffOpens(
+    token: string | undefined,
+    want: { accountCode: string; handle?: string; teamSlug?: string; slug: string },
+  ): Promise<boolean> {
+    if (!token || !isOneOffTokenShape(token)) return false;
+    const resolved = await resolveOneOffLink(this.db, token);
+    if (!resolved || resolved.state !== 'live') return false;
+    const t = resolved.target;
+    if (t.accountCode !== want.accountCode || t.slug !== want.slug) return false;
+    return t.kind === 'personal' ? t.handle === want.handle : t.teamSlug === want.teamSlug;
+  }
+
+  async availability(raw: unknown, oneOffToken?: string): Promise<AvailabilityResponse | null> {
     const q = availabilityQuerySchema.parse(raw);
     const fromMs = new Date(q.from).getTime();
     // Cap the search window (contract §Engine) — clamp `to` rather than reject,
@@ -144,6 +223,14 @@ export class BookingService {
         fromMs,
         toMs,
         displayTimeZone: q.timeZone,
+        // A hidden event answers here ONLY for a live link that opens this
+        // exact event (#110) — the booking page a one-off link serves has to
+        // read slots for the event the link exists to reach.
+        includeHidden: await this.oneOffOpens(oneOffToken, {
+          accountCode: q.accountCode,
+          handle: q.handle,
+          slug: q.slug,
+        }),
       },
       // Subtract the host's real connected-calendar busy times (no-op on the
       // OSS default disabled provider).
@@ -164,13 +251,23 @@ export class BookingService {
   }
 
   /** Reserve a 10-minute soft hold on a slot (public reserve→confirm two-step). */
-  async reserve(raw: unknown): Promise<{ reservationUid: string; expiresAt: string } | ServiceError> {
+  async reserve(
+    raw: unknown,
+    oneOffToken?: string,
+  ): Promise<{ reservationUid: string; expiresAt: string } | ServiceError> {
     const input = reserveSlotSchema.parse(raw);
     const held = await reserveSlot(this.db, {
       accountCode: input.accountCode,
       handle: input.handle,
       slug: input.slug,
       startMs: new Date(input.startUtc).getTime(),
+      // Same opt-in as `availability` above: without it the hold 404s on the
+      // hidden event and the invitee cannot get past the slot picker (#110).
+      includeHidden: await this.oneOffOpens(oneOffToken, {
+        accountCode: input.accountCode,
+        handle: input.handle,
+        slug: input.slug,
+      }),
     });
     if (!held.ok) {
       if (held.reason === 'NOT_FOUND')
@@ -245,6 +342,16 @@ export class BookingService {
        * repository namespaces it by account before storing.
        */
       idempotencyKey?: string;
+      /**
+       * A one-off link token (#110), from the `X-One-Off-Token` header.
+       *
+       * CONTEXT, never the request body, for the same reason `apiKeyWrite` is:
+       * `POST /v1/bookings` is unauthenticated and the controller hands the
+       * service whatever arrived. A header keeps the token out of the booking
+       * payload, out of `Referer`, and out of access logs that record query
+       * strings — the same reasoning `manageToken()` applies one route over.
+       */
+      oneOffToken?: string;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -265,6 +372,7 @@ export class BookingService {
           : undefined,
         onBehalf,
         apiKeyWrite: context?.apiKeyWrite,
+        oneOffToken: context?.oneOffToken,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
       this.calendar.provider,
@@ -302,6 +410,12 @@ export class BookingService {
           message: DUPLICATE_BOOKING_MESSAGE,
           status: 409,
         };
+      // One-off link (#110) — see ONE_OFF_GONE_MESSAGE for why these two codes
+      // are distinct and why only one of them explains itself.
+      if (outcome.reason === 'ONE_OFF_GONE')
+        return { error: 'ONE_OFF_GONE', message: ONE_OFF_GONE_MESSAGE, status: 410 };
+      if (outcome.reason === 'ONE_OFF_NOT_FOUND')
+        return { error: 'NOT_FOUND', message: ONE_OFF_NOT_FOUND_MESSAGE, status: 404 };
       return {
         error: 'SLOT_TAKEN',
         message: 'That time was just booked. Pick another slot.',
@@ -675,6 +789,7 @@ export class BookingService {
     from: string | undefined,
     to: string | undefined,
     timeZone?: string,
+    oneOffToken?: string,
   ): Promise<AvailabilityResponse | null> {
     // PARSED and CLAMPED, exactly as the personal path is (#136). This route is
     // unauthenticated, and it used to do neither: `new Date('x').getTime()` is
@@ -697,6 +812,13 @@ export class BookingService {
         fromMs,
         toMs,
         displayTimeZone: q.timeZone,
+        // A hidden TEAM event answers only for a live link over this exact
+        // event (#110) — the team mirror of the personal route's opt-in.
+        includeHidden: await this.oneOffOpens(oneOffToken, {
+          accountCode,
+          teamSlug,
+          slug: q.slug,
+        }),
       },
       this.calendar.provider,
     );
@@ -745,7 +867,7 @@ export class BookingService {
      * from the personal payload would keep the hazard alive on one route and
      * invite the next edit to that controller to reopen it.
      */
-    context?: { apiKeyWrite?: boolean; idempotencyKey?: string },
+    context?: { apiKeyWrite?: boolean; idempotencyKey?: string; oneOffToken?: string },
   ): Promise<(BookingView & { hostMemberId: string }) | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -762,6 +884,7 @@ export class BookingService {
           ? contextIdempotencyKeySchema.parse(context.idempotencyKey)
           : undefined,
         apiKeyWrite: context?.apiKeyWrite,
+        oneOffToken: context?.oneOffToken,
       },
       this.calendar.provider,
     );
@@ -786,6 +909,12 @@ export class BookingService {
           message: DUPLICATE_BOOKING_MESSAGE,
           status: 409,
         };
+      // One-off link (#110), the team half — the same two codes the personal
+      // path answers, because one concept must not report two ways.
+      if (out.reason === 'ONE_OFF_GONE')
+        return { error: 'ONE_OFF_GONE', message: ONE_OFF_GONE_MESSAGE, status: 410 };
+      if (out.reason === 'ONE_OFF_NOT_FOUND')
+        return { error: 'NOT_FOUND', message: ONE_OFF_NOT_FOUND_MESSAGE, status: 404 };
       return {
         error: 'SLOT_TAKEN',
         message: 'That time is taken.',

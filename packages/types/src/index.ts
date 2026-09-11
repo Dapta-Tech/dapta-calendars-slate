@@ -1136,3 +1136,65 @@ export interface IntegrationCapabilities {
    */
   requiredScopes: string[];
 }
+
+// --- One-off links (#69 / AB2, #110) ---------------------------------------
+
+/**
+ * A single one-off link, as the host's editor reads it.
+ *
+ * `token` is present in CLEAR on every read, which is the whole point of the
+ * storage policy chosen in
+ * `docs/adr/0003-public-tokens-have-two-storage-policies.md`: the host is the
+ * token's custodian rather than its recipient, so they come back to this list
+ * hours or days after minting and copy the link again. A show-once contract
+ * would mean re-minting every time a panel closes.
+ *
+ * Host-authenticated data, and never part of any public response — the public
+ * surface answers where a link POINTS, never what other links exist.
+ */
+export const oneOffLinkSchema = z.object({
+  id: z.string(),
+  /** In clear, re-readable, unique. Read ADR 0003 before changing this. */
+  token: z.string(),
+  /** The path to paste: `/booking/<token>`, built by the engine's one helper. */
+  path: z.string(),
+  createdAt: z.number(),
+  createdByMemberId: z.string().nullable(),
+  /**
+   * `live` opens a booking page; `consumed` produced a booking (`pending`
+   * counts, and a later cancel does NOT bring it back); `revoked` was killed by
+   * the host. The two dead states both answer 410 publicly and are kept apart
+   * only here, where the difference is something the host wants to see.
+   */
+  state: z.enum(['live', 'consumed', 'revoked']),
+  consumedAt: z.number().nullable(),
+  /** The booking that consumed it, so the list can point at it. */
+  consumedBookingUid: z.string().nullable(),
+  revokedAt: z.number().nullable(),
+});
+export type OneOffLinkView = z.infer<typeof oneOffLinkSchema>;
+
+/**
+ * Where a resolved one-off link points — the ONLY thing the public surface
+ * answers about a token.
+ *
+ * Deliberately the addressing triple and nothing else: no host name, no event
+ * title, no answer about whether other links exist. The page then fetches the
+ * event through exactly the contracts the ordinary booking routes use, so a
+ * one-off booking page and a public one are the same page fed the same way.
+ */
+export const oneOffLinkTargetSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('personal'),
+    accountCode: z.string(),
+    handle: z.string(),
+    slug: z.string(),
+  }),
+  z.object({
+    kind: z.literal('team'),
+    accountCode: z.string(),
+    teamSlug: z.string(),
+    slug: z.string(),
+  }),
+]);
+export type OneOffLinkTargetView = z.infer<typeof oneOffLinkTargetSchema>;

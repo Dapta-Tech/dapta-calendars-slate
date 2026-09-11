@@ -13,6 +13,7 @@ import {
   computeSlots,
   generateManageToken,
   intersectInstants,
+  isOneOffTokenShape,
   parseEventLocation,
   selectFixedRoundRobinHosts,
   selectLuckyHost,
@@ -50,6 +51,12 @@ import {
   hasUpcomingBookingForEmail,
   normalizeAttendeeEmail,
 } from './duplicate-guard';
+import {
+  consumeOneOffLink,
+  getOneOffLinkByToken,
+  oneOffGuardApplies,
+  type OneOffLinkRecord,
+} from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
@@ -116,6 +123,13 @@ export async function reserveSlot(
     slug: string;
     startMs: number;
     holdMs?: number;
+    /**
+     * Let a HIDDEN event type be held, for a resolved one-off link (#110).
+     * The booking page a link opens takes a soft hold like any other, so
+     * without this the reserve step 404s and the invitee cannot get past the
+     * slot picker on the very event the link exists to reach.
+     */
+    includeHidden?: boolean;
   },
 ): Promise<ReserveOutcome> {
   const now = Date.now();
@@ -125,7 +139,9 @@ export async function reserveSlot(
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const member = await getMember(db, account.id, args.handle);
   if (!member) return { ok: false, reason: 'NOT_FOUND' };
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
@@ -137,6 +153,7 @@ export async function reserveSlot(
     slug: args.slug,
     fromMs: args.startMs,
     toMs: endMs,
+    includeHidden: args.includeHidden,
   });
   const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
@@ -407,13 +424,26 @@ interface TeamEventType {
   prevent_duplicate_bookings: number;
 }
 
-async function getTeamEventType(db: Db, accountId: string, teamId: string, slug: string) {
+/**
+ * `hidden = 0` is the PUBLIC filter and the default stays public. `includeHidden`
+ * is the team mirror of the personal `getEventType` opt-in: set only by a caller
+ * holding a live one-off link over this exact event type (#110), because
+ * reaching an event the ordinary public URL cannot is what such a link is for.
+ */
+async function getTeamEventType(
+  db: Db,
+  accountId: string,
+  teamId: string,
+  slug: string,
+  opts?: { includeHidden?: boolean },
+) {
+  const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<TeamEventType>(
     sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
                booking_fields, prevent_duplicate_bookings
         FROM event_type
-        WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug} AND hidden = 0
+        WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug}${visibility}
         LIMIT 1`,
   );
 }
@@ -590,6 +620,8 @@ export async function getTeamAvailability(
     toMs: number;
     displayTimeZone?: string;
     now?: Date;
+    /** Let a HIDDEN team event answer, for a resolved one-off link (#110). */
+    includeHidden?: boolean;
   },
   /** Wired provider — each host's external busy is subtracted. See getAvailability. */
   calendar?: CalendarProvider,
@@ -598,7 +630,9 @@ export async function getTeamAvailability(
   if (!account) return null;
   const team = await getTeamBySlug(db, account.id, args.teamSlug);
   if (!team) return null;
-  const et = await getTeamEventType(db, account.id, team.id, args.slug);
+  const et = await getTeamEventType(db, account.id, team.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!et) return null;
   const hosts = await getEventHosts(db, et.id);
   const now = args.now ?? new Date();
@@ -669,7 +703,12 @@ export type TeamBookingOutcome =
         | 'CALENDAR_UNAVAILABLE'
         /** The event type's duplicate-booking guard refused this email (#69).
          *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
-        | 'DUPLICATE_BOOKING';
+        | 'DUPLICATE_BOOKING'
+        /** A one-off token naming nothing, or opening a different event type
+         *  (#110) — 404 upstream. See repository.ts's identical pair. */
+        | 'ONE_OFF_NOT_FOUND'
+        /** A one-off token that was real and is now consumed or revoked — 410. */
+        | 'ONE_OFF_GONE';
       message?: string;
     };
 
@@ -740,6 +779,13 @@ export async function createTeamBooking(
      * notion, so this is the whole of its exemption. See `duplicate-guard.ts`.
      */
     apiKeyWrite?: boolean;
+    /**
+     * A one-off link token presented with this write (#110). The team mirror of
+     * `CreateBookingArgs.oneOffToken`: when live it lets the lookup see a hidden
+     * team event and is burned once the booking commits, and nothing else.
+     * Ignored on API-key writes, which are not subject to the grant.
+     */
+    oneOffToken?: string;
   },
   /** Wired CalendarProvider — candidate hosts are conflict-checked against
    *  their external calendars, fail-closed (see createBooking). */
@@ -749,8 +795,28 @@ export async function createTeamBooking(
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const team = await getTeamBySlug(db, account.id, args.teamSlug);
   if (!team) return { ok: false, reason: 'NOT_FOUND' };
-  const et = await getTeamEventType(db, account.id, team.id, args.slug);
+  // One-off link (#69/AB2), the TEAM half — the personal path in repository.ts
+  // is the other, and instrumenting only one of the two is how this ships
+  // half-built. Resolved BEFORE the event type for the same reason there: a
+  // live link is what makes a hidden event visible to this request.
+  const honoursOneOff = !!args.oneOffToken && oneOffGuardApplies({ apiKeyWrite: args.apiKeyWrite });
+  // Shape first, matching the personal path and the read routes.
+  if (honoursOneOff && !isOneOffTokenShape(args.oneOffToken))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+  let live: OneOffLinkRecord | undefined;
+  if (honoursOneOff) {
+    const oneOff = await getOneOffLinkByToken(db, args.oneOffToken!);
+    if (!oneOff) return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+    if (oneOff.state !== 'live') return { ok: false, reason: 'ONE_OFF_GONE' };
+    live = oneOff;
+  }
+
+  const et = await getTeamEventType(db, account.id, team.id, args.slug, { includeHidden: !!live });
   if (!et) return { ok: false, reason: 'NOT_FOUND' };
+  // The link must open THIS event, not merely be live — otherwise a token over
+  // one team event would unlock every hidden event on the account.
+  if (live && (live.eventTypeId !== et.id || live.accountId !== account.id))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
 
   const invalid = validateTeamIntake(et, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
@@ -904,9 +970,12 @@ export async function createTeamBooking(
     ...insertAdditionalAttendees,
     ...insertHostRows,
   ]);
-  return booked
-    ? { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token }
-    : { ok: false, reason: 'SLOT_TAKEN' };
+  if (!booked) return { ok: false, reason: 'SLOT_TAKEN' };
+  // Committed — burn the link (#110). AFTER the write, never before: burning
+  // first would kill the link on every SLOT_TAKEN and strand the invitee with a
+  // dead link and no booking. See `consumeOneOffLink`.
+  if (live) await consumeOneOffLink(db, live.id, bookingId);
+  return { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token };
 }
 
 /**

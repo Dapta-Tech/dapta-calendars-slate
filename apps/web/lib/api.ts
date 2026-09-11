@@ -3,8 +3,13 @@
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
 import { cache } from 'react';
-import { bookingViewSchema } from '@slate/types';
-import type { AvailabilityResponse, BookingView, PublicProfile } from '@slate/types';
+import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
+import type {
+  AvailabilityResponse,
+  BookingView,
+  OneOffLinkTargetView,
+  PublicProfile,
+} from '@slate/types';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -12,8 +17,17 @@ import type { AvailabilityResponse, BookingView, PublicProfile } from '@slate/ty
 // then localhost for a bare clone. Set `API_URL` in each deployment's config.
 const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
-async function getJson<T>(path: string): Promise<T | null> {
-  const res = await fetch(`${API_URL}${path}`, { cache: 'no-store' });
+/**
+ * `oneOffToken` is optional and changes nothing when absent (#110). Present, it
+ * rides as a header so the API can answer for the ONE hidden event that token
+ * opens — see `ONE_OFF_HEADER` at the foot of this file for why a header and
+ * not a query parameter.
+ */
+async function getJson<T>(path: string, oneOffToken?: string): Promise<T | null> {
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: 'no-store',
+    headers: oneOffHeaders(oneOffToken),
+  });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
   return (await res.json()) as T;
@@ -91,12 +105,13 @@ export async function postTeamBooking(
   accountCode: string,
   teamSlug: string,
   body: unknown,
+  oneOffToken?: string,
 ): Promise<BookResult> {
   const res = await fetch(
     `${API_URL}/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}/bookings`,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...oneOffHeaders(oneOffToken) },
       body: JSON.stringify(body),
       cache: 'no-store',
     },
@@ -179,15 +194,18 @@ export interface ReserveResult {
 }
 
 /** Create a soft hold on a slot (public reserve→confirm two-step). */
-export async function postReservation(body: {
-  accountCode: string;
-  handle: string;
-  slug: string;
-  startUtc: string;
-}): Promise<ReserveResult> {
+export async function postReservation(
+  body: {
+    accountCode: string;
+    handle: string;
+    slug: string;
+    startUtc: string;
+  },
+  oneOffToken?: string,
+): Promise<ReserveResult> {
   const res = await fetch(`${API_URL}/v1/reservations`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...oneOffHeaders(oneOffToken) },
     body: JSON.stringify(body),
     cache: 'no-store',
   });
@@ -291,10 +309,12 @@ export async function postManage(
   return { ok: false, message: j.message ?? 'Something went wrong.' };
 }
 
-export async function postBooking(body: unknown): Promise<BookResult> {
+export async function postBooking(body: unknown, oneOffToken?: string): Promise<BookResult> {
   const res = await fetch(`${API_URL}/v1/bookings`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    // The token is a HEADER, never part of `body` — it is a credential, and the
+    // body is re-validated against `createBookingSchema`, which would drop it.
+    headers: { 'content-type': 'application/json', ...oneOffHeaders(oneOffToken) },
     body: JSON.stringify(body),
     cache: 'no-store',
   });
@@ -306,4 +326,108 @@ export async function postBooking(body: unknown): Promise<BookResult> {
     error: (json.error as string) ?? 'ERROR',
     message: (json.message as string) ?? 'Something went wrong.',
   };
+}
+
+// --- One-off links (#69 / AB2, #110) ---------------------------------------
+
+/**
+ * The header the one-off token travels in, server-to-server.
+ *
+ * Mirrors `ONE_OFF_HEADER` in `apps/api/src/public.controller.ts`. A header
+ * rather than a query parameter, for the same reason `getRescheduleAvailability`
+ * above prefers `x-manage-token`: a token in a query string lands in access
+ * logs and in `Referer` on every outbound click, and this one is a grant to
+ * create a booking.
+ *
+ * Every call here runs on the SERVER — these functions read `API_URL`, which is
+ * deliberately not a `NEXT_PUBLIC_*` value. The token therefore never becomes
+ * part of a browser-issued request, so it is never exposed to a page's network
+ * tab or to a third-party script on the booking page.
+ */
+const ONE_OFF_HEADER = 'x-one-off-token';
+
+function oneOffHeaders(token: string | undefined): Record<string, string> {
+  return token ? { [ONE_OFF_HEADER]: token } : {};
+}
+
+/**
+ * What `/booking/{token}` learns about the token in its path.
+ *
+ * Three outcomes and the route renders a different thing for each, so this
+ * answers a result rather than `target | null` — the same reasoning
+ * `ManageViewResult` gives one function up. `gone` is the one worth naming: it
+ * is the ORDINARY end of a one-off link's life, reached by the person the host
+ * sent it to opening it a second time, and it must read as "this was used",
+ * never as an error.
+ */
+export type OneOffLinkResult =
+  | { ok: true; target: OneOffLinkTargetView }
+  | { ok: false; reason: 'gone' | 'not-found' };
+
+export async function getOneOffLink(token: string): Promise<OneOffLinkResult> {
+  const res = await fetch(`${API_URL}/v1/public/one-off/${encodeURIComponent(token)}`, {
+    cache: 'no-store',
+  });
+  if (res.status === 410) return { ok: false, reason: 'gone' };
+  if (res.status === 404) return { ok: false, reason: 'not-found' };
+  if (!res.ok) throw new Error(`API one-off link failed: ${res.status}`);
+  const json = (await res.json().catch(() => ({}))) as unknown;
+  // PARSED against the shared contract, never asserted into it — a drift here
+  // would otherwise surface as a `RangeError` thrown from a render, which is
+  // the failure #102 spent a release chasing on the booking routes.
+  const parsed = oneOffLinkTargetSchema.safeParse(json);
+  if (!parsed.success) {
+    console.warn(
+      `[web] one-off link response did not match the contract: ${parsed.error.issues
+        .map((i) => i.path.join('.') || '(root)')
+        .join(', ')}`,
+    );
+    return { ok: false, reason: 'not-found' };
+  }
+  return { ok: true, target: parsed.data };
+}
+
+/**
+ * Availability for the event a one-off link opens.
+ *
+ * A separate function from `getAvailability` only because it carries the
+ * header; the route, the query and the response contract are identical. That is
+ * the point of the design — a one-off booking page is the ordinary booking page
+ * reading the ordinary endpoints, with one header that makes the hidden event
+ * it points at visible to this request alone.
+ */
+export function getAvailabilityWithOneOff(params: {
+  accountCode: string;
+  handle: string;
+  slug: string;
+  from: string;
+  to: string;
+  timeZone?: string;
+  oneOffToken: string;
+}): Promise<AvailabilityResponse | null> {
+  const qs = new URLSearchParams({
+    accountCode: params.accountCode,
+    handle: params.handle,
+    slug: params.slug,
+    from: params.from,
+    to: params.to,
+  });
+  if (params.timeZone) qs.set('timeZone', params.timeZone);
+  return getJson<AvailabilityResponse>(`/v1/availability?${qs.toString()}`, params.oneOffToken);
+}
+
+/** The team mirror of `getAvailabilityWithOneOff`. */
+export function getTeamAvailabilityWithOneOff(params: {
+  accountCode: string;
+  teamSlug: string;
+  slug: string;
+  from: string;
+  to: string;
+  oneOffToken: string;
+}): Promise<AvailabilityResponse | null> {
+  const qs = new URLSearchParams({ slug: params.slug, from: params.from, to: params.to });
+  return getJson<AvailabilityResponse>(
+    `/v1/public/teams/${encodeURIComponent(params.accountCode)}/${encodeURIComponent(params.teamSlug)}/availability?${qs}`,
+    params.oneOffToken,
+  );
 }

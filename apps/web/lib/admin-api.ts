@@ -19,6 +19,7 @@ import type {
   IntegrationCapabilities,
   IntegrationStatusView,
   OnboardingState,
+  OneOffLinkView,
 } from '@slate/types';
 import {
   getSession,
@@ -227,6 +228,17 @@ export const adminApi = {
   createEventType: (b: unknown) => req<EventType>('POST', '/v1/event-types', b),
   updateEventType: (id: string, b: unknown) => req<EventType>('PATCH', `/v1/event-types/${id}`, b),
   deleteEventType: (id: string) => req<void>('DELETE', `/v1/event-types/${id}`),
+
+  // One-off invite links (#69 / AB2, #110). They hang off the event type they
+  // grant access to, because that is what a link IS — a grant over an existing
+  // event, never a bookable object of its own.
+  listOneOffLinks: (eventTypeId: string) =>
+    req<OneOffLinkView[]>('GET', `/v1/event-types/${eventTypeId}/one-off-links`),
+  // No body: a one-off link has no options to set.
+  mintOneOffLink: (eventTypeId: string) =>
+    req<OneOffLinkView>('POST', `/v1/event-types/${eventTypeId}/one-off-links`),
+  revokeOneOffLink: (eventTypeId: string, linkId: string) =>
+    req<void>('DELETE', `/v1/event-types/${eventTypeId}/one-off-links/${linkId}`),
 
   // Schedules
   listSchedules: () => req<{ id: string; name: string; timeZone: string }[]>('GET', '/v1/schedules'),

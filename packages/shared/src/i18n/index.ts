@@ -63,6 +63,25 @@ export interface BookingMessages {
       body: string;
       changeEmail: string;
     };
+    /**
+     * One-off links (#69 / AB2, #110) — the PUBLIC half, shown to the invitee
+     * who opens a link that is already spent.
+     *
+     * Its own block rather than more keys on `duplicateGuard`, because the two
+     * say different things to different people: AB1's card tells a booker their
+     * address already has a booking, this one tells a person their invite link
+     * has been used. There is no retry and no "pick another": nothing the
+     * invitee can do here resolves it, so the copy sends them to the organizer
+     * instead of offering an action that cannot work.
+     *
+     * Says nothing about WHY it is dead. Consumed and revoked are one state to
+     * an invitee, and "the organizer cancelled this link" is a message about
+     * the host's intentions that the host may not want relayed.
+     */
+    oneOffLink: {
+      usedTitle: string;
+      usedBody: string;
+    };
   };
   /**
    * The three-region public event page (BP): event panel, month calendar, day
@@ -330,6 +349,40 @@ export interface BookingMessages {
       duplicateGuard: {
         label: string;
         hint: string;
+      };
+      /**
+       * One-off links (#69 / AB2, #110) — the editor half.
+       *
+       * Never call it a security control in either locale: it stops a link
+       * pasted to one person being forwarded and re-used, and it authenticates
+       * nobody (the per-IP limiter is the security control). Same framing rule
+       * as `duplicateGuard` above.
+       *
+       * `publicWarning` is requirement 4 of #110 and it is COPY PLUS A
+       * CONDITION, never a block: a link over a publicly bookable event limits
+       * nothing, and the host has to learn that where they mint it rather than
+       * from a doc — but they may have a reason, so nothing is disabled.
+       */
+      oneOffLinks: {
+        title: string;
+        hint: string;
+        mint: string;
+        minted: string;
+        /** Minting copies the new link too — one toast reports both. */
+        copiedOnMint: string;
+        copy: string;
+        copied: string;
+        revoke: string;
+        revoked: string;
+        empty: string;
+        saveFirst: string;
+        publicWarning: string;
+        stateLive: string;
+        stateConsumed: string;
+        stateRevoked: string;
+        /** `{date}` — when it was minted. */
+        createdAt: string;
+        failed: string;
       };
       intakeQuestions: string;
       /** Reorder + reserved-name hard block (QA3 fixes 3, 6). */
@@ -1189,6 +1242,13 @@ export const en: BookingMessages = {
       body: 'A booking already exists for this email on this event. Check your inbox for the confirmation.',
       changeEmail: 'Use a different email',
     },
+    // One-off links (#110), the invitee's side. No retry: nothing they can do
+    // here fixes it, and the copy must not say whether it was used or withdrawn.
+    oneOffLink: {
+      usedTitle: 'This invite link has already been used',
+      usedBody:
+        'Invite links work once. Ask the organizer to send you a new one, and it will open a fresh booking page.',
+    },
   },
   bookingPage: {
     detailsRegion: 'Event details',
@@ -1400,6 +1460,27 @@ export const en: BookingMessages = {
       duplicateGuard: {
         label: 'One booking per person',
         hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected. Anyone who guesses an invitee’s address is told a booking exists for it, though never when it is.',
+      },
+      // One-off links (#110). Not a security control; say what it does.
+      oneOffLinks: {
+        title: 'One-off invite links',
+        hint: 'Each link books this event once, then stops working. Send one to a single person. Cancelling that booking does not bring the link back — mint another.',
+        mint: 'Create invite link',
+        minted: 'Invite link created.',
+        copiedOnMint: 'Invite link created and copied.',
+        copy: 'Copy',
+        copied: 'Link copied.',
+        revoke: 'Revoke',
+        revoked: 'Invite link revoked.',
+        empty: 'No invite links yet.',
+        saveFirst: 'Save this event before creating invite links.',
+        publicWarning:
+          'This event is visible on your booking page, so an invite link limits nothing — anyone with the normal link can still book it. Mark the event Hidden to make invite links the only way in.',
+        stateLive: 'Ready to send',
+        stateConsumed: 'Used',
+        stateRevoked: 'Revoked',
+        createdAt: 'Created {date}',
+        failed: 'Could not do that. Try again.',
       },
       intakeQuestions: 'Intake questions',
       moveUp: 'Move up',
@@ -2186,6 +2267,12 @@ export const es: BookingMessages = {
       body: 'Ya existe una reserva con este correo en este evento. Revisa tu bandeja de entrada para ver la confirmación.',
       changeEmail: 'Usar otro correo',
     },
+    // Enlaces de un solo uso (#110), el lado del invitado. Sin reintento.
+    oneOffLink: {
+      usedTitle: 'Este enlace de invitación ya se usó',
+      usedBody:
+        'Los enlaces de invitación funcionan una sola vez. Pídele a quien te invitó que te envíe uno nuevo y se abrirá una página de reserva nueva.',
+    },
   },
   bookingPage: {
     detailsRegion: 'Detalles del evento',
@@ -2397,6 +2484,27 @@ export const es: BookingMessages = {
       duplicateGuard: {
         label: 'Una reserva por persona',
         hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados. A quien adivine el correo de un invitado se le dirá que existe una reserva, aunque nunca cuándo es.',
+      },
+      // Enlaces de un solo uso (#110). No es un control de seguridad.
+      oneOffLinks: {
+        title: 'Enlaces de invitación de un solo uso',
+        hint: 'Cada enlace reserva este evento una vez y luego deja de funcionar. Envía uno a una sola persona. Cancelar esa reserva no reactiva el enlace — crea otro.',
+        mint: 'Crear enlace de invitación',
+        minted: 'Enlace de invitación creado.',
+        copiedOnMint: 'Enlace de invitación creado y copiado.',
+        copy: 'Copiar',
+        copied: 'Enlace copiado.',
+        revoke: 'Revocar',
+        revoked: 'Enlace de invitación revocado.',
+        empty: 'Aún no hay enlaces de invitación.',
+        saveFirst: 'Guarda este evento antes de crear enlaces de invitación.',
+        publicWarning:
+          'Este evento es visible en tu página de reservas, así que un enlace de invitación no limita nada — cualquiera con el enlace normal puede reservarlo igual. Marca el evento como Oculto para que los enlaces de invitación sean la única vía.',
+        stateLive: 'Listo para enviar',
+        stateConsumed: 'Usado',
+        stateRevoked: 'Revocado',
+        createdAt: 'Creado el {date}',
+        failed: 'No se pudo completar. Inténtalo de nuevo.',
       },
       intakeQuestions: 'Preguntas del formulario',
       moveUp: 'Subir',

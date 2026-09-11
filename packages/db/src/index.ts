@@ -7,6 +7,7 @@ export * from './client';
 export * from './repository';
 export * from './parity';
 export * from './duplicate-guard';
+export * from './one-off-link';
 export * from './crud';
 export * from './members';
 export * from './calendar-refs';
