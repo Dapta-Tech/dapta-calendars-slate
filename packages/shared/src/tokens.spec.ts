@@ -14,8 +14,10 @@
  * back into a tonal mirror of the dark one" is invisible until it ships. Here it is
  * pure arithmetic, so it is caught for free.
  *
- * The ratios use the engine's own `contrastRatio`, so the sheet and `clampAccent`
- * can never disagree about what 4.5:1 means.
+ * The ratios use the engine's own `contrastRatio`, so the sheet and the engine can
+ * never disagree about what 4.5:1 means. Note that `contrastRatio` rounds to
+ * NEAREST: that slack is accepted here (see below) and nowhere that decides —
+ * `accentCanvasContrast` truncates precisely because the studio acts on it.
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
@@ -24,8 +26,8 @@ import { contrastRatio } from './branding';
 /* `contrastRatio` rounds to one decimal (it exists to drive a UI readout), so a
    true 4.45:1 reports as 4.5 and clears this bar. That 1% of slack is accepted
    rather than worked around: using the engine's own function is the point of this
-   spec — a palette must not be able to pass here and fail the clamp — and every
-   value the sheet actually ships sits well clear of the boundary (the tightest is
+   spec — the sheet and the engine must agree on what a ratio is — and every value
+   the sheet actually ships sits well clear of the boundary (the tightest is
    4.7:1). If a future token lands inside 0.05 of a threshold, tighten the token
    rather than the assertion. */
 const AA = 4.5; // WCAG 1.4.3 — body text.

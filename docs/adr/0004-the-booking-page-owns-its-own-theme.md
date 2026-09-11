@@ -86,3 +86,113 @@ arithmetic and unit tests, not architecture.
   purple that the product itself retired.
 - A third theme, or a per-event-type theme, would land on this axis rather than
   beside it. The value is an enum on the style object precisely so it can grow.
+
+## Amendment — 2026-09-11 (#162)
+
+Two of the decisions above are reversed by the product owner. They are recorded
+here rather than in a superseding ADR because only part of this document
+changes: the tenth axis, the studio control, the embed override, the
+`bookingCanvasOf` resolver and the ban on inheriting the host's admin
+preference all stand exactly as written.
+
+### The default canvas is now `dark`
+
+`theme` still defaults, still has no `auto`, and is still never influenced by
+the host's own admin theme. The default value moves from `light` to `dark`.
+
+The original reasoning — that the invitee is a stranger and the category renders
+on paper — was not disputed on its merits. It was outweighed: the product is
+dark, and the booking page is part of the product.
+
+The fact lives in two independent readers and both moved together:
+`bookingPageStyleSchema.theme`'s zod `.default()` in `@slate/types`, and
+`DEFAULT_BOOKING_THEME` in `@slate/shared`, which `apps/web/lib/booking-canvas.ts`
+re-exports. A split between them parses one canvas and derives the accent
+tokens against the other, with no error anywhere — just a wrong-looking page.
+`apps/web/lib/booking-canvas.spec.ts` is the only place both are reachable, so
+the parity assertion lives there.
+
+Timing was part of the decision. The studio control shipped days earlier
+(#109), so almost nothing carries an explicitly saved `theme` yet. Configs with
+no stored value went dark → light at that merge and this puts them straight
+back; in a month, against real saved values, it would have been a second
+visible move instead of an undo.
+
+### The engine no longer alters the host's accent
+
+`clampAccent` mixed the chosen colour 12% toward the canvas's opposite pole,
+repeatedly, until it cleared 3:1 against the ground. It does not any more. The
+colour renders as chosen. If a host picks something illegible, that is theirs to
+fix, and the studio shows them the number rather than overruling them.
+
+Three values that looked like one, and the diff keeps them apart:
+
+| Value | What it is | Outcome |
+|---|---|---|
+| `clampAccent` | the host's colour as a fill | no longer adjusted |
+| `accentInk` / `accentEdge` | the host's colour as link text and as a rim | no longer adjusted — same colour, same rule |
+| `onAccent` | the black-or-white label sitting *on top of* the fill | **keeps its floor** |
+
+`onAccent` is not the host's colour. It is a value the engine invents to put on
+their colour, and a host who picks dark green never chose black text on dark
+green. Measured across the sRGB cube its worst case is about 4.1:1, which is
+also why the studio's warning has to measure the canvas and can never be about
+the label.
+
+`clampAccent` keeps two other things. Its invalid-hex fallback
+(`parseHex(hex) ?? parseHex(DEFAULT_ACCENT)`) stays, because
+`apps/web/lib/embed.ts` lets a pasted snippet override `brand_color` from the
+URL and a typo there has to degrade rather than break the page. And it keeps its
+`canvas` parameter: nothing reads it now, `brandVars` still genuinely needs one
+for the hover direction and the wash, and a signature that quietly stopped
+asking would be the easiest place for preview and production to drift apart
+again.
+
+`accentWasAdjusted` is deleted rather than left returning a constant `false`.
+
+### The studio informs instead of correcting
+
+`adjustedNote` is retired in both locales. The contrast readout stays and is
+relabelled to name what it measures — the button LABEL on its fill — and a
+non-blocking `lowContrast` warning appears below it when
+`accentCanvasContrast` falls under `MIN_ACCENT_CONTRAST` (3:1) against the
+ground the page paints on. Two grounds, so both are named; the save is never
+blocked.
+
+`accentCanvasContrast` truncates to one decimal rather than rounding to nearest,
+and that is a correctness requirement rather than a display preference. The
+studio both shows this number and decides on it, and rounding to nearest reports
+a true 2.9885:1 as a passing `3` — roughly 4,500 colours per canvas that sit
+under the floor and would never warn. Truncating can only understate, so the
+number a host reads and the number the warning fires on are one value that never
+claims a ratio the colour does not have.
+
+### The accepted cost
+
+This is a deliberate accessibility regression on the one surface strangers use.
+A host who picks a low-contrast accent now ships a booking page whose links and
+buttons can fail WCAG AA, and nothing stops them. It was raised, and the product
+owner chose it: the host owns their brand, and the studio will show them the
+number.
+
+Recorded here, in the changeset and in the PR body specifically so that it is
+not rediscovered as a bug and "fixed". `packages/shared/src/branding.spec.ts`
+carries the same load: its sweep over 24,389 colours was built on the opposite
+law and now proves the colour comes back unchanged on both canvases while
+`onAccent` still clears its own floor for every one. A test named
+*lets an illegible accent through — the accepted cost, asserted* fails if anyone
+reinstates the clamp.
+
+### What this does to the consequences above
+
+- "`clampAccent` is no longer meaningful without a canvas" is now false in its
+  literal form; the parameter is retained by discipline, not by arithmetic. The
+  rule it protects — preview and production must clamp against the same ground —
+  survives, because `brandVars` still resolves hover and wash per canvas.
+- "Every pre-existing host therefore moves to a light booking page" is undone.
+  Pages with no stored `theme` move back to dark, which is where they were
+  before #109.
+- "Without the bidirectional clamp, 'light booking page' is a promise the
+  product cannot keep for any host whose brand colour is dark" is accepted as a
+  cost rather than answered. A dark brand colour on a light booking page is now
+  the host's to notice, with the warning to notice it by.

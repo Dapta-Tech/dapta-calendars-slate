@@ -1,9 +1,17 @@
 /**
  * Booking-page branding engine (ported verbatim from the original R25 util).
- * The host picks ONE accent color; we clamp it to an AA-safe range and derive
- * everything else. The public page and the studio live-preview share these, so
+ * The host picks ONE accent color and it is used AS PICKED; everything else is
+ * derived from it. The public page and the studio live-preview share these, so
  * preview == production. The 9 style axes + 4 theme presets are the exact values
  * from the previous version — radii/spacing/font stacks must match.
+ *
+ * The engine used to adjust the accent for contrast. It no longer does: ADR 0004's
+ * 2026-09-11 amendment took that decision away from the code and gave it to the
+ * host, who owns their brand. The one derived value that KEEPS a floor is
+ * `onAccent`, because that is not the host's colour — it is the black-or-white
+ * label sitting on top of it, and a host who picks dark green never chose black
+ * text on dark green. The studio now reports the contrast number instead of
+ * quietly correcting it.
  */
 
 // --- The 9 style axes (exact unions) --------------------------------------
@@ -47,9 +55,11 @@ export const DEFAULT_ACCENT = '#cbe84f';
 /**
  * The ground a branded surface paints on. ADR 0004 gives the booking page a
  * theme of its own, so a colour is never "legible" in the abstract — only
- * legible *against a canvas*. Every clamp and derivation below takes one, and
- * the value is the same union the stored `theme` axis will carry, so the axis
- * flows straight in without a translation step.
+ * legible *against a canvas*. The engine no longer acts on that (ADR 0004's
+ * amendment) but it still REPORTS it, and hover and the accent wash still
+ * resolve per ground, so every derivation below still takes one. The value is
+ * the same union the stored `theme` axis carries, so the axis flows straight in
+ * without a translation step.
  */
 export type BrandCanvas = 'dark' | 'light';
 
@@ -58,25 +68,32 @@ export type BrandCanvas = 'dark' | 'light';
  * page and card grounds in both directions, so an accent that clears the canvas
  * clears a card too.
  *
- * `dark` stays `#222222`, the value this engine has always clamped against. The
+ * `dark` stays `#222222`, the value this engine has always measured against. The
  * real dark page is `#0a0c0e` and its card `#101418` (tokens.css), both darker,
- * i.e. both easier for a colour travelling toward white. Keeping the old value
- * is what guarantees no already-saved accent moves the day this ships.
+ * i.e. both more forgiving for a light colour. Measuring against the stricter of
+ * the two is what keeps the studio's warning honest on a card as well as a page.
  *
- * `light` is the light `--background`, `#f4f6f8`. Its card is `#ffffff`, which
- * is the easier ground for a colour travelling toward black.
+ * `light` is the light `--background`, `#f4f6f8`. Its card is `#ffffff`, the
+ * more forgiving ground for a dark colour.
  */
 export const CANVAS_HEX: Record<BrandCanvas, string> = {
   dark: '#222222',
   light: '#f4f6f8',
 };
 
-/** WCAG 1.4.11: a fill or rim that identifies a control needs 3:1 on its ground. */
-const MIN_ACCENT_CONTRAST = 3;
-/** WCAG 1.4.3 AA: the accent used as LETTERS needs 4.5:1 on its ground. */
-const MIN_INK_CONTRAST = 4.5;
-/** The rim and focus outline carry the same non-text floor as the fill. */
-const MIN_EDGE_CONTRAST = 3;
+/**
+ * WCAG 1.4.11: a fill or rim that identifies a control needs 3:1 on its ground.
+ *
+ * The engine REPORTS this now rather than enforcing it (ADR 0004 amendment). It
+ * is exported because the studio's warning has to fire on the same number this
+ * file calls a floor — a threshold typed twice is a threshold that drifts, and
+ * the whole substitute for the old clamp is that the host is told accurately.
+ *
+ * There is no longer an ink or edge floor. Both derivations return the host's
+ * colour unchanged, so a second constant would only describe a rule nothing
+ * applies; the AA figure a host may need lives in the studio's copy instead.
+ */
+export const MIN_ACCENT_CONTRAST = 3;
 
 interface Rgb {
   r: number;
@@ -135,12 +152,12 @@ export function contrastRatio(a: string, b: string): number {
 /**
  * The same ratio, unrounded.
  *
- * `contrastRatio` rounds because it drives a UI readout, and `tokens.spec.ts`
- * accepts that slack deliberately: the sheet's values are hand-tuned and sit
- * well clear of every threshold. The engine's OWN output does not — the clamp
- * below stops on the first value that crosses its floor, so its results park
- * ON the boundary, where a rounded 2.98 reports as 3.0. Anything asserting a
- * law about a generated colour has to measure it exactly.
+ * `contrastRatio` rounds to NEAREST because it drives a UI readout whose values
+ * are hand-tuned, and `tokens.spec.ts` accepts that slack deliberately. Nothing
+ * that DECIDES may use it: a true 2.98 reports as 3.0, which is how a colour
+ * under the floor reads as passing. Anything asserting a law about a colour, or
+ * choosing whether to warn about one, has to measure it exactly — see
+ * `accentCanvasContrast`, which truncates for exactly this reason.
  * Returns 0 if either color fails to parse.
  */
 export function contrastRatioExact(a: string, b: string): number {
@@ -162,11 +179,14 @@ const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
 
 /**
- * Which pole a colour travels toward to become legible on a given canvas. This
- * is the whole of "bidirectional": on the console you lighten, on paper you
- * darken. The one-directional version lightened in BOTH cases, which is why a
- * host's navy came out of the engine as a washed pale blue and then disappeared
- * on a light booking page.
+ * Which pole a colour moves toward to read as "more" on a given canvas: on the
+ * console you lighten, on paper you darken.
+ *
+ * This drove the contrast clamp until the ADR 0004 amendment retired it. It
+ * survives for the one derivation that still moves a colour on purpose — the
+ * HOVER state — where the direction is not about legibility at all: a hover that
+ * mixed toward white on paper would fade toward the page it sits on, so the one
+ * interaction that must read as "more" would read as less.
  */
 const CANVAS_TARGET: Record<BrandCanvas, Rgb> = { dark: WHITE, light: BLACK };
 
@@ -176,145 +196,151 @@ const CANVAS_TARGET: Record<BrandCanvas, Rgb> = { dark: WHITE, light: BLACK };
  * A runtime guard, not a type concern. B2 reads this axis off the
  * `booking_page_style` jsonb, where an old row, a hand-edited one, or an embed
  * URL parameter can carry `'Dark'`, `null`, or nothing at all — and an unknown
- * key here would index to `undefined` and throw inside the clamp. A public
- * booking page must not 500 because a stored theme string was capitalised; it
- * falls back to the ground the page has always rendered on.
+ * key here would index to `undefined` and throw in any lookup keyed by canvas.
+ * A public booking page must not 500 because a stored theme string was
+ * capitalised; it falls back to the product's own ground.
  */
 function safeCanvas(canvas: BrandCanvas): BrandCanvas {
   return canvas === 'light' || canvas === 'dark' ? canvas : 'dark';
 }
 
-/** Snap to the 8-bit channels a hex can actually express. */
-function quantize({ r, g, b }: Rgb): Rgb {
-  const channel = (n: number): number => Math.max(0, Math.min(255, Math.round(n)));
-  return { r: channel(r), g: channel(g), b: channel(b) };
-}
-
 /**
- * Step a colour toward its canvas's pole, 0.12 at a time, until it clears `min`
- * against that canvas.
+ * The host's accent as a FILL — the colour they picked, byte for byte.
  *
- * The test is on the QUANTIZED candidate, not on the running float. A step
- * overshoots the floor by as little as 2e-7, and rounding to 8-bit channels then
- * moves the colour up to half a step back toward the ground — so testing the
- * float and shipping the hex let values out that measured 2.98:1 and 4.49:1. It
- * also broke idempotence: feeding a returned colour back in stepped it again,
- * and since the studio saves a clamped accent that the public page clamps a
- * second time, the two surfaces drifted apart — the exact "preview == prod"
- * break this engine exists to prevent. Measuring what is actually returned
- * makes the floor true, the function idempotent, and `accentEdge` equal to the
- * clamp by construction rather than by luck.
+ * This used to step the colour toward the canvas's pole until it cleared 3:1,
+ * which is why a host's `#cbe84f` came back `#7a8b21` olive on paper. ADR 0004's
+ * amendment reverses that: the host owns their brand, the engine reports the
+ * contrast rather than overriding it, and an illegible pick ships illegible. The
+ * accepted cost is written down in the ADR so it is not rediscovered as a bug.
  *
- * Capped at 20 steps. Instrumented over the full sRGB cube the worst case uses
- * 8, so the cap never binds; it is a guard, not a budget.
+ * WHAT DID NOT GO AWAY, and both are load-bearing:
+ *
+ *  - the **invalid-hex fallback**. `apps/web/lib/embed.ts` lets a pasted embed
+ *    snippet override `brand_color` from the URL; a typo there has to degrade to
+ *    the DS accent, not paint the page with `undefined`. Unlike before, the
+ *    fallback is returned RAW — there is no clamp left to put it through, and on
+ *    the dark default canvas the lime is already 12:1.
+ *  - the **`canvas` parameter**. Nothing reads it any more, and it stays anyway:
+ *    every caller still has to name the ground it is painting on, `brandVars`
+ *    below genuinely needs one, and a signature that quietly stopped asking
+ *    would be the easiest place for preview and production to drift apart again.
+ *    Kept under its real name rather than underscored — the name reaches every
+ *    caller's tooltip through the emitted `.d.ts`, and `_canvas` there would
+ *    read as "pass anything", which is the opposite of the discipline it exists
+ *    to enforce.
  */
-function towardLegible(rgb: Rgb, canvas: BrandCanvas, min: number): Rgb {
-  const c = safeCanvas(canvas);
-  const ground = parseHex(CANVAS_HEX[c])!;
-  const target = CANVAS_TARGET[c];
-  let exact = rgb;
-  let shipped = quantize(exact);
-  for (let i = 0; i < 20 && contrast(shipped, ground) < min; i++) {
-    exact = mix(exact, target, 0.12);
-    shipped = quantize(exact);
-  }
-  return shipped;
-}
-
-/**
- * Clamp a host-chosen accent into the legible range for `canvas`, in whichever
- * direction that canvas requires. This is the accent as a FILL: 3:1 so the
- * shape of a primary control is identifiable on its ground.
- *
- * An unparseable hex falls back to the DS accent — itself clamped, because the
- * lime is 1.2:1 on paper and handing a light page an invisible accent is not a
- * fallback.
- *
- * Note this clamps the FILL, where the token sheet deliberately does not: on
- * light, `--primary` keeps the bright lime and only the edge carries the 3:1.
- * That trade is available to the PRODUCT because there is one product accent
- * and it was hand-tuned against both grounds. A host's accent is arbitrary — no
- * one checked that their pale yellow reads as a button on paper — so the engine
- * keeps the safety net it has always had and moves the fill. The consequence is
- * visible and intended: a very light brand colour comes back darker on a light
- * booking page, rather than coming back as an invisible button.
- */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function clampAccent(hex: string, canvas: BrandCanvas): string {
-  return toHex(clampRgb(hex, canvas));
+  return toHex(accentRgb(hex));
 }
 
 /**
- * The clamp, before it becomes a string. Every derivation below composes on
- * this rather than re-parsing `clampAccent`'s output: a hex round-trip between
- * two steps is what let a colour lose up to half a channel step between the
- * check that approved it and the value that shipped.
+ * The accent before it becomes a string. Every derivation below composes on this
+ * rather than re-parsing `clampAccent`'s output: a hex round-trip between two
+ * steps is what let a colour lose up to half a channel step between the check
+ * that approved it and the value that shipped.
  */
-function clampRgb(hex: string, canvas: BrandCanvas): Rgb {
-  const rgb = parseHex(hex) ?? parseHex(DEFAULT_ACCENT)!;
-  return towardLegible(rgb, canvas, MIN_ACCENT_CONTRAST);
+function accentRgb(hex: string): Rgb {
+  return parseHex(hex) ?? parseHex(DEFAULT_ACCENT)!;
 }
 
 /**
  * The host's accent as LETTERS on `canvas` — `--primary-ink`.
  *
- * Text carries AA (4.5:1), a full step above what the fill needs, so this is
- * not the same colour as the fill on either theme: a lime that is a superb
- * 14:1 on the console is 1.3:1 on paper, and `text-primary` is re-pointed at
- * this token globally (globals.css). Without it every accent-coloured link on a
- * branded page falls back to the PRODUCT's lime.
+ * It used to carry AA (4.5:1) and therefore used to be a DIFFERENT colour from
+ * the fill. It is not any more: the amendment applies to the accent in every one
+ * of its jobs, so a host's links are the colour they chose, exactly as their
+ * buttons are.
+ *
+ * The function stays, and emitting it stays mandatory. `globals.css` re-points
+ * the `text-primary` utility at `--primary-ink` globally, so a branded surface
+ * that omits the token paints the host's links in the PRODUCT's lime — the
+ * repossession bug ADR 0004 was written against, which has nothing to do with
+ * contrast and did not go away with the clamp.
  */
 export function accentInk(hex: string, canvas: BrandCanvas): string {
-  return toHex(towardLegible(clampRgb(hex, canvas), canvas, MIN_INK_CONTRAST));
+  return clampAccent(hex, canvas);
 }
 
 /**
  * The host's accent as a RIM or focus outline on `canvas` — `--primary-edge`.
  *
  * globals.css rims every accent fill with this and draws the focus ring in it.
- * Stated as its own law rather than folded into `clampAccent`: the two floors
- * are equal today, so this returns the clamped accent unchanged — but the edge
- * answers to WCAG 1.4.11 about a *boundary* while the fill answers about a
- * *shape*, and a future retune of either must not silently move the other.
+ * Kept as its own name rather than folded into `clampAccent` for the same reason
+ * it always was: the rim answers to WCAG 1.4.11 about a *boundary* while the
+ * fill answers about a *shape*, and if either ever grows a rule again it must be
+ * able to grow one without silently moving the other.
  */
 export function accentEdge(hex: string, canvas: BrandCanvas): string {
-  return toHex(towardLegible(clampRgb(hex, canvas), canvas, MIN_EDGE_CONTRAST));
+  return clampAccent(hex, canvas);
 }
 
-/** The label color that reads on top of the accent (black or white). */
+/**
+ * The label colour that reads on top of the accent (black or white).
+ *
+ * THIS ONE KEEPS ITS FLOOR, and the distinction is the whole reason the ADR
+ * amendment is three changes rather than one. Everything above is the host's
+ * colour and theirs to get wrong. This is not their colour — it is a value the
+ * engine invents to put ON their colour, and a host who picks dark green never
+ * chose black text on dark green. Picking the better of the two poles is what
+ * keeps a button's own label readable no matter how illegible the button is
+ * against the page behind it. Measured across the whole sRGB cube the worst
+ * case is 4.1:1, which is why the studio's warning can be about the CANVAS and
+ * never about the label.
+ */
 export function onAccent(hex: string): string {
-  const rgb = parseHex(hex) ?? parseHex(DEFAULT_ACCENT)!;
+  const rgb = accentRgb(hex);
   return contrast(rgb, BLACK) >= contrast(rgb, WHITE) ? '#1a1a1c' : '#fafafa';
 }
 
+/** How legible a button's own LABEL is on the fill it sits on. `onAccent` keeps
+ *  its floor, so this never drops below about 4.1:1 — it is a readout, not a
+ *  warning, and the studio prints it as one. */
 export function accentLabelContrast(hex: string, canvas: BrandCanvas): number {
   const accent = parseHex(clampAccent(hex, canvas))!;
   const label = parseHex(onAccent(clampAccent(hex, canvas)))!;
   return Math.round(contrast(accent, label) * 10) / 10;
 }
 
-/** True when the host's raw pick had to be nudged to stay readable on `canvas`
- *  — lighter on the console, darker on paper. */
-export function accentWasAdjusted(hex: string, canvas: BrandCanvas): boolean {
-  const parsed = parseHex(hex);
-  if (!parsed) return false;
-  return toHex(parsed).toLowerCase() !== clampAccent(hex, canvas).toLowerCase();
+/**
+ * How legible the host's accent is against the GROUND their page paints on.
+ *
+ * This is the number the clamp used to act on, and now the only thing that acts
+ * on it is the host. Below `MIN_ACCENT_CONTRAST` the studio shows a non-blocking
+ * warning and saves anyway; nothing else in the system looks at it.
+ *
+ * Measured against `CANVAS_HEX`, deliberately the stricter of the page and card
+ * grounds — a warning that cleared the page and then failed on a card would be
+ * worse than no warning at all.
+ *
+ * ROUNDED DOWN, not to nearest, and that is the whole reason this is its own
+ * function rather than a call to `contrastRatio`. One decimal is what a readout
+ * can show, but the studio also DECIDES on this number, and rounding to nearest
+ * reports a true 2.9885:1 as a passing `3` — about 4,500 colours per canvas that
+ * are under the floor and would never warn. Truncating can only ever understate,
+ * so the number a host reads and the number the warning fires on are one value
+ * that never claims a ratio the colour does not have.
+ */
+export function accentCanvasContrast(hex: string, canvas: BrandCanvas): number {
+  const ground = parseHex(CANVAS_HEX[safeCanvas(canvas)])!;
+  return Math.floor(contrast(accentRgb(hex), ground) * 10) / 10;
 }
 
 export function accentVars(rawAccent: string, canvas: BrandCanvas): Record<string, string> {
-  return accentVarsFrom(clampRgb(rawAccent, canvas), canvas);
+  return accentVarsFrom(accentRgb(rawAccent), canvas);
 }
 
-/** `accentVars` given an ALREADY-clamped colour, so a caller that has one does
- *  not clamp it a second time. */
-function accentVarsFrom(clamped: Rgb, canvas: BrandCanvas): Record<string, string> {
-  const accent = toHex(clamped);
+/** `accentVars` given an ALREADY-parsed colour, so a caller that has one does
+ *  not round-trip it through hex a second time. */
+function accentVarsFrom(rgb: Rgb, canvas: BrandCanvas): Record<string, string> {
+  const accent = toHex(rgb);
   return {
     '--accent': accent,
     '--accent-contrast': onAccent(accent),
-    // Hover travels the same way the clamp does. Mixing toward white on a light
-    // canvas would make the hover state FADE toward the page it sits on, i.e.
-    // the one interaction that must read as "more" would read as less.
-    '--accent-hover': toHex(mix(clamped, CANVAS_TARGET[safeCanvas(canvas)], 0.16)),
+    // Hover travels away from the canvas. Mixing toward white on a light canvas
+    // would make the hover state FADE toward the page it sits on, i.e. the one
+    // interaction that must read as "more" would read as less.
+    '--accent-hover': toHex(mix(rgb, CANVAS_TARGET[safeCanvas(canvas)], 0.16)),
     '--accent-soft': `color-mix(in srgb, ${accent} 16%, transparent)`,
     // Composited against `--background`, so the wash follows whatever theme the
     // surface resolved to rather than assuming one.
@@ -337,21 +363,25 @@ function accentVarsFrom(clamped: Rgb, canvas: BrandCanvas): Record<string, strin
  * two call sites have to keep agreeing on.
  */
 export function brandVars(rawAccent: string, canvas: BrandCanvas): Record<string, string> {
-  // Clamped ONCE, and every token below derived from that one value. Deriving
-  // some of them by re-clamping a string made the block able to disagree with
-  // itself — `--primary` from one clamp, `--primary-edge` from a second.
-  const clamped = clampRgb(rawAccent, canvas);
-  const accent = toHex(clamped);
-  const edge = toHex(towardLegible(clamped, canvas, MIN_EDGE_CONTRAST));
+  // Parsed ONCE, and every token below derived from that one value. Deriving
+  // some of them by re-parsing a string made the block able to disagree with
+  // itself — `--primary` from one derivation, `--primary-edge` from a second.
+  const rgb = accentRgb(rawAccent);
+  const accent = toHex(rgb);
   return {
-    ...accentVarsFrom(clamped, canvas),
+    ...accentVarsFrom(rgb, canvas),
+    // Fill, letters and rim are now one colour — the host's. They stay three
+    // separate keys because `globals.css` reads three separate tokens, and a
+    // surface that emits only `--primary` still repossesses the other two to the
+    // PRODUCT's lime. That was never a contrast problem and the amendment does
+    // not touch it.
     '--primary': accent,
     '--primary-foreground': onAccent(accent),
-    '--primary-ink': toHex(towardLegible(clamped, canvas, MIN_INK_CONTRAST)),
-    '--primary-edge': edge,
+    '--primary-ink': accent,
+    '--primary-edge': accent,
     // The focus outline is drawn with `--primary-edge` (globals.css), so `--ring`
     // has to be the same colour or a focused control gets two different rims.
-    '--ring': edge,
+    '--ring': accent,
   };
 }
 
@@ -364,10 +394,18 @@ export const DEFAULT_FONT: BookingFont = 'sans';
 export const DEFAULT_SLOT_LAYOUT: BookingSlotLayout = 'grid';
 export const DEFAULT_DAY_GROUP: BookingDayGroup = 'flat';
 export const DEFAULT_SLOT_SELECT: BookingSlotSelect = 'soft';
-/** Paper, per ADR 0004 — and the reason this is a named constant rather than a
- *  literal is that an absent axis has to mean the same thing in the contract's
- *  `.default()`, in the web app's resolver, and here. */
-export const DEFAULT_BOOKING_THEME: BrandCanvas = 'light';
+/**
+ * The console, per ADR 0004's 2026-09-11 amendment — the product is dark and the
+ * booking page is part of the product.
+ *
+ * The reason this is a named constant rather than a literal is that an absent
+ * axis has to mean the same thing in the contract's `.default()`, in the web
+ * app's resolver, and here. It is NOT the only declaration of the fact —
+ * `bookingPageStyleSchema.theme` in `@slate/types` carries its own
+ * `.default()` — so the two are asserted equal by a test rather than trusted to
+ * stay in step. A split between them parses one canvas and paints the other.
+ */
+export const DEFAULT_BOOKING_THEME: BrandCanvas = 'dark';
 
 const CORNER_RADII: Record<BookingCorners, { card: string; sm: string }> = {
   sharp: { card: '4px', sm: '3px' },

@@ -18,7 +18,7 @@ import type { BrandCanvas } from '@slate/shared';
  *
  * Aliased to the branding engine's `BrandCanvas` rather than re-declared as an
  * identical union: the document's theme and the ground a host's accent is
- * clamped against are the same fact, and since B2 a public route's answer IS
+ * MEASURED against are the same fact, and since B2 a public route's answer IS
  * the stored `theme` style axis rather than a constant. A type-only import, so
  * nothing from the package reaches the middleware bundle.
  */

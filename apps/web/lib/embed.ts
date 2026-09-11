@@ -125,8 +125,10 @@ export function isEmbedRequest(params: RawSearchParams | undefined): boolean {
  * write `brand_color=1a73e8` at least as often as `brand_color=%231a73e8`. A
  * missing hash is normalised rather than rejected; anything that is not six hex
  * digits is dropped. The value then passes through the same `clampAccent` every
- * stored accent does (in `BrandedShell`), so an illegible colour self-corrects
- * instead of painting invisible text.
+ * stored accent does (in `BrandedShell`). That no longer corrects an illegible
+ * colour — ADR 0004's amendment renders a host's accent as picked — but it does
+ * still swap an unparseable one for the DS accent, so a typo in a pasted snippet
+ * degrades to a default instead of painting the page with nothing.
  */
 export function parseAccentParam(raw: string | undefined): string | null {
   if (!raw) return null;
