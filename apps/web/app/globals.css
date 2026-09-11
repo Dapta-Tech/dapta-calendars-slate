@@ -106,6 +106,32 @@
   --text-2xl--line-height: 30px;
   --text-3xl: 30px;
   --text-3xl--line-height: 36px;
+
+  /* The spacing scale, mapped to named utilities the same way colour, radius and
+     type are. `--sp-*` in tokens.css holds the values and the reasoning; these
+     keys are what turn them into `p-card`, `gap-field`, `min-h-control` and
+     `px-gutter sm:px-gutter-wide` — so a call site names the ROLE instead of
+     guessing a number.
+
+     Mapping the whole set matters for the same reason the radius ladder is pinned
+     end to end: half a scale is not a scale. If only `card` existed, every other
+     role would keep reaching for Tailwind's raw ramp and the sheet would once again
+     be describing a rule the app does not follow.
+
+     The utilities are additive — nothing is migrated onto them here. The sweep is
+     the second half of #147, and is what removes the 74 distinct values the audit
+     found. Until then both spellings work, which is the point: a sweep across every
+     admin screen cannot land in one commit. */
+  --spacing-inline: var(--sp-inline);
+  --spacing-field: var(--sp-field);
+  --spacing-card: var(--sp-card);
+  --spacing-group: var(--sp-group);
+  --spacing-section: var(--sp-section);
+  --spacing-gutter: var(--sp-page-x);
+  --spacing-gutter-wide: var(--sp-page-x-wide);
+  --spacing-gutter-y: var(--sp-page-y);
+  --spacing-control: var(--sp-control-h);
+  --spacing-control-pad: var(--sp-control-x);
 }
 
 /* Default border color for everything. MUST live in @layer base: un-layered
@@ -288,7 +314,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 2.75rem; /* 44px hit target (R28) */
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
   border: 1px solid var(--border);
   border-radius: var(--bp-btn-radius);
   padding: var(--bp-slot-pad);
@@ -334,7 +360,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2.75rem; /* 44px hit target (R28) */
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
   border: 1px solid var(--border);
   border-radius: var(--bp-btn-radius);
   padding-inline: 1rem;
@@ -457,7 +483,7 @@ body {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  min-height: 2.75rem; /* 44px hit target (R28) */
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
   aspect-ratio: 1 / 1;
   border: 1px solid transparent;
   border-radius: var(--bp-btn-radius, 0.5rem);

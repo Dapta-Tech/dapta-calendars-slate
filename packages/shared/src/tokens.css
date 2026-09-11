@@ -60,6 +60,84 @@
  * booking page's own canvas on a public one (ADR 0004).
  */
 
+/* ============================================================================
+   THE SPACING SCALE (SP, #147)
+
+   Until this block the sheet governed colour, radius and type, and said nothing
+   about space. Padding, gaps and margins were picked per screen, and the numbers
+   below are what that produced.
+
+   THE AUDIT, reproducible — every `p/px/py/pt/pb`, `m*`, `gap*`, `space-*` and
+   inset utility in the 60 `.tsx` files under `apps/web/app/admin` and
+   `apps/web/components`, at `develop` 0199efa: **74 distinct values across 17 spacing roles**, in the 51
+   of those files that space anything at all. The worst three roles alone:
+
+     gap-*   9 steps over 283 uses
+     px-*   10 steps over 127 uses
+     py-*    9 steps over  97 uses
+     p-*     8 steps over  68 uses
+
+   Nothing lines up because nothing said what to line up to.
+
+   These are theme-independent — a light page and a dark page are the same shape —
+   so they are declared once, above both theme blocks, and no theme block may
+   redefine one. `tokens.spec.ts` asserts that.
+
+   NAMED BY ROLE, NOT BY SIZE. `--sp-card` is "the padding inside a card"; if that
+   value changes, every card follows and no call site is orphaned by a rename. A
+   number in the name (`--sp-4`) would just be Tailwind's ramp with extra steps.
+
+   EVERY STEP IS A MULTIPLE OF 4px. Half-steps (`gap-1.5`, `py-0.5`, `px-2.5`)
+   account for **52** of the audited uses, and they are what makes two rows fail to
+   line up at a glance; each resolves up or down to a real step in the sweep.
+   `tokens.spec.ts` reads the roles OUT of this block and grid-checks every one, so
+   a step added later is covered without anyone remembering to list it.
+
+   Values are `rem` on purpose, unlike the radius and type ladders, which are `px`:
+   space should follow the reader's text size, a corner and a cap height should
+   not. `tokens.spec.ts` parses `rem` — normalising this block to `px` breaks it.
+
+   ROLES, tightest to loosest:
+     inline   8px   icon to its label, one button to the next, a chip's own padding
+     field   12px   a label to its control, a control to its help text
+     card    16px   inside an ordinary card, panel or list row
+     group   24px   inside a dialog or page-level card; between fields in a form
+     section 32px   between one titled section and the next
+
+   THE PAGE GUTTER IS TWO TOKENS, because it is the one role in this app that is
+   genuinely responsive: `settings-chrome.tsx` states the rule as "16px of gutter
+   at 360px, the full 32 from `sm` up (mobile bar, R28)", and every admin shell
+   follows it with `px-4 sm:px-8`. A custom property cannot carry a breakpoint, so
+   the call site keeps the `sm:` and picks the matching token:
+     page-x      16px   the floor, at 360px
+     page-x-wide 32px   from `sm` up
+     page-y      40px   vertical, the dominant `py-10`
+
+   CONTROLS get their own two, because a hit target is an accessibility floor
+   rather than a taste decision:
+     control-h  44px   the minimum height of anything tappable (R28). The audit
+                       found this hand-written as `min-h-[44px]` at 36 call sites
+                       in scope, 39 across `apps/web` — a real rule with no name.
+     control-x  16px   a control's inner horizontal padding.
+
+   NOT in the scale, on purpose: icon box sizes (`h-4`, `h-5`) and image or cover
+   dimensions (`h-64`). Those are the size of a THING, not the space between
+   things, and folding them in is what makes a raw `h-*` scan report 22 distinct
+   values for one role.
+   ============================================================================ */
+:root {
+  --sp-inline: 0.5rem;
+  --sp-field: 0.75rem;
+  --sp-card: 1rem;
+  --sp-group: 1.5rem;
+  --sp-section: 2rem;
+  --sp-page-x: 1rem;
+  --sp-page-x-wide: 2rem;
+  --sp-page-y: 2.5rem;
+  --sp-control-h: 2.75rem;
+  --sp-control-x: 1rem;
+}
+
 /* `:root` AND `[data-theme='dark']`, one declaration, no second copy.
    The selector list is what makes the dark palette re-establishable on a SUBTREE
    rather than only on the document: `:root` alone means a nested
@@ -285,3 +363,4 @@
     --ring: hsl(var(--acc-h) var(--acc-s) 28%);
   }
 }
+
