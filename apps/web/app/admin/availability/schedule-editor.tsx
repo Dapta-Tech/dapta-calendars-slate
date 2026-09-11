@@ -129,23 +129,23 @@ export function ScheduleEditor({
             value={name}
             onChange={(e) => setName(e.target.value)}
             aria-label={m.scheduleNameLabel}
-            className="min-h-[44px] w-full min-w-0 rounded-md border border-transparent bg-transparent px-1 text-2xl font-semibold tracking-tight hover:border-border focus:border-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="min-h-control w-full min-w-0 rounded-md border border-transparent bg-transparent px-tight text-2xl font-semibold tracking-tight hover:border-border focus:border-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         }
       />
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-card">
       {/* The full IANA list with its GMT hints, not the short curated one this
           used to offer: the profile and the manual-booking form already give the
           whole list, and a schedule that cannot be set to a zone the profile can
           be set to is the inconsistency. A <div>, not a <label>, because the
           picker's trigger is a <button> and buttons are not labelable. */}
-      <div className="flex max-w-sm flex-col gap-1 text-sm">
+      <div className="flex max-w-sm flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
         <TimeZoneSelect value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-inline">
         <span className="text-sm font-semibold text-muted-foreground">{m.weeklyHours}</span>
         {m.days.map((dayName, d) => {
           const ranges = week[d]!;
@@ -156,16 +156,16 @@ export function ScheduleEditor({
             // ~300px of FIXED width, inside 328px of content at 360px — before the
             // gaps. Below `sm` the day owns its own line and the ranges sit under
             // it; from `sm` up the row is exactly what it was.
-            <div key={d} className="flex flex-col gap-1 border-b border-border/50 py-2 last:border-b-0">
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:gap-3">
-                <label className="flex min-h-[44px] shrink-0 cursor-pointer items-center gap-2 text-sm sm:w-32">
+            <div key={d} className="flex flex-col gap-tight border-b border-border/50 py-inline last:border-b-0">
+              <div className="flex flex-col gap-inline sm:flex-row sm:flex-wrap sm:items-start sm:gap-field">
+                <label className="flex min-h-control shrink-0 cursor-pointer items-center gap-inline text-sm sm:w-32">
                   <Checkbox checked={on} onChange={(e) => toggleDay(d, e.target.checked)} />
                   {dayName}
                 </label>
                 {on ? (
-                  <div className="flex flex-1 flex-col gap-2">
+                  <div className="flex flex-1 flex-col gap-inline">
                     {ranges.map((r, ri) => (
-                      <div key={ri} className="flex items-center gap-2">
+                      <div key={ri} className="flex items-center gap-inline">
                         <TimeField
                           className="min-w-0 flex-1 sm:w-32 sm:flex-none"
                           aria-label={`${dayName} start`}
@@ -191,13 +191,13 @@ export function ScheduleEditor({
                         </Button>
                       </div>
                     ))}
-                    <Button variant="ghost" size="lg" onClick={() => addRange(d)} className="-ml-3 self-start">
+                    <Button variant="ghost" size="lg" onClick={() => addRange(d)} className="-ml-field self-start">
                       <i aria-hidden className="pi pi-plus" style={{ fontSize: 12 }} />
                       {m.addRange}
                     </Button>
                   </div>
                 ) : (
-                  <span className="py-1.5 text-sm text-muted-foreground">{m.unavailable}</span>
+                  <span className="py-inline text-sm text-muted-foreground">{m.unavailable}</span>
                 )}
               </div>
               {err ? <span className="text-xs text-destructive sm:pl-32">{err}</span> : null}
@@ -206,15 +206,15 @@ export function ScheduleEditor({
         })}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-inline">
         <span className="text-sm font-semibold text-muted-foreground">{m.dateOverrides}</span>
         {overrides.map((o, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div key={i} className="flex flex-wrap items-center gap-inline sm:gap-field">
             <Input
               type="date"
               value={o.date}
               aria-label={m.dateOverrides}
-              className="min-h-[44px] w-auto shrink-0"
+              className="min-h-control w-auto shrink-0"
               onChange={(e) => setOverrides((os) => os.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))}
             />
             <TimeField

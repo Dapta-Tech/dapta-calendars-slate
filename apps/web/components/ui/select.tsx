@@ -27,7 +27,7 @@ import { cn } from '@/lib/cn';
  *      primitive that owns its OWN copy: `locale = 'en'`, `getMessages` inside.
  *   2. The 44px mobile bar. Forms' trigger is ~38px and its rows ~32px; a row
  *      inside a popup is a touch target like any other, so both take
- *      `min-h-[44px]`. The panel shows fewer rows before it scrolls, which it
+ *      `min-h-control`. The panel shows fewer rows before it scrolls, which it
  *      already did.
  *   3. A `title` prop, so a disabled picker can say WHY on hover (the last owner
  *      of a team cannot be demoted). Without it, adopting this component would
@@ -231,7 +231,7 @@ export function Select({
         title={title}
         onClick={() => (open ? setOpen(false) : openPanel())}
         className={cn(
-          'flex min-h-[44px] w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60',
+          'flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60',
           className,
         )}
       >
@@ -260,14 +260,14 @@ export function Select({
 
       {open ? (
         <div
-          className="absolute left-0 right-0 top-full z-50 mt-1 flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg"
+          className="absolute left-0 right-0 top-full z-50 mt-tight flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg"
           onKeyDown={onKeyDown}
         >
           {searchable ? (
             // `role="combobox"` + `aria-expanded` are what make the two
             // relationship attributes below live: on a bare <input> they are
             // inert, and the filter box would own focus while announcing nothing
-            // about the list it drives. `min-h-[44px]` because this is the third
+            // about the list it drives. `min-h-control` because this is the third
             // interactive control in the panel and the mobile bar applies to it
             // as much as to the trigger and the rows — latent today (`searchable`
             // defaults false) and therefore exactly what ships unnoticed.
@@ -284,7 +284,7 @@ export function Select({
               aria-expanded
               aria-controls={listId}
               aria-activedescendant={filtered[active] ? optionId(active) : undefined}
-              className="min-h-[44px] border-b border-border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none"
+              className="min-h-control border-b border-border bg-transparent px-field py-inline text-sm placeholder:text-muted-foreground focus:outline-none"
             />
           ) : null}
           <ul
@@ -294,7 +294,7 @@ export function Select({
             aria-label={ariaLabel}
             aria-activedescendant={filtered[active] ? optionId(active) : undefined}
             tabIndex={-1}
-            className="max-h-64 overflow-y-auto p-1 focus:outline-none"
+            className="max-h-64 overflow-y-auto p-tight focus:outline-none"
           >
             {filtered.map((o, i) => {
               const isSelected = o.value === value;
@@ -322,7 +322,7 @@ export function Select({
                       if (!o.disabled) setActive(i);
                     }}
                     className={cn(
-                      'flex min-h-[44px] w-full items-center gap-3 rounded-sm px-2 py-2.5 text-left text-sm',
+                      'flex min-h-control w-full items-center gap-field rounded-sm px-inline py-field text-left text-sm',
                       o.disabled
                         ? 'cursor-not-allowed opacity-40'
                         : isSelected
@@ -354,7 +354,7 @@ export function Select({
               );
             })}
             {filtered.length === 0 ? (
-              <li className="px-2 py-3 text-sm text-muted-foreground">{m.noResults}</li>
+              <li className="px-inline py-field text-sm text-muted-foreground">{m.noResults}</li>
             ) : null}
           </ul>
         </div>

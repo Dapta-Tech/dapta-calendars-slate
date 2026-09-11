@@ -6,7 +6,7 @@ export function Skeleton({ className = '' }: { className?: string }) {
 /** A stack of skeleton lines that mirrors a card/list region. */
 export function SkeletonList({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-field">
       {Array.from({ length: rows }).map((_, i) => (
         <Skeleton key={i} className="h-16 w-full" />
       ))}

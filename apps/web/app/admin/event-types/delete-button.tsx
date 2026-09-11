@@ -11,7 +11,7 @@ export function DeleteButton({ id }: { id: string }) {
 
   if (confirming) {
     return (
-      <span className="flex items-center gap-1 text-sm">
+      <span className="flex items-center gap-tight text-sm">
         <button
           type="button"
           disabled={pending}
@@ -23,11 +23,11 @@ export function DeleteButton({ id }: { id: string }) {
               else error(r.message ?? 'Could not delete the event.');
             })
           }
-          className="rounded-md border border-destructive px-2 py-1 text-destructive disabled:opacity-60"
+          className="rounded-md border border-destructive px-inline py-tight text-destructive disabled:opacity-60"
         >
           Delete
         </button>
-        <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-2 py-1">
+        <button type="button" onClick={() => setConfirming(false)} className="rounded-md border border-border px-inline py-tight">
           Cancel
         </button>
       </span>
@@ -38,7 +38,7 @@ export function DeleteButton({ id }: { id: string }) {
     <button
       type="button"
       onClick={() => setConfirming(true)}
-      className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground transition-transform active:scale-[0.97] hover:border-destructive hover:text-destructive"
+      className="rounded-md border border-border px-field py-tight text-sm text-muted-foreground transition-transform active:scale-[0.97] hover:border-destructive hover:text-destructive"
     >
       Delete
     </button>

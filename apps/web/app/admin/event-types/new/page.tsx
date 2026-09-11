@@ -36,7 +36,7 @@ export default async function NewEventType({
     : undefined;
 
   return (
-    <div className="mx-auto max-w-4xl px-8 pb-10">
+    <div className="mx-auto max-w-4xl px-gutter sm:px-gutter-wide pb-gutter-y">
       <EventTypeForm
         schedules={schedules}
         messages={m}

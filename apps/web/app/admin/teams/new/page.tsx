@@ -11,7 +11,7 @@ export default async function NewTeamPage() {
   const tz = safeTimeZone(me?.timeZone ?? 'America/New_York');
 
   return (
-    <div className="mx-auto max-w-[1520px] px-4 pb-10 sm:px-8">
+    <div className="mx-auto max-w-[1520px] px-gutter pb-gutter-y sm:px-gutter-wide">
       <CreateTeamForm
         messages={m}
         defaultTimeZone={tz}

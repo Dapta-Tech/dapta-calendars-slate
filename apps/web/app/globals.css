@@ -122,6 +122,7 @@
      the second half of #147, and is what removes the 74 distinct values the audit
      found. Until then both spellings work, which is the point: a sweep across every
      admin screen cannot land in one commit. */
+  --spacing-tight: var(--sp-tight);
   --spacing-inline: var(--sp-inline);
   --spacing-field: var(--sp-field);
   --spacing-card: var(--sp-card);

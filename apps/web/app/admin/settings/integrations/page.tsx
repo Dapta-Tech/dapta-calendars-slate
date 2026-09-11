@@ -46,7 +46,7 @@ export default async function IntegrationsSettings() {
 
   const m = getMessages(locale).admin.integrations;
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    <div className="flex max-w-3xl flex-col gap-group">
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
       <IntegrationsPanel
         rows={rows}

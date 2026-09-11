@@ -77,7 +77,7 @@ function ToggleList({
   const attendee = data.settings.filter((s) => !s.key.startsWith('host_'));
   const host = data.settings.filter((s) => s.key.startsWith('host_'));
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-card">
       <Section title={m.attendeeSection} subtitle={m.attendeeSectionDesc}>
         {attendee.map((s) => (
           <Row key={s.key} s={s} m={m} onEdit={onEdit} />
@@ -94,8 +94,8 @@ function ToggleList({
 
 function Section({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-1">
+    <section className="rounded-xl border border-border bg-card p-card">
+      <div className="mb-tight">
         <h3 className="text-sm font-semibold">{title}</h3>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
@@ -134,12 +134,12 @@ function Row({
   };
 
   return (
-    <li className="flex items-start justify-between gap-4 py-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex flex-wrap items-center gap-2">
+    <li className="flex items-start justify-between gap-card py-field">
+      <div className="flex min-w-0 flex-1 flex-col gap-tight">
+        <div className="flex flex-wrap items-center gap-inline">
           <span className="text-sm font-medium">{m.labels[s.key]}</span>
           {s.customized ? (
-            <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-faint">
+            <span className="rounded-sm bg-muted px-inline py-tight text-xs text-faint">
               {m.customizedBadge}
             </span>
           ) : null}
@@ -150,7 +150,7 @@ function Row({
           size="lg"
           onClick={() => onEdit(s.key)}
           aria-label={`${m.editTemplate} · ${m.labels[s.key]}`}
-          className="mt-1 -ml-3 self-start"
+          className="mt-tight -ml-field self-start"
         >
           <i aria-hidden className="pi pi-pencil" style={{ fontSize: 13 }} />
           {m.editTemplate}
@@ -271,24 +271,24 @@ function TemplateEditor({
     });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-card">
       {/* Header: back + state chip left, Reset/Save (single primary CTA) right */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-field">
+        <div className="flex flex-wrap items-center gap-field">
           {/* Was `← Back` — a glyph doing a control's job. Same shape as
               FormHeader's back affordance, on the 44px step. */}
-          <Button variant="ghost" size="lg" onClick={onBack} className="-ml-3">
+          <Button variant="ghost" size="lg" onClick={onBack} className="-ml-field">
             <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
             {m.back}
           </Button>
           <span className="text-sm font-semibold">{m.labels[setting.key]}</span>
-          <span className="rounded-sm bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          <span className="rounded-sm bg-muted px-inline py-tight text-xs text-muted-foreground">
             {isDefault ? m.usingDefault : m.usingCustom}
           </span>
           {saveState === 'saved' && !isDirty ? <span className="text-xs text-primary">{m.saved}</span> : null}
           {saveState === 'error' ? <span className="text-xs text-destructive">{saveMsg}</span> : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-inline">
           <Button
             variant="outline"
             size="lg"
@@ -297,25 +297,25 @@ function TemplateEditor({
           >
             {m.reset}
           </Button>
-          <Button size="lg" onClick={save} disabled={!isDirty || pending} className="px-5">
+          <Button size="lg" onClick={save} disabled={!isDirty || pending} className="px-control-pad">
             {pending ? m.saving : m.save}
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-group lg:grid-cols-2">
         {/* Edit side */}
-        <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-card">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.editorSubject}</span>
             <Input
               value={subject}
               maxLength={200}
               onChange={(e) => setSubject(e.target.value)}
-              className="min-h-[44px]"
+              className="min-h-control"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.editorBody}</span>
             <textarea
               ref={bodyRef}
@@ -323,36 +323,36 @@ function TemplateEditor({
               rows={10}
               maxLength={5000}
               onChange={(e) => setBody(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-background px-field py-inline font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
           <div>
-            <div className="mb-1 text-sm text-muted-foreground">{m.variables}</div>
+            <div className="mb-tight text-sm text-muted-foreground">{m.variables}</div>
             {/* Insertable chips, on the 44px step like every other control the
                 thumb has to hit. */}
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-inline">
               {variables.map((v) => (
                 <button
                   key={v}
                   type="button"
                   onClick={() => insertVariable(v)}
-                  className="inline-flex min-h-[44px] items-center rounded-md border border-border bg-muted px-2.5 font-mono text-xs text-muted-foreground transition-colors hover:border-primary-edge hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex min-h-control items-center rounded-md border border-border bg-muted px-field font-mono text-xs text-muted-foreground transition-colors hover:border-primary-edge hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {`{{${v}}}`}
                 </button>
               ))}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{m.variablesHint}</p>
+            <p className="mt-tight text-xs text-muted-foreground">{m.variablesHint}</p>
           </div>
         </div>
 
         {/* Preview side (server-rendered plain text — what the email says) */}
         <div className="lg:sticky lg:top-6 lg:self-start">
-          <div className="mb-1 text-sm text-muted-foreground">{m.preview}</div>
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-tight text-sm text-muted-foreground">{m.preview}</div>
+          <div className="rounded-xl border border-border bg-card p-card">
             {preview?.ok ? (
               <>
-                <div className="mb-3 border-b border-border pb-2 text-sm font-semibold">{preview.subject}</div>
+                <div className="mb-field border-b border-border pb-inline text-sm font-semibold">{preview.subject}</div>
                 <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{preview.text}</pre>
               </>
             ) : (
@@ -360,7 +360,7 @@ function TemplateEditor({
             )}
           </div>
           {preview?.ok && preview.unknownTokens && preview.unknownTokens.length > 0 ? (
-            <p className="mt-2 text-xs text-destructive">
+            <p className="mt-inline text-xs text-destructive">
               {m.unknownTokensWarn} {preview.unknownTokens.map((t) => `{{${t}}}`).join(', ')}
             </p>
           ) : null}

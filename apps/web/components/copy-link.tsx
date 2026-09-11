@@ -45,8 +45,8 @@ export function CopyLink({
   return (
     // Wraps at 360px: the URL takes the first line and the two controls the next,
     // rather than the code element being squeezed to nothing.
-    <div className="flex flex-wrap items-center gap-2">
-      <code className="min-w-0 flex-1 truncate rounded-sm bg-muted px-2 py-1.5 font-mono text-xs text-foreground">
+    <div className="flex flex-wrap items-center gap-inline">
+      <code className="min-w-0 flex-1 truncate rounded-sm bg-muted px-inline py-inline font-mono text-xs text-foreground">
         {display}
       </code>
       <Button variant="outline" size="lg" onClick={copy} className="shrink-0">

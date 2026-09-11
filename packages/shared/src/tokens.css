@@ -88,7 +88,7 @@
    number in the name (`--sp-4`) would just be Tailwind's ramp with extra steps.
 
    EVERY STEP IS A MULTIPLE OF 4px. Half-steps (`gap-1.5`, `py-0.5`, `px-2.5`)
-   account for **52** of the audited uses, and they are what makes two rows fail to
+   account for **72** of the audited uses, and they are what makes two rows fail to
    line up at a glance; each resolves up or down to a real step in the sweep.
    `tokens.spec.ts` reads the roles OUT of this block and grid-checks every one, so
    a step added later is covered without anyone remembering to list it.
@@ -98,6 +98,11 @@
    not. `tokens.spec.ts` parses `rem` — normalising this block to `px` breaks it.
 
    ROLES, tightest to loosest:
+     tight    4px   inside a badge or chip, and the gap in a tight label stack.
+                    Added by the sweep: the 72 half-step uses (`py-0.5`,
+                    `gap-1.5`, `px-2.5`) had nowhere on-grid to land without a
+                    4px tier, and rounding them all up to 8px would have visibly
+                    fattened every badge in the app.
      inline   8px   icon to its label, one button to the next, a chip's own padding
      field   12px   a label to its control, a control to its help text
      card    16px   inside an ordinary card, panel or list row
@@ -118,7 +123,10 @@
      control-h  44px   the minimum height of anything tappable (R28). The audit
                        found this hand-written as `min-h-[44px]` at 36 call sites
                        in scope, 39 across `apps/web` — a real rule with no name.
-     control-x  16px   a control's inner horizontal padding.
+     control-x  16px   the standard control's inner horizontal padding — the
+                       Button primitive's default size. Its `sm` and `lg` steps
+                       sit a rung either side on the content ladder, because a
+                       control ladder needs three values and a token is one.
 
    NOT in the scale, on purpose: icon box sizes (`h-4`, `h-5`) and image or cover
    dimensions (`h-64`). Those are the size of a THING, not the space between
@@ -126,6 +134,7 @@
    values for one role.
    ============================================================================ */
 :root {
+  --sp-tight: 0.25rem;
   --sp-inline: 0.5rem;
   --sp-field: 0.75rem;
   --sp-card: 1rem;

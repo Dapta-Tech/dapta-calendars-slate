@@ -162,7 +162,7 @@ function ConfirmDialog({
   const dm = getMessages(locale).dialog;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-card">
       <button
         type="button"
         aria-hidden
@@ -177,15 +177,15 @@ function ConfirmDialog({
         aria-labelledby={titleId}
         aria-describedby={messageId}
         data-testid="confirm-dialog"
-        className="relative w-full max-w-sm rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg"
+        className="relative w-full max-w-sm rounded-xl border border-border bg-card p-group text-card-foreground shadow-lg"
       >
         <h2 id={titleId} className="text-base font-semibold tracking-tight">
           {options.title}
         </h2>
-        <p id={messageId} className="mt-2 text-sm text-muted-foreground">
+        <p id={messageId} className="mt-inline text-sm text-muted-foreground">
           {options.message}
         </p>
-        <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+        <div className="mt-card flex flex-wrap items-center justify-end gap-inline">
           <Button
             ref={cancelRef}
             variant="outline"

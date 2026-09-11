@@ -36,7 +36,7 @@ export default async function ConnectionsPage() {
   // admin list page (Bookings/Event types/Teams) so the body's right edge
   // lines up under the header action, not a narrower column underneath it.
   return (
-    <div className="mx-auto max-w-[1520px] px-4 py-8 sm:px-8 sm:py-10">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       <ConnectionsClient
         title={admin.nav.calendars}
         subtitle={messages.pageDesc}

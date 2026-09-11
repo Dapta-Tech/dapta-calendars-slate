@@ -33,7 +33,7 @@ export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages
     // edge-to-edge at 360px instead of clipping inside the page gutter, and
     // every tab sits on the 44px step because a tab is a touch target too.
     <nav
-      className="-mx-4 mb-6 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0"
+      className="-mx-gutter mb-group flex gap-tight overflow-x-auto px-gutter sm:mx-0 sm:px-0"
       aria-label="Settings"
     >
       {TABS.filter((tab) => isAdmin || !tab.adminOnly).map((tab) => {
@@ -44,7 +44,7 @@ export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages
             href={tab.href}
             aria-current={active ? 'page' : undefined}
             className={[
-              'inline-flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-md px-3 text-sm transition-colors active:scale-[0.99]',
+              'inline-flex min-h-control shrink-0 items-center whitespace-nowrap rounded-md px-field text-sm transition-colors active:scale-[0.99]',
               active
                 ? 'bg-muted font-medium text-foreground'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground',

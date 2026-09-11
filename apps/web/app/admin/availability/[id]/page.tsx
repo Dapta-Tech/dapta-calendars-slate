@@ -19,7 +19,7 @@ export default async function EditSchedule({ params }: { params: Promise<{ id: s
   const m = getMessages(locale).admin.availability;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-10 sm:px-8">
+    <div className="mx-auto max-w-3xl px-gutter pb-gutter-y sm:px-gutter-wide">
       <ScheduleEditor
         schedule={schedule}
         messages={m}

@@ -183,14 +183,14 @@ export function PhoneField({
   return (
     <div ref={rootRef} className="relative">
       {name ? <input type="hidden" name={name} value={value} /> : null}
-      <div className="flex gap-2">
+      <div className="flex gap-inline">
         <button
           type="button"
           aria-label={m.countryLabel}
           aria-haspopup="listbox"
           aria-expanded={open}
           onClick={() => (open ? setOpen(false) : openPanel())}
-          className="flex shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex shrink-0 items-center gap-inline rounded-md border border-input bg-background px-field py-inline text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span aria-hidden>{country.flag}</span>
           <span className="text-muted-foreground">{country.dial}</span>
@@ -223,20 +223,20 @@ export function PhoneField({
           }}
           aria-invalid={tooShort || undefined}
           className={cn(
-            'w-full flex-1 rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'w-full flex-1 rounded-md border bg-background px-field py-inline text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             tooShort ? 'border-destructive' : 'border-input',
           )}
         />
       </div>
       {tooShort ? (
-        <p role="alert" className="mt-1 text-xs text-destructive">
+        <p role="alert" className="mt-tight text-xs text-destructive">
           {m.invalid}
         </p>
       ) : null}
 
       {open ? (
         <div
-          className="absolute left-0 right-0 top-full z-50 mt-1 flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg"
+          className="absolute left-0 right-0 top-full z-50 mt-tight flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg"
           onKeyDown={onKeyDown}
         >
           <input
@@ -248,9 +248,9 @@ export function PhoneField({
             }}
             placeholder={m.search}
             aria-label={m.search}
-            className="border-b border-border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none"
+            className="border-b border-border bg-transparent px-field py-inline text-sm placeholder:text-muted-foreground focus:outline-none"
           />
-          <ul ref={listRef} role="listbox" aria-label={m.countryLabel} className="max-h-64 overflow-y-auto p-1">
+          <ul ref={listRef} role="listbox" aria-label={m.countryLabel} className="max-h-64 overflow-y-auto p-tight">
             {filtered.map((c, i) => {
               const selected = c.code === country.code;
               return (
@@ -260,7 +260,7 @@ export function PhoneField({
                     onClick={() => pick(c)}
                     onMouseEnter={() => setActive(i)}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                      'flex w-full items-center gap-inline rounded-sm px-inline py-inline text-left text-sm',
                       selected
                         ? 'bg-primary text-primary-foreground'
                         : i === active
@@ -285,7 +285,7 @@ export function PhoneField({
               );
             })}
             {filtered.length === 0 ? (
-              <li className="px-2 py-3 text-sm text-muted-foreground">{m.noResults}</li>
+              <li className="px-inline py-field text-sm text-muted-foreground">{m.noResults}</li>
             ) : null}
           </ul>
         </div>

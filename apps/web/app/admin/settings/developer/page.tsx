@@ -17,7 +17,7 @@ export default async function DeveloperSettings() {
   const [keys, webhooks] = await Promise.all([adminApi.listApiKeys(), adminApi.listWebhooks()]);
   const m = getMessages(locale).admin.developer;
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="flex max-w-3xl flex-col gap-section">
       {/* Page-level lead: who this page is for (QA2 fix 4). */}
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
       <ApiKeys keys={keys} messages={m} locale={locale} />

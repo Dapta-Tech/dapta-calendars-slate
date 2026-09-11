@@ -107,8 +107,8 @@ export function TeamMembersPanel({
     });
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-card rounded-xl border border-border bg-card p-card sm:p-card">
+      <div className="flex flex-wrap items-center justify-between gap-field">
         <span className="text-sm font-semibold text-muted-foreground">{m.members}</span>
         <Button
           size="lg"
@@ -122,7 +122,7 @@ export function TeamMembersPanel({
       </div>
 
       {members.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-border p-card text-sm text-muted-foreground">
           {m.noMembers}
         </p>
       ) : (
@@ -136,9 +136,9 @@ export function TeamMembersPanel({
               // a 328px row.
               <li
                 key={member.member_id}
-                className="flex flex-col gap-3 py-3 sm:flex-row sm:flex-wrap sm:items-center"
+                className="flex flex-col gap-field py-field sm:flex-row sm:flex-wrap sm:items-center"
               >
-                <span className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="flex min-w-0 flex-1 items-center gap-field">
                   {/* Member avatar — an initials monogram (members carry no image URL). */}
                   <span
                     aria-hidden
@@ -152,11 +152,11 @@ export function TeamMembersPanel({
                     <span className="truncate text-xs text-muted-foreground">{member.email ?? m.memberPending}</span>
                   </span>
                 </span>
-                <span className="flex flex-wrap items-center gap-2">
+                <span className="flex flex-wrap items-center gap-inline">
                 {/* Role pill (owner = accent) with an inline change select; the last
                     owner's role is locked so the team can't be left ownerless. */}
                 <span
-                  className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
+                  className={`rounded-sm px-inline py-tight text-xs font-medium ${
                     isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                   }`}
                 >
@@ -178,7 +178,7 @@ export function TeamMembersPanel({
                 {/* Owner-lock: owners show a lock (no remove affordance); demote to
                     member first to remove. Members get the ConfirmDialog. */}
                 {isOwner ? (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
+                  <span className="flex items-center gap-tight text-xs text-muted-foreground" title={m.ownerLock}>
                     <i aria-hidden className="pi pi-lock" style={{ fontSize: 13 }} />
                     <span className="sr-only">{m.ownerLock}</span>
                   </span>
@@ -204,28 +204,28 @@ export function TeamMembersPanel({
           Was a hand-rolled `fixed inset-0` stack; `Modal` owns the focus trap,
           the scroll lock, Escape and the focus restore. */}
       <Modal open={addOpen} onClose={closeDialog} title={m.inviteTitle} labelId="invite-dialog-title">
-        <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
+        <p className="mb-card text-sm text-muted-foreground">{m.inviteLead}</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             submitInvite();
           }}
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-field"
         >
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.emailLabel}</span>
             <Input
               type="email"
               value={inviteEmail}
               placeholder={m.emailPlaceholder}
               data-modal-autofocus
-              className="min-h-[44px]"
+              className="min-h-control"
               onChange={(e) => setInviteEmail(e.target.value)}
             />
           </label>
           {/* A <div>, not a <label>: the Select's trigger is a <button>, which
               is not a labelable element. The name rides on `ariaLabel`. */}
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.role}</span>
             <Select
               value={inviteRole}
@@ -236,7 +236,7 @@ export function TeamMembersPanel({
             />
           </div>
           {inviteErr ? (
-            <div role="alert" className="flex flex-col items-start gap-1">
+            <div role="alert" className="flex flex-col items-start gap-tight">
               <p className="text-sm text-destructive">{inviteErr}</p>
               {/* The recovery path out of "that email is not on your account".
                   It was an underlined link with an arrow stapled to it, inside
@@ -245,7 +245,7 @@ export function TeamMembersPanel({
               {inviteNoMatch ? (
                 <Link
                   href="/admin/settings/members"
-                  className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), '-ml-3')}
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), '-ml-field')}
                 >
                   <i aria-hidden className="pi pi-users" style={{ fontSize: 13 }} />
                   {m.inviteFromMembers}
@@ -253,7 +253,7 @@ export function TeamMembersPanel({
               ) : null}
             </div>
           ) : null}
-          <div className="mt-1 flex flex-wrap justify-end gap-2">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
             <Button variant="outline" size="lg" onClick={closeDialog}>
               {m.cancel}
             </Button>

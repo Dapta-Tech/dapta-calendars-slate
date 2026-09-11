@@ -495,6 +495,7 @@ describe('why no border in these screens is a washed accent', () => {
    silent removal fails too. */
 describe('the spacing scale', () => {
   const SPACING_ROLES = [
+    'tight',
     'inline',
     'field',
     'card',
@@ -531,7 +532,7 @@ describe('the spacing scale', () => {
   });
 
   it('keeps the content roles in ascending order, so "looser" means one thing', () => {
-    const ladder = ['inline', 'field', 'card', 'group', 'section'] as const;
+    const ladder = ['tight', 'inline', 'field', 'card', 'group', 'section'] as const;
     const values = ladder.map(pxOf);
     expect(values).toEqual([...values].sort((a, b) => a - b));
     expect(new Set(values).size, 'two roles share a value, so the ladder has a dead rung').toBe(

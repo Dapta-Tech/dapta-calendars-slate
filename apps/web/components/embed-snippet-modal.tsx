@@ -77,12 +77,12 @@ export function EmbedSnippetModal({
 
   return (
     <Modal open={open} onClose={onClose} title={m.title} labelId={labelId}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-card">
         <p className="text-sm text-muted-foreground">{m.intro}</p>
 
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-sm font-medium">{m.accentLabel}</legend>
-          <label className="flex items-center gap-2 text-sm">
+        <fieldset className="flex flex-col gap-inline">
+          <legend className="mb-tight text-sm font-medium">{m.accentLabel}</legend>
+          <label className="flex items-center gap-inline text-sm">
             <input
               type="radio"
               name="embed-accent"
@@ -91,7 +91,7 @@ export function EmbedSnippetModal({
             />
             <span>{m.accentInherit}</span>
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-inline text-sm">
             <input
               type="radio"
               name="embed-accent"
@@ -114,7 +114,7 @@ export function EmbedSnippetModal({
           </label>
         </fieldset>
 
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-tight text-sm">
           <span className="font-medium">{m.snippetLabel}</span>
           <textarea
             readOnly
@@ -122,25 +122,25 @@ export function EmbedSnippetModal({
             value={snippet}
             rows={7}
             onFocus={(e) => e.currentTarget.select()}
-            className="rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs"
+            className="rounded-md border border-input bg-muted px-field py-inline font-mono text-xs"
           />
         </label>
 
         <p className="text-xs text-muted-foreground">{m.resizeNote}</p>
         <p className="text-xs text-muted-foreground">{m.advancedNote}</p>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-inline">
           <button
             type="button"
             onClick={copy}
-            className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            className="rounded-md bg-primary px-field py-inline text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
           >
             {copied ? m.copied : m.copy}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-border px-3 py-2 text-sm transition-colors hover:border-primary"
+            className="rounded-md border border-border px-field py-inline text-sm transition-colors hover:border-primary"
           >
             {m.close}
           </button>

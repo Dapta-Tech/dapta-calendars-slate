@@ -28,22 +28,22 @@ export function GeneralForm({
   const [tz, setTz] = useState(timeZone);
 
   return (
-    <form action={action} className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-6">
-      <label className="flex flex-col gap-1 text-sm">
+    <form action={action} className="flex flex-col gap-card rounded-xl border border-border bg-card p-card sm:p-group">
+      <label className="flex flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.displayName}</span>
-        <Input name="displayName" defaultValue={displayName} className="min-h-[44px]" />
+        <Input name="displayName" defaultValue={displayName} className="min-h-control" />
       </label>
-      <label className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.publicHandle}</span>
         {/* The `/account/` prefix is part of the URL, so it reads in the mono
             voice next to the field that completes it, and wraps above the input
             at 360px rather than squeezing it. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-inline">
           <span className="font-mono text-xs text-muted-foreground">/{accountCode}/</span>
-          <Input name="handle" defaultValue={handle} className="min-h-[44px] flex-1" />
+          <Input name="handle" defaultValue={handle} className="min-h-control flex-1" />
         </div>
       </label>
-      <div className="flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
         {/* Full IANA list, never free text: an invalid zone used to reach the
             DB and crash every page that formats times (QA fix 1). Themed
@@ -53,7 +53,7 @@ export function GeneralForm({
       </div>
       {res && !res.ok ? <p role="alert" className="text-sm text-destructive">{res.message}</p> : null}
       {res?.ok ? <p className="text-sm text-primary">{m.saved}</p> : null}
-      <Button type="submit" size="lg" disabled={pending} className="self-start px-5">
+      <Button type="submit" size="lg" disabled={pending} className="self-start px-control-pad">
         {pending ? m.saving : m.save}
       </Button>
     </form>
