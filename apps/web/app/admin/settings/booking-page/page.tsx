@@ -1,6 +1,7 @@
 import { adminApi } from '@/lib/admin-api';
 import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { Studio } from './studio';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,10 @@ export default async function BookingPageSettings() {
     slotLayout: (style.slotLayout as never) ?? def.slotLayout,
     dayGroup: (style.dayGroup as never) ?? def.dayGroup,
     slotSelect: (style.slotSelect as never) ?? def.slotSelect,
+    // Through the resolver, not `style.theme ?? 'light'`: an absent axis means
+    // paper in exactly one place, and the studio has to agree with the public
+    // page about what a config saved before B2 renders as.
+    theme: bookingCanvasOf(style),
   };
 
   return (

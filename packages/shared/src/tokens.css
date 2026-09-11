@@ -298,8 +298,18 @@
    also marks the selected nav row, and that mark sits inside the wash rather than
    on the page behind it. At 32% light it cleared page and card and failed there at
    2.79:1 — the one ground it actually had to work on.
-   KEEP THIS BLOCK AND THE `prefers-color-scheme` BLOCK BELOW IDENTICAL. */
-:root[data-theme='light'] {
+   KEEP THIS BLOCK AND THE `prefers-color-scheme` BLOCK BELOW IDENTICAL.
+   ─────────────────────────────────────────────────────────────────────────────
+   TWO selectors, for the same reason the dark rule above carries two. The bare
+   `[data-theme='light']` is what makes paper re-establishable on a SUBTREE:
+   without it `:root` is the only element that can be light, and a light region
+   inside a dark document is impossible. The booking page's studio preview is
+   exactly that region — a host on the dark admin previewing their own light
+   page — and B2 is the slice that makes a host able to ask for it. The
+   `:root`-qualified selector stays first and more specific, so the document-level
+   behaviour is byte-for-byte what it was. */
+:root[data-theme='light'],
+[data-theme='light'] {
   color-scheme: light;
   --background: #f4f6f8;
   --foreground: #0d1013;

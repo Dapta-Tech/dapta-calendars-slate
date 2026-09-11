@@ -19,6 +19,7 @@ import {
   t,
   weekStartsOnFor,
   type BookingMessages,
+  type BrandCanvas,
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
@@ -30,16 +31,28 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/cn';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
-import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { ChevronIcon } from '@/components/booking-page-parts';
 import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
 
+/** The ten appearance axes the studio drives. Nine are widget shape; `theme` is
+ *  the GROUND they are drawn on (ADR 0004) and lives here rather than in its own
+ *  section because a host choosing how their page looks is choosing all ten. */
 type Axes = Pick<
   PublicBranding,
-  'template' | 'cardStyle' | 'corners' | 'buttons' | 'density' | 'font' | 'slotLayout' | 'dayGroup' | 'slotSelect'
+  | 'template'
+  | 'cardStyle'
+  | 'corners'
+  | 'buttons'
+  | 'density'
+  | 'font'
+  | 'slotLayout'
+  | 'dayGroup'
+  | 'slotSelect'
+  | 'theme'
 >;
 
 const AXIS_LABEL: Record<keyof Axes, keyof StudioMessages> = {
@@ -52,6 +65,7 @@ const AXIS_LABEL: Record<keyof Axes, keyof StudioMessages> = {
   slotLayout: 'axisSlotLayout',
   dayGroup: 'axisDayGroup',
   slotSelect: 'axisSlotSelect',
+  theme: 'axisTheme',
 };
 
 const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
@@ -64,6 +78,21 @@ const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
   slotLayout: ['grid', 'list'],
   dayGroup: ['flat', 'boxed'],
   slotSelect: ['soft', 'solid'],
+  theme: ['light', 'dark'],
+};
+
+/**
+ * The one axis whose VALUES are translated.
+ *
+ * Every other axis is an untranslated identifier — `Split`, `Boxed`, `Pill` are
+ * design vocabulary a host reads as a name. "Light" and "Dark" are not names,
+ * they are two ordinary words describing what the host will see, and leaving
+ * them in English is the kind of half-translated screen the i18n rule exists to
+ * prevent. Keyed by the axis value so the catalog stays flat.
+ */
+const THEME_OPTION_LABEL: Record<string, keyof StudioMessages> = {
+  light: 'themeLight',
+  dark: 'themeDark',
 };
 
 const ACCENT_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '#ff6fae'];
@@ -193,6 +222,10 @@ export function Studio(init: StudioInit) {
   const isDirty = snapshot !== initialSnapshot.current;
 
   const activeTheme = useMemo(() => matchTheme(axes), [axes]);
+  // The canvas the INVITEE will see, read through the same resolver the public
+  // shell uses. Never the admin's own `data-theme`: a host previewing their page
+  // is looking at a stranger's screen, not their own (ADR 0004).
+  const canvas = bookingCanvasOf(axes);
   // `brandVars`, not `accentVars`: the preview has to emit the PRODUCT accent
   // tokens too. Emitting only `--accent*` left `--primary-ink`/`--primary-edge`
   // resolving from the admin palette, so the preview drew the host's links and
@@ -200,10 +233,10 @@ export function Studio(init: StudioInit) {
   // exact "preview == prod" break ADR 0004 is written against. Same function and
   // same canvas as BrandedShell, so the two cannot drift.
   const previewVars = useMemo(
-    () => ({ ...brandVars(accent, BOOKING_CANVAS), ...widgetStyleVars(axes) }) as Record<string, string>,
+    () => ({ ...brandVars(accent, bookingCanvasOf(axes)), ...widgetStyleVars(axes) }) as Record<string, string>,
     [accent, axes],
   );
-  const adjusted = accentWasAdjusted(accent, BOOKING_CANVAS);
+  const adjusted = accentWasAdjusted(accent, canvas);
 
   // Live handle availability (debounced, per-account).
   useEffect(() => {
@@ -229,7 +262,12 @@ export function Studio(init: StudioInit) {
     return () => clearTimeout(t);
   }, [handle, init.handle]);
 
-  const applyTheme = (t: keyof typeof THEME_PRESETS) => setAxes({ ...THEME_PRESETS[t] });
+  // A preset sets the nine SHAPE axes and deliberately leaves the canvas alone:
+  // the presets predate B2 and describe a silhouette, not a ground, so a host
+  // who moved their page to dark and then tried "Bold" would otherwise be
+  // thrown back to paper by a control that says nothing about theme.
+  const applyTheme = (t: keyof typeof THEME_PRESETS) =>
+    setAxes((a) => ({ ...THEME_PRESETS[t], theme: a.theme }));
   const setAxis = (k: keyof Axes, v: string) => setAxes((a) => ({ ...a, [k]: v as never }));
   const handleBlocksSave = handleState === 'taken' || handleState === 'invalid' || handleState === 'checking';
 
@@ -464,8 +502,8 @@ export function Studio(init: StudioInit) {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                {t(m.contrast, { ratio: accentLabelContrast(accent, BOOKING_CANVAS) })}
-                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent, BOOKING_CANVAS) }) : ''}
+                {t(m.contrast, { ratio: accentLabelContrast(accent, canvas) })}
+                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent, canvas) }) : ''}
               </p>
             </Field>
             <Field label={m.photoAvatar}>
@@ -534,11 +572,15 @@ export function Studio(init: StudioInit) {
                       // class styles the trigger and the panel rows are drawn in
                       // a portal-ish subtree it does not reach, so the two halves
                       // of the control would disagree. The values themselves are
-                      // untranslated axis identifiers, as they were before.
-                      options={AXIS_OPTIONS[k].map((o) => ({
-                        value: o,
-                        label: o.charAt(0).toUpperCase() + o.slice(1),
-                      }))}
+                      // untranslated axis identifiers, as they were before —
+                      // except the canvas, whose two values are ordinary words.
+                      options={AXIS_OPTIONS[k].map((o) => {
+                        const translated = k === 'theme' ? THEME_OPTION_LABEL[o] : undefined;
+                        return {
+                          value: o,
+                          label: translated ? m[translated] : o.charAt(0).toUpperCase() + o.slice(1),
+                        };
+                      })}
                       ariaLabel={m[AXIS_LABEL[k]]}
                       locale={init.locale}
                       onChange={(v) => setAxis(k, v)}
@@ -684,8 +726,25 @@ export function Studio(init: StudioInit) {
           {/* The FRAME is chrome; everything inside it is BP's canvas and is not
               touched by this sweep (preview == prod, #134). `overflow-x-auto` so
               the fixed 360px mobile preview scrolls inside its frame instead of
-              widening the studio at 360px. */}
-          <div className="overflow-x-auto rounded-xl border border-border p-card sm:p-group" style={previewVars}>
+              widening the studio at 360px.
+
+              B2: the frame STAMPS the invitee's canvas and paints its ground.
+              Emitting only the branding vars and letting `--background`,
+              `--card` and `--foreground` fall through to the admin shell was
+              enough while there was one canvas; the moment a host can put their
+              page on paper it is the harder version of the preview != prod bug,
+              because `--accent-wash` is `color-mix(…, var(--background))`. The
+              accent would match the live page exactly while every wash and card
+              ground behind it came from the AUTHOR's theme instead of the
+              invitee's. Stamped on the frame rather than on an inner element so
+              the padding around the canvas is the canvas's own ground and not a
+              rim of the admin's; `overflow-x-auto` already clips it to the
+              rounded corners. */}
+          <div
+            data-theme={canvas}
+            className="overflow-x-auto rounded-xl border border-border bg-background p-card text-foreground sm:p-group"
+            style={previewVars}
+          >
             <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
               {surface === 'profile' ? (
                 <ProfilePreview
@@ -694,6 +753,7 @@ export function Studio(init: StudioInit) {
                   avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
                   accent={accent}
+                  canvas={canvas}
                   eventTypes={init.eventTypes}
                   m={m}
                 />
@@ -702,6 +762,7 @@ export function Studio(init: StudioInit) {
                   displayName={displayName}
                   avatarUrl={previewAvatarUrl}
                   accent={accent}
+                  canvas={canvas}
                   locale={init.locale}
                   m={m}
                 />
@@ -725,6 +786,7 @@ function ProfilePreview({
   avatarUrl,
   coverUrl,
   accent,
+  canvas,
   eventTypes,
   m,
 }: {
@@ -733,6 +795,9 @@ function ProfilePreview({
   avatarUrl: string;
   coverUrl: string;
   accent: string;
+  /** The ground the preview paints on, so the monogram's label is clamped
+   *  against the same canvas the public page clamps against. */
+  canvas: BrandCanvas;
   eventTypes: EventTypeLite[];
   m: StudioMessages;
 }) {
@@ -756,7 +821,7 @@ function ProfilePreview({
             className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
             style={{
               background: 'var(--accent)',
-              color: onAccent(clampAccent(accent, BOOKING_CANVAS)),
+              color: onAccent(clampAccent(accent, canvas)),
               borderRadius: 'var(--bp-radius)',
             }}
           >
@@ -799,12 +864,15 @@ function BookingPreview({
   displayName,
   avatarUrl,
   accent,
+  canvas,
   locale,
   m,
 }: {
   displayName: string;
   avatarUrl: string;
   accent: string;
+  /** As in `ProfilePreview` — the canvas the label is clamped against. */
+  canvas: BrandCanvas;
   locale: string;
   m: StudioMessages;
 }) {
@@ -847,7 +915,7 @@ function BookingPreview({
             className="flex h-10 w-10 items-center justify-center text-base font-semibold"
             style={{
               background: 'var(--accent)',
-              color: onAccent(clampAccent(accent, BOOKING_CANVAS)),
+              color: onAccent(clampAccent(accent, canvas)),
               borderRadius: 'var(--bp-radius)',
             }}
           >

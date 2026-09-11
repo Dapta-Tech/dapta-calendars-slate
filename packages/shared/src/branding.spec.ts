@@ -9,6 +9,7 @@ import {
   brandVars,
   clampAccent,
   contrastRatioExact,
+  onAccent,
   type BrandCanvas,
 } from './branding';
 
@@ -231,22 +232,81 @@ describe('brandVars — the single block a branded surface emits', () => {
     }
   });
 
-  it('emits the clamped accent as primary/edge/ring on the dark canvas', () => {
+  it('emits the clamped accent as primary/edge/ring on BOTH canvases', () => {
     // Slice F emitted the plain clamped accent for these three. B1 derives them,
     // and on the dark canvas the derivation must land on the same value, so no
-    // already-saved host page moves.
-    for (const accent of ACCENTS) {
-      const vars = brandVars(accent, 'dark');
-      const clamped = clampAccent(accent, 'dark');
-      expect(vars['--primary']).toBe(clamped);
-      expect(vars['--primary-edge']).toBe(clamped);
-      expect(vars['--ring']).toBe(clamped);
+    // already-saved host page moves. B2 makes the light canvas reachable by a
+    // host rather than only by this file, so the same law is asserted there:
+    // a page that swaps its ground must not also swap what its accent IS.
+    for (const canvas of CANVASES) {
+      for (const accent of ACCENTS) {
+        const vars = brandVars(accent, canvas);
+        const clamped = clampAccent(accent, canvas);
+        expect(vars['--primary'], `${accent} on ${canvas}`).toBe(clamped);
+        expect(vars['--primary-edge'], `${accent} on ${canvas}`).toBe(clamped);
+        expect(vars['--ring'], `${accent} on ${canvas}`).toBe(clamped);
+      }
     }
   });
 
-  it('carries the widget-independent accent vars through unchanged', () => {
-    const vars = brandVars('#c2261c', 'light');
-    expect(vars['--accent']).toBe(clampAccent('#c2261c', 'light'));
-    expect(vars['--accent-wash']).toContain('var(--background)');
+  it('carries the widget-independent accent vars through unchanged, on both', () => {
+    for (const canvas of CANVASES) {
+      const vars = brandVars('#c2261c', canvas);
+      expect(vars['--accent']).toBe(clampAccent('#c2261c', canvas));
+      // The wash composites against the SURFACE's `--background`, never a baked
+      // hex — which is the whole reason `BrandedShell` and the studio preview
+      // have to stamp `data-theme` as well as the accent. A preview that emits
+      // the accent but inherits the admin's ground resolves this token against
+      // the wrong canvas while the accent itself matches (B2, #109).
+      expect(vars['--accent-wash']).toContain('var(--background)');
+    }
+  });
+
+  /**
+   * The studio's own swatch row, on both grounds.
+   *
+   * These six are the colours a host reaches without opening a colour picker,
+   * so they are the accents most booking pages actually carry — and B2 is the
+   * slice that lets any of them land on paper. Kept in sync with
+   * `ACCENT_PRESETS` in the studio by hand; a preset added there and not here
+   * simply is not covered, which is why the list is short and named.
+   */
+  describe('the studio presets stay legible wherever a host puts their page', () => {
+    const STUDIO_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '#ff6fae'];
+
+    it('clears the fill, ink and edge floors on both canvases and on a card', () => {
+      for (const canvas of CANVASES) {
+        for (const ground of [CANVAS_HEX[canvas], PAGE_HEX[canvas], CARD_HEX[canvas]]) {
+          const fill = worst(STUDIO_PRESETS, (c) => clampAccent(c, canvas), ground);
+          expect(fill.low, `fill ${fill.at} on ${canvas}/${ground}`).toBeGreaterThanOrEqual(NON_TEXT);
+          const ink = worst(STUDIO_PRESETS, (c) => accentInk(c, canvas), ground);
+          expect(ink.low, `ink ${ink.at} on ${canvas}/${ground}`).toBeGreaterThanOrEqual(AA);
+          const edge = worst(STUDIO_PRESETS, (c) => accentEdge(c, canvas), ground);
+          expect(edge.low, `edge ${edge.at} on ${canvas}/${ground}`).toBeGreaterThanOrEqual(NON_TEXT);
+        }
+      }
+    });
+
+    it('keeps a preset label off the floor on either canvas', () => {
+      // NOT AA, and the gap is the engine's position rather than an oversight.
+      // `onAccent` picks the better of black and white, and a saturated mid-tone
+      // clears 4.5:1 against neither — the studio's own purple measures 4.15:1
+      // on both canvases and did so before B2 existed. ADR 0004 keeps the
+      // presets open (including that purple, which the product itself retired),
+      // and `accentLabelContrast` reports the number to the host rather than
+      // overruling their choice. The non-text floor is the line that does hold,
+      // and what this pins is that moving a page to paper never drops a preset
+      // through it — the clamp darkens the fill there, and darkening a fill is
+      // exactly how a label on it gets lost.
+      for (const canvas of CANVASES) {
+        for (const preset of STUDIO_PRESETS) {
+          const fill = clampAccent(preset, canvas);
+          expect(
+            contrastRatioExact(fill, onAccent(fill)),
+            `${preset} label on ${canvas}`,
+          ).toBeGreaterThanOrEqual(NON_TEXT);
+        }
+      }
+    });
   });
 });

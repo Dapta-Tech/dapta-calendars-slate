@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
-import { PATH_HEADER } from '@/lib/theme';
+import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
 import { framingHeaders } from '@/lib/framing';
 import { requestOrigin } from '@/lib/request-origin';
 
@@ -92,13 +92,18 @@ export function middleware(req: NextRequest) {
   // route from a booking page and stamp the right `data-theme` before paint.
   // The App Router gives a layout its params and never its path, and the root
   // layout is the only element that can carry the document theme — so the path
-  // has to travel as a header.
+  // has to travel as a header. Since B2 the query travels the same way, because
+  // an embed's `?theme=` override changes that same answer.
   //
-  // Set on the forwarded REQUEST headers: it reaches the app and never the
-  // browser, which also means a header of this name arriving from a client is
+  // Set on the forwarded REQUEST headers: they reach the app and never the
+  // browser, which also means headers of these names arriving from a client are
   // overwritten here rather than trusted into the theme decision.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set(PATH_HEADER, req.nextUrl.pathname);
+  // Capped: this is attacker-controlled on every request, and the only thing
+  // downstream reads out of it is one short enum. `URL` has already
+  // percent-encoded any C0 control, so the cap is about size, not injection.
+  requestHeaders.set(QUERY_HEADER, req.nextUrl.search.slice(0, 2048));
   const res = NextResponse.next({ request: { headers: requestHeaders } });
 
   // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public

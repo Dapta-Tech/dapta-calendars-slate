@@ -4,7 +4,9 @@ import { formatBookingLocation, formatSlotDateTime, getMessages, t } from '@slat
 import { getManageView, getAvailability, getRescheduleAvailability } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { ManageActions } from './manage-actions';
+import { CanvasStamp } from '@/components/canvas-stamp';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { resolveDocumentTheme } from '@/lib/theme.server';
 import { buttonVariants } from '@/components/ui/button';
 
 // Token-gated personal page: never indexed, and the title stays generic so no
@@ -25,6 +27,7 @@ async function ManageLinkInvalid() {
   const m = getMessages(locale).manage;
   return (
     <>
+      <CanvasStamp canvas={await resolveDocumentTheme()} />
       <main className="mx-auto max-w-xl px-6 py-12">
         <h1 className="mb-2 text-2xl font-semibold tracking-tight">{m.linkInvalidTitle}</h1>
         <p className="rounded-md border border-border bg-card p-4 text-muted-foreground">
@@ -124,6 +127,9 @@ export default async function ManagePage({
 
   return (
     <>
+      {/* This route renders no `BrandedShell`, so it declares its own canvas —
+          the ADR default, because a booking holds no branding of its own. */}
+      <CanvasStamp canvas={await resolveDocumentTheme()} />
       <main className="mx-auto max-w-xl px-6 py-12">
         <header className="mb-6 flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">{booking.title}</h1>

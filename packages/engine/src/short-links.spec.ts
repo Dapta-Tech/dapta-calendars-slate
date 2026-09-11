@@ -68,6 +68,27 @@ describe('short-links (pure rules)', () => {
         expect(validateVanitySlug(v)).toBe('reserved');
       }
     });
+
+    /**
+     * The web app's document-theme resolver (`apps/web/lib/theme.server.ts`)
+     * tells a booking page apart from the surfaces that store no theme by
+     * NAME: `/{code}/{handle}` and `/manage/{uid}` are both two segments, and
+     * `/{code}/{handle}/{slug}` and `/{code}/team/{slug}` are both three. It
+     * excludes the path when the first segment is `manage` or the second is
+     * `team`, and that is only sound while neither can be claimed.
+     *
+     * Un-reserve either one and a real host page starts resolving to the ADR
+     * default instead of its own canvas — a silent wrong palette on a live
+     * public page, with nothing in `apps/web` able to notice. This is the check
+     * that notices. `RESERVED_PUBLIC_SLUGS` is also `RESERVED_HANDLES`
+     * (packages/db), so one assertion covers codes, vanity slugs and handles.
+     */
+    it('keeps `manage` and `team` unclaimable, which the theme resolver relies on', () => {
+      for (const v of ['manage', 'team']) {
+        expect(isReservedPublicSlug(v)).toBe(true);
+        expect(validateVanitySlug(v)).toBe('reserved');
+      }
+    });
   });
 
   describe('vanity entitlement gate (open-core policy)', () => {

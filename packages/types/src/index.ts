@@ -394,7 +394,8 @@ export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 
 // --- Booking-page branding / studio ---------------------------------------
 
-/** The 9 style axes of the booking-page studio (exact values from the prior version). */
+/** The 10 style axes of the booking-page studio, plus three behaviour/content
+ *  keys that live in the same object (exact values from the prior version). */
 export const bookingPageStyleSchema = z.object({
   template: z.enum(['classic', 'split', 'banded']).default('classic'),
   cardStyle: z.enum(['outline', 'elevated', 'filled']).default('outline'),
@@ -405,6 +406,21 @@ export const bookingPageStyleSchema = z.object({
   slotLayout: z.enum(['grid', 'list']).default('grid'),
   dayGroup: z.enum(['flat', 'boxed']).default('flat'),
   slotSelect: z.enum(['soft', 'solid']).default('soft'),
+  /**
+   * The ground the page paints on (ADR 0004, slice B2) — the tenth axis.
+   *
+   * `light` by DEFAULT, and the default is the whole point: the invitee is a
+   * stranger on a landing page, and paper is what the category has taught them
+   * a booking page looks like. There is deliberately no `auto`: following the
+   * invitee's `prefers-color-scheme` would make the page look different on
+   * different phones and match the host's studio preview on neither.
+   *
+   * `brandingSchema.style` below is this schema `.partial()`, so a config saved
+   * before B2 carries no `theme` key at all and every reader has to resolve an
+   * absent value. That resolution lives in ONE place per app — the web app's
+   * `lib/booking-canvas.ts` — never at a call site.
+   */
+  theme: z.enum(['light', 'dark']).default('light'),
   landingEnabled: z.boolean().default(true),
   defaultEventSlug: z.string().nullable().optional(),
   bio: z.string().max(2000).nullable().optional(),
