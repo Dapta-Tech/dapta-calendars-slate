@@ -157,7 +157,7 @@ function ConnectDialog({
 }) {
   const router = useRouter();
   // 'email' collects WHICH account is about to be connected before starting
-  // the OAuth popup — the Membrane subject is `${iamUserId}-${email}` (see
+  // the OAuth popup — the connection subject is `${iamUserId}-${email}` (see
   // `connectCalendarAction`), a distinct subject per connected account. This
   // is what lets a host connect more than one calendar, and is the SAME "which
   // account?" step the main Dapta app already asks before a calendar connect.
@@ -175,7 +175,7 @@ function ConnectDialog({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeProvider = useRef<string>('google');
   // The email of the account currently being connected. Discovery MUST query
-  // the SAME composite Membrane subject (`${iamUserId}-${email}`) that the
+  // the SAME composite connection subject (`${iamUserId}-${email}`) that the
   // connect step wrote to — otherwise the just-authorized account is invisible.
   const activeEmail = useRef<string | undefined>(undefined);
   // The moment the connect popup opened, MINUS a clock-skew grace window —

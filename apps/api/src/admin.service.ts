@@ -574,23 +574,25 @@ export class AdminService {
    * provider and persist any not already stored (first destination wins R20).
    * Returns the connections now on record.
    *
-   * Discovery is keyed by the PLAIN Dapta iamUserId (no email suffix) so it
-   * enumerates EVERY account subject this member owns
-   * (`${iamUserId}-<email1>`, `${iamUserId}-<email2>`, …) — including accounts
-   * connected from the main Dapta app before this member ever opened
-   * Calendars, and every prior connection of this member's own (legacy plain
-   * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
+   * Discovery CANNOT lean on a prefix match: a tenant token is scoped to an
+   * exact subject, so this queries the UNION of every subject the member could
+   * own — the account just connected, the member's own login email, and the
+   * legacy bare `iamUserId` — and dedupes by `connectionRef`. That union is
+   * what surfaces accounts connected from the main Dapta app before this member
+   * ever opened Calendars, alongside the member's own prior connections
+   * (legacy plain `iamUserId` subjects pre-date the per-email scheme).
    */
   async discoverConnections(p: HostPrincipal, provider: string, email?: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
     const identity = await getMemberIdentity(this.db, p.memberId);
     const iamUserId = identity?.iamUserId ?? p.memberId;
-    // Membrane keys each connected account by the COMPOSITE subject
-    // `${iamUserId}-${email}` (the SAME scheme the main Dapta app uses — proven
-    // against the live workspace). A tenant token is an EXACT customerId match,
-    // so querying the bare `iamUserId` alone never sees a `${iamUserId}-<email>`
-    // account. Enumerate every subject this member could own and union them:
+    // The calendar backend keys each connected account by the COMPOSITE
+    // connection subject `${iamUserId}-${email}` (the SAME scheme the main
+    // Dapta app uses — proven against the live workspace). A tenant token is
+    // scoped to an EXACT subject match, so querying the bare `iamUserId` alone
+    // never sees a `${iamUserId}-<email>` account. Enumerate every subject this
+    // member could own and union them:
     //   - the account just connected (the `email` arg from the connect step),
     //   - the member's own login email (surfaces a calendar connected elsewhere
     //     in Dapta under the same identity — e.g. the main app),

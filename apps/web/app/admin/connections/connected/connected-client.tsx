@@ -15,10 +15,10 @@ interface ConnectSignal {
 
 /**
  * The OAuth popup's landing page (Bug C — the popup used to strand the user
- * on Membrane's own "you can close this tab" page instead of returning to
- * Dapta Calendars). Membrane redirects the popup here as a same-origin
- * request with `?connectionId=` on success or `?error=&errorData=` on
- * failure. On mount this:
+ * on the calendar backend's own "you can close this tab" page instead of
+ * returning to Dapta Calendars). That backend redirects the popup here as a
+ * same-origin request with `?connectionId=` on success or
+ * `?error=&errorData=` on failure. On mount this:
  *  1. Signals the opener with the actual outcome via BroadcastChannel AND a
  *     `localStorage` write (the `storage` event only fires in OTHER browsing
  *     contexts of the same origin — exactly the opener tab — so this is a
