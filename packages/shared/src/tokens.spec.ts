@@ -476,3 +476,112 @@ describe('why no border in these screens is a washed accent', () => {
     }
   });
 });
+
+
+/* The spacing scale (SP, #147).
+
+   The header of this file explains why the type and radius scales are NOT
+   asserted here: they are mapped in the web app's `@theme inline` block, and
+   reading that from a package spec would make `@slate/shared` depend on an app.
+   Spacing is the exception on both halves of that argument. It is declared in
+   THIS sheet, so reading it creates no such dependency; and unlike a crossed type
+   step, an off-grid spacing step is invisible on screen — it reads as "this row
+   is slightly off" and survives every review, which is exactly how 74 distinct
+   values accumulated across 17 roles before the scale existed.
+
+   The roles are read OUT of the sheet rather than listed here, so a step added
+   later is grid-checked without anyone remembering to add it to a literal. The
+   literal below is the pin: it asserts WHICH roles exist, so a rename or a
+   silent removal fails too. */
+describe('the spacing scale', () => {
+  const SPACING_ROLES = [
+    'inline',
+    'field',
+    'card',
+    'group',
+    'section',
+    'page-x',
+    'page-x-wide',
+    'page-y',
+    'control-h',
+    'control-x',
+  ] as const;
+
+  /* `sheet`, not `TOKENS_CSS`: comments in this file quote CSS, so a `--sp-…:`
+     inside prose would otherwise be read as a declaration. */
+  const DECLARED = [...sheet.matchAll(/--sp-([a-z-]+)\s*:/g)].map((m) => m[1]);
+
+  /** `--sp-card: 1rem;` → 16. Throws rather than returning NaN: a token that
+   *  cannot be read is a failure to report, not a value to compare. */
+  function pxOf(role: string): number {
+    const m = sheet.match(new RegExp(`--sp-${role}:\\s*([\\d.]+)rem\\s*;`));
+    if (!m) throw new Error(`--sp-${role} is missing from the sheet, or is not in rem`);
+    return Number(m[1]) * 16;
+  }
+
+  it('declares exactly the roles the scale claims, and no others', () => {
+    expect([...new Set(DECLARED)].sort()).toEqual([...SPACING_ROLES].sort());
+  });
+
+  it('lands every declared step on the 4px grid', () => {
+    expect(DECLARED.length).toBeGreaterThan(0);
+    for (const role of DECLARED) {
+      expect(pxOf(role) % 4, `--sp-${role} is ${pxOf(role)}px`).toBe(0);
+    }
+  });
+
+  it('keeps the content roles in ascending order, so "looser" means one thing', () => {
+    const ladder = ['inline', 'field', 'card', 'group', 'section'] as const;
+    const values = ladder.map(pxOf);
+    expect(values).toEqual([...values].sort((a, b) => a - b));
+    expect(new Set(values).size, 'two roles share a value, so the ladder has a dead rung').toBe(
+      values.length,
+    );
+  });
+
+  it('keeps the responsive gutter widening, never narrowing, from the floor up', () => {
+    expect(pxOf('page-x-wide')).toBeGreaterThan(pxOf('page-x'));
+  });
+
+  it('keeps the tap target at the 44px accessibility floor (R28)', () => {
+    expect(pxOf('control-h')).toBeGreaterThanOrEqual(44);
+  });
+
+  it('is theme-independent — every step is declared on a bare :root', () => {
+    // Walk the sheet tracking the selector of the block currently open. A regex
+    // over "the text after the last @media" would also match a block placed at
+    // the end of the file: a test that can only pass by accident.
+    expect(DECLARED.length).toBeGreaterThan(0);
+    const lines = sheet.split('\n');
+    const open: string[] = [];
+    let pending = '';
+    for (const line of lines) {
+      const decl = line.match(/^\s*(--sp-[a-z-]+):/);
+      if (decl) {
+        // `:root` ALONE, not a selector list that happens to contain it. The
+        // base colour rule is `:root, [data-theme='dark']`, and a spacing token
+        // parked there would simply not exist inside a `[data-theme='light']`
+        // subtree — the booking page's own canvas is exactly such a subtree.
+        const selector = open.at(-1) ?? '';
+        expect(
+          selector,
+          `${decl[1]} is declared under "${selector}"; spacing belongs on :root alone`,
+        ).toBe(':root');
+      }
+      if (line.includes('{')) {
+        // `stripComments` blanks a comment's body but leaves its delimiters, so
+        // anything up to the last `*/` on the way to the brace is not selector.
+        const raw = `${pending} ${line.slice(0, line.indexOf('{'))}`;
+        const selector = raw.includes('*/') ? raw.slice(raw.lastIndexOf('*/') + 2) : raw;
+        open.push(selector.trim());
+        pending = '';
+      } else if (line.includes('}')) {
+        open.pop();
+        pending = '';
+      } else if (line.trim()) {
+        // A selector list can span lines; carry it to the line with the brace.
+        pending = open.length === 0 ? line : '';
+      }
+    }
+  });
+});
