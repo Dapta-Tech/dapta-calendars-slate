@@ -58,6 +58,7 @@ export default async function TeamPage({
   const query = await searchParams;
   const [team, locale] = await Promise.all([getTeamProfile(accountCode, teamSlug), publicLocale()]);
   if (!team) notFound();
+  const msg = getMessages(locale);
 
   // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
   const code = team!.account.code;
@@ -76,7 +77,9 @@ export default async function TeamPage({
         <header className="mb-8 flex flex-col gap-1">
           <p className="text-sm text-muted-foreground">{team.account.name}</p>
           <h1 className="text-3xl font-semibold tracking-tight">{team.team.name}</h1>
-          <p className="text-sm text-muted-foreground">Times in {team.team.timeZone}</p>
+          <p className="text-sm text-muted-foreground">
+            {t(msg.landing.timesIn, { timeZone: team.team.timeZone })}
+          </p>
         </header>
 
         <ul className="flex flex-col gap-3">
@@ -96,13 +99,13 @@ export default async function TeamPage({
                   ) : null}
                 </span>
                 <span className="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">
-                  {et.lengthMinutes} min
+                  {t(msg.booking.durationMinutes, { minutes: et.lengthMinutes })}
                 </span>
               </Link>
             </li>
           ))}
           {team.eventTypes.length === 0 ? (
-            <li className="text-muted-foreground">No bookable team events yet.</li>
+            <li className="text-muted-foreground">{msg.landing.noTeamEvents}</li>
           ) : null}
         </ul>
       </main>

@@ -144,6 +144,15 @@ export interface BookingMessages {
     seoProfile: string;
     seoEvent: string;
   };
+  /** Public landing pages — the host profile and the team entry page (#141). */
+  landing: {
+    /** Header line under the team name on the team landing page. */
+    timesIn: string;
+    /** Empty state on the host landing page. */
+    noEvents: string;
+    /** Empty state on the team landing page. */
+    noTeamEvents: string;
+  };
   /**
    * Location kind labels — WHERE a meeting happens. Shared by the public
    * booking page, the manage page and the event-type editor so one kind reads
@@ -1269,6 +1278,11 @@ export const en: BookingMessages = {
     seoProfile: 'Book time with {name} online.',
     seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
   },
+  landing: {
+    timesIn: 'Times in {timeZone}',
+    noEvents: 'No bookable events yet.',
+    noTeamEvents: 'No bookable team events yet.',
+  },
   location: {
     whereLabel: 'Where',
     conferencing: 'Online meeting',
@@ -2265,6 +2279,11 @@ export const es: BookingMessages = {
     ctaAction: 'Consigue Dapta Calendars — gratis',
     seoProfile: 'Reserva un horario con {name} en línea.',
     seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+  },
+  landing: {
+    timesIn: 'Horarios en {timeZone}',
+    noEvents: 'Aún no hay eventos disponibles para reservar.',
+    noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
   },
   location: {
     whereLabel: 'Dónde',

@@ -58,6 +58,7 @@ export default async function ProfilePage({
   const query = await searchParams;
   const [profile, locale] = await Promise.all([getProfile(accountCode, handle), publicLocale()]);
   if (!profile) notFound();
+  const msg = getMessages(locale);
   // Inline embed (E): the mode plus any appearance overrides the snippet
   // carries. Empty by construction outside embed mode.
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
@@ -154,13 +155,13 @@ export default async function ProfilePage({
                   ) : null}
                 </span>
                 <span className="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">
-                  {et.lengthMinutes} min
+                  {t(msg.booking.durationMinutes, { minutes: et.lengthMinutes })}
                 </span>
               </Link>
             </li>
           ))}
           {eventTypes.length === 0 ? (
-            <li className="text-muted-foreground">No bookable events yet.</li>
+            <li className="text-muted-foreground">{msg.landing.noEvents}</li>
           ) : null}
         </ul>
       </main>
