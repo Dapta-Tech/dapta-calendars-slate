@@ -1,0 +1,48 @@
+# gitleaks config for the gitleaks layer of scripts/publish-gate.sh.
+#
+# `useDefault` keeps gitleaks' entire stock ruleset AND its stock allowlists —
+# this file ADDS to them and must never replace them. publish-gate.sh refuses to
+# run if the line below is not present, because a config that parses but loads
+# no rules is a green gate that scanned for nothing.
+#
+# The only thing here is a path allowlist, holding directories that are
+# gitignored and can therefore never reach public history.
+#
+# Why it exists: `gitleaks detect --no-git` walks the working directory and does
+# NOT honour .gitignore, so on any worktree that has been built it reports
+# Next.js' generated preview-signing and server-action keys out of
+# apps/web/.next/**, and on a maintainer's machine it reports the real
+# credentials the private deploy/ overlay is supposed to hold. None of it is
+# committable, and a gate that cries wolf is exactly how a real finding gets
+# waved through.
+#
+# Accepted trade-off: skipping .next/ means a local post-build run can no longer
+# notice a server secret inlined into the client bundle. CI never had that
+# coverage either — its publish-gate job is a separate job with a fresh checkout
+# and no build — so nothing regresses here.
+#
+# NEVER allowlist a repo file by path. .env.example and the docker-compose files
+# especially must always be scanned: they are where credentials get pasted by
+# mistake. Only gitignored directories belong below.
+#
+# The other two layers skip nearly the same set, by their own mechanism: the
+# internal-token grep via --exclude-dir in publish-gate.sh, trufflehog via
+# scripts/publish-gate-exclude.txt. Two deltas are deliberate, not drift:
+#   - .git/ is absent below because gitleaks skips it natively.
+#   - deploy/ is absent from the trufflehog list, so that layer still scans the
+#     overlay. Narrowing it there is a separate call, and its own header warns
+#     against casual additions.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Gitignored directories — generated, vendored, or private overlay. Never committed, never published."
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)\.next/''',
+  '''(^|/)\.turbo/''',
+  '''(^|/)\.data/''',
+  '''(^|/)deploy/''',
+]
