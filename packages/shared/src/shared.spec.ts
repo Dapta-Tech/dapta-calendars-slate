@@ -14,10 +14,10 @@ import { phoneValidator, parseGuests, guestsValidator } from './booking-fields';
 import { validateDayRanges, copyRangesToDays, daysToBlocks, blocksToDays } from './availability';
 import { matchTheme, widgetStyleVars, THEME_PRESETS } from './branding';
 
-// The colour half of the branding engine — the canvas-aware clamp and the
-// ink/edge derivations — is specced in `branding.spec.ts`, which states each
-// rule as a contrast law against a ground rather than as a fixed hex. What
-// stays here is the part that has nothing to do with colour: the axis maps.
+// The colour half of the branding engine — the host's accent and its ink/edge
+// jobs — is specced in `branding.spec.ts`, which states each rule as a law
+// against a ground rather than as a fixed hex. What stays here is the part that
+// has nothing to do with colour: the axis maps.
 describe('branding engine', () => {
   it('widgetStyleVars maps corners/density to the exact radii/spacing', () => {
     const v = widgetStyleVars({ corners: 'round', density: 'compact', buttons: 'pill' });

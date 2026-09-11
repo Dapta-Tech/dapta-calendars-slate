@@ -161,9 +161,13 @@
   }
 
   /* Rim every accent fill with `--primary-edge`, so the fill's SHAPE clears 3:1
-     against the page it sits on (WCAG 1.4.11). On dark the edge equals the fill and
-     this paints nothing; on light it is the difference between the primary action
-     being a recognisable control and being a pale smear at 1.27:1.
+     against the page it sits on (WCAG 1.4.11). This is about the PRODUCT tokens:
+     on dark the edge equals the fill and paints nothing; on light it is the
+     difference between the primary action being a recognisable control and being
+     a pale smear at 1.27:1. On a `.branded-surface` the rule still applies but
+     paints nothing on either ground — `brandVars` emits edge == primary since
+     ADR 0004's amendment, so a host's fill is deliberately unrimmed and whatever
+     contrast it has against the page is the contrast they chose.
      An `inset` box-shadow rather than a border because a border would add 2px to
      every accent fill and reflow all of them. Opacity-modified variants
      (`bg-primary/10`, `bg-primary/15`) are different classes and untouched — they
@@ -206,9 +210,11 @@ body {
 
 /* Lime focus ring (WCAG) honored everywhere.
    Uses `--primary-edge`, not `--primary`: the outline is the one thing that must be
-   findable on every surface, and the raw accent flattens to 1.27:1 over paper — the
-   focus indicator would be the least visible thing on a focused control in light
-   mode. On dark the edge IS the accent, so nothing changes there. */
+   findable on every surface, and the PRODUCT accent flattens to 1.27:1 over paper —
+   the focus indicator would be the least visible thing on a focused control in
+   light mode. On dark the edge IS the accent, so nothing changes there. On a
+   branded page the two tokens are equal by construction, so the ring is the host's
+   accent and carries whatever contrast they picked. */
 :focus-visible {
   outline: 2px solid var(--primary-edge);
   outline-offset: 2px;

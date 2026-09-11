@@ -34,9 +34,10 @@ export default async function BookingPageSettings() {
     slotLayout: (style.slotLayout as never) ?? def.slotLayout,
     dayGroup: (style.dayGroup as never) ?? def.dayGroup,
     slotSelect: (style.slotSelect as never) ?? def.slotSelect,
-    // Through the resolver, not `style.theme ?? 'light'`: an absent axis means
-    // paper in exactly one place, and the studio has to agree with the public
-    // page about what a config saved before B2 renders as.
+    // Through the resolver, never a literal at the call site: an absent axis
+    // resolves in exactly one place, and the studio has to agree with the public
+    // page about what a config saved before B2 renders as. The literal has moved
+    // once already (ADR 0004's amendment), which is the reason for the rule.
     theme: bookingCanvasOf(style),
   };
 

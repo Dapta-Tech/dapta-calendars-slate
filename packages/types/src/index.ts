@@ -409,18 +409,25 @@ export const bookingPageStyleSchema = z.object({
   /**
    * The ground the page paints on (ADR 0004, slice B2) — the tenth axis.
    *
-   * `light` by DEFAULT, and the default is the whole point: the invitee is a
-   * stranger on a landing page, and paper is what the category has taught them
-   * a booking page looks like. There is deliberately no `auto`: following the
-   * invitee's `prefers-color-scheme` would make the page look different on
-   * different phones and match the host's studio preview on neither.
+   * `dark` by DEFAULT, per ADR 0004's 2026-09-11 amendment: the product is dark
+   * and the booking page is part of the product. The original `light` default
+   * reasoned from the invitee, a stranger for whom paper is what the category
+   * has taught them a booking page looks like; the product owner reversed it.
+   * There is still deliberately no `auto`: following the invitee's
+   * `prefers-color-scheme` would make the page look different on different
+   * phones and match the host's studio preview on neither.
+   *
+   * This `.default()` is ONE OF TWO declarations of that fact. The other is
+   * `DEFAULT_BOOKING_THEME` in `@slate/shared`, which the web app's resolver
+   * reads. They must move together: a split parses one canvas and paints the
+   * other, with no error anywhere — just a wrong-looking page.
    *
    * `brandingSchema.style` below is this schema `.partial()`, so a config saved
    * before B2 carries no `theme` key at all and every reader has to resolve an
    * absent value. That resolution lives in ONE place per app — the web app's
    * `lib/booking-canvas.ts` — never at a call site.
    */
-  theme: z.enum(['light', 'dark']).default('light'),
+  theme: z.enum(['light', 'dark']).default('dark'),
   landingEnabled: z.boolean().default(true),
   defaultEventSlug: z.string().nullable().optional(),
   bio: z.string().max(2000).nullable().optional(),
@@ -431,7 +438,9 @@ export const brandingSchema = z.object({
   displayName: z.string().max(200).nullable().optional(),
   avatarUrl: z.string().url().nullable().optional(),
   coverUrl: z.string().url().nullable().optional(),
-  /** The single accent color (AA-clamped on render). */
+  /** The single accent color, rendered exactly as picked. The engine reports
+   *  its contrast and no longer adjusts it (ADR 0004, 2026-09-11 amendment); an
+   *  unparseable value falls back to the DS accent. */
   brandColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)

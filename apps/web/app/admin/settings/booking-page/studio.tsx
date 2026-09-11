@@ -9,8 +9,9 @@ import {
   widgetStyleVars,
   brandingClassOf,
   clampAccent,
-  accentWasAdjusted,
+  accentCanvasContrast,
   accentLabelContrast,
+  MIN_ACCENT_CONTRAST,
   buildMonthGrid,
   formatDayHeading,
   onAccent,
@@ -236,7 +237,11 @@ export function Studio(init: StudioInit) {
     () => ({ ...brandVars(accent, bookingCanvasOf(axes)), ...widgetStyleVars(axes) }) as Record<string, string>,
     [accent, axes],
   );
-  const adjusted = accentWasAdjusted(accent, canvas);
+  // The engine no longer corrects an illegible accent (ADR 0004's 2026-09-11
+  // amendment), so the studio's job on this field changed from reporting a
+  // correction to reporting a number. Measured against the ground the INVITEE
+  // will see, not the admin's, for the same reason `canvas` is resolved above.
+  const canvasContrast = accentCanvasContrast(accent, canvas);
 
   // Live handle availability (debounced, per-account).
   useEffect(() => {
@@ -299,13 +304,13 @@ export function Studio(init: StudioInit) {
         displayName,
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
-        // The host's RAW pick, not the clamped one. A clamp is only meaningful
-        // against a ground (ADR 0004), so a stored clamped colour has a canvas
-        // baked into it — and B2, which lets a host move their page to the light
-        // canvas, would have nothing left to re-clamp: a navy saved today comes
-        // back as the washed `#66798c` the dark canvas needed. Every read path
-        // already clamps (BrandedShell, the public profile, this preview), so
-        // storing the pick costs nothing and keeps the choice recoverable.
+        // The host's RAW pick. Since ADR 0004's amendment nothing alters it on
+        // the way out either, so this is now simply the one colour the whole
+        // system carries — stored, previewed and rendered identically. It stays
+        // worth stating: the reason to store the pick was that a stored ADJUSTED
+        // colour bakes a canvas into the row and cannot be recovered when the
+        // host moves their page to the other ground. That trap is what the
+        // amendment removed, and writing the pick is what keeps it removed.
         brandColor: accent,
         style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
       });
@@ -501,10 +506,22 @@ export function Studio(init: StudioInit) {
                   className="h-11 w-11 cursor-pointer rounded-md border border-input bg-background p-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
+              {/* Two different grounds, so both are named rather than left as
+                  bare numbers. The readout is the button LABEL on its fill,
+                  which `onAccent` keeps above ~4.1:1 no matter what the host
+                  picks — it can never trip the warning, and it is why the
+                  warning has to measure the canvas instead. */}
               <p className="text-xs text-muted-foreground">
                 {t(m.contrast, { ratio: accentLabelContrast(accent, canvas) })}
-                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent, canvas) }) : ''}
               </p>
+              {/* Announced, not just shown. It appears and disappears live as
+                  the host drags the colour picker, and it is the only signal
+                  left where the engine used to silently correct the colour. */}
+              {canvasContrast < MIN_ACCENT_CONTRAST ? (
+                <p role="status" aria-live="polite" className="text-xs text-destructive">
+                  {t(m.lowContrast, { ratio: canvasContrast })}
+                </p>
+              ) : null}
             </Field>
             <Field label={m.photoAvatar}>
               <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" m={m} />
@@ -795,8 +812,8 @@ function ProfilePreview({
   avatarUrl: string;
   coverUrl: string;
   accent: string;
-  /** The ground the preview paints on, so the monogram's label is clamped
-   *  against the same canvas the public page clamps against. */
+  /** The ground the preview paints on, so the monogram's label is derived
+   *  against the same canvas the public page derives against. */
   canvas: BrandCanvas;
   eventTypes: EventTypeLite[];
   m: StudioMessages;
@@ -871,7 +888,7 @@ function BookingPreview({
   displayName: string;
   avatarUrl: string;
   accent: string;
-  /** As in `ProfilePreview` — the canvas the label is clamped against. */
+  /** As in `ProfilePreview` — the canvas the label is derived against. */
   canvas: BrandCanvas;
   locale: string;
   m: StudioMessages;

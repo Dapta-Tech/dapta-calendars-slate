@@ -5,10 +5,12 @@ import { CanvasStamp } from '@/components/canvas-stamp';
 
 /**
  * Wraps a public surface with the host's branding — the SAME engine output the
- * studio preview uses (preview == prod). Applies the accent (clamped for the
- * page's canvas) as the page's `--primary`, derives the accent's other two jobs
+ * studio preview uses (preview == prod). Applies the host's accent, unaltered,
+ * as the page's `--primary`, and emits the accent's other two jobs
  * (`--primary-ink` as letters, `--primary-edge` as rim and focus outline) from
- * that same accent, and emits the widget vars (radii/spacing/font) plus
+ * that same accent so neither falls through to the PRODUCT's lime — which is
+ * why they are emitted even though all three are now one colour (ADR 0004's
+ * amendment). Also emits the widget vars (radii/spacing/font) plus
  * brandingClassOf() so the class-driven axes render via the .branded-surface
  * CSS. All 10 axes reach the DOM through this single wrapper.
  *
@@ -44,8 +46,9 @@ export function BrandedShell({
   children: ReactNode;
 }) {
   const axes = (style ?? {}) as Record<string, string>;
-  // The canvas the accent is clamped against and the canvas the page paints on
-  // are ONE fact, read once from the same style object the class axes come from.
+  // The canvas the accent's tokens are derived against and the canvas the page
+  // paints on are ONE fact, read once from the same style object the class axes
+  // come from.
   const canvas = bookingCanvasOf(style);
   const vars = {
     ...brandVars(brandColor ?? DEFAULT_ACCENT, canvas),

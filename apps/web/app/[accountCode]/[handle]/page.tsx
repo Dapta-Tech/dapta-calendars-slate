@@ -82,9 +82,10 @@ export default async function ProfilePage({
     redirect(withSearchParams(`/${code}/${handle}/${defaultSlug}`, query));
   }
   // The style the shell below will render with, derived ONCE. The canvas comes
-  // out of it, and the monogram tile sits inside that shell — so a second,
-  // differently-grounded clamp here would paint a tile that does not match the
-  // accent everything around it resolved to.
+  // out of it, and the monogram tile sits inside that shell, so the two have to
+  // resolve the accent through the same call. `clampAccent` no longer alters
+  // the colour (ADR 0004's amendment) but it still owns the invalid-hex
+  // fallback, which is what an embed's `brand_color` override can hand it.
   const style = mergeEmbedStyle(m.style, styleOverrides);
   const accent = clampAccent(
     accentOverride ?? m.brandColor ?? DEFAULT_ACCENT,

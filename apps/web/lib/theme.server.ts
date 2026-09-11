@@ -102,9 +102,10 @@ async function storedBookingStyle(path: string): Promise<Record<string, unknown>
  *  - a PRODUCT route answers with the host's cookie;
  *  - a PUBLIC route answers with the booking page's OWN `theme` style axis,
  *    which has nothing to do with the cookie, resolved through the same
- *    `bookingCanvasOf` the branding engine clamps the host's accent against.
- *    The ground a page paints on and the ground its accent is made legible
- *    against are one fact, resolved in one module, so they move together.
+ *    `bookingCanvasOf` the branding engine derives the host's accent tokens
+ *    against. The ground a page paints on and the ground its hover, wash and
+ *    contrast readout are computed against are one fact, resolved in one
+ *    module, so they move together.
  *
  * ── WHY THE DOCUMENT RESOLVES THIS AND NOT ONLY THE SHELL (B2's design call) ──
  *

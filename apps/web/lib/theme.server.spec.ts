@@ -66,8 +66,11 @@ describe('resolveDocumentTheme — the product/public boundary (ADR 0004)', () =
     await expect(
       request('/acme/alex-rivera/intro-call', { cookie: 'light', stored: { theme: 'dark' } }),
     ).resolves.toBe('dark');
-    // A page with no stored axis answers the ADR default, never the cookie.
-    await expect(request('/acme/alex-rivera', { cookie: 'dark', stored: {} })).resolves.toBe('light');
+    // A page with no stored axis answers the ADR default, never the cookie. The
+    // default is `dark` since the 2026-09-11 amendment, so the cookie here is
+    // `light` — with both on the same value this assertion would pass for the
+    // wrong reason.
+    await expect(request('/acme/alex-rivera', { cookie: 'light', stored: {} })).resolves.toBe('dark');
   });
 
   it('reads no cookie at all on the public branch', async () => {
@@ -84,7 +87,7 @@ describe('resolveDocumentTheme — the product/public boundary (ADR 0004)', () =
     // The middleware covers every page request, so this should not happen. If it
     // does, the admin quietly ignoring the toggle is visible immediately; the
     // cookie reaching a booking page is not.
-    await expect(request(null, { cookie: 'dark' })).resolves.toBe('light');
+    await expect(request(null, { cookie: 'light' })).resolves.toBe('dark');
     expect(getProfile).not.toHaveBeenCalled();
   });
 });
@@ -135,7 +138,7 @@ describe('resolveDocumentTheme — which paths carry a stored theme', () => {
       '/acme/team/sales/team-demo',
     ]) {
       getProfile.mockClear();
-      await expect(request(path, { cookie: 'dark' })).resolves.toBe('light');
+      await expect(request(path, { cookie: 'light' })).resolves.toBe('dark');
       expect(getProfile, path).not.toHaveBeenCalled();
     }
   });
@@ -145,7 +148,7 @@ describe('resolveDocumentTheme — which paths carry a stored theme', () => {
     // so a segment decoding to `..` would walk out of `/v1/profiles/`.
     for (const path of ['/%2E%2E/alex-rivera', '/acme/%2E%2E', '/a%2Fb/alex-rivera']) {
       getProfile.mockClear();
-      await expect(request(path)).resolves.toBe('light');
+      await expect(request(path)).resolves.toBe('dark');
       expect(getProfile, path).not.toHaveBeenCalled();
     }
   });
@@ -153,8 +156,8 @@ describe('resolveDocumentTheme — which paths carry a stored theme', () => {
   it('survives an API that is down by answering the default, not by throwing', async () => {
     headerStore.path = '/acme/alex-rivera';
     headerStore.query = null;
-    cookieStore.theme = 'dark';
+    cookieStore.theme = 'light';
     getProfile.mockRejectedValue(new Error('API /v1/profiles/acme/alex-rivera failed: 500'));
-    await expect(resolveDocumentTheme()).resolves.toBe('light');
+    await expect(resolveDocumentTheme()).resolves.toBe('dark');
   });
 });

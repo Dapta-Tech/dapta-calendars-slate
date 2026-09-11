@@ -1018,7 +1018,10 @@ export interface BookingMessages {
       tryHandle: string;
       accent: string;
       contrast: string;
-      adjustedNote: string;
+      /** Shown under the accent field when the host's colour falls below the
+       *  3:1 non-text floor against the canvas their page paints on. It never
+       *  blocks a save: ADR 0004's amendment informs, it does not override. */
+      lowContrast: string;
       photoAvatar: string;
       /** Shown under the photo field when it is empty and a connected calendar
        *  account has one — so the host knows where the face on their page comes
@@ -2054,8 +2057,9 @@ export const en: BookingMessages = {
       bio: 'Bio',
       tryHandle: 'Try {handle}',
       accent: 'Accent',
-      contrast: 'Contrast {ratio}:1',
-      adjustedNote: ' · adjusted to {hex} for legibility (AA)',
+      contrast: 'Label contrast {ratio}:1',
+      lowContrast:
+        'Low contrast: {ratio}:1 against your page background. Links and buttons may be hard to read. Your color is used exactly as picked.',
       photoAvatar: 'Photo / avatar',
       photoFromConnectedAccount:
         'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
@@ -3058,8 +3062,9 @@ export const es: BookingMessages = {
       bio: 'Biografía',
       tryHandle: 'Prueba {handle}',
       accent: 'Color de acento',
-      contrast: 'Contraste {ratio}:1',
-      adjustedNote: ' · ajustado a {hex} para mejor legibilidad (AA)',
+      contrast: 'Contraste del texto {ratio}:1',
+      lowContrast:
+        'Contraste bajo: {ratio}:1 sobre el fondo de tu página. Los enlaces y botones pueden ser difíciles de leer. Tu color se usa tal como lo elegiste.',
       photoAvatar: 'Foto / avatar',
       photoFromConnectedAccount:
         'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
