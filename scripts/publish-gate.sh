@@ -7,8 +7,9 @@
 #   3. an internal-token grep — the project-specific denylist the generic
 #      scanners don't know about.
 #
-# Layers 1 & 2 are skipped with a warning if the tools aren't installed locally
-# (CI installs them). Layer 3 always runs — it needs nothing but grep.
+# Layers 1 & 2 warn and skip if the tools aren't installed, so a bare clone can
+# still run the gate. In CI that skip is a FAILURE instead — see
+# PUBLISH_GATE_REQUIRE_SCANNERS below. Layer 3 always runs; it needs only grep.
 #
 # Usage: bash scripts/publish-gate.sh
 set -uo pipefail
@@ -16,6 +17,30 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 FAIL=0
+
+# A scanner that isn't installed means its layer DID NOT RUN. Locally that is a
+# warning, so a bare clone can still run the gate. In CI it is a failure: the
+# whole value of the layer is that it ran, and a silent skip is indistinguishable
+# from a clean scan. CI sets PUBLISH_GATE_REQUIRE_SCANNERS=1 (see
+# .github/workflows/ci.yml) — without this, a broken installer disables a layer
+# and the gate still prints PASSED, which is exactly what happened to gitleaks.
+REQUIRE_SCANNERS="${PUBLISH_GATE_REQUIRE_SCANNERS:-0}"
+missing_scanner() {
+  local what="${1:-scanner}"
+  # Accept the obvious truthy spellings: someone self-hosting this will write
+  # `true` as readily as `1`, and silently taking the WARN path would hand them
+  # the very false sense of coverage this guard exists to remove.
+  # `tr`, not `${var,,}`: that expansion is bash 4+, and macOS still ships 3.2.
+  case "$(printf '%s' "$REQUIRE_SCANNERS" | tr '[:upper:]' '[:lower:]')" in
+    1 | true | yes | on)
+      echo "FAIL: $what is not installed — this layer did not run, and scanners are required here."
+      FAIL=1
+      ;;
+    *)
+      echo "WARN: $what not installed — skipped locally (CI requires it and fails without it)."
+      ;;
+  esac
+}
 
 echo "== publish-gate: internal-token scan =="
 # The denylist: internal hosts, cloud/account markers, internal service names,
@@ -122,7 +147,7 @@ if command -v gitleaks >/dev/null 2>&1; then
   gitleaks detect --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
   gitleaks detect --no-git --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
 else
-  echo "WARN: gitleaks not installed — skipped locally (runs in CI)."
+  missing_scanner gitleaks
 fi
 
 echo
@@ -180,7 +205,7 @@ if command -v trufflehog >/dev/null 2>&1; then
   fi
   rm -f "$TH_JSON" "$TH_ERR"
 else
-  echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
+  missing_scanner trufflehog
 fi
 
 echo
