@@ -8,6 +8,7 @@ import {
   mergeEmbedStyle,
   parseAccentParam,
   parseEmbedParams,
+  searchParamsFromQuery,
   withSearchParams,
 } from './embed';
 
@@ -56,7 +57,7 @@ describe('parseEmbedParams', () => {
     expect(r).toEqual({ embed: false, brandColor: null, style: {} });
   });
 
-  it('reads the accent and all nine axes under embed=1', () => {
+  it('reads the accent and all ten axes under embed=1', () => {
     const r = parseEmbedParams({
       embed: '1',
       brand_color: '%231a73e8'.replace('%23', '#'),
@@ -69,6 +70,7 @@ describe('parseEmbedParams', () => {
       slot_layout: 'list',
       day_group: 'boxed',
       slot_select: 'solid',
+      theme: 'dark',
     });
     expect(r.embed).toBe(true);
     expect(r.brandColor).toBe('#1a73e8');
@@ -82,6 +84,7 @@ describe('parseEmbedParams', () => {
       slotLayout: 'list',
       dayGroup: 'boxed',
       slotSelect: 'solid',
+      theme: 'dark',
     });
   });
 
@@ -108,8 +111,53 @@ describe('parseEmbedParams', () => {
     expect(r.style).toEqual({});
   });
 
-  it('does not ship the tenth axis — theme belongs to B2', () => {
-    expect(parseEmbedParams({ embed: '1', theme: 'dark' }).style).toEqual({});
+  // The tenth axis (B2, #109). It is the one that changes the page's GROUND, so
+  // it gets its own cases rather than only riding the all-axes sweep above: a
+  // host pasting a booking page into a dark site is the reason it is overridable
+  // at all, and a typo there must cost the canvas and nothing else.
+  it('takes the canvas override, on both grounds', () => {
+    expect(parseEmbedParams({ embed: '1', theme: 'dark' }).style).toEqual({ theme: 'dark' });
+    expect(parseEmbedParams({ embed: '1', theme: 'light' }).style).toEqual({ theme: 'light' });
+  });
+
+  it('drops a canvas it does not recognise and keeps every other axis', () => {
+    const r = parseEmbedParams({ embed: '1', theme: 'nonsense', corners: 'round', font: 'serif' });
+    expect(r.style).toEqual({ corners: 'round', font: 'serif' });
+  });
+
+  it('ignores the canvas override entirely outside embed mode', () => {
+    expect(parseEmbedParams({ theme: 'dark' }).style).toEqual({});
+  });
+});
+
+/**
+ * The two callers that are NOT a route — the root layout, which gets the query
+ * as a middleware header, and `ThemeStamp`, which reads `location.search` —
+ * rebuild `searchParams` through this and then use the SAME `parseEmbedParams`.
+ * A drift here is a document stamped on one canvas around a shell painted on
+ * the other, which is the bug the single parser exists to prevent.
+ */
+describe('searchParamsFromQuery', () => {
+  it('round-trips a query into the shape a route is handed', () => {
+    expect(searchParamsFromQuery('?embed=1&theme=dark')).toEqual({ embed: '1', theme: 'dark' });
+    expect(searchParamsFromQuery('embed=1&theme=dark')).toEqual({ embed: '1', theme: 'dark' });
+  });
+
+  it('is empty for a request that carries no query at all', () => {
+    for (const q of ['', '?', null, undefined]) expect(searchParamsFromQuery(q)).toEqual({});
+  });
+
+  it('keeps a repeated key in order, leaving first-value-wins to the parser', () => {
+    expect(searchParamsFromQuery('?theme=dark&theme=light')).toEqual({ theme: ['dark', 'light'] });
+    expect(parseEmbedParams(searchParamsFromQuery('?embed=1&theme=dark&theme=light')).style).toEqual({
+      theme: 'dark',
+    });
+  });
+
+  it('decodes, so a token beside the override survives it', () => {
+    const params = searchParamsFromQuery('?token=a%2Bb%2Fc&embed=1&theme=dark');
+    expect(params.token).toBe('a+b/c');
+    expect(parseEmbedParams(params).style).toEqual({ theme: 'dark' });
   });
 });
 
@@ -222,15 +270,10 @@ describe('embedSrcPath / embedSnippet', () => {
  */
 describe('EMBED_STYLE_PARAMS covers the appearance half of the contract', () => {
   const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio'];
-  // `theme` arrives with B2 (#109). Listed so that unit deletes this line
-  // rather than discovering the assertion.
-  const NOT_YET_SHIPPED: string[] = ['theme'];
 
   it('maps every appearance axis and no behaviour key', () => {
     const inContract = Object.keys(bookingPageStyleSchema.shape);
-    const expected = inContract
-      .filter((k) => !BEHAVIOUR_KEYS.includes(k) && !NOT_YET_SHIPPED.includes(k))
-      .sort();
+    const expected = inContract.filter((k) => !BEHAVIOUR_KEYS.includes(k)).sort();
     expect(Object.values(EMBED_STYLE_PARAMS).slice().sort()).toEqual(expected);
     for (const key of BEHAVIOUR_KEYS) {
       expect(Object.values(EMBED_STYLE_PARAMS)).not.toContain(key);

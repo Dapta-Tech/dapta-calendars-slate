@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { DEFAULT_BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { PRODUCT_THEME_DEFAULT, THEME_COOKIE, isProductPath, parseTheme, type Theme } from '@/lib/theme';
 
 /**
@@ -17,10 +17,26 @@ import { PRODUCT_THEME_DEFAULT, THEME_COOKIE, isProductPath, parseTheme, type Th
  * OSS landing links straight at the demo booking page, so a host on light could
  * reach a light booking page without the studio ever saying so.
  *
- * This closes the class rather than that one link, and it answers with the same
- * rule the server does: the route decides. It re-derives on every pathname
- * change and only writes when the answer differs, so it is inert on a hard load
- * (where the server already got it right) and on navigation inside one surface.
+ * ── WHAT THIS OWNS, AND WHAT IT DELIBERATELY DOES NOT ──────────────────────
+ *
+ * It owns ONE question: is the host's product cookie on `<html>` when it has no
+ * business being there? So it writes in exactly two situations — a product route
+ * (answer with the cookie) and the CROSSING from a product route onto a public
+ * one (answer with the ADR default, immediately, so the cookie is gone in the
+ * same commit the `<Link>` lands).
+ *
+ * It does NOT answer with the booking page's own canvas, and that is the fix for
+ * a bug this file had: on a soft navigation the effect can fire in a commit
+ * where the destination is a Suspense fallback — every public route has a
+ * `loading.tsx` — so the new page's shell is not in the DOM to read a canvas
+ * off, `usePathname` has ALREADY changed, and the effect never runs again. Any
+ * guess it made there would be a wrong answer written over a correct one, not a
+ * fallback. `CanvasStamp`, rendered by each public route with the canvas the
+ * SERVER resolved, is what answers that question; it cannot run before its page
+ * exists, so it is never early and never wrong.
+ *
+ * Public-to-public navigation is therefore left alone entirely: no cookie can
+ * have leaked, and the destination's own `CanvasStamp` is already on its way.
  *
  * A LAYOUT effect, not a passive one: it must land in the same commit as the new
  * page, before the browser paints, or crossing into a booking page shows a frame
@@ -49,14 +65,29 @@ function cookieTheme(): Theme | null {
 
 export function ThemeStamp() {
   const pathname = usePathname();
+  // The route this effect last answered for. `null` on the first run, which is a
+  // HARD load — the server already stamped that response correctly, so there is
+  // nothing to correct and the public branch stays out of the way.
+  const previous = useRef<string | null>(null);
 
   useBeforePaint(() => {
-    // The public branch reads no cookie at all — the whole point.
-    const want: Theme = isProductPath(pathname)
-      ? (cookieTheme() ?? PRODUCT_THEME_DEFAULT)
-      : BOOKING_CANVAS;
-    if (document.documentElement.dataset.theme !== want) {
-      document.documentElement.dataset.theme = want;
+    const from = previous.current;
+    previous.current = pathname;
+
+    if (isProductPath(pathname)) {
+      const want = cookieTheme() ?? PRODUCT_THEME_DEFAULT;
+      if (document.documentElement.dataset.theme !== want) {
+        document.documentElement.dataset.theme = want;
+      }
+      return;
+    }
+
+    // A public route. The only thing to do here is evict a product theme that
+    // just rode in on a `<Link>` — the page's own canvas is `CanvasStamp`'s to
+    // answer. The public branch reads no cookie at all, which is the point.
+    if (from === null || !isProductPath(from)) return;
+    if (document.documentElement.dataset.theme !== DEFAULT_BOOKING_CANVAS) {
+      document.documentElement.dataset.theme = DEFAULT_BOOKING_CANVAS;
     }
   }, [pathname]);
 

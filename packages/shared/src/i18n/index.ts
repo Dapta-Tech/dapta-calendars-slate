@@ -1027,6 +1027,12 @@ export interface BookingMessages {
       axisSlotLayout: string;
       axisDayGroup: string;
       axisSlotSelect: string;
+      /** The booking page's tenth axis (ADR 0004, B2): the GROUND the other
+       *  nine are drawn on. Its two values are translated — unlike every other
+       *  axis, they are ordinary words rather than design vocabulary. */
+      axisTheme: string;
+      themeLight: string;
+      themeDark: string;
       show: string;
       hide: string;
       noEvents: string;
@@ -2051,6 +2057,9 @@ export const en: BookingMessages = {
       axisSlotLayout: 'Slot layout',
       axisDayGroup: 'Day group',
       axisSlotSelect: 'Slot select',
+      axisTheme: 'Theme',
+      themeLight: 'Light',
+      themeDark: 'Dark',
       show: 'Show',
       hide: 'Hide',
       noEvents: 'No events yet.',
@@ -3047,6 +3056,9 @@ export const es: BookingMessages = {
       axisSlotLayout: 'Disposición de horarios',
       axisDayGroup: 'Agrupación por día',
       axisSlotSelect: 'Selección de horario',
+      axisTheme: 'Tema',
+      themeLight: 'Claro',
+      themeDark: 'Oscuro',
       show: 'Mostrar',
       hide: 'Ocultar',
       noEvents: 'Aún no hay eventos.',

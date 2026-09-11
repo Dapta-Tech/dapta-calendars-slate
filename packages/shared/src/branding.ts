@@ -34,6 +34,11 @@ export interface PublicBranding {
   slotLayout: BookingSlotLayout;
   dayGroup: BookingDayGroup;
   slotSelect: BookingSlotSelect;
+  /** The GROUND the other nine axes are drawn on (ADR 0004). Carried here so a
+   *  consumer of this type sees all ten axes; `ThemeAxes` below deliberately
+   *  stays at nine, because a studio PRESET describes a silhouette and must not
+   *  move a host's page between canvases. */
+  theme: BrandCanvas;
 }
 
 /** DS primary lime — the default accent when a host hasn't chosen one. */
@@ -359,6 +364,10 @@ export const DEFAULT_FONT: BookingFont = 'sans';
 export const DEFAULT_SLOT_LAYOUT: BookingSlotLayout = 'grid';
 export const DEFAULT_DAY_GROUP: BookingDayGroup = 'flat';
 export const DEFAULT_SLOT_SELECT: BookingSlotSelect = 'soft';
+/** Paper, per ADR 0004 — and the reason this is a named constant rather than a
+ *  literal is that an absent axis has to mean the same thing in the contract's
+ *  `.default()`, in the web app's resolver, and here. */
+export const DEFAULT_BOOKING_THEME: BrandCanvas = 'light';
 
 const CORNER_RADII: Record<BookingCorners, { card: string; sm: string }> = {
   sharp: { card: '4px', sm: '3px' },
@@ -466,6 +475,7 @@ export function defaultBranding(displayName: string, avatarUrl: string | null = 
     slotLayout: DEFAULT_SLOT_LAYOUT,
     dayGroup: DEFAULT_DAY_GROUP,
     slotSelect: DEFAULT_SLOT_SELECT,
+    theme: DEFAULT_BOOKING_THEME,
   };
 }
 

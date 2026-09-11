@@ -18,10 +18,9 @@ import type { BrandCanvas } from '@slate/shared';
  *
  * Aliased to the branding engine's `BrandCanvas` rather than re-declared as an
  * identical union: the document's theme and the ground a host's accent is
- * clamped against are the same fact, `resolveDocumentTheme` already returns
- * `BOOKING_CANVAS` for a public route, and B2 makes the coupling explicit when
- * the canvas becomes a stored style axis. A type-only import, so nothing from
- * the package reaches the middleware bundle.
+ * clamped against are the same fact, and since B2 a public route's answer IS
+ * the stored `theme` style axis rather than a constant. A type-only import, so
+ * nothing from the package reaches the middleware bundle.
  */
 export type Theme = BrandCanvas;
 
@@ -55,6 +54,22 @@ export const PRODUCT_THEME_DEFAULT: Theme = 'dark';
  * rather than trusted.
  */
 export const PATH_HEADER = 'x-slate-path';
+
+/**
+ * Request header carrying the page request's QUERY STRING, `?` included.
+ *
+ * The same problem as `PATH_HEADER`, one step further out: a layout is handed
+ * `params` and never `searchParams`, and B2's embed override (`?embed=1&theme=…`)
+ * is a query parameter that changes the ground the document paints on. Without
+ * it an embed pasted into a dark site would stamp `<html>` with the host's
+ * stored canvas while the shell inside it paints the overridden one, and the
+ * iframe's 700px pre-JS floor would show the difference as a band of the wrong
+ * colour under a short page.
+ *
+ * Set on the forwarded REQUEST headers like the path, so it never reaches the
+ * browser and an inbound header of this name is overwritten rather than trusted.
+ */
+export const QUERY_HEADER = 'x-slate-query';
 
 /** A cookie value is a string from the client: anything unrecognised is not a
  *  theme, and must not be stamped into an attribute. */

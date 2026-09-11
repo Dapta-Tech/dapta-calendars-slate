@@ -4,7 +4,7 @@ import { notFound, permanentRedirect, redirect } from 'next/navigation';
 import { DEFAULT_ACCENT, clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
-import { BOOKING_CANVAS } from '@/lib/booking-canvas';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
@@ -80,10 +80,15 @@ export default async function ProfilePage({
     // full-chrome event page inside the frame.
     redirect(withSearchParams(`/${code}/${handle}/${defaultSlug}`, query));
   }
-  // Same canvas the shell below clamps against — the monogram tile sits inside
-  // it, so a second, differently-grounded clamp here would paint a tile that
-  // does not match the accent everything around it resolved to.
-  const accent = clampAccent(accentOverride ?? m.brandColor ?? DEFAULT_ACCENT, BOOKING_CANVAS);
+  // The style the shell below will render with, derived ONCE. The canvas comes
+  // out of it, and the monogram tile sits inside that shell — so a second,
+  // differently-grounded clamp here would paint a tile that does not match the
+  // accent everything around it resolved to.
+  const style = mergeEmbedStyle(m.style, styleOverrides);
+  const accent = clampAccent(
+    accentOverride ?? m.brandColor ?? DEFAULT_ACCENT,
+    bookingCanvasOf(style),
+  );
   const headerAvatar = resolveAvatarUrl(m.avatarUrl, m.connectedAvatarUrl);
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
@@ -99,7 +104,7 @@ export default async function ProfilePage({
   return (
     <BrandedShell
       brandColor={accentOverride ?? m.brandColor}
-      style={mergeEmbedStyle(m.style, styleOverrides)}
+      style={style}
       className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto w-full max-w-2xl px-6 py-12'}>

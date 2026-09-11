@@ -23,16 +23,18 @@ export const EMBED_PARAM = 'embed';
 export const EMBED_ROOT_CLASS = 'dc-embed';
 
 /**
- * The nine appearance axes of `bookingPageStyleSchema`, as the loose
- * snake_case names a snippet carries, mapped to the camelCase keys the style
- * object uses.
+ * The ten appearance axes of `bookingPageStyleSchema`, as the loose snake_case
+ * names a snippet carries, mapped to the camelCase keys the style object uses.
  *
- * Nine, not twelve: `landingEnabled`, `defaultEventSlug` and `bio` live in the
+ * Ten, not thirteen: `landingEnabled`, `defaultEventSlug` and `bio` live in the
  * same schema but change BEHAVIOUR and CONTENT, not appearance, and a third
  * party who can restyle an embed must not also be able to redirect it or
  * rewrite the host's bio (#67).
  *
- * Nine, not ten: the `theme` axis arrives with B2 (#109).
+ * `theme` is the tenth (B2, #109) and it is the one axis that changes the
+ * page's GROUND rather than a shape on it, which is exactly why an embed gets
+ * to set it: a host pasting a booking page into their own dark site needs it to
+ * stop being a sheet of paper in the middle of their layout.
  */
 export const EMBED_STYLE_PARAMS = {
   template: 'template',
@@ -44,6 +46,7 @@ export const EMBED_STYLE_PARAMS = {
   slot_layout: 'slotLayout',
   day_group: 'dayGroup',
   slot_select: 'slotSelect',
+  theme: 'theme',
 } as const;
 
 export type EmbedStyleParam = keyof typeof EMBED_STYLE_PARAMS;
@@ -73,6 +76,31 @@ export interface EmbedMode {
 
 /** The loose shape Next hands a page as `searchParams`. */
 export type RawSearchParams = Record<string, string | string[] | undefined>;
+
+/**
+ * A raw query string back into the shape a page receives as `searchParams`.
+ *
+ * The routes are handed `searchParams` and read the mode straight off it. The
+ * two places that are NOT a route — the root layout (which sees the query as a
+ * middleware header) and `ThemeStamp` (which sees `location.search`) — have to
+ * answer the same question about the same request, and they do it by rebuilding
+ * this shape and calling `parseEmbedParams`. One parser, three callers, rather
+ * than a second reading of the contract that can drift from the first.
+ *
+ * Repeats are kept in order rather than collapsed, because `parseEmbedParams`
+ * is the thing that decides first-value-wins.
+ */
+export function searchParamsFromQuery(query: string | null | undefined): RawSearchParams {
+  const out: RawSearchParams = {};
+  if (!query) return out;
+  for (const [key, value] of new URLSearchParams(query)) {
+    const prev = out[key];
+    if (prev === undefined) out[key] = value;
+    else if (Array.isArray(prev)) prev.push(value);
+    else out[key] = [prev, value];
+  }
+  return out;
+}
 
 /** First value wins when a key repeats — a snippet never writes two. */
 function one(value: string | string[] | undefined): string | undefined {

@@ -1,27 +1,40 @@
-import type { BrandCanvas } from '@slate/shared';
+import { DEFAULT_BOOKING_THEME, type BrandCanvas } from '@slate/shared';
 
 /**
- * The ground every branded surface currently paints on.
+ * The ground a booking page paints on — ADR 0004's tenth style axis, resolved.
  *
- * ADR 0004 gives the booking page a tenth style axis, `theme: 'dark' | 'light'`,
- * defaulting to `light` — set by the host in the studio, overridable per-embed,
- * and never inherited from the host's own admin preference. That axis is slice
- * B2. Until it lands there is exactly one canvas, and it is the dark one the
- * page has always rendered on, so no live page moves on the day B1 ships.
+ * `theme: 'light' | 'dark'` is stored on the page's style object, set by the
+ * host in the studio, overridable per-embed by URL parameter, and NEVER
+ * influenced by the host's own admin theme cookie. There is no `auto`.
  *
- * It lives in one module rather than as a literal at each call site for the
- * reason the ADR gives: the studio renders a live preview and that preview IS
- * production. The public shell and the preview reading the same constant is
- * what makes them unable to disagree — B2 replaces this with a lookup on the
- * stored axis, in one place, and both surfaces move together.
- *
- * NOTE FOR B2 — the accent tokens are not the whole job. The studio's preview
- * container emits only the branding vars and inherits `--background`, `--card`
- * and `--foreground` from the admin shell, which the root layout pins to dark.
- * That is why one canvas is enough today. The moment a host can put their page
- * on the light canvas, the preview has to stamp that canvas's `data-theme` and
- * surface tokens as well — `--accent-wash` composites against `--background`,
- * so otherwise the preview's wash and card grounds diverge from the real page's
- * while the accent itself matches, which is the harder version of the same bug.
+ * Everything lives in one module because the studio renders a live preview and
+ * that preview IS production. The public shell, the preview and the document
+ * stamp reading the same function is what makes them unable to disagree — a
+ * second copy of `style.theme ?? 'light'` at a call site is the whole class of
+ * bug this file exists to prevent.
  */
-export const BOOKING_CANVAS: BrandCanvas = 'dark';
+
+/**
+ * What an ABSENT axis means, and it means paper.
+ *
+ * `brandingSchema.style` is `bookingPageStyleSchema.partial()`, so every config
+ * saved before B2 carries no `theme` key at all. Those pages therefore move
+ * from dark to light the day this ships. Per ADR 0004 that is the intended
+ * outcome rather than a regression — but it is a visible change to live pages,
+ * so it ships as one change and is announced rather than discovered.
+ */
+export const DEFAULT_BOOKING_CANVAS: BrandCanvas = DEFAULT_BOOKING_THEME;
+
+/**
+ * The canvas a stored style object asks for.
+ *
+ * Deliberately tolerant of `unknown`: the style column is `jsonb`, the web app
+ * reads it as an opaque record off the public API, and an unrecognised value
+ * has to resolve to the default rather than throw on the invitee's page. The
+ * enum itself is validated at the two write boundaries that matter — the API's
+ * `brandingSchema.parse` on save, and `parseEmbedParams` on a URL override.
+ */
+export function bookingCanvasOf(style: Record<string, unknown> | null | undefined): BrandCanvas {
+  const theme = (style ?? {}).theme;
+  return theme === 'dark' || theme === 'light' ? theme : DEFAULT_BOOKING_CANVAS;
+}

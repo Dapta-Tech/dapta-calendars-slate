@@ -4,7 +4,9 @@ import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, t } from '@slate/shared';
 import { getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
+import { DEFAULT_BOOKING_CANVAS } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
+import { CanvasStamp } from '@/components/canvas-stamp';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import {
@@ -123,6 +125,14 @@ export default async function TeamPage({
     // the inconsistency an invitee actually notices. It renders no
     // `BrandedShell` outside the embed, so the floor needs an element of its
     // own; inside the embed it keeps the measured shell untouched.
-    <div className="bp-viewport">{body}</div>
+    //
+    // It declares its canvas here for the same reason `/manage/{uid}` does: with
+    // no shell there is nothing else to carry the answer up to `<html>` on a
+    // soft navigation. A team holds no stored branding, so the answer is the
+    // ADR default — and in embed mode the branch above gets it from the shell.
+    <div className="bp-viewport">
+      <CanvasStamp canvas={DEFAULT_BOOKING_CANVAS} />
+      {body}
+    </div>
   );
 }
