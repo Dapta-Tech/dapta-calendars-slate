@@ -296,6 +296,9 @@ export const slotReservation = pgTable('slot_reservation', {
   memberId: text('member_id').notNull(),
   slotStartMs: bigint('slot_start_ms', { mode: 'number' }).notNull(),
   slotEndMs: bigint('slot_end_ms', { mode: 'number' }).notNull(),
+  // The handle a caller holds a slot by. Every read and delete of a hold keys on
+  // it, so it is indexed by `slot_reservation_uid_idx` (migration
+  // …_slot_reservation_uid_index). Not unique: nothing asserts uid uniqueness today.
   uid: text('uid').notNull(),
   releaseAtMs: bigint('release_at_ms', { mode: 'number' }).notNull(),
   isSeat: integer('is_seat').notNull().default(0),

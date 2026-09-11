@@ -1,0 +1,16 @@
+-- Index `slot_reservation.uid`. Every lookup of a hold keys on the uid — the
+-- release delete (`releaseSlot`), the hold validation read, and the hold
+-- consumption deletes on the booking path — and the table carried no index on
+-- that column, so each one was a sequential scan.
+--
+-- The scan is pre-existing; what changed is that one of those paths is now
+-- reachable anonymously, at rate-limiter speed, from POST /v1/reservations/release.
+-- This is a cost multiplier rather than a correctness problem: the table stays
+-- small (holds are capped per host member, and `reserveSlot` sweeps expired rows
+-- on every call), but on a deployment with many active hosts it is still a scan
+-- per release.
+--
+-- Deliberately NOT unique. `uid` is not asserted unique today, and making it so
+-- would be a non-additive decision about reservation semantics rather than the
+-- index this is.
+CREATE INDEX IF NOT EXISTS slot_reservation_uid_idx ON slot_reservation (uid);
