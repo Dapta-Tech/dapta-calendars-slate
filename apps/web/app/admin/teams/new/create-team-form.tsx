@@ -7,18 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FormHeader } from '@/components/ui/page-header';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { createTeamFullAction } from '../actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
 
-/** Read an image File as a size/type-validated data URL (offline-safe, no host). */
-function readImageFile(file: File, onOk: (dataUrl: string) => void, onErr: (msg: string) => void, m: TeamsMessages) {
-  if (!file.type.startsWith('image/')) return onErr(m.imageInvalidType);
-  if (file.size > 1_000_000) return onErr(m.imageTooLarge);
-  const reader = new FileReader();
-  reader.onload = () => onOk(String(reader.result));
-  reader.onerror = () => onErr(m.imageReadError);
-  reader.readAsDataURL(file);
+/** The shared reader's codes, in this form's own words. */
+function imageErrText(code: ImageErrorCode, m: TeamsMessages): string {
+  if (code === 'invalid') return m.imageInvalidType;
+  if (code === 'tooLarge') return m.imageTooLarge;
+  if (code === 'cannotShrink') return m.imageCannotShrink;
+  return m.imageReadError;
 }
 
 export function CreateTeamForm({
@@ -47,6 +46,8 @@ export function CreateTeamForm({
   const [timeZone, setTimeZone] = useState(defaultTimeZone);
   const [err, setErr] = useState<string | null>(null);
   const [imgErr, setImgErr] = useState<string | null>(null);
+  // A 25MB decode is not instant, so the control says so rather than looking dead.
+  const [imgBusy, setImgBusy] = useState(false);
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -143,16 +144,31 @@ export function CreateTeamForm({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => {
+            disabled={imgBusy}
+            onChange={async (e) => {
               const f = e.target.files?.[0];
-              setImgErr(null);
-              if (f) readImageFile(f, setLogoUrl, setImgErr, m);
               e.target.value = '';
+              setImgErr(null);
+              if (!f) return;
+              setImgBusy(true);
+              try {
+                const r = await readImageFile(f, 'logo');
+                if (r.ok) setLogoUrl(r.dataUrl);
+                else setImgErr(imageErrText(r.code, m));
+              } finally {
+                setImgBusy(false);
+              }
             }}
           />
-          <Button variant="outline" size="lg" onClick={() => fileRef.current?.click()}>
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={imgBusy}
+            aria-busy={imgBusy}
+            onClick={() => fileRef.current?.click()}
+          >
             <i aria-hidden className="pi pi-upload" style={{ fontSize: 13 }} />
-            {m.uploadImage}
+            {imgBusy ? m.imageWorking : m.uploadImage}
           </Button>
           {logoUrl ? (
             <Button

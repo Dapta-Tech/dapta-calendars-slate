@@ -506,6 +506,7 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 | Booking confirmations never arrive | Default `EMAIL_PROVIDER=log-only` only logs — configure `smtp` or `http`. |
 | `CALENDAR_PROVIDER=external` fails loud at boot | No backend configured — set `CALENDAR_API_BASE_URL` + `CALENDAR_API_TOKEN`, or `CALENDAR_BACKEND_MODULE`, or use `disabled`. |
 | Browser requests blocked by CORS | Add the embedding origin(s) to `CORS_ORIGINS`. |
+| Saving a booking page says "Too large to save" | A host's avatar and cover are stored inline, so that save can reach ~3MB. If the photo is not itself enormous, the refusal is usually your reverse proxy rather than the app — nginx defaults to `client_max_body_size 1m`; raise it to at least `4m` on both the web and API upstreams. |
 
 ## See also
 

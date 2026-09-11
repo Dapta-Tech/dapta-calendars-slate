@@ -662,6 +662,11 @@ export interface BookingMessages {
       clearImage: string;
       imageTooLarge: string;
       imageInvalidType: string;
+      /** Label while a picked photo is being decoded and downscaled. */
+      imageWorking: string;
+      /** Opened fine, but nothing storable came out — a vector too big to keep
+       *  verbatim. Never names the 25MB input cap, which is not the problem. */
+      imageCannotShrink: string;
       creating: string;
       backToTeamsList: string;
       imageReadError: string;
@@ -999,6 +1004,9 @@ export interface BookingMessages {
       save: string;
       saving: string;
       saveFailed: string;
+      /** The save was refused outright for size — an image already stored under
+       *  the old cap is the only thing big enough to do it. */
+      saveTooLarge: string;
       profile: string;
       brand: string;
       appearance: string;
@@ -1072,6 +1080,12 @@ export interface BookingMessages {
       orPasteUrl: string;
       imageInvalid: string;
       imageTooLarge: string;
+      /** Label while a picked photo is being decoded and downscaled. */
+      imageWorking: string;
+      /** Opened fine, but nothing storable came out (see the teams key). */
+      imageCannotShrink: string;
+      /** What happens to the picked file — resized, and a GIF loses its motion. */
+      imageHelp: string;
       couldNotRead: string;
       introCall: string;
       minSuffix: string;
@@ -1701,15 +1715,17 @@ export const en: BookingMessages = {
       uploadImage: 'Upload image',
       orPasteUrl: '…or paste an image URL',
       clearImage: 'Clear',
-      imageTooLarge: 'Image must be 1MB or smaller.',
+      imageTooLarge: 'That image is too large to open. Please choose one under 25MB.',
       imageInvalidType: 'Please choose an image file.',
+      imageWorking: 'Resizing…',
+      imageCannotShrink: 'That image can’t be made small enough to store. Please try a different one.',
       creating: 'Creating…',
       backToTeamsList: 'Teams',
       imageReadError: 'Could not read that file.',
       nameHelp: 'Shown at the top of the team’s public booking page.',
       slugHelp: 'Used in the public URL. Lowercase letters, numbers and dashes.',
       bioHelp: 'A short line under the team name on the public page.',
-      logoHelp: 'Square image works best. Max 1MB.',
+      logoHelp: 'Square image works best. Large photos are resized for you; an animated GIF keeps only its first frame.',
     },
     members: {
       title: 'Members',
@@ -2040,6 +2056,7 @@ export const en: BookingMessages = {
       save: 'Save',
       saving: 'Saving…',
       saveFailed: 'Save failed.',
+      saveTooLarge: 'Too large to save. Re-upload your photo or cover and try again.',
       profile: 'Profile',
       brand: 'Brand',
       appearance: 'Appearance',
@@ -2104,7 +2121,10 @@ export const en: BookingMessages = {
       clear: 'Clear',
       orPasteUrl: '…or paste an image URL',
       imageInvalid: 'Please choose an image file.',
-      imageTooLarge: 'Image must be under 1 MB.',
+      imageTooLarge: 'That image is too large to open. Please choose one under 25MB.',
+      imageWorking: 'Resizing…',
+      imageCannotShrink: 'That image can’t be made small enough to store. Please try a different one.',
+      imageHelp: 'Large photos are resized for you; an animated GIF keeps only its first frame.',
       couldNotRead: 'Could not read that file.',
       introCall: 'Intro Call',
       minSuffix: 'min',
@@ -2706,15 +2726,17 @@ export const es: BookingMessages = {
       uploadImage: 'Subir imagen',
       orPasteUrl: '…o pega una URL de imagen',
       clearImage: 'Quitar',
-      imageTooLarge: 'La imagen debe pesar 1MB o menos.',
+      imageTooLarge: 'Esa imagen es demasiado grande para abrirse. Elige una de menos de 25MB.',
       imageInvalidType: 'Elige un archivo de imagen.',
+      imageWorking: 'Redimensionando…',
+      imageCannotShrink: 'No se puede reducir esa imagen lo suficiente para guardarla. Prueba con otra.',
       creating: 'Creando…',
       backToTeamsList: 'Equipos',
       imageReadError: 'No se pudo leer el archivo.',
       nameHelp: 'Se muestra en la parte superior de la página pública del equipo.',
       slugHelp: 'Se usa en la URL pública. Minúsculas, números y guiones.',
       bioHelp: 'Una línea breve bajo el nombre del equipo en la página pública.',
-      logoHelp: 'Una imagen cuadrada funciona mejor. Máx. 1MB.',
+      logoHelp: 'Una imagen cuadrada funciona mejor. Las fotos grandes se redimensionan automáticamente; de un GIF animado solo se conserva el primer fotograma.',
     },
     members: {
       title: 'Miembros',
@@ -3045,6 +3067,7 @@ export const es: BookingMessages = {
       save: 'Guardar',
       saving: 'Guardando…',
       saveFailed: 'Error al guardar.',
+      saveTooLarge: 'Demasiado grande para guardar. Vuelve a subir tu foto o portada e inténtalo de nuevo.',
       profile: 'Perfil',
       brand: 'Marca',
       appearance: 'Apariencia',
@@ -3109,7 +3132,11 @@ export const es: BookingMessages = {
       clear: 'Quitar',
       orPasteUrl: '…o pega una URL de imagen',
       imageInvalid: 'Elige un archivo de imagen.',
-      imageTooLarge: 'La imagen debe pesar menos de 1 MB.',
+      imageTooLarge: 'Esa imagen es demasiado grande para abrirse. Elige una de menos de 25MB.',
+      imageWorking: 'Redimensionando…',
+      imageCannotShrink: 'No se puede reducir esa imagen lo suficiente para guardarla. Prueba con otra.',
+      imageHelp:
+        'Las fotos grandes se redimensionan automáticamente; de un GIF animado solo se conserva el primer fotograma.',
       couldNotRead: 'No se pudo leer el archivo.',
       introCall: 'Llamada de introducción',
       minSuffix: 'min',
