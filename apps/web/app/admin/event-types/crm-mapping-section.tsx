@@ -134,7 +134,7 @@ export function CrmMappingSection({
   const atCap = mappings.length >= MAX_CRM_MAPPINGS_PER_EVENT;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-field">
       <span className="text-sm font-semibold text-muted-foreground">{m.sectionTitle}</span>
       <p className="max-w-prose text-xs text-muted-foreground">
         {m.sectionHint.replace('{provider}', provider)}
@@ -142,13 +142,13 @@ export function CrmMappingSection({
 
       {/* Identity, shown rather than merely absent: the exception to the
           overwrite rule has to be visible for the rule to make sense (ADR 0005). */}
-      <div className="flex flex-col gap-1.5 rounded-md border border-dashed border-border bg-background/40 p-3">
+      <div className="flex flex-col gap-inline rounded-md border border-dashed border-border bg-background/40 p-field">
         <span className="text-xs font-medium text-muted-foreground">{m.identityTitle}</span>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-inline">
           {[m.identityEmail, m.identityFirstName, m.identityLastName].map((label) => (
             <span
               key={label}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground"
+              className="inline-flex items-center gap-inline rounded-md border border-border px-inline py-tight text-xs text-muted-foreground"
             >
               <LockIcon />
               {label}
@@ -159,7 +159,7 @@ export function CrmMappingSection({
       </div>
 
       {!catalog.connected ? (
-        <div className="flex flex-col gap-1.5 rounded-md border border-dashed border-border bg-background/60 p-3">
+        <div className="flex flex-col gap-inline rounded-md border border-dashed border-border bg-background/60 p-field">
           <span className="text-sm text-muted-foreground">{m.notConnectedTitle}</span>
           <p className="text-xs text-muted-foreground">
             {m.notConnectedBody}{' '}
@@ -186,7 +186,7 @@ export function CrmMappingSection({
           {mappings.length === 0 ? (
             <p className="text-xs text-muted-foreground">{m.noMappings}</p>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-inline">
               {mappings.map((row, i) => (
                 <MappingRow
                   key={`${crmSourceKey(row.source)}-${i}`}
@@ -208,7 +208,7 @@ export function CrmMappingSection({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-field">
             <button
               type="button"
               disabled={atCap || sourceGroups.every((g) => g.options.length === 0)}
@@ -218,7 +218,7 @@ export function CrmMappingSection({
                   .find((o) => !takenSources.has(o.key));
                 if (next) onChange([...mappings, { source: next.source, properties: [] }]);
               }}
-              className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+              className="rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
             >
               {m.addMapping}
             </button>
@@ -226,7 +226,7 @@ export function CrmMappingSection({
               type="button"
               onClick={suggest}
               disabled={properties.length === 0 || atCap}
-              className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+              className="rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
             >
               {m.suggest}
             </button>
@@ -234,7 +234,7 @@ export function CrmMappingSection({
               type="button"
               onClick={refresh}
               disabled={refreshing}
-              className="rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               {refreshing ? m.refreshing : m.refresh}
             </button>
@@ -317,8 +317,8 @@ function MappingRow({
   const targets = row.properties.length > 0 ? row.properties : [''];
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-card px-3 py-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline">
+      <div className="flex flex-wrap items-center gap-inline">
         <div className="min-w-[12rem] flex-1">
           <Select
             value={sourceKey}
@@ -336,9 +336,9 @@ function MappingRow({
         <span aria-hidden className="text-xs text-muted-foreground">
           &rsaquo;
         </span>
-        <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+        <div className="flex min-w-[12rem] flex-1 flex-col gap-inline">
           {targets.map((target, t) => (
-            <div key={`${target}-${t}`} className="flex flex-col gap-0.5">
+            <div key={`${target}-${t}`} className="flex flex-col gap-tight">
               <Select
                 value={target}
                 onChange={(value) => {
@@ -425,7 +425,7 @@ function EnumerationDiffLine({
   if (lines.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-tight">
       {lines.map(({ property, diff }) => {
         const total = diff.matched.length + diff.unmatched.length;
         if (diff.unmatched.length === 0) {

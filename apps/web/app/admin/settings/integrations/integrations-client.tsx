@@ -38,7 +38,7 @@ const PROVIDERS = [{ id: 'hubspot', nameKey: 'hubspotName', descKey: 'hubspotDes
 
 // 44px minimum on every touch target (mobile bar). Matches the members and
 // developer tabs, which already inline this recipe rather than importing one.
-const TOUCH = 'min-h-[44px]';
+const TOUCH = 'min-h-control';
 
 export function IntegrationsPanel({
   rows,
@@ -62,11 +62,11 @@ export function IntegrationsPanel({
   useEffect(() => setCurrent(rows), [rows]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-card">
       {loadError ? (
         <p
           role="alert"
-          className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+          className="rounded-md border border-destructive bg-destructive/10 p-field text-sm text-destructive"
         >
           {m.loadError}
         </p>
@@ -175,13 +175,13 @@ function ProviderCard({
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5">
+    <section className="flex flex-col gap-card rounded-xl border border-border bg-card p-card sm:p-card">
       {/* Wraps at narrow widths so the badge drops under the title instead of
           squeezing it — the card has to survive 360px. */}
-      <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+      <header className="flex flex-wrap items-start justify-between gap-x-field gap-y-inline">
         <div className="min-w-0 flex-1 basis-48">
           <h2 className="font-semibold tracking-tight">{name}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          <p className="mt-tight text-sm text-muted-foreground">{description}</p>
         </div>
         <StatusBadge state={state} m={m} />
       </header>
@@ -190,7 +190,7 @@ function ProviderCard({
 
       {avail !== 'ok' ? <UnavailableNote availability={avail} id={noteId} m={m} /> : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-inline">
         {state === 'connected' || state === 'unhealthy' ? null : (
           <Button
             className={TOUCH}
@@ -273,7 +273,7 @@ function StatusBadge({ state, m }: { state: ConnectionState; m: Msgs }) {
       data-testid="integration-status"
       data-state={state}
       className={
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ' +
+        'inline-flex shrink-0 items-center gap-inline rounded-full border px-field py-tight text-xs font-medium ' +
         tone
       }
     >
@@ -316,11 +316,11 @@ function Details({
       : m.neverChecked;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-field">
       {/* Plain text, not a <dl>: these are two facts about one credential, not
           term/definition pairs, and a <dd> without a <dt> reads to a screen
           reader as a definition of nothing. */}
-      <div className="min-w-0 space-y-0.5 text-sm">
+      <div className="min-w-0 space-y-tight text-sm">
         {row?.label ? <p className="font-medium text-foreground">{row.label}</p> : null}
         {/* `break-words` so a long portal name cannot push the card sideways. */}
         <p className="break-words text-xs text-muted-foreground">
@@ -348,7 +348,7 @@ function UnhealthyDetail({ row, m }: { row: IntegrationStatusView | undefined; m
   return (
     <div
       role="alert"
-      className="flex flex-col gap-2 rounded-md border border-destructive/60 bg-destructive/5 p-3"
+      className="flex flex-col gap-inline rounded-md border border-destructive/60 bg-destructive/5 p-field"
     >
       <p className="text-sm font-medium text-foreground">{m.unhealthyLead}</p>
 
@@ -370,10 +370,10 @@ function UnhealthyDetail({ row, m }: { row: IntegrationStatusView | undefined; m
 /** Provider scope identifiers. `break-all` because they are long and unspaced. */
 function ScopeList({ scopes }: { scopes: string[] }) {
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="flex flex-col gap-tight">
       {scopes.map((s) => (
         <li key={s}>
-          <code className="break-all rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
+          <code className="break-all rounded bg-muted px-inline py-tight text-xs text-foreground">
             {s}
           </code>
         </li>
@@ -405,9 +405,9 @@ function UnavailableNote({
         ? [m.noKeyTitle, m.noKeyBody]
         : [m.unknownTitle, m.unknownBody];
   return (
-    <div id={id} className="rounded-md border border-dashed border-border bg-muted/40 p-3">
+    <div id={id} className="rounded-md border border-dashed border-border bg-muted/40 p-field">
       <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{body}</p>
+      <p className="mt-tight text-xs text-muted-foreground">{body}</p>
     </div>
   );
 }
@@ -474,20 +474,20 @@ function ConnectDialog({
 
   return (
     <Modal open={open} onClose={close} title={m.dialogTitle} labelId={titleId}>
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-card">
         <p className="text-sm text-muted-foreground">{m.dialogLead}</p>
 
         {/* Absent only if the adapter reports none, which the disabled Connect
             button already prevented reaching. Rendered from the provider's own
             list so the instructions cannot drift from what it needs. */}
         {scopes.length > 0 ? (
-        <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3">
-          <legend className="px-1 text-sm font-medium">{m.scopesTitle}</legend>
+        <fieldset className="flex flex-col gap-inline rounded-md border border-border p-field">
+          <legend className="px-tight text-sm font-medium">{m.scopesTitle}</legend>
           <p className="text-xs text-muted-foreground">{m.scopesLead}</p>
           {scopes.map((scope) => (
             <label
               key={scope}
-              className={`flex ${TOUCH} cursor-pointer items-center gap-2 text-sm`}
+              className={`flex ${TOUCH} cursor-pointer items-center gap-inline text-sm`}
             >
               <Checkbox
                 checked={checked.includes(scope)}
@@ -503,7 +503,7 @@ function ConnectDialog({
         </fieldset>
         ) : null}
 
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-tight text-sm">
           <span className="font-medium">{m.tokenLabel}</span>
           <Input
             type="password"
@@ -524,7 +524,7 @@ function ConnectDialog({
           <span className="text-xs text-muted-foreground">{m.tokenHelp}</span>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-tight text-sm">
           <span className="font-medium">{m.labelLabel}</span>
           <Input
             value={label}
@@ -538,7 +538,7 @@ function ConnectDialog({
 
         {failure ? <ConnectError failure={failure} m={m} /> : null}
 
-        <div className="mt-1 flex flex-wrap justify-end gap-2">
+        <div className="mt-tight flex flex-wrap justify-end gap-inline">
           <Button variant="outline" className={TOUCH} disabled={pending} onClick={close}>
             {m.cancel}
           </Button>
@@ -575,7 +575,7 @@ function ConnectError({ failure, m }: { failure: ConnectFailure; m: Msgs }) {
   return (
     <div
       role="alert"
-      className="flex flex-col gap-2 rounded-md border border-destructive bg-destructive/10 p-3"
+      className="flex flex-col gap-inline rounded-md border border-destructive bg-destructive/10 p-field"
     >
       <p className="text-sm font-medium text-destructive">{headline}</p>
       {failure.kind === 'scopes' ? <ScopeList scopes={failure.scopes} /> : null}

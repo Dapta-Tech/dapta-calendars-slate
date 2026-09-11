@@ -82,23 +82,23 @@ export function CreateTeamForm({
           </Button>
         }
       />
-      <div className="flex max-w-2xl flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-6">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 text-muted-foreground">
+      <div className="flex max-w-2xl flex-col gap-card rounded-xl border border-border bg-card p-card sm:p-group">
+      <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
+        <label className="flex flex-col gap-tight text-sm">
+          <span className="flex items-center gap-tight text-muted-foreground">
             {m.name}
             <FieldHelp text={m.nameHelp} />
           </span>
-          <Input value={name} className="min-h-[44px]" onChange={(e) => onName(e.target.value)} />
+          <Input value={name} className="min-h-control" onChange={(e) => onName(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 text-muted-foreground">
+        <label className="flex flex-col gap-tight text-sm">
+          <span className="flex items-center gap-tight text-muted-foreground">
             {m.slug}
             <FieldHelp text={m.slugHelp} />
           </span>
           <Input
             value={slug}
-            className="min-h-[44px]"
+            className="min-h-control"
             onChange={(e) => {
               setSlug(e.target.value);
               setSlugTouched(true);
@@ -111,8 +111,8 @@ export function CreateTeamForm({
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="flex items-center gap-1 text-muted-foreground">
+      <label className="flex flex-col gap-tight text-sm">
+        <span className="flex items-center gap-tight text-muted-foreground">
           {m.bioLabel}
           <FieldHelp text={m.bioHelp} />
         </span>
@@ -121,16 +121,16 @@ export function CreateTeamForm({
           rows={2}
           placeholder={m.bioPlaceholder}
           onChange={(e) => setBio(e.target.value)}
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full rounded-md border border-input bg-background px-field py-inline text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </label>
 
-      <div className="flex flex-col gap-2">
-        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+      <div className="flex flex-col gap-inline">
+        <span className="flex items-center gap-tight text-sm text-muted-foreground">
           {m.logoLabel}
           <FieldHelp text={m.logoHelp} />
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-field">
           {logoUrl ? (
             <img src={logoUrl} alt={m.logoLabel} className="h-12 w-12 rounded-md border border-border object-cover" />
           ) : (
@@ -168,7 +168,7 @@ export function CreateTeamForm({
         <Input
           value={logoUrl.startsWith('data:') ? '' : logoUrl}
           placeholder={m.orPasteUrl}
-          className="min-h-[44px]"
+          className="min-h-control"
           onChange={(e) => setLogoUrl(e.target.value)}
         />
         {imgErr ? <p role="alert" className="text-sm text-destructive">{imgErr}</p> : null}
@@ -176,7 +176,7 @@ export function CreateTeamForm({
 
       {/* Full IANA list through P's picker, like every other timezone field in
           the admin. A <div>, not a <label>: the trigger is a <button>. */}
-      <div className="flex max-w-sm flex-col gap-1 text-sm">
+      <div className="flex max-w-sm flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
         <TimeZoneSelect value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
       </div>

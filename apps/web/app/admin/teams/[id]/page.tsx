@@ -28,7 +28,7 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
   const m = msgs.admin.teams;
 
   return (
-    <div className="mx-auto max-w-[1520px] px-4 pb-10 sm:px-8">
+    <div className="mx-auto max-w-[1520px] px-gutter pb-gutter-y sm:px-gutter-wide">
       <FormHeader
         backHref="/admin/teams"
         backLabel={m.title}
@@ -52,16 +52,16 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
           ) : undefined
         }
       />
-      <p className="mb-6 -mt-2 font-mono text-xs text-muted-foreground">/{team.slug}</p>
+      <p className="mb-group -mt-inline font-mono text-xs text-muted-foreground">/{team.slug}</p>
 
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
+      <h2 className="mb-field text-sm font-semibold text-muted-foreground">
         {m.members} <span className="font-normal">({members.length})</span>
       </h2>
-      <div className="mb-8">
+      <div className="mb-section">
         <TeamMembersPanel teamId={team.id} members={members} messages={m} locale={locale} />
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-field flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-sm font-semibold text-muted-foreground">{m.teamEventTypes}</h2>
         {/* The only way to CREATE a team event — the list alone was a dead end
             (QA2 fix 5). */}
@@ -72,11 +72,11 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
           {m.newTeamEvent}
         </Link>
       </div>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {eventTypes.map((et) => (
           <li
             key={et.id}
-            className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col gap-field rounded-xl border border-border bg-card p-card sm:flex-row sm:items-center sm:justify-between"
           >
             {/* Edit links carry ?from=team:<id> so the editor's back affordance
                 returns HERE, not to the personal Events list (QA3 fix 4b). */}

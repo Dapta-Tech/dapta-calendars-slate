@@ -98,7 +98,7 @@ export function TimeField({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm tabular-nums transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'flex h-10 w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field text-sm tabular-nums transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           open && 'border-primary',
         )}
       >
@@ -109,7 +109,7 @@ export function TimeField({
         <div
           ref={listRef}
           role="listbox"
-          className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[9rem] overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          className="absolute left-0 top-full z-50 mt-tight max-h-64 w-full min-w-[9rem] overflow-y-auto rounded-md border border-border bg-popover p-tight text-popover-foreground shadow-lg"
         >
           {OPTIONS.map((opt) => {
             const selected = opt === value;
@@ -125,7 +125,7 @@ export function TimeField({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center rounded-sm px-3 py-1.5 text-left text-sm tabular-nums transition-colors',
+                  'flex w-full items-center rounded-sm px-field py-inline text-left text-sm tabular-nums transition-colors',
                   selected
                     ? 'bg-primary font-semibold text-primary-foreground'
                     : 'hover:bg-accent hover:text-accent-foreground',

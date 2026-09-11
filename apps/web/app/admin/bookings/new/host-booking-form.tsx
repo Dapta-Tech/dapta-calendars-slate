@@ -83,9 +83,9 @@ function EmptySlotsNotice({
     return <span className="col-span-full text-sm text-destructive">{m.slotsLoadError}</span>;
   }
   return (
-    <span className="col-span-full flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+    <span className="col-span-full flex flex-col gap-inline rounded-md border border-destructive/40 bg-destructive/10 p-field text-sm text-destructive">
       <span>{notice.text}</span>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-field">
         {issue === 'NO_SCHEDULE' ? (
           <CreateWorkingHoursButton m={m} onCreated={onScheduleCreated} />
         ) : null}
@@ -224,9 +224,9 @@ export function HostBookingForm({
 
   if (result?.ok) {
     return (
-      <div className="rounded-md border border-border bg-card p-6">
-        <h2 className="mb-2 text-xl font-semibold">{m.createdTitle}</h2>
-        <p className="mb-4 text-sm text-muted-foreground">{m.createdNote}</p>
+      <div className="rounded-md border border-border bg-card p-group">
+        <h2 className="mb-inline text-xl font-semibold">{m.createdTitle}</h2>
+        <p className="mb-card text-sm text-muted-foreground">{m.createdNote}</p>
         <Link href="/admin/bookings" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
           <i aria-hidden className="pi pi-chevron-left" style={{ fontSize: 12 }} />
           {m.backToBookings}
@@ -238,6 +238,7 @@ export function HostBookingForm({
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <FormHeader
+        gutter="responsive"
         backHref={backHref}
         backLabel={backLabel}
         title={heading}
@@ -248,11 +249,11 @@ export function HostBookingForm({
         }
       />
       {notice}
-      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-6">
+      <div className="flex flex-col gap-card rounded-md border border-border bg-card p-group">
       {/* A <div>, not a <label>: the Select's trigger is a <button>, which is not
           a labelable element — a wrapping label would associate with nothing and
           click through to nothing. The name is carried by `ariaLabel` instead. */}
-      <div className="flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.eventType}</span>
         <Select
           value={slug}
@@ -266,7 +267,7 @@ export function HostBookingForm({
         />
       </div>
 
-      <div className="flex gap-2 text-sm">
+      <div className="flex gap-inline text-sm">
         <Button variant={mode === 'slots' ? 'default' : 'outline'} size="sm" onClick={() => setMode('slots')}>
           {m.fromSlots}
         </Button>
@@ -276,7 +277,7 @@ export function HostBookingForm({
       </div>
 
       {mode === 'slots' ? (
-        <div className="grid max-h-56 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+        <div className="grid max-h-56 grid-cols-3 gap-inline overflow-y-auto sm:grid-cols-4">
           {slots.map((s) => (
             <button
               key={s}
@@ -284,7 +285,7 @@ export function HostBookingForm({
               onClick={() => setStartUtc(s)}
               aria-pressed={startUtc === s}
               className={
-                'rounded-md border px-2 py-2 text-xs ' +
+                'rounded-md border px-inline py-inline text-xs ' +
                 (startUtc === s ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background hover:border-primary')
               }
             >
@@ -305,7 +306,7 @@ export function HostBookingForm({
           ) : null}
         </div>
       ) : (
-        <div className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-tight text-sm">
           <span className="text-muted-foreground">{m.dateTimeHost}</span>
           {/* Emits the same wall-clock 'YYYY-MM-DDTHH:mm' string the native
               datetime-local input did, so wallClockToUtc at submit — which
@@ -330,28 +331,28 @@ export function HostBookingForm({
           in ONE "Questions" block below (QA3 fix 6a). Reserved-name questions
           are filtered above, so a question named "email" can't shadow the
           attendee's real email. */}
-      <div className="flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.attendeeTimezone}</span>
         <TimeZoneSelect value={tz} onChange={setTz} locale={locale} ariaLabel={m.attendeeTimezone} />
       </div>
 
-      <div className="mt-2 border-t border-border pt-4">
+      <div className="mt-inline border-t border-border pt-card">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {m.questionsTitle}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
+      <div className="grid grid-cols-2 gap-field">
+        <label className="flex flex-col gap-tight text-sm">
           <span className="text-muted-foreground">{m.attendeeName}</span>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="flex flex-col gap-tight text-sm">
           <span className="text-muted-foreground">{m.attendeeEmail}</span>
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
       </div>
       {fields.map((f) => (
-        <label key={f.name} className="flex flex-col gap-1 text-sm">
+        <label key={f.name} className="flex flex-col gap-tight text-sm">
           <span className="text-muted-foreground">
             {f.label}
             {f.required ? ' *' : ''}

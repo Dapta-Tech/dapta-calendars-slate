@@ -61,8 +61,8 @@ export function TeamCard({
   };
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
-      <Link href={`/admin/teams/${team.id}`} className="flex min-w-0 items-center gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-field rounded-xl border border-border bg-card p-card">
+      <Link href={`/admin/teams/${team.id}`} className="flex min-w-0 items-center gap-field">
         {team.logoUrl ? (
           <img src={team.logoUrl} alt="" className="h-10 w-10 shrink-0 rounded-md border border-border object-cover" />
         ) : (
@@ -78,7 +78,7 @@ export function TeamCard({
           {publicPath ? <span className="truncate text-xs text-muted-foreground">{publicPath}</span> : null}
         </span>
       </Link>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-inline">
         <Link
           href={`/admin/teams/${team.id}`}
           className={cn(buttonVariants({ variant: 'outline', size: 'lg' }))}

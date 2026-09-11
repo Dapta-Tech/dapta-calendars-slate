@@ -282,12 +282,12 @@ export function Studio(init: StudioInit) {
     });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-group">
       {/* Header: dirty chip + Reset/Save top-right */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-field">
+        <div className="flex flex-wrap items-center gap-field">
           <span
-            className={`rounded-sm px-2 py-1 text-xs ${
+            className={`rounded-sm px-inline py-tight text-xs ${
               isDirty ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
             }`}
           >
@@ -296,7 +296,7 @@ export function Studio(init: StudioInit) {
           {saved === 'ok' ? <span className="text-sm text-primary">{m.saved}</span> : null}
           {saved === 'err' ? <span className="text-sm text-destructive">{saveMsg}</span> : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-inline">
           <Button variant="outline" size="lg" onClick={reset} disabled={!isDirty || pending}>
             {m.reset}
           </Button>
@@ -304,16 +304,16 @@ export function Studio(init: StudioInit) {
             size="lg"
             onClick={save}
             disabled={!isDirty || pending || handleBlocksSave}
-            className="px-5"
+            className="px-control-pad"
           >
             {pending ? m.saving : m.save}
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[400px_1fr]">
+      <div className="grid gap-section lg:grid-cols-[400px_1fr]">
         {/* Controls */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-group">
           {/* PROFILE */}
           <Section title={m.profile}>
             <Field label={m.displayName}>
@@ -335,7 +335,7 @@ export function Studio(init: StudioInit) {
                 <Button
                   variant="ghost"
                   size="lg"
-                  className="-ml-3 self-start"
+                  className="-ml-field self-start"
                   onClick={() => setHandle(handleSuggestion)}
                 >
                   <i aria-hidden className="pi pi-replay" style={{ fontSize: 12 }} />
@@ -378,7 +378,7 @@ export function Studio(init: StudioInit) {
                 variant="ghost"
                 size="lg"
                 onClick={() => setEmbedOpen(true)}
-                className="-ml-3 self-start"
+                className="-ml-field self-start"
               >
                 <EmbedIcon />
                 {init.embedMessages.action}
@@ -424,7 +424,7 @@ export function Studio(init: StudioInit) {
                 value={bio}
                 rows={2}
                 onChange={(e) => setBio(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-field py-inline text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </Field>
           </Section>
@@ -436,7 +436,7 @@ export function Studio(init: StudioInit) {
                   the hit box grows around it, so the row reads the same and a
                   thumb can land on it. `aria-pressed` says which one is picked —
                   the ring alone was colour-only state. */}
-              <div className="mb-2 flex flex-wrap gap-1">
+              <div className="mb-inline flex flex-wrap gap-tight">
                 {ACCENT_PRESETS.map((c) => (
                   <button
                     key={c}
@@ -460,7 +460,7 @@ export function Studio(init: StudioInit) {
                   aria-label={m.accent}
                   value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : DEFAULT_ACCENT}
                   onChange={(e) => setAccent(e.target.value)}
-                  className="h-11 w-11 cursor-pointer rounded-md border border-input bg-background p-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="h-11 w-11 cursor-pointer rounded-md border border-input bg-background p-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               <p className="text-xs text-muted-foreground">
@@ -485,7 +485,7 @@ export function Studio(init: StudioInit) {
 
           {/* APPEARANCE */}
           <Section title={m.appearance}>
-            <div className="mb-3 flex flex-wrap gap-2">
+            <div className="mb-field flex flex-wrap gap-inline">
               {ALL_BOOKING_THEMES.map((themeName) => (
                 <Button
                   key={themeName}
@@ -507,7 +507,7 @@ export function Studio(init: StudioInit) {
               size="lg"
               aria-expanded={customizeOpen}
               onClick={() => setCustomizeOpen((o) => !o)}
-              className="-ml-3 self-start text-muted-foreground"
+              className="-ml-field self-start text-muted-foreground"
             >
               <i
                 aria-hidden
@@ -520,13 +520,13 @@ export function Studio(init: StudioInit) {
               // One column at 360px: two `Select` triggers side by side inside a
               // 400px control rail leaves ~150px each, which truncates every
               // option label.
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="mt-field grid grid-cols-1 gap-field sm:grid-cols-2">
                 {(Object.keys(AXIS_OPTIONS) as (keyof Axes)[]).map((k) => (
                   // A <div>, not a <label>: the picker's trigger is a <button>.
                   // The axis probe rides on this wrapper — it was on the
                   // `<select>` this replaces, and a hidden span would have been
                   // a worse target than a real element in the layout.
-                  <div key={k} data-testid={`bp-${k}-${axes[k]}`} className="flex flex-col gap-1 text-sm">
+                  <div key={k} data-testid={`bp-${k}-${axes[k]}`} className="flex flex-col gap-tight text-sm">
                     <span className="text-muted-foreground">{m[AXIS_LABEL[k]]}</span>
                     <Select
                       value={axes[k]}
@@ -551,14 +551,14 @@ export function Studio(init: StudioInit) {
 
           {/* MEETINGS — reorder (↑/↓) + show/hide on the public page */}
           <Section title={m.meetings}>
-            <ul className="flex flex-col gap-1 text-sm">
+            <ul className="flex flex-col gap-tight text-sm">
               {eventOrder
                 .map((s) => init.manageableEvents.find((e) => e.slug === s))
                 .filter((e): e is NonNullable<typeof e> => !!e)
                 .map((et, i, arr) => (
                   <li
                     key={et.slug}
-                    className={`flex items-center gap-1 rounded-md bg-muted px-2 py-1 ${et.hidden ? 'opacity-50' : ''}`}
+                    className={`flex items-center gap-tight rounded-md bg-muted px-inline py-tight ${et.hidden ? 'opacity-50' : ''}`}
                   >
                     {/* Was a stacked `▲`/`▼` pair of bare glyphs with no hit box
                         at all — roughly 10px of clickable text each. Side by
@@ -599,20 +599,20 @@ export function Studio(init: StudioInit) {
                 ))}
               {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">{m.noEvents}</li> : null}
             </ul>
-            <p className="mt-1 text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
+            <p className="mt-tight text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
             {/* Was `Configure events →`. It leaves this screen, so it is a button
                 with the design language's own mark, not an arrow on a link. */}
             <a
               href="/admin/event-types"
-              className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mt-1 self-start')}
+              className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mt-tight self-start')}
             >
               <i aria-hidden className="pi pi-cog" style={{ fontSize: 13 }} />
               {m.configureEventTypes}
             </a>
 
             {/* Landing (R25): show the picker, or send visitors straight to one event. */}
-            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3">
-              <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm">
+            <div className="mt-card flex flex-col gap-inline border-t border-border pt-field">
+              <label className="flex min-h-control cursor-pointer items-center gap-inline text-sm">
                 <Checkbox
                   checked={landingEnabled}
                   onChange={(e) => setLandingEnabled(e.target.checked)}
@@ -621,7 +621,7 @@ export function Studio(init: StudioInit) {
               </label>
               {!landingEnabled ? (
                 // A <div>, not a <label>: the picker's trigger is a <button>.
-                <div className="flex flex-col gap-1 text-sm">
+                <div className="flex flex-col gap-tight text-sm">
                   <span className="text-muted-foreground">{m.sendVisitorsTo}</span>
                   <Select
                     value={defaultEventSlug}
@@ -652,28 +652,28 @@ export function Studio(init: StudioInit) {
         <div className="lg:sticky lg:top-6 lg:self-start">
           {/* Preview toolbar — studio CHROME, not the canvas. Both segmented
               controls are on the 44px step and announce their state. */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex rounded-md border border-border p-0.5 text-sm">
+          <div className="mb-field flex flex-wrap items-center justify-between gap-inline">
+            <div className="flex rounded-md border border-border p-tight text-sm">
               {(['profile', 'booking'] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
                   aria-pressed={surface === s}
                   onClick={() => setSurface(s)}
-                  className={`inline-flex min-h-[44px] items-center rounded-sm px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${surface === s ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`inline-flex min-h-control items-center rounded-sm px-field transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${surface === s ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {s === 'booking' ? m.bookingFlow : m.previewProfile}
                 </button>
               ))}
             </div>
-            <div className="flex rounded-md border border-border p-0.5 text-sm">
+            <div className="flex rounded-md border border-border p-tight text-sm">
               {(['desktop', 'mobile'] as const).map((d) => (
                 <button
                   key={d}
                   type="button"
                   aria-pressed={device === d}
                   onClick={() => setDevice(d)}
-                  className={`inline-flex min-h-[44px] items-center rounded-sm px-3 capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${device === d ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`inline-flex min-h-control items-center rounded-sm px-field capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${device === d ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {d === 'desktop' ? m.desktop : m.mobile}
                 </button>
@@ -685,7 +685,7 @@ export function Studio(init: StudioInit) {
               touched by this sweep (preview == prod, #134). `overflow-x-auto` so
               the fixed 360px mobile preview scrolls inside its frame instead of
               widening the studio at 360px. */}
-          <div className="overflow-x-auto rounded-xl border border-border p-4 sm:p-6" style={previewVars}>
+          <div className="overflow-x-auto rounded-xl border border-border p-card sm:p-group" style={previewVars}>
             <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
               {surface === 'profile' ? (
                 <ProfilePreview
@@ -714,6 +714,11 @@ export function Studio(init: StudioInit) {
   );
 }
 
+/* spacing-gate:off — the BP canvas. Everything from here to the marker below is
+   the invitee's view, drawn from the host's own `--bp-*` axes so the preview
+   matches production exactly (#134). The admin spacing scale has no authority
+   here, and a sweep that renames these utilities silently breaks preview == prod.
+   The FRAME around the canvas is admin chrome and does follow the scale. */
 function ProfilePreview({
   displayName,
   bio,
@@ -955,6 +960,8 @@ const PREVIEW_AVAILABLE = [
   '2026-09-30',
 ];
 
+/* spacing-gate:on */
+
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   // The `✓`/`✗` the available/taken copy used to carry are icons now, so the
   // status reads the same in both locales without a glyph baked into a string.
@@ -967,18 +974,18 @@ function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   };
   const h = map[state];
   return h ? (
-    <span className={`flex items-center gap-1 text-xs ${h.cls}`}>
+    <span className={`flex items-center gap-tight text-xs ${h.cls}`}>
       {h.icon ? <i aria-hidden className={`pi ${h.icon}`} style={{ fontSize: 11 }} /> : null}
       {h.text}
     </span>
   ) : null;
 }
 
-const inputCls = 'min-h-[44px] w-full';
+const inputCls = 'min-h-control w-full';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+    <section className="flex flex-col gap-field rounded-xl border border-border bg-card p-card">
       <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
       {children}
     </section>
@@ -987,7 +994,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <label className="flex flex-col gap-tight text-sm">
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>
@@ -1012,7 +1019,7 @@ function ImageInput({
   const errText = (code: 'invalid' | 'tooLarge' | 'read') =>
     code === 'invalid' ? m.imageInvalid : code === 'tooLarge' ? m.imageTooLarge : m.couldNotRead;
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-inline">
       {value ? (
         <img
           src={value}
@@ -1020,7 +1027,7 @@ function ImageInput({
           className={preview === 'avatar' ? 'h-12 w-12 rounded-full object-cover' : 'h-16 w-full rounded-md object-cover'}
         />
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-inline">
         {/* The file input stays hidden inside its label — that is what makes the
             label the control — but the label now wears the button recipe and the
             44px step instead of a bespoke 28px chip. */}

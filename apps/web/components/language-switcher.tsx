@@ -19,7 +19,7 @@ export function LanguageSwitcher({ locale, label }: { locale: Locale; label: str
   return (
     // A <div>, not a <label>: the Select's trigger is a <button>, which is not a
     // labelable element. The name rides on `ariaLabel`.
-    <div className="flex max-w-xs flex-col gap-1 text-sm">
+    <div className="flex max-w-xs flex-col gap-tight text-sm">
       <span className="text-muted-foreground">{label}</span>
       <Select
         value={locale}

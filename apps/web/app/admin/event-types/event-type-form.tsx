@@ -145,9 +145,9 @@ function ReminderCard({
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-background/40 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
+    <div className="flex flex-col gap-inline rounded-md border border-border bg-background/40 p-field">
+      <div className="flex flex-wrap items-center gap-inline">
+        <label className="flex cursor-pointer items-center gap-inline text-sm">
           <Checkbox
             checked={row.enabled}
             onChange={(e) => onChange({ enabled: e.target.checked })}
@@ -164,13 +164,13 @@ function ReminderCard({
           value={lead.value}
           onChange={(e) => onChange({ leadMinutes: joinLead(Number(e.target.value) || 1, lead.unit) })}
           aria-label={`${m.sendLabel} — ${m.unitMinutes}/${m.unitHours}/${m.unitDays}`}
-          className="w-20 rounded-md border border-input bg-background px-2 py-1 text-sm"
+          className="w-20 rounded-md border border-input bg-background px-inline py-tight text-sm"
         />
         <select
           value={lead.unit}
           onChange={(e) => onChange({ leadMinutes: joinLead(lead.value, e.target.value as LeadUnit) })}
           aria-label={row.kind === 'follow_up' ? m.afterEnd : m.beforeStart}
-          className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+          className="rounded-md border border-input bg-background px-inline py-tight text-sm"
         >
           <option value="minutes">{m.unitMinutes}</option>
           <option value="hours">{m.unitHours}</option>
@@ -199,7 +199,7 @@ function ReminderCard({
         placeholder={m.subjectLabel}
         aria-label={m.subjectLabel}
         maxLength={MAX_REMINDER_SUBJECT}
-        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+        className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
       />
       <textarea
         ref={bodyRef}
@@ -212,37 +212,37 @@ function ReminderCard({
         // as a bare 400 from the other side of the wire.
         maxLength={MAX_REMINDER_BODY}
         rows={3}
-        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+        className="w-full rounded-md border border-input bg-background px-inline py-tight text-sm"
       />
       <p className="text-xs text-muted-foreground">{m.defaultCopyHint}</p>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-tight">
         <span className="text-2xs uppercase tracking-wide text-muted-foreground">{m.variablesLabel}</span>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-tight">
           {REMINDER_VARIABLES.map((v) => (
             <button
               key={v}
               type="button"
               onClick={() => insert(v)}
-              className="rounded border border-border px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+              className="rounded border border-border px-inline py-tight font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
             >
               {`{{${v}}}`}
             </button>
           ))}
         </div>
-        <span className="mt-1 text-2xs uppercase tracking-wide text-muted-foreground">
+        <span className="mt-tight text-2xs uppercase tracking-wide text-muted-foreground">
           {m.formVariablesLabel}
         </span>
         {fieldNames.length === 0 ? (
           <p className="text-xs text-muted-foreground">{m.noFormVariables}</p>
         ) : (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-tight">
             {fieldNames.map((name) => (
               <button
                 key={name}
                 type="button"
                 onClick={() => insert(`form.${name}`)}
-                className="rounded border border-border px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
+                className="rounded border border-border px-inline py-tight font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary"
               >
                 {`{{form.${name}}}`}
               </button>
@@ -292,11 +292,11 @@ function RemindersSection({
   }, [rows, fieldNames]);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-inline">
       <span className="text-sm font-semibold text-muted-foreground">{m.sectionTitle}</span>
       <p className="text-xs text-muted-foreground">{m.sectionHint}</p>
 
-      <span className="mt-1 text-xs font-medium text-muted-foreground">{m.beforeMeeting}</span>
+      <span className="mt-tight text-xs font-medium text-muted-foreground">{m.beforeMeeting}</span>
       {reminders.length === 0 ? (
         <p className="text-xs text-muted-foreground">{m.noReminders}</p>
       ) : (
@@ -311,7 +311,7 @@ function RemindersSection({
           />
         ))
       )}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-field">
         <button
           type="button"
           disabled={reminders.length >= MAX_REMINDERS_PER_EVENT}
@@ -322,7 +322,7 @@ function RemindersSection({
               ...rs.filter((r) => r.kind === 'follow_up'),
             ])
           }
-          className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+          className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
         >
           {m.addReminder}
         </button>
@@ -333,7 +333,7 @@ function RemindersSection({
         ) : null}
       </div>
 
-      <span className="mt-2 text-xs font-medium text-muted-foreground">{m.afterMeeting}</span>
+      <span className="mt-inline text-xs font-medium text-muted-foreground">{m.afterMeeting}</span>
       <p className="text-xs text-muted-foreground">{m.followUpHint}</p>
       <ReminderCard
         // An event whose stored list carries no follow-up still shows one,
@@ -406,7 +406,7 @@ function CalendarsForEventSection({
 }) {
   if (connections.length === 0) {
     return (
-      <div className="flex flex-col items-start gap-3 rounded-md border border-dashed border-border bg-background/60 p-3 text-sm text-muted-foreground">
+      <div className="flex flex-col items-start gap-field rounded-md border border-dashed border-border bg-background/60 p-field text-sm text-muted-foreground">
         <p>{m.calendarLinkNone}</p>
         <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
           {m.calendarLinkConnect}
@@ -415,8 +415,8 @@ function CalendarsForEventSection({
     );
   }
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-background/40 p-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-field rounded-md border border-border bg-background/40 p-card">
+      <div className="flex items-center justify-between gap-field">
         <span className="text-sm font-semibold text-muted-foreground">{m.calendarsSectionTitle}</span>
         <Link
           href="/admin/connections"
@@ -426,8 +426,8 @@ function CalendarsForEventSection({
         </Link>
       </div>
       <p className="text-xs text-muted-foreground">{m.calendarsSectionHint}</p>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3 px-1 text-xs text-muted-foreground">
+      <div className="flex flex-col gap-inline">
+        <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
           <span className="flex-1" />
           <span className="w-28 text-center sm:w-32">{m.calendarsCheckConflicts}</span>
           <span className="w-28 text-center sm:w-32">{m.calendarsAddEventsHere}</span>
@@ -437,7 +437,7 @@ function CalendarsForEventSection({
           return (
             <div
               key={c.id}
-              className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+              className="flex items-center gap-field rounded-md border border-border bg-card px-field py-inline"
             >
               <span className="min-w-0 flex-1 truncate text-sm" title={label}>
                 {label}
@@ -520,7 +520,7 @@ function LocationField({
     kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-field">
       <Field label={m.fLocation}>
         <select
           value={kind}
@@ -558,7 +558,7 @@ function LocationField({
       ) : null}
 
       {missingDestination ? (
-        <div className="flex flex-col items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
           <p>{m.locationNoDestinationWarning}</p>
           <Link href="/admin/connections" className={buttonVariants({ variant: 'outline', size: 'lg' })}>
             {m.calendarLinkConnect}
@@ -838,11 +838,12 @@ export function EventTypeForm({
   return (
     <form onSubmit={(e) => { e.preventDefault(); save(); }}>
       <FormHeader
+        gutter="responsive"
         backHref={backHref}
         backLabel={backLabel}
         title={heading}
         actions={
-          <span className="flex items-center gap-3">
+          <span className="flex items-center gap-field">
             {headerExtras}
             <Button type="submit" disabled={pending || !title || !slug}>
               {pending ? m.saving : initial ? m.saveChanges : m.createEventType}
@@ -850,8 +851,8 @@ export function EventTypeForm({
           </span>
         }
       />
-      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-5">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-col gap-card rounded-md border border-border bg-card p-card">
+      <div className="grid grid-cols-2 gap-field">
         <Field label={m.fTitle}>
           <input value={title} onChange={(e) => onTitle(e.target.value)} className={inputCls} />
         </Field>
@@ -871,7 +872,7 @@ export function EventTypeForm({
         m={m}
         locationLabels={locationLabels}
       />
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-field">
         <Field label={m.fLength}>
           <input type="number" value={lengthMinutes} onChange={(e) => setLength(Number(e.target.value))} className={inputCls} />
         </Field>
@@ -882,7 +883,7 @@ export function EventTypeForm({
           <input type="number" value={minNotice} onChange={(e) => setMinNotice(Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-field">
         <Field label={m.fBufferBefore}>
           <input type="number" value={beforeBuf} onChange={(e) => setBeforeBuf(Number(e.target.value))} className={inputCls} />
         </Field>
@@ -918,7 +919,7 @@ export function EventTypeForm({
       ) : null}
 
       {isTeamEvent && scheduling ? (
-        <div className="flex flex-col gap-4 rounded-md border border-border bg-background/40 p-4">
+        <div className="flex flex-col gap-card rounded-md border border-border bg-background/40 p-card">
           <Field label={m.schedulingMethod}>
             <select
               value={schedulingType}
@@ -931,14 +932,14 @@ export function EventTypeForm({
                 </option>
               ))}
             </select>
-            <span className="mt-1 text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
+            <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
           </Field>
 
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-inline">
             <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
             {/* Column header — only the fields the active method actually uses. */}
             {schedulingType !== 'collective' ? (
-              <div className="flex items-center gap-3 px-1 text-xs text-muted-foreground">
+              <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
                 <span className="flex-1" />
                 <span className="w-20 text-center">{m.priority}</span>
                 <span className="w-20 text-center">{m.weight}</span>
@@ -950,7 +951,7 @@ export function EventTypeForm({
             {hosts.map((h) => {
               const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
               return (
-                <div key={h.memberId} className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                <div key={h.memberId} className="flex items-center gap-field rounded-md border border-border bg-card px-field py-inline">
                   <span className="flex-1 text-sm">{name}</span>
                   {schedulingType !== 'collective' ? (
                     <>
@@ -959,7 +960,7 @@ export function EventTypeForm({
                         aria-label={`${name} — ${m.priority}`}
                         value={h.priority ?? 0}
                         onChange={(e) => setHost(h.memberId, { priority: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-2 py-1 text-center text-sm"
+                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
                       />
                       <input
                         type="number"
@@ -967,7 +968,7 @@ export function EventTypeForm({
                         aria-label={`${name} — ${m.weight}`}
                         value={h.weight ?? 100}
                         onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-2 py-1 text-center text-sm"
+                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
                       />
                       {schedulingType === 'fixed_round_robin' ? (
                         <label className="flex w-16 cursor-pointer justify-center" title={m.fixedHostHint}>
@@ -989,17 +990,17 @@ export function EventTypeForm({
       {/* Booking-policy booleans. The duplicate-booking guard (#69) joins the
           row a host already reads for this class of setting, rather than
           opening a section of its own. */}
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <div className="flex flex-col gap-inline">
+        <div className="flex flex-wrap gap-x-group gap-y-inline">
+          <label className="flex cursor-pointer items-center gap-inline text-sm">
             <Checkbox checked={requiresConfirmation} onChange={(e) => setRequiresConf(e.target.checked)} />
             {m.requiresConfirmation}
           </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <label className="flex cursor-pointer items-center gap-inline text-sm">
             <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
             {m.hiddenLabel}
           </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <label className="flex cursor-pointer items-center gap-inline text-sm">
             <Checkbox
               checked={preventDuplicateBookings}
               onChange={(e) => setPreventDuplicate(e.target.checked)}
@@ -1014,7 +1015,7 @@ export function EventTypeForm({
       </div>
 
       {/* Intake questions */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-inline">
         <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
         {/* Built-in fields the public booking page ALWAYS asks — shown locked so
             nobody re-creates "name"/"email" as custom questions and the attendee
@@ -1027,7 +1028,7 @@ export function EventTypeForm({
         ].map((bf) => (
           <div
             key={bf.label}
-            className="flex items-center gap-2 rounded-md border border-dashed border-border bg-background/40 px-3 py-1.5 text-sm text-muted-foreground"
+            className="flex items-center gap-inline rounded-md border border-dashed border-border bg-background/40 px-field py-inline text-sm text-muted-foreground"
           >
             <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} aria-hidden>
               <rect x="5" y="11" width="14" height="9" rx="2" />
@@ -1041,24 +1042,24 @@ export function EventTypeForm({
           </div>
         ))}
         {fields.map((f, i) => (
-          <div key={i} className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
+          <div key={i} className="flex flex-col gap-tight">
+            <div className="flex items-center gap-inline">
               <input
                 placeholder={m.namePlaceholder}
                 value={f.name}
                 onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, name: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') } : x)))}
-                className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                className="w-28 rounded-md border border-input bg-background px-inline py-tight text-sm"
               />
               <input
                 placeholder={m.labelPlaceholder}
                 value={f.label}
                 onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-                className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                className="flex-1 rounded-md border border-input bg-background px-inline py-tight text-sm"
               />
               <select
                 value={f.type}
                 onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}
-                className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+                className="rounded-md border border-input bg-background px-inline py-tight text-sm"
               >
                 {FIELD_TYPES.map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -1072,7 +1073,7 @@ export function EventTypeForm({
                   onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, defaultCountry: e.target.value } : x)))}
                   aria-label={`${m.defaultCountryLabel} — ${f.label || f.name}`}
                   title={m.defaultCountryLabel}
-                  className="w-36 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                  className="w-36 rounded-md border border-input bg-background px-inline py-tight text-sm"
                 >
                   {countryOptions.length === 0 ? (
                     // SSR/first paint: a bare-code option so the select's value
@@ -1088,7 +1089,7 @@ export function EventTypeForm({
                   )}
                 </select>
               ) : null}
-              <label className="flex cursor-pointer items-center gap-1 text-sm">
+              <label className="flex cursor-pointer items-center gap-tight text-sm">
                 <Checkbox checked={f.required} onChange={(e) => setFields((fs) => fs.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
                 {m.req}
               </label>
@@ -1122,7 +1123,7 @@ export function EventTypeForm({
         <button
           type="button"
           onClick={() => setFields((fs) => [...fs, { name: '', label: '', type: 'text', required: false }])}
-          className="self-start rounded-md border border-border px-3 py-1 text-sm text-muted-foreground hover:border-primary"
+          className="self-start rounded-md border border-border px-field py-tight text-sm text-muted-foreground hover:border-primary"
         >
           {m.addQuestion}
         </button>
@@ -1159,7 +1160,7 @@ export function EventTypeForm({
 }
 
 const inputCls =
-  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition-colors placeholder:text-muted-foreground hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'w-full rounded-md border border-input bg-background px-field py-inline text-sm transition-colors placeholder:text-muted-foreground hover:border-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /**
  * The mapping rows a save may actually carry.
@@ -1187,7 +1188,7 @@ function deliverableMappings(
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <label className="flex flex-col gap-tight text-sm">
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>

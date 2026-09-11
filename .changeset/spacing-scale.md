@@ -4,10 +4,10 @@
 
 The token sheet gains a spacing scale.
 
-Ten role-named tokens on a 4px grid — `--sp-inline`, `--sp-field`, `--sp-card`,
-`--sp-group`, `--sp-section`, the responsive gutter pair `--sp-page-x` /
-`--sp-page-x-wide`, `--sp-page-y`, plus `--sp-control-h` (the 44px tap-target
-floor, R28) and `--sp-control-x`. Seven distinct values across ten roles; the
+Role-named tokens on a 4px grid — the content ladder `--sp-tight`, `--sp-inline`,
+`--sp-field`, `--sp-card`, `--sp-group`, `--sp-section`, the responsive gutter
+pair `--sp-page-x` / `--sp-page-x-wide` with `--sp-page-y`, and the two control
+roles `--sp-control-h` (the 44px tap-target floor, R28) and `--sp-control-x`. The
 gutter and control roles deliberately reuse values the content ladder already
 defines.
 

@@ -15,7 +15,7 @@ export default async function GeneralSettings() {
   const m = getMessages(locale).admin;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
+    <div className="flex max-w-2xl flex-col gap-section">
       <GeneralForm
         displayName={me?.displayName ?? ''}
         handle={me?.handle ?? ''}
@@ -24,7 +24,7 @@ export default async function GeneralSettings() {
         messages={m.settingsGeneral}
         locale={locale}
       />
-      <div className="border-t border-border pt-6">
+      <div className="border-t border-border pt-group">
         <LanguageSwitcher locale={locale} label={m.common.language} />
       </div>
     </div>

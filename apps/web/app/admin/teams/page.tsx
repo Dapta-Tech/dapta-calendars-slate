@@ -19,7 +19,7 @@ export default async function TeamsPage() {
   const accountCode = me?.accountCode ?? '';
 
   return (
-    <div className="mx-auto max-w-[1520px] px-4 py-8 sm:px-8 sm:py-10">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       {/* One CTA per screen: top-right Create only with rows; the empty state
           owns the sole centered CTA. */}
       <PageHeader
@@ -34,7 +34,7 @@ export default async function TeamsPage() {
         }
       />
       {teams.length > 0 ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-field">
           {withMembers.map(({ team, count }) => (
             <TeamCard
               key={team.id}
@@ -47,7 +47,7 @@ export default async function TeamsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-6 text-center sm:p-10">
+        <div className="flex flex-col items-center gap-field rounded-xl border border-dashed border-border p-group text-center sm:p-section">
           <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
             <circle cx="9" cy="8" r="3.2" />
             <path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 20a5.5 5.5 0 0 0-3-4.9" />

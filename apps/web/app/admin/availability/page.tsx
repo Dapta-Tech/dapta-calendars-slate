@@ -19,7 +19,7 @@ export default async function AvailabilityPage() {
   const newButton = <NewScheduleButton messages={m} />;
 
   return (
-    <div className="mx-auto max-w-[1520px] px-4 py-8 sm:px-8 sm:py-10">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       {/* One CTA per screen: top-right Create only with rows; the empty state
           below owns the sole centered CTA. */}
       <PageHeader
@@ -29,13 +29,13 @@ export default async function AvailabilityPage() {
       />
 
       {schedules.length > 0 ? (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-inline">
           {schedules.map((s) => (
             <li
               key={s.id}
-              className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col gap-field rounded-xl border border-border bg-card p-card sm:flex-row sm:items-center sm:justify-between"
             >
-              <Link href={`/admin/availability/${s.id}`} className="flex min-w-0 items-center gap-3">
+              <Link href={`/admin/availability/${s.id}`} className="flex min-w-0 items-center gap-field">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground" aria-hidden>
                   <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="9" />
@@ -47,7 +47,7 @@ export default async function AvailabilityPage() {
                   <span className="truncate text-sm text-muted-foreground">{s.timeZone}</span>
                 </span>
               </Link>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="flex shrink-0 items-center gap-inline">
                 <Link
                   href={`/admin/availability/${s.id}`}
                   className={cn(buttonVariants({ variant: 'outline', size: 'lg' }))}
@@ -61,7 +61,7 @@ export default async function AvailabilityPage() {
           ))}
         </ul>
       ) : (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-6 text-center sm:p-10">
+        <div className="flex flex-col items-center gap-field rounded-xl border border-dashed border-border p-group text-center sm:p-section">
           <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
             <circle cx="12" cy="12" r="9" />
             <path d="M12 7.5V12l3 2" />

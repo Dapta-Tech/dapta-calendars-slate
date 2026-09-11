@@ -21,7 +21,7 @@ export default async function NotificationsSettings() {
   const data = (await res.json()) as NotificationSettingsPayload;
 
   return (
-    <div className="flex max-w-5xl flex-col gap-4">
+    <div className="flex max-w-5xl flex-col gap-card">
       <div>
         <h2 className="text-lg font-semibold">{m.notifications.title}</h2>
         <p className="text-sm text-muted-foreground">{m.notifications.subtitle}</p>

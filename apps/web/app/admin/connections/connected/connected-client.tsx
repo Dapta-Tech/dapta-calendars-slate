@@ -71,7 +71,7 @@ export function ConnectedClient({
   }, [error]);
 
   return (
-    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-card px-group text-center">
       <span
         aria-hidden
         className={`flex h-12 w-12 items-center justify-center rounded-full ${
@@ -90,7 +90,7 @@ export function ConnectedClient({
       </span>
       <div>
         <h1 className="text-xl font-semibold">{error ? m.errorTitle : m.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{error ? m.errorBody : m.body}</p>
+        <p className="mt-tight text-sm text-muted-foreground">{error ? m.errorBody : m.body}</p>
       </div>
       {showFallback ? (
         <Button variant="outline" size="lg" onClick={() => window.close()}>

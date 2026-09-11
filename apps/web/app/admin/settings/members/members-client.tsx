@@ -120,9 +120,9 @@ export function MembersClient({
     });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-card">
       {/* List/create pattern: the roster with the primary action top-right. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-field">
         <span className="text-sm font-semibold text-muted-foreground">{m.rosterLabel}</span>
         <Button
           size="lg"
@@ -162,8 +162,8 @@ export function MembersClient({
             // Two rows at 360px — identity above, controls below — instead of one
             // wrapping line that put an avatar, two pills, a picker and three
             // buttons through the same 328px.
-            <li key={member.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:px-5">
-              <span className="flex min-w-0 flex-1 items-center gap-3">
+            <li key={member.id} className="flex flex-col gap-field px-card py-card sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-field sm:px-control-pad">
+              <span className="flex min-w-0 flex-1 items-center gap-field">
                 <span
                   aria-hidden
                   className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background bg-cover bg-center text-xs font-semibold text-muted-foreground"
@@ -172,10 +172,10 @@ export function MembersClient({
                   {member.avatarUrl ? '' : initialOf(member)}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-2 truncate text-sm font-medium">
+                  <span className="flex items-center gap-inline truncate text-sm font-medium">
                     {label}
                     {isSelf ? (
-                      <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                      <span className="rounded-sm bg-muted px-inline py-tight text-xs font-medium text-muted-foreground">
                         {m.you}
                       </span>
                     ) : null}
@@ -186,10 +186,10 @@ export function MembersClient({
                 </span>
               </span>
 
-              <span className="flex flex-wrap items-center gap-2">
+              <span className="flex flex-wrap items-center gap-inline">
                 {/* Status pill (invited / disabled stand out; active is quiet). */}
                 <span
-                  className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
+                  className={`rounded-sm px-inline py-tight text-xs font-medium ${
                     member.status === 'invited'
                       ? 'bg-primary/10 text-primary'
                       : member.status === 'disabled'
@@ -207,7 +207,7 @@ export function MembersClient({
                     page. `title` is why the primitive has one — a locked picker
                     has to be able to say WHY. */}
                 <span
-                  className={`rounded-sm px-2 py-0.5 text-xs font-medium ${
+                  className={`rounded-sm px-inline py-tight text-xs font-medium ${
                     isOwner ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
                   }`}
                 >
@@ -256,7 +256,7 @@ export function MembersClient({
 
                 {/* Remove — owners show a lock (demote first); everyone else asks. */}
                 {isOwner ? (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground" title={m.ownerLock}>
+                  <span className="flex items-center gap-tight text-xs text-muted-foreground" title={m.ownerLock}>
                     <i aria-hidden className="pi pi-lock" style={{ fontSize: 13 }} />
                     <span className="sr-only">{m.ownerLock}</span>
                   </span>
@@ -280,28 +280,28 @@ export function MembersClient({
       {/* Invite-by-email dialog. Was a hand-rolled `fixed inset-0` stack with no
           focus trap and no scroll lock, beside a Modal that has both. */}
       <Modal open={addOpen} onClose={closeDialog} title={m.inviteTitle} labelId="invite-member-title">
-        <p className="mb-4 text-sm text-muted-foreground">{m.inviteLead}</p>
+        <p className="mb-card text-sm text-muted-foreground">{m.inviteLead}</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             submitInvite();
           }}
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-field"
         >
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.emailLabel}</span>
             <Input
               type="email"
               value={inviteEmail}
               placeholder={m.emailPlaceholder}
               data-modal-autofocus
-              className="min-h-[44px]"
+              className="min-h-control"
               onChange={(e) => setInviteEmail(e.target.value)}
             />
           </label>
           {/* A <div>, not a <label>: the Select's trigger is a <button>, which is
               not a labelable element. The name rides on `ariaLabel`. */}
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.roleLabel}</span>
             <Select
               value={inviteRole}
@@ -312,7 +312,7 @@ export function MembersClient({
             />
           </div>
           {inviteErr ? <p role="alert" className="text-sm text-destructive">{inviteErr}</p> : null}
-          <div className="mt-1 flex flex-wrap justify-end gap-2">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
             <Button variant="outline" size="lg" onClick={closeDialog}>
               {m.cancel}
             </Button>

@@ -18,13 +18,13 @@ export default async function MembersSettings() {
 
   const members = await adminApi.listMembers();
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <div className="flex max-w-3xl flex-col gap-card">
       <div>
         <h2 className="text-lg font-semibold">{m.title}</h2>
         <p className="text-sm text-muted-foreground">{m.subtitle}</p>
       </div>
       {/* Role matrix — what each role can do, visible before anyone assigns one (QA3 fix 5). */}
-      <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+      <ul className="flex flex-col gap-tight text-sm text-muted-foreground">
         {[m.rolesHintOwner, m.rolesHintAdmin, m.rolesHintMember].map((hint) => {
           // "Role — capabilities": set just the role name in medium weight.
           const cut = hint.indexOf(' — ');

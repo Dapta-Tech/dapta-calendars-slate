@@ -73,14 +73,14 @@ export function EventRowActions({
   };
 
   const actions = (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-inline">
       {!hideToggle ? (
         <Switch
           checked={visible}
           onCheckedChange={onToggle}
           disabled={pending}
           aria-label={m.toggleVisible}
-          className="mr-1"
+          className="mr-tight"
         />
       ) : null}
       {publicPath ? (

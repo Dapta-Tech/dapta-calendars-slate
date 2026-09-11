@@ -36,9 +36,9 @@ export default async function BookingPageSettings() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-10">
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
-      <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
+    <div className="mx-auto max-w-6xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
+      <h1 className="mb-tight text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
+      <p className="mb-group text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
         messages={t.studio}
         opensNewTab={t.common.opensNewTab}

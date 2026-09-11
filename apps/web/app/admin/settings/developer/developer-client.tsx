@@ -80,35 +80,35 @@ export function ApiKeys({
   };
 
   return (
-    <section className="mb-10">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+    <section className="mb-section">
+      <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
         <Button size="lg" onClick={() => setOpen(true)}>
           {m.createKey}
         </Button>
       </div>
       {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
-      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
+      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
-        <div className="mb-4 rounded-xl border border-primary-edge bg-card p-3">
-          <p className="mb-1 text-sm text-muted-foreground">{m.copyOnce}</p>
+        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+          <p className="mb-tight text-sm text-muted-foreground">{m.copyOnce}</p>
           <code className="break-all font-mono text-sm">{reveal}</code>
         </div>
       ) : null}
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {keys.map((k) => (
           <li
             key={k.id}
-            className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-border bg-card p-3"
+            className="flex flex-wrap items-center justify-between gap-x-field gap-y-inline rounded-xl border border-border bg-card p-field"
           >
             <span className="min-w-0 flex-1 text-sm">
               <span className="font-medium">{k.name}</span>{' '}
               <code className="font-mono text-xs text-muted-foreground">
                 {k.prefix}…{k.last4}
               </code>
-              {k.revoked_at_ms ? <span className="ml-2 text-destructive">{m.revoked}</span> : null}
+              {k.revoked_at_ms ? <span className="ml-inline text-destructive">{m.revoked}</span> : null}
             </span>
             {!k.revoked_at_ms ? (
               <Button
@@ -127,21 +127,21 @@ export function ApiKeys({
       </ul>
 
       <Modal open={open} onClose={() => setOpen(false)} title={m.createKey} labelId="new-api-key-title">
-        <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-card">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.name}</span>
             <Input
               value={name}
               data-modal-autofocus
-              className="min-h-[44px]"
+              className="min-h-control"
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.scopes}</span>
             <div className="flex flex-col">
               {SCOPES.map((s) => (
-                <label key={s} className="flex min-h-[44px] cursor-pointer items-center gap-2">
+                <label key={s} className="flex min-h-control cursor-pointer items-center gap-inline">
                   <Checkbox
                     checked={scopes.includes(s)}
                     onChange={(e) =>
@@ -153,7 +153,7 @@ export function ApiKeys({
               ))}
             </div>
           </div>
-          <div className="mt-1 flex flex-wrap justify-end gap-2">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
               {m.cancel}
             </Button>
@@ -190,11 +190,11 @@ function WebhookItem({
   const [showDeliveries, setShowDeliveries] = useState(false);
   const { success, error } = useToast();
   return (
-    <li className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+    <li className="flex flex-col gap-inline rounded-xl border border-border bg-card p-field">
       {/* Stacks at 360px: the URL owns the first line, the controls the next. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-field gap-y-inline">
         <code className="min-w-0 flex-1 break-all font-mono text-xs">{w.subscriber_url}</code>
-        <span className="flex flex-wrap items-center gap-2">
+        <span className="flex flex-wrap items-center gap-inline">
           {/* A <span>, not a <label>. `Switch` renders `<button role="switch">`,
               and a button is NOT a labelable element — wrapping it in a label
               would neither make the word clickable nor make it the control's
@@ -202,7 +202,7 @@ function WebhookItem({
               the URL so a screen reader knows WHICH webhook it is toggling; the
               word beside it is the visible caption, as on the notifications
               rows. */}
-          <span className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground">
+          <span className="flex min-h-control items-center gap-inline text-xs text-muted-foreground">
             <Switch
               checked={w.active === 1}
               disabled={pending}
@@ -257,9 +257,9 @@ function WebhookItem({
         ) : deliveries.length === 0 ? (
           <span className="text-xs text-muted-foreground">{m.noDeliveries}</span>
         ) : (
-          <ul className="flex flex-col gap-1 border-t border-border pt-2">
+          <ul className="flex flex-col gap-tight border-t border-border pt-inline">
             {deliveries.map((d) => (
-              <li key={d.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <li key={d.id} className="flex flex-wrap items-center gap-inline text-xs">
                 {/* Was a bare ✓ / ✗ — a glyph doing an icon's job, with no
                     accessible name. Now the design language's own mark, with
                     the outcome spelled out for a screen reader. */}
@@ -348,24 +348,24 @@ export function Webhooks({
 
   return (
     <section>
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.webhooks}</h2>
         <Button size="lg" onClick={() => setOpen(true)}>
           {m.addWebhook}
         </Button>
       </div>
-      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
+      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
 
       {/* The one and only chance to read this secret — it is encrypted at rest
           from here on, and no endpoint gives it back (W / #75). */}
       {reveal ? (
-        <div className="mb-4 rounded-xl border border-primary-edge bg-card p-3">
-          <p className="mb-1 text-sm text-muted-foreground">{m.webhookSecretCopyOnce}</p>
+        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+          <p className="mb-tight text-sm text-muted-foreground">{m.webhookSecretCopyOnce}</p>
           <code className="break-all font-mono text-sm">{reveal}</code>
         </div>
       ) : null}
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {webhooks.map((w) => (
           <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} onAskDelete={(x) => void askDelete(x)} />
         ))}
@@ -373,22 +373,22 @@ export function Webhooks({
       </ul>
 
       <Modal open={open} onClose={() => setOpen(false)} title={m.addWebhook} labelId="new-webhook-title">
-        <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-card">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.subscriberUrl}</span>
             <Input
               value={url}
               placeholder="https://…"
               data-modal-autofocus
-              className="min-h-[44px]"
+              className="min-h-control"
               onChange={(e) => setUrl(e.target.value)}
             />
           </label>
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.events}</span>
             <div className="flex flex-col">
               {TRIGGERS.map((tr) => (
-                <label key={tr} className="flex min-h-[44px] cursor-pointer items-center gap-2">
+                <label key={tr} className="flex min-h-control cursor-pointer items-center gap-inline">
                   <Checkbox
                     checked={triggers.includes(tr)}
                     onChange={(e) =>
@@ -400,7 +400,7 @@ export function Webhooks({
               ))}
             </div>
           </div>
-          <div className="mt-1 flex flex-wrap justify-end gap-2">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
               {m.cancel}
             </Button>

@@ -79,7 +79,7 @@ function NavLinks({
 }) {
   const pathname = usePathname();
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="flex flex-col gap-tight">
       {NAV.map((item) => {
         const active = isNavItemActive(pathname, item.href, item.match);
         const label = nav[item.key];
@@ -91,8 +91,8 @@ function NavLinks({
               title={collapsed ? label : undefined}
               aria-current={active ? 'page' : undefined}
               className={[
-                'flex items-center gap-3 rounded-md text-sm transition-colors active:scale-[0.99]',
-                collapsed ? 'mx-auto h-11 w-11 justify-center gap-0 px-0' : 'min-h-[44px] px-3 py-2.5',
+                'flex items-center gap-field rounded-md text-sm transition-colors active:scale-[0.99]',
+                collapsed ? 'mx-auto h-11 w-11 justify-center gap-0 px-0' : 'min-h-control px-field py-field',
                 active
                   ? 'bg-muted font-medium text-foreground'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -179,8 +179,8 @@ export function AdminShell({
   const userLabel = user?.displayName ?? 'Not signed in';
 
   const brand = (
-    <div className={`flex items-center gap-2 ${railCollapsed ? 'flex-col px-0' : 'px-2'}`}>
-      <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+    <div className={`flex items-center gap-inline ${railCollapsed ? 'flex-col px-0' : 'px-inline'}`}>
+      <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
       {!railCollapsed ? <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span> : null}
       <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
@@ -192,7 +192,7 @@ export function AdminShell({
           aria-expanded={!collapsed}
           aria-label={collapsed ? c.expand : c.collapse}
           title={collapsed ? c.expand : c.collapse}
-          className={`hidden rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
+          className={`hidden rounded-md p-inline text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:inline-flex ${collapsed ? '' : 'ml-auto'}`}
         >
           <i aria-hidden className={`pi ${collapsed ? 'pi-angle-double-right' : 'pi-angle-double-left'}`} style={{ fontSize: 16 }} />
         </button>
@@ -239,11 +239,11 @@ export function AdminShell({
   // has to spare.
   const renderFooter = (footerCollapsed: boolean) => (
     <div
-      className={`mt-auto flex flex-col border-t border-border pt-3 ${
-        footerCollapsed ? 'items-center gap-1' : 'gap-2'
+      className={`mt-auto flex flex-col border-t border-border pt-field ${
+        footerCollapsed ? 'items-center gap-tight' : 'gap-inline'
       }`}
     >
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 items-center gap-inline">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
           {initial}
         </span>
@@ -254,7 +254,7 @@ export function AdminShell({
         ) : null}
       </span>
       {/* Icon actions stay reachable in the collapsed rail too. */}
-      <span className={`flex items-center ${footerCollapsed ? 'flex-col gap-1' : 'gap-0.5'}`}>
+      <span className={`flex items-center gap-tight ${footerCollapsed ? 'flex-col' : ''}`}>
         <ThemeToggle theme={theme} onFlip={setTheme} messages={c.theme} />
         {viewPublic}
         {signOut}
@@ -268,7 +268,7 @@ export function AdminShell({
           escape the modal (WCAG 2.4.3 / APG modal-dialog). */}
       <header
         inert={drawerOpen || undefined}
-        className="sticky top-0 z-30 flex items-center gap-2 border-b border-border bg-popover px-3 py-2 md:hidden"
+        className="sticky top-0 z-30 flex items-center gap-inline border-b border-border bg-popover px-field py-inline md:hidden"
       >
         <button
           type="button"
@@ -279,14 +279,14 @@ export function AdminShell({
         >
           <i aria-hidden className="pi pi-bars" style={{ fontSize: 20 }} />
         </button>
-        <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+        <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
         <span className="text-sm font-semibold">{PRODUCT_NAME}</span>
       </header>
 
       {/* Desktop sidebar — flush, bordered, collapsible rail */}
       <aside
-        className={`hidden shrink-0 flex-col gap-6 border-r border-border bg-popover py-4 transition-[width] md:flex ${
-          railCollapsed ? 'w-[64px] px-2' : 'w-60 px-4'
+        className={`hidden shrink-0 flex-col gap-group border-r border-border bg-popover py-card transition-[width] md:flex ${
+          railCollapsed ? 'w-[64px] px-inline' : 'w-60 px-card'
         }`}
       >
         {brand}
@@ -308,7 +308,7 @@ export function AdminShell({
       ) : null}
       <aside
         ref={drawerRef}
-        className={`fixed inset-y-0 left-0 z-50 flex w-[82vw] max-w-[320px] flex-col gap-6 overflow-y-auto border-r border-border bg-popover p-4 transition-transform md:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[82vw] max-w-[320px] flex-col gap-group overflow-y-auto border-r border-border bg-popover p-card transition-transform md:hidden ${
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         role="dialog"
@@ -316,8 +316,8 @@ export function AdminShell({
         aria-label="Primary"
         inert={!drawerOpen || undefined}
       >
-        <div className="flex items-center gap-2 px-2">
-          <span className="rounded-md bg-primary px-2 py-0.5 text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+        <div className="flex items-center gap-inline px-inline">
+          <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
           <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
           <AppSwitcher messages={c.switcher} />
         </div>

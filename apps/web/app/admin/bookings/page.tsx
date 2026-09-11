@@ -42,20 +42,20 @@ export default async function BookingsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       <PageHeader
         title={m.title}
         action={
           <Link
             href="/admin/bookings/new"
-            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            className="inline-flex min-h-control items-center rounded-md bg-primary px-card py-field text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
           >
             {m.newBooking}
           </Link>
         }
       />
       {/* Which zone the short "MST"-style labels below refer to (QA2 fix 8c). */}
-      <p className="-mt-6 mb-8 text-sm text-muted-foreground">
+      <p className="-mt-group mb-section text-sm text-muted-foreground">
         {t(m.timesShownIn, { tz: tz.replaceAll('_', ' ') })}
       </p>
 
@@ -84,10 +84,10 @@ function Section({
   m: BookingsMessages;
 }) {
   return (
-    <section className="mb-8">
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{title}</h2>
+    <section className="mb-section">
+      <h2 className="mb-field text-sm font-semibold text-muted-foreground">{title}</h2>
       {rows.length === 0 ? (
-        <div className="flex items-center gap-2 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <div className="flex items-center gap-inline rounded-md border border-dashed border-border p-card text-sm text-muted-foreground">
           <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <rect x="3" y="4.5" width="18" height="16" rx="2" />
             <path d="M3 9h18M8 2.5v4M16 2.5v4" />
@@ -95,11 +95,11 @@ function Section({
           {m.nothingHere}
         </div>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-inline">
           {rows.map((b) => (
             <li
               key={b.uid}
-              className={`flex items-center justify-between rounded-md border border-border bg-card p-4 ${
+              className={`flex items-center justify-between rounded-md border border-border bg-card p-card ${
                 muted ? 'opacity-70' : ''
               }`}
             >
@@ -117,7 +117,7 @@ function Section({
                   }).format(new Date(b.startUtc))}
                 </span>
               </span>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-field">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
                 {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
                 {/* A status pill, NOT a button — a solid background paired with
@@ -133,7 +133,7 @@ function Section({
                     unmistakable as non-interactive (same convention as the
                     member and role pills elsewhere in admin). */}
                 <span
-                  className={`rounded-sm px-2 py-1 text-xs font-medium ${
+                  className={`rounded-sm px-inline py-tight text-xs font-medium ${
                     b.status === 'accepted'
                       ? 'bg-primary/10 text-primary'
                       : b.status === 'pending'

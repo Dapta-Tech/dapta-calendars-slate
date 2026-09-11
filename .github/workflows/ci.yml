@@ -26,6 +26,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm glyph-gate
+      - run: pnpm spacing-gate
       - run: pnpm build:packages
       - run: pnpm lint
       - run: pnpm typecheck
