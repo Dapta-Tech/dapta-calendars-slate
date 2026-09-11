@@ -104,9 +104,23 @@ fi
 
 echo
 echo "== publish-gate: gitleaks =="
+# Both passes run with publish-gate-gitleaks.toml, which keeps gitleaks' whole
+# stock ruleset (`useDefault`) and only skips gitignored directories. The
+# `--no-git` pass walks the working directory and does NOT honour .gitignore, so
+# without it a built worktree reports Next.js' generated keys out of
+# apps/web/.next/** — noise that trains people to wave the gate through.
+GITLEAKS_CFG="scripts/publish-gate-gitleaks.toml"
+# A MISSING config is fail-loud by itself (gitleaks exits non-zero). An empty or
+# rule-less one is NOT: gitleaks loads it happily, finds nothing, and exits 0 —
+# a green gate that scanned for nothing. So assert the ruleset, not just the
+# file, the same way the trufflehog allowlist is asserted further down.
+if [ ! -f "$GITLEAKS_CFG" ] || ! grep -qE '^[[:space:]]*useDefault[[:space:]]*=[[:space:]]*true' "$GITLEAKS_CFG"; then
+  echo "FAIL: $GITLEAKS_CFG is missing or no longer extends the default ruleset."
+  FAIL=1
+fi
 if command -v gitleaks >/dev/null 2>&1; then
-  gitleaks detect --no-banner --redact -v || FAIL=1
-  gitleaks detect --no-git --no-banner --redact -v || FAIL=1
+  gitleaks detect --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
+  gitleaks detect --no-git --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
 else
   echo "WARN: gitleaks not installed — skipped locally (runs in CI)."
 fi
