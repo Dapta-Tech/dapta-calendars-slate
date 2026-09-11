@@ -97,6 +97,11 @@ export interface BookingMessages {
     duration: string;
     /** Leaves the filled-in form and goes back to the slot list. */
     backToTimes: string;
+    /** Opens the rest of a long event description, which is clamped so that a
+     *  host who writes an essay cannot push the duration and the timezone below
+     *  the fold. */
+    descriptionMore: string;
+    descriptionLess: string;
   };
   manage: {
     title: string;
@@ -1006,6 +1011,10 @@ export interface BookingMessages {
       contrast: string;
       adjustedNote: string;
       photoAvatar: string;
+      /** Shown under the photo field when it is empty and a connected calendar
+       *  account has one — so the host knows where the face on their page comes
+       *  from, and that uploading their own replaces it. */
+      photoFromConnectedAccount: string;
       coverImage: string;
       custom: string;
       customizeAppearance: string;
@@ -1192,6 +1201,8 @@ export const en: BookingMessages = {
     hour24: '24h',
     duration: 'Duration',
     backToTimes: 'Back to times',
+    descriptionMore: 'Show more',
+    descriptionLess: 'Show less',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2026,6 +2037,8 @@ export const en: BookingMessages = {
       contrast: 'Contrast {ratio}:1',
       adjustedNote: ' · adjusted to {hex} for legibility (AA)',
       photoAvatar: 'Photo / avatar',
+      photoFromConnectedAccount:
+        'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
@@ -2182,6 +2195,8 @@ export const es: BookingMessages = {
     hour24: '24 h',
     duration: 'Duración',
     backToTimes: 'Volver a los horarios',
+    descriptionMore: 'Ver más',
+    descriptionLess: 'Ver menos',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -3018,6 +3033,8 @@ export const es: BookingMessages = {
       contrast: 'Contraste {ratio}:1',
       adjustedNote: ' · ajustado a {hex} para mejor legibilidad (AA)',
       photoAvatar: 'Foto / avatar',
+      photoFromConnectedAccount:
+        'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',

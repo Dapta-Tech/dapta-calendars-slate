@@ -54,6 +54,10 @@ export default async function BookingPageSettings() {
         handle={me?.handle ?? ''}
         bio={(style.bio as string) ?? ''}
         avatarUrl={profile?.member.avatarUrl ?? ''}
+        // The preview's fallback, NOT the input's value: the field stays the
+        // host's own choice, and the preview still draws what the live page
+        // draws when that choice is empty.
+        connectedAvatarUrl={profile?.member.connectedAvatarUrl ?? ''}
         coverUrl={profile?.member.coverUrl ?? ''}
         accent={accent}
         axes={axes}

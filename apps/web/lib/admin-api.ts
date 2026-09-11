@@ -476,6 +476,9 @@ export interface Profile {
     handle: string;
     displayName: string | null;
     avatarUrl: string | null;
+    /** The connected calendar account's photo — the fallback when the host set
+     *  none of their own. Absent on an older API; treated as null. */
+    connectedAvatarUrl?: string | null;
     coverUrl: string | null;
     brandColor: string | null;
     style: Record<string, unknown> | null;

@@ -14,6 +14,7 @@ import {
   createApiKey,
   createBooking,
   createConnection,
+  setConnectionAvatar,
   updateConnection,
   connectionExists,
   countPublishedEventTypes,
@@ -607,17 +608,48 @@ export class AdminService {
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {
-      if (await connectionExists(this.db, p.memberId, conn.connectionRef)) continue;
+      if (await connectionExists(this.db, p.memberId, conn.connectionRef)) {
+        // Already recorded — but a photo the backend only started reporting
+        // after the connection was made would otherwise never land, so take it
+        // now. Cheap: no extra call, only what discovery already returned.
+        if (conn.avatarUrl) {
+          await setConnectionAvatar(
+            this.db,
+            p.accountId,
+            p.memberId,
+            conn.connectionRef,
+            conn.avatarUrl,
+          );
+        }
+        continue;
+      }
       // Old-app parity: when discovery doesn't carry the account email, derive
       // it from the provider's primary calendar (its id IS the account email).
       // Best-effort — a label-less connection is still a working connection.
       let primaryEmail = conn.primaryEmail ?? null;
+      // The account's own photo travels the same route as its email: on the
+      // discovery record when the backend puts it there, otherwise off the
+      // primary calendar. Optional at every hop — a backend that reports none
+      // leaves this null and the page draws its initial tile, as it does today.
+      let avatarUrl = conn.avatarUrl ?? null;
+      // The condition stays `!primaryEmail`, deliberately. Almost no backend
+      // reports `avatarUrl` on the discovery record yet, so widening this to
+      // `|| !avatarUrl` would fire an uncached HTTP GET for EVERY newly
+      // discovered connection, serially, on the post-OAuth request path — a
+      // cost the previous code specifically avoided, and one the `catch` would
+      // hide. The photo rides along whenever the call happens anyway, and
+      // `setConnectionAvatar` above picks up one that only appears later.
       if (!primaryEmail) {
         try {
           const calendars = await this.provider.listCalendars(conn.connectionRef);
           primaryEmail =
             calendars.find((c) => c.isPrimary)?.primaryEmail ??
             calendars.find((c) => c.primaryEmail)?.primaryEmail ??
+            null;
+          avatarUrl =
+            avatarUrl ??
+            calendars.find((c) => c.isPrimary)?.avatarUrl ??
+            calendars.find((c) => c.avatarUrl)?.avatarUrl ??
             null;
         } catch {
           /* keep null */
@@ -629,6 +661,7 @@ export class AdminService {
         provider: conn.provider || provider,
         externalId: conn.connectionRef,
         primaryEmail: primaryEmail ?? undefined,
+        avatarUrl,
         // First calendar the host connects becomes the default destination.
         isDestination: firstNew,
         checkConflicts: true,

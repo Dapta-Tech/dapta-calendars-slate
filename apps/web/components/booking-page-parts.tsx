@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildMonthGrid,
   monogram,
@@ -103,6 +103,61 @@ export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
 // --- Left region: the event panel -----------------------------------------
 
 /**
+ * A description with a ceiling.
+ *
+ * The panel shares a column with the calendar, so an unbounded `<p>` here is a
+ * panel of unbounded height: a host who pastes an agenda pushes the duration,
+ * the location and the timezone picker off the fold, and the invitee scrolls
+ * past a wall of text to reach the thing they came for. Six lines is enough to
+ * read what the meeting is; the rest is one click away.
+ *
+ * The full text is always in the DOM — the clamp is `-webkit-line-clamp`, which
+ * hides overflow visually and leaves it to a screen reader and to the page's own
+ * indexing. `whitespace-pre-line` survives so the host's own line breaks do.
+ *
+ * The toggle renders unconditionally rather than measuring: a measurement here
+ * would have to run after layout, after webfonts, and again on every resize, and
+ * getting it wrong strands text behind a control that is not there. A "Show
+ * more" on a description that happens to be five lines costs a click that does
+ * nothing visible; the other way round costs the text.
+ */
+function EventDescription({ m, description }: { m: BookingMessages; description: string }) {
+  const [expanded, setExpanded] = useState(false);
+  // The toggle announces a state, so it has to say what it is the state OF.
+  const descriptionId = useId();
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <p
+        id={descriptionId}
+        className="whitespace-pre-line text-sm text-muted-foreground"
+        style={
+          expanded
+            ? undefined
+            : {
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: 6,
+                overflow: 'hidden',
+              }
+        }
+      >
+        {description}
+      </p>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={descriptionId}
+        onClick={() => setExpanded((v) => !v)}
+        className="text-xs font-medium underline underline-offset-4"
+        style={{ color: 'var(--primary-ink, inherit)' }}
+      >
+        {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
+      </button>
+    </div>
+  );
+}
+
+/**
  * Who, what, how long, where, and in whose clock. Everything an invitee needs
  * to decide BEFORE they look at a time — which is why it sits first in the DOM
  * and first in the mobile stack.
@@ -144,6 +199,9 @@ export function EventPanel({
             alt=""
             width={44}
             height={44}
+            // The photo may come from the connected account, i.e. a provider CDN.
+            // Do not hand that CDN the booking page's URL on every render.
+            referrerPolicy="no-referrer"
             className="h-11 w-11 shrink-0 rounded-full object-cover"
           />
         ) : (
@@ -165,18 +223,17 @@ export function EventPanel({
         <p className="min-w-0 break-words text-sm font-medium text-muted-foreground">{hostName}</p>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          style={{ fontFamily: 'var(--bp-font-display)' }}
-        >
-          {eventTitle}
-        </h1>
-        {description ? (
-          <p className="whitespace-pre-line text-sm text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
+      <h1
+        className="text-2xl font-semibold tracking-tight"
+        style={{ fontFamily: 'var(--bp-font-display)' }}
+      >
+        {eventTitle}
+      </h1>
 
+      {/* The facts come BEFORE the prose. They are fixed-height and they are what
+          an invitee needs in order to decide; a host who writes forty lines of
+          description used to push the duration and the timezone a thousand
+          pixels down the page, below the calendar. */}
       <dl className="flex flex-col gap-2 text-sm">
         {/* Duration. One length exists in the model today, so this is a static
             chip rather than a disabled picker — a disabled control tells the
@@ -210,6 +267,8 @@ export function EventPanel({
         ) : null}
 
       </dl>
+
+      {description ? <EventDescription m={m} description={description} /> : null}
 
       <div className="flex flex-col gap-1.5">
         <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">

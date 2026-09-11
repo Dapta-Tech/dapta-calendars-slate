@@ -1823,6 +1823,8 @@ export async function createConnection(
     provider: string;
     externalId: string;
     primaryEmail?: string;
+    /** The connected account's photo, when the backend reports one. */
+    avatarUrl?: string | null;
     isDestination?: boolean;
     checkConflicts?: boolean;
   },
@@ -1830,12 +1832,35 @@ export async function createConnection(
   const id = randomUUID();
   await db.run(
     sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id,
-          primary_email, is_destination, check_conflicts, created_at)
+          primary_email, avatar_url, is_destination, check_conflicts, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId}, ${args.provider}, ${args.externalId},
-          ${args.primaryEmail ?? null}, ${args.isDestination ? 1 : 0},
+          ${args.primaryEmail ?? null}, ${args.avatarUrl ?? null}, ${args.isDestination ? 1 : 0},
           ${args.checkConflicts === false ? 0 : 1}, ${Date.now()})`,
   );
   return { id };
+}
+
+/**
+ * Refresh the stored photo for a connection that already exists.
+ *
+ * Discovery skips rows it has already recorded, so without this a photo that
+ * only appears later — the backend started reporting it, or the person set one
+ * — would never reach a connection made before it existed. Writes only a real
+ * value: a backend that stops reporting must not blank a photo the page is
+ * already drawing.
+ */
+export async function setConnectionAvatar(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  externalId: string,
+  avatarUrl: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE connected_calendar SET avatar_url = ${avatarUrl}
+        WHERE account_id = ${accountId} AND member_id = ${memberId}
+          AND external_id = ${externalId}`,
+  );
 }
 
 /**

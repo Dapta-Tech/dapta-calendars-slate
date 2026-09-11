@@ -360,7 +360,16 @@ export interface PublicProfile {
     handle: string;
     displayName: string | null;
     timeZone: string;
+    /** What the host set in the studio. Their choice, and it always wins. */
     avatarUrl: string | null;
+    /**
+     * The photo on the connected calendar account, when the backend reports
+     * one. A FALLBACK the public surfaces draw when `avatarUrl` is null — kept
+     * as a separate field on purpose: folding it into `avatarUrl` would put a
+     * synced URL into the studio's own input, where saving the form would turn
+     * a fallback into a stored value that outlives the connection.
+     */
+    connectedAvatarUrl: string | null;
     coverUrl: string | null;
     brandColor: string | null;
     layout: string | null;
@@ -393,6 +402,20 @@ export async function getPublicProfile(
         WHERE account_id = ${account.id} AND member_id = ${member.id} AND hidden = 0
         ORDER BY length_minutes ASC`,
   );
+  // The destination connection first — that is the account the host actually
+  // schedules from, so its photo is the one an invitee should recognise. Only
+  // fetched when the host set no avatar of their own; their choice wins and
+  // there is nothing to fall back to.
+  let connectedAvatar: string | null = null;
+  if (!member.avatar_url) {
+    const avatars = await db.all<{ avatar_url: string | null }>(
+      sql`SELECT avatar_url FROM connected_calendar
+          WHERE account_id = ${account.id} AND member_id = ${member.id}
+            AND avatar_url IS NOT NULL
+          ORDER BY is_destination DESC, created_at ASC`,
+    );
+    connectedAvatar = avatars[0]?.avatar_url ?? null;
+  }
   return {
     // Public responses always carry the CANONICAL code (vanity ?? short) so
     // clients build/redirect to canonical links even when queried by an alias.
@@ -402,6 +425,7 @@ export async function getPublicProfile(
       displayName: member.display_name,
       timeZone: member.time_zone,
       avatarUrl: member.avatar_url,
+      connectedAvatarUrl: connectedAvatar,
       coverUrl: member.cover_url,
       brandColor: member.brand_color,
       layout: member.layout,

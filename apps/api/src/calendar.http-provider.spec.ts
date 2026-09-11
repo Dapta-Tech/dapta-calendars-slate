@@ -230,9 +230,48 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     ]);
     const found = await provider.discoverConnections('tenant-1', 'google');
     expect(found).toEqual([
-      { connectionRef: 'conn-A', provider: 'google', primaryEmail: 'me@x.com', name: null },
+      {
+        connectionRef: 'conn-A',
+        provider: 'google',
+        primaryEmail: 'me@x.com',
+        // Optional on the wire, so a backend that reports no photo yields null
+        // and every surface falls back to its initial tile.
+        avatarUrl: null,
+        name: null,
+      },
     ]);
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/connect/connections?tenantKey=tenant-1&provider=google');
+  });
+
+  it('discoverConnections carries the account photo when the backend reports one', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          connections: [
+            {
+              connectionRef: 'conn-A',
+              provider: 'google',
+              primaryEmail: 'me@x.com',
+              avatarUrl: 'https://cdn.example.test/me.jpg',
+            },
+          ],
+        },
+      },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found[0]!.avatarUrl).toBe('https://cdn.example.test/me.jpg');
+  });
+
+  it('discoverConnections ignores a non-string photo rather than passing it on', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          connections: [{ connectionRef: 'conn-A', provider: 'google', avatarUrl: { url: 'nope' } }],
+        },
+      },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found[0]!.avatarUrl).toBeNull();
   });
 
   it('discoverConnections skips not-yet-authorized connection shells (connected:false)', async () => {

@@ -118,6 +118,11 @@ export default async function TeamPage({
       {body}
     </BrandedShell>
   ) : (
-    body
+    // The fourth public shell, centred like the other three — a team's entry
+    // page sitting at the top while every page reachable from it is centred is
+    // the inconsistency an invitee actually notices. It renders no
+    // `BrandedShell` outside the embed, so the floor needs an element of its
+    // own; inside the embed it keeps the measured shell untouched.
+    <div className="bp-viewport">{body}</div>
   );
 }

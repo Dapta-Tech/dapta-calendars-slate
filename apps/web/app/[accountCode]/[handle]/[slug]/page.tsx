@@ -8,6 +8,7 @@ import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -42,8 +43,7 @@ export async function generateMetadata({
       name,
       minutes: event.lengthMinutes,
     });
-  const avatar = profile.member.avatarUrl;
-  const images = avatar && /^https?:\/\//i.test(avatar) ? [avatar] : undefined;
+  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
   return {
     title,
     description,
@@ -107,7 +107,7 @@ export default async function BookingPage({
     <BrandedShell
       brandColor={accentOverride ?? profile.member.brandColor}
       style={mergeEmbedStyle(profile.member.style, styleOverrides)}
-      className={embed ? EMBED_ROOT_CLASS : undefined}
+      className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       {/* No link back to the profile page. `/{account}/{handle}` is its own
           entry point — the "Your booking link" the studio hands out — not the
@@ -118,7 +118,7 @@ export default async function BookingPage({
         className={
           embed
             ? 'mx-auto max-w-6xl px-4 py-4'
-            : 'mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
+            : 'mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
         }
       >
         <BookingFlow
@@ -134,7 +134,7 @@ export default async function BookingPage({
           lengthMinutes={availability.eventType.lengthMinutes}
           description={listing?.description ?? null}
           hostName={hostName}
-          avatarUrl={profile.member.avatarUrl}
+          avatarUrl={resolveAvatarUrl(profile.member.avatarUrl, profile.member.connectedAvatarUrl)}
           location={availability.eventType.location}
           nowUtc={from}
           embed={embed}

@@ -79,6 +79,10 @@ export interface CalendarSummary {
   id: string;
   name: string;
   primaryEmail?: string | null;
+  /** The connected account's own profile photo, when the backend reports one.
+   *  OPTIONAL: a backend that omits it is valid, and the surfaces that draw an
+   *  avatar fall back exactly as they do with no connection at all. */
+  avatarUrl?: string | null;
   /** The account's default calendar — a sensible default destination. */
   isPrimary?: boolean;
   readOnly?: boolean;
