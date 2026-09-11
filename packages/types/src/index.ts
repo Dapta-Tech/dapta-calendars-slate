@@ -434,10 +434,52 @@ export const bookingPageStyleSchema = z.object({
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 
+/**
+ * The largest inline image the contract will store, in characters.
+ *
+ * Both of these fields accept a `data:` URL — that is how the studio stores an
+ * uploaded photo, since there is no file storage — and the value is rendered
+ * into `src` on the public booking page, so its size is the invitee's download.
+ * The browser downscales before encoding (`apps/web/lib/image-file.ts`), which
+ * puts a real photo three orders of magnitude under this. The cap is the
+ * backstop for a non-UI caller, and it matches `teamInputSchema.logoUrl`, which
+ * has carried the same number since it was written.
+ */
+export const MAX_INLINE_IMAGE_CHARS = 1_500_000;
+
+/**
+ * The request-body ceiling that makes the cap above actually reachable, in
+ * bytes, and the same number as a `bytes`-style string for the two configs that
+ * want one.
+ *
+ * Express defaults to 100kb and Next's Server Actions to 1mb; both are below
+ * what a single one of those fields can hold, so the declared cap was fiction
+ * until this. Three mebibytes clears two maxed image fields at once
+ * (3,000,000 chars) with room for the rest of a form.
+ *
+ * It is deliberately the smallest number that makes the contract true rather
+ * than a generous one, and it is NOT applied everywhere: only the handful of
+ * routes that carry an inline image get it (see `apps/api/src/main.ts`).
+ */
+export const MAX_REQUEST_BODY_BYTES = 3 * 1024 * 1024;
+export const MAX_REQUEST_BODY = '3mb';
+
+/**
+ * The smallest body ceiling a request is likely to meet in the wild, and so the
+ * point past which "the save was refused" should be read as "too large".
+ *
+ * Ours are not the only limits in the path: nginx defaults to
+ * `client_max_body_size 1m`, and a self-hoster who has not raised it refuses a
+ * 1.5MB save long before either of our 3MB ceilings sees it. Judging the
+ * message by OUR limit would tell that host "Save failed" and send them
+ * hunting, when too-large is the correct diagnosis no matter which hop said so.
+ */
+export const LIKELY_BODY_LIMIT_BYTES = 1024 * 1024;
+
 export const brandingSchema = z.object({
   displayName: z.string().max(200).nullable().optional(),
-  avatarUrl: z.string().url().nullable().optional(),
-  coverUrl: z.string().url().nullable().optional(),
+  avatarUrl: z.string().url().max(MAX_INLINE_IMAGE_CHARS).nullable().optional(),
+  coverUrl: z.string().url().max(MAX_INLINE_IMAGE_CHARS).nullable().optional(),
   /** The single accent color, rendered exactly as picked. The engine reports
    *  its contrast and no longer adjusts it (ADR 0004, 2026-09-11 amendment); an
    *  unparseable value falls back to the DS accent. */
@@ -942,9 +984,9 @@ export const teamInputSchema = z.object({
   name: z.string().min(1).max(200),
   slug: z.string().min(1).max(80),
   bio: z.string().max(2000).nullable().optional(),
-  // A https URL or a small data-URL logo. Capped server-side (~1MB image →
-  // base64 overhead) so a non-UI caller can't push an unbounded TEXT value.
-  logoUrl: z.string().max(1_500_000).nullable().optional(),
+  // A https URL or a small data-URL logo. Capped server-side so a non-UI caller
+  // can't push an unbounded TEXT value; same number as `brandingSchema`.
+  logoUrl: z.string().max(MAX_INLINE_IMAGE_CHARS).nullable().optional(),
   timeZone: timeZoneSchema.optional(),
   hideBranding: z.boolean().optional(),
 });

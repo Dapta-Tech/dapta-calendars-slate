@@ -24,6 +24,7 @@ import {
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
+import { saveErrorMessage } from '@/lib/save-error';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -34,8 +35,14 @@ import { cn } from '@/lib/cn';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
+import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { ChevronIcon } from '@/components/booking-page-parts';
-import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
+import {
+  checkHandleAction,
+  saveStudioAction,
+  toggleEventHiddenAction,
+  type SaveResult,
+} from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
 
@@ -102,19 +109,6 @@ interface EventTypeLite {
   slug: string;
   title: string;
   lengthMinutes: number;
-}
-
-/** Read an image file to a data-URL (like the old app): image/* only, ≤1MB.
- *  Returns a stable error code the caller localizes. */
-function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok: false; code: 'invalid' | 'tooLarge' | 'read' }> {
-  return new Promise((resolve) => {
-    if (!file.type.startsWith('image/')) return resolve({ ok: false, code: 'invalid' });
-    if (file.size > 1024 * 1024) return resolve({ ok: false, code: 'tooLarge' });
-    const reader = new FileReader();
-    reader.onload = () => resolve({ ok: true, dataUrl: String(reader.result) });
-    reader.onerror = () => resolve({ ok: false, code: 'read' });
-    reader.readAsDataURL(file);
-  });
 }
 
 export interface StudioInit {
@@ -297,7 +291,7 @@ export function Studio(init: StudioInit) {
     start(async () => {
       const vanityTrim = vanity.trim().toLowerCase();
       const vanityChanged = init.vanity.canClaim && vanityTrim !== (init.vanity.vanitySlug ?? '');
-      const r = await saveStudioAction({
+      const payload = {
         handle: handle !== init.handle ? handle : undefined,
         // One Save persists everything (R30): the vanity change rides along.
         vanitySlug: vanityChanged ? vanityTrim || null : undefined,
@@ -313,7 +307,23 @@ export function Studio(init: StudioInit) {
         // amendment removed, and writing the pick is what keeps it removed.
         brandColor: accent,
         style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
-      });
+      };
+
+      let r: SaveResult;
+      try {
+        r = await saveStudioAction(payload);
+      } catch (e) {
+        // Re-throws a session redirect and reports everything else; see
+        // `saveErrorMessage` for why that first step matters.
+        const message = saveErrorMessage(e, payload, {
+          tooLarge: m.saveTooLarge,
+          failed: m.saveFailed,
+        });
+        setSaved('err');
+        setSaveMsg(message);
+        return;
+      }
+
       if (r.ok) {
         setSaved('ok');
         setSaveMsg(null);
@@ -1086,8 +1096,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** Image picker: upload (data-URL, 1MB/type-validated) with a preview + clear,
- *  or paste a URL. Matches the old app's dropzone-to-data-URL behaviour. */
+/** Image picker: upload (downscaled to an inline data-URL by `@/lib/image-file`)
+ *  with a preview + clear, or paste a URL.
+ *
+ *  `preview` is not only the thumbnail shape — it is also the downscale target,
+ *  because the two must agree. A cover is a wide banner; squaring it to the
+ *  avatar's 512×512 would destroy it. */
 function ImageInput({
   value,
   onChange,
@@ -1100,9 +1114,15 @@ function ImageInput({
   m: StudioMessages;
 }) {
   const [err, setErr] = useState<string | null>(null);
+  // A 25MB decode is not instant, so the control says so rather than looking dead.
+  const [busy, setBusy] = useState(false);
   const isData = value.startsWith('data:');
-  const errText = (code: 'invalid' | 'tooLarge' | 'read') =>
-    code === 'invalid' ? m.imageInvalid : code === 'tooLarge' ? m.imageTooLarge : m.couldNotRead;
+  const errText = (code: ImageErrorCode) => {
+    if (code === 'invalid') return m.imageInvalid;
+    if (code === 'tooLarge') return m.imageTooLarge;
+    if (code === 'cannotShrink') return m.imageCannotShrink;
+    return m.couldNotRead;
+  };
   return (
     <div className="flex flex-col gap-inline">
       {value ? (
@@ -1120,23 +1140,34 @@ function ImageInput({
           className={cn(
             buttonVariants({ variant: 'outline', size: 'lg' }),
             'cursor-pointer text-xs',
+            busy && 'pointer-events-none opacity-60',
           )}
+          aria-busy={busy}
         >
           <i aria-hidden className="pi pi-upload" style={{ fontSize: 12 }} />
-          {m.uploadImage}
+          {busy ? m.imageWorking : m.uploadImage}
           <input
             type="file"
             accept="image/*"
             className="sr-only"
+            disabled={busy}
             onChange={async (e) => {
               const f = e.target.files?.[0];
+              // Clear the input NOW: picking the same file twice after an error
+              // fires no change event otherwise.
+              e.target.value = '';
               if (!f) return;
-              const r = await readImageFile(f);
-              if (r.ok) {
-                onChange(r.dataUrl);
-                setErr(null);
-              } else {
-                setErr(errText(r.code));
+              setBusy(true);
+              try {
+                const r = await readImageFile(f, preview);
+                if (r.ok) {
+                  onChange(r.dataUrl);
+                  setErr(null);
+                } else {
+                  setErr(errText(r.code));
+                }
+              } finally {
+                setBusy(false);
               }
             }}
           />
@@ -1155,13 +1186,17 @@ function ImageInput({
           </Button>
         ) : null}
       </div>
+      {/* Sits under the UPLOAD control, not under the paste-a-URL field below:
+          it describes what happens to a picked file, and a pasted URL is never
+          resized at all. */}
+      <span className="text-xs text-muted-foreground">{m.imageHelp}</span>
+      {err ? <span className="text-xs text-destructive">{err}</span> : null}
       <Input
         value={isData ? '' : value}
         placeholder={m.orPasteUrl}
         className={inputCls}
         onChange={(e) => onChange(e.target.value)}
       />
-      {err ? <span className="text-xs text-destructive">{err}</span> : null}
     </div>
   );
 }
