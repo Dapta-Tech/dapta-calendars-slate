@@ -19,9 +19,23 @@ FAIL=0
 
 echo "== publish-gate: internal-token scan =="
 # The denylist: internal hosts, cloud/account markers, internal service names,
-# and WIP markers that must never reach public history. Extend as needed.
+# the private integration platform behind CALENDAR_BACKEND_MODULE (R15 — both
+# its domain and its product name), and WIP markers that must never reach
+# public history. Extend as needed.
 # Matched case-insensitively (grep -i) so "Aurora"/"aurora" both trip it.
-PATTERN='[a-z0-9-]+\.dapta\.(ai|dev)|daptatech|amazonaws|aurora|\bbooking_ms\b|dapta_lab|dapta-iam|integration\.app|apps-configs-flux2|DO[ -]NOT[ -]MERGE'
+#
+# R15 entries hide one letter in a character class: `int[e]gration` matches
+# exactly the same strings as `integration`, but THIS FILE ships in the public
+# repo, so a plain-text search of it must not hand over the name the gate is
+# there to keep out. Add any future vendor entry the same way, and leave the
+# trailing `\b` off so `NameWire`/`NameConnector` still trip it.
+#
+# R15_PATTERN is held separately because it is the one group that must also be
+# absent from git HISTORY (scanned further down) — the internal hosts and WIP
+# markers are a working-tree concern. It is spliced into PATTERN below, so a new
+# vendor is still added in exactly one place.
+R15_PATTERN='int[e]gration\.app|m[e]mbrane'
+PATTERN="[a-z0-9-]+\.dapta\.(ai|dev)|daptatech|amazonaws|aurora|\bbooking_ms\b|dapta_lab|dapta-iam|${R15_PATTERN}|apps-configs-flux2|DO[ -]NOT[ -]MERGE"
 # Product-PUBLIC hosts (our own public web/API/platform hosts) are not leaks —
 # they may appear anywhere in the public repo. Internal service hosts stay blocked.
 PUBLIC_HOST_ALLOW='\b(app|www|calendars?(-api)?)\.dapta\.(ai|dev)\b'
@@ -61,6 +75,31 @@ if [ -n "$AUTHOR_HITS" ]; then
   echo "$AUTHOR_HITS"
 else
   echo "OK: no internal author identities in history."
+fi
+
+echo
+echo "== publish-gate: R15 vendor scan (git history) =="
+# The tree scan above cannot see history. A vendor name that was committed and
+# later removed is still one `git log --grep` away for anyone who clones the
+# repo, so history has to be curated (reword/squash) before the flip to public.
+#
+# Scoped to R15_PATTERN rather than the whole denylist on purpose: the internal
+# hosts and the `daptatech` co-author trailer already surface in the
+# author-identity scan above, and re-reporting them here would bury this signal
+# in noise. Non-fatal for the same reason as that scan — flip to FAIL=1 once
+# history has been curated, so a regression is caught.
+#
+# Prints SHAs and a count ONLY, never the matching text: this output lands in CI
+# logs, which are public the moment the repo is.
+R15_MSG=$(git log --regexp-ignore-case --extended-regexp --grep="$R15_PATTERN" --format='%H' 2>/dev/null || true)
+R15_BLOB=$(git log --regexp-ignore-case --pickaxe-regex -S"$R15_PATTERN" --format='%H' 2>/dev/null || true)
+R15_HITS=$(printf '%s\n%s\n' "$R15_MSG" "$R15_BLOB" | grep -v '^$' | sort -u || true)
+if [ -n "$R15_HITS" ]; then
+  echo "WARN: R15 vendor tokens in git history (curate before publish):"
+  echo "$R15_HITS" | head -10 | sed 's/^/  /'
+  echo "  $(echo "$R15_HITS" | wc -l | tr -d ' ') commit(s) total; text withheld (this log is public)."
+else
+  echo "OK: no R15 vendor tokens in history."
 fi
 
 echo
