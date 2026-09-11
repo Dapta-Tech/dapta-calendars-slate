@@ -8,6 +8,7 @@ import type {
   CrmPropertyMappings,
   EventLocationDto,
   EventReminder,
+  OneOffLinkView,
 } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
@@ -108,5 +109,73 @@ export async function deleteEventTypeAction(id: string): Promise<ActionResult> {
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the event.' };
+  }
+}
+
+// --- One-off invite links (#69 / AB2, #110) --------------------------------
+//
+// Server actions rather than browser fetches, for the reason every other admin
+// call here is one: `adminApi` reads `API_URL` at RUNTIME and attaches the
+// session, and neither may reach the client bundle. It matters more than usual
+// for this feature, because the payload these actions carry back is the TOKEN
+// itself, in clear — the thing a host pastes into a message.
+
+/** One link plus a result, so the panel can render an error without a throw. */
+export type OneOffLinkResult =
+  | { ok: true; link: OneOffLinkView }
+  | { ok: false; message?: string };
+
+export type OneOffLinkListResult =
+  | { ok: true; links: OneOffLinkView[] }
+  | { ok: false; message?: string };
+
+/**
+ * The links on one event, newest first.
+ *
+ * Answers a RESULT rather than throwing, because the panel that calls it lives
+ * inside the event-type form: an unreachable API must cost the host the link
+ * list, never the unsaved edits sitting in the rest of that form.
+ */
+export async function listOneOffLinksAction(eventTypeId: string): Promise<OneOffLinkListResult> {
+  try {
+    return { ok: true, links: await adminApi.listOneOffLinks(eventTypeId) };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/**
+ * Mint one.
+ *
+ * Takes no options: a one-off link is a grant over the event in the path and
+ * carries no settings of its own. The minted token comes straight back so the
+ * host can copy it without a second round trip — and can copy it again later
+ * from the list, which is what storing it in clear buys (ADR 0003).
+ */
+export async function mintOneOffLinkAction(eventTypeId: string): Promise<OneOffLinkResult> {
+  try {
+    return { ok: true, link: await adminApi.mintOneOffLink(eventTypeId) };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/**
+ * Kill one by hand. ADR 0003 makes revocation a condition of storing the token
+ * in clear, not a nicety — a re-readable token a host cannot withdraw is a link
+ * they can never take back out of the wrong thread.
+ */
+export async function revokeOneOffLinkAction(
+  eventTypeId: string,
+  linkId: string,
+): Promise<ActionResult> {
+  try {
+    await adminApi.revokeOneOffLink(eventTypeId, linkId);
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }

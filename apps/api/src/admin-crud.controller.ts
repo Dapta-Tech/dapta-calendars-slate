@@ -35,10 +35,13 @@ import {
   listEventTypes,
   listMembers,
   listSchedules,
+  listOneOffLinks,
   listTeamMembers,
   listTeams,
+  mintOneOffLink,
   removeMember,
   removeTeamMember,
+  revokeOneOffLink,
   setMemberStatus,
   updateEventType,
   updateSchedule,
@@ -49,12 +52,14 @@ import {
 import {
   eventTypeInputSchema,
   memberInviteSchema,
+  type OneOffLinkView,
   memberPatchSchema,
   scheduleInputSchema,
   teamInputSchema,
   teamMemberInputSchema,
   type CrmPropertyMappings,
 } from '@slate/types';
+import { oneOffLinkPath } from '@slate/engine';
 import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
 import { ZodError } from 'zod';
 import { AuthService, type ReqLike } from './auth.service';
@@ -77,6 +82,37 @@ function unwrapCrud<T>(r: CrudResult<T>): T {
   if (r.ok) return r.value;
   if (r.reason === 'NOT_FOUND') throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
   throw new ConflictException({ error: r.reason, message: r.message ?? 'Conflict.' });
+}
+
+/**
+ * One stored link as the editor reads it (#110).
+ *
+ * `path` is built here from the engine's single helper rather than assembled by
+ * the client, so the admin list, this response and the web route that serves
+ * the link cannot spell the address three different ways — a host copying a
+ * link that 404s is the exact failure that would cause.
+ */
+function toOneOffLinkView(link: {
+  id: string;
+  token: string;
+  createdAt: number;
+  createdByMemberId: string | null;
+  state: 'live' | 'consumed' | 'revoked';
+  consumedAt: number | null;
+  consumedBookingUid: string | null;
+  revokedAt: number | null;
+}): OneOffLinkView {
+  return {
+    id: link.id,
+    token: link.token,
+    path: oneOffLinkPath(link.token),
+    createdAt: link.createdAt,
+    createdByMemberId: link.createdByMemberId,
+    state: link.state,
+    consumedAt: link.consumedAt,
+    consumedBookingUid: link.consumedBookingUid,
+    revokedAt: link.revokedAt,
+  };
 }
 
 /** Host-authed CRUD for event-types, schedules, teams, members. */
@@ -285,6 +321,98 @@ export class AdminCrudController {
     if (!existing) return; // idempotent — already gone (204)
     assertOwnsOrAdmin(p, existing.memberId);
     await deleteEventType(this.db, p.accountId, id);
+  }
+
+  // --- One-off links (#69 / AB2, #110) -----------------------------------
+  //
+  // A link is a GRANT over an event type, so it hangs off that event type's
+  // resource rather than living at a top level of its own. All three routes
+  // resolve the principal and pass its `accountId` into the repository call
+  // (invariant 4), and all three additionally run `assertOwnsOrAdmin` against
+  // the event type they name — a plain member may mint, list and revoke links
+  // on their OWN events, while team events (which have no `memberId`) stay
+  // admin-and-owner territory exactly as editing them already is.
+  //
+  // An event type belonging to another account answers the same 404 a
+  // non-existent one does, never a 403, so these routes cannot be used to
+  // discover which ids exist elsewhere in the deployment.
+
+  /**
+   * The links on one event type, newest first.
+   *
+   * Carries the token IN CLEAR, which is the point (ADR 0003): a host comes
+   * back to this list hours or days after minting and copies the link again.
+   * It is host-authenticated data and never reaches a public response.
+   */
+  @Get('event-types/:id/one-off-links')
+  async listEventTypeOneOffLinks(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    const et = await getEventTypeById(this.db, p.accountId, id);
+    if (!et) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    assertOwnsOrAdmin(p, et.memberId);
+    return (await listOneOffLinks(this.db, p.accountId, id)).map(toOneOffLinkView);
+  }
+
+  /**
+   * Mint one.
+   *
+   * No body: a one-off link has no options. It is a grant over the event type
+   * in the path and nothing else — no duration, no availability, no title —
+   * because an ad-hoc meeting that exists only as a link would be a second kind
+   * of bookable object, and that stays deferred at #69.
+   *
+   * `createdByMemberId` is the principal, so a shared team event records WHICH
+   * host handed the link out.
+   */
+  @Post('event-types/:id/one-off-links')
+  @HttpCode(201)
+  async createEventTypeOneOffLink(@Req() req: ReqLike, @Param('id') id: string) {
+    const p = await this.auth.resolveHost(req);
+    const et = await getEventTypeById(this.db, p.accountId, id);
+    if (!et) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    assertOwnsOrAdmin(p, et.memberId);
+    const link = await mintOneOffLink(this.db, {
+      accountId: p.accountId,
+      eventTypeId: id,
+      createdByMemberId: p.memberId,
+    });
+    // Unreachable in practice — the ownership read above already passed — but
+    // the repository re-checks the account itself, and a null here must not
+    // become a 500 shaped like a crash.
+    if (!link) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    return toOneOffLinkView(link);
+  }
+
+  /**
+   * Kill one by hand.
+   *
+   * ADR 0003 makes revocation a CONDITION of storing the token in clear rather
+   * than a nicety: a re-readable token that cannot be withdrawn is a link a
+   * host can never take back out of the wrong thread.
+   *
+   * 204 whether or not the link was still live, like `deleteEventType` above:
+   * revoking an already-dead link is a request whose desired state already
+   * holds, and reporting that as a failure would make the button lie after a
+   * double click or a stale list.
+   */
+  @Delete('event-types/:id/one-off-links/:linkId')
+  @HttpCode(204)
+  async revokeEventTypeOneOffLink(
+    @Req() req: ReqLike,
+    @Param('id') id: string,
+    @Param('linkId') linkId: string,
+  ) {
+    const p = await this.auth.resolveHost(req);
+    const et = await getEventTypeById(this.db, p.accountId, id);
+    if (!et) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    assertOwnsOrAdmin(p, et.memberId);
+    // The event type travels into the WRITE, not just into the permission check
+    // above. Without it, `assertOwnsOrAdmin` would be vacuous with respect to
+    // the row this mutates: a member could pair their own event's id in the path
+    // with a link id belonging to a colleague's event — or to a team event that
+    // check makes admin-only — and revoke it. Both rows are in one account, so
+    // account scoping alone does not catch it.
+    await revokeOneOffLink(this.db, p.accountId, id, linkId);
   }
 
   // --- Schedules ---------------------------------------------------------

@@ -484,6 +484,55 @@ export const accountIntegration = pgTable('account_integration', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
+/**
+ * One-off links (#69 / AB2, #110) — a GRANT over an event type, never a meeting.
+ *
+ * A host mints a token over an event type they ALREADY have, pastes it into one
+ * message to one intended invitee, and it dies the moment a booking is made
+ * against it. That is the whole of the concept, and it is why there is no
+ * `length_minutes`, no `schedule_id` and no `title` here: an ad-hoc meeting that
+ * exists only as a link is a second kind of bookable object, and it stays
+ * deferred at #69. Everything this table holds describes the GRANT — which event
+ * type, the token, who minted it, when, and what consumed it.
+ *
+ * Like the duplicate-booking guard it ships beside, this is **not a security
+ * control**; the per-IP limiter in `apps/api/src/rate-limit.ts` is.
+ *
+ * `token` is stored IN CLEAR and is UNIQUE. Both halves are deliberate and
+ * `docs/adr/0003-public-tokens-have-two-storage-policies.md` is where they were
+ * decided — do not "fix" this to match `booking.manage_token_hash`. The unique
+ * index is `one_off_link_token_uq`, in migration
+ * `…_one_off_link.sql`: the schema files declare no indexes (there is no
+ * drizzle-kit here — migrations are hand-written SQL applied by `migrate.ts`),
+ * exactly as `slot_reservation.uid` and the `booking_no_overlap` EXCLUDE
+ * constraint are already documented.
+ *
+ * Three nullable timestamps rather than a status column, so the row records
+ * WHAT HAPPENED rather than a verdict someone has to keep in sync:
+ * `consumed_at` + `consumed_booking_id` are written together when a booking
+ * lands, and `revoked_at` when the host kills the link by hand. A later CANCEL
+ * of that booking does NOT clear `consumed_at` — the link did its job the moment
+ * it produced a booking, and the host mints another.
+ */
+export const oneOffLink = pgTable('one_off_link', {
+  id: text('id').primaryKey(),
+  /** Tenant scope (invariant 4). Every read and write passes it. */
+  accountId: text('account_id').notNull(),
+  /** The event type this grant opens. The grant's whole subject. */
+  eventTypeId: text('event_type_id').notNull(),
+  /** 256-bit base64url, IN CLEAR, globally unique — see ADR 0003 above. */
+  token: text('token').notNull(),
+  /** The member who minted it. Nullable: a member can be removed later. */
+  createdByMemberId: text('created_by_member_id'),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  /** Set when a booking was made against this link, `pending` included. */
+  consumedAt: bigint('consumed_at', { mode: 'number' }),
+  /** The booking that consumed it. Kept so the host's list can say which. */
+  consumedBookingId: text('consumed_booking_id'),
+  /** Set when the host revoked it by hand (ADR 0003: revocation must be real). */
+  revokedAt: bigint('revoked_at', { mode: 'number' }),
+});
+
 export const pgSchema = {
   account,
   member,
@@ -508,4 +557,5 @@ export const pgSchema = {
   outbox,
   notificationSetting,
   accountIntegration,
+  oneOffLink,
 };

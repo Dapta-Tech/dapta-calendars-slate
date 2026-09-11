@@ -12,6 +12,7 @@ import {
   classifyEmptyReason,
   computeSlots,
   generateManageToken,
+  isOneOffTokenShape,
   isExclusionViolation,
   isUniqueViolation,
   parseEventLocation,
@@ -29,6 +30,12 @@ import {
   hasUpcomingBookingForEmail,
   normalizeAttendeeEmail,
 } from './duplicate-guard';
+import {
+  consumeOneOffLink,
+  getOneOffLinkByToken,
+  oneOffGuardApplies,
+  type OneOffLinkRecord,
+} from './one-off-link';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -109,7 +116,23 @@ export type BookingOutcome =
         | 'CALENDAR_UNAVAILABLE'
         /** The event type's duplicate-booking guard refused this email (#69).
          *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
-        | 'DUPLICATE_BOOKING';
+        | 'DUPLICATE_BOOKING'
+        /**
+         * A one-off token was presented that names nothing, or that opens a
+         * DIFFERENT event type than the one being booked (#110). Answers 404
+         * upstream, indistinguishable from any other missing route — the two
+         * cases are folded together on purpose, so the response cannot
+         * confirm that a token exists somewhere else in the deployment.
+         */
+        | 'ONE_OFF_NOT_FOUND'
+        /**
+         * A one-off token that was real and is now dead — consumed by an
+         * earlier booking, or revoked by the host. Answers 410; a cancel of
+         * that earlier booking never brings it back. Kept apart from
+         * `ONE_OFF_NOT_FOUND` because "this link was used" and "this link
+         * never existed" are different things to tell a person.
+         */
+        | 'ONE_OFF_GONE';
     }
   | { ok: false; reason: 'INVALID'; message: string };
 
@@ -169,6 +192,20 @@ export interface CreateBookingArgs {
    * `duplicate-guard.ts`.
    */
   apiKeyWrite?: boolean;
+  /**
+   * A one-off link token presented with this write (#110), if any.
+   *
+   * Absent on every ordinary booking, which is why nothing about the existing
+   * paths changes. When present and live it does two things and only two: it
+   * lets the lookup see a HIDDEN event type, and it is burned once the booking
+   * commits. It grants nothing else — it does not skip availability, the
+   * duplicate guard, the overlap check or the reservation rules.
+   *
+   * Ignored entirely on host and API-key writes (`oneOffGuardApplies`), which
+   * are not subject to the grant — see there for what exemption does and does
+   * not mean.
+   */
+  oneOffToken?: string;
 }
 
 /**
@@ -231,12 +268,28 @@ export async function getMember(
   );
 }
 
+/**
+ * `hidden = 0` is the PUBLIC filter, and the default stays public.
+ *
+ * `includeHidden` exists for exactly one caller: a request carrying a valid,
+ * live one-off link (#110). Reaching an event the ordinary public URL cannot is
+ * the entire value of such a link — a host mints one precisely so an event can
+ * be hidden from their booking page and still bookable by the person they sent
+ * it to. Every caller that does NOT pass it keeps today's behaviour exactly.
+ *
+ * The flag is never derived from anything caller-supplied. It is set only after
+ * the token has been resolved against `one_off_link`, and the caller then
+ * re-checks that the resolved link opens THIS event type — a token for event A
+ * must not unlock event B.
+ */
 export async function getEventType(
   db: Db,
   accountId: string,
   memberId: string,
   slug: string,
+  opts?: { includeHidden?: boolean },
 ): Promise<EventTypeRow | undefined> {
+  const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
@@ -244,7 +297,7 @@ export async function getEventType(
                prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
-              AND hidden = 0 LIMIT 1`,
+              ${visibility} LIMIT 1`,
   );
 }
 
@@ -564,6 +617,13 @@ export async function getAvailability(
     toMs: number;
     displayTimeZone?: string;
     now?: Date;
+    /**
+     * Let a HIDDEN event type answer (#110). Set only by a caller that has
+     * already resolved a live one-off link over this exact event type — the
+     * booking page a one-off link opens has to be able to read slots for the
+     * hidden event the link exists to reach. Never derived from the request.
+     */
+    includeHidden?: boolean;
   },
   /**
    * The wired CalendarProvider. When enabled, the host's external busy times are
@@ -581,7 +641,9 @@ export async function getAvailability(
       : undefined;
   // The by-id path must stay account-scoped (tenant isolation).
   if (!member || member.account_id !== account.id) return undefined;
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!eventType) return undefined;
 
   const referenced = await resolveScheduleTimeZone(db, eventType.schedule_id);
@@ -763,8 +825,51 @@ export async function createBooking(
       : undefined;
   // The by-id path must stay account-scoped (tenant isolation).
   if (!member || member.account_id !== account.id) return { ok: false, reason: 'NOT_FOUND' };
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+
+  // One-off link (#69/AB2): resolved BEFORE the event type, because a live link
+  // is what decides whether a HIDDEN event type is visible to this request at
+  // all. Exempt writes (host on-behalf, API key) skip the whole block — a token
+  // they happen to carry is neither validated nor burned, and their visibility
+  // is unchanged from today. See `one-off-link.ts`.
+  //
+  // ABOVE the idempotency replay below, which is the opposite of where the
+  // duplicate-booking guard sits, and deliberately so. That guard is a verdict
+  // about PRIOR STATE ("this email already has a booking"), and a retry must
+  // return its original booking rather than be told about it. A one-off token
+  // is a CREDENTIAL FOR THIS WRITE, and a request presenting a spent credential
+  // is refused on its own terms whether or not some earlier request succeeded.
+  // The ordering is also forced: `getEventType` sits above the replay and the
+  // token is what makes a hidden one visible, so a dead token cannot resolve
+  // the event type this write needs before the replay is ever reached. No caller reaches both today — the
+  // public route sends no idempotency key, and every surface that does is
+  // `apiKeyWrite` and therefore exempt — but the reasoning is written down
+  // because the next person to plumb a key through the public route will
+  // otherwise have to re-derive it.
+  const honoursOneOff =
+    !!args.oneOffToken &&
+    oneOffGuardApplies({ onBehalf: args.onBehalf, apiKeyWrite: args.apiKeyWrite });
+  // Shape first, as the read paths do: the value is an unauthenticated header,
+  // and a malformed one is answered without spending a lookup on it.
+  if (honoursOneOff && !isOneOffTokenShape(args.oneOffToken))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+  let live: OneOffLinkRecord | undefined;
+  if (honoursOneOff) {
+    const oneOff = await getOneOffLinkByToken(db, args.oneOffToken!);
+    if (!oneOff) return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+    if (oneOff.state !== 'live') return { ok: false, reason: 'ONE_OFF_GONE' };
+    live = oneOff;
+  }
+
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: !!live,
+  });
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
+  // The link must open THIS event, not merely be live. Without this a token
+  // minted over a public 15-minute intro would unlock every hidden event on the
+  // account. Both halves are checked: the account, because the link is looked
+  // up by token alone and carries its own tenant, and the event type.
+  if (live && (live.eventTypeId !== eventType.id || live.accountId !== account.id))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
 
   // Start-instant sanity (QA fix 8) — applies to every surface, including the
   // host "Any time (outside availability)" path that let a 1905 date through.
@@ -903,6 +1008,10 @@ export async function createBooking(
         hostName: member.display_name,
         attendee: { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.timeZone },
       };
+      // Burn the one-off link (#110). A seat on a group event is a booking like
+      // any other, so a link spent on one is spent — the alternative would let
+      // a single link fill every seat, which is the opposite of what it is for.
+      if (live) await consumeOneOffLink(db, live.id, existing.id);
       // Seat-takers join the shared group booking; the manage link stays with
       // the first booker (per-seat manage tokens are a follow-up).
       return { ok: true, booking: rec, manageToken: '' };
@@ -993,6 +1102,10 @@ export async function createBooking(
     });
     if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    // The booking is committed — burn the link (#110). AFTER the write, never
+    // before: burning first would kill the link on every SLOT_TAKEN and strand
+    // the invitee with a dead link and no booking. See `consumeOneOffLink`.
+    if (live) await consumeOneOffLink(db, live.id, bookingId);
     return { ok: true, booking: record, manageToken: token };
   }
 
@@ -1012,6 +1125,8 @@ export async function createBooking(
     });
     if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    // Committed — burn the link (#110), same ordering as the SQLite branch.
+    if (live) await consumeOneOffLink(db, live.id, bookingId);
     return { ok: true, booking: record, manageToken: token };
   } catch (err) {
     if (isExclusionViolation(err) || isUniqueViolation(err)) {

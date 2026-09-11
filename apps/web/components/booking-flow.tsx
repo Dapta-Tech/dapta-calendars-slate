@@ -22,6 +22,7 @@ import { EventPanel, MonthCalendar } from '@/components/booking-page-parts';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
 import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import { classifyBookingFailure } from '@/lib/booking-failure';
 import { type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
@@ -73,6 +74,19 @@ interface Props {
    * opens a new tab instead of navigating the frame.
    */
   embed?: boolean;
+  /**
+   * The one-off link token (#110), when this page was reached through
+   * `/booking/{token}` rather than through a public event URL.
+   *
+   * Absent on every ordinary booking page, and absent changes nothing. Present,
+   * it rides the hold and the booking write so the API can see the HIDDEN event
+   * the link opens — and it is spent by the booking, which is what makes the
+   * link one-off.
+   *
+   * This island never calls the API directly (the base URL is server-only), so
+   * the token travels to the server actions and is turned into a header there.
+   */
+  oneOffToken?: string;
 }
 
 interface Hold {
@@ -113,6 +127,7 @@ export function BookingFlow({
   methodLabel,
   nowUtc,
   embed = false,
+  oneOffToken,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
@@ -309,7 +324,10 @@ export function BookingFlow({
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.
     if ((slot.capacity ?? 1) > 1) return;
-    const r = await reserveAction({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc });
+    const r = await reserveAction(
+      { accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc },
+      oneOffToken,
+    );
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
@@ -415,19 +433,23 @@ export function BookingFlow({
     );
   }
 
-  // The duplicate-booking guard (#69) answers 409, like a taken slot — but it
-  // is a different failure and gets its own card BEFORE the conflict branch.
-  // Left to fall through, it would render "that time was just taken" over a
-  // "pick another slot" button, telling the booker to do the one thing that
-  // cannot possibly help: the block is on their email, not on the time.
+  // WHICH card to show is decided by `classifyBookingFailure` in
+  // `lib/booking-failure.ts`, not here. The branches overlap on status — the
+  // duplicate guard and a taken slot are both 409, a spent invite link and an
+  // expired hold are both 410 — so the ORDER they are tested in is the whole
+  // decision, and it belongs somewhere it can be tested directly. It has been
+  // wrong twice.
+  //
   // `result !== dismissedResult` is the freshness test: an error the booker has
   // acknowledged stays hidden until the NEXT attempt produces a different
   // object, so nothing here can render last attempt's failure over an in-flight
   // request or over a newly picked slot.
   const live = result && !result.ok && result !== dismissedResult;
-  const duplicate = live && result.error === 'DUPLICATE_BOOKING';
-  const conflict = live && !duplicate && (result.status === 409 || result.status === 410);
-  const intakeError = live && result.status === 400;
+  const kind = live ? classifyBookingFailure(result, !!oneOffToken) : undefined;
+  const duplicate = kind === 'duplicate';
+  const oneOffGone = kind === 'one-off-gone';
+  const conflict = kind === 'conflict';
+  const intakeError = kind === 'intake';
 
   // --- Duplicate booking (409 DUPLICATE_BOOKING) --------------------------
   // The copy names NO date, time or host: revealing the existing slot would
@@ -445,6 +467,20 @@ export function BookingFlow({
         >
           {m.duplicateGuard.changeEmail}
         </button>
+      </section>
+    );
+  }
+
+  // --- One-off link spent (410 / 404) -------------------------------------
+  // The SAME card `/booking/{token}` renders when the link was already dead on
+  // arrival, from the same catalog keys, so a link that dies at submit time and
+  // one that died before the page loaded read identically. Localized, and with
+  // no action: nothing the booker can do on this page resolves it.
+  if (oneOffGone) {
+    return (
+      <section className="bp-card mx-auto max-w-2xl border border-border bg-card p-6">
+        <h2 className="mb-1 text-lg font-semibold">{m.oneOffLink.usedTitle}</h2>
+        <p className="text-sm text-muted-foreground">{m.oneOffLink.usedBody}</p>
       </section>
     );
   }
@@ -549,6 +585,10 @@ export function BookingFlow({
             <input type="hidden" name="startUtc" value={selected} />
             <input type="hidden" name="timeZone" value={timeZone} />
             {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
+            {/* The one-off token (#110). A hidden field so the token reaches
+                the server action without this island holding an API base URL;
+                the action forwards it as a header. */}
+            {oneOffToken ? <input type="hidden" name="oneOffToken" value={oneOffToken} /> : null}
 
             <p className="text-sm font-medium">
               {formatSlotDateTime(selected, timeZone, locale, hour12)}

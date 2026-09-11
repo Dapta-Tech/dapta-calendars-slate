@@ -473,6 +473,29 @@ export const accountIntegration = sqliteTable('account_integration', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+/**
+ * One-off links (#69 / AB2, #110) — see `schema.pg.ts` for the full rationale;
+ * Postgres is the source of truth and this mirrors it 1:1 on table and column
+ * names, with `bigint` epoch-ms landing as `integer`.
+ *
+ * A GRANT over an event type the host already has, never a meeting of its own:
+ * no duration, no availability, no title. `token` is stored IN CLEAR and unique
+ * per `docs/adr/0003-public-tokens-have-two-storage-policies.md`; the unique
+ * index lives in the migration, not here, because these files declare no
+ * indexes. `consumed_at` survives a later cancel of the booking that set it.
+ */
+export const oneOffLink = sqliteTable('one_off_link', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  eventTypeId: text('event_type_id').notNull(),
+  token: text('token').notNull(),
+  createdByMemberId: text('created_by_member_id'),
+  createdAt: integer('created_at').notNull(),
+  consumedAt: integer('consumed_at'),
+  consumedBookingId: text('consumed_booking_id'),
+  revokedAt: integer('revoked_at'),
+});
+
 export const sqliteSchema = {
   account,
   member,
@@ -497,4 +520,5 @@ export const sqliteSchema = {
   outbox,
   notificationSetting,
   accountIntegration,
+  oneOffLink,
 };

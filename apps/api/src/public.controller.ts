@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  GoneException,
   Headers,
   HttpCode,
   Inject,
@@ -13,7 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ZodError } from 'zod';
-import { BookingService } from './booking.service';
+import { BookingService, ONE_OFF_GONE_MESSAGE } from './booking.service';
 import { unwrap } from './http';
 import { RateLimitGuard } from './rate-limit';
 
@@ -39,6 +40,29 @@ function manageToken(sources: {
 }
 
 /**
+ * The header a one-off link token travels in (#69/AB2, #110).
+ *
+ * A HEADER, and only a header — no `?token=` fallback, unlike `manageToken()`
+ * above. That fallback exists there for links already in the wild carrying the
+ * token in a query string; a one-off link has no such history, so it starts on
+ * the least-leaky carrier and stays there. A query parameter would land in
+ * access logs and in `Referer` on every outbound click from the booking page,
+ * and this token is a grant to create a booking.
+ *
+ * Never read off the request BODY either, matching the reasoning `teamBook`
+ * spells out below: the booking routes are unauthenticated and Nest hands them
+ * an unvalidated `@Body()`, so keeping every caller-supplied credential on one
+ * named header means there is exactly one place to audit.
+ */
+const ONE_OFF_HEADER = 'x-one-off-token';
+
+/** Trim and normalise the header — an absent header is simply no token. */
+function oneOffToken(raw: string | undefined): string | undefined {
+  const value = (raw ?? '').trim();
+  return value.length > 0 ? value : undefined;
+}
+
+/**
  * Public, unauthenticated booking surface (personal + team + manage).
  * Rate-limited per IP (P1-5) — this is the only surface an anonymous client can
  * hit, so booking spam / availability scraping / uid-token probing are throttled.
@@ -55,10 +79,52 @@ export class PublicController {
     return p;
   }
 
+  /**
+   * Resolve a one-off link (#110) — where the token points, or how it is dead.
+   *
+   * THE THREE CODES, and the reason this route exists at all rather than the
+   * token riding as a query parameter on the ordinary booking URL:
+   *
+   *   200  the link is live; the body is the addressing triple and nothing else
+   *   410  the link was real and is consumed or revoked
+   *   404  the token names nothing here, same as any missing route
+   *
+   * A token carried as `?k=…` on a public event URL could never give a guess a
+   * 404, because that page is public and renders perfectly well without the
+   * parameter — a wrong token would be indistinguishable from no token. The
+   * token has to BE the address, which is what `/booking/{token}` on the web
+   * side is; this is the API half of that decision.
+   *
+   * Rate-limited by the controller's guard like every other public route, which
+   * is what actually makes enumeration uninteresting. The 256-bit token is what
+   * makes it hopeless.
+   */
+  @Get('public/one-off/:token')
+  async oneOffLink(@Param('token') token: string) {
+    const target = await this.svc.oneOffTarget(token);
+    if (target === 'gone')
+      // The constant, not a third copy of the literal — the two write paths
+      // already share it so they cannot drift, and this is the same sentence.
+      throw new GoneException({ error: 'ONE_OFF_GONE', message: ONE_OFF_GONE_MESSAGE });
+    // The same STATUS and the same `error` code every other missing public
+    // route answers, and a message that names nothing. Each 404 on this API
+    // names what was missing — "Booking page not found.", "Team event not
+    // found." — so this one deliberately names nothing at all: saying "invite
+    // link" would confirm to anyone guessing that this deployment mints them
+    // and that this particular guess was merely wrong.
+    if (!target) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    return target;
+  }
+
   @Get('availability')
-  async availability(@Query() query: Record<string, string>) {
+  async availability(
+    @Query() query: Record<string, string>,
+    @Headers(ONE_OFF_HEADER) token?: string,
+  ) {
     try {
-      const r = await this.svc.availability(query);
+      // The token widens visibility to the ONE hidden event it opens, and only
+      // that one — `oneOffOpens` compares coordinates. Absent, nothing changes.
+      const r = await this.svc.availability(query, oneOffToken(token));
       if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Booking page not found.' });
       return r;
     } catch (err) {
@@ -68,9 +134,11 @@ export class PublicController {
 
   @Post('reservations')
   @HttpCode(201)
-  async reserve(@Body() body: unknown) {
+  async reserve(@Body() body: unknown, @Headers(ONE_OFF_HEADER) token?: string) {
     try {
-      return unwrap(await this.svc.reserve(body));
+      // A hold on the hidden event the link opens (#110) — without this the
+      // invitee cannot get past the slot picker on that event.
+      return unwrap(await this.svc.reserve(body, oneOffToken(token)));
     } catch (err) {
       badReq(err);
     }
@@ -102,9 +170,12 @@ export class PublicController {
 
   @Post('bookings')
   @HttpCode(201)
-  async book(@Body() body: unknown) {
+  async book(@Body() body: unknown, @Headers(ONE_OFF_HEADER) token?: string) {
     try {
-      return unwrap(await this.svc.book(body));
+      // The token is CONTEXT, never part of `body` — see ONE_OFF_HEADER. A live
+      // one is validated against this event and burned once the booking
+      // commits; a dead one answers 410 and an unknown one 404.
+      return unwrap(await this.svc.book(body, false, { oneOffToken: oneOffToken(token) }));
     } catch (err) {
       badReq(err);
     }
@@ -184,13 +255,22 @@ export class PublicController {
     @Param('accountCode') accountCode: string,
     @Param('teamSlug') teamSlug: string,
     @Query() q: Record<string, string>,
+    @Headers(ONE_OFF_HEADER) token?: string,
   ) {
     // The service parses this query with `teamAvailabilityQuerySchema` and
     // clamps the window (#136). The presence check that used to stand here
     // bounded nothing and let an unparseable `from` through as a `NaN`; a zod
     // failure now answers 400 through `badReq`, as the personal route does.
     try {
-      const r = await this.svc.teamAvailability(accountCode, teamSlug, q.slug, q.from, q.to, q.timeZone);
+      const r = await this.svc.teamAvailability(
+        accountCode,
+        teamSlug,
+        q.slug,
+        q.from,
+        q.to,
+        q.timeZone,
+        oneOffToken(token),
+      );
       if (!r) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Team event not found.' });
       return r;
     } catch (err) {
@@ -204,6 +284,7 @@ export class PublicController {
     @Param('accountCode') accountCode: string,
     @Param('teamSlug') teamSlug: string,
     @Body() body: { slug: string; startUtc: string; attendee: never; answers?: Record<string, unknown> },
+    @Headers(ONE_OFF_HEADER) token?: string,
   ) {
     // Forward an EXPLICIT pick, never the raw body. Nest hands this handler the
     // parsed request object as-is and the app installs no global
@@ -216,12 +297,20 @@ export class PublicController {
     // safe by construction: `book()` runs the payload through
     // `createBookingSchema`, which drops unknown keys.
     return unwrap(
-      await this.svc.teamBook(accountCode, teamSlug, {
-        slug: body?.slug,
-        startUtc: body?.startUtc,
-        attendee: body?.attendee,
-        answers: body?.answers,
-      }),
+      await this.svc.teamBook(
+        accountCode,
+        teamSlug,
+        {
+          slug: body?.slug,
+          startUtc: body?.startUtc,
+          attendee: body?.attendee,
+          answers: body?.answers,
+        },
+        // CONTEXT, from the header — never `body`. A one-off token read off the
+        // raw body here would join `metadata` and `idempotencyKey` in the list
+        // of things this handler deliberately refuses to forward from it.
+        { oneOffToken: oneOffToken(token) },
+      ),
     );
   }
 }
