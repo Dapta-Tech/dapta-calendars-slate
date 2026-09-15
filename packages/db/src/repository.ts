@@ -12,16 +12,30 @@ import {
   classifyEmptyReason,
   computeSlots,
   generateManageToken,
+  isOneOffTokenShape,
   isExclusionViolation,
   isUniqueViolation,
+  parseEventLocation,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type EventLocation,
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
+import {
+  duplicateGuardApplies,
+  hasUpcomingBookingForEmail,
+  normalizeAttendeeEmail,
+} from './duplicate-guard';
+import {
+  consumeOneOffLink,
+  getOneOffLinkByToken,
+  oneOffGuardApplies,
+  type OneOffLinkRecord,
+} from './one-off-link';
 
 /**
  * Read a JSON column uniformly: Postgres jsonb comes back parsed (object),
@@ -86,12 +100,40 @@ export interface EventTypeRow {
   after_event_buffer: number;
   slot_interval: number | null;
   requires_confirmation: number;
+  /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
+  prevent_duplicate_bookings: number;
   seats_per_time_slot: number | null;
 }
 
 export type BookingOutcome =
   | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
-  | { ok: false; reason: 'SLOT_TAKEN' | 'NOT_FOUND' | 'RESERVATION_EXPIRED' | 'CALENDAR_UNAVAILABLE' }
+  | {
+      ok: false;
+      reason:
+        | 'SLOT_TAKEN'
+        | 'NOT_FOUND'
+        | 'RESERVATION_EXPIRED'
+        | 'CALENDAR_UNAVAILABLE'
+        /** The event type's duplicate-booking guard refused this email (#69).
+         *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
+        | 'DUPLICATE_BOOKING'
+        /**
+         * A one-off token was presented that names nothing, or that opens a
+         * DIFFERENT event type than the one being booked (#110). Answers 404
+         * upstream, indistinguishable from any other missing route — the two
+         * cases are folded together on purpose, so the response cannot
+         * confirm that a token exists somewhere else in the deployment.
+         */
+        | 'ONE_OFF_NOT_FOUND'
+        /**
+         * A one-off token that was real and is now dead — consumed by an
+         * earlier booking, or revoked by the host. Answers 410; a cancel of
+         * that earlier booking never brings it back. Kept apart from
+         * `ONE_OFF_NOT_FOUND` because "this link was used" and "this link
+         * never existed" are different things to tell a person.
+         */
+        | 'ONE_OFF_GONE';
+    }
   | { ok: false; reason: 'INVALID'; message: string };
 
 export interface BookingRecord {
@@ -114,14 +156,56 @@ export interface CreateBookingArgs {
   memberId?: string;
   slug: string;
   startMs: number;
-  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+  attendee: {
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+    /** Notification language (`en` | `es`). Persisted since H2 (#108); the
+     *  contract has always accepted it and this layer used to drop it. */
+    language?: string;
+  };
+  /** Additional creation-time guests/attendees, inserted in the booking transaction. */
+  additionalAttendees?: Array<{
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+    language?: string;
+  }>;
   /** Answers to the event type's custom intake fields. */
   answers?: Record<string, unknown>;
+  /** Public API metadata. Internal keys are added by the repository. */
+  metadata?: Record<string, unknown>;
   /** A held reservation to consume (deleted on success). */
   reservationUid?: string;
   idempotencyKey?: string;
   /** True when a host/agent booked on behalf (attribution; skips manage-token gating upstream). */
   onBehalf?: boolean;
+  /**
+   * True when this write arrives through an API key (the machine API or the
+   * v2 compatibility surface). Only the duplicate-booking guard reads it
+   * — it is a SEPARATE flag from `onBehalf` because the compatibility surface
+   * is an API-key write that deliberately reports `onBehalf: false`. See
+   * `duplicate-guard.ts`.
+   */
+  apiKeyWrite?: boolean;
+  /**
+   * A one-off link token presented with this write (#110), if any.
+   *
+   * Absent on every ordinary booking, which is why nothing about the existing
+   * paths changes. When present and live it does two things and only two: it
+   * lets the lookup see a HIDDEN event type, and it is burned once the booking
+   * commits. It grants nothing else — it does not skip availability, the
+   * duplicate guard, the overlap check or the reservation rules.
+   *
+   * Ignored entirely on host and API-key writes (`oneOffGuardApplies`), which
+   * are not subject to the grant — see there for what exemption does and does
+   * not mean.
+   */
+  oneOffToken?: string;
 }
 
 /**
@@ -184,20 +268,36 @@ export async function getMember(
   );
 }
 
+/**
+ * `hidden = 0` is the PUBLIC filter, and the default stays public.
+ *
+ * `includeHidden` exists for exactly one caller: a request carrying a valid,
+ * live one-off link (#110). Reaching an event the ordinary public URL cannot is
+ * the entire value of such a link — a host mints one precisely so an event can
+ * be hidden from their booking page and still bookable by the person they sent
+ * it to. Every caller that does NOT pass it keeps today's behaviour exactly.
+ *
+ * The flag is never derived from anything caller-supplied. It is set only after
+ * the token has been resolved against `one_off_link`, and the caller then
+ * re-checks that the resolved link opens THIS event type — a token for event A
+ * must not unlock event B.
+ */
 export async function getEventType(
   db: Db,
   accountId: string,
   memberId: string,
   slug: string,
+  opts?: { includeHidden?: boolean },
 ): Promise<EventTypeRow | undefined> {
+  const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
-              AND hidden = 0 LIMIT 1`,
+              ${visibility} LIMIT 1`,
   );
 }
 
@@ -214,7 +314,7 @@ export async function getEventTypeRowById(db: Db, id: string): Promise<EventType
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type WHERE id = ${id} LIMIT 1`,
   );
 }
@@ -234,6 +334,17 @@ export async function isSlotBookable(
   args: {
     eventTypeId: string;
     hostMemberId: string;
+    /**
+     * This host's OWN schedule for the event (`event_type_host.schedule_id`),
+     * for a TEAM event type whose hosts each bring their own hours. Pass it and
+     * the resolution becomes `override ?? member default` — precisely what the
+     * team availability projection does, so the picker and a reschedule cannot
+     * read different hours for the same host. OMIT it (personal events, and
+     * every caller that predates teams) and the event type's own `schedule_id`
+     * leads, exactly as before. `null` is meaningful and NOT the same as
+     * omitted: it says "this host has no override", i.e. use the member default.
+     */
+    hostScheduleId?: string | null;
     startMs: number;
     excludeBookingId?: string;
     now?: Date;
@@ -245,18 +356,26 @@ export async function isSlotBookable(
   if (!eventType || !member) return false;
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
+  const scheduleId = args.hostScheduleId !== undefined ? args.hostScheduleId : eventType.schedule_id;
   const schedule =
-    (await resolveScheduleTimeZone(db, eventType.schedule_id)) ??
+    (await resolveScheduleTimeZone(db, scheduleId)) ??
     (await resolveScheduleTimeZone(db, member.default_schedule_id));
   const scheduleTimeZone = schedule?.timeZone ?? member.time_zone;
   const rules: AvailabilityRule[] = schedule ? await loadAvailabilityRules(db, schedule.id) : [];
 
   // Host busy over the target window, minus the booking being rescheduled.
-  const exclude = args.excludeBookingId ? sql` AND id <> ${args.excludeBookingId}` : sql``;
-  const rows = await db.all<{ start_ms: number; end_ms: number }>(
-    sql`SELECT start_ms, end_ms FROM booking
-        WHERE host_member_id = ${args.hostMemberId} AND status IN ('accepted','pending')
-              AND start_ms < ${endMs} AND end_ms > ${args.startMs}${exclude}`,
+  // Through `loadBusyForHost` so this reads the SAME definition of busy the
+  // availability projections do — a member is busy for a booking whether they
+  // hold it as its organizer or as an assigned co-host. Its own query matched
+  // `host_member_id` only, so a co-host's commitment was invisible here and
+  // only the transactional overlap guard refused the move.
+  const busyRows = await loadBusyForHost(
+    db,
+    args.hostMemberId,
+    args.startMs,
+    endMs,
+    undefined,
+    args.excludeBookingId,
   );
   // Fail-closed: an unreachable external calendar makes the target slot NOT
   // bookable (never move a meeting onto a conflict we couldn't see).
@@ -267,7 +386,7 @@ export async function isSlotBookable(
     return false;
   }
   const busy: Interval[] = [
-    ...rows.map((r) => ({ start: new Date(Number(r.start_ms)), end: new Date(Number(r.end_ms)) })),
+    ...busyRows,
     ...(await loadReservationBusy(db, args.hostMemberId, args.startMs, endMs, args.now?.getTime())),
     ...externalBusy,
   ];
@@ -294,7 +413,16 @@ export interface PublicProfile {
     handle: string;
     displayName: string | null;
     timeZone: string;
+    /** What the host set in the studio. Their choice, and it always wins. */
     avatarUrl: string | null;
+    /**
+     * The photo on the connected calendar account, when the backend reports
+     * one. A FALLBACK the public surfaces draw when `avatarUrl` is null — kept
+     * as a separate field on purpose: folding it into `avatarUrl` would put a
+     * synced URL into the studio's own input, where saving the form would turn
+     * a fallback into a stored value that outlives the connection.
+     */
+    connectedAvatarUrl: string | null;
     coverUrl: string | null;
     brandColor: string | null;
     layout: string | null;
@@ -327,6 +455,20 @@ export async function getPublicProfile(
         WHERE account_id = ${account.id} AND member_id = ${member.id} AND hidden = 0
         ORDER BY length_minutes ASC`,
   );
+  // The destination connection first — that is the account the host actually
+  // schedules from, so its photo is the one an invitee should recognise. Only
+  // fetched when the host set no avatar of their own; their choice wins and
+  // there is nothing to fall back to.
+  let connectedAvatar: string | null = null;
+  if (!member.avatar_url) {
+    const avatars = await db.all<{ avatar_url: string | null }>(
+      sql`SELECT avatar_url FROM connected_calendar
+          WHERE account_id = ${account.id} AND member_id = ${member.id}
+            AND avatar_url IS NOT NULL
+          ORDER BY is_destination DESC, created_at ASC`,
+    );
+    connectedAvatar = avatars[0]?.avatar_url ?? null;
+  }
   return {
     // Public responses always carry the CANONICAL code (vanity ?? short) so
     // clients build/redirect to canonical links even when queried by an alias.
@@ -336,6 +478,7 @@ export async function getPublicProfile(
       displayName: member.display_name,
       timeZone: member.time_zone,
       avatarUrl: member.avatar_url,
+      connectedAvatarUrl: connectedAvatar,
       coverUrl: member.cover_url,
       brandColor: member.brand_color,
       layout: member.layout,
@@ -367,6 +510,8 @@ export interface AvailabilityResult {
     title: string;
     lengthMinutes: number;
     bookingFields: BookingFieldDef[];
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: EventLocation | null;
   };
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
@@ -407,14 +552,21 @@ export async function loadBusyForHost(
    * Pass the event's id to exclude its bookings from the host busy set.
    */
   excludeEventTypeId?: string,
+  /**
+   * The booking being MOVED. A reschedule must not let a booking's current
+   * instant — or the buffers around it — block its own move, so both the write
+   * and the reschedule picker drop it from the host's busy set.
+   */
+  excludeBookingId?: string,
 ): Promise<Interval[]> {
   const exclude = excludeEventTypeId ? sql` AND b.event_type_id <> ${excludeEventTypeId}` : sql``;
+  const excludeBooking = excludeBookingId ? sql` AND b.id <> ${excludeBookingId}` : sql``;
   // A member is busy for a booking whether they're the primary host_member_id OR
   // an assigned co-host (collective / fixed_round_robin) recorded in booking_host.
   const rows = await db.all<{ start_ms: number; end_ms: number }>(
     sql`SELECT b.start_ms, b.end_ms FROM booking b
         WHERE b.status IN ('accepted','pending')
-              AND b.start_ms < ${toMs} AND b.end_ms > ${fromMs}${exclude}
+              AND b.start_ms < ${toMs} AND b.end_ms > ${fromMs}${exclude}${excludeBooking}
               AND (b.host_member_id = ${hostMemberId}
                    OR EXISTS (SELECT 1 FROM booking_host bh
                               WHERE bh.booking_id = b.id AND bh.member_id = ${hostMemberId}))`,
@@ -465,6 +617,13 @@ export async function getAvailability(
     toMs: number;
     displayTimeZone?: string;
     now?: Date;
+    /**
+     * Let a HIDDEN event type answer (#110). Set only by a caller that has
+     * already resolved a live one-off link over this exact event type — the
+     * booking page a one-off link opens has to be able to read slots for the
+     * hidden event the link exists to reach. Never derived from the request.
+     */
+    includeHidden?: boolean;
   },
   /**
    * The wired CalendarProvider. When enabled, the host's external busy times are
@@ -482,7 +641,9 @@ export async function getAvailability(
       : undefined;
   // The by-id path must stay account-scoped (tenant isolation).
   if (!member || member.account_id !== account.id) return undefined;
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!eventType) return undefined;
 
   const referenced = await resolveScheduleTimeZone(db, eventType.schedule_id);
@@ -500,6 +661,7 @@ export async function getAvailability(
     title: eventType.title,
     lengthMinutes: eventType.length_minutes,
     bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
+    location: parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null)),
   };
   const displayTz = args.displayTimeZone ?? scheduleTimeZone;
 
@@ -619,6 +781,31 @@ export function bookingStartOutOfRange(startMs: number, now = Date.now()): strin
   return null;
 }
 
+/**
+ * The value actually stored in `booking.idempotency_key` (#104).
+ *
+ * That column carries a GLOBAL `UNIQUE`, so a raw caller-supplied key belongs
+ * to whichever tenant writes it first: a second account reusing the same
+ * string collides on insert and can never book with it, and a replay lookup
+ * that forgot its account would hand one tenant's booking to another. Both
+ * halves are closed by never storing the raw key — the account id is folded in
+ * here, and every read of the column goes through the same function so the
+ * write and the lookup cannot drift apart.
+ *
+ * The prefix needs no escaping, but the reason is narrower than it looks. Keys
+ * are opaque, so within one account the mapping is trivially injective; what
+ * the UNIQUE column needs is injectivity ACROSS accounts, and that holds only
+ * because an account id never contains the separator. Ids are `randomUUID()`
+ * (see `insertAccountWithShortCode` in `short-links.ts`), so it never does.
+ * Were that to change, `a:b` + `c` and `a` + `b:c` would collide.
+ *
+ * Callers still hold the raw key (it is what the client retries with); only
+ * storage and lookup are namespaced.
+ */
+export function scopedIdempotencyKey(accountId: string, key: string): string {
+  return `${accountId}:${key}`;
+}
+
 export async function createBooking(
   db: Db,
   args: CreateBookingArgs,
@@ -638,8 +825,51 @@ export async function createBooking(
       : undefined;
   // The by-id path must stay account-scoped (tenant isolation).
   if (!member || member.account_id !== account.id) return { ok: false, reason: 'NOT_FOUND' };
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+
+  // One-off link (#69/AB2): resolved BEFORE the event type, because a live link
+  // is what decides whether a HIDDEN event type is visible to this request at
+  // all. Exempt writes (host on-behalf, API key) skip the whole block — a token
+  // they happen to carry is neither validated nor burned, and their visibility
+  // is unchanged from today. See `one-off-link.ts`.
+  //
+  // ABOVE the idempotency replay below, which is the opposite of where the
+  // duplicate-booking guard sits, and deliberately so. That guard is a verdict
+  // about PRIOR STATE ("this email already has a booking"), and a retry must
+  // return its original booking rather than be told about it. A one-off token
+  // is a CREDENTIAL FOR THIS WRITE, and a request presenting a spent credential
+  // is refused on its own terms whether or not some earlier request succeeded.
+  // The ordering is also forced: `getEventType` sits above the replay and the
+  // token is what makes a hidden one visible, so a dead token cannot resolve
+  // the event type this write needs before the replay is ever reached. No caller reaches both today — the
+  // public route sends no idempotency key, and every surface that does is
+  // `apiKeyWrite` and therefore exempt — but the reasoning is written down
+  // because the next person to plumb a key through the public route will
+  // otherwise have to re-derive it.
+  const honoursOneOff =
+    !!args.oneOffToken &&
+    oneOffGuardApplies({ onBehalf: args.onBehalf, apiKeyWrite: args.apiKeyWrite });
+  // Shape first, as the read paths do: the value is an unauthenticated header,
+  // and a malformed one is answered without spending a lookup on it.
+  if (honoursOneOff && !isOneOffTokenShape(args.oneOffToken))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+  let live: OneOffLinkRecord | undefined;
+  if (honoursOneOff) {
+    const oneOff = await getOneOffLinkByToken(db, args.oneOffToken!);
+    if (!oneOff) return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+    if (oneOff.state !== 'live') return { ok: false, reason: 'ONE_OFF_GONE' };
+    live = oneOff;
+  }
+
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: !!live,
+  });
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
+  // The link must open THIS event, not merely be live. Without this a token
+  // minted over a public 15-minute intro would unlock every hidden event on the
+  // account. Both halves are checked: the account, because the link is looked
+  // up by token alone and carries its own tenant, and the event type.
+  if (live && (live.eventTypeId !== eventType.id || live.accountId !== account.id))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
 
   // Start-instant sanity (QA fix 8) — applies to every surface, including the
   // host "Any time (outside availability)" path that let a 1905 date through.
@@ -689,9 +919,11 @@ export async function createBooking(
     if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
   }
 
-  // Idempotency: return the prior booking for a repeated key.
+  // Idempotency: return the prior booking for a repeated key. Scoped to the
+  // account resolved above (#104) — a key only ever replays its own tenant's
+  // booking.
   if (args.idempotencyKey) {
-    const prior = await findBookingByIdempotencyKey(db, args.idempotencyKey);
+    const prior = await findBookingByIdempotencyKey(db, account.id, args.idempotencyKey);
     // Replay: return the existing booking, do NOT re-mint the token, and flag it
     // deduplicated (B3 — contract).
     if (prior) return { ok: true, booking: prior.record, manageToken: '', deduplicated: true };
@@ -708,6 +940,23 @@ export async function createBooking(
       await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       return { ok: false, reason: 'RESERVATION_EXPIRED' };
     }
+  }
+
+  // Duplicate-booking guard (#69/AB1): the host switched this event type to one
+  // upcoming booking per email. Placed AFTER the idempotency replay above — a
+  // repeated key must return its original booking, never a 409 — and BEFORE the
+  // group-seat branch below, so on a multi-seat event the same address is
+  // refused instead of quietly taking a second seat. Advisory and outside the
+  // write transaction on purpose; see `duplicate-guard.ts`.
+  if (
+    duplicateGuardApplies({
+      preventDuplicateBookings: eventType.prevent_duplicate_bookings,
+      onBehalf: args.onBehalf,
+      apiKeyWrite: args.apiKeyWrite,
+    }) &&
+    (await hasUpcomingBookingForEmail(db, account.id, eventType.id, args.attendee.email))
+  ) {
+    return { ok: false, reason: 'DUPLICATE_BOOKING' };
   }
 
   const startMs = args.startMs;
@@ -732,10 +981,21 @@ export async function createBooking(
       );
       if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
       await db.run(
-        sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
-              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${Date.now()})`,
+              ${normalizeAttendeeEmail(args.attendee.email)},
+              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
+              ${args.attendee.language ?? null}, ${Date.now()})`,
       );
+      for (const attendee of args.additionalAttendees ?? []) {
+        await db.run(
+          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
+              VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
+                ${normalizeAttendeeEmail(attendee.email)},
+                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
+                ${attendee.language ?? null}, ${Date.now()})`,
+        );
+      }
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       const rec: BookingRecord = {
@@ -748,6 +1008,10 @@ export async function createBooking(
         hostName: member.display_name,
         attendee: { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.timeZone },
       };
+      // Burn the one-off link (#110). A seat on a group event is a booking like
+      // any other, so a link spent on one is spent — the alternative would let
+      // a single link fill every seat, which is the opposite of what it is for.
+      if (live) await consumeOneOffLink(db, live.id, existing.id);
       // Seat-takers join the shared group booking; the manage link stays with
       // the first booker (per-seat manage tokens are a follow-up).
       return { ok: true, booking: rec, manageToken: '' };
@@ -774,7 +1038,7 @@ export async function createBooking(
   const bookingId = randomUUID();
   const attendeeId = randomUUID();
   const { token, tokenHash } = generateManageToken();
-  const metadata = JSON.stringify({ _manage: { tokenHash } });
+  const metadata = JSON.stringify({ ...(args.metadata ?? {}), _manage: { tokenHash } });
   const title = eventType.title;
 
   // Postgres stores metadata as jsonb (source-of-truth, full power); the bound
@@ -786,18 +1050,32 @@ export async function createBooking(
   const responsesExpr = jsonParam(db, args.answers ?? null);
   // Snapshot the event type's configured Where onto the booking so the manage
   // page (and calendar write-out) can show it, even if the event is edited later.
-  const eventLocation = parseJsonColumn<string | null>(eventType.locations, null);
+  // The KIND drives behaviour (conferencing ⇒ request a link at write-out); the
+  // detail is the human string. Both are frozen here on purpose.
+  const eventLocation = parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null));
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location,
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
       created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title}, ${eventLocation},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
+      ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
-      ${args.idempotencyKey ?? null}, ${now}, ${now})`;
+      ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
+      ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
-      ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+      ${normalizeAttendeeEmail(args.attendee.email)},
+      ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
+      ${args.attendee.language ?? null}, ${now})`;
+  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+    (attendee) => sql`
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
+      VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${normalizeAttendeeEmail(attendee.email)},
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
+        ${attendee.language ?? null}, ${now})`,
+  );
 
   const record: BookingRecord = {
     uid,
@@ -819,10 +1097,15 @@ export async function createBooking(
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
       return 'ok';
     });
     if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    // The booking is committed — burn the link (#110). AFTER the write, never
+    // before: burning first would kill the link on every SLOT_TAKEN and strand
+    // the invitee with a dead link and no booking. See `consumeOneOffLink`.
+    if (live) await consumeOneOffLink(db, live.id, bookingId);
     return { ok: true, booking: record, manageToken: token };
   }
 
@@ -837,10 +1120,13 @@ export async function createBooking(
       if (rows.length > 0) return true;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);
+      for (const attendee of insertAdditionalAttendees) await tx.execute(attendee);
       return false;
     });
     if (conflicted) return { ok: false, reason: 'SLOT_TAKEN' };
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+    // Committed — burn the link (#110), same ordering as the SQLite branch.
+    if (live) await consumeOneOffLink(db, live.id, bookingId);
     return { ok: true, booking: record, manageToken: token };
   } catch (err) {
     if (isExclusionViolation(err) || isUniqueViolation(err)) {
@@ -850,8 +1136,16 @@ export async function createBooking(
   }
 }
 
+/**
+ * Replay lookup for a repeated idempotency key — ALWAYS account-scoped (#104).
+ * This route is reachable without a credential, and the row it returns carries
+ * the host, the attendee and the meeting time, so a key alone must never be
+ * enough to read a booking. The account filter is the guarantee;
+ * `scopedIdempotencyKey` matches how the value was written.
+ */
 async function findBookingByIdempotencyKey(
   db: Db,
+  accountId: string,
   key: string,
 ): Promise<{ record: BookingRecord } | undefined> {
   const row = await db.get<{
@@ -872,7 +1166,8 @@ async function findBookingByIdempotencyKey(
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         LEFT JOIN booking_attendee a ON a.booking_id = b.id
-        WHERE b.idempotency_key = ${key} LIMIT 1`,
+        WHERE b.account_id = ${accountId}
+          AND b.idempotency_key = ${scopedIdempotencyKey(accountId, key)} LIMIT 1`,
   );
   if (!row) return undefined;
   return {

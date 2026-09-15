@@ -25,6 +25,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm glyph-gate
+      - run: pnpm spacing-gate
       - run: pnpm build:packages
       - run: pnpm lint
       - run: pnpm typecheck
@@ -78,8 +80,49 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install scanners
+        # Pinned, checksum-verified, and deliberately NOT tolerant of failure.
+        # The previous version of this step piped an installer URL that now
+        # 404s and hid the error behind `|| true`, so gitleaks never installed
+        # and the gate printed "not installed — skipped locally (runs in CI)"
+        # on every run: one of its three layers dead, reported as if it were fine.
+        #
+        # `set -euo pipefail` is load-bearing, not decoration. A run: block's
+        # default shell is `bash -e` WITHOUT pipefail, so `curl … | sh` reports
+        # only sh's status: a failed download hands sh an empty script, sh exits
+        # 0, and the install silently no-ops. Dropping `|| true` does nothing on
+        # its own — that is the precise shape of the bug this step is fixing.
+        #
+        # Both versions are pinned by hand, and Dependabot will NOT bump them:
+        # its github-actions ecosystem only updates `uses:` refs, not versions
+        # in a run-step env block. Raise them deliberately when upgrading a
+        # scanner, and re-check publish-gate.sh's trufflehog JSON parsing if the
+        # trufflehog major changes.
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          TRUFFLEHOG_VERSION: 3.97.4
         run: |
-          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh | sh -s -- -b /usr/local/bin || true
-          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin || true
+          set -euo pipefail
+          retry=(--retry 3 --retry-delay 2 --retry-all-errors)
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tgz="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sSfL "${retry[@]}" -o "$tmp/$tgz" "$base/$tgz"
+          curl -sSfL "${retry[@]}" -o "$tmp/checksums.txt" \
+            "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          # The installer this replaced sha256-verified its download; keep that.
+          # Same origin, so this catches a corrupt or tampered CDN response, not
+          # a compromised release — but it is the bar for a scanner's installer.
+          (cd "$tmp" && sha256sum --ignore-missing -c checksums.txt)
+          tar -xzf "$tmp/$tgz" -C /usr/local/bin gitleaks
+          rm -rf "$tmp"
+          curl -sSfL "${retry[@]}" \
+            https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh \
+            | sh -s -- -b /usr/local/bin "v${TRUFFLEHOG_VERSION}"
+          gitleaks version
+          trufflehog --version
       - name: Run publish gate
+        # Belt and braces: even if an install silently regresses again, the gate
+        # itself refuses to pass with a layer missing.
+        env:
+          PUBLISH_GATE_REQUIRE_SCANNERS: '1'
         run: bash scripts/publish-gate.sh

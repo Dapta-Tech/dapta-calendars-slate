@@ -9,7 +9,7 @@ const vars = (over: Partial<Record<TemplateVariable, string>> = {}): Record<Temp
   event_title: 'Intro call',
   start_time: 'Fri, Jul 17 · 9:30 AM',
   end_time: 'Fri, Jul 17 · 10:00 AM',
-  location: 'Google Meet',
+  location: 'Online meeting',
   manage_url: 'https://calendar.dapta.ai/manage/x?token=t',
   cancel_link: 'https://calendar.dapta.ai/manage/x?token=t',
   reschedule_link: 'https://calendar.dapta.ai/manage/x?token=t',
@@ -27,7 +27,7 @@ describe('renderBrandedHtml', () => {
     for (const k of kinds) {
       const html = renderBrandedHtml(k, vars(), 'en');
       expect(html).toContain('Dapta Calendars');
-      expect(html).toContain('Google Meet'); // location detail row
+      expect(html).toContain('Online meeting'); // location detail row
       expect(html).toContain('Fri, Jul 17'); // when
     }
   });

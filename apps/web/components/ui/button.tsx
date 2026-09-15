@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn';
  * <button> with variant styling.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 rounded-md text-sm font-semibold transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] disabled:pointer-events-none disabled:border-transparent disabled:bg-muted disabled:text-muted-foreground',
+  'inline-flex items-center justify-center gap-inline rounded-md text-sm font-semibold transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] disabled:pointer-events-none disabled:border-transparent disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none',
   {
     variants: {
       variant: {
@@ -20,9 +20,9 @@ const buttonVariants = cva(
         link: 'bg-transparent text-primary underline-offset-4 hover:underline',
       },
       size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-8 px-3 text-xs',
-        lg: 'h-11 px-6',
+        default: 'h-10 px-control-pad py-inline',
+        sm: 'h-8 px-field text-xs',
+        lg: 'h-11 px-group',
         icon: 'h-9 w-9',
       },
     },

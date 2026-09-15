@@ -1,0 +1,28 @@
+-- Per-event-type reminders + follow-up (#68 / #91). Additive and SAFE.
+--
+-- The list lives as JSON on the event type rather than in a table of its own:
+-- it is an ordered list, owned by one event type, always read as a whole and
+-- never queried across events — the same shape as `booking_fields` beside it.
+-- Row shape (packages/db/src/reminders.ts):
+--   { id, kind: 'reminder'|'follow_up', enabled, leadMinutes, subject, body }
+--
+-- Three states, and the difference between the first two matters:
+--   NULL  never configured — the read falls back to the shipped defaults
+--   []    deliberately none — no reminder is scheduled
+--   [...] exactly these
+-- Without that distinction a host who deletes their last reminder gets it back
+-- on the next save.
+--
+-- The DATA copy-forward (every existing event type inherits its account's
+-- current lead times and copy, so nobody's mail moves by a minute) is NOT here:
+-- building a JSON array out of another table's JSON array needs jsonb_agg over
+-- a lateral unnest on this engine and json_group_array/json_each on the other —
+-- two implementations of one idea, each exercised on only one engine. It runs
+-- instead as the idempotent fixup `applyReminderCopyForward` in migrate.ts,
+-- beside `applyShortLinkFixups`, which is the hook that exists for data work
+-- portable SQL cannot express.
+--
+-- ADD COLUMN (nullable, no default) is a metadata-only op in modern Postgres —
+-- no long-lived lock on existing rows.
+
+ALTER TABLE event_type ADD COLUMN IF NOT EXISTS reminders JSONB;

@@ -15,11 +15,18 @@ export default async function EditSchedule({ params }: { params: Promise<{ id: s
     throw e;
   });
   if (!schedule) notFound();
-  const m = getMessages(await getLocale()).admin.availability;
+  const locale = await getLocale();
+  const m = getMessages(locale).admin.availability;
 
   return (
-    <div className="mx-auto max-w-3xl px-8 pb-10">
-      <ScheduleEditor schedule={schedule} messages={m} backHref="/admin/availability" backLabel={m.title} />
+    <div className="mx-auto max-w-3xl px-gutter pb-gutter-y sm:px-gutter-wide">
+      <ScheduleEditor
+        schedule={schedule}
+        messages={m}
+        backHref="/admin/availability"
+        backLabel={m.title}
+        locale={locale}
+      />
     </div>
   );
 }

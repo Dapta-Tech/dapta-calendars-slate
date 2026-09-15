@@ -1,7 +1,7 @@
 # Architecture
 
 Dapta Calendars is a Turborepo + pnpm-workspaces monorepo: two deployable apps
-over seven packages. This page is the map — the request flows, the dependency
+over eight packages. This page is the map — the request flows, the dependency
 direction, and the ports/adapters seams that keep the project self-hostable. For
 how to run and change it, see [`CLAUDE.md`](CLAUDE.md); for self-hosting, see
 [`SELF-HOSTING.md`](SELF-HOSTING.md).
@@ -33,8 +33,17 @@ it always goes through the API over HTTP, so the two apps deploy independently.
      ▼
   apps/api/outbox.worker.ts  (poll + retry/backoff)
      ├── @slate/notifications → EmailProvider adapter (log-only|noop|smtp|http)
-     └── @slate/calendar      → CalendarProvider write-out (disabled|external)
+     ├── @slate/calendar      → CalendarProvider write-out (disabled|external)
+     └── dapta-sync.effects   → growth contact sync + lead score (both opt-in)
 ```
+
+The worker handles five row kinds: `calendar`, `webhook`, `email`, and the two
+growth kinds `dapta_sync` and `iam_onboarding`. The growth pair is deliberately
+two kinds rather than one row doing two calls — they retry independently, so a
+failing contact upsert can never re-post the qualification responses and mint a
+second lead score for one workspace. Both are unconfigured by default, and an
+unconfigured destination marks its row `skipped` with a reason rather than
+burning retries against a URL that does not exist.
 
 Three properties fall out of this shape:
 
@@ -54,7 +63,8 @@ Three properties fall out of this shape:
 
 Dependencies point one way: apps depend on packages; packages depend only on
 packages below them; nothing depends on an app. `types` and `engine` are the
-shared foundation.
+shared foundation — a package may depend on them (for example `@slate/db`
+reads the reminder contract from `@slate/types`), never the other way round.
 
 ```
         apps/web  ────HTTP────▶  apps/api
@@ -94,6 +104,7 @@ empty `.env` runs end-to-end.
 |---|---|---|---|---|
 | **Auth** | `apps/api/src/auth.provider.ts` | `local` stub, `workos` (HS256 JWT) | `AUTH_PROVIDER` | `local` (no identity server) |
 | **Calendar** | `packages/calendar` (`CalendarProvider`) | `disabled`, `external` (generic HTTP) | `CALENDAR_PROVIDER` | `disabled` (local busy only, no write-out) |
+| **CRM** | `packages/crm` (`CrmProvider`) | `disabled`, `hubspot` | `CRM_PROVIDER` | `disabled` (nothing enqueued, nothing called) |
 | **Email** | `packages/notifications/src/email.port.ts` | `log-only`, `noop`, `smtp`, `http` | `EMAIL_PROVIDER` | `log-only` (prints to API log) |
 | **Entitlements** | `apps/api/src/entitlements.provider.ts` | `open`, upstream service | `PREMIUM_FEATURES` | `open` (every feature unlocked) |
 | **Database** | `createDb(url)` in `packages/db/src/client.ts` | Postgres (`postgres://…`) or SQLite (`file:…`) | `DATABASE_URL` | SQLite at `.data/dev.db` |

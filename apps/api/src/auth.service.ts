@@ -8,6 +8,7 @@ import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './a
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
 export interface MachinePrincipal {
+  keyId: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;

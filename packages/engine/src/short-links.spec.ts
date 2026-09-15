@@ -55,6 +55,40 @@ describe('short-links (pure rules)', () => {
         expect(isReservedPublicSlug(v.toUpperCase())).toBe(true);
       }
     });
+
+    /**
+     * Every top-level path the web app treats as the PRODUCT has to be
+     * unclaimable, or an account serves its booking page from a path the
+     * framing rule reads as the dashboard — and its embed renders a blocked
+     * frame on every host site, with no error anywhere. `onboarding` was the
+     * one entry in that list nothing here covered.
+     */
+    it('blocks every top-level product path, so none can shadow the framing rule', () => {
+      for (const v of ['admin', 'login', 'onboarding', 'api', 'manage']) {
+        expect(validateVanitySlug(v)).toBe('reserved');
+      }
+    });
+
+    /**
+     * The web app's document-theme resolver (`apps/web/lib/theme.server.ts`)
+     * tells a booking page apart from the surfaces that store no theme by
+     * NAME: `/{code}/{handle}` and `/manage/{uid}` are both two segments, and
+     * `/{code}/{handle}/{slug}` and `/{code}/team/{slug}` are both three. It
+     * excludes the path when the first segment is `manage` or the second is
+     * `team`, and that is only sound while neither can be claimed.
+     *
+     * Un-reserve either one and a real host page starts resolving to the ADR
+     * default instead of its own canvas — a silent wrong palette on a live
+     * public page, with nothing in `apps/web` able to notice. This is the check
+     * that notices. `RESERVED_PUBLIC_SLUGS` is also `RESERVED_HANDLES`
+     * (packages/db), so one assertion covers codes, vanity slugs and handles.
+     */
+    it('keeps `manage` and `team` unclaimable, which the theme resolver relies on', () => {
+      for (const v of ['manage', 'team']) {
+        expect(isReservedPublicSlug(v)).toBe(true);
+        expect(validateVanitySlug(v)).toBe('reserved');
+      }
+    });
   });
 
   describe('vanity entitlement gate (open-core policy)', () => {

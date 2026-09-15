@@ -1,0 +1,90 @@
+'use server';
+
+import { cookies } from 'next/headers';
+import { redirect, unstable_rethrow } from 'next/navigation';
+import { adminApi } from '@/lib/admin-api';
+import { ONBOARDING_SKIP_COOKIE } from '@/lib/onboarding';
+
+export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
+
+/** Gate 1 — claim the workspace's qualification answers (write-once server-side). */
+export async function submitQualificationAction(
+  answers: Record<string, string>,
+): Promise<OnboardingActionResult> {
+  try {
+    await adminApi.submitQualification(answers);
+    return { ok: true };
+  } catch (e) {
+    // The 401 path inside adminApi redirects; never swallow that as an error.
+    unstable_rethrow(e);
+    return { ok: false, error: e instanceof Error ? e.message : 'unknown' };
+  }
+}
+
+/**
+ * O2 — the wizard's FIRST answer (#65 → Growth funnel).
+ *
+ * Fires once the host leaves the first question with something in it, so a
+ * contact exists for someone who types one answer and closes the tab. The
+ * server enqueues an outbox row and nothing more; it is idempotent per account,
+ * so re-opening the wizard cannot push the same lead twice.
+ *
+ * Returns void and swallows everything: the wizard shows no outcome either way,
+ * and a growth push must never be able to interrupt a signup.
+ */
+export async function noteFirstAnswerAction(): Promise<void> {
+  try {
+    await adminApi.onboardingEarly();
+  } catch {
+    /* the funnel is best-effort; the wizard is not */
+  }
+}
+
+/**
+ * Gate 2 — create the host's first event type from a named template, then leave
+ * the wizard. The redirect is deliberately OUTSIDE the try: `redirect()` works
+ * by throwing, so catching it here would report a successful setup as a failure.
+ */
+export async function submitSetupAction(templateId: string): Promise<OnboardingActionResult> {
+  try {
+    await adminApi.submitOnboardingSetup(templateId);
+  } catch (e) {
+    unstable_rethrow(e);
+    return { ok: false, error: e instanceof Error ? e.message : 'unknown' };
+  }
+  redirect('/admin');
+}
+
+/**
+ * Leave the wizard having owed nothing further. Deliberately NOT the skip
+ * action: setting the skip cookie here would mute the guard for the rest of the
+ * session, so a host who later deleted their only event type would not be
+ * guided again — which is exactly the behaviour gate 2's missing completion
+ * claim exists to provide.
+ */
+export async function finishOnboardingAction(): Promise<void> {
+  redirect('/admin');
+}
+
+/**
+ * "Skip for now" — set the session marker the admin guard honours, so the Home
+ * checklist (the designated recovery path) is reachable. The gate itself stays
+ * unsatisfied: this records that the host asked to move on, not that they are
+ * bookable.
+ *
+ * NOT a security boundary. Neither gate is one — the API never refuses a
+ * request on `onboardingRequired`/`setupRequired`, it only reports them — so a
+ * forged cookie costs the forger a wizard and nothing else. `httpOnly` keeps it
+ * out of page JS; it is not proof against the person holding the browser, and
+ * no authorization decision may ever be hung on it.
+ */
+export async function skipOnboardingAction(): Promise<void> {
+  const jar = await cookies();
+  jar.set(ONBOARDING_SKIP_COOKIE, '1', {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  redirect('/admin');
+}

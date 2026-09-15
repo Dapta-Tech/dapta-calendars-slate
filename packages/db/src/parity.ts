@@ -13,21 +13,27 @@ import {
   computeSlots,
   generateManageToken,
   intersectInstants,
+  isOneOffTokenShape,
+  parseEventLocation,
   selectFixedRoundRobinHosts,
   selectLuckyHost,
   unionInstants,
   verifyManageToken,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
+  type EventLocation,
   type HostCandidate,
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
+import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } from './crypto';
 import { sql, type Db } from './client';
-import { bookingStartOutOfRange,
+import {
+  bookingStartOutOfRange,
   getAccountByCode,
   getAvailability,
   getEventType,
+  getEventTypeRowById,
   getMember,
   isSlotBookable,
   jsonParam,
@@ -36,8 +42,21 @@ import { bookingStartOutOfRange,
   loadReservationBusy,
   parseJsonColumn,
   resolveScheduleTimeZone,
+  scopedIdempotencyKey,
   type BookingFieldDef,
 } from './repository';
+import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
+import {
+  duplicateGuardApplies,
+  hasUpcomingBookingForEmail,
+  normalizeAttendeeEmail,
+} from './duplicate-guard';
+import {
+  consumeOneOffLink,
+  getOneOffLinkByToken,
+  oneOffGuardApplies,
+  type OneOffLinkRecord,
+} from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
@@ -49,8 +68,36 @@ const DEFAULT_HOLD_MS = 10 * 60_000;
 /** Cap on concurrent unexpired holds per booking page (per host member). */
 const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
-export async function releaseReservation(db: Db, uid: string): Promise<void> {
+/**
+ * Give a soft hold back (#135) — the counterpart to {@link reserveSlot}, which
+ * had none: an abandoned pick used to sit until its TTL while
+ * `loadReservationBusy` hid that slot from every other visitor.
+ *
+ * The uid IS the authorisation. It is a `randomUUID()` handed only to the
+ * caller that placed the hold, so no further scoping is needed — and none is
+ * offered: deleting by `(account, handle, slug, slot_start_ms)` would let any
+ * visitor free anybody's hold, because anyone can name a slot.
+ *
+ * Deliberately TOTAL and silent. A uid that names nothing, a hold that already
+ * expired, and a hold the booking write already consumed all take the same path
+ * as a real release and report nothing back, so a caller cannot use this to
+ * probe whether a hold exists, and a release racing a booking that succeeded
+ * cannot read as a failure.
+ *
+ * It can only ever delete a `slot_reservation` row. A confirmed meeting lives
+ * in `booking` and is not reachable from here, so a release can never cancel
+ * one — including when the uid handed in is a booking uid rather than a
+ * reservation uid.
+ */
+export async function releaseSlot(db: Db, uid: string): Promise<void> {
+  if (!uid) return;
   await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${uid}`);
+}
+
+/** @deprecated Use {@link releaseSlot} — same delete, and the name pairs with
+ *  `reserveSlot`. Kept because `@slate/db` is a published package. */
+export async function releaseReservation(db: Db, uid: string): Promise<void> {
+  await releaseSlot(db, uid);
 }
 
 export async function sweepExpiredReservations(db: Db, now = Date.now()): Promise<void> {
@@ -70,7 +117,20 @@ export type ReserveOutcome =
  */
 export async function reserveSlot(
   db: Db,
-  args: { accountCode: string; handle: string; slug: string; startMs: number; holdMs?: number },
+  args: {
+    accountCode: string;
+    handle: string;
+    slug: string;
+    startMs: number;
+    holdMs?: number;
+    /**
+     * Let a HIDDEN event type be held, for a resolved one-off link (#110).
+     * The booking page a link opens takes a soft hold like any other, so
+     * without this the reserve step 404s and the invitee cannot get past the
+     * slot picker on the very event the link exists to reach.
+     */
+    includeHidden?: boolean;
+  },
 ): Promise<ReserveOutcome> {
   const now = Date.now();
   await sweepExpiredReservations(db, now);
@@ -79,7 +139,9 @@ export async function reserveSlot(
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const member = await getMember(db, account.id, args.handle);
   if (!member) return { ok: false, reason: 'NOT_FOUND' };
-  const eventType = await getEventType(db, account.id, member.id, args.slug);
+  const eventType = await getEventType(db, account.id, member.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!eventType) return { ok: false, reason: 'NOT_FOUND' };
 
   const endMs = args.startMs + eventType.length_minutes * 60_000;
@@ -91,6 +153,7 @@ export async function reserveSlot(
     slug: args.slug,
     fromMs: args.startMs,
     toMs: endMs,
+    includeHidden: args.includeHidden,
   });
   const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
@@ -99,8 +162,7 @@ export async function reserveSlot(
   const active = await db.get<{ n: number }>(
     sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
   );
-  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER)
-    return { ok: false, reason: 'RATE_LIMITED' };
+  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return { ok: false, reason: 'RATE_LIMITED' };
 
   const uid = randomUUID();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
@@ -134,14 +196,12 @@ export interface MeView {
 }
 
 /** Resolve the authenticated principal's account + member for /me. */
-export async function getMe(
-  db: Db,
-  accountId: string,
-  memberId?: string,
-): Promise<MeView | null> {
-  const account = await db.get<{ id: string; code: string; vanity_slug: string | null }>(
-    sql`SELECT id, code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`,
-  );
+export async function getMe(db: Db, accountId: string, memberId?: string): Promise<MeView | null> {
+  const account = await db.get<{
+    id: string;
+    code: string;
+    vanity_slug: string | null;
+  }>(sql`SELECT id, code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`);
   if (!account) return null;
   const member = await db.get<{
     id: string;
@@ -208,8 +268,7 @@ export async function checkHandleAvailable(
   const h = handle.toLowerCase();
   if (h.length < 3) return { handle: h, available: false, reason: 'too_short' };
   if (h.length > 40) return { handle: h, available: false, reason: 'too_long' };
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h))
-    return { handle: h, available: false, reason: 'invalid' };
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(h)) return { handle: h, available: false, reason: 'invalid' };
   if (RESERVED_HANDLES.has(h)) return { handle: h, available: false, reason: 'reserved' };
   if (!(await isHandleFree(db, accountId, h, excludeMemberId))) {
     // Offer the first free handle-N (D18 — old contract returns a suggestion).
@@ -237,11 +296,7 @@ export interface BrandingPatch {
   style?: Record<string, unknown>;
 }
 
-export async function updateBranding(
-  db: Db,
-  memberId: string,
-  patch: BrandingPatch,
-): Promise<boolean> {
+export async function updateBranding(db: Db, memberId: string, patch: BrandingPatch): Promise<boolean> {
   const sets: ReturnType<typeof sql>[] = [];
   if ('displayName' in patch) sets.push(sql`display_name = ${patch.displayName ?? null}`);
   if ('avatarUrl' in patch) sets.push(sql`avatar_url = ${patch.avatarUrl ?? null}`);
@@ -259,7 +314,12 @@ export async function updateBranding(
 export async function updateMemberSettings(
   db: Db,
   memberId: string,
-  patch: { timeZone?: string; locale?: string | null; weekStart?: string; displayName?: string | null },
+  patch: {
+    timeZone?: string;
+    locale?: string | null;
+    weekStart?: string;
+    displayName?: string | null;
+  },
 ): Promise<void> {
   const sets: ReturnType<typeof sql>[] = [];
   if (patch.timeZone !== undefined) sets.push(sql`time_zone = ${patch.timeZone}`);
@@ -280,7 +340,12 @@ export async function updateHandle(db: Db, memberId: string, handle: string): Pr
 
 export interface TeamProfileView {
   account: { code: string; name: string };
-  team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
+  team: {
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    timeZone: string;
+  };
   eventTypes: Array<{
     slug: string;
     title: string;
@@ -291,7 +356,13 @@ export interface TeamProfileView {
 }
 
 async function getTeamBySlug(db: Db, accountId: string, teamSlug: string) {
-  return db.get<{ id: string; slug: string; name: string; logo_url: string | null; time_zone: string }>(
+  return db.get<{
+    id: string;
+    slug: string;
+    name: string;
+    logo_url: string | null;
+    time_zone: string;
+  }>(
     sql`SELECT id, slug, name, logo_url, time_zone FROM team WHERE account_id = ${accountId} AND slug = ${teamSlug} LIMIT 1`,
   );
 }
@@ -319,7 +390,12 @@ export async function getTeamProfile(
   return {
     // Canonical code always (vanity ?? short) — clients redirect aliases to it.
     account: { code: canonicalPublicCode(account), name: account.name },
-    team: { slug: team.slug, name: team.name, logoUrl: team.logo_url, timeZone: team.time_zone },
+    team: {
+      slug: team.slug,
+      name: team.name,
+      logoUrl: team.logo_url,
+      timeZone: team.time_zone,
+    },
     eventTypes: rows.map((r) => ({
       slug: r.slug,
       title: r.title,
@@ -344,18 +420,48 @@ interface TeamEventType {
   after_event_buffer: number;
   scheduling_type: string | null;
   booking_fields: unknown;
+  /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
+  prevent_duplicate_bookings: number;
 }
 
-async function getTeamEventType(db: Db, accountId: string, teamId: string, slug: string) {
+/**
+ * `hidden = 0` is the PUBLIC filter and the default stays public. `includeHidden`
+ * is the team mirror of the personal `getEventType` opt-in: set only by a caller
+ * holding a live one-off link over this exact event type (#110), because
+ * reaching an event the ordinary public URL cannot is what such a link is for.
+ */
+async function getTeamEventType(
+  db: Db,
+  accountId: string,
+  teamId: string,
+  slug: string,
+  opts?: { includeHidden?: boolean },
+) {
+  const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<TeamEventType>(
     sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
-               booking_fields
+               booking_fields, prevent_duplicate_bookings
         FROM event_type
-        WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug} AND hidden = 0
+        WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug}${visibility}
         LIMIT 1`,
   );
 }
+
+/**
+ * The slot-math half of an event type — everything `computeSlots` needs and
+ * nothing more. Named apart from `TeamEventType` so the reschedule picker can
+ * hand over an `event_type` row loaded BY ID: a booking knows its event type's
+ * id, never the account/team/slug triple `getTeamEventType` resolves from.
+ */
+type SlotShapedEventType = Pick<
+  TeamEventType,
+  | 'length_minutes'
+  | 'slot_interval'
+  | 'minimum_booking_notice'
+  | 'before_event_buffer'
+  | 'after_event_buffer'
+>;
 
 interface EventHostRow {
   member_id: string;
@@ -381,24 +487,29 @@ async function getEventHosts(db: Db, eventTypeId: string): Promise<EventHostRow[
 async function hostFreeSlotMs(
   db: Db,
   host: EventHostRow,
-  et: TeamEventType,
+  et: SlotShapedEventType,
   fromMs: number,
   toMs: number,
   now: Date,
-  calendar?: CalendarProvider,
-  /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
-   *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
-   *  fail-closed semantics stay the single owner of those outcomes. */
-  rulesOnly = false,
+  opts: {
+    /** Wired provider — this host's external busy is subtracted. */
+    calendar?: CalendarProvider;
+    /** Rules-only projection (QA fix 13, team surface): what the CONFIGURATION
+     *  offers — skip busy + external calendar so downstream SLOT_TAKEN /
+     *  fail-closed semantics stay the single owner of those outcomes. */
+    rulesOnly?: boolean;
+    /** The booking being MOVED, dropped from this host's busy set so it cannot
+     *  block its own reschedule — its buffers included. */
+    excludeBookingId?: string;
+  } = {},
 ): Promise<{ free: Set<number>; reason: AvailabilityEmptyReason | null }> {
-  const member = await db.get<{ time_zone: string; default_schedule_id: string | null }>(
-    sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`,
-  );
+  const member = await db.get<{
+    time_zone: string;
+    default_schedule_id: string | null;
+  }>(sql`SELECT time_zone, default_schedule_id FROM member WHERE id = ${host.member_id} LIMIT 1`);
   if (!member) return { free: new Set(), reason: 'NO_SCHEDULE' };
   const referenced = await resolveScheduleTimeZone(db, host.schedule_id);
-  const fallback = referenced
-    ? undefined
-    : await resolveScheduleTimeZone(db, member.default_schedule_id);
+  const fallback = referenced ? undefined : await resolveScheduleTimeZone(db, member.default_schedule_id);
   const schedule = referenced ?? fallback;
   const tz = schedule?.timeZone ?? member.time_zone;
   let rules: AvailabilityRule[] = [];
@@ -415,15 +526,15 @@ async function hostFreeSlotMs(
   // Fail-closed: an unreadable external calendar contributes NO free slots
   // (never offer times we couldn't conflict-check) and reports why.
   let busy: Interval[] = [];
-  if (!rulesOnly) {
+  if (!opts.rulesOnly) {
     let externalBusy: Interval[];
     try {
-      externalBusy = await loadExternalBusy(db, calendar, host.member_id, fromMs, toMs);
+      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, fromMs, toMs);
     } catch {
       return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
     }
     busy = [
-      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs)),
+      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs, undefined, opts.excludeBookingId)),
       ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
       ...externalBusy,
     ];
@@ -451,6 +562,8 @@ export interface TeamAvailabilityResult {
     lengthMinutes: number;
     bookingFields: BookingFieldDef[];
     schedulingType: string | null;
+    /** Where the meeting happens — rendered on the public booking page. */
+    location: EventLocation | null;
   };
   timeZone: string;
   slots: string[];
@@ -507,6 +620,8 @@ export async function getTeamAvailability(
     toMs: number;
     displayTimeZone?: string;
     now?: Date;
+    /** Let a HIDDEN team event answer, for a resolved one-off link (#110). */
+    includeHidden?: boolean;
   },
   /** Wired provider — each host's external busy is subtracted. See getAvailability. */
   calendar?: CalendarProvider,
@@ -515,15 +630,21 @@ export async function getTeamAvailability(
   if (!account) return null;
   const team = await getTeamBySlug(db, account.id, args.teamSlug);
   if (!team) return null;
-  const et = await getTeamEventType(db, account.id, team.id, args.slug);
+  const et = await getTeamEventType(db, account.id, team.id, args.slug, {
+    includeHidden: args.includeHidden,
+  });
   if (!et) return null;
   const hosts = await getEventHosts(db, et.id);
   const now = args.now ?? new Date();
   const method = normalizeSchedulingMethod(et.scheduling_type);
 
-  const hostSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+  const hostSets: Array<{
+    isFixed: boolean;
+    free: Set<number>;
+    reason: AvailabilityEmptyReason | null;
+  }> = [];
   for (const host of hosts) {
-    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, calendar);
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, { calendar });
     hostSets.push({ isFixed: host.is_fixed === 1, free, reason });
   }
   const slots = combineTeamSlots(method, hostSets).map((ms) => new Date(ms).toISOString());
@@ -534,6 +655,7 @@ export async function getTeamAvailability(
       lengthMinutes: et.length_minutes,
       bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
       schedulingType: et.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(et.locations, null)),
     },
     timeZone: args.displayTimeZone ?? team.time_zone,
     slots,
@@ -572,14 +694,33 @@ function teamEmptyReason(
 
 export type TeamBookingOutcome =
   | { ok: true; uid: string; hostMemberId: string; manageToken: string }
-  | { ok: false; reason: 'NOT_FOUND' | 'SLOT_TAKEN' | 'INVALID' | 'CALENDAR_UNAVAILABLE'; message?: string };
+  | {
+      ok: false;
+      reason:
+        | 'NOT_FOUND'
+        | 'SLOT_TAKEN'
+        | 'INVALID'
+        | 'CALENDAR_UNAVAILABLE'
+        /** The event type's duplicate-booking guard refused this email (#69).
+         *  Carries NO slot detail, by design — see `duplicate-guard.ts`. */
+        | 'DUPLICATE_BOOKING'
+        /** A one-off token naming nothing, or opening a different event type
+         *  (#110) — 404 upstream. See repository.ts's identical pair. */
+        | 'ONE_OFF_NOT_FOUND'
+        /** A one-off token that was real and is now consumed or revoked — 410. */
+        | 'ONE_OFF_GONE';
+      message?: string;
+    };
 
 /** True (as a 1-row SELECT) if `memberId` already holds an overlapping booking —
- * whether as the primary host_member_id OR an assigned co-host (booking_host). */
-function memberOverlapSql(memberId: string, startMs: number, endMs: number) {
+ * whether as the primary host_member_id OR an assigned co-host (booking_host).
+ * `exceptBookingId` drops ONE booking from the check: a reschedule asks this of
+ * the booking it is moving, which must never block its own move. */
+function memberOverlapSql(memberId: string, startMs: number, endMs: number, exceptBookingId?: string) {
+  const except = exceptBookingId ? sql` AND b.id <> ${exceptBookingId}` : sql``;
   return sql`SELECT b.id FROM booking b
     WHERE b.status IN ('accepted','pending')
-      AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}
+      AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}${except}
       AND (b.host_member_id = ${memberId}
            OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))
     LIMIT 1`;
@@ -614,8 +755,37 @@ export async function createTeamBooking(
     teamSlug: string;
     slug: string;
     startMs: number;
-    attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string };
+    attendee: {
+      name: string;
+      email: string;
+      timeZone: string;
+      notes?: string;
+      phone?: string;
+    };
+    additionalAttendees?: Array<{
+      name: string;
+      email: string;
+      timeZone: string;
+      notes?: string;
+      phone?: string;
+    }>;
     answers?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    idempotencyKey?: string;
+    /**
+     * True when this write arrives through an API key (the v2
+     * compatibility surface is the only caller today). Only the
+     * duplicate-booking guard reads it — the team path has no `onBehalf`
+     * notion, so this is the whole of its exemption. See `duplicate-guard.ts`.
+     */
+    apiKeyWrite?: boolean;
+    /**
+     * A one-off link token presented with this write (#110). The team mirror of
+     * `CreateBookingArgs.oneOffToken`: when live it lets the lookup see a hidden
+     * team event and is burned once the booking commits, and nothing else.
+     * Ignored on API-key writes, which are not subject to the grant.
+     */
+    oneOffToken?: string;
   },
   /** Wired CalendarProvider — candidate hosts are conflict-checked against
    *  their external calendars, fail-closed (see createBooking). */
@@ -625,8 +795,28 @@ export async function createTeamBooking(
   if (!account) return { ok: false, reason: 'NOT_FOUND' };
   const team = await getTeamBySlug(db, account.id, args.teamSlug);
   if (!team) return { ok: false, reason: 'NOT_FOUND' };
-  const et = await getTeamEventType(db, account.id, team.id, args.slug);
+  // One-off link (#69/AB2), the TEAM half — the personal path in repository.ts
+  // is the other, and instrumenting only one of the two is how this ships
+  // half-built. Resolved BEFORE the event type for the same reason there: a
+  // live link is what makes a hidden event visible to this request.
+  const honoursOneOff = !!args.oneOffToken && oneOffGuardApplies({ apiKeyWrite: args.apiKeyWrite });
+  // Shape first, matching the personal path and the read routes.
+  if (honoursOneOff && !isOneOffTokenShape(args.oneOffToken))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+  let live: OneOffLinkRecord | undefined;
+  if (honoursOneOff) {
+    const oneOff = await getOneOffLinkByToken(db, args.oneOffToken!);
+    if (!oneOff) return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
+    if (oneOff.state !== 'live') return { ok: false, reason: 'ONE_OFF_GONE' };
+    live = oneOff;
+  }
+
+  const et = await getTeamEventType(db, account.id, team.id, args.slug, { includeHidden: !!live });
   if (!et) return { ok: false, reason: 'NOT_FOUND' };
+  // The link must open THIS event, not merely be live — otherwise a token over
+  // one team event would unlock every hidden event on the account.
+  if (live && (live.eventTypeId !== et.id || live.accountId !== account.id))
+    return { ok: false, reason: 'ONE_OFF_NOT_FOUND' };
 
   const invalid = validateTeamIntake(et, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
@@ -634,6 +824,21 @@ export async function createTeamBooking(
   // Start-instant sanity (QA fix 8) — same range policy as createBooking.
   const rangeErr = bookingStartOutOfRange(args.startMs);
   if (rangeErr) return { ok: false, reason: 'INVALID', message: rangeErr };
+
+  // Duplicate-booking guard (#69/AB1), the TEAM half — the personal path in
+  // repository.ts is the other. Instrumenting only one of the two is how this
+  // feature ships half-built, so the two call sites stay in step. Checked
+  // before host resolution: there is nothing to gain from picking a
+  // round-robin host for a booking that is about to be refused.
+  if (
+    duplicateGuardApplies({
+      preventDuplicateBookings: et.prevent_duplicate_bookings,
+      apiKeyWrite: args.apiKeyWrite,
+    }) &&
+    (await hasUpcomingBookingForEmail(db, account.id, et.id, args.attendee.email))
+  ) {
+    return { ok: false, reason: 'DUPLICATE_BOOKING' };
+  }
 
   // QA fix 13 (team surface): the public team-booking path must land on a
   // slot the team's CONFIGURATION offers (per-host rules combined by the
@@ -643,16 +848,26 @@ export async function createTeamBooking(
   {
     const now = new Date();
     const endMsProbe = args.startMs + et.length_minutes * 60_000;
-    const ruleSets: Array<{ isFixed: boolean; free: Set<number>; reason: AvailabilityEmptyReason | null }> = [];
+    const ruleSets: Array<{
+      isFixed: boolean;
+      free: Set<number>;
+      reason: AvailabilityEmptyReason | null;
+    }> = [];
     for (const host of await getEventHosts(db, et.id)) {
-      const { free, reason } = await hostFreeSlotMs(
-        db, host, et, args.startMs, endMsProbe, now, undefined, true,
-      );
+      const { free, reason } = await hostFreeSlotMs(db, host, et, args.startMs, endMsProbe, now, {
+        rulesOnly: true,
+      });
       ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
     }
-    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets)
-      .includes(args.startMs);
-    if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };
+    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets).includes(
+      args.startMs,
+    );
+    if (!offered)
+      return {
+        ok: false,
+        reason: 'INVALID',
+        message: 'That time is not available.',
+      };
   }
 
   const endMs = args.startMs + et.length_minutes * 60_000;
@@ -695,7 +910,10 @@ export async function createTeamBooking(
   // Resolve the assigned host set for the method.
   const assigned = resolveAssignment(method, hosts, candidates);
   if (!assigned || assigned.length === 0)
-    return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
+    return {
+      ok: false,
+      reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN',
+    };
 
   const organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
   const assignedIds = assigned.map((h) => h.memberId);
@@ -705,22 +923,35 @@ export async function createTeamBooking(
   const attendeeId = randomUUID();
   const now = Date.now();
   const { token, tokenHash } = generateManageToken();
-  const metaExpr = jsonParam(db, { _manage: { tokenHash } });
+  const metaExpr = jsonParam(db, {
+    ...(args.metadata ?? {}),
+    _manage: { tokenHash },
+  });
   const responsesExpr = jsonParam(db, args.answers ?? null);
 
   // Snapshot the team event type's configured Where onto the booking (F5), same
   // as the personal path — otherwise team bookings show no location.
-  const eventLocation = parseJsonColumn<string | null>(et.locations, null);
+  const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
   const insertBooking = sql`
-    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title}, ${eventLocation},
+    INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key, created_at, updated_at)
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
+      ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
+      ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
       ${now}, ${now})`;
   const insertAttendee = sql`
-    INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
+    INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
+      ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+    (attendee) => sql`
+      INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+      VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
+        ${normalizeAttendeeEmail(attendee.email)},
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+  );
   // Multi-host bookings (collective / fixed_round_robin) record every assigned
   // host so write-out + notifications fan out. Round-robin's single host is
   // already carried by host_member_id, so it writes no booking_host rows.
@@ -733,16 +964,18 @@ export async function createTeamBooking(
         )
       : [];
 
-  const booked = await insertBookingGuarded(
-    db,
-    assignedIds,
-    args.startMs,
-    endMs,
-    [insertBooking, insertAttendee, ...insertHostRows],
-  );
-  return booked
-    ? { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token }
-    : { ok: false, reason: 'SLOT_TAKEN' };
+  const booked = await insertBookingGuarded(db, assignedIds, args.startMs, endMs, [
+    insertBooking,
+    insertAttendee,
+    ...insertAdditionalAttendees,
+    ...insertHostRows,
+  ]);
+  if (!booked) return { ok: false, reason: 'SLOT_TAKEN' };
+  // Committed — burn the link (#110). AFTER the write, never before: burning
+  // first would kill the link on every SLOT_TAKEN and strand the invitee with a
+  // dead link and no booking. See `consumeOneOffLink`.
+  if (live) await consumeOneOffLink(db, live.id, bookingId);
+  return { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token };
 }
 
 /**
@@ -787,20 +1020,21 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
 }
 
 /**
- * Shared dual-enforced insert (SQLite sync txn / Postgres async txn + EXCLUDE).
- * Re-checks overlap for EVERY assigned host inside the transaction so a
- * collective/fixed-RR booking can't slip past a co-host who got booked
- * concurrently, then runs the ordered statement list (booking, attendee, and any
- * booking_host rows).
+ * The ONE guarded write (SQLite sync txn / Postgres async txn, alongside the
+ * Postgres EXCLUDE). Runs every overlap check inside the transaction and only
+ * then the ordered statement list; any hit, or any throw, leaves the tree
+ * untouched and answers false.
+ *
+ * One function rather than two because the create guard and the reschedule
+ * guard drifting apart IS #129: a booking became reschedulable onto an overlap
+ * that create time refused. Sharing the body makes that drift impossible to
+ * reintroduce by editing one side.
  */
-async function insertBookingGuarded(
+async function runGuarded(
   db: Db,
-  hostMemberIds: string[],
-  startMs: number,
-  endMs: number,
+  overlapChecks: Array<ReturnType<typeof sql>>,
   statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
-  const overlapChecks = hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs));
   if (db.dialect === 'sqlite') {
     return db.sqlite!.txn<boolean>(() => {
       for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
@@ -821,6 +1055,25 @@ async function insertBookingGuarded(
   } catch {
     return false;
   }
+}
+
+/**
+ * Insert a booking, re-checking overlap for EVERY assigned host inside the
+ * transaction so a collective/fixed-RR booking can't slip past a co-host who
+ * got booked concurrently.
+ */
+function insertBookingGuarded(
+  db: Db,
+  hostMemberIds: string[],
+  startMs: number,
+  endMs: number,
+  statements: Array<ReturnType<typeof sql>>,
+): Promise<boolean> {
+  return runGuarded(
+    db,
+    hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
+    statements,
+  );
 }
 
 // --- Reschedule / cancel --------------------------------------------------
@@ -859,6 +1112,30 @@ export async function resolveBooking(
 function manageHashOf(metadata: unknown): string | null {
   const meta = parseJsonColumn<{ _manage?: { tokenHash?: string } }>(metadata, {});
   return meta._manage?.tokenHash ?? null;
+}
+
+/**
+ * The host set a booking was CREATED with: its organizer plus every
+ * `booking_host` row, organizer first and de-duplicated.
+ *
+ * `createTeamBooking` writes a `booking_host` row per host only for the
+ * multi-host methods (collective / fixed_round_robin) — round-robin's single
+ * host is carried by `host_member_id` alone, and a personal booking has no
+ * rows either. So for those this answers exactly `[organizer]`, and every
+ * guard reading it behaves precisely as the single-host code it replaced.
+ */
+async function loadAssignedHostIds(
+  db: Db,
+  bookingId: string,
+  organizerId: string | null,
+): Promise<string[]> {
+  const rows = await db.all<{ member_id: string }>(
+    sql`SELECT member_id FROM booking_host WHERE booking_id = ${bookingId}`,
+  );
+  const ids: string[] = [];
+  if (organizerId) ids.push(organizerId);
+  for (const r of rows) if (r.member_id && !ids.includes(r.member_id)) ids.push(r.member_id);
+  return ids;
 }
 
 export type MutationOutcome =
@@ -913,7 +1190,10 @@ export async function rescheduleBooking(
   // already-applied state WITHOUT moving again or re-rotating the manage token
   // (a double-move would silently invalidate the token the first response
   // handed back). Keyed on the booking's stored `_idem.reschedule`.
-  const meta = parseJsonColumn<{ _manage?: unknown; _idem?: { reschedule?: string } }>(b.metadata, {});
+  const meta = parseJsonColumn<{
+    _manage?: unknown;
+    _idem?: { reschedule?: string };
+  }>(b.metadata, {});
   if (args.idempotencyKey && meta._idem?.reschedule === args.idempotencyKey) {
     return {
       ok: true,
@@ -924,19 +1204,47 @@ export async function rescheduleBooking(
     };
   }
 
-  // B6: the new time must be a REAL bookable slot — enforce the host's schedule
+  // #129: a reschedule answers to the SAME host set the booking was CREATED
+  // with, never to the organizer alone. `createTeamBooking` records a
+  // `booking_host` row per assigned host and guards overlap for every one of
+  // them; this path validated `booking.host_member_id` only, so a collective
+  // co-host could be double-booked by a move that create time would have
+  // refused — and the Postgres `booking_no_overlap` EXCLUDE cannot catch it,
+  // because a co-host conflict is a different tuple. The app-level guard is the
+  // only line here, so it has to cover everyone who is actually attending.
+  //
+  // #127: that host set is IMMUTABLE across a reschedule. The invitee keeps the
+  // people the scheduling method matched them with, and the manage picker asks
+  // `getBookingRescheduleAvailability` — scoped to this same set — so the
+  // picker and this write agree by construction rather than by coincidence.
+  const assignedHostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  // A team host may carry its own schedule (`event_type_host.schedule_id`), and
+  // that override — not the event type's own schedule — is what the team
+  // availability projection resolves against. Validate through the same one, or
+  // a host with an override has the picker and the write reading different
+  // hours. A personal event has no host rows, so this stays empty and
+  // `isSlotBookable` resolves the event type's schedule exactly as before.
+  const hostScheduleIds = new Map<string, string | null>();
+  if (b.event_type_id)
+    for (const h of await getEventHosts(db, b.event_type_id))
+      hostScheduleIds.set(h.member_id, h.schedule_id);
+
+  // B6: the new time must be a REAL bookable slot — enforce each host's schedule
   // rules, min-notice, buffers, and not-in-the-past (the old path only checked
   // booking-overlap, so a manage-link holder could move a meeting to any
   // instant). Skipped only when the booking has no host/event to validate against.
-  if (b.host_member_id && b.event_type_id) {
-    const bookable = await isSlotBookable(db, {
-      eventTypeId: b.event_type_id,
-      hostMemberId: b.host_member_id,
-      startMs: args.newStartMs,
-      excludeBookingId: b.id,
-      now: args.now,
-    });
-    if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+  if (b.event_type_id) {
+    for (const hostMemberId of assignedHostIds) {
+      const bookable = await isSlotBookable(db, {
+        eventTypeId: b.event_type_id,
+        hostMemberId,
+        hostScheduleId: hostScheduleIds.get(hostMemberId),
+        startMs: args.newStartMs,
+        excludeBookingId: b.id,
+        now: args.now,
+      });
+      if (!bookable) return { ok: false, reason: 'INVALID_SLOT' };
+    }
   }
 
   const duration = Number(b.end_ms) - Number(b.start_ms);
@@ -947,13 +1255,15 @@ export async function rescheduleBooking(
   // calendar rejects the move, and an UNREADABLE calendar blocks it visibly
   // instead of moving the meeting onto a conflict we couldn't see (fail-closed).
   // This path previously skipped the check entirely, so a reschedule could
-  // double-book the host over an external event.
-  if (b.host_member_id) {
+  // double-book the host over an external event. Run per ASSIGNED host, as the
+  // create path conflict-checks every candidate: a co-host's external calendar
+  // is as good a reason to refuse the move as the organizer's.
+  for (const hostMemberId of assignedHostIds) {
     try {
       const externalBusy = await loadExternalBusy(
         db,
         calendar,
-        b.host_member_id,
+        hostMemberId,
         args.newStartMs,
         newEndMs,
         b.event_type_id,
@@ -971,13 +1281,17 @@ export async function rescheduleBooking(
   // Preserve any other metadata; rotate the manage token and record the
   // idempotency key so an identical retry short-circuits above.
   const newMeta: Record<string, unknown> = { ...meta, _manage: { tokenHash } };
-  if (args.idempotencyKey)
-    newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
+  if (args.idempotencyKey) newMeta._idem = { ...(meta._idem ?? {}), reschedule: args.idempotencyKey };
   const metaExpr = jsonParam(db, newMeta);
 
-  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
-    AND status = 'accepted' AND id <> ${b.id}
-    AND start_ms < ${newEndMs} AND end_ms > ${args.newStartMs} LIMIT 1`;
+  // The same guard `createTeamBooking` runs, per assigned host, inside the same
+  // transaction as the move: a member is busy whether they hold the conflicting
+  // booking as its organizer or as an assigned co-host, and a pending booking
+  // holds its slot just as an accepted one does. Both are what create enforces;
+  // the old single-host, accepted-only check was strictly weaker.
+  const overlapChecks = assignedHostIds.map((id) =>
+    memberOverlapSql(id, args.newStartMs, newEndMs, b.id),
+  );
   // Restore the reschedule audit trail: since this is an in-place move (uid
   // stable, no mint-new row), record where it came FROM (the previous start) in
   // `from_reschedule` — the old system's back-pointer analog. `rescheduled=1`
@@ -986,7 +1300,7 @@ export async function rescheduleBooking(
     rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
     updated_at = ${now} WHERE id = ${b.id}`;
 
-  const moved = await runGuardedUpdate(db, overlapSql, updateSql);
+  const moved = await runGuardedUpdate(db, overlapChecks, updateSql);
   if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
@@ -998,29 +1312,132 @@ export async function rescheduleBooking(
   };
 }
 
-async function runGuardedUpdate(
+/**
+ * Move (or confirm) a booking under the same guard the insert runs. Takes a
+ * LIST of checks because a team booking has a host SET, not a host: a
+ * collective move has to answer for each of its co-hosts, and checking them one
+ * transaction at a time would leave open the window this guard exists to close.
+ */
+function runGuardedUpdate(
   db: Db,
-  overlapSql: ReturnType<typeof sql>,
+  overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
 ): Promise<boolean> {
-  if (db.dialect === 'sqlite') {
-    return db.sqlite!.txn<boolean>(() => {
-      if (db.sqlite!.drizzle.get(overlapSql)) return false;
-      db.sqlite!.drizzle.run(updateSql);
-      return true;
+  return runGuarded(db, overlapChecks, [updateSql]);
+}
+
+/**
+ * Availability for RESCHEDULING one existing booking — the picker's half of
+ * #127, and the only availability read the manage page's reschedule form uses
+ * for a team booking.
+ *
+ * The public TEAM route answers what the EVENT offers to a new invitee, which
+ * for `round_robin` is the UNION across hosts: a time is listed if ANY host is
+ * free, because create time is still free to pick who takes it. A reschedule is
+ * not free to: the booking already has an assigned host set, `rescheduleBooking`
+ * keeps it (#127, option a — the invitee keeps the people they were matched
+ * with), and so the picker was offering times the write then refused with
+ * `INVALID_SLOT`. Same mismatch, differently shaped, for the rotating half of
+ * `fixed_round_robin`.
+ *
+ * So this asks a narrower question — "when can THIS booking move to?" — and
+ * answers it from the booking's OWN host set (`loadAssignedHostIds`),
+ * INTERSECTED: everyone still attending has to be free, whatever method
+ * originally assigned them. That is the same set, resolved by the same helper,
+ * that the write validates and guards against, so picker and write cannot
+ * drift apart.
+ *
+ * Token-gated like every other manage read, and deliberately answers `null` for
+ * a bad token exactly as it does for an unknown uid — this is a public route,
+ * and telling the two apart would turn it into a uid prober. There is no
+ * host/admin bypass: the manage token is the only key, so no caller can read
+ * another account's booking by asking nicely.
+ *
+ * The booking being moved is dropped from its own hosts' busy sets, exactly as
+ * `rescheduleBooking` drops it (`excludeBookingId`). Otherwise a booking blocks
+ * its own move: with buffers, or an event longer than its slot interval, the
+ * times either side of where it already sits vanish from the picker — and
+ * nudging a meeting is the commonest reschedule there is. Its own instant is
+ * then removed from the result, since a "move" to where it already is has no
+ * meaning.
+ */
+export async function getBookingRescheduleAvailability(
+  db: Db,
+  args: {
+    uid: string;
+    manageToken: string;
+    fromMs: number;
+    toMs: number;
+    displayTimeZone?: string;
+    now?: Date;
+  },
+  /** Wired provider — each assigned host's external busy is subtracted. */
+  calendar?: CalendarProvider,
+): Promise<TeamAvailabilityResult | null> {
+  const b = await resolveBooking(db, args.uid);
+  if (!b || !b.event_type_id) return null;
+  if (!verifyManageToken(args.manageToken, manageHashOf(b.metadata))) return null;
+  // Only an accepted booking can move — `rescheduleBooking` answers GONE for
+  // every other status, so listing times for one would offer a picker whose
+  // every option is already refused.
+  if (b.status !== 'accepted') return null;
+  const et = await getEventTypeRowById(db, b.event_type_id);
+  if (!et) return null;
+  const assignedHostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  if (assignedHostIds.length === 0) return null;
+
+  const eventHosts = new Map((await getEventHosts(db, et.id)).map((h) => [h.member_id, h]));
+  const now = args.now ?? new Date();
+  const hostSets: Array<{
+    isFixed: boolean;
+    free: Set<number>;
+    reason: AvailabilityEmptyReason | null;
+  }> = [];
+  for (const memberId of assignedHostIds) {
+    // A host removed from the event type since the booking was made still owes
+    // this meeting, so it keeps validating them — against the event type's own
+    // schedule, since their per-host override is gone with the host row.
+    const host: EventHostRow = eventHosts.get(memberId) ?? {
+      member_id: memberId,
+      is_fixed: 1,
+      priority: null,
+      weight: null,
+      schedule_id: et.schedule_id,
+    };
+    const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, {
+      calendar,
+      excludeBookingId: b.id,
     });
+    hostSets.push({ isFixed: true, free, reason });
   }
-  const pg = db.pg!.drizzle;
-  try {
-    return await pg.transaction(async (tx) => {
-      const rows = (await tx.execute(overlapSql)) as unknown as unknown[];
-      if (rows.length > 0) return false;
-      await tx.execute(updateSql);
-      return true;
-    });
-  } catch {
-    return false;
-  }
+  const startMs = Number(b.start_ms);
+  const slots = intersectInstants(hostSets.map((h) => h.free))
+    .filter((ms) => ms !== startMs)
+    .map((ms) => new Date(ms).toISOString());
+  const tz = await db.get<{ time_zone: string | null }>(
+    sql`SELECT COALESCE(t.time_zone, m.time_zone) AS time_zone
+        FROM booking b
+        LEFT JOIN event_type et ON et.id = b.event_type_id
+        LEFT JOIN team t ON t.id = et.team_id
+        LEFT JOIN member m ON m.id = b.host_member_id
+        WHERE b.id = ${b.id} LIMIT 1`,
+  );
+  return {
+    eventType: {
+      slug: et.slug,
+      title: et.title,
+      lengthMinutes: et.length_minutes,
+      bookingFields: parseJsonColumn<BookingFieldDef[]>(et.booking_fields, []),
+      schedulingType: et.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(et.locations, null)),
+    },
+    timeZone: args.displayTimeZone ?? tz?.time_zone ?? 'UTC',
+    slots,
+    // Everyone assigned must be free, so ONE broken host empties the window —
+    // the collective rule, whatever method did the assigning.
+    emptyReason:
+      slots.length === 0 ? teamEmptyReason('collective', assignedHostIds.length, hostSets) : undefined,
+  };
 }
 
 export async function cancelBooking(
@@ -1041,7 +1458,10 @@ export async function cancelBooking(
   // bad token), so an idempotent retry still requires a valid principal.
   if (!args.byHost && !verifyManageToken(args.manageToken ?? '', manageHashOf(b.metadata)))
     return { ok: false, reason: 'FORBIDDEN' };
-  const nowIso = { startUtc: new Date(Number(b.start_ms)).toISOString(), endUtc: new Date(Number(b.end_ms)).toISOString() };
+  const nowIso = {
+    startUtc: new Date(Number(b.start_ms)).toISOString(),
+    endUtc: new Date(Number(b.end_ms)).toISOString(),
+  };
   // P1-1: cancel is IDEMPOTENT. A retried cancel of an already-cancelled booking
   // returns success (was 410 GONE, which broke agent retry loops that treat
   // non-2xx as failure). Only a truly non-cancellable state (rejected) is GONE.
@@ -1051,10 +1471,17 @@ export async function cancelBooking(
   if (b.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
   if (b.status !== 'accepted' && b.status !== 'pending') return { ok: false, reason: 'GONE' };
   const now = Date.now();
-  await db.run(
+  const updated = await db.get<{ id: string }>(
     sql`UPDATE booking SET status = 'cancelled', cancellation_reason = ${args.reason ?? null},
-        cancelled_by = ${args.byHost ? 'host' : 'attendee'}, updated_at = ${now} WHERE id = ${b.id}`,
+        cancelled_by = ${args.byHost ? 'host' : 'attendee'}, updated_at = ${now}
+        WHERE id = ${b.id} AND status IN ('accepted', 'pending')
+        RETURNING id`,
   );
+  if (!updated) {
+    const current = await resolveBooking(db, args.uid, args.accountId);
+    if (current?.status === 'cancelled') return { ok: true, uid: b.uid, ...nowIso, alreadyApplied: true };
+    return { ok: false, reason: current ? 'GONE' : 'NOT_FOUND' };
+  }
   return { ok: true, uid: b.uid, ...nowIso };
 }
 
@@ -1066,24 +1493,27 @@ export async function addAttendeeToBooking(
   db: Db,
   uid: string,
   accountId: string,
-  attendee: { name: string; email: string; timeZone: string; notes?: string; phone?: string },
+  attendee: {
+    name: string;
+    email: string;
+    timeZone: string;
+    notes?: string;
+    phone?: string;
+  },
 ): Promise<{ ok: boolean; reason?: 'NOT_FOUND' }> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   await db.run(
-    sql`INSERT INTO booking_attendee (id, booking_id, name, email, time_zone, phone, notes, created_at)
-        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email}, ${attendee.timeZone},
+    sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
+        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email},
+          ${normalizeAttendeeEmail(attendee.email)}, ${attendee.timeZone},
           ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
   );
   return { ok: true };
 }
 
 /** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(
-  db: Db,
-  uid: string,
-  accountId?: string,
-): Promise<MutationOutcome> {
+export async function confirmBooking(db: Db, uid: string, accountId?: string): Promise<MutationOutcome> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
@@ -1096,7 +1526,7 @@ export async function confirmBooking(
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
     WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, overlapSql, updateSql);
+  const ok = await runGuardedUpdate(db, [overlapSql], updateSql);
   if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
@@ -1138,7 +1568,10 @@ export interface BookingNotificationContext {
   startUtc: string;
   endUtc: string;
   status: string;
+  /** The human detail of the Where; null for conferencing (no typed detail). */
   location: string | null;
+  /** The kind snapshotted on the booking; null on pre-kind rows. */
+  locationKind: string | null;
   host: { name: string | null; email: string | null };
   attendee: { name: string; email: string; timeZone: string };
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
@@ -1147,6 +1580,30 @@ export interface BookingNotificationContext {
   hostLocale: string | null;
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
+  /**
+   * The EVENT TYPE's reminders + follow-up (#68) — what the enqueue path
+   * schedules from, replacing the account's single lead-time list. NULL on the
+   * column (never configured) resolves to the shipped defaults here; a booking
+   * with no event type at all gets those defaults too, which is what it got
+   * before reminders moved.
+   */
+  reminders: EventReminder[];
+  /**
+   * The booking's own intake answers, RAW (`string | boolean | string[]`), for
+   * the `{{form.<field name>}}` namespace. Snapshotted into the outbox payload
+   * at enqueue time like the rest of the notification (ADR 0007) — the answer
+   * exists the moment the booking does, so nothing waits for delivery. They
+   * stay raw here because rendering a boolean as Yes/Sí needs the locale, which
+   * is the renderer's business, not the storage layer's.
+   */
+  formAnswers: Record<string, unknown>;
+}
+
+/** `booking.responses` as a plain own-property record; anything else (null, an
+ *  array, a legacy scalar) becomes `{}` so `{{form.*}}` simply resolves empty. */
+function asAnswerRecord(raw: unknown): Record<string, unknown> {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return { ...(raw as Record<string, unknown>) };
 }
 
 /**
@@ -1169,6 +1626,7 @@ export async function loadBookingNotificationContext(
     end_ms: number;
     status: string;
     location: string | null;
+    location_kind: string | null;
     host_member_id: string | null;
     host_name: string | null;
     host_email: string | null;
@@ -1179,11 +1637,14 @@ export async function loadBookingNotificationContext(
     host_handle: string | null;
     account_code: string | null;
     event_slug: string | null;
+    event_reminders: unknown;
+    responses: unknown;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
-               b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+               b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
                m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
+               et.reminders AS event_reminders, b.responses AS responses,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -1195,7 +1656,11 @@ export async function loadBookingNotificationContext(
   if (!row || !row.att_email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.
-  const coHostRows = await db.all<{ member_id: string; name: string | null; email: string | null }>(
+  const coHostRows = await db.all<{
+    member_id: string;
+    name: string | null;
+    email: string | null;
+  }>(
     sql`SELECT bh.member_id, m.display_name AS name, m.email AS email
         FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
         WHERE bh.booking_id = ${row.id} AND bh.member_id <> ${row.host_member_id ?? ''}`,
@@ -1208,6 +1673,7 @@ export async function loadBookingNotificationContext(
     endUtc: new Date(Number(row.end_ms)).toISOString(),
     status: row.status,
     location: row.location,
+    locationKind: row.location_kind,
     host: { name: row.host_name, email: row.host_email },
     attendee: {
       name: row.att_name ?? '',
@@ -1216,9 +1682,15 @@ export async function loadBookingNotificationContext(
     },
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
     hostLocale: row.host_locale,
+    reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
+    formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
     bookAgain:
       row.account_code && row.host_handle && row.event_slug
-        ? { accountCode: row.account_code, handle: row.host_handle, slug: row.event_slug }
+        ? {
+            accountCode: row.account_code,
+            handle: row.host_handle,
+            slug: row.event_slug,
+          }
         : null,
   };
 }
@@ -1273,9 +1745,7 @@ export async function listBookings(
   // page, so paging never skips or repeats rows even as new bookings arrive.
   const cursor = decodeBookingCursor(args.cursor);
   if (cursor) {
-    conds.push(
-      sql`(start_ms < ${cursor.startMs} OR (start_ms = ${cursor.startMs} AND uid < ${cursor.uid}))`,
-    );
+    conds.push(sql`(start_ms < ${cursor.startMs} OR (start_ms = ${cursor.startMs} AND uid < ${cursor.uid}))`);
   }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   // Fetch one extra row to know whether a further page exists.
@@ -1348,9 +1818,10 @@ export interface MemberIdentity {
 }
 
 export async function getMemberIdentity(db: Db, memberId: string): Promise<MemberIdentity | null> {
-  const row = await db.get<{ external_id: string | null; email: string | null }>(
-    sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`,
-  );
+  const row = await db.get<{
+    external_id: string | null;
+    email: string | null;
+  }>(sql`SELECT external_id, email FROM member WHERE id = ${memberId} LIMIT 1`);
   if (!row) return null;
   const iamUserId = row.external_id && row.external_id.length > 0 ? row.external_id : memberId;
   return { iamUserId, email: row.email };
@@ -1421,6 +1892,8 @@ export async function createConnection(
     provider: string;
     externalId: string;
     primaryEmail?: string;
+    /** The connected account's photo, when the backend reports one. */
+    avatarUrl?: string | null;
     isDestination?: boolean;
     checkConflicts?: boolean;
   },
@@ -1428,12 +1901,35 @@ export async function createConnection(
   const id = randomUUID();
   await db.run(
     sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id,
-          primary_email, is_destination, check_conflicts, created_at)
+          primary_email, avatar_url, is_destination, check_conflicts, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId}, ${args.provider}, ${args.externalId},
-          ${args.primaryEmail ?? null}, ${args.isDestination ? 1 : 0},
+          ${args.primaryEmail ?? null}, ${args.avatarUrl ?? null}, ${args.isDestination ? 1 : 0},
           ${args.checkConflicts === false ? 0 : 1}, ${Date.now()})`,
   );
   return { id };
+}
+
+/**
+ * Refresh the stored photo for a connection that already exists.
+ *
+ * Discovery skips rows it has already recorded, so without this a photo that
+ * only appears later — the backend started reporting it, or the person set one
+ * — would never reach a connection made before it existed. Writes only a real
+ * value: a backend that stops reporting must not blank a photo the page is
+ * already drawing.
+ */
+export async function setConnectionAvatar(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  externalId: string,
+  avatarUrl: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE connected_calendar SET avatar_url = ${avatarUrl}
+        WHERE account_id = ${accountId} AND member_id = ${memberId}
+          AND external_id = ${externalId}`,
+  );
 }
 
 /**
@@ -1466,7 +1962,9 @@ export async function deleteConnection(db: Db, memberId: string, id: string): Pr
   );
   if (!owned) return { ok: true };
   await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE connected_calendar_id = ${id}`);
-  await db.run(sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`);
+  await db.run(
+    sql`UPDATE event_type SET destination_calendar_id = NULL WHERE destination_calendar_id = ${id}`,
+  );
   await db.run(sql`DELETE FROM connected_calendar WHERE id = ${id} AND member_id = ${memberId}`);
   return { ok: true };
 }
@@ -1543,7 +2041,13 @@ export interface CreatedApiKey {
 
 export async function createApiKey(
   db: Db,
-  args: { accountId: string; name: string; scopes: string[]; eventTypeIds?: string[]; expiresAtMs?: number },
+  args: {
+    accountId: string;
+    name: string;
+    scopes: string[];
+    eventTypeIds?: string[];
+    expiresAtMs?: number;
+  },
 ): Promise<CreatedApiKey> {
   const id = randomUUID();
   const secret = randomBytes(24).toString('base64url');
@@ -1562,6 +2066,7 @@ export async function createApiKey(
 }
 
 export interface ApiKeyPrincipal {
+  keyId: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
@@ -1588,6 +2093,7 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
   if (row.expires_at_ms != null && Number(row.expires_at_ms) <= now) return null;
   await db.run(sql`UPDATE api_key SET last_used_at_ms = ${now} WHERE id = ${row.id}`);
   return {
+    keyId: row.id,
     accountId: row.account_id,
     scopes: parseJsonColumn<string[]>(row.scopes, []),
     eventTypeIds: parseJsonColumn<string[] | null>(row.event_type_ids, null),
@@ -1595,7 +2101,13 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
 }
 
 export async function listApiKeys(db: Db, accountId: string) {
-  return db.all<{ id: string; name: string; prefix: string; last4: string; revoked_at_ms: number | null }>(
+  return db.all<{
+    id: string;
+    name: string;
+    prefix: string;
+    last4: string;
+    revoked_at_ms: number | null;
+  }>(
     sql`SELECT id, name, prefix, last4, revoked_at_ms FROM api_key WHERE account_id = ${accountId}
         ORDER BY created_at DESC`,
   );
@@ -1609,15 +2121,99 @@ export async function revokeApiKey(db: Db, accountId: string, id: string): Promi
 
 // --- Webhooks -------------------------------------------------------------
 
+// --- Webhook signing secrets at rest (W / #75) ----------------------------
+//
+// A webhook secret cannot be hashed the way `api_key` is: the signer has to read
+// it back to build the HMAC, so it must be reversible. It therefore rides the
+// SAME AES-256-GCM envelope H1a introduced for `account_integration`, in a new
+// `secret_cipher` column, bound per row by `webhookSecretAad`.
+//
+// The plaintext is decrypted at ONE moment — signing — and never leaves these
+// helpers, never reaches a list/read endpoint, and is never logged.
+
+/** The two secret columns as they come off a row. */
+interface WebhookSecretColumns {
+  secret: string | null;
+  secret_cipher: string | null;
+}
+
+/**
+ * Re-seal a legacy plaintext row into the envelope. Best-effort by design:
+ * the backfill is a convenience, and a delivery must never fail because the
+ * upgrade could not be written (a read-only replica, a lock, a racing worker).
+ *
+ * Guarded by `secret_cipher IS NULL` so two workers racing the same row cannot
+ * clobber each other — the loser's UPDATE simply matches nothing.
+ */
+async function upgradeLegacyWebhookSecret(
+  db: Db,
+  args: { webhookId: string; accountId: string; secret: string; key: Buffer },
+): Promise<void> {
+  try {
+    const aad = webhookSecretAad(args.accountId, args.webhookId);
+    const cipher = encryptSecret(args.secret, args.key, aad);
+    // Read it back before destroying the only recoverable copy. This UPDATE is
+    // irreversible in a way the CRM's is not — there, a host can re-paste the
+    // token; here the plaintext in this column is the last copy anyone has, and
+    // clearing it on the strength of an envelope nobody has opened would trade a
+    // readable secret for an unopenable one. Cheap, and it runs once per row.
+    if (decryptSecret(cipher, args.key, aad) !== args.secret) return;
+    await db.run(
+      sql`UPDATE webhook SET secret_cipher = ${cipher}, secret = NULL
+          WHERE id = ${args.webhookId} AND secret_cipher IS NULL`,
+    );
+  } catch {
+    /* best-effort: signing this delivery matters more than draining plaintext */
+  }
+}
+
+/**
+ * The signing secret for one webhook, or null when it has none.
+ *
+ * Precedence and the key-absent contract (#75), in one place so all three
+ * signing paths agree:
+ *
+ *   - `secret_cipher` set  → decrypt; with NO key this THROWS. A stored
+ *     ciphertext we cannot open is a deployment fault (the key was removed or
+ *     changed), and the honest response is a failed delivery the outbox retries
+ *     and an operator can see — never a silent downgrade to an unsigned POST
+ *     that a subscriber would reject anyway, or worse, accept.
+ *   - legacy plaintext `secret` → returned as-is, key or no key, so a
+ *     deployment that has never configured one keeps working exactly as today.
+ *     When a key IS present the row is re-sealed on the way past.
+ *   - neither → null (unsigned, which is what an old secret-less row already did).
+ */
+async function resolveWebhookSecret(
+  db: Db,
+  args: {
+    webhookId: string;
+    accountId: string;
+    row: WebhookSecretColumns;
+    key: Buffer | null;
+  },
+): Promise<string | null> {
+  const { row, key, webhookId, accountId } = args;
+  if (row.secret_cipher) {
+    if (!key) {
+      throw new SecretCryptoError(
+        'cannot sign this webhook delivery: the signing secret is encrypted and ' +
+          'INTEGRATION_ENCRYPTION_KEY is not configured.',
+      );
+    }
+    return decryptSecret(row.secret_cipher, key, webhookSecretAad(accountId, webhookId));
+  }
+  if (!row.secret) return null;
+  if (key) await upgradeLegacyWebhookSecret(db, { webhookId, accountId, secret: row.secret, key });
+  return row.secret;
+}
+
 export async function listWebhooks(db: Db, accountId: string) {
   return db.all<{
     id: string;
     subscriber_url: string;
     event_triggers: unknown;
     active: number;
-  }>(
-    sql`SELECT id, subscriber_url, event_triggers, active FROM webhook WHERE account_id = ${accountId}`,
-  );
+  }>(sql`SELECT id, subscriber_url, event_triggers, active FROM webhook WHERE account_id = ${accountId}`);
 }
 
 export async function createWebhook(
@@ -1626,6 +2222,14 @@ export async function createWebhook(
     accountId: string;
     subscriberUrl: string;
     eventTriggers: string[];
+    /**
+     * REQUIRED (#75) — not `Buffer | null`. Making the key a type obligation is
+     * what guarantees no call site can write a plaintext secret: there is no
+     * runtime branch to forget, and a new caller cannot compile without deciding
+     * where its key comes from. The API layer turns an absent key into a coded
+     * refusal before it ever reaches here.
+     */
+    key: Buffer;
     secret?: string;
     memberId?: string;
     teamId?: string;
@@ -1635,13 +2239,18 @@ export async function createWebhook(
   const id = randomUUID();
   // Always store a signing secret so payloads are never unsigned. If the caller
   // didn't supply one we mint it and return it once (subscribers verify the
-  // X-Slate-Signature HMAC with it — see dispatchWebhooks).
+  // X-Slate-Signature HMAC with it — see dispatchWebhooks). Generation is
+  // unchanged by #75: the `whsec_` prefix and 24 random bytes are what a
+  // subscriber already knows how to handle.
   const secret = args.secret ?? `whsec_${randomBytes(24).toString('base64url')}`;
+  // `secret` is written NULL: a row is readable one way only, so nothing can
+  // later disagree about which column is authoritative.
+  const cipher = encryptSecret(secret, args.key, webhookSecretAad(args.accountId, id));
   await db.run(
     sql`INSERT INTO webhook (id, account_id, member_id, team_id, event_type_id, subscriber_url,
-          secret, event_triggers, active, created_at)
+          secret, secret_cipher, event_triggers, active, created_at)
         VALUES (${id}, ${args.accountId}, ${args.memberId ?? null}, ${args.teamId ?? null},
-          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${secret},
+          ${args.eventTypeId ?? null}, ${args.subscriberUrl}, ${null}, ${cipher},
           ${jsonParam(db, args.eventTriggers)}, 1, ${Date.now()})`,
   );
   return { id, secret };
@@ -1673,18 +2282,37 @@ export async function pingWebhook(
   db: Db,
   accountId: string,
   id: string,
+  key: Buffer | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: boolean; status?: number; message?: string }> {
-  const h = await db.get<{ subscriber_url: string; secret: string | null }>(
-    sql`SELECT subscriber_url, secret FROM webhook WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
+  const h = await db.get<{ subscriber_url: string } & WebhookSecretColumns>(
+    sql`SELECT subscriber_url, secret, secret_cipher FROM webhook
+        WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`,
   );
   if (!h) return { ok: false, message: 'Webhook not found.' };
   if (!(await checkWebhookUrl(h.subscriber_url)).ok) return { ok: false, message: 'URL is not allowed.' };
   const body = JSON.stringify({ event: 'ping', data: { ok: true } });
-  const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': 'ping' };
-  if (h.secret) headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    'X-Slate-Event': 'ping',
+  };
+  // A ping that cannot be signed is reported as a failed ping, not thrown:
+  // this function's whole contract is "never throws, return the result", and
+  // an operator staring at the developer page needs the reason, not a 500.
+  let secret: string | null;
   try {
-    const res = await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
+    secret = await resolveWebhookSecret(db, { webhookId: id, accountId, row: h, key });
+  } catch {
+    return { ok: false, message: 'Cannot sign: the signing secret could not be decrypted.' };
+  }
+  if (secret)
+    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+  try {
+    const res = await fetchImpl(h.subscriber_url, {
+      method: 'POST',
+      headers,
+      body,
+    });
     return { ok: res.ok, status: res.status };
   } catch {
     return { ok: false, message: 'Subscriber unreachable.' };
@@ -1703,16 +2331,18 @@ export async function dispatchWebhooks(
   accountId: string,
   event: string,
   payload: unknown,
+  key: Buffer | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<number> {
-  const hooks = await db.all<{
-    id: string;
-    subscriber_url: string;
-    secret: string | null;
-    event_triggers: unknown;
-    active: number;
-  }>(
-    sql`SELECT id, subscriber_url, secret, event_triggers, active FROM webhook
+  const hooks = await db.all<
+    {
+      id: string;
+      subscriber_url: string;
+      event_triggers: unknown;
+      active: number;
+    } & WebhookSecretColumns
+  >(
+    sql`SELECT id, subscriber_url, secret, secret_cipher, event_triggers, active FROM webhook
         WHERE account_id = ${accountId} AND active = 1`,
   );
   const body = JSON.stringify({ event, data: payload });
@@ -1724,11 +2354,24 @@ export async function dispatchWebhooks(
       // Re-validate at egress (defends against a URL that resolved public at
       // creation but was later re-pointed at a private address — DNS rebinding).
       if (!(await checkWebhookUrl(h.subscriber_url)).ok) return;
-      const headers: Record<string, string> = { 'content-type': 'application/json', 'X-Slate-Event': event };
-      if (h.secret) {
-        headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', h.secret).update(body).digest('hex')}`;
-      }
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        'X-Slate-Event': event,
+      };
       try {
+        // Inside the try with the POST: this path is documented as
+        // best-effort/never-throws, so an unopenable secret drops THIS
+        // subscriber rather than sending it unsigned or failing the others.
+        const secret = await resolveWebhookSecret(db, {
+          webhookId: h.id,
+          accountId,
+          row: h,
+          key,
+        });
+        if (secret) {
+          headers['X-Slate-Signature'] =
+            `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+        }
         await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
         sent++;
       } catch {
@@ -1747,10 +2390,15 @@ export async function dispatchWebhooks(
 // gives per-subscriber isolation (a slow/broken subscriber can't starve the
 // others), per-subscriber retry, and a delivery log.
 
+/**
+ * NO `secret` field (#75). This type only ever fed `enqueueWebhookDeliveries`,
+ * which needs the id and nothing else — carrying the plaintext here made it one
+ * careless `...spread` away from an outbox payload or a log line. The secret is
+ * now read at signing time only, by `deliverWebhookEvent`.
+ */
 export interface MatchingWebhook {
   id: string;
   subscriberUrl: string;
-  secret: string | null;
 }
 
 /** Active webhooks in the account whose triggers include `event`. */
@@ -1762,15 +2410,17 @@ export async function loadMatchingWebhooks(
   const hooks = await db.all<{
     id: string;
     subscriber_url: string;
-    secret: string | null;
     event_triggers: unknown;
   }>(
-    sql`SELECT id, subscriber_url, secret, event_triggers FROM webhook
+    sql`SELECT id, subscriber_url, event_triggers FROM webhook
         WHERE account_id = ${accountId} AND active = 1`,
   );
   return hooks
     .filter((h) => parseJsonColumn<string[]>(h.event_triggers, []).includes(event))
-    .map((h) => ({ id: h.id, subscriberUrl: h.subscriber_url, secret: h.secret }));
+    .map((h) => ({
+      id: h.id,
+      subscriberUrl: h.subscriber_url,
+    }));
 }
 
 /**
@@ -1876,16 +2526,18 @@ export async function listWebhookDeliveries(
 
 export async function deliverWebhookEvent(
   db: Db,
-  args: { webhookId: string; body: string },
+  args: { webhookId: string; body: string; key: Buffer | null },
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const hook = await db.get<{
-    account_id: string;
-    subscriber_url: string;
-    secret: string | null;
-    active: number;
-  }>(
-    sql`SELECT account_id, subscriber_url, secret, active FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  const hook = await db.get<
+    {
+      account_id: string;
+      subscriber_url: string;
+      active: number;
+    } & WebhookSecretColumns
+  >(
+    sql`SELECT account_id, subscriber_url, secret, secret_cipher, active FROM webhook
+        WHERE id = ${args.webhookId} LIMIT 1`,
   );
   if (!hook || hook.active !== 1) {
     // Subscriber gone/disabled since enqueue — nothing to deliver, don't retry.
@@ -1912,8 +2564,31 @@ export async function deliverWebhookEvent(
     'content-type': 'application/json',
     'X-Slate-Event': event,
   };
-  if (hook.secret) {
-    headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', hook.secret).update(args.body).digest('hex')}`;
+  // Signing is a delivery precondition, not a best-effort extra: an envelope we
+  // cannot open FAILS the attempt (recorded, then rethrown so the outbox retries
+  // with backoff). Sending unsigned instead would strip the guarantee the
+  // subscriber authenticates on, silently, at exactly the moment an operator
+  // has misconfigured the key — the one time it must be loud.
+  let secret: string | null;
+  try {
+    secret = await resolveWebhookSecret(db, {
+      webhookId: args.webhookId,
+      accountId: hook.account_id,
+      row: hook,
+      key: args.key,
+    });
+  } catch (err) {
+    // Two audiences, two messages. The delivery log is rendered to any account
+    // admin, so it gets a generic line: naming a deployment env var to a tenant
+    // tells them something they cannot act on about infrastructure they do not
+    // run. The specific reason rides the thrown error, which reaches the
+    // operator's worker log.
+    await record(false, null, 'delivery could not be signed — contact the administrator');
+    throw err;
+  }
+  if (secret) {
+    headers['X-Slate-Signature'] =
+      `sha256=${createHmac('sha256', secret).update(args.body).digest('hex')}`;
   }
   let res: Response | undefined;
   try {

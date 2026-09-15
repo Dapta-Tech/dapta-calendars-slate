@@ -6,6 +6,8 @@ import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
 import { HostController } from './host.controller';
 import { AdminService } from './admin.service';
+import { OnboardingService } from './onboarding.service';
+import { GrowthService } from './growth.service';
 import type { AuthService, ReqLike } from './auth.service';
 
 /**
@@ -36,7 +38,7 @@ describe('timezone validation (QA fix 1)', () => {
     } as unknown as AuthService;
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     const email = new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db);
-    ctrl = new HostController(new AdminService(db, calendar, email), auth);
+    ctrl = new HostController(new AdminService(db, calendar, email), new OnboardingService(db), auth, new GrowthService(db));
   });
 
   const req = {} as ReqLike;

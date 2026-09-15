@@ -7,8 +7,9 @@
 #   3. an internal-token grep — the project-specific denylist the generic
 #      scanners don't know about.
 #
-# Layers 1 & 2 are skipped with a warning if the tools aren't installed locally
-# (CI installs them). Layer 3 always runs — it needs nothing but grep.
+# Layers 1 & 2 warn and skip if the tools aren't installed, so a bare clone can
+# still run the gate. In CI that skip is a FAILURE instead — see
+# PUBLISH_GATE_REQUIRE_SCANNERS below. Layer 3 always runs; it needs only grep.
 #
 # Usage: bash scripts/publish-gate.sh
 set -uo pipefail
@@ -17,14 +18,55 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 FAIL=0
 
+# A scanner that isn't installed means its layer DID NOT RUN. Locally that is a
+# warning, so a bare clone can still run the gate. In CI it is a failure: the
+# whole value of the layer is that it ran, and a silent skip is indistinguishable
+# from a clean scan. CI sets PUBLISH_GATE_REQUIRE_SCANNERS=1 (see
+# .github/workflows/ci.yml) — without this, a broken installer disables a layer
+# and the gate still prints PASSED, which is exactly what happened to gitleaks.
+REQUIRE_SCANNERS="${PUBLISH_GATE_REQUIRE_SCANNERS:-0}"
+missing_scanner() {
+  local what="${1:-scanner}"
+  # Accept the obvious truthy spellings: someone self-hosting this will write
+  # `true` as readily as `1`, and silently taking the WARN path would hand them
+  # the very false sense of coverage this guard exists to remove.
+  # `tr`, not `${var,,}`: that expansion is bash 4+, and macOS still ships 3.2.
+  case "$(printf '%s' "$REQUIRE_SCANNERS" | tr '[:upper:]' '[:lower:]')" in
+    1 | true | yes | on)
+      echo "FAIL: $what is not installed — this layer did not run, and scanners are required here."
+      FAIL=1
+      ;;
+    *)
+      echo "WARN: $what not installed — skipped locally (CI requires it and fails without it)."
+      ;;
+  esac
+}
+
 echo "== publish-gate: internal-token scan =="
 # The denylist: internal hosts, cloud/account markers, internal service names,
-# and WIP markers that must never reach public history. Extend as needed.
+# the private integration platform behind CALENDAR_BACKEND_MODULE (R15 — both
+# its domain and its product name), and WIP markers that must never reach
+# public history. Extend as needed.
 # Matched case-insensitively (grep -i) so "Aurora"/"aurora" both trip it.
-PATTERN='[a-z0-9-]+\.dapta\.(ai|dev)|daptatech|amazonaws|aurora|\bbooking_ms\b|dapta_lab|dapta-iam|integration\.app|apps-configs-flux2|DO[ -]NOT[ -]MERGE'
+#
+# R15 entries hide one letter in a character class: `int[e]gration` matches
+# exactly the same strings as `integration`, but THIS FILE ships in the public
+# repo, so a plain-text search of it must not hand over the name the gate is
+# there to keep out. Add any future vendor entry the same way, and leave the
+# trailing `\b` off so `NameWire`/`NameConnector` still trip it.
+#
+# R15_PATTERN is held separately because it is the one group that must also be
+# absent from git HISTORY (scanned further down) — the internal hosts and WIP
+# markers are a working-tree concern. It is spliced into PATTERN below, so a new
+# vendor is still added in exactly one place.
+R15_PATTERN='int[e]gration\.app|m[e]mbrane'
+PATTERN="[a-z0-9-]+\.dapta\.(ai|dev)|daptatech|amazonaws|aurora|\bbooking_ms\b|dapta_lab|dapta-iam|${R15_PATTERN}|apps-configs-flux2|DO[ -]NOT[ -]MERGE"
 # Product-PUBLIC hosts (our own public web/API/platform hosts) are not leaks —
 # they may appear anywhere in the public repo. Internal service hosts stay blocked.
 PUBLIC_HOST_ALLOW='\b(app|www|calendars?(-api)?)\.dapta\.(ai|dev)\b'
+# The customer-facing support address is intentionally public product copy, not
+# an internal host, credential, or employee identity.
+PUBLIC_EMAIL_ALLOW='support@daptatech\.com'
 
 # Scan tracked/working files, excluding vendored/build/self paths. The deploy/
 # overlay is gitignored (never in public history) so it is not scanned here.
@@ -36,7 +78,7 @@ MATCHES=$(grep -RInEi "$PATTERN" \
   --exclude-dir=.turbo \
   --exclude-dir=deploy \
   --exclude=publish-gate.sh \
-  . 2>/dev/null | grep -vE "$PUBLIC_HOST_ALLOW" || true)
+  . 2>/dev/null | grep -vE "$PUBLIC_HOST_ALLOW" | grep -vE "$PUBLIC_EMAIL_ALLOW" || true)
 
 if [ -n "$MATCHES" ]; then
   echo "FAIL: internal tokens found in tree:"
@@ -61,12 +103,51 @@ else
 fi
 
 echo
-echo "== publish-gate: gitleaks =="
-if command -v gitleaks >/dev/null 2>&1; then
-  gitleaks detect --no-banner --redact -v || FAIL=1
-  gitleaks detect --no-git --no-banner --redact -v || FAIL=1
+echo "== publish-gate: R15 vendor scan (git history) =="
+# The tree scan above cannot see history. A vendor name that was committed and
+# later removed is still one `git log --grep` away for anyone who clones the
+# repo, so history has to be curated (reword/squash) before the flip to public.
+#
+# Scoped to R15_PATTERN rather than the whole denylist on purpose: the internal
+# hosts and the `daptatech` co-author trailer already surface in the
+# author-identity scan above, and re-reporting them here would bury this signal
+# in noise. Non-fatal for the same reason as that scan — flip to FAIL=1 once
+# history has been curated, so a regression is caught.
+#
+# Prints SHAs and a count ONLY, never the matching text: this output lands in CI
+# logs, which are public the moment the repo is.
+R15_MSG=$(git log --regexp-ignore-case --extended-regexp --grep="$R15_PATTERN" --format='%H' 2>/dev/null || true)
+R15_BLOB=$(git log --regexp-ignore-case --pickaxe-regex -S"$R15_PATTERN" --format='%H' 2>/dev/null || true)
+R15_HITS=$(printf '%s\n%s\n' "$R15_MSG" "$R15_BLOB" | grep -v '^$' | sort -u || true)
+if [ -n "$R15_HITS" ]; then
+  echo "WARN: R15 vendor tokens in git history (curate before publish):"
+  echo "$R15_HITS" | head -10 | sed 's/^/  /'
+  echo "  $(echo "$R15_HITS" | wc -l | tr -d ' ') commit(s) total; text withheld (this log is public)."
 else
-  echo "WARN: gitleaks not installed — skipped locally (runs in CI)."
+  echo "OK: no R15 vendor tokens in history."
+fi
+
+echo
+echo "== publish-gate: gitleaks =="
+# Both passes run with publish-gate-gitleaks.toml, which keeps gitleaks' whole
+# stock ruleset (`useDefault`) and only skips gitignored directories. The
+# `--no-git` pass walks the working directory and does NOT honour .gitignore, so
+# without it a built worktree reports Next.js' generated keys out of
+# apps/web/.next/** — noise that trains people to wave the gate through.
+GITLEAKS_CFG="scripts/publish-gate-gitleaks.toml"
+# A MISSING config is fail-loud by itself (gitleaks exits non-zero). An empty or
+# rule-less one is NOT: gitleaks loads it happily, finds nothing, and exits 0 —
+# a green gate that scanned for nothing. So assert the ruleset, not just the
+# file, the same way the trufflehog allowlist is asserted further down.
+if [ ! -f "$GITLEAKS_CFG" ] || ! grep -qE '^[[:space:]]*useDefault[[:space:]]*=[[:space:]]*true' "$GITLEAKS_CFG"; then
+  echo "FAIL: $GITLEAKS_CFG is missing or no longer extends the default ruleset."
+  FAIL=1
+fi
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks detect --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
+  gitleaks detect --no-git --no-banner --redact -v --config "$GITLEAKS_CFG" || FAIL=1
+else
+  missing_scanner gitleaks
 fi
 
 echo
@@ -124,7 +205,7 @@ if command -v trufflehog >/dev/null 2>&1; then
   fi
   rm -f "$TH_JSON" "$TH_ERR"
 else
-  echo "WARN: trufflehog not installed — skipped locally (runs in CI)."
+  missing_scanner trufflehog
 fi
 
 echo

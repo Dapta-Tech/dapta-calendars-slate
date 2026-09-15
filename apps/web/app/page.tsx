@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { authProvider, getSession } from '@/lib/auth-session';
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/cn';
 
 // Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
 const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
@@ -36,11 +38,13 @@ export default async function HomePage() {
         </p>
       </div>
 
-      <Link
-        href="/acme/alex-rivera"
-        className="rounded-md bg-primary px-5 py-3 font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
-      >
-        Open the demo booking page →
+      {/* A2 (#112): was a text link wearing an arrow. The OSS root is the door
+          to /login on this build, so it takes the sweep's arrow rule with the
+          login screen even though the stub's scope list stops one route short —
+          otherwise it belongs to no unit at all. */}
+      <Link href="/acme/alex-rivera" className={cn(buttonVariants({ size: 'lg' }), 'px-6')}>
+        <i aria-hidden className="pi pi-external-link" style={{ fontSize: 14 }} />
+        Open the demo booking page
       </Link>
 
       <p className="text-sm text-muted-foreground">

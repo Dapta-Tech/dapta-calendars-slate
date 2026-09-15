@@ -26,10 +26,113 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-md: var(--radius);
-  /* Poppins is the brand font, self-hosted via next/font (--font-poppins);
-     falls back to a system stack if the variable is ever absent. */
-  --font-sans: var(--font-poppins), 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Faint Slate — the quietest legible voice (telemetry labels, hints, inactive
+     states). A fourth text step the old two-tone scale had no room for. */
+  --color-faint: var(--faint);
+  /* The constant dark tile that fixed-colour brand artwork sits on, and its
+     foreground. Same values in both themes on purpose — see `--brand-ink` in
+     tokens.css. */
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-ink-foreground: var(--brand-ink-foreground);
+
+  /* The accent at a lightness that reads against this theme's page — the rim on an
+     accent fill, the focus outline, and the mark on a selected control.
+
+     THE RULE, in one line: the accent has three jobs and three tokens.
+       FILL    `bg-primary`          — `--primary`, the brand lime, rimmed below
+       LETTERS `text-primary`        — `--primary-ink`, overridden below
+       LINES   `border-primary-edge` — this token, used directly at the call site
+     A border is the one job that is NOT overridden here, because `border-primary`
+     is nine different classes once you count `/40 /50 /60`, `hover:`, `checked:`
+     and `focus-within:` — overriding the bare one would have silently left the
+     other eight on the raw lime, which in light mode is a 1.27:1 line. So the call
+     sites name this token themselves and every opacity variant follows for free.
+     On dark `--primary-edge` IS `--primary`, so none of this changes that theme. */
+  --color-primary-edge: var(--primary-edge);
+
+  /* The WHOLE radius scale is pinned here, not just `md`: overriding one step
+     leaves `rounded-lg/xl/2xl` on Tailwind's defaults, so the scale contradicts
+     itself — a `rounded-lg` chip ends up sharper than the `rounded-md` button next
+     to it. One ladder, softest at the card step. `rounded-full` is left alone: it
+     is avatars and status dots, not a corner decision. */
+  --radius-sm: 6px;
+  --radius-md: var(--radius); /* 10px */
+  --radius-lg: 12px;
+  --radius-xl: var(--radius-monitor); /* 16px — the card step the sheet always claimed */
+  --radius-2xl: 20px;
+
+  /* Two voices, no third font. Figtree does all the talking; IBM Plex Mono is
+     reserved for strings you COPY rather than read — links, slugs, hex, keys,
+     template variables — where a fixed advance and an unambiguous l/1/O/0 do real
+     work. Numbers are NOT one of those: a stat is glanced at, and monospacing it
+     only made it read as code. Both self-hosted via next/font (`--font-figtree`,
+     `--font-plex-mono`) and both OFL, which is what lets next/font bake the files
+     into the build and into every clone of this repo. Until now `--font-mono` was
+     not defined at all, so the two `font-mono` call sites in the notifications
+     editor silently rendered in the browser default. Each falls back to a system
+     stack if its variable is ever absent. */
+  --font-sans: var(--font-figtree), Figtree, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* The type scale, pinned end to end. Before this it was eight Tailwind defaults
+     plus ten arbitrary `text-[10px]` / `text-[11px]` sites — a scale nobody could
+     pick a step from, because half the steps were not steps.
+     Seven roles, eight keys:
+       30  page title
+       24  metric value — deliberately BELOW the title so the title still wins
+       20  section heading
+       16  card heading
+       14  body
+       12  label / metadata
+       10  telemetry (uppercase, tracked)
+     The telemetry step is a PAIR: `text-2xs` always travels with `text-faint`.
+     `lg` and `xl` are the same 20px on purpose: `lg` was 18px and carried the
+     section headings, and moving it up merges a near-duplicate step rather than
+     rewriting every call site. Line heights are pinned with the sizes — 11px alone
+     had three different ones, which is what made small text look ragged. */
+  --text-2xs: 10px;
+  --text-2xs--line-height: 14px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 20px;
+  --text-lg--line-height: 26px;
+  --text-xl: 20px;
+  --text-xl--line-height: 26px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 30px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
+
+  /* The spacing scale, mapped to named utilities the same way colour, radius and
+     type are. `--sp-*` in tokens.css holds the values and the reasoning; these
+     keys are what turn them into `p-card`, `gap-field`, `min-h-control` and
+     `px-gutter sm:px-gutter-wide` — so a call site names the ROLE instead of
+     guessing a number.
+
+     Mapping the whole set matters for the same reason the radius ladder is pinned
+     end to end: half a scale is not a scale. If only `card` existed, every other
+     role would keep reaching for Tailwind's raw ramp and the sheet would once again
+     be describing a rule the app does not follow.
+
+     The utilities are additive — nothing is migrated onto them here. The sweep is
+     the second half of #147, and is what removes the 74 distinct values the audit
+     found. Until then both spellings work, which is the point: a sweep across every
+     admin screen cannot land in one commit. */
+  --spacing-tight: var(--sp-tight);
+  --spacing-inline: var(--sp-inline);
+  --spacing-field: var(--sp-field);
+  --spacing-card: var(--sp-card);
+  --spacing-group: var(--sp-group);
+  --spacing-section: var(--sp-section);
+  --spacing-gutter: var(--sp-page-x);
+  --spacing-gutter-wide: var(--sp-page-x-wide);
+  --spacing-gutter-y: var(--sp-page-y);
+  --spacing-control: var(--sp-control-h);
+  --spacing-control-pad: var(--sp-control-x);
 }
 
 /* Default border color for everything. MUST live in @layer base: un-layered
@@ -42,6 +145,61 @@
   }
 }
 
+/* Point the accent-as-TEXT utility at `--primary-ink` instead of `--primary`.
+   Done here rather than at 88 call sites: the accent needs one lightness as a fill
+   and a darker one as letters (see `--primary-ink` in tokens.css), and
+   `text-primary`/`bg-primary` both read `--color-primary`. Overriding the single
+   utility keeps every call site untouched and cannot drift. In `@layer utilities`
+   for the mirror image of the reason the wildcard border rule is in `@layer base`
+   (QA2 BUG-2): here we WANT an explicit color utility on the same element to still
+   win. The `hover:` variant is listed because its pseudo-class outranks a bare
+   class. */
+@layer utilities {
+  .text-primary,
+  .hover\:text-primary:hover {
+    color: var(--primary-ink);
+  }
+
+  /* Rim every accent fill with `--primary-edge`, so the fill's SHAPE clears 3:1
+     against the page it sits on (WCAG 1.4.11). This is about the PRODUCT tokens:
+     on dark the edge equals the fill and paints nothing; on light it is the
+     difference between the primary action being a recognisable control and being
+     a pale smear at 1.27:1. On a `.branded-surface` the rule still applies but
+     paints nothing on either ground — `brandVars` emits edge == primary since
+     ADR 0004's amendment, so a host's fill is deliberately unrimmed and whatever
+     contrast it has against the page is the contrast they chose.
+     An `inset` box-shadow rather than a border because a border would add 2px to
+     every accent fill and reflow all of them. Opacity-modified variants
+     (`bg-primary/10`, `bg-primary/15`) are different classes and untouched — they
+     are washes, not fills.
+
+     THE SIZE RULE this implies: `bg-primary` is for fills big enough to HAVE an
+     interior — buttons, chips, badges. A 1px rim on a 6px dot leaves 4px of fill
+     and reads as a donut. Below about 10px the accent is a MARK, not a fill, and it
+     takes `bg-primary-edge` instead: the edge colour carrying the whole shape,
+     which is identical on dark and a legible dark-olive on light. The connection
+     status dot, the radio's checked dot and the date picker's has-slots marker all
+     use that, and a new one should too.
+
+     TWO THINGS THIS RULE DOES NOT REACH, both by construction:
+     1. A DISABLED accent fill. `disabled:bg-muted` swaps `background-color` only,
+        so the rim outlives the fill and a disabled button wears a lime ring around
+        a muted body. Any call site that disables an accent fill must also carry
+        `disabled:shadow-none` — `button.tsx` and `new-schedule-button.tsx` do.
+     2. VARIANT-PREFIXED fills. `checked:bg-primary` compiles to a different class
+        (`.checked\:bg-primary:checked`) and gets no rim. It is listed here rather
+        than fixed because raising this rule's specificity to catch it would also
+        beat `focus-visible:ring-2`, which sets `box-shadow` too — the rim would eat
+        the focus ring. There are two such sites, not the one this note first
+        claimed: `checkbox.tsx` and `radio.tsx` both carried `checked:border-primary`.
+        Both now carry `checked:border-primary-edge` instead (reskin slice P, #97) —
+        the edge colour on the border does the job the rim cannot. A NEW
+        variant-prefixed accent fill must do the same. On dark none of this shows. */
+  .bg-primary {
+    box-shadow: inset 0 0 0 1px var(--primary-edge);
+  }
+}
+
 html,
 body {
   background: var(--background);
@@ -50,9 +208,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Lime focus ring (WCAG) honored everywhere. */
+/* Lime focus ring (WCAG) honored everywhere.
+   Uses `--primary-edge`, not `--primary`: the outline is the one thing that must be
+   findable on every surface, and the PRODUCT accent flattens to 1.27:1 over paper —
+   the focus indicator would be the least visible thing on a focused control in
+   light mode. On dark the edge IS the accent, so nothing changes there. On a
+   branded page the two tokens are equal by construction, so the ring is the host's
+   accent and carries whatever contrast they picked. */
 :focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--primary-edge);
   outline-offset: 2px;
 }
 
@@ -157,7 +321,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 2.75rem; /* 44px hit target (R28) */
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
   border: 1px solid var(--border);
   border-radius: var(--bp-btn-radius);
   padding: var(--bp-slot-pad);
@@ -195,10 +359,248 @@ body {
   background: var(--accent);
   color: var(--accent-contrast);
 }
+/* The quiet sibling of `.bp-btn`: a real control for a secondary action (the
+   manage link on the confirmation) rather than an underlined word with a `→`
+   after it. Takes the same radius axis, so it follows the host's Buttons
+   setting exactly as the primary does. */
+.branded-surface .bp-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius);
+  padding-inline: 1rem;
+  font-weight: 500;
+  transition: border-color 120ms var(--ease-standard, ease);
+}
+.branded-surface .bp-btn-outline:hover {
+  border-color: var(--accent);
+}
 /* template: banded shows a cover band; split widens the canvas */
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;
 }
+/* Centre a short public page in the viewport, and scroll normally when it is
+   taller than one.
+
+   The height goes on the SHELL, not on `<main>`: `MadeWithBadge` is an in-flow
+   sibling of `<main>`, roughly 77px of footer, so a 100dvh `<main>` would make
+   every public page exactly one badge taller than the viewport — a scrollbar on
+   a page that fits, on every configured deployment and on none of the bare
+   forks where the badge does not render. The shell holds both, so the floor
+   applies to the whole page and the footer is inside it.
+
+   `margin-block: auto` on `<main>` rather than `justify-content: center` on the
+   shell: centring a flex child that overflows pushes its top off the top edge,
+   where no browser lets you scroll back to it, while `auto` margins collapse to
+   zero once the child fills the box and degrade to a plain top-anchored page.
+   The footer keeps its own margins and sits under the centred main.
+
+   `100dvh`, not `100vh`, so mobile browser chrome does not add a scrollbar to a
+   page that fits.
+
+   NOT applied in embed mode: `EmbedResizeReporter` measures this subtree and
+   reports it to the host page, and a viewport-height floor would report the
+   viewport instead of the content — an iframe that grows to 100vh forever. */
+.bp-viewport {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+.bp-viewport > main {
+  margin-block: auto;
+}
+
+/* The three-region event page (BP) needs room for panel + month + day column,
+   so the canvas carries its own cap and `split` widens it — which is what the
+   axis has always claimed to do. */
+.bp-canvas {
+  margin-inline: auto;
+  max-width: 64rem;
+}
 .branded-surface.tpl-split .bp-canvas {
-  max-width: 44rem;
+  max-width: 72rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * BP: month calendar + day column. Everything here is token-driven, so both
+ * themes and all nine branding axes reach it the same way the slot chips do.
+ * ------------------------------------------------------------------------ */
+
+/* The slot-layout axis, re-scoped inside the day column. The page-wide rule is
+   3 columns (4 above 640px); in a ~16rem column that is a 65px cell holding a
+   `white-space: nowrap` "10:30 AM", which overflows on every wide screen. Here
+   `list` is one per row and `grid` is two — both axes stay visibly different,
+   neither can overflow, and no other surface changes. */
+.branded-surface .bp-daycol .bp-slots,
+.branded-surface.slots-list .bp-daycol .bp-slots {
+  grid-template-columns: 1fr;
+}
+.branded-surface.slots-grid .bp-daycol .bp-slots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* The day column's own scroller — desktop only. Nesting a fixed-height scroll
+   region inside page scroll is a touch trap: the finger lands in the inner box
+   and the page stops moving. Below `md` the list just flows in the page. */
+@media (min-width: 768px) {
+  .branded-surface .bp-daycol-scroll {
+    max-height: 26rem;
+    overflow-y: auto;
+    /* Room for the scrollbar so a chip's rim is never clipped by it. */
+    padding-right: 0.25rem;
+  }
+}
+
+/* Rows own their own seven-column track rather than `display: contents` on a
+   shared one. `contents` has a long history of dropping elements out of the
+   accessibility tree, and the row structure is the whole reason this claims
+   grid semantics — so the layout must not depend on removing the rows from it.
+   Every row is seven equal fractions of the same width, so the columns line up
+   without a shared track. (The cells themselves are `display: contents`
+   wrappers carrying `role="gridcell"`; a wrapper that vanishes from layout is
+   fine, one that vanishes from the a11y tree is not, and only the latter is at
+   issue with `contents`.) */
+.branded-surface .bp-cal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.branded-surface .bp-cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+.branded-surface .bp-cal-weekday {
+  min-width: 0;
+  padding-block: 0.25rem;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+/* A day cell is a slot chip by another name — same hit target, same radius
+   axis, same accent rim on hover — so the grid cannot drift from the column
+   beside it. */
+.branded-surface .bp-cal-day {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: var(--sp-control-h); /* 44px hit target (R28) */
+  aspect-ratio: 1 / 1;
+  border: 1px solid transparent;
+  border-radius: var(--bp-btn-radius, 0.5rem);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  transition:
+    transform 120ms var(--ease-standard, ease),
+    border-color 120ms var(--ease-standard, ease);
+}
+/* Bookable. */
+.branded-surface .bp-cal-day[data-state='available'] {
+  border-color: var(--border);
+  background: var(--card);
+  font-weight: 600;
+  cursor: pointer;
+}
+.branded-surface .bp-cal-day[data-state='available']:hover {
+  border-color: var(--accent, var(--primary));
+}
+.branded-surface .bp-cal-day[data-state='available']:active {
+  transform: scale(0.97);
+}
+/* Nothing to book — visibly a date, not a control. `disabled` already takes it
+   out of the tab order; this takes it out of the eye's. */
+.branded-surface .bp-cal-day[data-state='empty'] {
+  color: var(--muted-foreground);
+  opacity: 0.45;
+  cursor: default;
+}
+.branded-surface .bp-cal-day[data-state='outside'] {
+  color: var(--muted-foreground);
+  opacity: 0.25;
+  cursor: default;
+}
+/* Today: a dot under the number, so "today" and "selected" can both be true at
+   once and still be told apart. */
+.branded-surface .bp-cal-day[data-today='true']::after {
+  content: '';
+  position: absolute;
+  bottom: 0.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: currentColor;
+}
+/* Selected day — the same two treatments the slotSelect axis gives a chip. */
+.branded-surface .bp-cal-day[data-selected='true'],
+.branded-surface.sel-soft .bp-cal-day[data-selected='true'] {
+  background: var(--accent-soft, var(--muted));
+  border-color: var(--accent, var(--primary));
+  box-shadow: inset 0 0 0 1px var(--accent, var(--primary));
+  color: var(--foreground);
+  font-weight: 700;
+}
+.branded-surface.sel-solid .bp-cal-day[data-selected='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: none;
+  font-weight: 700;
+}
+/* Month arrows + the 12h/24h toggle: same rim and target as everything else. */
+.branded-surface .bp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius, 0.5rem);
+  background: var(--card);
+  transition: border-color 120ms var(--ease-standard, ease);
+}
+.branded-surface .bp-icon-btn:hover:not(:disabled) {
+  border-color: var(--accent, var(--primary));
+}
+.branded-surface .bp-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- Inline embed (E) -----------------------------------------------------
+   `dc-embed` rides on the same element as `.branded-surface`, so these rules
+   out-specify the page-wide ones without `!important` and without touching
+   them. Only reachable under `?embed=1`; a page opened directly never carries
+   the class. */
+
+/* The day column's scroller is switched OFF inside a frame. On a real page a
+   fixed-height inner scroller is right: the window height is fixed and the
+   column should not push the footer off screen. Inside an auto-resizing iframe
+   it is wrong twice — the frame grows to fit its content, so there is nothing
+   for the scroller to save, and a fixed-height scroll region inside a frame
+   inside a scrolling host page is the same touch trap this rule already
+   refuses below `md`, with one more layer on it. Let the FRAME grow instead.
+
+   This is also what makes the height reporter honest: with the scroller on, the
+   document's scroll height is the clipped height, so the number posted to the
+   parent would hide slots behind a scrollbar the host never asked for. */
+.branded-surface.dc-embed .bp-daycol-scroll {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+/* The badge keeps its place in the embed (#67 — a host's own site is the
+   growth loop's best placement), but not 3rem of dead space under it: inside a
+   frame that is just height the host page pays for. */
+.dc-embed .bp-embed-footer {
+  padding-top: 0.5rem;
+  padding-bottom: 1rem;
 }

@@ -37,6 +37,28 @@ export function isEmailTemplateKey(v: string): v is EmailTemplateKey {
 }
 
 /**
+ * The keys that MOVED to the event type (#68): reminders and the follow-up are
+ * configured per event now, so Settings → Notifications no longer shows or
+ * accepts them. They keep their shipped default copy, which is what a reminder
+ * with a NULL subject/body renders, and their stored rows survive as the
+ * copy-forward source — they are simply no longer editable account-wide.
+ */
+export const EVENT_LEVEL_TEMPLATE_KEYS = [
+  'attendee_reminder',
+  'host_reminder',
+  'follow_up',
+] as const satisfies readonly EmailTemplateKey[];
+
+/** The transactional keys that remain account-wide (one text, every event). */
+export const ACCOUNT_TEMPLATE_KEYS = EMAIL_TEMPLATE_KEYS.filter(
+  (k) => !(EVENT_LEVEL_TEMPLATE_KEYS as readonly string[]).includes(k),
+);
+
+export function isAccountTemplateKey(v: string): v is EmailTemplateKey {
+  return isEmailTemplateKey(v) && !(EVENT_LEVEL_TEMPLATE_KEYS as readonly string[]).includes(v);
+}
+
+/**
  * Whether a key sends with NO stored setting. Lifecycle mail defaults ON
  * (parity with the pre-toggle product); the post-meeting follow-up is
  * marketing-ish, so it is strictly opt-in.
@@ -61,6 +83,11 @@ export const TEMPLATE_VARIABLES = [
   'start_time',
   'end_time',
   'location',
+  // The conferencing link. UNIQUE among these: it is the one variable resolved
+  // at DELIVERY time rather than snapshotted at enqueue, because it is minted
+  // later by the calendar outbox row (ADR 0007). Empty when the write-out has
+  // not produced one — the empty-line rule then drops its whole line.
+  'meeting_url',
   'manage_url',
   'cancel_link',
   'reschedule_link',
@@ -72,7 +99,30 @@ export const TEMPLATE_VARIABLES = [
 ] as const;
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
 
-const TOKEN_RE = /\{\{\s*([a-z_]+)\s*\}\}/g;
+/**
+ * The rendered variable map: every built-in is present (the renderer may read
+ * `v.start_time` without a guard), plus an open tail for the `{{form.*}}`
+ * namespace, whose names are only known at run time.
+ */
+export type TemplateVarMap = Record<TemplateVariable, string> & Record<string, string>;
+
+/**
+ * `{{built_in}}` or `{{form.<field name>}}`. The `form.` half is the per-event
+ * namespace (#68 decision 2): a reminder may quote that event type's own intake
+ * answers, and the prefix is what stops a question named `location` from
+ * shadowing the built-in `{{location}}` — so no new names are reserved and
+ * every already-saved form keeps working. The charset matches what the event
+ * editor already sanitizes intake field names to (`[A-Za-z0-9_]`).
+ */
+const TOKEN_RE = /\{\{\s*([a-z_]+|form\.[A-Za-z0-9_]{1,64})\s*\}\}/g;
+
+/** The `{{form.*}}` namespace prefix. */
+export const FORM_VARIABLE_PREFIX = 'form.';
+
+/** The variable name for one intake field — `{{form.budget}}`. */
+export function formVariable(fieldName: string): string {
+  return `${FORM_VARIABLE_PREFIX}${fieldName}`;
+}
 
 /** All `{{token}}` names appearing in a template string (editor validation). */
 export function extractTokens(text: string): string[] {
@@ -81,11 +131,19 @@ export function extractTokens(text: string): string[] {
   return [...names];
 }
 
-/** Tokens present in the text that are NOT in the whitelist (flag in preview). */
-export function unknownTokens(text: string): string[] {
-  return extractTokens(text).filter(
-    (t) => !(TEMPLATE_VARIABLES as readonly string[]).includes(t),
-  );
+/**
+ * Tokens present in the text that will render empty (flagged in the preview and
+ * in the event editor's dangling-reference warning).
+ *
+ * `formFields` is the set of intake field names on the event type being edited;
+ * pass it and `{{form.x}}` counts as known when `x` is one of them. Omit it —
+ * the account-level preview, which has no event — and every `form.` token is
+ * reported, which is the honest answer there.
+ */
+export function unknownTokens(text: string, formFields?: readonly string[]): string[] {
+  const known = new Set<string>(TEMPLATE_VARIABLES);
+  for (const f of formFields ?? []) known.add(formVariable(f));
+  return extractTokens(text).filter((t) => !known.has(t));
 }
 
 /** Locale-aware "Sat, Aug 1, 11:00 AM EDT" in the given time zone. */
@@ -121,20 +179,54 @@ export function formatLead(leadMinutes: number | undefined, locale: TemplateLoca
 }
 
 /**
+ * One intake answer as email text. Booleans are the only value that needs the
+ * locale — a raw `true` in a reminder body reads as a bug. An absent answer is
+ * the empty string, which the line-drop rule then removes along with its label.
+ */
+function answerText(value: unknown, locale: TemplateLocale): string {
+  if (value == null) return '';
+  if (typeof value === 'boolean') return value ? (locale === 'es' ? 'Sí' : 'Yes') : locale === 'es' ? 'No' : 'No';
+  if (Array.isArray(value)) return value.map((v) => answerText(v, locale)).filter(Boolean).join(', ');
+  if (typeof value === 'object') return '';
+  return String(value);
+}
+
+/**
+ * The `{{form.<field name>}}` half of the variable map, built from the
+ * booking's own intake answers. Own properties only, and every key is
+ * `form.`-prefixed, so an answer can never collide with a built-in.
+ */
+export function formVars(
+  answers: Record<string, unknown> | null | undefined,
+  locale: TemplateLocale = 'en',
+): Record<string, string> {
+  const out: Record<string, string> = Object.create(null) as Record<string, string>;
+  if (!answers) return out;
+  for (const [name, value] of Object.entries(answers)) {
+    out[formVariable(name)] = answerText(value, locale);
+  }
+  return out;
+}
+
+/**
  * Build the variable map for one notification. Times are formatted in the
  * ATTENDEE's time zone for both sides (v1 — the booking's reference zone).
+ * `{{form.*}}` entries come from the answers snapshotted onto the notification.
  */
 export function templateVars(
   n: BookingNotification & { reminderLeadMinutes?: number },
   locale: TemplateLocale = 'en',
-): Record<TemplateVariable, string> {
+): TemplateVarMap {
   const tz = n.attendee.timeZone ?? 'UTC';
   const pendingNote = n.pending
     ? locale === 'es'
       ? 'Esta solicitud está pendiente de tu confirmación.'
       : 'This request is pending your confirmation.'
     : '';
-  return {
+  // Kept as its own typed map so the compiler still enforces that every
+  // built-in has a value; the form namespace is open by nature and merges on
+  // top without being able to shadow one (every key is `form.`-prefixed).
+  const builtIn: Record<TemplateVariable, string> = {
     attendee_name: n.attendee.name ?? '',
     attendee_email: n.attendee.email ?? '',
     host_name: n.host.name ?? '',
@@ -142,6 +234,7 @@ export function templateVars(
     start_time: formatWhen(n.startUtc, tz, locale),
     end_time: formatWhen(n.endUtc, tz, locale),
     location: n.location ?? '',
+    meeting_url: n.meetingUrl ?? '',
     manage_url: n.manageUrl ?? '',
     cancel_link: n.manageUrl ?? '',
     reschedule_link: n.manageUrl ?? '',
@@ -151,6 +244,9 @@ export function templateVars(
     pending_note: pendingNote,
     booking_link: n.bookingLink ?? '',
   };
+  // Safe by construction: `builtIn` is exhaustive above, and every form key is
+  // `form.`-prefixed so the spread cannot drop or shadow one.
+  return { ...builtIn, ...formVars(n.formAnswers, locale) } as TemplateVarMap;
 }
 
 export interface RenderedEmail {
@@ -218,6 +314,7 @@ Your booking "{{event_title}}" is confirmed.
 When: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   attendee_pending: {
@@ -246,6 +343,7 @@ Was: {{previous_start_time}}
 Now: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   attendee_cancellation: {
@@ -263,6 +361,7 @@ Reminder: "{{event_title}}" starts {{reminder_lead}}.
 When: {{start_time}}
 Host: {{host_name}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 Manage your booking: {{manage_url}}`,
   },
   host_booked: {
@@ -272,6 +371,7 @@ Manage your booking: {{manage_url}}`,
 {{attendee_name}} ({{attendee_email}}) booked "{{event_title}}".
 When: {{start_time}}
 Where: {{location}}
+Join the meeting: {{meeting_url}}
 {{pending_note}}`,
   },
   host_rescheduled: {
@@ -281,7 +381,8 @@ Where: {{location}}
 The booking "{{event_title}}" with {{attendee_name}} has been rescheduled.
 Was: {{previous_start_time}}
 Now: {{start_time}}
-Where: {{location}}`,
+Where: {{location}}
+Join the meeting: {{meeting_url}}`,
   },
   host_cancelled: {
     subject: 'Cancelled: {{event_title}} — {{start_time}}',
@@ -303,7 +404,8 @@ Reason: {{cancellation_reason}}`,
 
 Reminder: "{{event_title}}" with {{attendee_name}} starts {{reminder_lead}}.
 When: {{start_time}}
-Where: {{location}}`,
+Where: {{location}}
+Join the meeting: {{meeting_url}}`,
   },
   follow_up: {
     subject: 'Thanks for meeting — {{event_title}}',
@@ -323,6 +425,7 @@ Tu reserva "{{event_title}}" está confirmada.
 Cuándo: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   attendee_pending: {
@@ -351,6 +454,7 @@ Antes: {{previous_start_time}}
 Ahora: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   attendee_cancellation: {
@@ -368,6 +472,7 @@ Recordatorio: "{{event_title}}" comienza {{reminder_lead}}.
 Cuándo: {{start_time}}
 Anfitrión: {{host_name}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 Gestiona tu reserva: {{manage_url}}`,
   },
   host_booked: {
@@ -377,6 +482,7 @@ Gestiona tu reserva: {{manage_url}}`,
 {{attendee_name}} ({{attendee_email}}) reservó "{{event_title}}".
 Cuándo: {{start_time}}
 Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}
 {{pending_note}}`,
   },
   host_rescheduled: {
@@ -386,7 +492,8 @@ Dónde: {{location}}
 La reserva "{{event_title}}" con {{attendee_name}} ha sido reprogramada.
 Antes: {{previous_start_time}}
 Ahora: {{start_time}}
-Dónde: {{location}}`,
+Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}`,
   },
   host_cancelled: {
     subject: 'Cancelada: {{event_title}} — {{start_time}}',
@@ -408,7 +515,8 @@ Motivo: {{cancellation_reason}}`,
 
 Recordatorio: "{{event_title}}" con {{attendee_name}} comienza {{reminder_lead}}.
 Cuándo: {{start_time}}
-Dónde: {{location}}`,
+Dónde: {{location}}
+Unirse a la reunión: {{meeting_url}}`,
   },
   follow_up: {
     subject: 'Gracias por la reunión — {{event_title}}',

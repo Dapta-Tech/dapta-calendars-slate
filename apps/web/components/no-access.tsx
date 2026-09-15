@@ -5,7 +5,7 @@
  */
 export function NoAccess({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
+    <div className="flex flex-col items-center gap-field rounded-md border border-dashed border-border p-section text-center">
       <span
         aria-hidden
         className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground"

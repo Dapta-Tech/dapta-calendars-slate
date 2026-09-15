@@ -5,7 +5,8 @@
  * AuthService), so the guards are tested where they actually run.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ForbiddenException, ConflictException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ForbiddenException, ConflictException, NotFoundException } from '@nestjs/common';
 import {
   sql,
   createDb,
@@ -106,7 +107,8 @@ describe('permission matrix — guarded routes (real controllers)', () => {
       listWebhooks: () => Promise.resolve([]),
     };
     crud = new AdminCrudController(db, auth as unknown as AuthService);
-    host = new HostController(adminStub as never, auth as unknown as AuthService);
+    // Onboarding is likewise past the guard on every route asserted here.
+    host = new HostController(adminStub as never, {} as never, auth as unknown as AuthService, {} as never);
   });
 
   // --- Member management (admin/owner only; admins can't touch owners) ------
@@ -240,5 +242,132 @@ describe('permission matrix — guarded routes (real controllers)', () => {
     as('owner', alex);
     expect(await host.listApiKeys(REQ)).toEqual([]);
     expect(await host.listWebhooks(REQ)).toEqual([]);
+  });
+  // --- One-off invite links (#69 / AB2, #110) -------------------------------
+  //
+  // The three routes are guarded ONLY by the permission check on the event type
+  // they name, so each one is asserted here where that guard actually runs. An
+  // earlier revision passed the permission check and then mutated a link
+  // addressed by id alone, which made the check vacuous with respect to the row
+  // it wrote; the last test in this block is the one that catches that.
+
+  it('one-off links: a member mints, lists and revokes only on their OWN event', async () => {
+    const alexEt = (await createEventType(db, accountId, alex, {
+      slug: 'alex-private',
+      title: 'Alex Private',
+      lengthMinutes: 30,
+      scheduleId: null,
+      hidden: true,
+    })) as { ok: true; value: { id: string } };
+    const jordanEt = (await createEventType(db, accountId, jordan, {
+      slug: 'jordan-private',
+      title: 'Jordan Private',
+      lengthMinutes: 30,
+      scheduleId: null,
+      hidden: true,
+    })) as { ok: true; value: { id: string } };
+
+    as('member', jordan);
+    await expect(
+      crud.createEventTypeOneOffLink(REQ, alexEt.value.id),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      crud.listEventTypeOneOffLinks(REQ, alexEt.value.id),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      crud.revokeEventTypeOneOffLink(REQ, alexEt.value.id, 'whatever'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const own = await crud.createEventTypeOneOffLink(REQ, jordanEt.value.id);
+    expect(own).toMatchObject({ state: 'live' });
+    expect(own.path).toBe(`/booking/${own.token}`);
+    expect(await crud.listEventTypeOneOffLinks(REQ, jordanEt.value.id)).toHaveLength(1);
+
+    // An owner reaches anyone's.
+    as('owner', alex);
+    expect(await crud.listEventTypeOneOffLinks(REQ, jordanEt.value.id)).toHaveLength(1);
+  });
+
+  it('one-off links on a TEAM event are admin-only, like every other team resource', async () => {
+    as('owner', alex);
+    const team = (await crud.createTeam(REQ, { name: 'Sales', slug: 'sales-oneoff' })).id;
+    const teamEt = await crud.createEventType(REQ, {
+      slug: 'team-private',
+      title: 'Team Private',
+      lengthMinutes: 30,
+      teamId: team,
+    });
+
+    // A team event type has no `memberId`, which `assertOwnsOrAdmin` treats as
+    // admin-and-owner territory.
+    as('member', jordan);
+    await expect(
+      crud.createEventTypeOneOffLink(REQ, teamEt.id),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      crud.revokeEventTypeOneOffLink(REQ, teamEt.id, 'whatever'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    as('owner', alex);
+    expect(await crud.createEventTypeOneOffLink(REQ, teamEt.id)).toMatchObject({ state: 'live' });
+  });
+
+  it('one-off links: another account’s event type answers 404, never 403', async () => {
+    // No oracle: a principal must not be able to learn which event-type ids
+    // exist elsewhere in the deployment by reading the status code.
+    auth.current = { accountId: randomUUID(), memberId: alex, role: 'owner' };
+    const et = (await createEventType(db, accountId, alex, {
+      slug: 'other-account',
+      title: 'Other',
+      lengthMinutes: 30,
+      scheduleId: null,
+    })) as { ok: true; value: { id: string } };
+    await expect(
+      crud.listEventTypeOneOffLinks(REQ, et.value.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      crud.createEventTypeOneOffLink(REQ, et.value.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      crud.revokeEventTypeOneOffLink(REQ, et.value.id, 'whatever'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('revoke cannot reach a link on an event type other than the one in the path', async () => {
+    // THE REGRESSION TEST. The permission check runs against the event type
+    // NAMED IN THE PATH, so if the link were addressed by id alone that check
+    // would say nothing about the row actually written — and both rows live in
+    // the same account, so account scoping alone does not catch it.
+    const alexEt = (await createEventType(db, accountId, alex, {
+      slug: 'alex-victim',
+      title: 'Alex Victim',
+      lengthMinutes: 30,
+      scheduleId: null,
+    })) as { ok: true; value: { id: string } };
+    const jordanEt = (await createEventType(db, accountId, jordan, {
+      slug: 'jordan-decoy',
+      title: 'Jordan Decoy',
+      lengthMinutes: 30,
+      scheduleId: null,
+    })) as { ok: true; value: { id: string } };
+
+    as('owner', alex);
+    const victim = await crud.createEventTypeOneOffLink(REQ, alexEt.value.id);
+
+    // Jordan owns `jordanEt` and may revoke on it — but naming Alex's link id
+    // must change nothing. 204 either way (revoke is idempotent), so the
+    // assertion is on the STATE, not on a thrown error.
+    as('member', jordan);
+    await crud.revokeEventTypeOneOffLink(REQ, jordanEt.value.id, victim.id);
+
+    as('owner', alex);
+    const [still] = await crud.listEventTypeOneOffLinks(REQ, alexEt.value.id);
+    expect(still?.state).toBe('live');
+    expect(still?.revokedAt).toBeNull();
+
+    // ...and revoking through the RIGHT event type does work.
+    await crud.revokeEventTypeOneOffLink(REQ, alexEt.value.id, victim.id);
+    const [now] = await crud.listEventTypeOneOffLinks(REQ, alexEt.value.id);
+    expect(now?.state).toBe('revoked');
   });
 });

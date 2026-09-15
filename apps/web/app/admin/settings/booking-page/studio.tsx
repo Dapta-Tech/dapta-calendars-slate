@@ -3,30 +3,64 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   ALL_BOOKING_THEMES,
+  DEFAULT_ACCENT,
   THEME_PRESETS,
-  accentVars,
+  brandVars,
   widgetStyleVars,
   brandingClassOf,
   clampAccent,
-  accentWasAdjusted,
+  accentCanvasContrast,
   accentLabelContrast,
+  MIN_ACCENT_CONTRAST,
+  buildMonthGrid,
+  formatDayHeading,
   onAccent,
   matchTheme,
   monogram,
   t,
+  weekStartsOnFor,
   type BookingMessages,
+  type BrandCanvas,
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
+import { saveErrorMessage } from '@/lib/save-error';
 import { useToast } from '@/components/toast';
 import { CopyLink } from '@/components/copy-link';
-import { checkHandleAction, saveStudioAction, toggleEventHiddenAction } from './actions';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
+import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
+import { resolveAvatarUrl } from '@/lib/avatar';
+import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
+import { ChevronIcon } from '@/components/booking-page-parts';
+import {
+  checkHandleAction,
+  saveStudioAction,
+  toggleEventHiddenAction,
+  type SaveResult,
+} from './actions';
 
 type StudioMessages = BookingMessages['admin']['studio'];
 
+/** The ten appearance axes the studio drives. Nine are widget shape; `theme` is
+ *  the GROUND they are drawn on (ADR 0004) and lives here rather than in its own
+ *  section because a host choosing how their page looks is choosing all ten. */
 type Axes = Pick<
   PublicBranding,
-  'template' | 'cardStyle' | 'corners' | 'buttons' | 'density' | 'font' | 'slotLayout' | 'dayGroup' | 'slotSelect'
+  | 'template'
+  | 'cardStyle'
+  | 'corners'
+  | 'buttons'
+  | 'density'
+  | 'font'
+  | 'slotLayout'
+  | 'dayGroup'
+  | 'slotSelect'
+  | 'theme'
 >;
 
 const AXIS_LABEL: Record<keyof Axes, keyof StudioMessages> = {
@@ -39,6 +73,7 @@ const AXIS_LABEL: Record<keyof Axes, keyof StudioMessages> = {
   slotLayout: 'axisSlotLayout',
   dayGroup: 'axisDayGroup',
   slotSelect: 'axisSlotSelect',
+  theme: 'axisTheme',
 };
 
 const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
@@ -51,6 +86,21 @@ const AXIS_OPTIONS: Record<keyof Axes, string[]> = {
   slotLayout: ['grid', 'list'],
   dayGroup: ['flat', 'boxed'],
   slotSelect: ['soft', 'solid'],
+  theme: ['light', 'dark'],
+};
+
+/**
+ * The one axis whose VALUES are translated.
+ *
+ * Every other axis is an untranslated identifier — `Split`, `Boxed`, `Pill` are
+ * design vocabulary a host reads as a name. "Light" and "Dark" are not names,
+ * they are two ordinary words describing what the host will see, and leaving
+ * them in English is the kind of half-translated screen the i18n rule exists to
+ * prevent. Keyed by the axis value so the catalog stays flat.
+ */
+const THEME_OPTION_LABEL: Record<string, keyof StudioMessages> = {
+  light: 'themeLight',
+  dark: 'themeDark',
 };
 
 const ACCENT_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '#ff6fae'];
@@ -59,19 +109,6 @@ interface EventTypeLite {
   slug: string;
   title: string;
   lengthMinutes: number;
-}
-
-/** Read an image file to a data-URL (like the old app): image/* only, ≤1MB.
- *  Returns a stable error code the caller localizes. */
-function readImageFile(file: File): Promise<{ ok: true; dataUrl: string } | { ok: false; code: 'invalid' | 'tooLarge' | 'read' }> {
-  return new Promise((resolve) => {
-    if (!file.type.startsWith('image/')) return resolve({ ok: false, code: 'invalid' });
-    if (file.size > 1024 * 1024) return resolve({ ok: false, code: 'tooLarge' });
-    const reader = new FileReader();
-    reader.onload = () => resolve({ ok: true, dataUrl: String(reader.result) });
-    reader.onerror = () => resolve({ ok: false, code: 'read' });
-    reader.readAsDataURL(file);
-  });
 }
 
 export interface StudioInit {
@@ -85,6 +122,10 @@ export interface StudioInit {
   handle: string;
   bio: string;
   avatarUrl: string;
+  /** The connected account's photo. The preview's FALLBACK, never the input's
+   *  value — the field holds the host's own choice and saving must not turn a
+   *  synced URL into a stored one. */
+  connectedAvatarUrl: string;
   coverUrl: string;
   accent: string;
   axes: Axes;
@@ -94,6 +135,13 @@ export interface StudioInit {
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
+  /** Copy for the embed dialog (E) — the landing page's snippet lives beside
+   *  the link it embeds, which is here. */
+  embedMessages: BookingMessages['embed'];
+  /** 'en' | 'es' — the booking-flow preview's month grid is locale-shaped. */
+  locale: string;
+  /** Screen-reader suffix for the link that opens the public page (A2, #112). */
+  opensNewTab: string;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -105,6 +153,11 @@ export function Studio(init: StudioInit) {
   const [vanity, setVanity] = useState(init.vanity.vanitySlug ?? '');
   const [bio, setBio] = useState(init.bio);
   const [avatarUrl, setAvatarUrl] = useState(init.avatarUrl);
+  // What the PUBLIC page will draw, through the same helper it uses. The input
+  // above stays bound to `avatarUrl`; only the preview resolves the fallback,
+  // so a preview showing a letter while the live page shows a face cannot
+  // happen and an empty field still saves as empty.
+  const previewAvatarUrl = resolveAvatarUrl(avatarUrl, init.connectedAvatarUrl) ?? '';
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
@@ -116,7 +169,15 @@ export function Studio(init: StudioInit) {
     const ordered = init.eventOrder.filter((s) => all.includes(s));
     return [...ordered, ...all.filter((s) => !ordered.includes(s))];
   });
+  const [embedOpen, setEmbedOpen] = useState(false);
   const [eventPending, startEvent] = useTransition();
+
+  /**
+   * The host's public landing path, derived once so the copyable link and the
+   * embed snippet cannot describe two different pages. Live: editing the handle
+   * or the vanity slug above updates both immediately.
+   */
+  const landingPath = `/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`;
   const router = useRouter();
   const toast = useToast();
 
@@ -156,11 +217,25 @@ export function Studio(init: StudioInit) {
   const isDirty = snapshot !== initialSnapshot.current;
 
   const activeTheme = useMemo(() => matchTheme(axes), [axes]);
+  // The canvas the INVITEE will see, read through the same resolver the public
+  // shell uses. Never the admin's own `data-theme`: a host previewing their page
+  // is looking at a stranger's screen, not their own (ADR 0004).
+  const canvas = bookingCanvasOf(axes);
+  // `brandVars`, not `accentVars`: the preview has to emit the PRODUCT accent
+  // tokens too. Emitting only `--accent*` left `--primary-ink`/`--primary-edge`
+  // resolving from the admin palette, so the preview drew the host's links and
+  // rims in our lime while the real page drew them in the host's colour — the
+  // exact "preview == prod" break ADR 0004 is written against. Same function and
+  // same canvas as BrandedShell, so the two cannot drift.
   const previewVars = useMemo(
-    () => ({ ...accentVars(accent), ...widgetStyleVars(axes) }) as Record<string, string>,
+    () => ({ ...brandVars(accent, bookingCanvasOf(axes)), ...widgetStyleVars(axes) }) as Record<string, string>,
     [accent, axes],
   );
-  const adjusted = accentWasAdjusted(accent);
+  // The engine no longer corrects an illegible accent (ADR 0004's 2026-09-11
+  // amendment), so the studio's job on this field changed from reporting a
+  // correction to reporting a number. Measured against the ground the INVITEE
+  // will see, not the admin's, for the same reason `canvas` is resolved above.
+  const canvasContrast = accentCanvasContrast(accent, canvas);
 
   // Live handle availability (debounced, per-account).
   useEffect(() => {
@@ -186,7 +261,12 @@ export function Studio(init: StudioInit) {
     return () => clearTimeout(t);
   }, [handle, init.handle]);
 
-  const applyTheme = (t: keyof typeof THEME_PRESETS) => setAxes({ ...THEME_PRESETS[t] });
+  // A preset sets the nine SHAPE axes and deliberately leaves the canvas alone:
+  // the presets predate B2 and describe a silhouette, not a ground, so a host
+  // who moved their page to dark and then tried "Bold" would otherwise be
+  // thrown back to paper by a control that says nothing about theme.
+  const applyTheme = (t: keyof typeof THEME_PRESETS) =>
+    setAxes((a) => ({ ...THEME_PRESETS[t], theme: a.theme }));
   const setAxis = (k: keyof Axes, v: string) => setAxes((a) => ({ ...a, [k]: v as never }));
   const handleBlocksSave = handleState === 'taken' || handleState === 'invalid' || handleState === 'checking';
 
@@ -211,16 +291,39 @@ export function Studio(init: StudioInit) {
     start(async () => {
       const vanityTrim = vanity.trim().toLowerCase();
       const vanityChanged = init.vanity.canClaim && vanityTrim !== (init.vanity.vanitySlug ?? '');
-      const r = await saveStudioAction({
+      const payload = {
         handle: handle !== init.handle ? handle : undefined,
         // One Save persists everything (R30): the vanity change rides along.
         vanitySlug: vanityChanged ? vanityTrim || null : undefined,
         displayName,
         avatarUrl: avatarUrl.trim() || null,
         coverUrl: coverUrl.trim() || null,
-        brandColor: clampAccent(accent),
+        // The host's RAW pick. Since ADR 0004's amendment nothing alters it on
+        // the way out either, so this is now simply the one colour the whole
+        // system carries — stored, previewed and rendered identically. It stays
+        // worth stating: the reason to store the pick was that a stored ADJUSTED
+        // colour bakes a canvas into the row and cannot be recovered when the
+        // host moves their page to the other ground. That trap is what the
+        // amendment removed, and writing the pick is what keeps it removed.
+        brandColor: accent,
         style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
-      });
+      };
+
+      let r: SaveResult;
+      try {
+        r = await saveStudioAction(payload);
+      } catch (e) {
+        // Re-throws a session redirect and reports everything else; see
+        // `saveErrorMessage` for why that first step matters.
+        const message = saveErrorMessage(e, payload, {
+          tooLarge: m.saveTooLarge,
+          failed: m.saveFailed,
+        });
+        setSaved('err');
+        setSaveMsg(message);
+        return;
+      }
+
       if (r.ok) {
         setSaved('ok');
         setSaveMsg(null);
@@ -232,13 +335,13 @@ export function Studio(init: StudioInit) {
     });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-group">
       {/* Header: dirty chip + Reset/Save top-right */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-field">
+        <div className="flex flex-wrap items-center gap-field">
           <span
-            className={`rounded-sm px-2 py-1 text-xs ${
-              isDirty ? 'bg-secondary text-secondary-foreground' : 'bg-muted text-muted-foreground'
+            className={`rounded-sm px-inline py-tight text-xs ${
+              isDirty ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
             }`}
           >
             {isDirty ? m.unsavedChanges : m.allChangesSaved}
@@ -246,49 +349,51 @@ export function Studio(init: StudioInit) {
           {saved === 'ok' ? <span className="text-sm text-primary">{m.saved}</span> : null}
           {saved === 'err' ? <span className="text-sm text-destructive">{saveMsg}</span> : null}
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            disabled={!isDirty || pending}
-            className="rounded-md border border-border px-4 py-2 text-sm disabled:opacity-50"
-          >
+        <div className="flex items-center gap-inline">
+          <Button variant="outline" size="lg" onClick={reset} disabled={!isDirty || pending}>
             {m.reset}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="lg"
             onClick={save}
             disabled={!isDirty || pending || handleBlocksSave}
-            className="rounded-md bg-primary px-5 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60"
+            className="px-control-pad"
           >
             {pending ? m.saving : m.save}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[400px_1fr]">
+      <div className="grid gap-section lg:grid-cols-[400px_1fr]">
         {/* Controls */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-group">
           {/* PROFILE */}
           <Section title={m.profile}>
             <Field label={m.displayName}>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} />
+              <Input
+                value={displayName}
+                className={inputCls}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
             </Field>
             <Field label={m.publicHandle}>
-              <input
+              <Input
                 value={handle}
-                onChange={(e) => setHandle(e.target.value.toLowerCase())}
                 className={inputCls}
+                onChange={(e) => setHandle(e.target.value.toLowerCase())}
               />
               <HandleHint state={handleState} m={m} />
+              {/* Was `Try alex-2 →`. A suggestion you can accept is a control. */}
               {handleState === 'taken' && handleSuggestion ? (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  className="-ml-field self-start"
                   onClick={() => setHandle(handleSuggestion)}
-                  className="self-start text-xs text-primary hover:underline"
                 >
+                  <i aria-hidden className="pi pi-replay" style={{ fontSize: 12 }} />
                   {t(m.tryHandle, { handle: handleSuggestion })}
-                </button>
+                </Button>
               ) : null}
             </Field>
             {/* The shareable link as ONE compact copyable unit (no raw hex —
@@ -296,17 +401,56 @@ export function Studio(init: StudioInit) {
                 update the path immediately. */}
             <Field label={m.yourLink}>
               <CopyLink
-                path={`/${(init.vanity.canClaim && vanity.trim().toLowerCase()) || init.vanity.shortCode || init.accountCode}/${handle || init.handle}`}
-                labels={{ copy: m.linkCopy, copied: m.linkCopied, open: m.linkOpen }}
+                // `landingPath` is E's derived const — the same expression this
+                // used to inline, hoisted so the copyable link and the embed
+                // snippet cannot describe two different pages.
+                path={landingPath}
+                labels={{
+                  copy: m.linkCopy,
+                  copied: m.linkCopied,
+                  open: m.linkOpen,
+                  opensNewTab: init.opensNewTab,
+                }}
               />
             </Field>
+            {/* The landing page's embed snippet, beside the link it embeds
+                (#67). Event types get theirs from the row actions.
+
+                Deliberately OUTSIDE the `Field` above: that component wraps its
+                children in a `<label>`, and a control inside a label takes the
+                label's whole text as its accessible name — so putting this here
+                renamed the neighbouring Copy button to "Your link Copy Open
+                Embed on your site". A button is not what a field label labels. */}
+            {/* A2 (#112): E landed this as a button wearing link styling
+                (`text-primary hover:underline`) at ~20px tall, in a control rail
+                where the sweep had just made every other control a `Button` on
+                the 44px step. Same handler, same icon, same copy — it is the
+                ghost variant now, so it reads as the control it always was. */}
+            <div className="flex flex-col">
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={() => setEmbedOpen(true)}
+                className="-ml-field self-start"
+              >
+                <EmbedIcon />
+                {init.embedMessages.action}
+              </Button>
+              <EmbedSnippetModal
+                open={embedOpen}
+                onClose={() => setEmbedOpen(false)}
+                publicPath={landingPath}
+                title={displayName || init.displayName || handle || init.handle}
+                messages={init.embedMessages}
+              />
+            </div>
             {init.vanity.canClaim ? (
               <Field label={m.vanityLabel}>
-                <input
+                <Input
                   value={vanity}
-                  onChange={(e) => setVanity(e.target.value.toLowerCase())}
                   placeholder={init.vanity.shortCode}
                   className={inputCls}
+                  onChange={(e) => setVanity(e.target.value.toLowerCase())}
                 />
                 <span className="text-xs text-muted-foreground">{m.vanityHint}</span>
               </Field>
@@ -329,40 +473,75 @@ export function Studio(init: StudioInit) {
               </p>
             )}
             <Field label={m.bio}>
-              <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} className={inputCls} />
+              <textarea
+                value={bio}
+                rows={2}
+                onChange={(e) => setBio(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-field py-inline text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
             </Field>
           </Section>
 
           {/* BRAND */}
           <Section title={m.brand}>
             <Field label={m.accent}>
-              <div className="mb-2 flex flex-wrap gap-2">
+              {/* Swatches on the 44px step: the coloured disc keeps its size and
+                  the hit box grows around it, so the row reads the same and a
+                  thumb can land on it. `aria-pressed` says which one is picked —
+                  the ring alone was colour-only state. */}
+              <div className="mb-inline flex flex-wrap gap-tight">
                 {ACCENT_PRESETS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setAccent(c)}
                     aria-label={c}
-                    style={{ background: c }}
-                    className={`h-7 w-7 rounded-full border-2 ${
-                      accent.toLowerCase() === c ? 'border-foreground' : 'border-transparent'
-                    }`}
-                  />
+                    aria-pressed={accent.toLowerCase() === c}
+                    className="flex h-11 w-11 items-center justify-center rounded-md transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span
+                      aria-hidden
+                      style={{ background: c }}
+                      className={`h-7 w-7 rounded-full border-2 ${
+                        accent.toLowerCase() === c ? 'border-foreground' : 'border-transparent'
+                      }`}
+                    />
+                  </button>
                 ))}
                 <input
                   type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : '#cbe84f'}
+                  aria-label={m.accent}
+                  value={/^#[0-9a-fA-F]{6}$/.test(accent) ? accent : DEFAULT_ACCENT}
                   onChange={(e) => setAccent(e.target.value)}
-                  className="h-7 w-9 rounded-md border border-input bg-background"
+                  className="h-11 w-11 cursor-pointer rounded-md border border-input bg-background p-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
+              {/* Two different grounds, so both are named rather than left as
+                  bare numbers. The readout is the button LABEL on its fill,
+                  which `onAccent` keeps above ~4.1:1 no matter what the host
+                  picks — it can never trip the warning, and it is why the
+                  warning has to measure the canvas instead. */}
               <p className="text-xs text-muted-foreground">
-                {t(m.contrast, { ratio: accentLabelContrast(accent) })}
-                {adjusted ? t(m.adjustedNote, { hex: clampAccent(accent) }) : ''}
+                {t(m.contrast, { ratio: accentLabelContrast(accent, canvas) })}
               </p>
+              {/* Announced, not just shown. It appears and disappears live as
+                  the host drags the colour picker, and it is the only signal
+                  left where the engine used to silently correct the colour. */}
+              {canvasContrast < MIN_ACCENT_CONTRAST ? (
+                <p role="status" aria-live="polite" className="text-xs text-destructive">
+                  {t(m.lowContrast, { ratio: canvasContrast })}
+                </p>
+              ) : null}
             </Field>
             <Field label={m.photoAvatar}>
               <ImageInput value={avatarUrl} onChange={setAvatarUrl} preview="avatar" m={m} />
+              {/* The public page falls back to the connected account's photo,
+                  and a host who never opens this field would otherwise have no
+                  idea where the face on their page came from — or that leaving
+                  this empty is what keeps it. */}
+              {!avatarUrl.trim() && previewAvatarUrl ? (
+                <p className="text-xs text-muted-foreground">{m.photoFromConnectedAccount}</p>
+              ) : null}
             </Field>
             <Field label={m.coverImage}>
               <ImageInput value={coverUrl} onChange={setCoverUrl} preview="cover" m={m} />
@@ -371,46 +550,69 @@ export function Studio(init: StudioInit) {
 
           {/* APPEARANCE */}
           <Section title={m.appearance}>
-            <div className="mb-3 flex flex-wrap gap-2">
-              {ALL_BOOKING_THEMES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => applyTheme(t)}
-                  className={`rounded-md border px-3 py-1.5 text-sm capitalize transition-transform active:scale-[0.97] ${
-                    activeTheme === t ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
-                  }`}
+            <div className="mb-field flex flex-wrap gap-inline">
+              {ALL_BOOKING_THEMES.map((themeName) => (
+                <Button
+                  key={themeName}
+                  variant={activeTheme === themeName ? 'default' : 'outline'}
+                  size="lg"
+                  aria-pressed={activeTheme === themeName}
+                  onClick={() => applyTheme(themeName)}
+                  className="capitalize"
                 >
-                  {t}
-                </button>
+                  {themeName}
+                </Button>
               ))}
               <span className="self-center text-xs text-muted-foreground">{activeTheme ? '' : m.custom}</span>
             </div>
-            <button
-              type="button"
+            {/* Was `▸ Customize appearance` — a text glyph standing in for a
+                disclosure icon, with no `aria-expanded` for anyone not seeing it. */}
+            <Button
+              variant="ghost"
+              size="lg"
+              aria-expanded={customizeOpen}
               onClick={() => setCustomizeOpen((o) => !o)}
-              className="text-sm text-muted-foreground hover:text-foreground"
+              className="-ml-field self-start text-muted-foreground"
             >
-              {customizeOpen ? '▾' : '▸'} {m.customizeAppearance}
-            </button>
+              <i
+                aria-hidden
+                className={`pi ${customizeOpen ? 'pi-chevron-down' : 'pi-chevron-right'}`}
+                style={{ fontSize: 12 }}
+              />
+              {m.customizeAppearance}
+            </Button>
             {customizeOpen ? (
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              // One column at 360px: two `Select` triggers side by side inside a
+              // 400px control rail leaves ~150px each, which truncates every
+              // option label.
+              <div className="mt-field grid grid-cols-1 gap-field sm:grid-cols-2">
                 {(Object.keys(AXIS_OPTIONS) as (keyof Axes)[]).map((k) => (
-                  <label key={k} className="flex flex-col gap-1 text-sm">
+                  // A <div>, not a <label>: the picker's trigger is a <button>.
+                  // The axis probe rides on this wrapper — it was on the
+                  // `<select>` this replaces, and a hidden span would have been
+                  // a worse target than a real element in the layout.
+                  <div key={k} data-testid={`bp-${k}-${axes[k]}`} className="flex flex-col gap-tight text-sm">
                     <span className="text-muted-foreground">{m[AXIS_LABEL[k]]}</span>
-                    <select
+                    <Select
                       value={axes[k]}
-                      onChange={(e) => setAxis(k, e.target.value)}
-                      data-testid={`bp-${k}-${axes[k]}`}
-                      className="rounded-md border border-input bg-background px-2 py-1.5 capitalize"
-                    >
-                      {AXIS_OPTIONS[k].map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      // Capitalised here, not with a `capitalize` class: the
+                      // class styles the trigger and the panel rows are drawn in
+                      // a portal-ish subtree it does not reach, so the two halves
+                      // of the control would disagree. The values themselves are
+                      // untranslated axis identifiers, as they were before —
+                      // except the canvas, whose two values are ordinary words.
+                      options={AXIS_OPTIONS[k].map((o) => {
+                        const translated = k === 'theme' ? THEME_OPTION_LABEL[o] : undefined;
+                        return {
+                          value: o,
+                          label: translated ? m[translated] : o.charAt(0).toUpperCase() + o.slice(1),
+                        };
+                      })}
+                      ariaLabel={m[AXIS_LABEL[k]]}
+                      locale={init.locale}
+                      onChange={(v) => setAxis(k, v)}
+                    />
+                  </div>
                 ))}
               </div>
             ) : null}
@@ -418,66 +620,98 @@ export function Studio(init: StudioInit) {
 
           {/* MEETINGS — reorder (↑/↓) + show/hide on the public page */}
           <Section title={m.meetings}>
-            <ul className="flex flex-col gap-1 text-sm">
+            <ul className="flex flex-col gap-tight text-sm">
               {eventOrder
                 .map((s) => init.manageableEvents.find((e) => e.slug === s))
                 .filter((e): e is NonNullable<typeof e> => !!e)
                 .map((et, i, arr) => (
                   <li
                     key={et.slug}
-                    className={`flex items-center gap-2 rounded-sm bg-muted px-2 py-1.5 ${et.hidden ? 'opacity-50' : ''}`}
+                    className={`flex items-center gap-tight rounded-md bg-muted px-inline py-tight ${et.hidden ? 'opacity-50' : ''}`}
                   >
-                    <span className="flex flex-col">
-                      <button type="button" aria-label={m.moveUp} disabled={i === 0} onClick={() => moveEvent(et.slug, -1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▲</button>
-                      <button type="button" aria-label={m.moveDown} disabled={i === arr.length - 1} onClick={() => moveEvent(et.slug, 1)} className="leading-none text-muted-foreground hover:text-foreground disabled:opacity-30">▼</button>
-                    </span>
-                    <span className="flex-1 truncate">{et.title}</span>
-                    <button
-                      type="button"
+                    {/* Was a stacked `▲`/`▼` pair of bare glyphs with no hit box
+                        at all — roughly 10px of clickable text each. Side by
+                        side, on the 44px step, with real chevrons and names that
+                        say WHICH event they move. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.moveUp} · ${et.title}`}
+                      disabled={i === 0}
+                      onClick={() => moveEvent(et.slug, -1)}
+                      className="h-11 w-8 shrink-0 text-muted-foreground disabled:opacity-30"
+                    >
+                      <i aria-hidden className="pi pi-chevron-up" style={{ fontSize: 11 }} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${m.moveDown} · ${et.title}`}
+                      disabled={i === arr.length - 1}
+                      onClick={() => moveEvent(et.slug, 1)}
+                      className="h-11 w-8 shrink-0 text-muted-foreground disabled:opacity-30"
+                    >
+                      <i aria-hidden className="pi pi-chevron-down" style={{ fontSize: 11 }} />
+                    </Button>
+                    <span className="min-w-0 flex-1 truncate">{et.title}</span>
+                    <Button
+                      variant="outline"
+                      size="lg"
                       disabled={eventPending}
+                      aria-label={`${et.hidden ? m.show : m.hide} · ${et.title}`}
                       onClick={() => toggleHidden(et.id, !et.hidden)}
-                      className="rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground hover:border-primary disabled:opacity-60"
+                      className="shrink-0 text-xs text-muted-foreground"
                     >
                       {et.hidden ? m.show : m.hide}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               {init.manageableEvents.length === 0 ? <li className="text-muted-foreground">{m.noEvents}</li> : null}
             </ul>
-            <p className="mt-1 text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
-            <a href="/admin/event-types" className="mt-1 inline-block text-xs text-primary hover:underline">
+            <p className="mt-tight text-xs text-muted-foreground">{m.orderVisibilityNote}</p>
+            {/* Was `Configure events →`. It leaves this screen, so it is a button
+                with the design language's own mark, not an arrow on a link. */}
+            <a
+              href="/admin/event-types"
+              className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'mt-tight self-start')}
+            >
+              <i aria-hidden className="pi pi-cog" style={{ fontSize: 13 }} />
               {m.configureEventTypes}
             </a>
 
             {/* Landing (R25): show the picker, or send visitors straight to one event. */}
-            <div className="mt-4 flex flex-col gap-2 border-t border-border pt-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+            <div className="mt-card flex flex-col gap-inline border-t border-border pt-field">
+              <label className="flex min-h-control cursor-pointer items-center gap-inline text-sm">
+                <Checkbox
                   checked={landingEnabled}
                   onChange={(e) => setLandingEnabled(e.target.checked)}
                 />
                 {m.showLandingPage}
               </label>
               {!landingEnabled ? (
-                <label className="flex flex-col gap-1 text-sm">
+                // A <div>, not a <label>: the picker's trigger is a <button>.
+                <div className="flex flex-col gap-tight text-sm">
                   <span className="text-muted-foreground">{m.sendVisitorsTo}</span>
-                  <select
+                  <Select
                     value={defaultEventSlug}
-                    onChange={(e) => setDefaultEventSlug(e.target.value)}
-                    className={inputCls}
-                  >
-                    <option value="">{m.chooseEvent}</option>
-                    {init.eventTypes.map((et) => (
-                      <option key={et.slug} value={et.slug}>
-                        {et.title}
-                      </option>
-                    ))}
-                  </select>
+                    // The empty row stays an OPTION, not just the placeholder:
+                    // without it a host who picks the wrong event cannot get
+                    // back to "none" without toggling the landing page off and
+                    // on again. The invalid-empty state is what the message
+                    // below is for.
+                    options={[
+                      { value: '', label: m.chooseEvent },
+                      ...init.eventTypes.map((et) => ({ value: et.slug, label: et.title })),
+                    ]}
+                    placeholder={m.chooseEvent}
+                    ariaLabel={m.sendVisitorsTo}
+                    locale={init.locale}
+                    onChange={setDefaultEventSlug}
+                  />
                   {!defaultEventSlug ? (
                     <span className="text-xs text-destructive">{m.pickDefaultEvent}</span>
                   ) : null}
-                </label>
+                </div>
               ) : null}
             </div>
           </Section>
@@ -485,26 +719,30 @@ export function Studio(init: StudioInit) {
 
         {/* Live preview (sticky) */}
         <div className="lg:sticky lg:top-6 lg:self-start">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex rounded-md border border-border p-0.5 text-sm">
+          {/* Preview toolbar — studio CHROME, not the canvas. Both segmented
+              controls are on the 44px step and announce their state. */}
+          <div className="mb-field flex flex-wrap items-center justify-between gap-inline">
+            <div className="flex rounded-md border border-border p-tight text-sm">
               {(['profile', 'booking'] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
+                  aria-pressed={surface === s}
                   onClick={() => setSurface(s)}
-                  className={`rounded-sm px-3 py-1 ${surface === s ? 'bg-accent' : ''}`}
+                  className={`inline-flex min-h-control items-center rounded-sm px-field transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${surface === s ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {s === 'booking' ? m.bookingFlow : m.previewProfile}
                 </button>
               ))}
             </div>
-            <div className="flex rounded-md border border-border p-0.5 text-sm">
+            <div className="flex rounded-md border border-border p-tight text-sm">
               {(['desktop', 'mobile'] as const).map((d) => (
                 <button
                   key={d}
                   type="button"
+                  aria-pressed={device === d}
                   onClick={() => setDevice(d)}
-                  className={`rounded-sm px-3 py-1 capitalize ${device === d ? 'bg-accent' : ''}`}
+                  className={`inline-flex min-h-control items-center rounded-sm px-field capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${device === d ? 'bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   {d === 'desktop' ? m.desktop : m.mobile}
                 </button>
@@ -512,20 +750,49 @@ export function Studio(init: StudioInit) {
             </div>
           </div>
 
-          <div className="rounded-md border border-border p-6" style={previewVars}>
+          {/* The FRAME is chrome; everything inside it is BP's canvas and is not
+              touched by this sweep (preview == prod, #134). `overflow-x-auto` so
+              the fixed 360px mobile preview scrolls inside its frame instead of
+              widening the studio at 360px.
+
+              B2: the frame STAMPS the invitee's canvas and paints its ground.
+              Emitting only the branding vars and letting `--background`,
+              `--card` and `--foreground` fall through to the admin shell was
+              enough while there was one canvas; the moment a host can put their
+              page on paper it is the harder version of the preview != prod bug,
+              because `--accent-wash` is `color-mix(…, var(--background))`. The
+              accent would match the live page exactly while every wash and card
+              ground behind it came from the AUTHOR's theme instead of the
+              invitee's. Stamped on the frame rather than on an inner element so
+              the padding around the canvas is the canvas's own ground and not a
+              rim of the admin's; `overflow-x-auto` already clips it to the
+              rounded corners. */}
+          <div
+            data-theme={canvas}
+            className="overflow-x-auto rounded-xl border border-border bg-background p-card text-foreground sm:p-group"
+            style={previewVars}
+          >
             <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
               {surface === 'profile' ? (
                 <ProfilePreview
                   displayName={displayName}
                   bio={bio}
-                  avatarUrl={avatarUrl}
+                  avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
                   accent={accent}
+                  canvas={canvas}
                   eventTypes={init.eventTypes}
                   m={m}
                 />
               ) : (
-                <BookingPreview accent={accent} m={m} />
+                <BookingPreview
+                  displayName={displayName}
+                  avatarUrl={previewAvatarUrl}
+                  accent={accent}
+                  canvas={canvas}
+                  locale={init.locale}
+                  m={m}
+                />
               )}
             </div>
           </div>
@@ -535,12 +802,18 @@ export function Studio(init: StudioInit) {
   );
 }
 
+/* spacing-gate:off — the BP canvas. Everything from here to the marker below is
+   the invitee's view, drawn from the host's own `--bp-*` axes so the preview
+   matches production exactly (#134). The admin spacing scale has no authority
+   here, and a sweep that renames these utilities silently breaks preview == prod.
+   The FRAME around the canvas is admin chrome and does follow the scale. */
 function ProfilePreview({
   displayName,
   bio,
   avatarUrl,
   coverUrl,
   accent,
+  canvas,
   eventTypes,
   m,
 }: {
@@ -549,6 +822,9 @@ function ProfilePreview({
   avatarUrl: string;
   coverUrl: string;
   accent: string;
+  /** The ground the preview paints on, so the monogram's label is derived
+   *  against the same canvas the public page derives against. */
+  canvas: BrandCanvas;
   eventTypes: EventTypeLite[];
   m: StudioMessages;
 }) {
@@ -561,11 +837,20 @@ function ProfilePreview({
       )}
       <div className="mb-4 flex items-center gap-3">
         {avatarUrl ? (
-          <img src={avatarUrl} alt="" className="h-12 w-12 rounded-full object-cover" />
+          <img
+            src={avatarUrl}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="h-12 w-12 rounded-full object-cover"
+          />
         ) : (
           <div
             className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
-            style={{ background: 'var(--accent)', color: onAccent(clampAccent(accent)), borderRadius: 'var(--bp-radius)' }}
+            style={{
+              background: 'var(--accent)',
+              color: onAccent(clampAccent(accent, canvas)),
+              borderRadius: 'var(--bp-radius)',
+            }}
           >
             {monogram(displayName)}
           </div>
@@ -589,45 +874,213 @@ function ProfilePreview({
   );
 }
 
-function BookingPreview({ accent: _accent, m }: { accent: string; m: StudioMessages }) {
+/**
+ * The booking-flow preview, rebuilt to BP's three regions — event panel, month
+ * calendar, day column — so the axes this studio exists to demonstrate land on
+ * the markup the public page actually ships (`bp-card`, `bp-cal-*`, `bp-daycol`,
+ * `bp-slots`, `bp-slot`, `bp-icon-btn`).
+ *
+ * It is still a MOCK, not the live island: `BookingFlow` needs slots, server
+ * actions and a real account, and this preview deliberately has none of those.
+ * The whole thing stays out of the tab order and the a11y tree for the reason
+ * it always did — nothing here can be clicked, so nothing here should invite a
+ * click. The sample dates are fixed rather than derived from today, so the
+ * preview renders identically on the server and after hydration.
+ */
+function BookingPreview({
+  displayName,
+  avatarUrl,
+  accent,
+  canvas,
+  locale,
+  m,
+}: {
+  displayName: string;
+  avatarUrl: string;
+  accent: string;
+  /** As in `ProfilePreview` — the canvas the label is derived against. */
+  canvas: BrandCanvas;
+  locale: string;
+  m: StudioMessages;
+}) {
+  // The sample MONTH is fixed; how it READS is not. Month names, weekday
+  // initials and which day a week starts on are locale decisions, and the
+  // public page makes them — a Spanish admin previewing a Sunday-first English
+  // grid is being shown a page that does not exist. Built from the same
+  // helpers the real calendar uses, on a fixed key, so it is localized and
+  // still renders identically on the server and after hydration.
+  const grid = useMemo(
+    () =>
+      buildMonthGrid(PREVIEW_MONTH_KEY, {
+        availableDayKeys: PREVIEW_AVAILABLE,
+        todayKey: PREVIEW_TODAY,
+        locale,
+        weekStartsOn: weekStartsOnFor(locale),
+      }),
+    [locale],
+  );
+  const selectedLabel = useMemo(
+    () => formatDayHeading(PREVIEW_SELECTED_INSTANT, 'UTC', locale),
+    [locale],
+  );
+
   return (
-    <div>
-      <div className="bp-card mb-4">
-        <div className="font-medium">{m.introCall}</div>
-        <div className="text-sm text-muted-foreground">30 {m.minSuffix}</div>
+    <div aria-hidden="true" className="flex flex-col gap-4">
+      {/* Event panel */}
+      <div className="flex items-center gap-3">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt=""
+            width={40}
+            height={40}
+            referrerPolicy="no-referrer"
+            className="h-10 w-10 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="flex h-10 w-10 items-center justify-center text-base font-semibold"
+            style={{
+              background: 'var(--accent)',
+              color: onAccent(clampAccent(accent, canvas)),
+              borderRadius: 'var(--bp-radius)',
+            }}
+          >
+            {monogram(displayName)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="truncate font-medium">
+            {m.introCall}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            30 {m.minSuffix} · {displayName}
+          </div>
+        </div>
       </div>
-      {/* Decorative theme preview only — these sample times aren't real
-          availability and never will be (no onClick). Excluded from the tab
-          order / a11y tree so keyboard and screen-reader users don't land on
-          a button that visually invites a click but can never do anything. */}
-      <div className="bp-slots" aria-hidden="true">
-        {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-          <button key={s} type="button" tabIndex={-1} aria-pressed={i === 0} className="bp-slot text-sm">
-            {s}
-          </button>
-        ))}
+
+      {/* One column, always. The preview box is `max-w-md` on desktop and
+          360px on mobile, so a viewport-width `sm:` breakpoint inside it is
+          always true and the "mobile" preview would render the two-column
+          desktop layout at ~28px per calendar cell — a preview of a page that
+          does not exist. The public page stacks these two regions below `lg`,
+          and every width this box takes is below `lg`. */}
+      <div className="flex flex-col gap-4">
+        {/* Month calendar */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
+              {grid.label}
+            </span>
+            <div className="flex gap-1">
+              {/* The same chevron the public page draws, so the preview shows
+                  the control that ships rather than a stand-in for it. */}
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="left" />
+              </span>
+              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
+                <ChevronIcon direction="right" />
+              </span>
+            </div>
+          </div>
+          <div className="bp-cal-grid">
+            <div className="bp-cal-week">
+              {grid.weekdayLabels.map((d, i) => (
+                <div key={`${d}-${i}`} className="bp-cal-weekday">
+                  {d}
+                </div>
+              ))}
+            </div>
+            {grid.weeks.map((week) => (
+              <div className="bp-cal-week" key={week[0]!.dayKey}>
+                {week.map((day) => (
+                  <span
+                    key={day.dayKey}
+                    className="bp-cal-day"
+                    data-state={
+                      !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty'
+                    }
+                    data-today={day.isToday ? 'true' : undefined}
+                    data-selected={day.dayKey === PREVIEW_SELECTED ? 'true' : undefined}
+                  >
+                    {day.dayOfMonth}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Day column */}
+        <div className="bp-daycol flex min-w-0 flex-col gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">{selectedLabel}</span>
+          <div className="bp-slots">
+            {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
+              <span key={s} className="bp-slot text-sm" aria-pressed={i === 0}>
+                {s}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
+// Fixed sample data for the preview. Deliberately not derived from `new Date()`
+// — a preview that changes shape at midnight is a preview that fails to render
+// the same way twice, and this one is server-rendered before it hydrates. The
+// KEYS are fixed; how they read is the locale's business, which is why they go
+// through `buildMonthGrid` rather than being spelled out in English.
+const PREVIEW_MONTH_KEY = '2026-09';
+const PREVIEW_TODAY = '2026-09-10';
+const PREVIEW_SELECTED = '2026-09-14';
+/** UTC noon of the selected day — the day column's heading. */
+const PREVIEW_SELECTED_INSTANT = '2026-09-14T12:00:00.000Z';
+const PREVIEW_AVAILABLE = [
+  '2026-09-10',
+  '2026-09-11',
+  '2026-09-14',
+  '2026-09-15',
+  '2026-09-16',
+  '2026-09-17',
+  '2026-09-18',
+  '2026-09-21',
+  '2026-09-22',
+  '2026-09-23',
+  '2026-09-24',
+  '2026-09-25',
+  '2026-09-28',
+  '2026-09-29',
+  '2026-09-30',
+];
+
+/* spacing-gate:on */
+
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
-  const map: Record<HandleState, { text: string; cls: string } | null> = {
+  // The `✓`/`✗` the available/taken copy used to carry are icons now, so the
+  // status reads the same in both locales without a glyph baked into a string.
+  const map: Record<HandleState, { text: string; cls: string; icon: string | null } | null> = {
     idle: null,
-    checking: { text: m.checking, cls: 'text-muted-foreground' },
-    available: { text: m.available, cls: 'text-primary' },
-    taken: { text: m.taken, cls: 'text-destructive' },
-    invalid: { text: m.invalid, cls: 'text-destructive' },
+    checking: { text: m.checking, cls: 'text-muted-foreground', icon: null },
+    available: { text: m.available, cls: 'text-primary', icon: 'pi-check-circle' },
+    taken: { text: m.taken, cls: 'text-destructive', icon: 'pi-times-circle' },
+    invalid: { text: m.invalid, cls: 'text-destructive', icon: 'pi-times-circle' },
   };
   const h = map[state];
-  return h ? <span className={`text-xs ${h.cls}`}>{h.text}</span> : null;
+  return h ? (
+    <span className={`flex items-center gap-tight text-xs ${h.cls}`}>
+      {h.icon ? <i aria-hidden className={`pi ${h.icon}`} style={{ fontSize: 11 }} /> : null}
+      {h.text}
+    </span>
+  ) : null;
 }
 
-const inputCls = 'rounded-md border border-input bg-background px-3 py-2 w-full';
+const inputCls = 'min-h-control w-full';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
+    <section className="flex flex-col gap-field rounded-xl border border-border bg-card p-card">
       <h3 className="text-sm font-semibold text-muted-foreground">{title}</h3>
       {children}
     </section>
@@ -636,15 +1089,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <label className="flex flex-col gap-tight text-sm">
       <span className="text-muted-foreground">{label}</span>
       {children}
     </label>
   );
 }
 
-/** Image picker: upload (data-URL, 1MB/type-validated) with a preview + clear,
- *  or paste a URL. Matches the old app's dropzone-to-data-URL behaviour. */
+/** Image picker: upload (downscaled to an inline data-URL by `@/lib/image-file`)
+ *  with a preview + clear, or paste a URL.
+ *
+ *  `preview` is not only the thumbnail shape — it is also the downscale target,
+ *  because the two must agree. A cover is a wide banner; squaring it to the
+ *  avatar's 512×512 would destroy it. */
 function ImageInput({
   value,
   onChange,
@@ -657,11 +1114,17 @@ function ImageInput({
   m: StudioMessages;
 }) {
   const [err, setErr] = useState<string | null>(null);
+  // A 25MB decode is not instant, so the control says so rather than looking dead.
+  const [busy, setBusy] = useState(false);
   const isData = value.startsWith('data:');
-  const errText = (code: 'invalid' | 'tooLarge' | 'read') =>
-    code === 'invalid' ? m.imageInvalid : code === 'tooLarge' ? m.imageTooLarge : m.couldNotRead;
+  const errText = (code: ImageErrorCode) => {
+    if (code === 'invalid') return m.imageInvalid;
+    if (code === 'tooLarge') return m.imageTooLarge;
+    if (code === 'cannotShrink') return m.imageCannotShrink;
+    return m.couldNotRead;
+  };
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-inline">
       {value ? (
         <img
           src={value}
@@ -669,46 +1132,71 @@ function ImageInput({
           className={preview === 'avatar' ? 'h-12 w-12 rounded-full object-cover' : 'h-16 w-full rounded-md object-cover'}
         />
       ) : null}
-      <div className="flex items-center gap-2">
-        <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs transition-colors hover:border-primary">
-          {m.uploadImage}
+      <div className="flex flex-wrap items-center gap-inline">
+        {/* The file input stays hidden inside its label — that is what makes the
+            label the control — but the label now wears the button recipe and the
+            44px step instead of a bespoke 28px chip. */}
+        <label
+          className={cn(
+            buttonVariants({ variant: 'outline', size: 'lg' }),
+            'cursor-pointer text-xs',
+            busy && 'pointer-events-none opacity-60',
+          )}
+          aria-busy={busy}
+        >
+          <i aria-hidden className="pi pi-upload" style={{ fontSize: 12 }} />
+          {busy ? m.imageWorking : m.uploadImage}
           <input
             type="file"
             accept="image/*"
-            className="hidden"
+            className="sr-only"
+            disabled={busy}
             onChange={async (e) => {
               const f = e.target.files?.[0];
+              // Clear the input NOW: picking the same file twice after an error
+              // fires no change event otherwise.
+              e.target.value = '';
               if (!f) return;
-              const r = await readImageFile(f);
-              if (r.ok) {
-                onChange(r.dataUrl);
-                setErr(null);
-              } else {
-                setErr(errText(r.code));
+              setBusy(true);
+              try {
+                const r = await readImageFile(f, preview);
+                if (r.ok) {
+                  onChange(r.dataUrl);
+                  setErr(null);
+                } else {
+                  setErr(errText(r.code));
+                }
+              } finally {
+                setBusy(false);
               }
             }}
           />
         </label>
         {value ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="lg"
+            className="text-xs text-muted-foreground hover:text-destructive"
             onClick={() => {
               onChange('');
               setErr(null);
             }}
-            className="text-xs text-muted-foreground hover:text-destructive"
           >
             {m.clear}
-          </button>
+          </Button>
         ) : null}
       </div>
-      <input
+      {/* Sits under the UPLOAD control, not under the paste-a-URL field below:
+          it describes what happens to a picked file, and a pasted URL is never
+          resized at all. */}
+      <span className="text-xs text-muted-foreground">{m.imageHelp}</span>
+      {err ? <span className="text-xs text-destructive">{err}</span> : null}
+      <Input
         value={isData ? '' : value}
-        onChange={(e) => onChange(e.target.value)}
         placeholder={m.orPasteUrl}
         className={inputCls}
+        onChange={(e) => onChange(e.target.value)}
       />
-      {err ? <span className="text-xs text-destructive">{err}</span> : null}
     </div>
   );
 }

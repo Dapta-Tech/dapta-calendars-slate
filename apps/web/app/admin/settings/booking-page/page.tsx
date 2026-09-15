@@ -1,6 +1,7 @@
 import { adminApi } from '@/lib/admin-api';
-import { defaultBranding, getMessages } from '@slate/shared';
+import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { Studio } from './studio';
 
 export const dynamic = 'force-dynamic';
@@ -13,10 +14,14 @@ export default async function BookingPageSettings() {
     getLocale(),
     adminApi.vanityStatus().catch(() => ({ vanitySlug: null, shortCode: '', canClaim: false })),
   ]);
-  const t = getMessages(locale).admin;
+  const msgs = getMessages(locale);
+  const t = msgs.admin;
 
   const displayName = profile?.member.displayName ?? me?.displayName ?? 'You';
-  const accent = profile?.member.brandColor ?? '#cbe84f';
+  // The literal used to live here. If DEFAULT_ACCENT ever moves, a hardcoded
+  // copy seeds the studio from a colour the public page would never render —
+  // preview != prod, one indirection out.
+  const accent = profile?.member.brandColor ?? DEFAULT_ACCENT;
   const style = (profile?.member.style ?? {}) as Record<string, unknown>;
   const def = defaultBranding(displayName);
   const axes = {
@@ -29,14 +34,25 @@ export default async function BookingPageSettings() {
     slotLayout: (style.slotLayout as never) ?? def.slotLayout,
     dayGroup: (style.dayGroup as never) ?? def.dayGroup,
     slotSelect: (style.slotSelect as never) ?? def.slotSelect,
+    // Through the resolver, never a literal at the call site: an absent axis
+    // resolves in exactly one place, and the studio has to agree with the public
+    // page about what a config saved before B2 renders as. The literal has moved
+    // once already (ADR 0004's amendment), which is the reason for the rule.
+    theme: bookingCanvasOf(style),
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-8 py-10">
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
-      <p className="mb-6 text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
+    <div className="mx-auto max-w-6xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
+      <h1 className="mb-tight text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
+      <p className="mb-group text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
         messages={t.studio}
+        opensNewTab={t.common.opensNewTab}
+        embedMessages={msgs.embed}
+        // The preview draws a month grid, and month names, weekday initials and
+        // which day a week starts on are all locale decisions — so the preview
+        // needs the locale itself, not only the resolved copy.
+        locale={locale}
         accountCode={me?.accountCode ?? ''}
         vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
         subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}
@@ -44,6 +60,10 @@ export default async function BookingPageSettings() {
         handle={me?.handle ?? ''}
         bio={(style.bio as string) ?? ''}
         avatarUrl={profile?.member.avatarUrl ?? ''}
+        // The preview's fallback, NOT the input's value: the field stays the
+        // host's own choice, and the preview still draws what the live page
+        // draws when that choice is empty.
+        connectedAvatarUrl={profile?.member.connectedAvatarUrl ?? ''}
         coverUrl={profile?.member.coverUrl ?? ''}
         accent={accent}
         axes={axes}

@@ -1,4 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
+import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
+import { framingHeaders } from '@/lib/framing';
+import { requestOrigin } from '@/lib/request-origin';
 
 /**
  * Canonical-host redirect: the Dapta cloud deployment's canonical hosts are
@@ -12,6 +16,64 @@ const CANONICAL: Record<string, string> = {
   'calendars.dapta.dev': 'calendar.dapta.dev',
 };
 
+/**
+ * O2 — where a campaign click is remembered (#94, refining #65).
+ *
+ * #65 said "the root page forwards the params into the login hand-off". That is
+ * not implementable where it is written: the root page is a React Server
+ * Component, and Next does not permit setting a cookie during render — only a
+ * Route Handler, a Server Action, or middleware may. Middleware is the right
+ * place regardless: it already runs on every page request, it sees the request
+ * HEADERS (so the referrer is server-read and never caller-supplied), and what
+ * it parks survives the whole identity round-trip whichever login path this
+ * deployment uses. Forwarding through the login URL instead would re-implement
+ * the allowlist in a second place, put the parameters back into a URL, and do
+ * nothing at all for the OSS `/login` path.
+ *
+ * FIRST TOUCH WINS: an existing cookie is never overwritten, mirroring Forms.
+ * The claim downstream is write-once and cannot be undone, so the browser half
+ * has to agree with it.
+ */
+function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
+  // Never park on an API route. `/api/auth/callback` in particular carries the
+  // IDENTITY PROVIDER as its referrer — cross-origin, so it would otherwise be
+  // recorded as the acquisition source — on the very request whose handler is
+  // deleting this cookie. Two writers on one response is not a race worth
+  // having, and no API route is ever an acquisition surface.
+  if (req.nextUrl.pathname.startsWith('/api/')) return res;
+  if (req.cookies.has(ATTRIBUTION_COOKIE)) return res;
+
+  const attribution = parseAttribution({
+    params: req.nextUrl.searchParams,
+    refererHeader: req.headers.get('referer'),
+    // NOT `req.nextUrl.origin`. Behind the ALB `req.url` reflects the server's
+    // bind address (see request-origin.ts), so the same-origin check would fail
+    // for internal navigation and every organic signup would be stamped with a
+    // self-referral — the exact permanent lie #65 forbids, in the one column
+    // that can never be corrected. Local dev would never show it, because
+    // there the two happen to match.
+    selfOrigin: requestOrigin(req),
+  });
+  // Organic traffic parks NOTHING. No synthetic `direct`/`organic` — an empty
+  // result is the honest representation, and the funnel reads it as such.
+  if (!attribution) return res;
+
+  // `SameSite=Lax` means this does NOT park from inside a third-party iframe,
+  // which the inline embed (E) made a first-class context. That is the right
+  // trade rather than an oversight: `None` would require `Secure` and would
+  // send the cookie on every cross-site request, and an embedded booking page
+  // is the host's acquisition surface, not ours. So an embed's campaign click
+  // is simply not attributed, and the funnel reads that as organic.
+  res.cookies.set(ATTRIBUTION_COOKIE, JSON.stringify(attribution), {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: Math.floor(ATTRIBUTION_WINDOW_MS / 1000),
+  });
+  return res;
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host')?.toLowerCase().split(':')[0] ?? '';
   const canonical = CANONICAL[host];
@@ -20,9 +82,40 @@ export function middleware(req: NextRequest) {
     url.host = canonical;
     url.port = '';
     url.protocol = 'https';
+    // Nothing is parked here on purpose: the cookie would be host-only to the
+    // alias and never sent to the canonical host. The 308 preserves the query
+    // string, so the canonical host's own pass parks the same click.
     return NextResponse.redirect(url, 308);
   }
-  return NextResponse.next();
+
+  // Tag the request with its own path so the ROOT layout can tell a product
+  // route from a booking page and stamp the right `data-theme` before paint.
+  // The App Router gives a layout its params and never its path, and the root
+  // layout is the only element that can carry the document theme — so the path
+  // has to travel as a header. Since B2 the query travels the same way, because
+  // an embed's `?theme=` override changes that same answer.
+  //
+  // Set on the forwarded REQUEST headers: they reach the app and never the
+  // browser, which also means headers of these names arriving from a client are
+  // overwritten here rather than trusted into the theme decision.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(PATH_HEADER, req.nextUrl.pathname);
+  // Capped: this is attacker-controlled on every request, and the only thing
+  // downstream reads out of it is one short enum. `URL` has already
+  // percent-encoded any C0 control, so the cap is about size, not injection.
+  requestHeaders.set(QUERY_HEADER, req.nextUrl.search.slice(0, 2048));
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+
+  // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public
+  // booking routes is the promise the embed rests on; `'self'` on the admin,
+  // on `/manage/[uid]` and on the login/onboarding surfaces is the half that
+  // makes the promise safe to make. Before this the repo declared neither, so
+  // the dashboard was frameable by any site — by omission.
+  for (const [name, value] of Object.entries(framingHeaders(req.nextUrl.pathname))) {
+    res.headers.set(name, value);
+  }
+
+  return parkAttribution(req, res);
 }
 
 export const config = {

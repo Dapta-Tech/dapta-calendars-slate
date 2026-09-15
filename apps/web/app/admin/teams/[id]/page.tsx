@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import { buttonVariants } from '@/components/ui/button';
 import { FormHeader } from '@/components/ui/page-header';
+import { cn } from '@/lib/cn';
 import { EventRowActions } from '@/app/admin/event-types/event-row-actions';
 import { TeamMembersPanel } from '../team-members-panel';
 
@@ -21,51 +23,60 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
     adminApi.teamMembers(id),
     adminApi.teamEventTypes(id),
   ]);
-  const msgs = getMessages(await getLocale());
+  const locale = await getLocale();
+  const msgs = getMessages(locale);
   const m = msgs.admin.teams;
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 pb-10">
+    <div className="mx-auto max-w-[1520px] px-gutter pb-gutter-y sm:px-gutter-wide">
       <FormHeader
         backHref="/admin/teams"
         backLabel={m.title}
         title={team.name}
+        gutter="responsive"
         actions={
           me?.accountCode && team.slug ? (
+            // Was `View public team page →`. The arrow is now the design
+            // language's own open-in-new-tab mark, and the control is a button
+            // rather than a link dressed as one.
             <Link
               href={`/${me.accountCode}/team/${team.slug}`}
-              className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm transition-colors hover:border-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(buttonVariants({ variant: 'outline', size: 'lg' }))}
             >
+              <i aria-hidden className="pi pi-external-link" style={{ fontSize: 14 }} />
               {m.viewPublicTeam}
+              <span className="sr-only"> ({msgs.admin.common.opensNewTab})</span>
             </Link>
           ) : undefined
         }
       />
-      <p className="mb-6 -mt-2 text-sm text-muted-foreground">/{team.slug}</p>
+      <p className="mb-group -mt-inline font-mono text-xs text-muted-foreground">/{team.slug}</p>
 
-      <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
+      <h2 className="mb-field text-sm font-semibold text-muted-foreground">
         {m.members} <span className="font-normal">({members.length})</span>
       </h2>
-      <div className="mb-8">
-        <TeamMembersPanel teamId={team.id} members={members} messages={m} />
+      <div className="mb-section">
+        <TeamMembersPanel teamId={team.id} members={members} messages={m} locale={locale} />
       </div>
 
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-field flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-sm font-semibold text-muted-foreground">{m.teamEventTypes}</h2>
         {/* The only way to CREATE a team event — the list alone was a dead end
             (QA2 fix 5). */}
         <Link
           href={`/admin/event-types/new?teamId=${team.id}`}
-          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+          className={cn(buttonVariants({ size: 'lg' }))}
         >
           {m.newTeamEvent}
         </Link>
       </div>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {eventTypes.map((et) => (
           <li
             key={et.id}
-            className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
+            className="flex flex-col gap-field rounded-xl border border-border bg-card p-card sm:flex-row sm:items-center sm:justify-between"
           >
             {/* Edit links carry ?from=team:<id> so the editor's back affordance
                 returns HERE, not to the personal Events list (QA3 fix 4b). */}
@@ -87,7 +98,9 @@ export default async function TeamDetail({ params }: { params: Promise<{ id: str
                     ? `/${me.accountCode}/team/${team.slug}/${et.slug}`
                     : null
                 }
+                title={et.title}
                 messages={msgs.admin.eventTypes}
+                embedMessages={msgs.embed}
               />
             </span>
           </li>

@@ -19,6 +19,14 @@ export interface IcsInput {
   title: string;
   description?: string | null;
   location?: string | null;
+  /**
+   * The conferencing link. When present it becomes BOTH the `URL:` property and
+   * the `LOCATION` value — clients linkify a LOCATION reliably only when it is a
+   * bare URL, and the join click is the whole point of putting it here. The
+   * human label ("Online meeting", or the runtime `conferencingLabel`) is not
+   * lost: it is the Where line of the mail this invite is attached to.
+   */
+  url?: string | null;
   organizer?: { name?: string | null; email?: string | null } | null;
   attendees: Array<{ name?: string | null; email: string }>;
   /** DTSTAMP instant (ISO). Injected for deterministic output/tests. */
@@ -32,6 +40,22 @@ function escapeText(value: string): string {
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\r?\n/g, '\\n');
+}
+
+/**
+ * A URI value safe to emit unescaped.
+ *
+ * `URL:` is a URI, not TEXT, so it must NOT go through `escapeText` — but that
+ * makes it the one unescaped sink in this builder, and the value arrives from an
+ * external calendar backend. A CR or LF inside it would end the content line and
+ * let the rest be read as further iCalendar properties, so line breaks are
+ * stripped. Anything that is not an http(s) URL is dropped entirely rather than
+ * written into an invite.
+ */
+function sanitizeUri(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const stripped = value.replace(/[\r\n]/g, '').trim();
+  return /^https?:\/\//i.test(stripped) ? stripped : null;
 }
 
 /** Format an ISO instant as a UTC iCalendar date-time (YYYYMMDDTHHMMSSZ). */
@@ -75,7 +99,14 @@ export function buildIcs(input: IcsInput): string {
     `STATUS:${status}`,
   ];
   if (input.description) lines.push(`DESCRIPTION:${escapeText(input.description)}`);
-  if (input.location) lines.push(`LOCATION:${escapeText(input.location)}`);
+  // A link, when there is one, is the most useful thing LOCATION can hold.
+  const url = sanitizeUri(input.url);
+  const location = url ?? input.location;
+  if (location) lines.push(`LOCATION:${escapeText(location)}`);
+  // RFC 5545 types URL as a URI, NOT as TEXT — so it is emitted verbatim.
+  // Running it through escapeText would backslash-escape the `,` and `;` that
+  // occur in real query strings and corrupt the link.
+  if (url) lines.push(`URL:${url}`);
   if (input.organizer?.email) {
     const cn = input.organizer.name ? `;CN=${escapeText(input.organizer.name)}` : '';
     lines.push(`ORGANIZER${cn}:mailto:${input.organizer.email}`);

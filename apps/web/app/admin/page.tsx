@@ -19,34 +19,49 @@ export default async function AdminHome() {
     (b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > Date.now(),
   );
   const publicUrl = me?.handle ? `/${me.accountCode}/${me.handle}` : null;
-  const h = getMessages(await getLocale()).admin.home;
+  const admin = getMessages(await getLocale()).admin;
+  const h = admin.home;
   const firstName = me?.displayName?.split(' ')[0];
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
-      <h1 className="mb-1 text-3xl font-semibold tracking-tight">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
+      <h1 className="mb-tight text-3xl font-semibold tracking-tight">
         {firstName ? t(h.welcomeNamed, { name: firstName }) : h.welcome}
       </h1>
-      <p className="mb-8 text-muted-foreground">{h.subtitle}</p>
+      <p className="mb-section text-muted-foreground">{h.subtitle}</p>
 
-      <SetupChecklist status={setupStatus} publicUrl={publicUrl} messages={h} />
+      <SetupChecklist status={setupStatus} messages={h} />
 
-      {/* Every member has an auto-assigned handle (short-links §3), so the
-          shareable link always exists — the old "set a handle" nag is gone. */}
-      {publicUrl ? (
-        <div className="mb-8 flex flex-col gap-2 rounded-md border border-border bg-card p-5">
+      {/* Every member has an auto-assigned handle (short-links §3), so the link
+          always exists — but a link to a page with nothing on it is not worth
+          copying. Shown only once the host has a published event type (#84);
+          until then the checklist above is telling them to create one. */}
+      {publicUrl && setupStatus.hasPublishedEventType ? (
+        <div className="mb-section flex flex-col gap-inline rounded-md border border-border bg-card p-card">
           <span className="text-sm text-muted-foreground">{h.bookingLink}</span>
-          <CopyLink path={publicUrl} labels={{ copy: h.copy, copied: h.copied, open: h.open }} />
+          {/* `opensNewTab` only: `CopyLink`'s Open control is a real button that
+              opens a new tab now (A2, #112), and its screen-reader suffix must
+              not fall back to English on the Spanish catalog. The rest of this
+              screen is A1's (#111). */}
+          <CopyLink
+            path={publicUrl}
+            labels={{
+              copy: h.copy,
+              copied: h.copied,
+              open: h.open,
+              opensNewTab: admin.common.opensNewTab,
+            }}
+          />
         </div>
       ) : null}
 
-      <div className="mb-8 grid grid-cols-3 gap-4">
+      <div className="mb-section grid grid-cols-3 gap-card">
         <Stat label={h.statEventTypes} value={eventTypes.length} href="/admin/event-types" />
         <Stat label={h.statUpcoming} value={upcoming.length} href="/admin/bookings" />
         <Stat label={h.statTeams} value={teams.length} href="/admin/teams" />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-card">
         <Shortcut href="/admin/event-types" title={h.createEvent} desc={h.createEventDesc} />
         <Shortcut href="/admin/availability" title={h.setAvailability} desc={h.setAvailabilityDesc} />
         <Shortcut href="/admin/settings/booking-page" title={h.stylePage} desc={h.stylePageDesc} />
@@ -60,7 +75,7 @@ function Stat({ label, value, href }: { label: string; value: number; href: stri
   return (
     <Link
       href={href}
-      className="flex flex-col gap-1 rounded-md border border-border bg-card p-5 transition-transform hover:border-primary active:scale-[0.99]"
+      className="flex flex-col gap-tight rounded-md border border-border bg-card p-card transition-transform hover:border-primary active:scale-[0.99]"
     >
       <span className="text-3xl font-semibold">{value}</span>
       <span className="text-sm text-muted-foreground">{label}</span>
@@ -72,7 +87,7 @@ function Shortcut({ href, title, desc }: { href: string; title: string; desc: st
   return (
     <Link
       href={href}
-      className="flex flex-col gap-1 rounded-md border border-border bg-card p-5 transition-transform hover:border-primary active:scale-[0.99]"
+      className="flex flex-col gap-tight rounded-md border border-border bg-card p-card transition-transform hover:border-primary active:scale-[0.99]"
     >
       <span className="font-medium">{title}</span>
       <span className="text-sm text-muted-foreground">{desc}</span>

@@ -5,6 +5,12 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability, getMember, getAccountByCode } from './repository';
+import {
+  addGuestsToBooking,
+  claimApiIdempotency,
+  completeApiIdempotency,
+  rescheduleBookingV2,
+} from './v2-pilot';
 
 // The Postgres path is the SOURCE OF TRUTH — CI runs this on a real Postgres on
 // every PR. It proves BOTH the app-level guard and the DB-level EXCLUDE
@@ -19,7 +25,12 @@ describePg('repository (real Postgres — the tested truth)', () => {
   beforeAll(async () => {
     db = await createDb(url);
     await migrate(db);
-    await seed(db);
+    // Seed ONLY if the demo account is missing. `seed()` deletes and re-inserts
+    // it wholesale, and several spec files share one Postgres — the same guard
+    // `reminders.spec.ts` and `duplicate-guard.pg.spec.ts` document. File-level
+    // sequencing (vitest.config.ts) is what makes the check itself safe.
+    const existing = await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`);
+    if (!existing) await seed(db);
   });
 
   afterAll(async () => {
@@ -40,14 +51,22 @@ describePg('repository (real Postgres — the tested truth)', () => {
       handle: 'alex-rivera',
       slug: 'intro-call',
       startMs,
-      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      attendee: {
+        name: 'Sam',
+        email: 'sam@example.com',
+        timeZone: 'America/New_York',
+      },
       answers: { company: 'Acme' },
     };
     const first = await createBooking(db, args);
     expect(first.ok).toBe(true);
     const second = await createBooking(db, {
       ...args,
-      attendee: { name: 'Pat', email: 'pat@example.com', timeZone: 'America/New_York' },
+      attendee: {
+        name: 'Pat',
+        email: 'pat@example.com',
+        timeZone: 'America/New_York',
+      },
     });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.reason).toBe('SLOT_TAKEN');
@@ -108,5 +127,100 @@ describePg('repository (real Postgres — the tested truth)', () => {
       expect(isExclusionViolation(err)).toBe(true);
     }
     expect(threw).toBe(true);
+  });
+
+  it('persists v2 replay, guests, and a linked new-UID reschedule on Postgres', async () => {
+    const account = await getAccountByCode(db, 'acme');
+    const availability = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now(),
+      toMs: Date.now() + 20 * 86_400_000,
+    });
+    const starts = availability!.slots.map((slot) => new Date(slot.startUtc).getTime());
+    const created = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startMs: starts[0]!,
+      attendee: {
+        name: 'Pilot',
+        email: 'pilot-pg@example.com',
+        timeZone: 'UTC',
+      },
+      answers: { company: 'Dapta' },
+      metadata: { source: 'pg-parity' },
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    expect(
+      await addGuestsToBooking(db, {
+        accountId: account!.id,
+        uid: created.booking.uid,
+        guests: [{ email: 'guest-pg@example.com', name: 'Guest' }, { email: 'GUEST-PG@example.com' }],
+      }),
+    ).toEqual({ ok: true, added: 1 });
+
+    const moved = await rescheduleBookingV2(db, {
+      accountId: account!.id,
+      uid: created.booking.uid,
+      newStartMs: starts[1]!,
+      idempotencyKey: 'idem-key',
+      reason: 'Postgres parity',
+    });
+    expect(moved).toMatchObject({ ok: true, uid: expect.any(String) });
+    if (!moved.ok) return;
+    expect(moved.uid).not.toBe(created.booking.uid);
+    const links = await db.all<{
+      uid: string;
+      rescheduled_from_uid: string | null;
+      rescheduled_to_uid: string | null;
+    }>(
+      sql`SELECT uid, rescheduled_from_uid, rescheduled_to_uid FROM booking
+          WHERE uid IN (${created.booking.uid}, ${moved.uid}) ORDER BY uid`,
+    );
+    expect(links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          uid: created.booking.uid,
+          rescheduled_to_uid: moved.uid,
+        }),
+        expect.objectContaining({
+          uid: moved.uid,
+          rescheduled_from_uid: created.booking.uid,
+        }),
+      ]),
+    );
+    const guestCount = await db.get<{ count: number }>(
+      sql`SELECT COUNT(*) AS count FROM booking_guest bg
+          JOIN booking b ON b.id = bg.booking_id WHERE b.uid = ${moved.uid}`,
+    );
+    expect(Number(guestCount?.count)).toBe(1);
+
+    const claim = await claimApiIdempotency(db, {
+      namespaceHash: `pg-${randomUUID()}`,
+      accountId: account!.id,
+      apiKeyId: 'pg-test-key',
+      method: 'POST',
+      path: '/v2/bookings/example/cancel',
+      requestHash: 'request-a',
+    });
+    await completeApiIdempotency(db, claim.id, 200, { uid: moved.uid });
+    const replay = await claimApiIdempotency(db, {
+      namespaceHash: (await db.get<{ namespace_hash: string }>(
+        sql`SELECT namespace_hash FROM api_idempotency WHERE id = ${claim.id}`,
+      ))!.namespace_hash,
+      accountId: account!.id,
+      apiKeyId: 'pg-test-key',
+      method: 'POST',
+      path: '/v2/bookings/example/cancel',
+      requestHash: 'request-a',
+    });
+    expect(replay).toMatchObject({
+      statusCode: 200,
+      responseBody: { uid: moved.uid },
+    });
   });
 });

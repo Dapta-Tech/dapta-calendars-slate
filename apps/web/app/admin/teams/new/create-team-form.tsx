@@ -1,22 +1,23 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
-import { commonTimeZones, type BookingMessages } from '@slate/shared';
+import type { BookingMessages, Locale } from '@slate/shared';
 import { FieldHelp } from '@/components/field-help';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { FormHeader } from '@/components/ui/page-header';
+import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { createTeamFullAction } from '../actions';
 
 type TeamsMessages = BookingMessages['admin']['teams'];
 
-/** Read an image File as a size/type-validated data URL (offline-safe, no host). */
-function readImageFile(file: File, onOk: (dataUrl: string) => void, onErr: (msg: string) => void, m: TeamsMessages) {
-  if (!file.type.startsWith('image/')) return onErr(m.imageInvalidType);
-  if (file.size > 1_000_000) return onErr(m.imageTooLarge);
-  const reader = new FileReader();
-  reader.onload = () => onOk(String(reader.result));
-  reader.onerror = () => onErr(m.imageReadError);
-  reader.readAsDataURL(file);
+/** The shared reader's codes, in this form's own words. */
+function imageErrText(code: ImageErrorCode, m: TeamsMessages): string {
+  if (code === 'invalid') return m.imageInvalidType;
+  if (code === 'tooLarge') return m.imageTooLarge;
+  if (code === 'cannotShrink') return m.imageCannotShrink;
+  return m.imageReadError;
 }
 
 export function CreateTeamForm({
@@ -26,6 +27,7 @@ export function CreateTeamForm({
   backHref,
   backLabel,
   heading,
+  locale,
 }: {
   messages: TeamsMessages;
   defaultTimeZone: string;
@@ -33,6 +35,8 @@ export function CreateTeamForm({
   backHref: string;
   backLabel: string;
   heading: string;
+  /** Active admin locale — the timezone picker's own copy. */
+  locale?: Locale;
 }) {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -42,6 +46,8 @@ export function CreateTeamForm({
   const [timeZone, setTimeZone] = useState(defaultTimeZone);
   const [err, setErr] = useState<string | null>(null);
   const [imgErr, setImgErr] = useState<string | null>(null);
+  // A 25MB decode is not instant, so the control says so rather than looking dead.
+  const [imgBusy, setImgBusy] = useState(false);
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -70,55 +76,62 @@ export function CreateTeamForm({
         backHref={backHref}
         backLabel={backLabel}
         title={heading}
+        gutter="responsive"
         actions={
-          <Button type="submit" disabled={pending || !name.trim() || !slug.trim()}>
+          <Button type="submit" size="lg" disabled={pending || !name.trim() || !slug.trim()}>
             {pending ? m.creating : m.createTeam}
           </Button>
         }
       />
-      <div className="flex max-w-2xl flex-col gap-4 rounded-md border border-border bg-card p-6">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 text-muted-foreground">
+      <div className="flex max-w-2xl flex-col gap-card rounded-xl border border-border bg-card p-card sm:p-group">
+      <div className="grid grid-cols-1 gap-field sm:grid-cols-2">
+        <label className="flex flex-col gap-tight text-sm">
+          <span className="flex items-center gap-tight text-muted-foreground">
             {m.name}
             <FieldHelp text={m.nameHelp} />
           </span>
-          <input value={name} onChange={(e) => onName(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2" />
+          <Input value={name} className="min-h-control" onChange={(e) => onName(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 text-muted-foreground">
+        <label className="flex flex-col gap-tight text-sm">
+          <span className="flex items-center gap-tight text-muted-foreground">
             {m.slug}
             <FieldHelp text={m.slugHelp} />
           </span>
-          <input
+          <Input
             value={slug}
+            className="min-h-control"
             onChange={(e) => {
               setSlug(e.target.value);
               setSlugTouched(true);
             }}
-            className="rounded-md border border-input bg-background px-3 py-2"
           />
-          {/* Live public-URL preview (R25). */}
-          <span className="truncate text-xs text-muted-foreground">
+          {/* Live public-URL preview (R25) — a string you copy, so the mono voice. */}
+          <span className="truncate font-mono text-xs text-muted-foreground">
             /{accountCode || '…'}/team/{slug || '…'}
           </span>
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="flex items-center gap-1 text-muted-foreground">
+      <label className="flex flex-col gap-tight text-sm">
+        <span className="flex items-center gap-tight text-muted-foreground">
           {m.bioLabel}
           <FieldHelp text={m.bioHelp} />
         </span>
-        <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={2} placeholder={m.bioPlaceholder} className="rounded-md border border-input bg-background px-3 py-2" />
+        <textarea
+          value={bio}
+          rows={2}
+          placeholder={m.bioPlaceholder}
+          onChange={(e) => setBio(e.target.value)}
+          className="w-full rounded-md border border-input bg-background px-field py-inline text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
       </label>
 
-      <div className="flex flex-col gap-2">
-        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+      <div className="flex flex-col gap-inline">
+        <span className="flex items-center gap-tight text-sm text-muted-foreground">
           {m.logoLabel}
           <FieldHelp text={m.logoHelp} />
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-field">
           {logoUrl ? (
             <img src={logoUrl} alt={m.logoLabel} className="h-12 w-12 rounded-md border border-border object-cover" />
           ) : (
@@ -131,44 +144,58 @@ export function CreateTeamForm({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => {
+            disabled={imgBusy}
+            onChange={async (e) => {
               const f = e.target.files?.[0];
-              setImgErr(null);
-              if (f) readImageFile(f, setLogoUrl, setImgErr, m);
               e.target.value = '';
+              setImgErr(null);
+              if (!f) return;
+              setImgBusy(true);
+              try {
+                const r = await readImageFile(f, 'logo');
+                if (r.ok) setLogoUrl(r.dataUrl);
+                else setImgErr(imageErrText(r.code, m));
+              } finally {
+                setImgBusy(false);
+              }
             }}
           />
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={imgBusy}
+            aria-busy={imgBusy}
             onClick={() => fileRef.current?.click()}
-            className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm hover:border-primary"
           >
-            {m.uploadImage}
-          </button>
+            <i aria-hidden className="pi pi-upload" style={{ fontSize: 13 }} />
+            {imgBusy ? m.imageWorking : m.uploadImage}
+          </Button>
           {logoUrl ? (
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="lg"
+              className="text-muted-foreground"
               onClick={() => setLogoUrl('')}
-              className="inline-flex min-h-[44px] items-center rounded-md border border-border px-3 py-2 text-sm text-muted-foreground hover:border-destructive hover:text-destructive"
             >
               {m.clearImage}
-            </button>
+            </Button>
           ) : null}
         </div>
-        <input value={logoUrl.startsWith('data:') ? '' : logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder={m.orPasteUrl} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
+        <Input
+          value={logoUrl.startsWith('data:') ? '' : logoUrl}
+          placeholder={m.orPasteUrl}
+          className="min-h-control"
+          onChange={(e) => setLogoUrl(e.target.value)}
+        />
         {imgErr ? <p role="alert" className="text-sm text-destructive">{imgErr}</p> : null}
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
+      {/* Full IANA list through P's picker, like every other timezone field in
+          the admin. A <div>, not a <label>: the trigger is a <button>. */}
+      <div className="flex max-w-sm flex-col gap-tight text-sm">
         <span className="text-muted-foreground">{m.timezone}</span>
-        <select value={timeZone} onChange={(e) => setTimeZone(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2 text-sm">
-          {commonTimeZones(timeZone).map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </select>
-      </label>
+        <TimeZoneSelect value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
+      </div>
 
       {err ? <p role="alert" className="text-sm text-destructive">{err}</p> : null}
       </div>

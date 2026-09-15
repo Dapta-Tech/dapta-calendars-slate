@@ -120,7 +120,12 @@ describe('BE polish', () => {
       // A fake API-key principal that allows everything (auth is exercised elsewhere).
       const auth = {
         resolveMachine: (): Promise<MachinePrincipal> =>
-          Promise.resolve({ accountId, scopes: ['availability:read', 'bookings:write'], eventTypeIds: null } as MachinePrincipal),
+          Promise.resolve({
+            keyId: 'test-key',
+            accountId,
+            scopes: ['availability:read', 'bookings:write'],
+            eventTypeIds: null,
+          } as MachinePrincipal),
         assertEventTypeAllowed: () => undefined,
       } as unknown as AuthService;
       machine = new MachineController(makeSvc(db), auth, db);

@@ -22,6 +22,21 @@ export interface BookingNotification {
   coHosts?: Array<{ name?: string | null; email?: string | null }>;
   attendee: { name: string; email: string; timeZone?: string | null };
   location?: string | null;
+  /**
+   * The conferencing link. Filled at DELIVERY time, never at enqueue — it is
+   * minted later by the calendar outbox row, so the enqueue-time snapshot
+   * cannot contain it (ADR 0007). Absent/null renders no join affordance
+   * anywhere: the template line drops, the HTML CTA is omitted, the `.ics`
+   * keeps its human LOCATION and gains no `URL:`.
+   */
+  meetingUrl?: string | null;
+  /**
+   * The booking's snapshotted location kind, carried so the DELIVERY side can
+   * tell whether this booking is even supposed to have a link — and therefore
+   * whether it is worth waiting a bounded moment for one. Absent on rows
+   * queued before C2, which is exactly the "never wait" case.
+   */
+  locationKind?: string | null;
   manageUrl?: string | null;
   cancellationReason?: string | null;
   previousStartUtc?: string | null;
@@ -46,6 +61,14 @@ export interface BookingNotification {
   pending?: boolean;
   /** Public book-again URL for this event type (drives {{booking_link}}). */
   bookingLink?: string | null;
+  /**
+   * The booking's own intake answers, raw, driving the `{{form.<field name>}}`
+   * namespace (#68 decision 2). Snapshotted into the outbox payload at enqueue
+   * time like the rest of this object (ADR 0007) — the answer exists the moment
+   * the booking does, so nothing here waits on delivery. Absent = no form
+   * variables resolve, and each of their lines is dropped.
+   */
+  formAnswers?: Record<string, unknown> | null;
 }
 
 /**
@@ -315,6 +338,7 @@ export class BookingNotifier {
         endUtc: n.endUtc,
         title: n.title,
         location: n.location,
+        url: n.meetingUrl,
         organizer: n.host,
         attendees: [{ name: n.attendee.name, email: n.attendee.email }],
         stamp: n.stamp ?? n.startUtc,

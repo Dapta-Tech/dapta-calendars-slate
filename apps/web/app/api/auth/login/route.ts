@@ -29,12 +29,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     maxAge: 600, // 10 min — just long enough to finish the round-trip
   });
 
+  // `prompt=login` makes the hosted login show its sign-in screen even when the
+  // provider's own session cookie is still alive, which is what turns the button
+  // on the signed-out landing into a real "sign in as someone" rather than a
+  // silent re-authentication into the account the person just left. It is also
+  // what makes skipping the IdP logout hop viable at all: switching accounts
+  // stays possible.
+  //
+  // Allowlisted to the one value we mean — this route is directly reachable and
+  // the value ends up on an external authorize URL. The bare auto-redirect from
+  // /login sends no prompt, keeping the silent SSO for arrivals from the
+  // platform.
+  const prompt = new URL(req.url).searchParams.get('prompt') === 'login' ? 'login' : null;
+
   const returnTo = `${origin}/api/auth/callback`;
   const res = await fetch(
-    `${iam}/auth/login-url?returnTo=${encodeURIComponent(returnTo)}&state=${encodeURIComponent(state)}`,
+    `${iam}/auth/login-url?returnTo=${encodeURIComponent(returnTo)}&state=${encodeURIComponent(state)}` +
+      (prompt ? `&prompt=${prompt}` : ''),
     { cache: 'no-store' },
   ).catch(() => null);
   const loginUrl = res && res.ok ? ((await res.json().catch(() => ({}))) as { loginUrl?: string }).loginUrl : undefined;
   if (!loginUrl) return NextResponse.redirect(new URL('/login?error=login', origin));
-  return NextResponse.redirect(loginUrl);
+
+  // Parsed ONCE, before the prompt branch and not inside it: `NextResponse
+  // .redirect` throws on a malformed URL, so handing it the IAM's string
+  // unchecked turns a bad answer from the identity service into an unhandled
+  // 500 on the login path. The error card is the right landing either way.
+  let target: URL;
+  try {
+    target = new URL(loginUrl);
+  } catch {
+    return NextResponse.redirect(new URL('/login?error=login', origin));
+  }
+  // The IAM does not forward `prompt` onto the authorize URL yet, so patch it on
+  // ourselves. Forwarded above as well, so nothing changes here the day it does.
+  if (prompt) target.searchParams.set('prompt', prompt);
+  return NextResponse.redirect(target.toString());
 }

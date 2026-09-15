@@ -29,6 +29,24 @@ export const account = sqliteTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: integer('entitlement_checked_at'),
+  // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
+  // by Forms' question bank. Written once, alongside the claim below.
+  // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
+  onboarding: text('onboarding'),
+  // The write-once qualification claim. NULL means "this account still owes
+  // onboarding" — which is why migration 0012 STAMPS every pre-existing account,
+  // so the wizard greets new signups only and never traps an existing host.
+  onboardingCompletedAt: integer('onboarding_completed_at'),
+  // O2 growth attribution: the 7-key allowlist blob captured at the front door
+  // and claimed WRITE-ONCE onto this account. NULL is the truthful state for
+  // organic traffic and for every account predating the migration — nothing
+  // backfills it, because a synthetic value here can never be corrected.
+  // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
+  attribution: text('attribution'),
+  // The write-once attribution claim. Also refuses accounts older than the
+  // 10-minute window, so a campaign click by the owner of an established
+  // workspace can never restamp its origin.
+  attributionClaimedAt: integer('attribution_claimed_at'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -127,16 +145,31 @@ export const eventType = sqliteTable('event_type', {
   schedulingType: text('scheduling_type'),
   locations: text('locations'),
   bookingFields: text('booking_fields'),
+  /**
+   * Per-event reminders + follow-up (#68), JSON text. NULL = never configured
+   * (the read falls back to the shipped defaults); `[]` = deliberately none.
+   */
+  reminders: text('reminders'),
   metadata: text('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),
   requiresConfirmation: integer('requires_confirmation').notNull().default(0),
+  /**
+   * Duplicate-booking guard (#69/AB1): 1 = one normalized email may hold at
+   * most one UPCOMING booking on this event type. Off (0) by default and off
+   * on every already-saved event — turning it on is the host's choice. Not a
+   * security control: email is verified nowhere, so it prevents accidents.
+   */
+  preventDuplicateBookings: integer('prevent_duplicate_bookings').notNull().default(0),
   seatsPerTimeSlot: integer('seats_per_time_slot'),
   /** Per-event calendar write destination override; NULL = fall back to the
    *  host's member-level `is_destination` calendar (calendar-refs.ts). */
   destinationCalendarId: text('destination_calendar_id'),
+  /** H2 (#108): CRM contact property mappings, keyed by provider, as JSON text.
+   *  NULL = never configured. The Postgres twin is `jsonb`. */
+  crmPropertyMappings: text('crm_property_mappings'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -174,7 +207,13 @@ export const booking = sqliteTable('booking', {
   startMs: integer('start_ms').notNull(),
   endMs: integer('end_ms').notNull(),
   status: text('status').notNull().default('accepted'),
+  /** Human detail of the Where (address, number, custom label). */
   location: text('location'),
+  /**
+   * The event type's location kind, SNAPSHOTTED at booking time. Null for rows
+   * written before the kind existed — the render falls back to `location`.
+   */
+  locationKind: text('location_kind'),
   meetingUrl: text('meeting_url'),
   attendeeTimeZone: text('attendee_time_zone'),
   responses: text('responses'),
@@ -183,7 +222,14 @@ export const booking = sqliteTable('booking', {
   cancelledBy: text('cancelled_by'),
   rescheduled: integer('rescheduled'),
   fromReschedule: text('from_reschedule'),
+  rescheduledFromUid: text('rescheduled_from_uid'),
+  rescheduledToUid: text('rescheduled_to_uid'),
+  reschedulingReason: text('rescheduling_reason'),
+  rescheduledByEmail: text('rescheduled_by_email'),
   recurringEventId: text('recurring_event_id'),
+  /** Namespaced by account before it is stored (#104) — this `unique` is
+   *  GLOBAL, so a raw caller-supplied key would be claimable across
+   *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
@@ -194,9 +240,31 @@ export const bookingAttendee = sqliteTable('booking_attendee', {
   bookingId: text('booking_id').notNull(),
   name: text('name').notNull(),
   email: text('email').notNull(),
+  /**
+   * `lower(trim(email))`, indexed, for the duplicate-booking guard (#69/AB1).
+   * NULLABLE on purpose, unlike `booking_guest.email_normalized`: migrations
+   * land before the API that writes this column, so rows inserted in that
+   * window carry NULL. Every read coalesces — see `normalizedEmailSql`.
+   * `+tags` are NOT stripped (#69: most providers treat them as distinct).
+   */
+  emailNormalized: text('email_normalized'),
   timeZone: text('time_zone'),
   phone: text('phone'),
   notes: text('notes'),
+  /** Attendee notification language (`en` | `es`), persisted since H2 (#108).
+   *  See the Postgres twin for why it was previously dropped. */
+  language: text('language'),
+  createdAt: integer('created_at').notNull(),
+});
+
+/** Post-create guests. Kept separate so case-insensitive dedupe has a safe unique key. */
+export const bookingGuest = sqliteTable('booking_guest', {
+  id: text('id').primaryKey(),
+  bookingId: text('booking_id').notNull(),
+  email: text('email').notNull(),
+  emailNormalized: text('email_normalized').notNull(),
+  name: text('name'),
+  timeZone: text('time_zone'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -216,6 +284,9 @@ export const slotReservation = sqliteTable('slot_reservation', {
   memberId: text('member_id').notNull(),
   slotStartMs: integer('slot_start_ms').notNull(),
   slotEndMs: integer('slot_end_ms').notNull(),
+  // The handle a caller holds a slot by. Every read and delete of a hold keys on
+  // it, so it is indexed by `slot_reservation_uid_idx` (migration
+  // …_slot_reservation_uid_index). Not unique: nothing asserts uid uniqueness today.
   uid: text('uid').notNull(),
   releaseAtMs: integer('release_at_ms').notNull(),
   isSeat: integer('is_seat').notNull().default(0),
@@ -230,6 +301,10 @@ export const connectedCalendar = sqliteTable('connected_calendar', {
   provider: text('provider').notNull(),
   externalId: text('external_id').notNull(),
   primaryEmail: text('primary_email'),
+  /** The connected account's own profile photo, when the calendar backend
+   *  reports one. A FALLBACK for the public page, never written onto the
+   *  member — what a host uploads in the studio always wins. */
+  avatarUrl: text('avatar_url'),
   isDestination: integer('is_destination').notNull().default(0),
   checkConflicts: integer('check_conflicts').notNull().default(1),
   createdAt: integer('created_at').notNull(),
@@ -237,6 +312,45 @@ export const connectedCalendar = sqliteTable('connected_calendar', {
   lastCheckAt: integer('last_check_at'),
   lastCheckOk: integer('last_check_ok'),
   lastCheckDetail: text('last_check_detail'),
+});
+
+/** Provider calendars discovered beneath a connected account/credential. */
+export const providerCalendar = sqliteTable('provider_calendar', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  memberId: text('member_id').notNull(),
+  connectedCalendarId: text('connected_calendar_id').notNull(),
+  externalId: text('external_id').notNull(),
+  name: text('name').notNull(),
+  email: text('email'),
+  isPrimary: integer('is_primary').notNull().default(0),
+  readOnly: integer('read_only').notNull().default(1),
+  accessRole: text('access_role').notNull().default('none'),
+  source: text('source').notNull().default('shared'),
+  canRead: integer('can_read').notNull().default(1),
+  canReadFreeBusy: integer('can_read_free_busy').notNull().default(1),
+  canCreate: integer('can_create').notNull().default(0),
+  canUpdate: integer('can_update').notNull().default(0),
+  canDelete: integer('can_delete').notNull().default(0),
+  syncStatus: text('sync_status').notNull().default('healthy'),
+  lastSyncedAt: integer('last_synced_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** Hashed, tenant/key/path-scoped mutation replay records (never stores plaintext keys). */
+export const apiIdempotency = sqliteTable('api_idempotency', {
+  id: text('id').primaryKey(),
+  namespaceHash: text('namespace_hash').notNull().unique(),
+  accountId: text('account_id').notNull(),
+  apiKeyId: text('api_key_id').notNull(),
+  method: text('method').notNull(),
+  path: text('path').notNull(),
+  requestHash: text('request_hash').notNull(),
+  statusCode: integer('status_code'),
+  responseBody: text('response_body'),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
 });
 
 export const apiKey = sqliteTable('api_key', {
@@ -261,7 +375,14 @@ export const webhook = sqliteTable('webhook', {
   teamId: text('team_id'),
   eventTypeId: text('event_type_id'),
   subscriberUrl: text('subscriber_url').notNull(),
+  /** LEGACY plaintext signing secret (W / #75). Read-only fallback: rows written
+   *  before the envelope still sign, and are re-sealed into `secretCipher` the
+   *  first time a key is present at signing time. Never written with a plaintext
+   *  value by new code — only cleared to NULL on re-seal. */
   secret: text('secret'),
+  /** AES-256-GCM envelope (`v1.<iv>.<tag>.<ciphertext>`) bound to
+   *  `${accountId}:webhook:${id}`. Decrypted ONLY at signing time. */
+  secretCipher: text('secret_cipher'),
   eventTriggers: text('event_triggers'),
   active: integer('active').notNull().default(1),
   createdAt: integer('created_at').notNull(),
@@ -314,6 +435,67 @@ export const notificationSetting = sqliteTable('notification_setting', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+/**
+ * H1a (#63 / ADR 0001): ONE third-party integration credential per (account,
+ * provider). The pasted private-app token is stored AES-256-GCM encrypted under
+ * a `v1.<iv>.<tag>.<ciphertext>` envelope bound to (account_id, provider), and
+ * is NEVER returned to a client — `label` + `token_last4` are the whole of what
+ * a status view may show.
+ *
+ * Disconnecting is a SOFT delete: `status = 'disconnected'` and `token_cipher`
+ * nulled. The row's `id` must survive, because `booking_reference.destination`
+ * points at it — a hard delete would mint a new id on reconnect, orphan every
+ * stored reference, and turn the first post-reconnect cancellation into a
+ * duplicate meeting.
+ *
+ * Health mirrors `connected_calendar.last_check_*` so the two read alike, plus
+ * `last_error_detail`: the STRUCTURED provider error (category + the missing
+ * scope names), so a UI can name the exact checkbox that was missed rather than
+ * re-parsing prose.
+ */
+export const accountIntegration = sqliteTable('account_integration', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  /** Vendor key, e.g. `hubspot`. UNIQUE with account_id. */
+  provider: text('provider').notNull(),
+  /** `connected` | `unhealthy` | `disconnected`. Never auto-disabled. */
+  status: text('status').notNull().default('connected'),
+  /** `v1.<iv>.<tag>.<ciphertext>`; NULL once disconnected (credential scrubbed). */
+  tokenCipher: text('token_cipher'),
+  label: text('label'),
+  tokenLast4: text('token_last4'),
+  lastCheckAt: integer('last_check_at'),
+  lastCheckOk: integer('last_check_ok'),
+  lastCheckDetail: text('last_check_detail'),
+  /** Structured provider error: `{ category, requiredGranularScopes }` as TEXT JSON. */
+  lastErrorDetail: text('last_error_detail'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/**
+ * One-off links (#69 / AB2, #110) — see `schema.pg.ts` for the full rationale;
+ * Postgres is the source of truth and this mirrors it 1:1 on table and column
+ * names, with `bigint` epoch-ms landing as `integer`.
+ *
+ * A GRANT over an event type the host already has, never a meeting of its own:
+ * no duration, no availability, no title. `token` is stored IN CLEAR and unique
+ * per `docs/adr/0003-public-tokens-have-two-storage-policies.md`; the unique
+ * index lives in the migration, not here, because these files declare no
+ * indexes. `consumed_at` survives a later cancel of the booking that set it.
+ */
+export const oneOffLink = sqliteTable('one_off_link', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  eventTypeId: text('event_type_id').notNull(),
+  token: text('token').notNull(),
+  createdByMemberId: text('created_by_member_id'),
+  createdAt: integer('created_at').notNull(),
+  consumedAt: integer('consumed_at'),
+  consumedBookingId: text('consumed_booking_id'),
+  revokedAt: integer('revoked_at'),
+});
+
 export const sqliteSchema = {
   account,
   member,
@@ -326,12 +508,17 @@ export const sqliteSchema = {
   eventTypeConflictCalendar,
   booking,
   bookingAttendee,
+  bookingGuest,
   bookingHost,
   slotReservation,
   connectedCalendar,
+  providerCalendar,
+  apiIdempotency,
   apiKey,
   webhook,
   bookingReference,
   outbox,
   notificationSetting,
+  accountIntegration,
+  oneOffLink,
 };

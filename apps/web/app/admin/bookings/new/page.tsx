@@ -3,6 +3,7 @@ import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { FormHeader } from '@/components/ui/page-header';
+import { buttonVariants } from '@/components/ui/button';
 import { HostBookingForm } from './host-booking-form';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ export default async function NewHostBooking() {
   const m = getMessages(locale).admin.bookings;
 
   return (
-    <div className="mx-auto max-w-2xl px-8 pb-10">
+    <div className="mx-auto max-w-2xl px-gutter sm:px-gutter-wide pb-gutter-y">
       {eventTypes.length > 0 ? (
         <HostBookingForm
           handle={me?.handle ?? undefined}
@@ -32,13 +33,13 @@ export default async function NewHostBooking() {
             // the PUBLIC booking page is unpublished, so say it, with the fix
             // one click away. Previously this state silently showed no slots.
             !me?.handle ? (
-              <div className="mb-6 flex flex-col gap-1 rounded-lg border border-border bg-muted/30 p-4 text-sm">
+              <div className="mb-group flex flex-col items-start gap-field rounded-lg border border-border bg-muted/30 p-card text-sm">
                 <p className="text-muted-foreground">{m.noHandleNotice}</p>
                 <Link
                   href="/admin/settings/booking-page"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
+                  className={buttonVariants({ variant: 'outline', size: 'lg' })}
                 >
-                  {m.noHandleLink} →
+                  {m.noHandleLink}
                 </Link>
               </div>
             ) : undefined
@@ -46,7 +47,7 @@ export default async function NewHostBooking() {
         />
       ) : (
         <>
-          <FormHeader backHref="/admin/bookings" backLabel={m.title} title={m.newTitle} />
+          <FormHeader backHref="/admin/bookings" backLabel={m.title} title={m.newTitle} gutter="responsive" />
           <p className="text-muted-foreground">{m.createEventFirst}</p>
         </>
       )}

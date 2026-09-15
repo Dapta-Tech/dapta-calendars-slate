@@ -18,7 +18,7 @@ An open-source, self-hostable scheduling & booking platform: availability →
 DST-safe slots, single-host and team (round-robin & collective) event types,
 external calendar sync, durable notifications with editable templates, and short
 shareable links — **double-booking-safe by construction**. A Turborepo + pnpm
--workspaces monorepo of two apps and seven packages. **Postgres is the source of
+-workspaces monorepo of two apps and eight packages. **Postgres is the source of
 truth** (CI and production); **SQLite is a zero-infra dev accelerator** so a bare
 clone runs in seconds.
 
@@ -34,6 +34,7 @@ packages/
   db/             Drizzle schema (pg + sqlite) + migrations + seed + booking repository
   notifications/  EmailProvider port + adapters (log-only/noop/smtp/http) + booking notifier
   calendar/       CalendarProvider port (disabled default) — external free-busy + write-out
+  crm/            CrmProvider port + the HubSpot adapter (disabled default) — booking → CRM write-out
   shared/         i18n (en/es), timezone/slot/handle utils, growth attribution, design tokens
   config/         zod env schema + shared tsconfig/eslint/prettier presets
 ```
@@ -164,6 +165,15 @@ DB layer, run this before you push.
    REST contract to `CALENDAR_API_BASE_URL`; a real integration platform is a
    PRIVATE overlay loaded by `CALENDAR_BACKEND_MODULE` (gitignored `deploy/`),
    never committed here.
+   **R15 governs CALENDAR vendors only.** The CRM seam — `packages/crm`
+   (`CrmProvider`), selected by `CRM_PROVIDER` (`disabled` default, `hubspot`) —
+   is the one place a vendor IS named, per
+   [ADR 0001](docs/adr/0001-crm-integrations-are-open-core-and-name-their-vendor.md):
+   that integration is a public API plus a token the END USER pastes, so there is
+   no Dapta-side credential or contract to protect and the adapter ships in-repo.
+   Read the ADR before "fixing" the apparent violation. Per-account credentials
+   are AES-256-GCM encrypted in `account_integration`
+   (`packages/db/src/crypto.ts`) and are never returned to a client.
 8. **Entitlements behind a port — Calendars is ALWAYS free.** Premium perks (vanity
    slugs, …) gate through `apps/api/src/entitlements.provider.ts`, selected by
    `PREMIUM_FEATURES` (`open` default unlocks everything — a bare fork gets every
@@ -198,10 +208,15 @@ invariants above and the gates so CI does not surprise you.
 
 ## Branch flow
 
-Feature branch off `main` → PR **into `main`** (there is no long-lived `develop` in
-the public core). CI gates + one approving review gate the merge. `main` is always
-releasable; the private deploy overlay ships it (see `SELF-HOSTING.md` for how a
-self-hoster releases their own build).
+Feature/fix branch off `develop` → PR **into `develop`**. CI gates + one approving
+review gate the integration merge. Never target a feature/fix branch directly at
+`main`.
+
+After validation on `develop`, a release PR promotes **`develop` → `main`**.
+`main` is the production/release branch and must remain releasable; the private
+deploy overlay ships it (see `SELF-HOSTING.md` for how a self-hoster releases
+their own build). Keep `develop` synchronized with the released tree before
+starting new work so feature PRs contain only their intended changes.
 
 ## Common tasks (file pointers)
 
@@ -226,10 +241,24 @@ point `CALENDAR_BACKEND_MODULE` at a private overlay. See
 add a full message const (the interface forces complete key coverage), wire it into
 the message getter.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
+
 ## Related
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — request flows, package dependency
-  direction, the four ports/adapters seams, double-booking safety.
+  direction, the five ports/adapters seams, double-booking safety.
 - [`SELF-HOSTING.md`](SELF-HOSTING.md) — production deploy, full env reference,
   external calendar contract, upgrades/rollback, troubleshooting.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — DCO, commit conventions, PR flow.

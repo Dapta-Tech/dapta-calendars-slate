@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import type { BookingMessages } from '@slate/shared';
+import { t, type BookingMessages, type Locale } from '@slate/shared';
+import type { ApiScope } from '@slate/types';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
 import {
   createApiKeyAction,
@@ -17,18 +23,32 @@ import {
 
 type DevMessages = BookingMessages['admin']['developer'];
 
-const SCOPES = ['availability:read', 'bookings:read', 'bookings:write'];
+const SCOPES: ApiScope[] = [
+  'availability:read',
+  'event-types:read',
+  'calendars:read',
+  'bookings:read',
+  'bookings:write',
+];
 const TRIGGERS = ['booking.created', 'booking.rescheduled', 'booking.cancelled'];
 
-const createBtn = 'inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60';
-
-export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: DevMessages }) {
+export function ApiKeys({
+  keys,
+  messages: m,
+  locale,
+}: {
+  keys: ApiKeyRow[];
+  messages: DevMessages;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
+}) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(['availability:read']);
   const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
+  const { confirm, dialog } = useConfirmDialog(locale);
 
   const submit = () =>
     start(async () => {
@@ -41,47 +61,65 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
       }
     });
 
+  // A2 (#112): revoking used to be one click. A live key stops working the
+  // instant this returns and there is no undo, so it is asked for by name.
+  const askRevoke = async (k: ApiKeyRow) => {
+    const ok = await confirm({
+      title: m.revokeTitle,
+      message: t(m.revokeBody, { name: k.name }),
+      confirmLabel: m.revoke,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (!ok) return;
+    start(async () => {
+      const r = await revokeApiKeyAction(k.id);
+      if (r.ok) success(m.revokedToast);
+      else error(r.error ?? m.genericError);
+    });
+  };
+
   return (
-    <section className="mb-10">
-      <div className="mb-1 flex items-center justify-between gap-3">
+    <section className="mb-section">
+      <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
-        <button type="button" onClick={() => setOpen(true)} className={createBtn}>
+        <Button size="lg" onClick={() => setOpen(true)}>
           {m.createKey}
-        </button>
+        </Button>
       </div>
       {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
-      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
+      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
-        <div className="mb-4 rounded-md border border-primary bg-card p-3">
-          <p className="mb-1 text-sm text-muted-foreground">{m.copyOnce}</p>
-          <code className="break-all text-sm">{reveal}</code>
+        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+          <p className="mb-tight text-sm text-muted-foreground">{m.copyOnce}</p>
+          <code className="break-all font-mono text-sm">{reveal}</code>
         </div>
       ) : null}
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {keys.map((k) => (
-          <li key={k.id} className="flex items-center justify-between rounded-md border border-border bg-card p-3">
-            <span className="text-sm">
+          <li
+            key={k.id}
+            className="flex flex-wrap items-center justify-between gap-x-field gap-y-inline rounded-xl border border-border bg-card p-field"
+          >
+            <span className="min-w-0 flex-1 text-sm">
               <span className="font-medium">{k.name}</span>{' '}
-              <code className="text-muted-foreground">{k.prefix}…{k.last4}</code>
-              {k.revoked_at_ms ? <span className="ml-2 text-destructive">{m.revoked}</span> : null}
+              <code className="font-mono text-xs text-muted-foreground">
+                {k.prefix}…{k.last4}
+              </code>
+              {k.revoked_at_ms ? <span className="ml-inline text-destructive">{m.revoked}</span> : null}
             </span>
             {!k.revoked_at_ms ? (
-              <button
-                type="button"
+              <Button
+                variant="destructive"
+                size="lg"
                 disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    const r = await revokeApiKeyAction(k.id);
-                    if (r.ok) success(m.revokedToast);
-                    else error(r.error ?? m.genericError);
-                  })
-                }
-                className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
+                aria-label={`${m.revoke} · ${k.name}`}
+                onClick={() => void askRevoke(k)}
               >
                 {m.revoke}
-              </button>
+              </Button>
             ) : null}
           </li>
         ))}
@@ -89,36 +127,43 @@ export function ApiKeys({ keys, messages: m }: { keys: ApiKeyRow[]; messages: De
       </ul>
 
       <Modal open={open} onClose={() => setOpen(false)} title={m.createKey} labelId="new-api-key-title">
-        <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-card">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.name}</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="rounded-md border border-input bg-background px-3 py-2" />
+            <Input
+              value={name}
+              data-modal-autofocus
+              className="min-h-control"
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.scopes}</span>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col">
               {SCOPES.map((s) => (
-                <label key={s} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
+                <label key={s} className="flex min-h-control cursor-pointer items-center gap-inline">
+                  <Checkbox
                     checked={scopes.includes(s)}
-                    onChange={(e) => setScopes((cur) => (e.target.checked ? [...cur, s] : cur.filter((x) => x !== s)))}
+                    onChange={(e) =>
+                      setScopes((cur) => (e.target.checked ? [...cur, s] : cur.filter((x) => x !== s)))
+                    }
                   />
-                  {s}
+                  <code className="font-mono text-xs text-foreground">{s}</code>
                 </label>
               ))}
             </div>
           </div>
-          <div className="mt-1 flex justify-end gap-2">
-            <button type="button" onClick={() => setOpen(false)} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
+            <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
               {m.cancel}
-            </button>
-            <button type="button" disabled={pending || !name || scopes.length === 0} onClick={submit} className={createBtn}>
-              {pending ? '…' : m.createKey}
-            </button>
+            </Button>
+            <Button size="lg" disabled={pending || !name || scopes.length === 0} onClick={submit}>
+              {pending ? m.creating : m.createKey}
+            </Button>
           </div>
         </div>
       </Modal>
+      {dialog}
     </section>
   );
 }
@@ -128,11 +173,13 @@ function WebhookItem({
   start,
   pending,
   m,
+  onAskDelete,
 }: {
   w: WebhookRow;
   start: (fn: () => void | Promise<void>) => void;
   pending: boolean;
   m: DevMessages;
+  onAskDelete: (w: WebhookRow) => void;
 }) {
   const [ping, setPing] = useState<string | null>(null);
   // Delivery history (QA fix 10): fetched lazily on expand — proof that real
@@ -143,74 +190,88 @@ function WebhookItem({
   const [showDeliveries, setShowDeliveries] = useState(false);
   const { success, error } = useToast();
   return (
-    <li className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
-      <div className="flex items-center justify-between gap-3">
-        <code className="break-all text-sm">{w.subscriber_url}</code>
-        <span className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
+    <li className="flex flex-col gap-inline rounded-xl border border-border bg-card p-field">
+      {/* Stacks at 360px: the URL owns the first line, the controls the next. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-field gap-y-inline">
+        <code className="min-w-0 flex-1 break-all font-mono text-xs">{w.subscriber_url}</code>
+        <span className="flex flex-wrap items-center gap-inline">
+          {/* A <span>, not a <label>. `Switch` renders `<button role="switch">`,
+              and a button is NOT a labelable element — wrapping it in a label
+              would neither make the word clickable nor make it the control's
+              programmatic name. The name is the `aria-label`, which also carries
+              the URL so a screen reader knows WHICH webhook it is toggling; the
+              word beside it is the visible caption, as on the notifications
+              rows. */}
+          <span className="flex min-h-control items-center gap-inline text-xs text-muted-foreground">
+            <Switch
               checked={w.active === 1}
               disabled={pending}
-              onChange={(e) =>
+              aria-label={`${m.active} · ${w.subscriber_url}`}
+              onCheckedChange={(next) =>
                 start(async () => {
-                  const r = await toggleWebhookAction(w.id, e.target.checked);
+                  const r = await toggleWebhookAction(w.id, next);
                   if (r.ok) success(m.toggledToast);
                   else error(r.error ?? m.genericError);
                 })
               }
             />
             {m.active}
-          </label>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}
-            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary disabled:opacity-60"
-          >
+          </span>
+          <Button variant="outline" size="lg" disabled={pending} onClick={() => start(async () => setPing((await pingWebhookAction(w.id)).message))}>
             {m.ping}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
             disabled={pending}
+            aria-expanded={showDeliveries}
             onClick={() => {
               const next = !showDeliveries;
               setShowDeliveries(next);
               if (next && deliveries === null)
                 start(async () => setDeliveries((await webhookDeliveriesAction(w.id)).items));
             }}
-            className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
-            aria-expanded={showDeliveries}
           >
+            <i
+              aria-hidden
+              className={`pi ${showDeliveries ? 'pi-chevron-down' : 'pi-chevron-right'}`}
+              style={{ fontSize: 12 }}
+            />
             {m.deliveries}
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              start(async () => {
-                const r = await deleteWebhookAction(w.id);
-                if (r.ok) success(m.deletedToast);
-                else error(r.error ?? m.genericError);
-              })
-            }
-            className="rounded-md border border-destructive px-3 py-1 text-sm text-destructive disabled:opacity-60"
+          </Button>
+          <Button
+            variant="destructive"
+            size="lg"
+            disabled={pending}
+            aria-label={`${m.delete} · ${w.subscriber_url}`}
+            onClick={() => onAskDelete(w)}
           >
             {m.delete}
-          </button>
+          </Button>
         </span>
       </div>
       {ping ? <span className="text-xs text-muted-foreground">{ping}</span> : null}
       {showDeliveries ? (
         deliveries === null ? (
-          <span className="text-xs text-muted-foreground">…</span>
+          <span className="text-xs text-muted-foreground">{m.loading}</span>
         ) : deliveries.length === 0 ? (
           <span className="text-xs text-muted-foreground">{m.noDeliveries}</span>
         ) : (
-          <ul className="flex flex-col gap-1 border-t border-border pt-2">
+          <ul className="flex flex-col gap-tight border-t border-border pt-inline">
             {deliveries.map((d) => (
-              <li key={d.id} className="flex items-center gap-2 text-xs">
-                <span className={d.ok ? 'text-primary' : 'text-destructive'}>{d.ok ? '✓' : '✗'}</span>
-                <code>{d.event}</code>
+              <li key={d.id} className="flex flex-wrap items-center gap-inline text-xs">
+                {/* Was a bare ✓ / ✗ — a glyph doing an icon's job, with no
+                    accessible name. Now the design language's own mark, with
+                    the outcome spelled out for a screen reader. */}
+                <span className={d.ok ? 'text-primary' : 'text-destructive'}>
+                  <i
+                    aria-hidden
+                    className={`pi ${d.ok ? 'pi-check-circle' : 'pi-times-circle'}`}
+                    style={{ fontSize: 12 }}
+                  />
+                  <span className="sr-only">{d.ok ? m.deliveryOk : m.deliveryFailed}</span>
+                </span>
+                <code className="font-mono">{d.event}</code>
                 <span className="text-muted-foreground">
                   {d.statusCode ? `HTTP ${d.statusCode}` : (d.error ?? '')}
                 </span>
@@ -226,67 +287,130 @@ function WebhookItem({
   );
 }
 
-export function Webhooks({ webhooks, messages: m }: { webhooks: WebhookRow[]; messages: DevMessages }) {
+export function Webhooks({
+  webhooks,
+  messages: m,
+  locale,
+}: {
+  webhooks: WebhookRow[];
+  messages: DevMessages;
+  /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
+  locale?: Locale;
+}) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [triggers, setTriggers] = useState<string[]>(['booking.created']);
+  const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const { success, error } = useToast();
+  const { confirm, dialog } = useConfirmDialog(locale);
 
+  /**
+   * W (#75): the reply is now load-bearing in both directions, so neither half
+   * may be dropped.
+   *
+   * On success the signing secret comes back ONCE — it is an envelope at rest
+   * from here on, with no read endpoint — so it is revealed the way a new API
+   * key is, immediately above the list. On failure the modal STAYS OPEN with the
+   * typed url intact: a deployment with no encryption key refuses every create,
+   * and closing the form on that answer would read as success.
+   */
   const submit = () =>
     start(async () => {
-      await createWebhookAction(url, triggers);
+      const r = await createWebhookAction(url, triggers);
+      if (!r.ok) {
+        error(r.code === 'INTEGRATION_KEY_MISSING' ? m.webhookNoKeyError : (r.error ?? m.genericError));
+        return;
+      }
+      setReveal(r.secret ?? null);
       setUrl('');
       setTriggers(['booking.created']);
       setOpen(false);
     });
 
+  // A2 (#112): deleting a webhook silently killed a live integration AND burned
+  // its signing secret, which no endpoint hands back. It asks first, by URL.
+  const askDelete = async (w: WebhookRow) => {
+    const ok = await confirm({
+      title: m.deleteWebhookTitle,
+      message: t(m.deleteWebhookBody, { url: w.subscriber_url }),
+      confirmLabel: m.delete,
+      cancelLabel: m.cancel,
+      destructive: true,
+    });
+    if (!ok) return;
+    start(async () => {
+      const r = await deleteWebhookAction(w.id);
+      if (r.ok) success(m.deletedToast);
+      else error(r.error ?? m.genericError);
+    });
+  };
+
   return (
     <section>
-      <div className="mb-1 flex items-center justify-between gap-3">
+      <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.webhooks}</h2>
-        <button type="button" onClick={() => setOpen(true)} className={createBtn}>
+        <Button size="lg" onClick={() => setOpen(true)}>
           {m.addWebhook}
-        </button>
+        </Button>
       </div>
-      <p className="mb-3 max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
-      <ul className="flex flex-col gap-2">
+      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
+
+      {/* The one and only chance to read this secret — it is encrypted at rest
+          from here on, and no endpoint gives it back (W / #75). */}
+      {reveal ? (
+        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+          <p className="mb-tight text-sm text-muted-foreground">{m.webhookSecretCopyOnce}</p>
+          <code className="break-all font-mono text-sm">{reveal}</code>
+        </div>
+      ) : null}
+
+      <ul className="flex flex-col gap-inline">
         {webhooks.map((w) => (
-          <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} />
+          <WebhookItem key={w.id} w={w} start={start} pending={pending} m={m} onAskDelete={(x) => void askDelete(x)} />
         ))}
         {webhooks.length === 0 ? <li className="text-sm text-muted-foreground">{m.noWebhooks}</li> : null}
       </ul>
 
       <Modal open={open} onClose={() => setOpen(false)} title={m.addWebhook} labelId="new-webhook-title">
-        <div className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-card">
+          <label className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.subscriberUrl}</span>
-            <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className="rounded-md border border-input bg-background px-3 py-2" />
+            <Input
+              value={url}
+              placeholder="https://…"
+              data-modal-autofocus
+              className="min-h-control"
+              onChange={(e) => setUrl(e.target.value)}
+            />
           </label>
-          <div className="flex flex-col gap-1 text-sm">
+          <div className="flex flex-col gap-tight text-sm">
             <span className="text-muted-foreground">{m.events}</span>
-            <div className="flex flex-wrap gap-3">
-              {TRIGGERS.map((t) => (
-                <label key={t} className="flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={triggers.includes(t)}
-                    onChange={(e) => setTriggers((cur) => (e.target.checked ? [...cur, t] : cur.filter((x) => x !== t)))}
+            <div className="flex flex-col">
+              {TRIGGERS.map((tr) => (
+                <label key={tr} className="flex min-h-control cursor-pointer items-center gap-inline">
+                  <Checkbox
+                    checked={triggers.includes(tr)}
+                    onChange={(e) =>
+                      setTriggers((cur) => (e.target.checked ? [...cur, tr] : cur.filter((x) => x !== tr)))
+                    }
                   />
-                  {t.replace('booking.', '')}
+                  {tr.replace('booking.', '')}
                 </label>
               ))}
             </div>
           </div>
-          <div className="mt-1 flex justify-end gap-2">
-            <button type="button" onClick={() => setOpen(false)} className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm">
+          <div className="mt-tight flex flex-wrap justify-end gap-inline">
+            <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
               {m.cancel}
-            </button>
-            <button type="button" disabled={pending || !url} onClick={submit} className={createBtn}>
-              {pending ? '…' : m.addWebhook}
-            </button>
+            </Button>
+            <Button size="lg" disabled={pending || !url} onClick={submit}>
+              {pending ? m.creating : m.addWebhook}
+            </Button>
           </div>
         </div>
       </Modal>
+      {dialog}
     </section>
   );
 }

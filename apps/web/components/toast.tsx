@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       <div
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-inline p-card sm:items-end"
         aria-live="polite"
         aria-atomic="false"
       >
@@ -53,7 +53,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={t.id}
             role={t.type === 'error' ? 'alert' : 'status'}
             className={[
-              'pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border px-4 py-3 text-sm shadow-lg',
+              'pointer-events-auto flex w-full max-w-sm items-start gap-field rounded-md border px-card py-field text-sm shadow-lg',
               'bg-popover text-popover-foreground',
               t.type === 'error' ? 'border-destructive' : t.type === 'success' ? 'border-primary/50' : 'border-border',
             ].join(' ')}
@@ -61,7 +61,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <span
               aria-hidden
               className={
-                'mt-0.5 h-2 w-2 shrink-0 rounded-full ' +
+                'mt-tight h-2 w-2 shrink-0 rounded-full ' +
                 (t.type === 'error' ? 'bg-destructive' : t.type === 'success' ? 'bg-primary' : 'bg-muted-foreground')
               }
             />

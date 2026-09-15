@@ -64,6 +64,8 @@ export interface DiscoveredConnection {
   connectionRef: string;
   provider: string;
   primaryEmail?: string | null;
+  /** The connected account's profile photo, when the backend reports one. */
+  avatarUrl?: string | null;
   name?: string | null;
   /** The vendor's own connection id (may equal connectionRef; kept distinct
    *  in case a wire ever needs to encode connectionRef differently). */
@@ -155,10 +157,13 @@ export interface ExternalCalendarOptions {
    * consent screen instead of an intermediate hosted page.
    */
   startConnect?: (provider: string, tenantKey: string) => Promise<ConnectStart>;
+  /** Display name for the conferencing this backend mints (deploy config). */
+  conferencingLabel?: string | null;
 }
 
 export class ExternalCalendarProvider implements CalendarProvider {
   readonly enabled = true;
+  readonly conferencingLabel: string | null;
   private readonly baseUrl: string;
   private readonly tokens: CalendarTokenSource;
   private readonly wire: CalendarWire;
@@ -173,6 +178,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.startConnectOverride = opts.startConnect;
+    this.conferencingLabel = opts.conferencingLabel ?? null;
   }
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
@@ -182,7 +188,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
     // sorts/merges the union itself, so an unsorted concat is fine.
     const out: BusyInterval[] = [];
     for (const ref of input.connectionRefs) {
-      const req = this.wire.listBusy({ connectionRefs: [ref], fromUtc: input.fromUtc, toUtc: input.toUtc });
+      const req = this.wire.listBusy({
+        connectionRefs: [ref],
+        calendarIds: input.calendarIds,
+        fromUtc: input.fromUtc,
+        toUtc: input.toUtc,
+      });
       out.push(...this.wire.parseBusy(await this.send('listBusy', req)));
     }
     return out;

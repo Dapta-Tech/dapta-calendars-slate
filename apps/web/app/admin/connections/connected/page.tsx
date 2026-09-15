@@ -8,10 +8,11 @@ const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 export const metadata = { title: `Connected — ${PRODUCT_NAME}` };
 
 /**
- * The OAuth popup's landing page (Bug C). Membrane redirects the popup here
- * once the provider handshake completes — success as `?connectionId=<id>`,
- * failure as `?error=<message>&errorData=<json>&connectionId=<id>` — instead
- * of stranding the user on Membrane's own "you can close this tab" page. The
+ * The OAuth popup's landing page (Bug C). The calendar backend redirects the
+ * popup here once the provider handshake completes — success as
+ * `?connectionId=<id>`, failure as
+ * `?error=<message>&errorData=<json>&connectionId=<id>` — instead of
+ * stranding the user on that backend's own "you can close this tab" page. The
  * LAST thing the user sees is Dapta Calendars, branded, with an immediate
  * auto-close (success) or a readable failure (error present) + a signal back
  * to the opener modal (see connected-client.tsx). No admin data is read

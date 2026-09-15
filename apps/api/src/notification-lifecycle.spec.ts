@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   createDb,
   migrate,
@@ -8,6 +9,7 @@ import {
   createWebhook,
   getAvailability,
   listOutbox,
+  loadEncryptionKey,
   type Db,
 } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
@@ -15,6 +17,7 @@ import { BookingNotifier } from '@slate/notifications';
 import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notifications';
 import { loadServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { BookingService } from './booking.service';
 import { AdminService } from './admin.service';
@@ -28,7 +31,17 @@ class RecordingEmailProvider implements EmailProvider {
   }
 }
 
-const ENV = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
+/**
+ * W (#75): webhook secrets are enveloped at rest, so the worker that signs a
+ * delivery has to hold the same key the row was sealed with — the env carries it
+ * here exactly as a real deployment's `.env` does.
+ */
+const WEBHOOK_KEY_B64 = randomBytes(32).toString('base64');
+const WEBHOOK_KEY = loadEncryptionKey(WEBHOOK_KEY_B64);
+const ENV = loadServerEnv({
+  NODE_ENV: 'test',
+  INTEGRATION_ENCRYPTION_KEY: WEBHOOK_KEY_B64,
+} as NodeJS.ProcessEnv);
 /** Let the services' void-ed fire-and-forget enqueues settle before draining. */
 const settle = async () => {
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
@@ -73,7 +86,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     booking = new BookingService(db, ENV, calendar, emailEffects);
     admin = new AdminService(db, calendar, emailEffects);
-    worker = new OutboxWorker(db, ENV, calendar, emailEffects);
+    worker = new OutboxWorker(db, ENV, calendar, emailEffects, new DaptaSyncEffects(ENV));
     worker.fetchImpl = fakeFetch;
   });
 
@@ -149,6 +162,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.cancelled'],
+      key: WEBHOOK_KEY,
     });
     const res = await booking.book({
       accountCode: 'acme',
@@ -178,6 +192,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
       accountId,
       subscriberUrl: 'https://198.51.100.10/hook',
       eventTriggers: ['booking.cancelled'],
+      key: WEBHOOK_KEY,
     });
     const uid = await bookAccepted();
     email.sent.length = 0;

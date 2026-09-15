@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
 
 /** Must match the constants in connections-client.tsx (the opener side). */
 const CONNECT_SIGNAL_CHANNEL = 'slate-connect-signal';
@@ -14,10 +15,10 @@ interface ConnectSignal {
 
 /**
  * The OAuth popup's landing page (Bug C — the popup used to strand the user
- * on Membrane's own "you can close this tab" page instead of returning to
- * Dapta Calendars). Membrane redirects the popup here as a same-origin
- * request with `?connectionId=` on success or `?error=&errorData=` on
- * failure. On mount this:
+ * on the calendar backend's own "you can close this tab" page instead of
+ * returning to Dapta Calendars). That backend redirects the popup here as a
+ * same-origin request with `?connectionId=` on success or
+ * `?error=&errorData=` on failure. On mount this:
  *  1. Signals the opener with the actual outcome via BroadcastChannel AND a
  *     `localStorage` write (the `storage` event only fires in OTHER browsing
  *     contexts of the same origin — exactly the opener tab — so this is a
@@ -70,7 +71,7 @@ export function ConnectedClient({
   }, [error]);
 
   return (
-    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-card px-group text-center">
       <span
         aria-hidden
         className={`flex h-12 w-12 items-center justify-center rounded-full ${
@@ -89,16 +90,12 @@ export function ConnectedClient({
       </span>
       <div>
         <h1 className="text-xl font-semibold">{error ? m.errorTitle : m.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{error ? m.errorBody : m.body}</p>
+        <p className="mt-tight text-sm text-muted-foreground">{error ? m.errorBody : m.body}</p>
       </div>
       {showFallback ? (
-        <button
-          type="button"
-          onClick={() => window.close()}
-          className="inline-flex min-h-[44px] items-center rounded-md border border-border px-4 py-2.5 text-sm transition-colors hover:border-primary"
-        >
+        <Button variant="outline" size="lg" onClick={() => window.close()}>
           {m.close}
-        </button>
+        </Button>
       ) : null}
     </main>
   );

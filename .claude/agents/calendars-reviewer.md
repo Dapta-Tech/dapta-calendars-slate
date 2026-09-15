@@ -12,7 +12,7 @@ strangers; a fork with nothing configured must still run.
 ## How to run a review
 
 1. Establish the diff. Prefer `git diff --stat` and `git diff` against the base
-   branch (`git merge-base HEAD origin/main`), or review the uncommitted working
+   branch (`git merge-base HEAD origin/develop`), or review the uncommitted working
    tree if there is no branch yet. List the changed files first.
 2. Read the changed files and enough surrounding code to judge them.
 3. Where a claim is checkable, verify it with a command (`pnpm typecheck`,
@@ -77,7 +77,7 @@ strangers; a fork with nothing configured must still run.
 ## The gates you also check
 
 - **DCO**: every non-merge commit in the branch has a `Signed-off-by:` line
-  (`git log --format=%B origin/main..HEAD | grep -c Signed-off-by`).
+  (`git log --format=%B origin/develop..HEAD | grep -c Signed-off-by`).
 - **Conventional Commit** titles.
 - **Tests + types + lint** pass, and the **Postgres parity** DB test passes if the
   DB layer changed (see `CLAUDE.md` → How to test).

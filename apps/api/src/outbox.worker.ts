@@ -3,11 +3,13 @@ import {
   Injectable,
   Logger,
   type OnModuleDestroy,
+  Optional,
   type OnModuleInit,
 } from '@nestjs/common';
 import {
   claimDueOutbox,
   deliverWebhookEvent,
+  loadEncryptionKey,
   markOutboxDone,
   markOutboxFailed,
   markOutboxRetry,
@@ -17,6 +19,8 @@ import {
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
+import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects, OutboxSkipError } from './email-effects';
 import { DB, ENV } from './tokens';
 
@@ -54,7 +58,42 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     // the class a value and gives Nest the token directly.
     @Inject(CalendarEffects) private readonly calendar: CalendarEffects,
     @Inject(EmailEffects) private readonly email: EmailEffects,
+    @Inject(DaptaSyncEffects) private readonly daptaSync: DaptaSyncEffects,
+    // H1a. LAST and @Optional() for the same reason as the lifecycle services:
+    // the existing worker specs construct this positionally, and a worker with
+    // no CRM handler simply has no `crm` rows to drain.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
+
+  /**
+   * The webhook signing key (#75), resolved once and cached — including the
+   * "no key" answer, which is a normal state for a deployment whose webhook
+   * secrets are all legacy plaintext. Cached because the worker asks per
+   * delivery and the answer cannot change without a restart.
+   */
+  private cachedWebhookKey: Buffer | null | undefined;
+  private webhookKey(): Buffer | null {
+    if (this.cachedWebhookKey === undefined) {
+      try {
+        this.cachedWebhookKey = loadEncryptionKey(this.env.INTEGRATION_ENCRYPTION_KEY);
+      } catch (err) {
+        this.cachedWebhookKey = null;
+        // Warned ONCE, at the moment the answer is decided. A key that is set
+        // but malformed is the state that otherwise hides: legacy plaintext
+        // rows keep signing and nothing is ever re-sealed, so without this line
+        // the deployment looks healthy while quietly doing nothing it was
+        // configured to do. The message names the variable, never a secret.
+        if (this.env.INTEGRATION_ENCRYPTION_KEY) {
+          this.log.warn(
+            `webhook signing key unusable, encrypted secrets cannot be opened: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    }
+    return this.cachedWebhookKey;
+  }
 
   onModuleInit(): void {
     if (!this.env.OUTBOX_WORKER_ENABLED || this.env.NODE_ENV === 'test') return;
@@ -131,19 +170,51 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
       await this.calendar.runCalendarJob(row.action as CalendarAction, row.bookingUid);
       return;
     }
+    // H1a (#63): ONE row does both halves of the CRM write-out — resolve the
+    // contact, then create the meeting associated to it. Retries are safe: the
+    // DH1 claim on `booking_reference` means a re-run cannot create a second
+    // meeting.
+    if (row.kind === 'crm') {
+      if (!row.bookingUid) throw new Error('crm outbox row missing booking_uid');
+      if (!this.crm) throw new Error('crm outbox row with no CRM handler wired');
+      await this.crm.runCrmJob(row.action, row.bookingUid);
+      return;
+    }
     if (row.kind === 'webhook') {
       if (!row.webhookId || row.payload == null)
         throw new Error('webhook outbox row missing webhook_id/payload');
       await deliverWebhookEvent(
         this.db,
-        { webhookId: row.webhookId, body: row.payload },
+        {
+          webhookId: row.webhookId,
+          body: row.payload,
+          // #75: null is a valid state (a deployment with only legacy plaintext
+          // secrets). An ENCRYPTED secret with no key throws inside, which the
+          // catch below turns into a normal retry — so a key removed by mistake
+          // shows up as retrying deliveries, never as unsigned ones.
+          key: this.webhookKey(),
+        },
         this.fetchImpl,
       );
       return;
     }
     if (row.kind === 'email') {
       if (row.payload == null) throw new Error('email outbox row missing payload');
-      await this.email.deliver(row.action, row.payload, row.accountId);
+      // `attempts` bounds the conferencing-link wait (ADR 0007): the delivery
+      // side needs to know how long it has already waited to decide when to
+      // stop waiting and send the mail without the link.
+      await this.email.deliver(row.action, row.payload, row.accountId, row.attempts);
+      return;
+    }
+    // O2 growth (#94). Two kinds, never one: the contact upsert and the
+    // lead-score post retry independently, so a CRM outage can never re-post
+    // the qualification responses and mint a second lead score.
+    if (row.kind === 'dapta_sync') {
+      await this.daptaSync.deliverContact(row.action, row.payload);
+      return;
+    }
+    if (row.kind === 'iam_onboarding') {
+      await this.daptaSync.deliverLeadScore(row.action, row.payload);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);

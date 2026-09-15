@@ -93,11 +93,11 @@ export function AppSwitcher({
           ref={menuRef}
           role="menu"
           aria-label={m.menuLabel}
-          className={`absolute z-50 mt-2 w-60 rounded-md border border-border bg-popover p-1.5 text-popover-foreground shadow-lg ${
+          className={`absolute z-50 mt-inline w-60 rounded-md border border-border bg-popover p-inline text-popover-foreground shadow-lg ${
             collapsed ? 'left-0' : 'left-0'
           }`}
         >
-          <p className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="px-inline py-tight text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {m.eyebrow}
           </p>
 
@@ -109,7 +109,7 @@ export function AppSwitcher({
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2.5 rounded-sm px-2 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <img src="/dapta-mark.png" alt="" width={24} height={24} className="h-6 w-6 shrink-0 rounded-md object-contain" />
             <span className="flex-1 truncate">Dapta AI</span>
@@ -122,7 +122,7 @@ export function AppSwitcher({
             role="menuitem"
             tabIndex={-1}
             aria-current="true"
-            className="flex items-center gap-2.5 rounded-sm bg-muted px-2 py-2 text-sm font-medium"
+            className="flex items-center gap-field rounded-sm bg-muted px-inline py-inline text-sm font-medium"
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
               {PRODUCT_NAME.charAt(0)}
@@ -136,13 +136,13 @@ export function AppSwitcher({
             role="menuitem"
             tabIndex={-1}
             aria-disabled="true"
-            className="flex items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-muted-foreground"
+            className="flex items-center gap-field rounded-sm px-inline py-inline text-sm text-muted-foreground"
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground" aria-hidden>
               <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
             </span>
             <span className="flex-1 truncate">{m.forms}</span>
-            <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+            <span className="rounded-full border border-border px-inline py-tight text-2xs font-medium uppercase tracking-wide">
               {m.comingSoon}
             </span>
           </span>

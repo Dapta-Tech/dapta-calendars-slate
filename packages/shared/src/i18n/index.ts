@@ -51,6 +51,76 @@ export interface BookingMessages {
     with: string;
     seatsLeft: string;
     full: string;
+    /**
+     * Duplicate-booking guard (#69 / AB1). Its own block, and its own card on
+     * the booking page: a `DUPLICATE_BOOKING` is a 409 like a taken slot, but
+     * the block is on the address rather than the time, so `slotTaken` +
+     * `pickAnother` would send the booker to do the one thing that cannot
+     * help. `body` names NO date, time or host — see `duplicate-guard.ts`.
+     */
+    duplicateGuard: {
+      title: string;
+      body: string;
+      changeEmail: string;
+    };
+    /**
+     * One-off links (#69 / AB2, #110) — the PUBLIC half, shown to the invitee
+     * who opens a link that is already spent.
+     *
+     * Its own block rather than more keys on `duplicateGuard`, because the two
+     * say different things to different people: AB1's card tells a booker their
+     * address already has a booking, this one tells a person their invite link
+     * has been used. There is no retry and no "pick another": nothing the
+     * invitee can do here resolves it, so the copy sends them to the organizer
+     * instead of offering an action that cannot work.
+     *
+     * Says nothing about WHY it is dead. Consumed and revoked are one state to
+     * an invitee, and "the organizer cancelled this link" is a message about
+     * the host's intentions that the host may not want relayed.
+     */
+    oneOffLink: {
+      usedTitle: string;
+      usedBody: string;
+    };
+  };
+  /**
+   * The three-region public event page (BP): event panel, month calendar, day
+   * column. Its own block rather than more keys on `booking`, because these
+   * words belong to the LAYOUT — region names, month navigation, the 12h/24h
+   * toggle — while `booking` owns the flow (pick, hold, confirm, fail) that
+   * runs inside it and is also used by surfaces with no calendar at all.
+   */
+  bookingPage: {
+    /** Landmark names, read by a screen reader as it moves between regions. */
+    detailsRegion: string;
+    calendarRegion: string;
+    timesRegion: string;
+    /** The attendee form's landmark, once a time has been chosen. */
+    yourDetails: string;
+    /** Term for the team scheduling method shown in the panel. */
+    method: string;
+    previousMonth: string;
+    nextMonth: string;
+    /** Marks the current day in the grid; visually a dot, here for the label. */
+    today: string;
+    /** The day column before any day is chosen. */
+    pickADay: string;
+    /** A chosen day that turns out to have nothing bookable on it. */
+    noTimesOnDay: string;
+    /** Heading over the day column: "Times on Mon, Sep 14". */
+    timesOn: string;
+    timeFormat: string;
+    hour12: string;
+    hour24: string;
+    /** Label for the duration chip (one duration today, a selector later). */
+    duration: string;
+    /** Leaves the filled-in form and goes back to the slot list. */
+    backToTimes: string;
+    /** Opens the rest of a long event description, which is clamped so that a
+     *  host who writes an essay cannot push the duration and the timezone below
+     *  the fold. */
+    descriptionMore: string;
+    descriptionLess: string;
   };
   manage: {
     title: string;
@@ -71,8 +141,18 @@ export interface BookingMessages {
     statusRejected: string;
     cancelThis: string;
     noOpenTimes: string;
-    whereLabel: string;
     joinMeeting: string;
+    /** Appended to the join link for screen readers. It opens in a new tab, and
+     *  saying so is the whole point — so it cannot be hardcoded English on a
+     *  page whose locale comes from the invitee's own link. */
+    joinMeetingOpensNewTab: string;
+    /** Shown in place of the date line when the booking's start instant did not
+     *  parse — a readable line instead of a thrown render (#123). */
+    timeUnreadable: string;
+    /** Shown when the manage link no longer opens a booking — usually because
+     *  the token rotated on an earlier reschedule (#123). */
+    linkInvalidTitle: string;
+    linkInvalidBody: string;
   };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
@@ -82,6 +162,28 @@ export interface BookingMessages {
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
+  };
+  /** Public landing pages — the host profile and the team entry page (#141). */
+  landing: {
+    /** Header line under the team name on the team landing page. */
+    timesIn: string;
+    /** Empty state on the host landing page. */
+    noEvents: string;
+    /** Empty state on the team landing page. */
+    noTeamEvents: string;
+  };
+  /**
+   * Location kind labels — WHERE a meeting happens. Shared by the public
+   * booking page, the manage page and the event-type editor so one kind reads
+   * the same everywhere. No conferencing vendor is named (R15); the running
+   * product may override `conferencing` with a runtime label (ADR 0008).
+   */
+  location: {
+    whereLabel: string;
+    conferencing: string;
+    inPerson: string;
+    phone: string;
+    custom: string;
   };
   /** Team scheduling method names (the FREE layer competitors paywall). */
   scheduling: {
@@ -104,6 +206,21 @@ export interface BookingMessages {
     noResults: string;
     invalid: string;
     countryLabel: string;
+  };
+  /**
+   * Generic token-styled listbox (`Select`, reskin slice P) — a sibling of
+   * `tzPicker`/`phonePicker`: a shared primitive that owns its OWN copy, so a
+   * caller never threads these two strings through. Only the search affordance
+   * needs words; the options are the caller's.
+   */
+  select: {
+    search: string;
+    noResults: string;
+  };
+  /** Generic dialog actions — the `ConfirmDialog` defaults (reskin slice P). */
+  dialog: {
+    confirm: string;
+    cancel: string;
   };
   /** Admin dashboard surface (F8 parity). Reuses the same catalog/locale mechanism. */
   admin: {
@@ -140,6 +257,9 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
+       *  new tab. The icon says it visually; this says it out loud. */
+      opensNewTab: string;
       switcher: {
         trigger: string;
         menuLabel: string;
@@ -147,6 +267,13 @@ export interface BookingMessages {
         comingSoon: string;
         opensNewTab: string;
         forms: string;
+      };
+      /** Product theme switch (rail footer). Both strings name the DESTINATION,
+       *  not the current state — a control reading "Dark" is ambiguous about
+       *  whether that is where you are or where you are going. */
+      theme: {
+        toLight: string;
+        toDark: string;
       };
     };
     home: {
@@ -178,8 +305,9 @@ export interface BookingMessages {
       setupHoursTitle: string;
       setupHoursDesc: string;
       setupHoursAction: string;
-      setupLinkTitle: string;
-      setupLinkDesc: string;
+      setupEventTitle: string;
+      setupEventDesc: string;
+      setupEventAction: string;
       setupDone: string;
     };
     settings: {
@@ -190,6 +318,8 @@ export interface BookingMessages {
       members: string;
       developer: string;
       notifications: string;
+      /** Tab label. The tab's own copy lives at `admin.integrations`. */
+      integrations: string;
     };
     eventTypes: {
       title: string;
@@ -203,6 +333,12 @@ export interface BookingMessages {
       fDescription: string;
       fLocation: string;
       locationPlaceholder: string;
+      locationNone: string;
+      locationDetailAddress: string;
+      locationDetailPhone: string;
+      locationDetailCustom: string;
+      locationConferencingHint: string;
+      locationNoDestinationWarning: string;
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
@@ -214,6 +350,49 @@ export interface BookingMessages {
       noSchedules: string;
       requiresConfirmation: string;
       hiddenLabel: string;
+      /**
+       * Duplicate-booking guard (#69 / AB1) — the editor half. Never call it a
+       * rate limit or an abuse control in either locale: it counts an email
+       * nobody verifies, so it prevents accidents (CONTEXT.md).
+       */
+      duplicateGuard: {
+        label: string;
+        hint: string;
+      };
+      /**
+       * One-off links (#69 / AB2, #110) — the editor half.
+       *
+       * Never call it a security control in either locale: it stops a link
+       * pasted to one person being forwarded and re-used, and it authenticates
+       * nobody (the per-IP limiter is the security control). Same framing rule
+       * as `duplicateGuard` above.
+       *
+       * `publicWarning` is requirement 4 of #110 and it is COPY PLUS A
+       * CONDITION, never a block: a link over a publicly bookable event limits
+       * nothing, and the host has to learn that where they mint it rather than
+       * from a doc — but they may have a reason, so nothing is disabled.
+       */
+      oneOffLinks: {
+        title: string;
+        hint: string;
+        mint: string;
+        minted: string;
+        /** Minting copies the new link too — one toast reports both. */
+        copiedOnMint: string;
+        copy: string;
+        copied: string;
+        revoke: string;
+        revoked: string;
+        empty: string;
+        saveFirst: string;
+        publicWarning: string;
+        stateLive: string;
+        stateConsumed: string;
+        stateRevoked: string;
+        /** `{date}` — when it was minted. */
+        createdAt: string;
+        failed: string;
+      };
       intakeQuestions: string;
       /** Reorder + reserved-name hard block (QA3 fixes 3, 6). */
       moveUp: string;
@@ -269,6 +448,102 @@ export interface BookingMessages {
       calendarsCheckConflicts: string;
       calendarsAddEventsHere: string;
       calendarsManageLink: string;
+      /** R (#91) — reminders + follow-up, owned by the event type (#68). */
+      reminders: {
+        sectionTitle: string;
+        sectionHint: string;
+        beforeMeeting: string;
+        afterMeeting: string;
+        addReminder: string;
+        /** {max} interpolates the per-event cap. */
+        capReached: string;
+        sendLabel: string;
+        unitMinutes: string;
+        unitHours: string;
+        unitDays: string;
+        beforeStart: string;
+        afterEnd: string;
+        subjectLabel: string;
+        bodyLabel: string;
+        defaultCopyHint: string;
+        remove: string;
+        followUpHint: string;
+        variablesLabel: string;
+        formVariablesLabel: string;
+        noFormVariables: string;
+        /** {tokens} interpolates the dangling `{{form.*}}` variables. */
+        danglingWarn: string;
+        enabledLabel: string;
+        noReminders: string;
+      };
+      /**
+       * H2 (#108) — the intake-question → CRM contact property mapping section.
+       * Never call a mapped write a "sync": it is one-directional, and it
+       * OVERWRITES the property on every accepted booking (ADR 0005).
+       */
+      crmMapping: {
+        sectionTitle: string;
+        /** {provider} interpolates the CRM's own name. */
+        sectionHint: string;
+        /** The read-only identity row, and why it is shown rather than absent. */
+        identityTitle: string;
+        identityHint: string;
+        identityEmail: string;
+        identityFirstName: string;
+        identityLastName: string;
+        /** Empty states. */
+        notConnectedTitle: string;
+        notConnectedBody: string;
+        notConnectedLink: string;
+        unavailable: string;
+        noProperties: string;
+        /** The table itself. */
+        sourceLabel: string;
+        propertyLabel: string;
+        sourcePlaceholder: string;
+        propertyPlaceholder: string;
+        addMapping: string;
+        removeMapping: string;
+        addTarget: string;
+        noMappings: string;
+        /** {max} interpolates the per-event cap. */
+        capReached: string;
+        /** Source group headings in the source picker. */
+        groupQuestions: string;
+        groupAttendee: string;
+        groupEvent: string;
+        /** Attendee + event metadata source names. */
+        attendeePhone: string;
+        attendeeNotes: string;
+        attendeeTimeZone: string;
+        attendeeLanguage: string;
+        eventTypeTitle: string;
+        eventStart: string;
+        eventLength: string;
+        eventHostName: string;
+        eventHostEmail: string;
+        /** Enumeration reconciliation, shown at configure time. */
+        optionsMatch: string;
+        /** {matched}, {total} and {values} interpolate the diff. */
+        optionsPartial: string;
+        optionsNone: string;
+        /** A stored target the portal no longer has. */
+        missingProperty: string;
+        /** A stored target that exists but no longer fits this answer's type. */
+        incompatibleProperty: string;
+        /** The mapped QUESTION was deleted or renamed; the row is dropped on save. */
+        missingQuestion: string;
+        /** Actions. */
+        refresh: string;
+        refreshing: string;
+        suggest: string;
+        suggestNone: string;
+        /** {n} interpolates how many rows were pre-filled. */
+        suggestFilled: string;
+        suggestNotSaved: string;
+        /** The never-create rule, as the picker's empty hint. */
+        createInProviderHint: string;
+      };
     };
     availability: {
       title: string;
@@ -289,6 +564,12 @@ export interface BookingMessages {
       saving: string;
       scheduleNameLabel: string;
       removeRange: string;
+      /** A2 (#112) — the delete confirmation, as a real dialog. The inline
+       *  yes/no pair it replaces never trapped focus and never announced the
+       *  question it was asking. */
+      deleteTitle: string;
+      deleteBody: string;
+      removeOverride: string;
       savedToast: string;
       deletedToast: string;
       saveError: string;
@@ -378,6 +659,18 @@ export interface BookingMessages {
       delete: string;
       cancel: string;
       deleteError: string;
+      /**
+       * Destructive-confirmation copy for the `ConfirmDialog` (reskin slice P).
+       * The inline two-button confirm this replaced asked nothing — it just
+       * swapped the Delete button out — so a real dialog needs a question and a
+       * consequence. `{name}` interpolates the team / member.
+       * Deleting a team is API-guarded against orphaned event types (409), so
+       * the body deliberately does NOT claim they go with it.
+       */
+      deleteTitle: string;
+      deleteBody: string;
+      removeTitle: string;
+      removeBody: string;
       memberSingular: string;
       memberPlural: string;
       noMembers: string;
@@ -422,6 +715,11 @@ export interface BookingMessages {
       clearImage: string;
       imageTooLarge: string;
       imageInvalidType: string;
+      /** Label while a picked photo is being decoded and downscaled. */
+      imageWorking: string;
+      /** Opened fine, but nothing storable came out — a vector too big to keep
+       *  verbatim. Never names the 25MB input cap, which is not the problem. */
+      imageCannotShrink: string;
       creating: string;
       backToTeamsList: string;
       imageReadError: string;
@@ -465,6 +763,11 @@ export interface BookingMessages {
       /** Single-owner model (QA2 fix 6b): explicit transfer flow. */
       transferOwnership: string;
       transferConfirm: string;
+      /** A2 (#112) — both destructive asks move onto ConfirmDialog. */
+      removeTitle: string;
+      removeBody: string;
+      transferTitle: string;
+      transferBody: string;
       ownershipTransferred: string;
       roleUpdated: string;
       statusUpdated: string;
@@ -500,19 +803,29 @@ export interface BookingMessages {
       connectSuccess: string;
       connectCancelled: string;
       connectFailed: string;
+      /** In-flight label on "I've finished connecting" — an explicit check must
+       *  always change something on screen, so it says it is working. */
+      connectChecking: string;
+      /** The check ran and the connection is not there. Names the provider AND
+       *  the account being looked for: the usual real cause is that a different
+       *  account was authorized than the one typed at the email step. */
+      connectNotSeenYet: string;
+      /** Two failed manual checks in a row — stop waiting and say why. */
+      connectGaveUp: string;
+      /** The check could not run at all (transport, or a server error whose own
+       *  message is raw English and must not be shown). */
+      connectCheckFailed: string;
       popupBlocked: string;
       destination: string;
       conflictCheck: string;
       disconnect: string;
       disconnectError: string;
+      /** A2 (#112) — disconnecting stops conflict checks and write-out, so it asks. */
+      disconnectTitle: string;
+      disconnectBody: string;
       /** Muted fallback label when a connection's account email couldn't be
        *  determined (never repeats the provider name — see connectionLabel). */
       accountUnknown: string;
-      manualTitle: string;
-      manualDesc: string;
-      provider: string;
-      calendarId: string;
-      addConnection: string;
       healthSyncing: string;
       healthRecorded: string;
       yourCalendars: string;
@@ -570,6 +883,19 @@ export interface BookingMessages {
       error: string;
       retry: string;
     };
+    /**
+     * The identity service could not be reached while renewing a session
+     * (#114). Distinct from `login.error` on purpose: nothing is wrong with the
+     * person's credentials and they are still signed in, so the copy must not
+     * imply they need to sign in again.
+     */
+    session: {
+      unavailableTitle: string;
+      unavailableBody: string;
+      retry: string;
+      /** The way out when the failure turns out not to be transient. */
+      signOut: string;
+    };
     settingsGeneral: {
       displayName: string;
       publicHandle: string;
@@ -591,11 +917,6 @@ export interface BookingMessages {
       editTemplate: string;
       updated: string;
       updateFailed: string;
-      reminderLeads: string;
-      reminderLeadsHint: string;
-      reminderLeadsInvalid: string;
-      followUpLead: string;
-      followUpLeadHint: string;
       editorSubject: string;
       editorBody: string;
       variables: string;
@@ -606,6 +927,9 @@ export interface BookingMessages {
       usingCustom: string;
       reset: string;
       resetDone: string;
+      /** A2 (#112) — reset throws away copy the host wrote, so it asks first. */
+      resetTitle: string;
+      resetBody: string;
       save: string;
       saving: string;
       saved: string;
@@ -620,6 +944,13 @@ export interface BookingMessages {
       apiKeys: string;
       noKeys: string;
       revoke: string;
+      /** A2 (#112) — revoking a key and deleting a webhook were one click each. */
+      revokeTitle: string;
+      revokeBody: string;
+      deleteWebhookTitle: string;
+      deleteWebhookBody: string;
+      deliveryOk: string;
+      deliveryFailed: string;
       revoked: string;
       copyOnce: string;
       name: string;
@@ -627,12 +958,19 @@ export interface BookingMessages {
       createKey: string;
       webhooks: string;
       noWebhooks: string;
+      /** Shown once with a new webhook's signing secret (W / #75). */
+      webhookSecretCopyOnce: string;
+      /** This deployment has no encryption key, so no secret can be stored. */
+      webhookNoKeyError: string;
       subscriberUrl: string;
       events: string;
       addWebhook: string;
       ping: string;
       deliveries: string;
       noDeliveries: string;
+      /** In-flight labels — these two replace a bare ellipsis (A2, #112). */
+      creating: string;
+      loading: string;
       delete: string;
       active: string;
       cancel: string;
@@ -640,6 +978,72 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
+    };
+    /**
+     * Integrations tab (H1b / #93) — connect one CRM credential per account.
+     *
+     * NOTE WHAT IS ABSENT: the required-scope names. They are provider
+     * identifiers the host matches character-for-character on a checkbox in
+     * someone else's UI, so they come from the adapter itself
+     * (`CrmProvider.requiredScopes`, surfaced on the capabilities reply) rather
+     * than from here. Putting them in a locale catalog would let the setup
+     * instructions drift from what the adapter needs, and would invite a
+     * translator to "translate" an identifier. Only the prose lives here.
+     */
+    integrations: {
+      pageLead: string;
+      loadError: string;
+      hubspotName: string;
+      hubspotDesc: string;
+      /** Deployment states in which connecting cannot succeed (#93, story 20). */
+      disabledTitle: string;
+      disabledBody: string;
+      noKeyTitle: string;
+      noKeyBody: string;
+      /** The probe itself failed — say that, never diagnose a cause we did not learn. */
+      unknownTitle: string;
+      unknownBody: string;
+      statusConnected: string;
+      statusUnhealthy: string;
+      statusDisconnected: string;
+      statusNotConnected: string;
+      notConnectedBody: string;
+      endingIn: string;
+      lastChecked: string;
+      neverChecked: string;
+      disconnectedBody: string;
+      unhealthyLead: string;
+      unhealthyScopes: string;
+      unhealthyKeepsCredential: string;
+      unhealthyUnknown: string;
+      connect: string;
+      connecting: string;
+      reconnect: string;
+      disconnect: string;
+      disconnecting: string;
+      disconnectConfirm: string;
+      disconnectNothingDeleted: string;
+      confirmDisconnect: string;
+      cancel: string;
+      dialogTitle: string;
+      dialogLead: string;
+      scopesTitle: string;
+      scopesLead: string;
+      tokenLabel: string;
+      tokenPlaceholder: string;
+      tokenHelp: string;
+      labelLabel: string;
+      labelPlaceholder: string;
+      labelHelp: string;
+      errorRejected: string;
+      errorMissingScopes: string;
+      errorUnverified: string;
+      errorNoKey: string;
+      errorDisabled: string;
+      errorGeneric: string;
+      nothingStored: string;
+      connectedToast: string;
+      disconnectedToast: string;
     };
     bookingPageHeader: {
       title: string;
@@ -653,6 +1057,9 @@ export interface BookingMessages {
       save: string;
       saving: string;
       saveFailed: string;
+      /** The save was refused outright for size — an image already stored under
+       *  the old cap is the only thing big enough to do it. */
+      saveTooLarge: string;
       profile: string;
       brand: string;
       appearance: string;
@@ -672,8 +1079,15 @@ export interface BookingMessages {
       tryHandle: string;
       accent: string;
       contrast: string;
-      adjustedNote: string;
+      /** Shown under the accent field when the host's colour falls below the
+       *  3:1 non-text floor against the canvas their page paints on. It never
+       *  blocks a save: ADR 0004's amendment informs, it does not override. */
+      lowContrast: string;
       photoAvatar: string;
+      /** Shown under the photo field when it is empty and a connected calendar
+       *  account has one — so the host knows where the face on their page comes
+       *  from, and that uploading their own replaces it. */
+      photoFromConnectedAccount: string;
       coverImage: string;
       custom: string;
       customizeAppearance: string;
@@ -686,6 +1100,12 @@ export interface BookingMessages {
       axisSlotLayout: string;
       axisDayGroup: string;
       axisSlotSelect: string;
+      /** The booking page's tenth axis (ADR 0004, B2): the GROUND the other
+       *  nine are drawn on. Its two values are translated — unlike every other
+       *  axis, they are ordinary words rather than design vocabulary. */
+      axisTheme: string;
+      themeLight: string;
+      themeDark: string;
       show: string;
       hide: string;
       noEvents: string;
@@ -713,10 +1133,99 @@ export interface BookingMessages {
       orPasteUrl: string;
       imageInvalid: string;
       imageTooLarge: string;
+      /** Label while a picked photo is being decoded and downscaled. */
+      imageWorking: string;
+      /** Opened fine, but nothing storable came out (see the teams key). */
+      imageCannotShrink: string;
+      /** What happens to the picked file — resized, and a GIF loses its motion. */
+      imageHelp: string;
       couldNotRead: string;
       introCall: string;
       minSuffix: string;
     };
+  };
+  // --- O1: onboarding's two gates (ADR 0002) ------------------------------
+  // Appended as one namespaced block at the end of the catalogue, per #71's
+  // parallel-worktree convention: concurrent units that each append their own
+  // block leave git an adjacency to resolve rather than an overlap.
+  onboarding: {
+    /** Gate 1 — qualification (account level, owner/admin). */
+    qualifyTitle: string;
+    qualifySubtitle: string;
+    /** Labels for Forms' shared question bank, keyed by `question_key`. */
+    questions: {
+      phone: string;
+      industry: string;
+      crm: string;
+      lead_volume: string;
+      lead_source: string;
+      use_case: string;
+    };
+    /** Gate 2 — setup (member level, every active host). */
+    templateTitle: string;
+    templateSubtitle: string;
+    /** Template copy — keys mirror the registry in @slate/engine. */
+    template30MinTitle: string;
+    template30MinDesc: string;
+    template15MinTitle: string;
+    template15MinDesc: string;
+    template45MinTitle: string;
+    template45MinDesc: string;
+    template60MinTitle: string;
+    template60MinDesc: string;
+    /** Intake field labels a template creates on the new event type. */
+    intakeTopic: string;
+    intakeCompany: string;
+    minutes: string;
+    continueLabel: string;
+    saving: string;
+    finish: string;
+    finishing: string;
+    /** Setup only — the escape hatch that makes the Home checklist reachable. */
+    skipForNow: string;
+    errorGeneric: string;
+  };
+  // --- H1a: CRM write-out (#63 / ADR 0001) --------------------------------
+  // Appended as its own namespaced block, per #71's parallel-worktree
+  // convention. Small on purpose: H1a has no UI, so the only user-facing copy
+  // is what a host reads inside the CRM record itself. The connect dialog's
+  // copy belongs to H1b.
+  crm: {
+    /** Body line naming the assigned host (`hubspot_owner_id` is left unset). */
+    hostLabel: string;
+    /** Body line carrying the booking's uid — traceable, and not a capability. */
+    bookingReferenceLabel: string;
+    /** Rendering for boolean intake answers. */
+    yes: string;
+    no: string;
+    /** Prefixed onto the meeting title when the booking is cancelled. */
+    cancelledTitlePrefix: string;
+  };
+  /**
+   * The inline embed (E). Every string here is read by a HOST inside the admin
+   * — the embedded booking page itself carries no copy of its own, because it
+   * is the same page under a different padding.
+   */
+  embed: {
+    /** The icon button beside open-public and copy-link on an event-type row. */
+    action: string;
+    /** Dialog heading. */
+    title: string;
+    /** One line saying what the snippet is and where it goes. */
+    intro: string;
+    /** Label over the read-only snippet box. */
+    snippetLabel: string;
+    copy: string;
+    copied: string;
+    close: string;
+    /** The accent control's label, and its two states. */
+    accentLabel: string;
+    accentInherit: string;
+    accentCustom: string;
+    /** Says the frame resizes itself, so nobody hunts for a height setting. */
+    resizeNote: string;
+    /** Names the URL params a host can hand-add for the other axes. */
+    advancedNote: string;
   };
 }
 
@@ -753,6 +1262,39 @@ export const en: BookingMessages = {
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
+    // Duplicate-booking guard (#69 / AB1). No date, no time, no host.
+    duplicateGuard: {
+      title: 'You already have a booking',
+      body: 'A booking already exists for this email on this event. Check your inbox for the confirmation.',
+      changeEmail: 'Use a different email',
+    },
+    // One-off links (#110), the invitee's side. No retry: nothing they can do
+    // here fixes it, and the copy must not say whether it was used or withdrawn.
+    oneOffLink: {
+      usedTitle: 'This invite link has already been used',
+      usedBody:
+        'Invite links work once. Ask the organizer to send you a new one, and it will open a fresh booking page.',
+    },
+  },
+  bookingPage: {
+    detailsRegion: 'Event details',
+    calendarRegion: 'Choose a date',
+    timesRegion: 'Choose a time',
+    yourDetails: 'Your details',
+    method: 'Scheduling',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
+    today: 'Today',
+    pickADay: 'Pick a day to see the times available.',
+    noTimesOnDay: 'No times available on this day.',
+    timesOn: 'Times on {day}',
+    timeFormat: 'Time format',
+    hour12: '12h',
+    hour24: '24h',
+    duration: 'Duration',
+    backToTimes: 'Back to times',
+    descriptionMore: 'Show more',
+    descriptionLess: 'Show less',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -771,6 +1313,14 @@ export const en: BookingMessages = {
     noResults: 'No matching country.',
     invalid: 'Enter a valid phone number.',
     countryLabel: 'Country code',
+  },
+  select: {
+    search: 'Search…',
+    noResults: 'No matching option.',
+  },
+  dialog: {
+    confirm: 'Confirm',
+    cancel: 'Cancel',
   },
   manage: {
     title: 'Manage your booking',
@@ -791,8 +1341,12 @@ export const en: BookingMessages = {
     statusRejected: 'rejected',
     cancelThis: 'Cancel this booking',
     noOpenTimes: 'No open times in the next 3 weeks.',
-    whereLabel: 'Where',
     joinMeeting: 'Join the meeting',
+    joinMeetingOpensNewTab: ' (opens in a new tab)',
+    timeUnreadable: 'We could not read the time for this booking. Check your confirmation email.',
+    linkInvalidTitle: 'This link is no longer active',
+    linkInvalidBody:
+      'Manage links change each time a booking is rescheduled, so an older email carries a link that no longer opens. Your booking has not been affected — open the most recent confirmation or reschedule email to manage it.',
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
@@ -800,6 +1354,18 @@ export const en: BookingMessages = {
     ctaAction: 'Get Dapta Calendars — free',
     seoProfile: 'Book time with {name} online.',
     seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
+  },
+  landing: {
+    timesIn: 'Times in {timeZone}',
+    noEvents: 'No bookable events yet.',
+    noTeamEvents: 'No bookable team events yet.',
+  },
+  location: {
+    whereLabel: 'Where',
+    conferencing: 'Online meeting',
+    inPerson: 'In person',
+    phone: 'Phone call',
+    custom: 'Custom',
   },
   admin: {
     nav: {
@@ -835,6 +1401,7 @@ export const en: BookingMessages = {
       language: 'Language',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
+      opensNewTab: 'Opens in a new tab',
       switcher: {
         trigger: 'Switch product',
         menuLabel: 'Dapta products',
@@ -843,6 +1410,10 @@ export const en: BookingMessages = {
         opensNewTab: '(opens in a new tab)',
         forms: 'Forms',
       },
+      theme: {
+        toLight: 'Switch to light theme',
+        toDark: 'Switch to dark theme',
+      },
     },
     home: {
       welcome: 'Welcome',
@@ -850,7 +1421,7 @@ export const en: BookingMessages = {
       subtitle: 'Your scheduling at a glance.',
       bookingLink: 'Your booking link',
       copy: 'Copy',
-      copied: 'Copied ✓',
+      copied: 'Copied',
       open: 'Open',
       statEventTypes: 'Events',
       statUpcoming: 'Upcoming bookings',
@@ -871,8 +1442,9 @@ export const en: BookingMessages = {
       setupHoursTitle: 'Set your working hours',
       setupHoursDesc: 'Defines the window your booking link offers.',
       setupHoursAction: 'Create default working hours (Mon–Fri 9–5)',
-      setupLinkTitle: 'Share your booking link',
-      setupLinkDesc: 'Send it to anyone — no account needed on their end.',
+      setupEventTitle: 'Publish an event type',
+      setupEventDesc: 'Until one is live your booking page loads but has nothing to book.',
+      setupEventAction: 'Create an event',
       setupDone: 'Done',
     },
     settings: {
@@ -883,6 +1455,7 @@ export const en: BookingMessages = {
       members: 'Members',
       developer: 'Developer',
       notifications: 'Notifications',
+      integrations: 'Integrations',
     },
     eventTypes: {
       title: 'Events',
@@ -895,7 +1468,14 @@ export const en: BookingMessages = {
       fSlug: 'Slug',
       fDescription: 'Description',
       fLocation: 'Location',
-      locationPlaceholder: 'e.g. Google Meet, Phone, or an address',
+      locationPlaceholder: 'e.g. an address, a phone number, or your own wording',
+      locationNone: 'Not specified',
+      locationDetailAddress: 'Address',
+      locationDetailPhone: 'Phone number',
+      locationDetailCustom: 'What to tell invitees',
+      locationConferencingHint: 'A meeting link is created automatically when the booking is confirmed.',
+      locationNoDestinationWarning:
+        'No calendar is connected yet, so no meeting link can be created. Connect one in Connections — bookings still work in the meantime.',
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
@@ -907,6 +1487,32 @@ export const en: BookingMessages = {
       noSchedules: 'No schedules yet — create one in Availability',
       requiresConfirmation: 'Requires confirmation',
       hiddenLabel: 'Hidden',
+      // Duplicate-booking guard (#69 / AB1) — the host-facing switch.
+      duplicateGuard: {
+        label: 'One booking per person',
+        hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected. Anyone who guesses an invitee’s address is told a booking exists for it, though never when it is.',
+      },
+      // One-off links (#110). Not a security control; say what it does.
+      oneOffLinks: {
+        title: 'One-off invite links',
+        hint: 'Each link books this event once, then stops working. Send one to a single person. Cancelling that booking does not bring the link back — mint another.',
+        mint: 'Create invite link',
+        minted: 'Invite link created.',
+        copiedOnMint: 'Invite link created and copied.',
+        copy: 'Copy',
+        copied: 'Link copied.',
+        revoke: 'Revoke',
+        revoked: 'Invite link revoked.',
+        empty: 'No invite links yet.',
+        saveFirst: 'Save this event before creating invite links.',
+        publicWarning:
+          'This event is visible on your booking page, so an invite link limits nothing — anyone with the normal link can still book it. Mark the event Hidden to make invite links the only way in.',
+        stateLive: 'Ready to send',
+        stateConsumed: 'Used',
+        stateRevoked: 'Revoked',
+        createdAt: 'Created {date}',
+        failed: 'Could not do that. Try again.',
+      },
       intakeQuestions: 'Intake questions',
       moveUp: 'Move up',
       moveDown: 'Move down',
@@ -945,12 +1551,93 @@ export const en: BookingMessages = {
       calendarLinkConflictsOnly: 'Checked against {n} calendar(s) for conflicts. No calendar is set to receive new events.',
       calendarLinkNoDestination: 'No calendar is set to receive new events yet.',
       calendarLinkNone: 'No calendar connected — bookings won’t check your real availability.',
-      calendarLinkConnect: 'Connect one',
+      calendarLinkConnect: 'Connect a calendar',
       calendarsSectionTitle: 'Calendars for this event',
       calendarsSectionHint: 'Choose which connected calendars this event checks for conflicts, and where booked events are added.',
       calendarsCheckConflicts: 'Check for conflicts',
       calendarsAddEventsHere: 'Add events here',
       calendarsManageLink: 'Manage calendars',
+      reminders: {
+        sectionTitle: 'Reminders',
+        sectionHint: 'Reminders belong to this event. Each one has its own switch, timing and wording.',
+        beforeMeeting: 'Before the meeting',
+        afterMeeting: 'After the meeting',
+        addReminder: 'Add reminder',
+        capReached: 'Up to {max} reminders on one event.',
+        sendLabel: 'Send',
+        unitMinutes: 'minutes',
+        unitHours: 'hours',
+        unitDays: 'days',
+        beforeStart: 'before it starts',
+        afterEnd: 'after it ends',
+        subjectLabel: 'Subject',
+        bodyLabel: 'Message',
+        defaultCopyHint: 'Leave empty to use the standard wording.',
+        remove: 'Remove',
+        followUpHint: 'A thank-you sent once the meeting is over. Off unless you turn it on.',
+        variablesLabel: 'Variables',
+        formVariablesLabel: 'From this event’s questions',
+        noFormVariables: 'Add a question above to use its answer here.',
+        danglingWarn: 'These variables no longer match a question and will arrive empty: {tokens}',
+        enabledLabel: 'Send this reminder',
+        noReminders: 'No reminders — invitees get no nudge before this event.',
+      },
+      crmMapping: {
+        sectionTitle: 'Send answers to your CRM',
+        sectionHint:
+          'Pick which answers land on which {provider} contact properties. Each mapped property is overwritten on every accepted booking, so it always shows this contact’s most recent answer.',
+        identityTitle: 'Always sent',
+        identityHint:
+          'Name and email identify the contact, so they cannot be mapped. A contact your CRM already knows keeps the name it has.',
+        identityEmail: 'Email',
+        identityFirstName: 'First name',
+        identityLastName: 'Last name',
+        notConnectedTitle: 'No CRM is connected yet',
+        notConnectedBody: 'Connect one in Settings to start mapping answers onto contact properties.',
+        notConnectedLink: 'Go to Integrations',
+        unavailable:
+          'We could not reach your CRM to read its properties. Showing the last list we loaded — press Refresh to try again.',
+        noProperties:
+          'This portal has no contact properties we can write to. Create one in your CRM, then press Refresh.',
+        sourceLabel: 'Answer',
+        propertyLabel: 'Contact property',
+        sourcePlaceholder: 'Choose an answer',
+        propertyPlaceholder: 'Choose a property',
+        addMapping: '+ Map an answer',
+        removeMapping: 'Remove this mapping',
+        addTarget: '+ Add another property',
+        noMappings: 'No answers are sent to your CRM yet.',
+        capReached: 'You can map up to {max} answers on one event.',
+        groupQuestions: 'Intake questions',
+        groupAttendee: 'Attendee details',
+        groupEvent: 'Event details',
+        attendeePhone: 'Phone',
+        attendeeNotes: 'Notes',
+        attendeeTimeZone: 'Time zone',
+        attendeeLanguage: 'Language',
+        eventTypeTitle: 'Event name',
+        eventStart: 'Booking start',
+        eventLength: 'Length in minutes',
+        eventHostName: 'Assigned host',
+        eventHostEmail: 'Assigned host email',
+        optionsMatch: 'All options match this property.',
+        optionsPartial: '{matched} of {total} options match. These will not be sent: {values}',
+        optionsNone:
+          'None of this question’s options match this property, so nothing will be sent. Rename them to match, or pick another property.',
+        missingProperty: 'This property is no longer in your portal.',
+        incompatibleProperty:
+          'This property no longer fits this answer’s type, so the save will be refused. Pick another one.',
+        missingQuestion:
+          'The question this maps from no longer exists. This row is dropped when you save.',
+        refresh: 'Refresh properties',
+        refreshing: 'Refreshing…',
+        suggest: 'Suggest mappings',
+        suggestNone: 'Nothing to suggest — no answer matched a property in your portal.',
+        suggestFilled: 'Filled in {n}. Review them, then save.',
+        suggestNotSaved: 'Suggestions are not saved until you press Save.',
+        createInProviderHint:
+          'We never create properties. If the one you want is missing, create it in your CRM and press Refresh.',
+      },
     },
     availability: {
       title: 'Availability',
@@ -971,6 +1658,9 @@ export const en: BookingMessages = {
       saving: 'Saving…',
       scheduleNameLabel: 'Schedule name',
       removeRange: 'Remove range',
+      deleteTitle: 'Delete this schedule?',
+      deleteBody: '“{name}” will be removed. Event types using it fall back to your default availability.',
+      removeOverride: 'Remove date override',
       savedToast: 'Availability saved.',
       deletedToast: 'Schedule deleted.',
       saveError: 'Could not save availability.',
@@ -1023,11 +1713,11 @@ export const en: BookingMessages = {
       createBooking: 'Create booking',
       createdTitle: 'Booking created',
       createdNote: 'The attendee has been notified.',
-      backToBookings: '← Back to bookings',
+      backToBookings: 'Back to bookings',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
-      noHandleLink: 'Set your handle in Booking Page settings',
+      noHandleLink: 'Set your handle',
       slotTaken: 'That time was just taken — pick another slot.',
       scheduleMissingNotice: 'This event’s schedule is missing — pick a schedule in the event settings.',
       scheduleMissingLink: 'Open event settings',
@@ -1057,6 +1747,10 @@ export const en: BookingMessages = {
       delete: 'Delete',
       cancel: 'Cancel',
       deleteError: 'Could not delete.',
+      deleteTitle: 'Delete this team?',
+      deleteBody: '“{name}” will be deleted permanently. This cannot be undone.',
+      removeTitle: 'Remove this member?',
+      removeBody: '{name} will lose access to this team. You can add them again later.',
       memberSingular: 'member',
       memberPlural: 'members',
       noMembers: 'No members yet. Add someone from your account below.',
@@ -1077,8 +1771,8 @@ export const en: BookingMessages = {
       memberRemoved: 'Member removed.',
       memberAdded: 'Member added.',
       genericError: 'Something went wrong.',
-      backToTeams: '← Teams',
-      viewPublicTeam: 'View public team page →',
+      backToTeams: 'Teams',
+      viewPublicTeam: 'View public team page',
       roundRobin: 'round-robin scheduling',
       members: 'Members',
       teamEventTypes: 'Team events',
@@ -1093,7 +1787,7 @@ export const en: BookingMessages = {
       ownerLock: 'Team admins can’t be removed — change their role first.',
       memberPending: 'Pending',
       noAccountMember: 'No account member with that email — they need to sign up first.',
-      inviteFromMembers: 'Invite them from Settings → Members',
+      inviteFromMembers: 'Invite them from Members settings',
       createTitle: 'New team',
       createSubtitle: 'Round-robin bookings across a group of hosts. You can add members after creating.',
       bioLabel: 'Bio',
@@ -1102,15 +1796,17 @@ export const en: BookingMessages = {
       uploadImage: 'Upload image',
       orPasteUrl: '…or paste an image URL',
       clearImage: 'Clear',
-      imageTooLarge: 'Image must be 1MB or smaller.',
+      imageTooLarge: 'That image is too large to open. Please choose one under 25MB.',
       imageInvalidType: 'Please choose an image file.',
+      imageWorking: 'Resizing…',
+      imageCannotShrink: 'That image can’t be made small enough to store. Please try a different one.',
       creating: 'Creating…',
-      backToTeamsList: '← Teams',
+      backToTeamsList: 'Teams',
       imageReadError: 'Could not read that file.',
       nameHelp: 'Shown at the top of the team’s public booking page.',
       slugHelp: 'Used in the public URL. Lowercase letters, numbers and dashes.',
       bioHelp: 'A short line under the team name on the public page.',
-      logoHelp: 'Square image works best. Max 1MB.',
+      logoHelp: 'Square image works best. Large photos are resized for you; an animated GIF keeps only its first frame.',
     },
     members: {
       title: 'Members',
@@ -1144,6 +1840,10 @@ export const en: BookingMessages = {
       lastOwnerTitle: 'A workspace must keep at least one owner',
       transferOwnership: 'Transfer ownership',
       transferConfirm: 'Yes, transfer — I become an admin',
+      removeTitle: 'Remove this member?',
+      removeBody: '{name} loses access to this workspace. Their past bookings stay.',
+      transferTitle: 'Transfer ownership?',
+      transferBody: '{name} becomes the owner and you become an admin. Only they can hand it back.',
       ownershipTransferred: 'Ownership transferred.',
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
@@ -1178,17 +1878,20 @@ export const en: BookingMessages = {
       connectSuccess: 'Calendar connected.',
       connectCancelled: 'Connect cancelled — no calendar was linked.',
       connectFailed: 'Could not start the connect flow. Please try again.',
+      connectChecking: 'Checking…',
+      connectNotSeenYet:
+        'No {provider} connection for {email} yet. Finish the popup window, then check again.',
+      connectGaveUp:
+        'Still no {provider} connection for {email}. If you signed in with a different account, start again and enter that address.',
+      connectCheckFailed: 'Could not check for the connection. Try again in a moment.',
       popupBlocked: 'Your browser blocked the popup. Allow popups for this site and try again.',
       destination: 'Destination',
       conflictCheck: 'Conflict check',
       disconnect: 'Disconnect',
       disconnectError: 'Could not disconnect.',
+      disconnectTitle: 'Disconnect this calendar?',
+      disconnectBody: '{account} stops being checked for conflicts, and new bookings will not be written to it.',
       accountUnknown: 'Account unknown',
-      manualTitle: 'Link a calendar manually',
-      manualDesc: 'Advanced: record a calendar reference by id (used when a provider adapter is configured, or for testing).',
-      provider: 'Provider',
-      calendarId: 'Calendar id / email',
-      addConnection: 'Add connection',
       healthSyncing: 'Syncing',
       healthRecorded: 'Recorded only',
       yourCalendars: 'Your calendars',
@@ -1241,6 +1944,13 @@ export const en: BookingMessages = {
       error: 'Something went wrong signing in. Please try again.',
       retry: 'Try again',
     },
+    session: {
+      unavailableTitle: 'We couldn’t renew your session',
+      unavailableBody:
+        'You’re still signed in. The sign-in service didn’t answer just now, so nothing was changed. Wait a moment and try again.',
+      retry: 'Try again',
+      signOut: 'Sign out instead',
+    },
     settingsGeneral: {
       displayName: 'Display name',
       publicHandle: 'Public handle',
@@ -1288,11 +1998,6 @@ export const en: BookingMessages = {
       editTemplate: 'Edit template',
       updated: 'Updated.',
       updateFailed: 'Could not update — try again.',
-      reminderLeads: 'Send reminders before start',
-      reminderLeadsHint: 'Minutes before start, comma-separated (e.g. 1440, 60). Up to 5.',
-      reminderLeadsInvalid: 'Whole minutes between 5 and 40320, up to 5 values.',
-      followUpLead: 'Send after the meeting ends',
-      followUpLeadHint: 'Minutes after the end time, comma-separated (e.g. 60). Up to 5.',
       editorSubject: 'Subject',
       editorBody: 'Body',
       variables: 'Variables',
@@ -1303,6 +2008,8 @@ export const en: BookingMessages = {
       usingCustom: 'Using a custom template',
       reset: 'Reset to default',
       resetDone: 'Template reset to default.',
+      resetTitle: 'Reset this template?',
+      resetBody: 'Your subject and body are discarded and the shipped copy comes back. This cannot be undone.',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved.',
@@ -1319,6 +2026,12 @@ export const en: BookingMessages = {
       apiKeys: 'API keys',
       noKeys: 'No API keys.',
       revoke: 'Revoke',
+      revokeTitle: 'Revoke this key?',
+      revokeBody: '“{name}” stops working immediately. Anything using it will start failing.',
+      deleteWebhookTitle: 'Delete this webhook?',
+      deleteWebhookBody: 'No more events will be sent to {url}. Its signing secret is gone for good.',
+      deliveryOk: 'Delivered',
+      deliveryFailed: 'Failed',
       revoked: 'revoked',
       copyOnce: 'Copy this now — it won’t be shown again:',
       name: 'Name',
@@ -1326,12 +2039,18 @@ export const en: BookingMessages = {
       createKey: 'Create key',
       webhooks: 'Webhooks',
       noWebhooks: 'No webhooks.',
+      webhookSecretCopyOnce:
+        'Copy this signing secret now — it won’t be shown again. Your subscriber uses it to verify the X-Slate-Signature header on every delivery:',
+      webhookNoKeyError:
+        'This installation has no encryption key, so a signing secret could only be kept in the clear. We refuse to do that. Ask whoever runs it to set INTEGRATION_ENCRYPTION_KEY, then come back. Webhooks you already have keep working.',
       subscriberUrl: 'Subscriber URL',
       events: 'Events',
       addWebhook: 'Add webhook',
       ping: 'Ping',
       deliveries: 'Deliveries',
       noDeliveries: 'No deliveries yet — they appear when a real booking event fires this webhook.',
+      creating: 'Creating…',
+      loading: 'Loading…',
       delete: 'Delete',
       active: 'active',
       cancel: 'Cancel',
@@ -1339,6 +2058,72 @@ export const en: BookingMessages = {
       revokedToast: 'Key revoked.',
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
+    },
+    integrations: {
+      pageLead:
+        'Connect your CRM once for the whole workspace. From then on, every booking anyone here accepts becomes a contact and a meeting on that contact, automatically.',
+      loadError: 'We could not load the current connection. Refresh to try again.',
+      hubspotName: 'HubSpot',
+      hubspotDesc:
+        'Accepted bookings become a contact and an associated meeting. Reschedules and cancellations update the same meeting, never a second one.',
+      disabledTitle: 'Not enabled on this deployment',
+      disabledBody:
+        'Whoever runs this installation has not switched a CRM on. Ask them to set CRM_PROVIDER, then come back.',
+      noKeyTitle: 'Credentials cannot be stored here yet',
+      noKeyBody:
+        'This installation has no encryption key, so a token could only be kept in the clear. We refuse to do that. Ask whoever runs it to set INTEGRATION_ENCRYPTION_KEY, then come back.',
+      unknownTitle: 'We could not check this connection',
+      unknownBody:
+        'Something went wrong reading this installation\u2019s settings, so we are not offering to connect until we know it would work. Refresh to try again.',
+      statusConnected: 'Connected',
+      statusUnhealthy: 'Needs attention',
+      statusDisconnected: 'Disconnected',
+      statusNotConnected: 'Not connected',
+      notConnectedBody: 'Nothing is being sent to HubSpot from this workspace.',
+      endingIn: 'Token ending in {last4}',
+      lastChecked: 'Last checked {date}',
+      neverChecked: 'Not used yet — the next accepted booking is the first check.',
+      disconnectedBody:
+        'The credential was removed. Existing bookings still point at their meetings, so reconnecting the same portal picks up where this left off.',
+      unhealthyLead: 'Bookings have stopped reaching HubSpot.',
+      unhealthyScopes: 'HubSpot says these scopes are missing from your private app:',
+      unhealthyKeepsCredential:
+        'The token is still here. Grant the scopes in HubSpot and the next accepted booking goes through on its own — there is nothing to re-paste.',
+      unhealthyUnknown: 'HubSpot rejected the last write and did not say why.',
+      connect: 'Connect',
+      connecting: 'Connecting…',
+      reconnect: 'Reconnect',
+      disconnect: 'Disconnect',
+      disconnecting: 'Disconnecting…',
+      disconnectConfirm: 'Stop sending bookings to HubSpot?',
+      disconnectNothingDeleted:
+        'Nothing is deleted inside HubSpot. Contacts and meetings already there stay exactly as they are.',
+      confirmDisconnect: 'Yes, disconnect',
+      cancel: 'Cancel',
+      dialogTitle: 'Connect HubSpot',
+      dialogLead:
+        'In HubSpot, open Settings, then Integrations, then Private Apps, and create an app. Grant it the two scopes below, then paste its access token here.',
+      scopesTitle: 'Scopes this app needs',
+      scopesLead: 'Tick each one off as you grant it in HubSpot. All of them are required.',
+      tokenLabel: 'Access token',
+      tokenPlaceholder: 'Paste the private app token',
+      tokenHelp:
+        'We check the token against HubSpot before storing it, and we never show it again after that.',
+      labelLabel: 'Portal name (optional)',
+      labelPlaceholder: 'e.g. Acme sales portal',
+      labelHelp: 'Only so this connection is recognizable later.',
+      errorRejected:
+        'HubSpot rejected that token. Check that the private app is active and has both scopes.',
+      errorMissingScopes: 'HubSpot says these scopes are missing:',
+      errorUnverified:
+        'We could not reach HubSpot to check that token. Try again in a moment.',
+      errorNoKey:
+        'This installation cannot store credentials: no encryption key is configured.',
+      errorDisabled: 'No CRM is enabled on this installation.',
+      errorGeneric: 'Something went wrong. Try again.',
+      nothingStored: 'Nothing was saved.',
+      connectedToast: 'HubSpot connected.',
+      disconnectedToast: 'HubSpot disconnected.',
     },
     bookingPageHeader: {
       title: 'Booking Page',
@@ -1352,6 +2137,7 @@ export const en: BookingMessages = {
       save: 'Save',
       saving: 'Saving…',
       saveFailed: 'Save failed.',
+      saveTooLarge: 'Too large to save. Re-upload your photo or cover and try again.',
       profile: 'Profile',
       brand: 'Brand',
       appearance: 'Appearance',
@@ -1367,11 +2153,14 @@ export const en: BookingMessages = {
       vanityIncluded: 'Custom links are included with your Dapta AI subscription.',
       vanityIncludedLink: 'Learn more',
       bio: 'Bio',
-      tryHandle: 'Try {handle} →',
+      tryHandle: 'Try {handle}',
       accent: 'Accent',
-      contrast: 'Contrast {ratio}:1',
-      adjustedNote: ' · adjusted to {hex} for legibility (AA)',
+      contrast: 'Label contrast {ratio}:1',
+      lowContrast:
+        'Low contrast: {ratio}:1 against your page background. Links and buttons may be hard to read. Your color is used exactly as picked.',
       photoAvatar: 'Photo / avatar',
+      photoFromConnectedAccount:
+        'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
@@ -1384,11 +2173,14 @@ export const en: BookingMessages = {
       axisSlotLayout: 'Slot layout',
       axisDayGroup: 'Day group',
       axisSlotSelect: 'Slot select',
+      axisTheme: 'Theme',
+      themeLight: 'Light',
+      themeDark: 'Dark',
       show: 'Show',
       hide: 'Hide',
       noEvents: 'No events yet.',
       orderVisibilityNote: 'Order + visibility apply to your public page.',
-      configureEventTypes: 'Configure events →',
+      configureEventTypes: 'Configure events',
       showLandingPage: 'Show the landing page (list of events)',
       sendVisitorsTo: 'Send visitors directly to',
       chooseEvent: 'Choose an event…',
@@ -1403,18 +2195,73 @@ export const en: BookingMessages = {
       desktop: 'desktop',
       mobile: 'mobile',
       checking: 'Checking…',
-      available: '✓ Available',
-      taken: '✗ Taken',
+      available: 'Available',
+      taken: 'Taken',
       invalid: 'Invalid (3–40 chars, a–z 0–9 -)',
       uploadImage: 'Upload image',
       clear: 'Clear',
       orPasteUrl: '…or paste an image URL',
       imageInvalid: 'Please choose an image file.',
-      imageTooLarge: 'Image must be under 1 MB.',
+      imageTooLarge: 'That image is too large to open. Please choose one under 25MB.',
+      imageWorking: 'Resizing…',
+      imageCannotShrink: 'That image can’t be made small enough to store. Please try a different one.',
+      imageHelp: 'Large photos are resized for you; an animated GIF keeps only its first frame.',
       couldNotRead: 'Could not read that file.',
       introCall: 'Intro Call',
       minSuffix: 'min',
     },
+  },
+  onboarding: {
+    qualifyTitle: 'Tell us about your work',
+    qualifySubtitle: 'A couple of questions so we can set things up for how you actually book.',
+    questions: {
+      phone: 'Phone number',
+      industry: 'What industry are you in?',
+      crm: 'Which CRM does your team use?',
+      lead_volume: 'How many new leads do you handle in a month?',
+      lead_source: 'Where do most of your leads come from?',
+      use_case: 'What will you use scheduling for?',
+    },
+    templateTitle: 'Create your first event',
+    templateSubtitle: 'Pick a starting point. You can rename it, re-time it, or add more later.',
+    template30MinTitle: '30-minute meeting',
+    template30MinDesc: 'The default for most conversations.',
+    template15MinTitle: 'Quick call',
+    template15MinDesc: 'Short check-ins and intros.',
+    template45MinTitle: 'Demo',
+    template45MinDesc: 'Enough room to show something properly.',
+    template60MinTitle: 'One-on-one',
+    template60MinDesc: 'A full hour for deeper conversations.',
+    intakeTopic: 'What would you like to discuss?',
+    intakeCompany: 'Company',
+    minutes: '{minutes} min',
+    continueLabel: 'Continue',
+    saving: 'Saving…',
+    finish: 'Create event and finish',
+    finishing: 'Creating…',
+    skipForNow: 'Skip for now',
+    errorGeneric: 'Something went wrong. Please try again.',
+  },
+  crm: {
+    hostLabel: 'Host',
+    bookingReferenceLabel: 'Booking reference',
+    yes: 'Yes',
+    no: 'No',
+    cancelledTitlePrefix: '[Canceled] ',
+  },
+  embed: {
+    action: 'Embed on your site',
+    title: 'Embed on your site',
+    intro: 'Paste this where the booking page should appear. It sizes itself to fit, and the booking page still loads even if this script is blocked.',
+    snippetLabel: 'Embed code',
+    copy: 'Copy code',
+    copied: 'Copied',
+    close: 'Done',
+    accentLabel: 'Accent color',
+    accentInherit: 'Use my booking page style',
+    accentCustom: 'Pick a color for this embed',
+    resizeNote: 'The frame grows and shrinks with the page, so you do not need to set a height.',
+    advancedNote: 'To change more of the look, add any of these to the embed address: template, card_style, corners, buttons, density, font, slot_layout, day_group, slot_select. A value we do not recognize is ignored.',
   },
 };
 
@@ -1452,6 +2299,38 @@ export const es: BookingMessages = {
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
+    // Duplicate-booking guard (#69 / AB1). Sin fecha, sin hora, sin anfitrión.
+    duplicateGuard: {
+      title: 'Ya tienes una reserva',
+      body: 'Ya existe una reserva con este correo en este evento. Revisa tu bandeja de entrada para ver la confirmación.',
+      changeEmail: 'Usar otro correo',
+    },
+    // Enlaces de un solo uso (#110), el lado del invitado. Sin reintento.
+    oneOffLink: {
+      usedTitle: 'Este enlace de invitación ya se usó',
+      usedBody:
+        'Los enlaces de invitación funcionan una sola vez. Pídele a quien te invitó que te envíe uno nuevo y se abrirá una página de reserva nueva.',
+    },
+  },
+  bookingPage: {
+    detailsRegion: 'Detalles del evento',
+    calendarRegion: 'Elige una fecha',
+    timesRegion: 'Elige un horario',
+    yourDetails: 'Tus datos',
+    method: 'Agendamiento',
+    previousMonth: 'Mes anterior',
+    nextMonth: 'Mes siguiente',
+    today: 'Hoy',
+    pickADay: 'Elige un día para ver los horarios disponibles.',
+    noTimesOnDay: 'No hay horarios disponibles este día.',
+    timesOn: 'Horarios del {day}',
+    timeFormat: 'Formato de hora',
+    hour12: '12 h',
+    hour24: '24 h',
+    duration: 'Duración',
+    backToTimes: 'Volver a los horarios',
+    descriptionMore: 'Ver más',
+    descriptionLess: 'Ver menos',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -1470,6 +2349,14 @@ export const es: BookingMessages = {
     noResults: 'No hay países que coincidan.',
     invalid: 'Ingresa un número de teléfono válido.',
     countryLabel: 'Código de país',
+  },
+  select: {
+    search: 'Buscar…',
+    noResults: 'No hay opciones que coincidan.',
+  },
+  dialog: {
+    confirm: 'Confirmar',
+    cancel: 'Cancelar',
   },
   manage: {
     title: 'Gestiona tu reserva',
@@ -1490,8 +2377,12 @@ export const es: BookingMessages = {
     statusRejected: 'rechazada',
     cancelThis: 'Cancelar esta reserva',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
-    whereLabel: 'Dónde',
     joinMeeting: 'Unirse a la reunión',
+    joinMeetingOpensNewTab: ' (se abre en una pestaña nueva)',
+    timeUnreadable: 'No pudimos leer la hora de esta reserva. Revisa tu correo de confirmación.',
+    linkInvalidTitle: 'Este enlace ya no está activo',
+    linkInvalidBody:
+      'Los enlaces de gestión cambian cada vez que se reprograma una reserva, así que un correo anterior lleva un enlace que ya no abre. Tu reserva no se ha visto afectada: abre el correo de confirmación o de reprogramación más reciente para gestionarla.',
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
@@ -1499,6 +2390,18 @@ export const es: BookingMessages = {
     ctaAction: 'Consigue Dapta Calendars — gratis',
     seoProfile: 'Reserva un horario con {name} en línea.',
     seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+  },
+  landing: {
+    timesIn: 'Horarios en {timeZone}',
+    noEvents: 'Aún no hay eventos disponibles para reservar.',
+    noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
+  },
+  location: {
+    whereLabel: 'Dónde',
+    conferencing: 'Reunión en línea',
+    inPerson: 'Presencial',
+    phone: 'Llamada telefónica',
+    custom: 'Personalizado',
   },
   admin: {
     nav: {
@@ -1534,6 +2437,7 @@ export const es: BookingMessages = {
       language: 'Idioma',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
+      opensNewTab: 'Se abre en una pestaña nueva',
       switcher: {
         trigger: 'Cambiar producto',
         menuLabel: 'Productos Dapta',
@@ -1542,6 +2446,10 @@ export const es: BookingMessages = {
         opensNewTab: '(se abre en una pestaña nueva)',
         forms: 'Forms',
       },
+      theme: {
+        toLight: 'Cambiar al tema claro',
+        toDark: 'Cambiar al tema oscuro',
+      },
     },
     home: {
       welcome: 'Bienvenido',
@@ -1549,7 +2457,7 @@ export const es: BookingMessages = {
       subtitle: 'Tu agenda de un vistazo.',
       bookingLink: 'Tu enlace de reservas',
       copy: 'Copiar',
-      copied: 'Copiado ✓',
+      copied: 'Copiado',
       open: 'Abrir',
       statEventTypes: 'Eventos',
       statUpcoming: 'Próximas reservas',
@@ -1570,8 +2478,9 @@ export const es: BookingMessages = {
       setupHoursTitle: 'Define tus horas de trabajo',
       setupHoursDesc: 'Define la ventana que ofrece tu enlace de reservas.',
       setupHoursAction: 'Crear horario de trabajo por defecto (lun–vie 9–5)',
-      setupLinkTitle: 'Comparte tu enlace de reservas',
-      setupLinkDesc: 'Envíalo a cualquier persona — no necesita cuenta.',
+      setupEventTitle: 'Publica un tipo de evento',
+      setupEventDesc: 'Hasta que publiques uno tu página de reservas carga, pero no hay nada que reservar.',
+      setupEventAction: 'Crear un evento',
       setupDone: 'Listo',
     },
     settings: {
@@ -1582,6 +2491,7 @@ export const es: BookingMessages = {
       members: 'Miembros',
       developer: 'Desarrollador',
       notifications: 'Notificaciones',
+      integrations: 'Integraciones',
     },
     eventTypes: {
       title: 'Eventos',
@@ -1594,7 +2504,14 @@ export const es: BookingMessages = {
       fSlug: 'Identificador',
       fDescription: 'Descripción',
       fLocation: 'Ubicación',
-      locationPlaceholder: 'p. ej. Google Meet, Teléfono o una dirección',
+      locationPlaceholder: 'p. ej. una dirección, un teléfono o tu propio texto',
+      locationNone: 'Sin especificar',
+      locationDetailAddress: 'Dirección',
+      locationDetailPhone: 'Número de teléfono',
+      locationDetailCustom: 'Qué indicar a los invitados',
+      locationConferencingHint: 'El enlace de la reunión se crea automáticamente al confirmar la reserva.',
+      locationNoDestinationWarning:
+        'Aún no hay ningún calendario conectado, así que no se puede crear el enlace. Conecta uno en Conexiones — las reservas siguen funcionando mientras tanto.',
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',
@@ -1606,6 +2523,32 @@ export const es: BookingMessages = {
       noSchedules: 'Aún no hay horarios — crea uno en Disponibilidad',
       requiresConfirmation: 'Requiere confirmación',
       hiddenLabel: 'Oculto',
+      // Duplicate-booking guard (#69 / AB1) — el interruptor del anfitrión.
+      duplicateGuard: {
+        label: 'Una reserva por persona',
+        hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados. A quien adivine el correo de un invitado se le dirá que existe una reserva, aunque nunca cuándo es.',
+      },
+      // Enlaces de un solo uso (#110). No es un control de seguridad.
+      oneOffLinks: {
+        title: 'Enlaces de invitación de un solo uso',
+        hint: 'Cada enlace reserva este evento una vez y luego deja de funcionar. Envía uno a una sola persona. Cancelar esa reserva no reactiva el enlace — crea otro.',
+        mint: 'Crear enlace de invitación',
+        minted: 'Enlace de invitación creado.',
+        copiedOnMint: 'Enlace de invitación creado y copiado.',
+        copy: 'Copiar',
+        copied: 'Enlace copiado.',
+        revoke: 'Revocar',
+        revoked: 'Enlace de invitación revocado.',
+        empty: 'Aún no hay enlaces de invitación.',
+        saveFirst: 'Guarda este evento antes de crear enlaces de invitación.',
+        publicWarning:
+          'Este evento es visible en tu página de reservas, así que un enlace de invitación no limita nada — cualquiera con el enlace normal puede reservarlo igual. Marca el evento como Oculto para que los enlaces de invitación sean la única vía.',
+        stateLive: 'Listo para enviar',
+        stateConsumed: 'Usado',
+        stateRevoked: 'Revocado',
+        createdAt: 'Creado el {date}',
+        failed: 'No se pudo completar. Inténtalo de nuevo.',
+      },
       intakeQuestions: 'Preguntas del formulario',
       moveUp: 'Subir',
       moveDown: 'Bajar',
@@ -1644,12 +2587,97 @@ export const es: BookingMessages = {
       calendarLinkConflictsOnly: 'Verificado contra {n} calendario(s) para conflictos. Ningún calendario está configurado para recibir eventos nuevos.',
       calendarLinkNoDestination: 'Aún no hay un calendario configurado para recibir eventos nuevos.',
       calendarLinkNone: 'Ningún calendario conectado — las reservas no verificarán tu disponibilidad real.',
-      calendarLinkConnect: 'Conectar uno',
+      calendarLinkConnect: 'Conectar un calendario',
       calendarsSectionTitle: 'Calendarios para este evento',
       calendarsSectionHint: 'Elige qué calendarios conectados verifica este evento para conflictos, y dónde se añaden los eventos reservados.',
       calendarsCheckConflicts: 'Verificar conflictos',
       calendarsAddEventsHere: 'Añadir eventos aquí',
       calendarsManageLink: 'Administrar calendarios',
+      reminders: {
+        sectionTitle: 'Recordatorios',
+        sectionHint:
+          'Los recordatorios son de este evento. Cada uno tiene su propio interruptor, momento y texto.',
+        beforeMeeting: 'Antes de la reunión',
+        afterMeeting: 'Después de la reunión',
+        addReminder: 'Añadir recordatorio',
+        capReached: 'Hasta {max} recordatorios por evento.',
+        sendLabel: 'Enviar',
+        unitMinutes: 'minutos',
+        unitHours: 'horas',
+        unitDays: 'días',
+        beforeStart: 'antes de que empiece',
+        afterEnd: 'después de que termine',
+        subjectLabel: 'Asunto',
+        bodyLabel: 'Mensaje',
+        defaultCopyHint: 'Déjalo vacío para usar el texto estándar.',
+        remove: 'Quitar',
+        followUpHint:
+          'Un agradecimiento que se envía cuando la reunión termina. Desactivado salvo que lo actives.',
+        variablesLabel: 'Variables',
+        formVariablesLabel: 'De las preguntas de este evento',
+        noFormVariables: 'Añade una pregunta arriba para usar su respuesta aquí.',
+        danglingWarn: 'Estas variables ya no coinciden con ninguna pregunta y llegarán vacías: {tokens}',
+        enabledLabel: 'Enviar este recordatorio',
+        noReminders: 'Sin recordatorios: nadie recibirá aviso antes de este evento.',
+      },
+      crmMapping: {
+        sectionTitle: 'Enviar respuestas a tu CRM',
+        sectionHint:
+          'Elige qué respuestas llegan a qué propiedades de contacto en {provider}. Cada propiedad asignada se sobrescribe en cada reserva aceptada, así que siempre muestra la respuesta más reciente de ese contacto.',
+        identityTitle: 'Siempre se envía',
+        identityHint:
+          'El nombre y el correo identifican al contacto, por eso no se pueden asignar. Un contacto que tu CRM ya conoce conserva el nombre que tiene.',
+        identityEmail: 'Correo',
+        identityFirstName: 'Nombre',
+        identityLastName: 'Apellido',
+        notConnectedTitle: 'Todavía no hay ningún CRM conectado',
+        notConnectedBody:
+          'Conecta uno en Ajustes para empezar a asignar respuestas a propiedades de contacto.',
+        notConnectedLink: 'Ir a Integraciones',
+        unavailable:
+          'No pudimos conectar con tu CRM para leer sus propiedades. Mostramos la última lista que cargamos: pulsa Actualizar para reintentar.',
+        noProperties:
+          'Este portal no tiene propiedades de contacto en las que podamos escribir. Crea una en tu CRM y pulsa Actualizar.',
+        sourceLabel: 'Respuesta',
+        propertyLabel: 'Propiedad de contacto',
+        sourcePlaceholder: 'Elige una respuesta',
+        propertyPlaceholder: 'Elige una propiedad',
+        addMapping: '+ Asignar una respuesta',
+        removeMapping: 'Quitar esta asignación',
+        addTarget: '+ Añadir otra propiedad',
+        noMappings: 'Todavía no se envía ninguna respuesta a tu CRM.',
+        capReached: 'Puedes asignar hasta {max} respuestas en un evento.',
+        groupQuestions: 'Preguntas del formulario',
+        groupAttendee: 'Datos del invitado',
+        groupEvent: 'Datos del evento',
+        attendeePhone: 'Teléfono',
+        attendeeNotes: 'Notas',
+        attendeeTimeZone: 'Zona horaria',
+        attendeeLanguage: 'Idioma',
+        eventTypeTitle: 'Nombre del evento',
+        eventStart: 'Inicio de la reserva',
+        eventLength: 'Duración en minutos',
+        eventHostName: 'Anfitrión asignado',
+        eventHostEmail: 'Correo del anfitrión asignado',
+        optionsMatch: 'Todas las opciones coinciden con esta propiedad.',
+        optionsPartial:
+          '{matched} de {total} opciones coinciden. Estas no se enviarán: {values}',
+        optionsNone:
+          'Ninguna opción de esta pregunta coincide con la propiedad, así que no se enviará nada. Renómbralas para que coincidan o elige otra propiedad.',
+        missingProperty: 'Esta propiedad ya no está en tu portal.',
+        incompatibleProperty:
+          'Esta propiedad ya no encaja con el tipo de esta respuesta, así que el guardado se rechazará. Elige otra.',
+        missingQuestion:
+          'La pregunta de la que proviene ya no existe. Esta fila se descarta al guardar.',
+        refresh: 'Actualizar propiedades',
+        refreshing: 'Actualizando…',
+        suggest: 'Sugerir asignaciones',
+        suggestNone: 'Nada que sugerir: ninguna respuesta coincidió con una propiedad de tu portal.',
+        suggestFilled: 'Se rellenaron {n}. Revísalas y guarda.',
+        suggestNotSaved: 'Las sugerencias no se guardan hasta que pulses Guardar.',
+        createInProviderHint:
+          'Nunca creamos propiedades. Si falta la que quieres, créala en tu CRM y pulsa Actualizar.',
+      },
     },
     availability: {
       title: 'Disponibilidad',
@@ -1670,6 +2698,9 @@ export const es: BookingMessages = {
       saving: 'Guardando…',
       scheduleNameLabel: 'Nombre del horario',
       removeRange: 'Quitar rango',
+      deleteTitle: '¿Eliminar este horario?',
+      deleteBody: 'Se eliminará «{name}». Los eventos que lo usan volverán a tu disponibilidad predeterminada.',
+      removeOverride: 'Quitar excepción de fecha',
       savedToast: 'Disponibilidad guardada.',
       deletedToast: 'Horario eliminado.',
       saveError: 'No se pudo guardar la disponibilidad.',
@@ -1722,11 +2753,11 @@ export const es: BookingMessages = {
       createBooking: 'Crear reserva',
       createdTitle: 'Reserva creada',
       createdNote: 'Se ha notificado al invitado.',
-      backToBookings: '← Volver a reservas',
+      backToBookings: 'Volver a reservas',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
-      noHandleLink: 'Define tu identificador en Ajustes de Página de reservas',
+      noHandleLink: 'Definir mi identificador',
       slotTaken: 'Ese horario acaba de ocuparse — elige otro.',
       scheduleMissingNotice:
         'Falta el horario de este evento — elige un horario en la configuración del evento.',
@@ -1757,6 +2788,10 @@ export const es: BookingMessages = {
       delete: 'Eliminar',
       cancel: 'Cancelar',
       deleteError: 'No se pudo eliminar.',
+      deleteTitle: '¿Eliminar este equipo?',
+      deleteBody: '“{name}” se eliminará de forma permanente. Esta acción no se puede deshacer.',
+      removeTitle: '¿Quitar a este miembro?',
+      removeBody: '{name} perderá el acceso a este equipo. Puedes volver a añadirle más adelante.',
       memberSingular: 'miembro',
       memberPlural: 'miembros',
       noMembers: 'Aún no hay miembros. Añade a alguien de tu cuenta abajo.',
@@ -1774,8 +2809,8 @@ export const es: BookingMessages = {
       memberRemoved: 'Miembro eliminado.',
       memberAdded: 'Miembro añadido.',
       genericError: 'Algo salió mal.',
-      backToTeams: '← Equipos',
-      viewPublicTeam: 'Ver página pública del equipo →',
+      backToTeams: 'Equipos',
+      viewPublicTeam: 'Ver página pública del equipo',
       roundRobin: 'programación por turnos',
       members: 'Miembros',
       teamEventTypes: 'Eventos del equipo',
@@ -1790,7 +2825,7 @@ export const es: BookingMessages = {
       ownerLock: 'Los admins del equipo no se pueden quitar — cambia su rol primero.',
       memberPending: 'Pendiente',
       noAccountMember: 'No hay ningún miembro de la cuenta con ese correo — primero debe registrarse.',
-      inviteFromMembers: 'Invítalo desde Configuración → Miembros',
+      inviteFromMembers: 'Invítalo desde la configuración de Miembros',
       createTitle: 'Nuevo equipo',
       createSubtitle: 'Reparte reservas por turnos entre un grupo de anfitriones. Puedes añadir miembros después de crearlo.',
       bioLabel: 'Biografía',
@@ -1799,15 +2834,17 @@ export const es: BookingMessages = {
       uploadImage: 'Subir imagen',
       orPasteUrl: '…o pega una URL de imagen',
       clearImage: 'Quitar',
-      imageTooLarge: 'La imagen debe pesar 1MB o menos.',
+      imageTooLarge: 'Esa imagen es demasiado grande para abrirse. Elige una de menos de 25MB.',
       imageInvalidType: 'Elige un archivo de imagen.',
+      imageWorking: 'Redimensionando…',
+      imageCannotShrink: 'No se puede reducir esa imagen lo suficiente para guardarla. Prueba con otra.',
       creating: 'Creando…',
-      backToTeamsList: '← Equipos',
+      backToTeamsList: 'Equipos',
       imageReadError: 'No se pudo leer el archivo.',
       nameHelp: 'Se muestra en la parte superior de la página pública del equipo.',
       slugHelp: 'Se usa en la URL pública. Minúsculas, números y guiones.',
       bioHelp: 'Una línea breve bajo el nombre del equipo en la página pública.',
-      logoHelp: 'Una imagen cuadrada funciona mejor. Máx. 1MB.',
+      logoHelp: 'Una imagen cuadrada funciona mejor. Las fotos grandes se redimensionan automáticamente; de un GIF animado solo se conserva el primer fotograma.',
     },
     members: {
       title: 'Miembros',
@@ -1841,6 +2878,10 @@ export const es: BookingMessages = {
       lastOwnerTitle: 'Un espacio debe conservar al menos un propietario',
       transferOwnership: 'Transferir propiedad',
       transferConfirm: 'Sí, transferir — yo paso a admin',
+      removeTitle: '¿Quitar a esta persona?',
+      removeBody: '{name} perderá el acceso a este espacio. Sus reservas anteriores se conservan.',
+      transferTitle: '¿Transferir la propiedad?',
+      transferBody: '{name} pasará a ser propietario y tú pasarás a administrador. Solo esa persona puede devolvértela.',
       ownershipTransferred: 'Propiedad transferida.',
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
@@ -1875,17 +2916,20 @@ export const es: BookingMessages = {
       connectSuccess: 'Calendario conectado.',
       connectCancelled: 'Conexión cancelada: no se vinculó ningún calendario.',
       connectFailed: 'No se pudo iniciar la conexión. Inténtalo de nuevo.',
+      connectChecking: 'Comprobando…',
+      connectNotSeenYet:
+        'Todavía no hay una conexión de {provider} para {email}. Termina en la ventana emergente y vuelve a comprobar.',
+      connectGaveUp:
+        'Sigue sin haber una conexión de {provider} para {email}. Si iniciaste sesión con otra cuenta, empieza de nuevo y escribe esa dirección.',
+      connectCheckFailed: 'No se pudo comprobar la conexión. Inténtalo de nuevo en un momento.',
       popupBlocked: 'Tu navegador bloqueó la ventana emergente. Permite ventanas emergentes e inténtalo de nuevo.',
       destination: 'Destino',
       conflictCheck: 'Verificar conflictos',
       disconnect: 'Desconectar',
       disconnectError: 'No se pudo desconectar.',
+      disconnectTitle: '¿Desconectar este calendario?',
+      disconnectBody: 'Dejaremos de comprobar conflictos en {account} y las nuevas reservas no se escribirán ahí.',
       accountUnknown: 'Cuenta desconocida',
-      manualTitle: 'Vincular un calendario manualmente',
-      manualDesc: 'Avanzado: registra una referencia de calendario por id (se usa cuando hay un adaptador de proveedor configurado, o para pruebas).',
-      provider: 'Proveedor',
-      calendarId: 'Id de calendario / correo',
-      addConnection: 'Añadir conexión',
       healthSyncing: 'Sincronizando',
       healthRecorded: 'Solo registrado',
       yourCalendars: 'Tus calendarios',
@@ -1938,6 +2982,13 @@ export const es: BookingMessages = {
       error: 'Algo salió mal al iniciar sesión. Inténtalo de nuevo.',
       retry: 'Reintentar',
     },
+    session: {
+      unavailableTitle: 'No pudimos renovar tu sesión',
+      unavailableBody:
+        'Tu sesión sigue activa. El servicio de inicio de sesión no respondió ahora mismo, así que no se cambió nada. Espera un momento e inténtalo de nuevo.',
+      retry: 'Reintentar',
+      signOut: 'Cerrar sesión',
+    },
     settingsGeneral: {
       displayName: 'Nombre visible',
       publicHandle: 'Identificador público',
@@ -1985,11 +3036,6 @@ export const es: BookingMessages = {
       editTemplate: 'Editar plantilla',
       updated: 'Actualizado.',
       updateFailed: 'No se pudo actualizar — inténtalo de nuevo.',
-      reminderLeads: 'Enviar recordatorios antes del inicio',
-      reminderLeadsHint: 'Minutos antes del inicio, separados por comas (p. ej. 1440, 60). Hasta 5.',
-      reminderLeadsInvalid: 'Minutos enteros entre 5 y 40320, hasta 5 valores.',
-      followUpLead: 'Enviar después de que termine la reunión',
-      followUpLeadHint: 'Minutos después de la hora de fin, separados por comas (p. ej. 60). Hasta 5.',
       editorSubject: 'Asunto',
       editorBody: 'Cuerpo',
       variables: 'Variables',
@@ -2000,6 +3046,8 @@ export const es: BookingMessages = {
       usingCustom: 'Usando una plantilla personalizada',
       reset: 'Restablecer predeterminada',
       resetDone: 'Plantilla restablecida.',
+      resetTitle: '¿Restablecer esta plantilla?',
+      resetBody: 'Se descartarán tu asunto y tu cuerpo y volverá el texto original. Esto no se puede deshacer.',
       save: 'Guardar',
       saving: 'Guardando…',
       saved: 'Guardado.',
@@ -2016,6 +3064,12 @@ export const es: BookingMessages = {
       apiKeys: 'Claves API',
       noKeys: 'No hay claves API.',
       revoke: 'Revocar',
+      revokeTitle: '¿Revocar esta clave?',
+      revokeBody: '«{name}» dejará de funcionar de inmediato. Lo que la use empezará a fallar.',
+      deleteWebhookTitle: '¿Eliminar este webhook?',
+      deleteWebhookBody: 'No se enviarán más eventos a {url}. Su secreto de firma se pierde definitivamente.',
+      deliveryOk: 'Entregado',
+      deliveryFailed: 'Falló',
       revoked: 'revocada',
       copyOnce: 'Cópiala ahora — no se volverá a mostrar:',
       name: 'Nombre',
@@ -2023,12 +3077,18 @@ export const es: BookingMessages = {
       createKey: 'Crear clave',
       webhooks: 'Webhooks',
       noWebhooks: 'No hay webhooks.',
+      webhookSecretCopyOnce:
+        'Copia ahora esta clave de firma — no se volverá a mostrar. Tu suscriptor la usa para verificar la cabecera X-Slate-Signature en cada entrega:',
+      webhookNoKeyError:
+        'Esta instalación no tiene clave de cifrado, así que una clave de firma solo podría guardarse sin proteger. Nos negamos a hacerlo. Pide a quien la administra que configure INTEGRATION_ENCRYPTION_KEY y vuelve. Los webhooks que ya tienes siguen funcionando.',
       subscriberUrl: 'URL del suscriptor',
       events: 'Eventos',
       addWebhook: 'Añadir webhook',
       ping: 'Probar',
       deliveries: 'Entregas',
       noDeliveries: 'Aún no hay entregas — aparecerán cuando un evento real de reserva dispare este webhook.',
+      creating: 'Creando…',
+      loading: 'Cargando…',
       delete: 'Eliminar',
       active: 'activo',
       cancel: 'Cancelar',
@@ -2036,6 +3096,72 @@ export const es: BookingMessages = {
       revokedToast: 'Clave revocada.',
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
+    },
+    integrations: {
+      pageLead:
+        'Conecta tu CRM una vez para todo el espacio de trabajo. A partir de ahí, cada reserva que alguien acepte aquí se convierte en un contacto y en una reunión sobre ese contacto, automáticamente.',
+      loadError: 'No pudimos cargar la conexión actual. Recarga para reintentar.',
+      hubspotName: 'HubSpot',
+      hubspotDesc:
+        'Las reservas aceptadas se convierten en un contacto y una reunión asociada. Los cambios de horario y las cancelaciones actualizan esa misma reunión, nunca crean una segunda.',
+      disabledTitle: 'No está habilitado en esta instalación',
+      disabledBody:
+        'Quien administra esta instalación no ha activado ningún CRM. Pídele que configure CRM_PROVIDER y vuelve.',
+      noKeyTitle: 'Todavía no se pueden guardar credenciales aquí',
+      noKeyBody:
+        'Esta instalación no tiene clave de cifrado, así que un token solo podría guardarse sin proteger. Nos negamos a hacerlo. Pide a quien la administra que configure INTEGRATION_ENCRYPTION_KEY y vuelve.',
+      unknownTitle: 'No pudimos comprobar esta conexión',
+      unknownBody:
+        'Algo falló al leer la configuración de esta instalación, así que no ofrecemos conectar hasta saber que funcionaría. Recarga para reintentar.',
+      statusConnected: 'Conectado',
+      statusUnhealthy: 'Requiere atención',
+      statusDisconnected: 'Desconectado',
+      statusNotConnected: 'Sin conectar',
+      notConnectedBody: 'Este espacio de trabajo no está enviando nada a HubSpot.',
+      endingIn: 'Token terminado en {last4}',
+      lastChecked: 'Última comprobación: {date}',
+      neverChecked: 'Aún sin usar — la próxima reserva aceptada será la primera comprobación.',
+      disconnectedBody:
+        'Se eliminó la credencial. Las reservas existentes siguen apuntando a sus reuniones, así que reconectar el mismo portal retoma justo donde quedó.',
+      unhealthyLead: 'Las reservas dejaron de llegar a HubSpot.',
+      unhealthyScopes: 'HubSpot indica que a tu aplicación privada le faltan estos permisos:',
+      unhealthyKeepsCredential:
+        'El token sigue aquí. Concede los permisos en HubSpot y la próxima reserva aceptada pasará sola — no hay nada que volver a pegar.',
+      unhealthyUnknown: 'HubSpot rechazó la última escritura y no dijo por qué.',
+      connect: 'Conectar',
+      connecting: 'Conectando…',
+      reconnect: 'Reconectar',
+      disconnect: 'Desconectar',
+      disconnecting: 'Desconectando…',
+      disconnectConfirm: '¿Dejar de enviar reservas a HubSpot?',
+      disconnectNothingDeleted:
+        'No se borra nada dentro de HubSpot. Los contactos y las reuniones que ya están ahí se quedan tal cual.',
+      confirmDisconnect: 'Sí, desconectar',
+      cancel: 'Cancelar',
+      dialogTitle: 'Conectar HubSpot',
+      dialogLead:
+        'En HubSpot, abre Configuración, luego Integraciones y luego Aplicaciones privadas, y crea una aplicación. Concédele los dos permisos de abajo y pega aquí su token de acceso.',
+      scopesTitle: 'Permisos que necesita la aplicación',
+      scopesLead: 'Marca cada uno a medida que lo concedes en HubSpot. Todos son obligatorios.',
+      tokenLabel: 'Token de acceso',
+      tokenPlaceholder: 'Pega el token de la aplicación privada',
+      tokenHelp:
+        'Comprobamos el token con HubSpot antes de guardarlo, y no volvemos a mostrarlo nunca más.',
+      labelLabel: 'Nombre del portal (opcional)',
+      labelPlaceholder: 'p. ej. Portal de ventas de Acme',
+      labelHelp: 'Solo para reconocer esta conexión más adelante.',
+      errorRejected:
+        'HubSpot rechazó ese token. Comprueba que la aplicación privada esté activa y tenga los dos permisos.',
+      errorMissingScopes: 'HubSpot indica que faltan estos permisos:',
+      errorUnverified:
+        'No pudimos contactar con HubSpot para comprobar ese token. Inténtalo de nuevo en un momento.',
+      errorNoKey:
+        'Esta instalación no puede guardar credenciales: no hay clave de cifrado configurada.',
+      errorDisabled: 'No hay ningún CRM habilitado en esta instalación.',
+      errorGeneric: 'Algo salió mal. Inténtalo de nuevo.',
+      nothingStored: 'No se guardó nada.',
+      connectedToast: 'HubSpot conectado.',
+      disconnectedToast: 'HubSpot desconectado.',
     },
     bookingPageHeader: {
       title: 'Página de reservas',
@@ -2049,6 +3175,7 @@ export const es: BookingMessages = {
       save: 'Guardar',
       saving: 'Guardando…',
       saveFailed: 'Error al guardar.',
+      saveTooLarge: 'Demasiado grande para guardar. Vuelve a subir tu foto o portada e inténtalo de nuevo.',
       profile: 'Perfil',
       brand: 'Marca',
       appearance: 'Apariencia',
@@ -2064,11 +3191,14 @@ export const es: BookingMessages = {
       vanityIncluded: 'Los enlaces personalizados están incluidos con tu suscripción de Dapta AI.',
       vanityIncludedLink: 'Saber más',
       bio: 'Biografía',
-      tryHandle: 'Prueba {handle} →',
+      tryHandle: 'Prueba {handle}',
       accent: 'Color de acento',
-      contrast: 'Contraste {ratio}:1',
-      adjustedNote: ' · ajustado a {hex} para mejor legibilidad (AA)',
+      contrast: 'Contraste del texto {ratio}:1',
+      lowContrast:
+        'Contraste bajo: {ratio}:1 sobre el fondo de tu página. Los enlaces y botones pueden ser difíciles de leer. Tu color se usa tal como lo elegiste.',
       photoAvatar: 'Foto / avatar',
+      photoFromConnectedAccount:
+        'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',
@@ -2081,11 +3211,14 @@ export const es: BookingMessages = {
       axisSlotLayout: 'Disposición de horarios',
       axisDayGroup: 'Agrupación por día',
       axisSlotSelect: 'Selección de horario',
+      axisTheme: 'Tema',
+      themeLight: 'Claro',
+      themeDark: 'Oscuro',
       show: 'Mostrar',
       hide: 'Ocultar',
       noEvents: 'Aún no hay eventos.',
       orderVisibilityNote: 'El orden y la visibilidad se aplican a tu página pública.',
-      configureEventTypes: 'Configurar eventos →',
+      configureEventTypes: 'Configurar eventos',
       showLandingPage: 'Mostrar la página de inicio (lista de eventos)',
       sendVisitorsTo: 'Enviar a los visitantes directamente a',
       chooseEvent: 'Elige un evento…',
@@ -2100,18 +3233,74 @@ export const es: BookingMessages = {
       desktop: 'escritorio',
       mobile: 'móvil',
       checking: 'Comprobando…',
-      available: '✓ Disponible',
-      taken: '✗ Ocupado',
+      available: 'Disponible',
+      taken: 'Ocupado',
       invalid: 'No válido (3–40 caracteres, a–z 0–9 -)',
       uploadImage: 'Subir imagen',
       clear: 'Quitar',
       orPasteUrl: '…o pega una URL de imagen',
       imageInvalid: 'Elige un archivo de imagen.',
-      imageTooLarge: 'La imagen debe pesar menos de 1 MB.',
+      imageTooLarge: 'Esa imagen es demasiado grande para abrirse. Elige una de menos de 25MB.',
+      imageWorking: 'Redimensionando…',
+      imageCannotShrink: 'No se puede reducir esa imagen lo suficiente para guardarla. Prueba con otra.',
+      imageHelp:
+        'Las fotos grandes se redimensionan automáticamente; de un GIF animado solo se conserva el primer fotograma.',
       couldNotRead: 'No se pudo leer el archivo.',
       introCall: 'Llamada de introducción',
       minSuffix: 'min',
     },
+  },
+  onboarding: {
+    qualifyTitle: 'Cuéntanos sobre tu trabajo',
+    qualifySubtitle: 'Un par de preguntas para configurar todo según cómo agendas en realidad.',
+    questions: {
+      phone: 'Número de teléfono',
+      industry: '¿En qué industria trabajas?',
+      crm: '¿Qué CRM usa tu equipo?',
+      lead_volume: '¿Cuántos leads nuevos manejas al mes?',
+      lead_source: '¿De dónde vienen la mayoría de tus leads?',
+      use_case: '¿Para qué vas a usar la agenda?',
+    },
+    templateTitle: 'Crea tu primer evento',
+    templateSubtitle: 'Elige un punto de partida. Luego puedes renombrarlo, cambiar la duración o agregar más.',
+    template30MinTitle: 'Reunión de 30 minutos',
+    template30MinDesc: 'La opción por defecto para la mayoría de las conversaciones.',
+    template15MinTitle: 'Llamada rápida',
+    template15MinDesc: 'Para seguimientos cortos y presentaciones.',
+    template45MinTitle: 'Demo',
+    template45MinDesc: 'Espacio suficiente para mostrar algo con calma.',
+    template60MinTitle: 'Reunión 1:1',
+    template60MinDesc: 'Una hora completa para conversaciones más profundas.',
+    intakeTopic: '¿Qué te gustaría conversar?',
+    intakeCompany: 'Empresa',
+    minutes: '{minutes} min',
+    continueLabel: 'Continuar',
+    saving: 'Guardando…',
+    finish: 'Crear evento y terminar',
+    finishing: 'Creando…',
+    skipForNow: 'Ahora no',
+    errorGeneric: 'Algo salió mal. Inténtalo de nuevo.',
+  },
+  crm: {
+    hostLabel: 'Anfitrión',
+    bookingReferenceLabel: 'Referencia de la reserva',
+    yes: 'Sí',
+    no: 'No',
+    cancelledTitlePrefix: '[Cancelada] ',
+  },
+  embed: {
+    action: 'Insertar en tu sitio',
+    title: 'Insertar en tu sitio',
+    intro: 'Pega esto donde quieras que aparezca la página de reservas. Se ajusta de alto solo, y la página de reservas se carga igual aunque este script quede bloqueado.',
+    snippetLabel: 'Código para insertar',
+    copy: 'Copiar código',
+    copied: 'Copiado',
+    close: 'Listo',
+    accentLabel: 'Color de acento',
+    accentInherit: 'Usar el estilo de mi página de reservas',
+    accentCustom: 'Elegir un color para esta inserción',
+    resizeNote: 'El marco crece y se reduce con la página, así que no necesitas fijar una altura.',
+    advancedNote: 'Para cambiar más el aspecto, agrega cualquiera de estos a la dirección insertada: template, card_style, corners, buttons, density, font, slot_layout, day_group, slot_select. Un valor que no reconozcamos se ignora.',
   },
 };
 

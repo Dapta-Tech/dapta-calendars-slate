@@ -1,21 +1,33 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import Link from 'next/link';
 import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
+import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
+import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import {
+  EMBED_ROOT_CLASS,
+  isEmbedRequest,
+  mergeEmbedStyle,
+  parseEmbedParams,
+  withSearchParams,
+  type RawSearchParams,
+} from '@/lib/embed';
 
 // Per-page SEO/OG from team + event data (R11 audit); getTeamProfile is
 // request-cached, so this shares the page's fetch.
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountCode: string; teamSlug: string; slug: string }>;
+  searchParams: Promise<RawSearchParams>;
 }): Promise<Metadata> {
   const { accountCode, teamSlug, slug } = await params;
+  const query = await searchParams;
   const team = await getTeamProfile(accountCode, teamSlug);
   const event = team?.eventTypes.find((e) => e.slug === slug);
   if (!team || !event) return {};
@@ -34,20 +46,34 @@ export async function generateMetadata({
     description,
     openGraph: { title, description, type: 'website', images },
     twitter: { card: 'summary', title, description, images },
+    // An embedded URL is this same page with different chrome — never a second
+    // indexable copy of it.
+    ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),
   };
 }
 
 export default async function TeamBookingPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountCode: string; teamSlug: string; slug: string }>;
+  searchParams: Promise<RawSearchParams>;
 }) {
   const { accountCode, teamSlug, slug } = await params;
+  const query = await searchParams;
   const locale = await publicLocale();
+  // Inline embed (E). A team event holds no stored branding of its own, so on
+  // this route the URL overrides are the ONLY style there is — which is the
+  // point: a host embedding a team event still gets to make it match their site.
+  const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
   const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
-  const to = new Date(now.getTime() + 21 * 86_400_000).toISOString();
+  // The month calendar's window, matching the personal route. `teamAvailability()`
+  // now clamps to this same bound server-side (#136) — it used to pass the range
+  // through, which made this number the whole bound on an unauthenticated path.
+  // Which slots a team event offers is unchanged (#127 owns that question).
+  const to = new Date(now.getTime() + MAX_AVAILABILITY_WINDOW_MS).toISOString();
 
   const [team, availability] = await Promise.all([
     getTeamProfile(accountCode, teamSlug),
@@ -57,22 +83,29 @@ export default async function TeamBookingPage({
 
   // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
   const code = team!.account.code;
-  if (accountCode !== code) permanentRedirect(`/${code}/team/${teamSlug}/${slug}`);
+  // The whole query travels, so an alias-code URL in a snippet stays an embed.
+  if (accountCode !== code) {
+    permanentRedirect(withSearchParams(`/${code}/team/${teamSlug}/${slug}`, query));
+  }
+
+  const listing = team.eventTypes.find((e) => e.slug === slug);
 
   return (
-    <BrandedShell brandColor={null} style={null}>
-      <main className="mx-auto max-w-3xl px-6 py-12">
-        <header className="mb-8 flex flex-col gap-1">
-          <Link href={`/${code}/team/${teamSlug}`} className="text-sm text-muted-foreground hover:text-foreground">
-            ← {team.team.name}
-          </Link>
-          <h1 className="text-3xl font-semibold tracking-tight">{availability.eventType.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {availability.eventType.lengthMinutes} min · {team.team.name} ·{' '}
-            {schedulingMethodLabel(messages, availability.eventType.schedulingType)}
-          </p>
-        </header>
-
+    <BrandedShell
+      brandColor={accentOverride}
+      style={mergeEmbedStyle(null, styleOverrides)}
+      className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
+    >
+      {/* No link back to the team page, for the same reason the personal event
+          page no longer links to a profile: the team page is an entry point,
+          not this page's parent. */}
+      <main
+        className={
+          embed
+            ? 'mx-auto max-w-6xl px-4 py-4'
+            : 'mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
+        }
+      >
         <BookingFlow
           accountCode={accountCode}
           ownerSlug={teamSlug}
@@ -83,9 +116,21 @@ export default async function TeamBookingPage({
           bookingFields={availability.eventType.bookingFields}
           initialTimeZone={availability.timeZone}
           locale={locale}
+          eventTitle={availability.eventType.title}
+          lengthMinutes={availability.eventType.lengthMinutes}
+          description={listing?.description ?? null}
+          // The team is the host here: its name and logo are what an invitee
+          // is booking with, and B1's initial tile covers a team with no logo.
+          hostName={team.team.name}
+          avatarUrl={team.team.logoUrl}
+          location={availability.eventType.location}
+          methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
+          nowUtc={from}
+          embed={embed}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />
+      {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );
 }

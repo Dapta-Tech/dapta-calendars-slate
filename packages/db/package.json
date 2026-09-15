@@ -22,6 +22,7 @@
   "dependencies": {
     "@slate/calendar": "workspace:*",
     "@slate/engine": "workspace:*",
+    "@slate/types": "workspace:*",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.38.2",
     "postgres": "^3.4.5"

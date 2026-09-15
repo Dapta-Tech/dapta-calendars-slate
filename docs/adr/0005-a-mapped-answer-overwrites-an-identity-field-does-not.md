@@ -1,0 +1,9 @@
+# A mapped answer overwrites, an identity field does not
+
+ADR 0001 established the CRM write-out, and its design deliberately refuses to overwrite the name of a contact the CRM already knows: a booking is not the source of truth on a lead's identity, which is why the contact is resolved with search-then-create rather than an upsert keyed by email. Property mapping appears to contradict that rule, because a mapped answer **does** overwrite whatever value the property already held.
+
+The two are consistent, and the distinction is who chose the write. `email`, `firstname` and `lastname` are inferred from whatever the invitee happened to type into the booking form; nobody asked for them to become CRM truth, so a returning invitee typing "Bob" must not rename "Robert Smith". A mapped answer is the opposite: a host deliberately wired *this* question to *that* property, and the invitee deliberately answered it. The newest deliberate answer is the truest one. This is why identity fields are not offered in the mapping UI at all — they are shown as a read-only "always sent" row, so the exception is visible rather than merely absent.
+
+Calendly does the reverse: its integration writes custom-question answers only onto *new* contacts and never updates them on later bookings, which means a returning lead's fresh answers vanish silently. We rejected that as the worse failure — a stale property that looks current is more dangerous than an overwritten one, because nothing in the CRM signals it is stale.
+
+Consequence: a contact's mapped properties always describe their **most recent** booking, not their first. Event-metadata sources (last event type booked, last booking time, host who took it) are only meaningful under this rule; under Calendly's they would freeze at the first booking forever.

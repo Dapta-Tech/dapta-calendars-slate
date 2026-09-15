@@ -161,10 +161,10 @@ export function DateTimePicker({
   // error contradicts what the user sees selected (QA2 fix 8a).
   const statusBar =
     dateStatusLabel && timeStatusLabel ? (
-      <div className="flex flex-wrap gap-2 border-b border-border pb-2 text-xs" aria-live="polite">
+      <div className="flex flex-wrap gap-inline border-b border-border pb-inline text-xs" aria-live="polite">
         <span
           className={cn(
-            'rounded-sm px-2 py-1',
+            'rounded-sm px-inline py-tight',
             date ? 'bg-primary/10 font-medium text-primary' : 'bg-muted text-muted-foreground',
           )}
         >
@@ -175,7 +175,7 @@ export function DateTimePicker({
         </span>
         <span
           className={cn(
-            'rounded-sm px-2 py-1',
+            'rounded-sm px-inline py-tight',
             time ? 'bg-primary/10 font-medium text-primary' : 'bg-muted text-muted-foreground',
           )}
         >
@@ -185,12 +185,12 @@ export function DateTimePicker({
     ) : null;
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-background p-3">
+    <div className="flex flex-col gap-field rounded-md border border-border bg-background p-field">
       {statusBar}
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-field sm:flex-row">
       {/* Month calendar */}
       <div className="flex-1">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-inline flex items-center justify-between">
           <button
             type="button"
             disabled={!canPrev}
@@ -198,7 +198,7 @@ export function DateTimePicker({
             // Intl-formatted target month doubles as the locale-aware label —
             // no i18n key needed for "previous month".
             aria-label={monthFmt.format(new Date(y, mo - 1, 1))}
-            className="rounded-md border border-border bg-background p-1.5 transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+            className="rounded-md border border-border bg-background p-inline transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
           >
             <ChevronIcon direction="left" />
           </button>
@@ -209,14 +209,14 @@ export function DateTimePicker({
             disabled={!canNext}
             onClick={() => setViewMonth(new Date(y, mo + 1, 1))}
             aria-label={monthFmt.format(new Date(y, mo + 1, 1))}
-            className="rounded-md border border-border bg-background p-1.5 transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
+            className="rounded-md border border-border bg-background p-inline transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border"
           >
             <ChevronIcon direction="right" />
           </button>
         </div>
-        <div className="grid grid-cols-7 gap-1 text-center">
+        <div className="grid grid-cols-7 gap-tight text-center">
           {weekdays.map((w) => (
-            <span key={w} className="py-1 text-[11px] uppercase text-muted-foreground">
+            <span key={w} className="py-tight text-xs uppercase text-muted-foreground">
               {w}
             </span>
           ))}
@@ -238,7 +238,7 @@ export function DateTimePicker({
                 onClick={() => pickDate(key)}
                 aria-pressed={selected}
                 className={cn(
-                  'rounded-md border py-1.5 text-xs tabular-nums transition-colors',
+                  'rounded-md border py-inline text-xs tabular-nums transition-colors',
                   selected
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-border bg-background hover:border-primary',
@@ -246,7 +246,7 @@ export function DateTimePicker({
                   // a bordered today reads as a second selection (QA2 fix 8b).
                   isToday &&
                     !selected &&
-                    "relative font-semibold after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary after:content-['']",
+                    "relative font-semibold after:absolute after:bottom-0.5 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-primary-edge after:content-['']",
                   disabled && 'cursor-not-allowed opacity-40 hover:border-border',
                 )}
               >
@@ -261,7 +261,7 @@ export function DateTimePicker({
       <div
         role="group"
         aria-label={timeLabel}
-        className="grid max-h-64 grid-cols-4 content-start gap-1 overflow-y-auto sm:w-44 sm:grid-cols-2"
+        className="grid max-h-64 grid-cols-4 content-start gap-tight overflow-y-auto sm:w-44 sm:grid-cols-2"
       >
         {timeOptions.map((t) => {
           const selected = t === time;
@@ -272,7 +272,7 @@ export function DateTimePicker({
               onClick={() => pickTime(t)}
               aria-pressed={selected}
               className={cn(
-                'rounded-md border px-2 py-1.5 text-xs tabular-nums transition-colors',
+                'rounded-md border px-inline py-inline text-xs tabular-nums transition-colors',
                 selected
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-background hover:border-primary',

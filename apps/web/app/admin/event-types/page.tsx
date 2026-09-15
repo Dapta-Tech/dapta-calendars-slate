@@ -22,11 +22,12 @@ export default async function EventTypesPage() {
       teams.map(async (team) => ({ team, eventTypes: await adminApi.teamEventTypes(team.id) })),
     )
   ).filter((g) => g.eventTypes.length > 0);
-  const admin = getMessages(await getLocale()).admin;
+  const msgs = getMessages(await getLocale());
+  const admin = msgs.admin;
   const m = admin.eventTypes;
 
   return (
-    <div className="mx-auto max-w-[1520px] px-8 py-10">
+    <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       {/* One CTA per screen: the top-right Create shows ONLY when the list has
           rows. On the empty state the centered CTA below is the sole create
           affordance (never both at once). */}
@@ -36,7 +37,7 @@ export default async function EventTypesPage() {
           eventTypes.length > 0 ? (
             <Link
               href="/admin/event-types/new"
-              className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+              className="inline-flex min-h-control items-center rounded-md bg-primary px-card py-field text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
             >
               {m.newEventType}
             </Link>
@@ -44,32 +45,34 @@ export default async function EventTypesPage() {
         }
       />
 
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-inline">
         {eventTypes.map((et) => (
           <li
             key={et.id}
-            className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
+            className="flex items-center justify-between gap-field rounded-md border border-border bg-card p-card"
           >
             <span className="flex min-w-0 flex-col">
               <span className="font-medium">
                 {et.title}
-                {et.hidden ? <span className="ml-2 text-xs text-muted-foreground">({m.hidden})</span> : null}
+                {et.hidden ? <span className="ml-inline text-xs text-muted-foreground">({m.hidden})</span> : null}
               </span>
               <span className="text-sm text-muted-foreground">
                 /{et.slug} · {et.lengthMinutes} {m.minSuffix}
                 {et.requiresConfirmation ? ` · ${m.needsConfirmation}` : ''}
               </span>
             </span>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-inline">
               <EventRowActions
                 id={et.id}
                 hidden={et.hidden}
                 publicPath={me.handle ? `/${me.accountCode}/${me.handle}/${et.slug}` : null}
+                title={et.title}
                 messages={m}
+                embedMessages={msgs.embed}
               />
               <Link
                 href={`/admin/event-types/${et.id}`}
-                className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+                className="rounded-md border border-border px-field py-tight text-sm hover:border-primary"
               >
                 {admin.common.edit}
               </Link>
@@ -79,7 +82,7 @@ export default async function EventTypesPage() {
         ))}
       </ul>
       {eventTypes.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border p-10 text-center">
+        <div className="flex flex-col items-center gap-field rounded-md border border-dashed border-border p-section text-center">
           <svg width={30} height={30} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground" aria-hidden>
             <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H5a2 2 0 0 1-2-2 2 2 0 0 0 0-4Z" />
             <path d="M14 6v12" strokeDasharray="2 2" />
@@ -87,7 +90,7 @@ export default async function EventTypesPage() {
           <p className="max-w-sm text-sm text-muted-foreground">{m.emptyList}</p>
           <Link
             href="/admin/event-types/new"
-            className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
+            className="inline-flex min-h-control items-center rounded-md bg-primary px-card py-field text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
           >
             {m.newEventType}
           </Link>
@@ -99,40 +102,42 @@ export default async function EventTypesPage() {
           carry no ?from, so the editor returns to THIS page — only the team
           page's own links inject from=team. */}
       {teamEventGroups.length > 0 ? (
-        <div className="mt-10">
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">{m.teamEventsSection}</h2>
-          <div className="flex flex-col gap-6">
+        <div className="mt-section">
+          <h2 className="mb-field text-sm font-semibold text-muted-foreground">{m.teamEventsSection}</h2>
+          <div className="flex flex-col gap-group">
             {teamEventGroups.map(({ team, eventTypes: teamEventTypes }) => (
               <section key={team.id}>
-                <h3 className="mb-2 text-sm font-medium">{team.name}</h3>
-                <ul className="flex flex-col gap-2">
+                <h3 className="mb-inline text-sm font-medium">{team.name}</h3>
+                <ul className="flex flex-col gap-inline">
                   {teamEventTypes.map((et) => (
                     <li
                       key={et.id}
-                      className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4"
+                      className="flex items-center justify-between gap-field rounded-md border border-border bg-card p-card"
                     >
                       <span className="flex min-w-0 flex-col">
                         <span className="font-medium">
                           {et.title}
-                          {et.hidden ? <span className="ml-2 text-xs text-muted-foreground">({m.hidden})</span> : null}
+                          {et.hidden ? <span className="ml-inline text-xs text-muted-foreground">({m.hidden})</span> : null}
                         </span>
                         <span className="text-sm text-muted-foreground">
                           /{et.slug} · {et.lengthMinutes} {m.minSuffix}
                           {et.requiresConfirmation ? ` · ${m.needsConfirmation}` : ''}
                         </span>
                       </span>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-inline">
                         <EventRowActions
                           id={et.id}
                           hidden={et.hidden}
                           publicPath={
                             team.slug ? `/${me.accountCode}/team/${team.slug}/${et.slug}` : null
                           }
+                          title={et.title}
                           messages={m}
+                          embedMessages={msgs.embed}
                         />
                         <Link
                           href={`/admin/event-types/${et.id}`}
-                          className="rounded-md border border-border px-3 py-1 text-sm hover:border-primary"
+                          className="rounded-md border border-border px-field py-tight text-sm hover:border-primary"
                         >
                           {admin.common.edit}
                         </Link>

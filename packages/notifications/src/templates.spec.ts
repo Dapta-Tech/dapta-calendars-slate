@@ -29,10 +29,77 @@ const base: BookingNotification = {
   host: { name: 'Alex Rivera', email: 'alex@example.com' },
   coHosts: [{ name: 'Jordan', email: 'jordan@example.com' }],
   attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
-  location: 'Google Meet',
+  location: 'Online meeting',
   manageUrl: 'https://app.example.com/manage/bk-123?token=tok',
   stamp: '2026-07-09T12:00:00.000Z',
 };
+
+describe('{{form.*}} — the per-event intake namespace', () => {
+  const withAnswers = (answers: Record<string, unknown>): BookingNotification => ({
+    ...base,
+    formAnswers: answers,
+  });
+
+  it('renders a string answer, and a multi-select as a comma list', () => {
+    const r = renderTemplate(
+      { subject: 'Re: {{form.topic}}', body: 'Topic: {{form.topic}}\nTools: {{form.tools}}' },
+      templateVars(withAnswers({ topic: 'Pricing', tools: ['Forms', 'Calendars'] })),
+    );
+    expect(r.subject).toBe('Re: Pricing');
+    expect(r.text).toContain('Topic: Pricing');
+    expect(r.text).toContain('Tools: Forms, Calendars');
+  });
+
+  it('renders a boolean in the template locale, not as true/false', () => {
+    expect(
+      renderTemplate({ subject: 's', body: 'First time: {{form.newbie}}' }, templateVars(withAnswers({ newbie: true })))
+        .text,
+    ).toBe('First time: Yes');
+    expect(
+      renderTemplate(
+        { subject: 's', body: 'Primera vez: {{form.newbie}}' },
+        templateVars(withAnswers({ newbie: true }), 'es'),
+      ).text,
+    ).toBe('Primera vez: Sí');
+  });
+
+  it('an unanswered or deleted question renders empty and drops its line', () => {
+    // #68 decision 3: a dangling reference warns on save, it does not break mail.
+    const r = renderTemplate(
+      { subject: 'Hi {{attendee_name}}', body: 'Kept line\nBudget: {{form.budget}}' },
+      templateVars(withAnswers({ topic: 'Pricing' })),
+    );
+    expect(r.text).toBe('Kept line');
+    expect(r.text).not.toContain('{{');
+  });
+
+  it('a question cannot shadow a built-in — the prefix keeps them apart', () => {
+    const r = renderTemplate(
+      { subject: 's', body: 'Where: {{location}}\nAsked: {{form.location}}' },
+      templateVars(withAnswers({ location: 'Their office' })),
+    );
+    expect(r.text).toContain('Where: Online meeting'); // the booking's own Where
+    expect(r.text).toContain('Asked: Their office'); // the intake answer
+  });
+
+  it('prototype keys stay inert — they never stringify a function', () => {
+    // The literal answer key is `form.__proto__`, so nothing reaches
+    // Object.prototype; both tokens resolve empty. `{{attendee_name}}` keeps
+    // the line alive so the assertion sees the substitution, not the drop.
+    const r = renderTemplate(
+      { subject: 's', body: 'A{{form.__proto__}}B{{form.constructor}}C {{attendee_name}}' },
+      templateVars(withAnswers({ safe: 'x' })),
+    );
+    expect(r.text).toBe('ABC Sam Guest');
+  });
+
+  it('unknownTokens counts a form variable as known only for THIS event’s fields', () => {
+    const text = 'Hi {{attendee_name}} — {{form.topic}} {{form.gone}} {{bogus}}';
+    expect(unknownTokens(text, ['topic'])).toEqual(['form.gone', 'bogus']);
+    // With no event in hand (the account-wide preview) every form token is unknown.
+    expect(unknownTokens(text)).toEqual(['form.topic', 'form.gone', 'bogus']);
+  });
+});
 
 describe('renderTemplate — safety and substitution', () => {
   it('substitutes whitelisted variables in subject and body', () => {

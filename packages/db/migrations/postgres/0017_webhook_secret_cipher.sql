@@ -1,0 +1,23 @@
+-- W (#75): webhook signing secrets encrypted at rest.
+--
+-- `webhook.secret` was plain TEXT — readable by anyone with database access.
+-- Unlike `api_key`, it cannot be hashed: the signer must read it back to build
+-- the X-Slate-Signature HMAC, so it has to be reversible. It now lives in the
+-- SAME AES-256-GCM envelope H1a (#92 / #63) introduced for `account_integration`
+-- (`v1.<iv>.<tag>.<ciphertext>`, keyed by INTEGRATION_ENCRYPTION_KEY), bound to
+-- `${account_id}:webhook:${id}` so a ciphertext lifted into another row fails to
+-- decrypt rather than signing with a secret it never owned.
+--
+-- A NEW COLUMN rather than an in-place envelope on `secret`, because
+-- POST /v1/webhooks accepts a CALLER-SUPPLIED secret: an in-place envelope would
+-- have to infer "is this an envelope or a literal secret?" from the string's
+-- shape, and a caller may legitimately supply one that starts with `v1.`. A
+-- separate column makes "is this encrypted" a schema fact instead of a guess.
+--
+-- Purely additive and order-independent, so this number may safely collide with
+-- another unit's (#71, Mechanical conventions). Existing rows are NOT rewritten:
+-- `secret` is left exactly as it is and read as the legacy plaintext fallback,
+-- then re-sealed into `secret_cipher` the first time that webhook signs a
+-- delivery on a deployment that has a key. ADD COLUMN nullable with no default
+-- is a metadata-only op in modern Postgres — no lock held over existing rows.
+ALTER TABLE webhook ADD COLUMN IF NOT EXISTS secret_cipher TEXT;

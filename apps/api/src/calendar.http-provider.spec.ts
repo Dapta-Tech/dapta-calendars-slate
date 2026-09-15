@@ -57,6 +57,7 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(provider.enabled).toBe(true);
     const busy = await provider.listBusy({
       connectionRefs: ['conn-A'],
+      calendarIds: ['calendar-A'],
       fromUtc: '2026-08-01T00:00:00.000Z',
       toUtc: '2026-08-02T00:00:00.000Z',
     });
@@ -64,7 +65,10 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/free-busy');
     expect(calls[0]!.method).toBe('POST');
     expect(calls[0]!.auth).toBe('Bearer tok-123');
-    expect(calls[0]!.body).toMatchObject({ connectionRefs: ['conn-A'] });
+    expect(calls[0]!.body).toMatchObject({
+      connectionRefs: ['conn-A'],
+      calendarIds: ['calendar-A'],
+    });
   });
 
   it('short-circuits listBusy with no connection refs (no HTTP call)', async () => {
@@ -133,6 +137,49 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     const cals = await provider.listCalendars('conn-A');
     expect(cals).toHaveLength(2);
     expect(cals[0]).toMatchObject({ id: 'c1', name: 'Work', isPrimary: true });
+    expect(cals[0]).toMatchObject({
+      readOnly: true,
+      capabilities: { canCreate: false, canUpdate: false, canDelete: false },
+    });
+  });
+
+  it('passes through explicit provider-calendar permissions', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          calendars: [
+            {
+              id: 'writable',
+              name: 'Writable',
+              readOnly: false,
+              accessRole: 'writer',
+              source: 'shared',
+              capabilities: {
+                canRead: true,
+                canReadFreeBusy: true,
+                canCreate: true,
+                canUpdate: true,
+                canDelete: false,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(await provider.listCalendars('conn-A')).toEqual([
+      expect.objectContaining({
+        readOnly: false,
+        accessRole: 'writer',
+        source: 'shared',
+        capabilities: {
+          canRead: true,
+          canReadFreeBusy: true,
+          canCreate: true,
+          canUpdate: true,
+          canDelete: false,
+        },
+      }),
+    ]);
   });
 
   it('checkConnection reports health and NEVER throws on backend error', async () => {
@@ -183,9 +230,48 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     ]);
     const found = await provider.discoverConnections('tenant-1', 'google');
     expect(found).toEqual([
-      { connectionRef: 'conn-A', provider: 'google', primaryEmail: 'me@x.com', name: null },
+      {
+        connectionRef: 'conn-A',
+        provider: 'google',
+        primaryEmail: 'me@x.com',
+        // Optional on the wire, so a backend that reports no photo yields null
+        // and every surface falls back to its initial tile.
+        avatarUrl: null,
+        name: null,
+      },
     ]);
     expect(calls[0]!.url).toBe('https://cal.example.test/v1/connect/connections?tenantKey=tenant-1&provider=google');
+  });
+
+  it('discoverConnections carries the account photo when the backend reports one', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          connections: [
+            {
+              connectionRef: 'conn-A',
+              provider: 'google',
+              primaryEmail: 'me@x.com',
+              avatarUrl: 'https://cdn.example.test/me.jpg',
+            },
+          ],
+        },
+      },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found[0]!.avatarUrl).toBe('https://cdn.example.test/me.jpg');
+  });
+
+  it('discoverConnections ignores a non-string photo rather than passing it on', async () => {
+    const { provider } = makeProvider([
+      {
+        json: {
+          connections: [{ connectionRef: 'conn-A', provider: 'google', avatarUrl: { url: 'nope' } }],
+        },
+      },
+    ]);
+    const found = await provider.discoverConnections('tenant-1', 'google');
+    expect(found[0]!.avatarUrl).toBeNull();
   });
 
   it('discoverConnections skips not-yet-authorized connection shells (connected:false)', async () => {

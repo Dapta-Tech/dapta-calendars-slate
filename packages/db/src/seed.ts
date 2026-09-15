@@ -48,8 +48,14 @@ export async function seed(db: Db): Promise<SeedResult> {
   const scheduleId = randomUUID();
   const eventTypeId = randomUUID();
 
+  // `onboarding_completed_at` is stamped here for the same reason migration
+  // 0013/0012 stamps every pre-existing account: NULL means "owes onboarding",
+  // and the seed runs AFTER the migration and re-inserts this row — so without
+  // the stamp a bare `pnpm dev` clone would open the demo account straight into
+  // the first-run wizard instead of the seeded booking page.
   await db.run(
-    sql`INSERT INTO account (id, code, name, created_at) VALUES (${accountId}, ${accountCode}, ${'Acme Inc.'}, ${now})`,
+    sql`INSERT INTO account (id, code, name, onboarding_completed_at, created_at)
+        VALUES (${accountId}, ${accountCode}, ${'Acme Inc.'}, ${now}, ${now})`,
   );
   await db.run(
     sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)

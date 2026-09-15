@@ -12,9 +12,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import type { Interval } from '@slate/engine';
+import { isLocationKind, type Interval, type LocationKind } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
+import { parseJsonColumn } from './repository';
 
 /**
  * Connection refs used for CONFLICT checking (availability). Only calendars the
@@ -77,9 +78,14 @@ export async function loadDestinationConnectionRefs(
       // through to the member-level default below (never throw, never 500).
     }
   }
+  // ORDER BY id: a partial unique index already caps this at one destination per
+  // member, but `destinationRefs[0]` is now a documented contract (one
+  // conferencing room, minted from the organizer's side) and a contract must not
+  // rest on an unordered SELECT.
   const rows = await db.all<{ external_id: string }>(
     sql`SELECT external_id FROM connected_calendar
-        WHERE member_id = ${memberId} AND is_destination = 1`,
+        WHERE member_id = ${memberId} AND is_destination = 1
+        ORDER BY id`,
   );
   return rows.map((r) => r.external_id);
 }
@@ -114,7 +120,10 @@ export async function loadExternalBusy(
   });
   // The engine merges/sorts busy itself (computeSlots → mergeIntervals), so an
   // unsorted union is fine here.
-  return busy.map((b) => ({ start: new Date(b.startUtc), end: new Date(b.endUtc) }));
+  return busy.map((b) => ({
+    start: new Date(b.startUtc),
+    end: new Date(b.endUtc),
+  }));
 }
 
 // --- booking_reference (the persisted external event id per booking) --------
@@ -126,13 +135,32 @@ export interface CalendarWriteContext {
   title: string;
   startUtc: string;
   endUtc: string;
-  /** B9: a Meet link is requested when this is exactly `'google_meet'`. */
+  /** The human detail of the Where (address, number, custom label). */
   location: string | null;
+  /**
+   * B9: a conferencing link is requested when this is `'conferencing'` — the
+   * kind snapshotted on the booking, never a vendor literal (R15).
+   * Null on rows written before the kind existed.
+   */
+  locationKind: LocationKind | null;
   attendeeTimeZone: string | null;
   attendeeEmails: string[];
   organizerEmail: string | null;
-  /** Write-destination connection refs (`is_destination = 1`). */
+  /** The organizer's locale — the co-hosts' event body is written in it. */
+  organizerLocale: string | null;
+  /**
+   * Write-destination connection refs (`is_destination = 1`), **ordered with
+   * the primary organizer's destinations first**.
+   *
+   * The order is a CONTRACT, not an accident of Set insertion: the conferencing
+   * link is minted from `destinationRefs[0]` and only from there, so a team
+   * booking gets exactly ONE room rather than one per host (#66). When the
+   * primary host has no destination of their own, the first co-host's stands in
+   * — still one room, which is what the invitee needs.
+   */
   destinationRefs: string[];
+  /** Optional provider calendar beneath each connection, selected by the v2 pilot. */
+  destinationCalendarIds: Record<string, string>;
 }
 
 /**
@@ -140,10 +168,7 @@ export interface CalendarWriteContext {
  * needed to write (or later delete) the external calendar event. Returns null
  * if the booking is gone.
  */
-export async function loadBookingForCalendarWrite(
-  db: Db,
-  uid: string,
-): Promise<CalendarWriteContext | null> {
+export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<CalendarWriteContext | null> {
   const b = await db.get<{
     id: string;
     uid: string;
@@ -151,20 +176,25 @@ export async function loadBookingForCalendarWrite(
     start_ms: number;
     end_ms: number;
     location: string | null;
+    location_kind: string | null;
     attendee_time_zone: string | null;
     host_member_id: string | null;
     event_type_id: string | null;
     host_email: string | null;
+    host_locale: string | null;
+    metadata: unknown;
   }>(
-    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.attendee_time_zone,
-               b.host_member_id, b.event_type_id, m.email AS host_email
+    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.location_kind, b.attendee_time_zone,
+               b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email, m.locale AS host_locale
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.uid = ${uid} LIMIT 1`,
   );
   if (!b) return null;
   const attendees = await db.all<{ email: string }>(
-    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}`,
+    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}
+        UNION
+        SELECT email FROM booking_guest WHERE booking_id = ${b.id}`,
   );
 
   // The assigned host set: co-hosts recorded in booking_host (collective /
@@ -177,9 +207,16 @@ export async function loadBookingForCalendarWrite(
         FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
         WHERE bh.booking_id = ${b.id}`,
   );
-  const hostMemberIds = new Set<string>();
-  if (b.host_member_id) hostMemberIds.add(b.host_member_id);
-  for (const h of coHosts) hostMemberIds.add(h.member_id);
+  // ORDERED, organizer first — `destinationRefs`' documented contract depends on
+  // it (one conferencing room per booking, minted from the organizer's side).
+  // A plain array + dedupe rather than relying on Set insertion order being
+  // obvious to the next reader.
+  const hostMemberIds: string[] = [];
+  const addHost = (id: string) => {
+    if (!hostMemberIds.includes(id)) hostMemberIds.push(id);
+  };
+  if (b.host_member_id) addHost(b.host_member_id);
+  for (const h of coHosts) addHost(h.member_id);
 
   // PHASE 2 (per-event calendars): the event's `destination_calendar_id`
   // override applies ONLY to genuinely single-host bookings (personal /
@@ -187,20 +224,28 @@ export async function loadBookingForCalendarWrite(
   // bookings keep each host's own member-level default (Phase 3 territory);
   // applying one event-level override across multiple hosts' calendars would
   // be a silent wrong-calendar write.
-  const isSingleHost = hostMemberIds.size <= 1;
+  const isSingleHost = hostMemberIds.length <= 1;
   const destinationSet = new Set<string>();
-  for (const memberId of hostMemberIds) {
-    const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
-    for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
-      destinationSet.add(ref);
+  const destinationCalendarIds: Record<string, string> = {};
+  const metadata = parseJsonColumn<{
+    _destinationCalendar?: { connectionRef?: string; externalId?: string };
+  }>(b.metadata, {});
+  const requestedDestination = metadata._destinationCalendar;
+  if (isSingleHost && requestedDestination?.connectionRef && requestedDestination.externalId) {
+    destinationSet.add(requestedDestination.connectionRef);
+    destinationCalendarIds[requestedDestination.connectionRef] = requestedDestination.externalId;
+  } else {
+    for (const memberId of hostMemberIds) {
+      const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
+      for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
+        destinationSet.add(ref);
+      }
     }
   }
 
   // On multi-host bookings the co-hosts join the invite as attendees (the
   // organizer is the booking's primary host, so exclude their email).
-  const coHostEmails = coHosts
-    .map((h) => h.email)
-    .filter((e): e is string => !!e && e !== b.host_email);
+  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e && e !== b.host_email);
   const attendeeEmails = [...new Set([...attendees.map((a) => a.email), ...coHostEmails])].filter(Boolean);
 
   return {
@@ -210,15 +255,29 @@ export async function loadBookingForCalendarWrite(
     startUtc: new Date(Number(b.start_ms)).toISOString(),
     endUtc: new Date(Number(b.end_ms)).toISOString(),
     location: b.location,
+    locationKind: isLocationKind(b.location_kind) ? b.location_kind : null,
     attendeeTimeZone: b.attendee_time_zone,
     attendeeEmails,
     organizerEmail: b.host_email,
+    organizerLocale: b.host_locale,
     destinationRefs: [...destinationSet],
+    destinationCalendarIds,
   };
 }
 
+/**
+ * The two kinds of external record this table tracks. `calendar_event` is the
+ * event written to a host's calendar; `crm` is the meeting written to the
+ * account's CRM (H1a / #63). They share the table because they share ONE
+ * guarantee — the `(booking_id, destination)` unique index that makes a retry
+ * unable to create a duplicate — but they are addressed by different providers
+ * and must never be handed to each other's.
+ */
+export type BookingReferenceType = 'calendar_event' | 'crm';
+
 export interface BookingReferenceRow {
   id: string;
+  destination: string | null;
   type: string;
   externalEventId: string | null;
   externalCalendarId: string | null;
@@ -234,7 +293,7 @@ export async function writeBookingReference(
   db: Db,
   ref: {
     bookingId: string;
-    type: string;
+    type: BookingReferenceType;
     externalEventId: string;
     externalCalendarId: string | null;
     meetingUrl: string | null;
@@ -254,17 +313,24 @@ export async function writeBookingReference(
  * retried or concurrent write loses the race and gets `null`, so it skips
  * createEvent and cannot produce a duplicate external event. Returns the new
  * reference id on success, or null if this destination is already claimed.
+ *
+ * `type` defaults to `calendar_event`, which is the whole of what this table
+ * held before H1a. The CRM write-out (#63) reuses this exact mechanism with
+ * `type='crm'` and an `account_integration`-derived destination rather than
+ * growing a second table: one guarantee, implemented once. A parallel copy of
+ * this INSERT would put the no-duplicates promise in two places.
  */
 export async function claimBookingDestination(
   db: Db,
   bookingId: string,
   destination: string,
+  type: BookingReferenceType = 'calendar_event',
 ): Promise<string | null> {
   const id = randomUUID();
   try {
     await db.run(
       sql`INSERT INTO booking_reference (id, booking_id, destination, type, created_at)
-          VALUES (${id}, ${bookingId}, ${destination}, 'calendar_event', ${Date.now()})`,
+          VALUES (${id}, ${bookingId}, ${destination}, ${type}, ${Date.now()})`,
     );
     return id;
   } catch {
@@ -277,7 +343,11 @@ export async function claimBookingDestination(
 export async function fillBookingReference(
   db: Db,
   referenceId: string,
-  ref: { externalEventId: string; externalCalendarId: string | null; meetingUrl: string | null },
+  ref: {
+    externalEventId: string;
+    externalCalendarId: string | null;
+    meetingUrl: string | null;
+  },
 ): Promise<void> {
   await db.run(
     sql`UPDATE booking_reference
@@ -288,27 +358,102 @@ export async function fillBookingReference(
   );
 }
 
+/**
+ * Set ONLY the conferencing link on an existing reference.
+ *
+ * Scoped to `calendar_event`: a conferencing room is the calendar's business,
+ * and the CRM's row must not be written by the calendar path (see
+ * `BookingReferenceType`).
+ *
+ * Distinct from `fillBookingReference`, which also rewrites the external ids:
+ * a reschedule has an event id already and must not touch it. Used to persist a
+ * URL a `moveEvent` returned, and to mirror the organizer's room onto co-host
+ * rows so every reference for a booking names the same room.
+ */
+export async function setBookingReferenceMeetingUrl(
+  db: Db,
+  bookingId: string,
+  meetingUrl: string,
+): Promise<void> {
+  await db.run(
+    sql`UPDATE booking_reference SET meeting_url = ${meetingUrl}
+        WHERE booking_id = ${bookingId} AND type = 'calendar_event'`,
+  );
+}
+
+/**
+ * Is a calendar write-out for this booking still in flight?
+ *
+ * The precise answer to "is it worth waiting for a link" (ADR 0007). It is
+ * FALSE by construction on a bare fork — a disabled provider enqueues no
+ * calendar row at all — and false once the job has finished or given up, so a
+ * booking that can never receive a link is never delayed for one.
+ */
+export async function hasPendingCalendarJob(db: Db, uid: string): Promise<boolean> {
+  const row = await db.get<{ n: number }>(
+    sql`SELECT COUNT(*) AS n FROM outbox
+        WHERE kind = 'calendar' AND booking_uid = ${uid} AND status = 'pending'`,
+  );
+  return Number(row?.n ?? 0) > 0;
+}
+
+/**
+ * The booking's conferencing link, or null. ADR 0007: this is the ONE value an
+ * email resolves at DELIVERY time rather than at enqueue — it is minted later,
+ * by the calendar outbox row, so the enqueue-time snapshot cannot contain it.
+ *
+ * Every filled reference for a booking carries the same URL (write-out mints one
+ * room and mirrors it in a single booking-wide UPDATE), so the value is the same
+ * whichever row wins. `ORDER BY` is belt-and-braces: it keeps the read stable
+ * even for rows written before that invariant held, so this reader, the manage
+ * page and `/v1` cannot disagree about a legacy booking.
+ */
+export async function loadBookingMeetingUrl(db: Db, uid: string): Promise<string | null> {
+  const row = await db.get<{ meeting_url: string | null }>(
+    sql`SELECT br.meeting_url FROM booking_reference br
+        JOIN booking b ON b.id = br.booking_id
+        WHERE b.uid = ${uid} AND br.meeting_url IS NOT NULL
+        ORDER BY br.created_at, br.id
+        LIMIT 1`,
+  );
+  return row?.meeting_url ?? null;
+}
+
 /** Release a claim (e.g. createEvent failed) so a later retry can re-create it. */
 export async function releaseBookingReference(db: Db, referenceId: string): Promise<void> {
   await db.run(sql`DELETE FROM booking_reference WHERE id = ${referenceId}`);
 }
 
+/**
+ * References for a booking, optionally narrowed to ONE kind.
+ *
+ * `type` is not optional in spirit: since H1a this table holds calendar events
+ * AND CRM meetings, and a reader that takes both will hand a CRM meeting id to
+ * the calendar provider. Every production caller passes a type; the parameter
+ * stays optional only so a diagnostic can still see the whole set.
+ */
 export async function loadBookingReferences(
   db: Db,
   bookingId: string,
+  type?: BookingReferenceType,
 ): Promise<BookingReferenceRow[]> {
   const rows = await db.all<{
     id: string;
+    destination: string | null;
     type: string;
     external_event_id: string | null;
     external_calendar_id: string | null;
     meeting_url: string | null;
   }>(
-    sql`SELECT id, type, external_event_id, external_calendar_id, meeting_url
-        FROM booking_reference WHERE booking_id = ${bookingId}`,
+    type
+      ? sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
+            FROM booking_reference WHERE booking_id = ${bookingId} AND type = ${type}`
+      : sql`SELECT id, destination, type, external_event_id, external_calendar_id, meeting_url
+            FROM booking_reference WHERE booking_id = ${bookingId}`,
   );
   return rows.map((r) => ({
     id: r.id,
+    destination: r.destination,
     type: r.type,
     externalEventId: r.external_event_id,
     externalCalendarId: r.external_calendar_id,
@@ -316,7 +461,19 @@ export async function loadBookingReferences(
   }));
 }
 
-/** Drop all references for a booking once the remote events are deleted. */
-export async function deleteBookingReferences(db: Db, bookingId: string): Promise<void> {
-  await db.run(sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId}`);
+/**
+ * Drop a booking's references once the remote records are gone. SCOPED BY TYPE:
+ * the calendar teardown must not delete the CRM's row, which points at a meeting
+ * that is PATCHed rather than deleted and is still needed to cancel it.
+ */
+export async function deleteBookingReferences(
+  db: Db,
+  bookingId: string,
+  type?: BookingReferenceType,
+): Promise<void> {
+  await db.run(
+    type
+      ? sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId} AND type = ${type}`
+      : sql`DELETE FROM booking_reference WHERE booking_id = ${bookingId}`,
+  );
 }

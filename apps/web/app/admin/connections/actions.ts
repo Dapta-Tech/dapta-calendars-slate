@@ -5,25 +5,6 @@ import { adminApi, type Connection, type ConnectionTestResult } from '@/lib/admi
 
 export type ActionResult = { ok: boolean; message?: string };
 
-export async function createConnectionAction(
-  _prev: ActionResult | null,
-  form: FormData,
-): Promise<ActionResult> {
-  try {
-    await adminApi.createConnection({
-      provider: String(form.get('provider') ?? 'google'),
-      externalId: String(form.get('externalId') ?? ''),
-      primaryEmail: form.get('primaryEmail') ? String(form.get('primaryEmail')) : undefined,
-      checkConflicts: form.get('checkConflicts') === 'on',
-      isDestination: form.get('isDestination') === 'on',
-    });
-    revalidatePath('/admin/connections');
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
-  }
-}
-
 export async function deleteConnectionAction(id: string): Promise<{ ok: boolean; message?: string }> {
   try {
     // Disconnecting the sole/destination calendar is allowed — the API always
@@ -87,7 +68,7 @@ export async function testConnectionAction(id: string): Promise<ConnectionTestRe
 
 /**
  * `email` is the account the host is about to connect (collected by the
- * connect dialog's "which account?" step). It becomes part of the Membrane
+ * connect dialog's "which account?" step). It becomes part of the connection
  * subject (`${iamUserId}-${email}`) so this connection lines up with the SAME
  * scheme the main Dapta app uses — a distinct subject per connected account is
  * what lets a member connect more than one calendar, and what makes an

@@ -1,4 +1,11 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   listWebhookDeliveries,
@@ -7,8 +14,10 @@ import {
   createApiKey,
   createBooking,
   createConnection,
+  setConnectionAvatar,
   updateConnection,
   connectionExists,
+  countPublishedEventTypes,
   getConnectionRef,
   getMemberIdentity,
   declineBooking,
@@ -24,6 +33,11 @@ import {
   getSchedule,
   listApiKeys,
   listBookings,
+  listAccountIntegrations,
+  type IntegrationStatusRow,
+  disconnectAccountIntegration,
+  loadEncryptionKey,
+  upsertAccountIntegration,
   listConnections,
   listSchedules,
   listWebhooks,
@@ -45,7 +59,7 @@ import {
   upsertNotificationSetting,
 } from '@slate/db';
 import {
-  EMAIL_TEMPLATE_KEYS,
+  ACCOUNT_TEMPLATE_KEYS,
   TEMPLATE_VARIABLES,
   defaultEnabledFor,
   defaultTemplate,
@@ -57,11 +71,20 @@ import {
   type EmailTemplateKey,
 } from '@slate/notifications';
 import { canClaimVanitySlug } from '@slate/engine';
+import { CrmAuthError } from '@slate/crm';
+import {
+  clampAvailabilityWindow,
+  type IntegrationCapabilities,
+  type IntegrationConnectInput,
+  type IntegrationStatusView,
+} from '@slate/types';
+import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
+import { CrmEffects } from './crm-effects';
 import { asConnector } from './calendar.http-provider';
-import { EmailEffects, DEFAULT_REMINDER_LEAD_MINUTES, DEFAULT_FOLLOW_UP_LEAD_MINUTES } from './email-effects';
+import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
@@ -82,11 +105,21 @@ export class AdminService {
     // Optional (specs construct this service directly): only used to build the
     // attendee manage link on host-created bookings.
     @Optional() @Inject(ENV) private readonly env?: ServerEnv,
+    // H1a: the CRM write-out rides the SAME lifecycle transitions as the
+    // calendar one, as its own enqueue — no-op when CRM_PROVIDER=disabled,
+    // which is the OSS default. LAST and @Optional() so the many specs that
+    // construct this service positionally keep working: absent, the booking
+    // lifecycle simply enqueues no CRM row, which is exactly what those specs
+    // (and a bare fork) already expect.
+    @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
 
   async me(p: HostPrincipal) {
     // Hard invariant: a host must never resolve to NO_SCHEDULE — see
     // ensureDefaultSchedule. Cheap (one indexed SELECT) once a default exists.
+    // The onboarding gates are NOT read here: OnboardingService is their single
+    // authority (it also decides whether gate 1 applies to this deployment at
+    // all), and HostController.me composes the two onto one response.
     await ensureDefaultSchedule(this.db, p.accountId, p.memberId);
     return getMe(this.db, p.accountId, p.memberId);
   }
@@ -118,18 +151,25 @@ export class AdminService {
   /**
    * The Home "Get bookable" checklist (R22: real data, not a static nag) —
    * three steps: a connected calendar, working hours (a default schedule with
-   * ≥1 rule), and a shareable booking link (always true — every member gets an
-   * auto-handle at creation, short-links §3).
+   * ≥1 rule), and at least one PUBLISHED event type.
+   *
+   * That third step used to be `hasBookingLink: !!me?.handle`, and it lied to
+   * every host in the product. Every member is given an auto-handle at creation
+   * (short-links §3), so the flag was true from the first second of an account's
+   * life — the checklist reported "you are bookable" while the host's public
+   * page rendered an empty list with nothing to book. The measure is now the
+   * thing the step is actually about: does this host own a published event type
+   * (ADR 0002 → Consequences, #84).
    */
   async setupStatus(p: HostPrincipal): Promise<{
     hasConnectedCalendar: boolean;
     hasWorkingHours: boolean;
-    hasBookingLink: boolean;
+    hasPublishedEventType: boolean;
   }> {
-    const [connections, schedules, me] = await Promise.all([
+    const [connections, schedules, publishedEventTypes] = await Promise.all([
       listConnections(this.db, p.memberId),
       listSchedules(this.db, p.memberId),
-      getMe(this.db, p.accountId, p.memberId),
+      countPublishedEventTypes(this.db, p.accountId, p.memberId),
     ]);
     let hasWorkingHours = false;
     if (schedules.length > 0) {
@@ -143,7 +183,7 @@ export class AdminService {
     return {
       hasConnectedCalendar: connections.length > 0,
       hasWorkingHours,
-      hasBookingLink: !!me?.handle,
+      hasPublishedEventType: publishedEventTypes > 0,
     };
   }
 
@@ -210,6 +250,7 @@ export class AdminService {
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
     if (outcome.ok && outcome.booking.status === 'accepted') {
       this.calendar.onBookingAccepted(outcome.booking.uid);
+      this.crm?.onBookingAccepted(outcome.booking.uid);
     }
     // QA2 BUG-1 — same bug develop's 7305d09 fixed; merged as the superset:
     // this path created the booking but notified NOBODY while the UI claimed
@@ -248,6 +289,7 @@ export class AdminService {
     // idempotent retry (already cancelled) so nothing is duplicated (P1-1).
     if (out.ok && !out.alreadyApplied) {
       this.calendar.onBookingCancelled(uid);
+      this.crm?.onBookingCancelled(uid);
       void this.email.enqueueCancellation(uid, { reason: reason ?? null });
       // The booking is off — its still-pending reminders must never fire.
       // (The public cancel path already did this; the host path missed it.)
@@ -268,6 +310,7 @@ export class AdminService {
       // the attendee the confirmation (they already hold the manage link from
       // the "request received" email; the token isn't retrievable here).
       this.calendar.onBookingAccepted(uid);
+      this.crm?.onBookingAccepted(uid);
       void this.email.enqueueConfirmation(uid);
       // Now that it's confirmed, schedule its pre-meeting reminders.
       void this.email.enqueueReminders(uid);
@@ -307,8 +350,137 @@ export class AdminService {
    * reads are free. Never blocks or fails the read: an unreachable provider
    * just leaves the row as-is (the UI falls back to "account unknown").
    */
+  // --- H1a: CRM integrations (#63 / ADR 0001) ------------------------------
+  //
+  // Three admin operations, no UI (that is H1b / #93). Every one resolves the
+  // principal upstream and is scoped to `p.accountId` — a credential is an
+  // ACCOUNT-level resource, so it is `assertAdmin` at the controller and
+  // account-scoped here (invariant 4).
+  //
+  // The token travels in only. Nothing any of these returns carries it, or the
+  // cipher: `IntegrationStatusView` is the whole of what a client may see.
+
+  /** Status rows for the account's integrations. Never carries a credential. */
+  async listIntegrations(p: HostPrincipal): Promise<IntegrationStatusView[]> {
+    const rows = await listAccountIntegrations(this.db, p.accountId);
+    return rows.map(toIntegrationView);
+  }
+
+  /**
+   * What this DEPLOYMENT can do — not what this account has done (H1b / #93).
+   *
+   * `connectIntegration` refuses on two deployment states: no adapter selected
+   * (`CRM_DISABLED`) and no encryption key (`INTEGRATION_KEY_MISSING`). Neither
+   * is discoverable from a browser except by pasting a credential and being
+   * turned away, which is a bad trade when the paste is preceded by a trip to
+   * the provider's portal. So the UI asks up front and disables Connect.
+   *
+   * Booleans only. The key itself, its length, and the provider's own config
+   * stay on this side — the answer says WHETHER, never WHAT.
+   */
+  integrationCapabilities(_p: HostPrincipal): IntegrationCapabilities {
+    const provider = this.crm?.provider;
+    const enabled = provider?.enabled === true;
+    let canStoreCredentials = false;
+    try {
+      loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+      canStoreCredentials = true;
+    } catch {
+      /* absent or malformed — either way the answer is the same: no */
+    }
+    return {
+      provider: enabled ? (provider?.name ?? null) : null,
+      enabled,
+      canStoreCredentials,
+      // From the ADAPTER, never from a copy catalog: the checklist a host works
+      // through and the scopes the adapter actually needs are one list.
+      requiredScopes: enabled ? [...(provider?.requiredScopes ?? [])] : [],
+    };
+  }
+
+  /**
+   * Connect a credential: VERIFY FIRST, store only on success (fail-closed).
+   *
+   * #63 rejected introspecting the token for its scope list — that endpoint is
+   * documented only in community threads and has an EU-token quirk, and resting
+   * the connect gate on it is fragile. So we simply use the credential: if the
+   * read works, the token is real and carries the scopes this integration
+   * needs; if it 403s, the reply names the scopes that are missing (#74), and
+   * they go back to the caller as DATA rather than prose.
+   */
+  async connectIntegration(
+    p: HostPrincipal,
+    input: IntegrationConnectInput,
+  ): Promise<IntegrationStatusView> {
+    const provider = this.crm?.provider;
+    if (!provider?.enabled || provider.name !== input.provider) {
+      throw new BadRequestException({
+        error: 'CRM_DISABLED',
+        message: `No ${input.provider} integration is enabled on this deployment (set CRM_PROVIDER).`,
+      });
+    }
+    // Loud, not silent: refusing is the only honest alternative to writing a
+    // customer's CRM credential to disk in plaintext. Translated to a coded
+    // reply rather than left to surface as a bare 500 — "the operator has not
+    // set a key" and "the CRM is unreachable" need different actions from
+    // whoever is looking at the screen.
+    let key: Buffer;
+    try {
+      key = loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY);
+    } catch {
+      throw new ServiceUnavailableException({
+        error: 'INTEGRATION_KEY_MISSING',
+        message:
+          'This deployment cannot store integration credentials: INTEGRATION_ENCRYPTION_KEY is not configured.',
+      });
+    }
+
+    try {
+      await provider.verifyCredential({ token: input.token });
+    } catch (err) {
+      if (err instanceof CrmAuthError) {
+        throw new UnprocessableEntityException({
+          error: 'INTEGRATION_REJECTED',
+          message: 'That token was rejected. Check the private app\'s scopes and try again.',
+          requiredGranularScopes: err.requiredGranularScopes,
+          category: err.category,
+        });
+      }
+      // Reachable upstream, unreachable right now. Nothing is stored: a
+      // credential we could not verify is a credential we do not keep.
+      throw new BadRequestException({
+        error: 'INTEGRATION_UNVERIFIED',
+        message: 'Could not reach the CRM to verify that token. Try again in a moment.',
+      });
+    }
+
+    const row = await upsertAccountIntegration(this.db, {
+      accountId: p.accountId,
+      provider: input.provider,
+      token: input.token,
+      key,
+      label: input.label ?? null,
+    });
+    return toIntegrationView(row);
+  }
+
+  /**
+   * Disconnect: scrub the credential, keep the row (and therefore its id).
+   * Pending write-out is marked `skipped` — the user reversed a decision, they
+   * did not suffer a delivery failure. Nothing is deleted in the CRM.
+   */
+  async disconnectIntegration(p: HostPrincipal, provider: string): Promise<{ disconnected: boolean }> {
+    const disconnected = await disconnectAccountIntegration(this.db, p.accountId, provider);
+    return { disconnected };
+  }
+
   async listConnections(p: HostPrincipal) {
-    const rows = await listConnections(this.db, p.memberId);
+    const rows = (await listConnections(this.db, p.memberId)).map((c) => ({
+      ...c,
+      // ADR 0008: the running product names the conferencing platform, the repo
+      // never does. Null on a bare fork ⇒ the editor shows generic wording.
+      conferencingLabel: this.provider.conferencingLabel ?? null,
+    }));
     if (!this.provider.enabled) return rows;
     // Backfill missing primaryEmail in small batches (optibot #32 fix): an
     // unbounded Promise.all here would fan out one provider call PER
@@ -402,23 +574,25 @@ export class AdminService {
    * provider and persist any not already stored (first destination wins R20).
    * Returns the connections now on record.
    *
-   * Discovery is keyed by the PLAIN Dapta iamUserId (no email suffix) so it
-   * enumerates EVERY account subject this member owns
-   * (`${iamUserId}-<email1>`, `${iamUserId}-<email2>`, …) — including accounts
-   * connected from the main Dapta app before this member ever opened
-   * Calendars, and every prior connection of this member's own (legacy plain
-   * `iamUserId` subjects, pre-dating the per-email scheme, keep matching too).
+   * Discovery CANNOT lean on a prefix match: a tenant token is scoped to an
+   * exact subject, so this queries the UNION of every subject the member could
+   * own — the account just connected, the member's own login email, and the
+   * legacy bare `iamUserId` — and dedupes by `connectionRef`. That union is
+   * what surfaces accounts connected from the main Dapta app before this member
+   * ever opened Calendars, alongside the member's own prior connections
+   * (legacy plain `iamUserId` subjects pre-date the per-email scheme).
    */
   async discoverConnections(p: HostPrincipal, provider: string, email?: string) {
     const connector = asConnector(this.provider);
     if (!connector) return listConnections(this.db, p.memberId);
     const identity = await getMemberIdentity(this.db, p.memberId);
     const iamUserId = identity?.iamUserId ?? p.memberId;
-    // Membrane keys each connected account by the COMPOSITE subject
-    // `${iamUserId}-${email}` (the SAME scheme the main Dapta app uses — proven
-    // against the live workspace). A tenant token is an EXACT customerId match,
-    // so querying the bare `iamUserId` alone never sees a `${iamUserId}-<email>`
-    // account. Enumerate every subject this member could own and union them:
+    // The calendar backend keys each connected account by the COMPOSITE
+    // connection subject `${iamUserId}-${email}` (the SAME scheme the main
+    // Dapta app uses — proven against the live workspace). A tenant token is
+    // scoped to an EXACT subject match, so querying the bare `iamUserId` alone
+    // never sees a `${iamUserId}-<email>` account. Enumerate every subject this
+    // member could own and union them:
     //   - the account just connected (the `email` arg from the connect step),
     //   - the member's own login email (surfaces a calendar connected elsewhere
     //     in Dapta under the same identity — e.g. the main app),
@@ -436,17 +610,48 @@ export class AdminService {
     const haveDestination = (await listConnections(this.db, p.memberId)).some((c) => c.isDestination);
     let firstNew = !haveDestination;
     for (const conn of discovered) {
-      if (await connectionExists(this.db, p.memberId, conn.connectionRef)) continue;
+      if (await connectionExists(this.db, p.memberId, conn.connectionRef)) {
+        // Already recorded — but a photo the backend only started reporting
+        // after the connection was made would otherwise never land, so take it
+        // now. Cheap: no extra call, only what discovery already returned.
+        if (conn.avatarUrl) {
+          await setConnectionAvatar(
+            this.db,
+            p.accountId,
+            p.memberId,
+            conn.connectionRef,
+            conn.avatarUrl,
+          );
+        }
+        continue;
+      }
       // Old-app parity: when discovery doesn't carry the account email, derive
       // it from the provider's primary calendar (its id IS the account email).
       // Best-effort — a label-less connection is still a working connection.
       let primaryEmail = conn.primaryEmail ?? null;
+      // The account's own photo travels the same route as its email: on the
+      // discovery record when the backend puts it there, otherwise off the
+      // primary calendar. Optional at every hop — a backend that reports none
+      // leaves this null and the page draws its initial tile, as it does today.
+      let avatarUrl = conn.avatarUrl ?? null;
+      // The condition stays `!primaryEmail`, deliberately. Almost no backend
+      // reports `avatarUrl` on the discovery record yet, so widening this to
+      // `|| !avatarUrl` would fire an uncached HTTP GET for EVERY newly
+      // discovered connection, serially, on the post-OAuth request path — a
+      // cost the previous code specifically avoided, and one the `catch` would
+      // hide. The photo rides along whenever the call happens anyway, and
+      // `setConnectionAvatar` above picks up one that only appears later.
       if (!primaryEmail) {
         try {
           const calendars = await this.provider.listCalendars(conn.connectionRef);
           primaryEmail =
             calendars.find((c) => c.isPrimary)?.primaryEmail ??
             calendars.find((c) => c.primaryEmail)?.primaryEmail ??
+            null;
+          avatarUrl =
+            avatarUrl ??
+            calendars.find((c) => c.isPrimary)?.avatarUrl ??
+            calendars.find((c) => c.avatarUrl)?.avatarUrl ??
             null;
         } catch {
           /* keep null */
@@ -458,6 +663,7 @@ export class AdminService {
         provider: conn.provider || provider,
         externalId: conn.connectionRef,
         primaryEmail: primaryEmail ?? undefined,
+        avatarUrl,
         // First calendar the host connects becomes the default destination.
         isDestination: firstNew,
         checkConflicts: true,
@@ -609,8 +815,43 @@ export class AdminService {
   listWebhookDeliveries(p: HostPrincipal, webhookId: string) {
     return listWebhookDeliveries(this.db, p.accountId, webhookId);
   }
+  /**
+   * The encryption key, or WHY there isn't one (#75).
+   *
+   * The reason is carried, not discarded, because "unset" and "set but not 32
+   * bytes" need different actions from whoever reads the message — and
+   * `loadEncryptionKey` already writes the useful sentence for the second case
+   * (`must decode to exactly 32 bytes (got N)`). Collapsing both into a bare
+   * null told an operator with a malformed key that it was "not configured",
+   * which sends them to fix the one thing that is not wrong.
+   */
+  private webhookKey(): { key: Buffer; reason?: undefined } | { key: null; reason: string } {
+    try {
+      return { key: loadEncryptionKey(this.env?.INTEGRATION_ENCRYPTION_KEY) };
+    } catch (err) {
+      return { key: null, reason: err instanceof Error ? err.message : 'no encryption key' };
+    }
+  }
+
+  /**
+   * Create a webhook. REFUSES when there is no usable encryption key (#75).
+   *
+   * Webhooks used to work with no key at all, so this is a deliberate trim to
+   * clone-and-run, made for the same reason `connectIntegration` refuses: the
+   * only alternative is minting a fresh signing secret and writing it to disk in
+   * the clear with nobody told. Refusing is loud, coded, and one
+   * `openssl rand -base64 32` away from fixed — a silent plaintext write is none
+   * of those. Webhooks that already exist are untouched and keep delivering.
+   */
   createWebhook(p: HostPrincipal, body: { subscriberUrl: string; eventTriggers: string[]; secret?: string }) {
-    return createWebhook(this.db, { accountId: p.accountId, ...body });
+    const resolved = this.webhookKey();
+    if (!resolved.key) {
+      throw new ServiceUnavailableException({
+        error: 'INTEGRATION_KEY_MISSING',
+        message: `This deployment cannot store a webhook signing secret: ${resolved.reason}`,
+      });
+    }
+    return createWebhook(this.db, { accountId: p.accountId, ...body, key: resolved.key });
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);
@@ -619,7 +860,9 @@ export class AdminService {
     return updateWebhook(this.db, p.accountId, id, patch);
   }
   pingWebhook(p: HostPrincipal, id: string) {
-    return pingWebhook(this.db, p.accountId, id);
+    // A ping READS: no key is legitimate here (a legacy plaintext row still
+    // signs), so this passes null rather than refusing.
+    return pingWebhook(this.db, p.accountId, id, this.webhookKey().key);
   }
 
   /** Resolve the account code for a principal (for host on-behalf booking). */
@@ -700,8 +943,9 @@ export class AdminService {
     if (!accountCode) return null;
     const fromMs = new Date(q.from).getTime();
     if (!Number.isFinite(fromMs)) return null;
-    // Same 60-day window cap as the public endpoint (contract §Engine).
-    const toMs = Math.min(new Date(q.to).getTime(), fromMs + 60 * 86_400_000);
+    // Same window cap as the public endpoints, from the one shared constant
+    // (contract §Engine, #136).
+    const toMs = clampAvailabilityWindow(fromMs, new Date(q.to).getTime());
     if (!Number.isFinite(toMs)) return null;
     const result = await getAvailability(
       this.db,
@@ -731,8 +975,10 @@ export class AdminService {
     const stored = await getNotificationSettings(this.db, p.accountId);
     return {
       variables: [...TEMPLATE_VARIABLES],
-      defaultReminderLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
-      settings: EMAIL_TEMPLATE_KEYS.map((key) => {
+      // Reminders and the follow-up moved to the event type (#68) — one place
+      // per thing, so this screen no longer lists them. The stored rows stay as
+      // the copy-forward source; they are just not editable here any more.
+      settings: ACCOUNT_TEMPLATE_KEYS.map((key) => {
         const s =
           stored.get(key) ??
           { ...defaultNotificationSetting(key), enabled: defaultEnabledFor(key) };
@@ -745,12 +991,6 @@ export class AdminService {
           defaultSubject: def.subject,
           defaultBody: def.body,
           customized: s.subject != null || s.body != null,
-          reminderLeadMinutes:
-            key === 'attendee_reminder'
-              ? (s.reminderLeadMinutes ?? DEFAULT_REMINDER_LEAD_MINUTES)
-              : key === 'follow_up'
-                ? (s.reminderLeadMinutes ?? DEFAULT_FOLLOW_UP_LEAD_MINUTES)
-                : undefined,
         };
       }),
     };
@@ -794,7 +1034,7 @@ export class AdminService {
         email: 'guest@example.com',
         timeZone: me?.timeZone ?? 'UTC',
       },
-      location: 'Google Meet',
+      location: getMessages(locale).location.conferencing,
       manageUrl: 'https://example.com/manage/sample',
       bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
       cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
@@ -808,4 +1048,24 @@ export class AdminService {
       unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
     };
   }
+}
+
+/**
+ * `IntegrationStatusRow` → what a client may see.
+ *
+ * The explicit field list is the point. A spread would silently start leaking
+ * whatever column someone adds to the row type later, and the column this table
+ * exists to hold is a decrypted-on-read credential.
+ */
+function toIntegrationView(row: IntegrationStatusRow): IntegrationStatusView {
+  return {
+    provider: row.provider,
+    status: row.status,
+    label: row.label,
+    tokenLast4: row.tokenLast4,
+    lastCheckAt: row.lastCheckAt,
+    lastCheckOk: row.lastCheckOk,
+    lastCheckDetail: row.lastCheckDetail,
+    lastErrorDetail: row.lastErrorDetail,
+  };
 }

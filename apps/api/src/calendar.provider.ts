@@ -40,6 +40,11 @@ export interface CalendarBackend {
    * intermediate hosted screen.
    */
   startConnect?: (provider: string, tenantKey: string) => Promise<ConnectStart>;
+  /**
+   * Display name for the conferencing this backend mints. An overlay knows its
+   * own platform, so its value wins over CALENDAR_CONFERENCING_LABEL.
+   */
+  conferencingLabel?: string | null;
 }
 export type CalendarBackendFactory = (env: ServerEnv) => CalendarBackend | Promise<CalendarBackend>;
 
@@ -67,6 +72,7 @@ export function createCalendarProvider(env: ServerEnv): CalendarProvider {
           tokenSource: new StaticTokenSource(env.CALENDAR_API_TOKEN),
           wire: new GenericRestWire(),
           timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
+          conferencingLabel: env.CALENDAR_CONFERENCING_LABEL ?? null,
         });
       }
       throw new Error(OVERLAY_HINT);
@@ -98,6 +104,7 @@ export async function createCalendarProviderAsync(env: ServerEnv): Promise<Calen
       wire: backend.wire,
       startConnect: backend.startConnect,
       timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
+      conferencingLabel: backend.conferencingLabel ?? env.CALENDAR_CONFERENCING_LABEL ?? null,
     });
   }
   return createCalendarProvider(env);

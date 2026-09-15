@@ -159,9 +159,19 @@ export class MachineController {
           startUtc: body.startUtc,
           attendee: primary,
           answers: body.answers,
-          idempotencyKey,
         },
         true,
+        // `apiKeyWrite` is stated rather than left to `onBehalf` above: it is
+        // the flag the duplicate-booking guard (#69) exempts on, and the
+        // reason this caller is exempt is that it holds an API key. The
+        // `Idempotency-Key` header rides the same context channel (#104):
+        // `createBookingSchema` no longer carries the field, so an
+        // unauthenticated booker cannot set it on the public route.
+        {
+          additionalAttendees: body.attendees.slice(1),
+          apiKeyWrite: true,
+          idempotencyKey,
+        },
       ),
     );
     // Machine envelope: attendees[] (plural).

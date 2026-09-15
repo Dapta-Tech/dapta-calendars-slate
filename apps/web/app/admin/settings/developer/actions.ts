@@ -3,7 +3,7 @@
 import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, ApiError } from '@/lib/admin-api';
 
 export async function createApiKeyAction(name: string, scopes: string[]): Promise<{ plaintext?: string; error?: string }> {
   try {
@@ -27,14 +27,35 @@ export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; err
   }
 }
 
-export async function createWebhookAction(subscriberUrl: string, triggers: string[]): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Create a webhook, returning the signing secret ONCE (W / #75).
+ *
+ * The secret used to be recoverable with `SELECT secret FROM webhook`; it is now
+ * an envelope at rest with no read endpoint and no decrypt CLI, so this reply is
+ * the only moment it can ever be learned. Discarding it — which is what this
+ * action did — would leave a dashboard-created webhook signing with a secret its
+ * subscriber can never verify against.
+ *
+ * `code` is returned alongside so the caller can tell the deployment-level
+ * refusal (`INTEGRATION_KEY_MISSING`, no encryption key configured) apart from
+ * an ordinary bad URL, which need different words.
+ */
+export async function createWebhookAction(
+  subscriberUrl: string,
+  triggers: string[],
+): Promise<{ ok: boolean; secret?: string; error?: string; code?: string }> {
   try {
-    await adminApi.createWebhook({ subscriberUrl, eventTriggers: triggers });
+    const created = await adminApi.createWebhook({ subscriberUrl, eventTriggers: triggers });
     revalidatePath('/admin/settings/developer');
-    return { ok: true };
+    const secret = (created as { secret?: unknown } | null)?.secret;
+    return { ok: true, secret: typeof secret === 'string' ? secret : undefined };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
-    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Failed',
+      code: e instanceof ApiError ? e.code : undefined,
+    };
   }
 }
 

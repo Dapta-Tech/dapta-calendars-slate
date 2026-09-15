@@ -1,50 +1,73 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, permanentRedirect, redirect } from 'next/navigation';
-import { clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
+import { DEFAULT_ACCENT, clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
+import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
+import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
+import {
+  EMBED_ROOT_CLASS,
+  isEmbedRequest,
+  mergeEmbedStyle,
+  parseEmbedParams,
+  withSearchParams,
+  type RawSearchParams,
+} from '@/lib/embed';
 
 // Per-page SEO/OG from host data (R11 audit). getProfile is request-cached, so
 // this shares the page's fetch. Only public profile fields are used.
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountCode: string; handle: string }>;
+  searchParams: Promise<RawSearchParams>;
 }): Promise<Metadata> {
   const { accountCode, handle } = await params;
+  const query = await searchParams;
   const profile = await getProfile(accountCode, handle);
   if (!profile) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
   const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
   const title = `${name} — ${profile.account.name}`;
-  const avatar = profile.member.avatarUrl;
-  const images = avatar && /^https?:\/\//i.test(avatar) ? [avatar] : undefined;
+  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
   return {
     title,
     description,
     openGraph: { title, description, type: 'profile', images },
     twitter: { card: 'summary', title, description, images },
+    // An embedded URL is this same page with different chrome — never a second
+    // indexable copy of it.
+    ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),
   };
 }
 
 export default async function ProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ accountCode: string; handle: string }>;
+  searchParams: Promise<RawSearchParams>;
 }) {
   const { accountCode, handle } = await params;
+  const query = await searchParams;
   const [profile, locale] = await Promise.all([getProfile(accountCode, handle), publicLocale()]);
   if (!profile) notFound();
+  const msg = getMessages(locale);
+  // Inline embed (E): the mode plus any appearance overrides the snippet
+  // carries. Empty by construction outside embed mode.
+  const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
 
   // Canonical-code guard (short-links §4): the API resolves legacy/alias codes
   // but responds with the CANONICAL code — a visit on an alias 308s to it, so
   // old shared links keep working and search engines converge on one URL.
   const code = profile!.account.code;
-  if (accountCode !== code) permanentRedirect(`/${code}/${handle}`);
+  if (accountCode !== code) permanentRedirect(withSearchParams(`/${code}/${handle}`, query));
 
   const m = profile.member;
 
@@ -53,9 +76,22 @@ export default async function ProfilePage({
   const landing = m.style as { landingEnabled?: boolean; defaultEventSlug?: string | null } | null;
   const defaultSlug = landing?.defaultEventSlug;
   if (landing?.landingEnabled === false && defaultSlug && profile.eventTypes.some((e) => e.slug === defaultSlug)) {
-    redirect(`/${code}/${handle}/${defaultSlug}`);
+    // Carries the query, so a host who embedded their landing link and then
+    // turned the landing page off still serves an embed rather than a
+    // full-chrome event page inside the frame.
+    redirect(withSearchParams(`/${code}/${handle}/${defaultSlug}`, query));
   }
-  const accent = clampAccent(m.brandColor ?? '#cbe84f');
+  // The style the shell below will render with, derived ONCE. The canvas comes
+  // out of it, and the monogram tile sits inside that shell, so the two have to
+  // resolve the accent through the same call. `clampAccent` no longer alters
+  // the colour (ADR 0004's amendment) but it still owns the invalid-hex
+  // fallback, which is what an embed's `brand_color` override can hand it.
+  const style = mergeEmbedStyle(m.style, styleOverrides);
+  const accent = clampAccent(
+    accentOverride ?? m.brandColor ?? DEFAULT_ACCENT,
+    bookingCanvasOf(style),
+  );
+  const headerAvatar = resolveAvatarUrl(m.avatarUrl, m.connectedAvatarUrl);
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
 
@@ -68,16 +104,25 @@ export default async function ProfilePage({
   const eventTypes = [...profile.eventTypes].sort((a, b) => rank(a.slug) - rank(b.slug));
 
   return (
-    <BrandedShell brandColor={m.brandColor} style={m.style}>
-      <main className="mx-auto max-w-2xl px-6 py-12">
+    <BrandedShell
+      brandColor={accentOverride ?? m.brandColor}
+      style={style}
+      className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
+    >
+      <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto w-full max-w-2xl px-6 py-12'}>
         {m.coverUrl ? (
           <img src={m.coverUrl} alt="" className="bp-cover mb-4 h-32 w-full rounded-md object-cover" />
         ) : (
           <div className="bp-cover mb-4 h-24 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
         )}
         <header className="mb-8 flex items-center gap-4">
-          {m.avatarUrl ? (
-            <img src={m.avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover" />
+          {headerAvatar ? (
+            <img
+              src={headerAvatar}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="h-16 w-16 rounded-full object-cover"
+            />
           ) : (
             <div
               className="flex h-16 w-16 items-center justify-center text-2xl font-semibold"
@@ -97,7 +142,11 @@ export default async function ProfilePage({
           {eventTypes.map((et) => (
             <li key={et.slug}>
               <Link
-                href={`/${code}/${handle}/${et.slug}`}
+                // Inside a frame this navigates the frame, which is the embed
+                // working — but only if the mode and the overrides travel with
+                // it. Without them, picking an event from a styled embed lands
+                // on an unstyled full-chrome page in a 700px box.
+                href={withSearchParams(`/${code}/${handle}/${et.slug}`, query)}
                 className="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]"
               >
                 <span className="flex flex-col">
@@ -107,17 +156,18 @@ export default async function ProfilePage({
                   ) : null}
                 </span>
                 <span className="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">
-                  {et.lengthMinutes} min
+                  {t(msg.booking.durationMinutes, { minutes: et.lengthMinutes })}
                 </span>
               </Link>
             </li>
           ))}
           {eventTypes.length === 0 ? (
-            <li className="text-muted-foreground">No bookable events yet.</li>
+            <li className="text-muted-foreground">{msg.landing.noEvents}</li>
           ) : null}
         </ul>
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />
+      {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );
 }
