@@ -29,6 +29,44 @@ import type {
  *  bot heuristics; identifies the product for the vendor's request logs. */
 const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calendar.dapta.ai)';
 
+/**
+ * The longest span asked of the backend in ONE busy read.
+ *
+ * A busy read is only as complete as the backend's answer, and many calendar
+ * APIs answer an event listing one PAGE at a time. A wire that speaks a
+ * single-request contract reads the first page and nothing after it, so past a
+ * certain number of events the list comes back short — silently, with a 200.
+ * Every event that fell off is a slot offered as free on a calendar that is
+ * busy, and the create-time check (which reads only the slot it is about to
+ * book, so its page is never full) then refuses it: the visitor picks a time
+ * and is told it was just taken.
+ *
+ * The booking page reads the whole availability window in one go, which is the
+ * read most exposed to this. So a long read is cut into windows short enough
+ * that one page holds them, and the pieces are unioned. A week is three times
+ * shorter than the span a very full calendar has been seen to survive intact.
+ */
+const BUSY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** How many busy windows are in flight at once, across all connections. */
+const BUSY_CONCURRENCY = 6;
+
+/**
+ * Cut [fromMs, toMs) into consecutive windows of at most `spanMs`. The windows
+ * tile the range exactly: each starts where the previous one ended, so an event
+ * on a boundary is always inside at least one of them.
+ */
+export function splitBusyWindow(fromMs: number, toMs: number, spanMs: number): Array<[number, number]> {
+  // A range that is empty, inverted or unparseable is passed through untouched:
+  // what the backend makes of it is the backend's answer, as it was before.
+  if (!(toMs > fromMs) || !(spanMs > 0)) return [[fromMs, toMs]];
+  const windows: Array<[number, number]> = [];
+  for (let start = fromMs; start < toMs; start += spanMs) {
+    windows.push([start, Math.min(start + spanMs, toMs)]);
+  }
+  return windows;
+}
+
 /** Token authority for the calendar backend. Mints a short-lived bearer. */
 export interface CalendarTokenSource {
   /**
@@ -149,6 +187,8 @@ export interface ExternalCalendarOptions {
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Longest span of one busy read, in ms. Defaults to a week. */
+  busyWindowMs?: number;
   /**
    * Optional custom connect handshake. Some backends need a multi-step dance
    * (create a request, resolve the end-provider's OAuth URL, …) that the
@@ -169,6 +209,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
   private readonly wire: CalendarWire;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly busyWindowMs: number;
   private readonly startConnectOverride?: ExternalCalendarOptions['startConnect'];
 
   constructor(opts: ExternalCalendarOptions) {
@@ -177,24 +218,71 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.wire = opts.wire;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.busyWindowMs = opts.busyWindowMs ?? BUSY_WINDOW_MS;
     this.startConnectOverride = opts.startConnect;
     this.conferencingLabel = opts.conferencingLabel ?? null;
   }
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
     if (input.connectionRefs.length === 0) return [];
+    const fromMs = Date.parse(input.fromUtc);
+    const toMs = Date.parse(input.toUtc);
+    // An unparseable bound is sent as given, in one read — never rewritten.
+    const windows: Array<{ fromUtc: string; toUtc: string }> =
+      Number.isFinite(fromMs) && Number.isFinite(toMs)
+        ? splitBusyWindow(fromMs, toMs, this.busyWindowMs).map(([a, b]) => ({
+            fromUtc: new Date(a).toISOString(),
+            toUtc: new Date(b).toISOString(),
+          }))
+        : [{ fromUtc: input.fromUtc, toUtc: input.toUtc }];
+
     // Per-connection reads, merged: a backend need not offer a batch free-busy
-    // (many calendar APIs expose only per-calendar event listing). The engine
-    // sorts/merges the union itself, so an unsorted concat is fine.
-    const out: BusyInterval[] = [];
+    // (many calendar APIs expose only per-calendar event listing). Each
+    // connection is read one window at a time (see BUSY_WINDOW_MS).
+    const reads: Array<() => Promise<BusyInterval[]>> = [];
     for (const ref of input.connectionRefs) {
-      const req = this.wire.listBusy({
-        connectionRefs: [ref],
-        calendarIds: input.calendarIds,
-        fromUtc: input.fromUtc,
-        toUtc: input.toUtc,
-      });
-      out.push(...this.wire.parseBusy(await this.send('listBusy', req)));
+      for (const window of windows) {
+        reads.push(async () => {
+          const req = this.wire.listBusy({
+            connectionRefs: [ref],
+            calendarIds: input.calendarIds,
+            fromUtc: window.fromUtc,
+            toUtc: window.toUtc,
+          });
+          return this.wire.parseBusy(await this.send('listBusy', req));
+        });
+      }
+    }
+
+    // A bounded pool, in request order. One failed window fails the whole read:
+    // a partial busy list is exactly the short answer this exists to prevent,
+    // and callers already treat a throw as "calendar unreadable" (fail-closed).
+    const results: BusyInterval[][] = new Array(reads.length);
+    let next = 0;
+    let failed = false;
+    const worker = async (): Promise<void> => {
+      while (!failed && next < reads.length) {
+        const i = next++;
+        try {
+          results[i] = await reads[i]!();
+        } catch (err) {
+          failed = true; // the read is lost: stop the other workers asking for more
+          throw err;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(BUSY_CONCURRENCY, reads.length) }, worker));
+
+    // An event that crosses a window boundary is reported by both windows. The
+    // engine merges busy itself, so the duplicate is harmless — but a caller
+    // that counts intervals should not see one event twice.
+    const seen = new Set<string>();
+    const out: BusyInterval[] = [];
+    for (const interval of results.flat()) {
+      const key = `${interval.startUtc}|${interval.endUtc}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(interval);
     }
     return out;
   }
