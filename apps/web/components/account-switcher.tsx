@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { switchAccountAction } from '@/app/admin/account-actions';
+import { searchAccountsAction, switchAccountAction } from '@/app/admin/account-actions';
 
 /**
  * Account picker for the platform operator's own staff — the same move as the
@@ -18,8 +18,15 @@ import { switchAccountAction } from '@/app/admin/account-actions';
  * implementer find the client by the name they were given; the rows that share
  * an account simply all read as current once you are in it.
  *
- * WAI-ARIA menu-button pattern, same as the app switcher: Escape and
- * outside-click dismiss, focus moves to the first item on open.
+ * SEARCH IS THE PRIMARY WAY THROUGH IT. An operator login can reach every
+ * account on the platform, so the list is as long as the customer base: the
+ * page it opens with is a starting point, not the catalogue, and the query goes
+ * upstream rather than filtering what is already here — there would be nothing
+ * to filter.
+ *
+ * A dialog and not a `menu`: WAI-ARIA menus may not contain a textbox, and this
+ * one's first control is the search field. Escape and outside-click dismiss,
+ * and focus opens on the field.
  */
 
 export interface AccountOption {
@@ -28,20 +35,34 @@ export interface AccountOption {
   name: string;
 }
 
+/** How long a pause in typing counts as "done typing", in ms. */
+const SEARCH_DEBOUNCE_MS = 300;
+
 export function AccountSwitcher({
   accounts,
   currentAccountId,
+  hasMore: initialHasMore = false,
+  fallbackLabel,
   collapsed = false,
 }: {
   accounts: AccountOption[];
   currentAccountId: string | null;
+  hasMore?: boolean;
+  fallbackLabel?: string;
   collapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(accounts);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [page, setPage] = useState(1);
   const [pending, startTransition] = useTransition();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Which query the rows on screen belong to. A ref and not state: it is
+  // bookkeeping for the fetch, and re-rendering on it would be noise.
+  const shownQuery = useRef('');
 
   useEffect(() => {
     if (!open) return;
@@ -60,13 +81,48 @@ export function AccountSwitcher({
   }, [open]);
 
   useEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    if (open) searchRef.current?.focus();
   }, [open]);
+
+  // Search upstream once typing settles. The guard is what keeps opening the
+  // menu free: the first page is already here from the server, and an unchanged
+  // query never costs a request.
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    if (q === shownQuery.current) return;
+
+    const timer = setTimeout(() => {
+      startTransition(async () => {
+        const next = await searchAccountsAction(q, 1);
+        shownQuery.current = q;
+        setResults(next.items);
+        setHasMore(next.hasMore);
+        setPage(1);
+      });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [open, query]);
+
+  const loadMore = () => {
+    startTransition(async () => {
+      const nextPage = page + 1;
+      const next = await searchAccountsAction(query.trim(), nextPage);
+      setResults((curr) => [...curr, ...next.items]);
+      setHasMore(next.hasMore);
+      setPage(nextPage);
+    });
+  };
 
   if (accounts.length === 0) return null;
 
-  const current = accounts.find((a) => a.accountId === currentAccountId);
-  const label = current?.name ?? 'Switch account';
+  // The current account is only named when it happens to be on screen — the
+  // first page is 20 rows out of however many exist. Its code is what the
+  // address bar shows, so it is the honest fallback, and it changes with the
+  // account rather than reading the same in all of them.
+  const current = results.find((a) => a.accountId === currentAccountId);
+  const label = current?.name ?? fallbackLabel ?? 'Switch account';
 
   const choose = (accountId: string) => {
     setError(null);
@@ -82,7 +138,7 @@ export function AccountSwitcher({
     <div ref={wrapRef} className="relative">
       <button
         type="button"
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Account: ${label}`}
         title={label}
@@ -103,38 +159,71 @@ export function AccountSwitcher({
 
       {open ? (
         <div
-          ref={menuRef}
-          role="menu"
+          role="dialog"
           aria-label="Switch account"
           // Opens upward: this lives in the sidebar footer, where a downward
           // menu would render off the bottom of the viewport.
-          className="absolute bottom-full left-0 z-50 mb-inline max-h-80 w-64 overflow-y-auto rounded-md border border-border bg-popover p-inline text-popover-foreground shadow-lg"
+          className="absolute bottom-full left-0 z-50 mb-inline w-64 rounded-md border border-border bg-popover p-inline text-popover-foreground shadow-lg"
         >
-          {accounts.map((account) => {
-            const active = account.accountId === currentAccountId;
-            return (
+          <input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search accounts"
+            aria-label="Search accounts"
+            autoComplete="off"
+            className="mb-inline w-full rounded-sm border border-input bg-background px-inline py-tight text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+
+          <div className="max-h-64 overflow-y-auto">
+            {results.map((account) => {
+              const active = account.accountId === currentAccountId;
+              return (
+                <button
+                  key={account.id}
+                  type="button"
+                  disabled={pending || active}
+                  onClick={() => choose(account.accountId)}
+                  className={[
+                    'flex w-full items-center gap-field rounded-sm px-inline py-inline text-left text-sm transition-colors',
+                    active
+                      ? 'bg-muted font-medium'
+                      : 'hover:bg-accent hover:text-accent-foreground disabled:opacity-60',
+                  ].join(' ')}
+                  aria-current={active ? 'true' : undefined}
+                >
+                  <span className="min-w-0 flex-1 truncate">{account.name}</span>
+                  {active ? (
+                    <i aria-hidden className="pi pi-check text-primary" style={{ fontSize: 14 }} />
+                  ) : null}
+                </button>
+              );
+            })}
+
+            {results.length === 0 && !pending ? (
+              <p className="px-inline py-tight text-xs text-muted-foreground">
+                No account matches that.
+              </p>
+            ) : null}
+
+            {hasMore ? (
               <button
-                key={account.id}
-                role="menuitem"
-                tabIndex={-1}
                 type="button"
-                disabled={pending || active}
-                onClick={() => choose(account.accountId)}
-                className={[
-                  'flex w-full items-center gap-field rounded-sm px-inline py-inline text-left text-sm transition-colors',
-                  active
-                    ? 'bg-muted font-medium'
-                    : 'hover:bg-accent hover:text-accent-foreground disabled:opacity-60',
-                ].join(' ')}
-                aria-current={active ? 'true' : undefined}
+                disabled={pending}
+                onClick={loadMore}
+                className="w-full rounded-sm px-inline py-inline text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
               >
-                <span className="min-w-0 flex-1 truncate">{account.name}</span>
-                {active ? (
-                  <i aria-hidden className="pi pi-check text-primary" style={{ fontSize: 14 }} />
-                ) : null}
+                {pending ? 'Loading…' : 'Load more'}
               </button>
-            );
-          })}
+            ) : null}
+          </div>
+
+          {/* Announced because the search runs on a timer, not on submit: with
+              nothing to read, a screen reader never learns the list changed. */}
+          <p aria-live="polite" className="sr-only">
+            {pending ? 'Searching accounts' : `${results.length} accounts listed`}
+          </p>
 
           {error ? (
             <p role="alert" className="px-inline py-tight text-xs text-destructive">

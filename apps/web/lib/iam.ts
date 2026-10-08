@@ -26,11 +26,27 @@ export interface Workspace {
 
 const iamBase = (): string | null => process.env.IAM_BASE_URL?.replace(/\/$/, '') ?? null;
 
-/** How many workspaces to offer. Upstream caps this at 100; beyond it the picker needs search. */
-const LIST_LIMIT = 100;
+/**
+ * How many workspaces one page of the picker offers.
+ *
+ * Small on purpose: an operator login sees every workspace on the platform, so
+ * the list is as long as the customer base and the only usable way through it
+ * is the search box, not scrolling. Upstream caps a page at 100 anyway.
+ */
+export const WORKSPACE_PAGE_SIZE = 20;
+
+/** One page of the picker's list, and whether upstream has another. */
+export interface WorkspacePage {
+  items: Workspace[];
+  hasMore: boolean;
+}
+
+const EMPTY_PAGE: WorkspacePage = { items: [], hasMore: false };
 
 /**
- * The workspaces this login may act in, newest-irrelevant order (upstream's).
+ * One page of the workspaces this login may act in, optionally narrowed by
+ * `query` — upstream matches it against workspace id, name, description,
+ * account id and member emails.
  *
  * `search-light` and NOT the bare `GET /workspace`, which returns every
  * workspace on the platform as an unpaginated array with their members —
@@ -40,28 +56,50 @@ const LIST_LIMIT = 100;
  * it belongs, and leaves `mayPickAccount` as what it claims to be — a decision
  * about what to DRAW.
  *
- * Returns an empty list on any failure — no upstream, upstream down, token
+ * Searching upstream rather than filtering a prefetched list is the whole
+ * point: the list an operator can reach is the entire customer base, so it is
+ * never all in hand to filter.
+ *
+ * Returns an empty page on any failure — no upstream, upstream down, token
  * rejected. The picker reads "nothing to choose from" and hides itself, which
  * is the right outcome for all three: this is an affordance, not a gate.
  */
-export async function listWorkspaces(accessToken: string): Promise<Workspace[]> {
+export async function listWorkspaces(
+  accessToken: string,
+  options: { query?: string; page?: number; limit?: number } = {},
+): Promise<WorkspacePage> {
   const base = iamBase();
-  if (!base) return [];
+  if (!base) return EMPTY_PAGE;
 
-  const res = await fetch(`${base}/workspace/search-light?page=1&limit=${LIST_LIMIT}`, {
+  // The page number reaches here from a Server Action, so it is caller input:
+  // clamp it instead of forwarding whatever arrived.
+  const page = Math.max(1, Math.floor(options.page ?? 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? WORKSPACE_PAGE_SIZE)));
+  const query = options.query?.trim();
+
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (query) params.set('query', query);
+
+  const res = await fetch(`${base}/workspace/search-light?${params}`, {
     headers: { authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   }).catch(() => null);
-  if (!res?.ok) return [];
+  if (!res?.ok) return EMPTY_PAGE;
 
-  const body = (await res.json().catch(() => null)) as { data?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as { data?: unknown; hasMore?: unknown } | null;
   const rows = Array.isArray(body?.data) ? body.data : [];
 
-  return rows.flatMap((row) => {
+  const items = rows.flatMap((row) => {
     const w = row as { id?: unknown; account_id?: unknown; name?: unknown };
     if (typeof w.id !== 'string' || typeof w.account_id !== 'string') return [];
     return [{ id: w.id, accountId: w.account_id, name: typeof w.name === 'string' ? w.name : w.id }];
   });
+
+  // Upstream says so itself; a full page with no verdict is assumed to have a
+  // next one, which costs one empty fetch at worst and never hides a result.
+  const hasMore = typeof body?.hasMore === 'boolean' ? body.hasMore : rows.length >= limit;
+
+  return { items, hasMore };
 }
 
 /**
