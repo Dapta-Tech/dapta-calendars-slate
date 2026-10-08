@@ -3,7 +3,37 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSession, setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
-import { AccountSwitchDenied, mayPickAccount, switchAccount } from '@/lib/iam';
+import {
+  AccountSwitchDenied,
+  listWorkspaces,
+  mayPickAccount,
+  switchAccount,
+  type WorkspacePage,
+} from '@/lib/iam';
+
+/**
+ * One page of accounts for the picker's search box.
+ *
+ * The list an operator may reach is the whole customer base, so the picker
+ * cannot hold it and filter in the browser — it asks upstream per keystroke
+ * (debounced) and per "load more".
+ *
+ * `mayPickAccount` is re-checked here for the same reason `switchAccountAction`
+ * re-checks it: a Server Action is a public endpoint. Without it, hiding the
+ * menu from customers would still leave them an endpoint that names other
+ * tenants back. The token is the one in the cookie, never one from the caller.
+ *
+ * Answers an empty page rather than throwing: the caller is a menu, and a
+ * search that fails should read as "nothing matched", not break the page.
+ */
+export async function searchAccountsAction(query: string, page: number): Promise<WorkspacePage> {
+  const session = await getSession();
+  if (session?.provider !== 'workos' || !mayPickAccount(session.accessToken)) {
+    return { items: [], hasMore: false };
+  }
+
+  return listWorkspaces(session.accessToken, { query, page });
+}
 
 /**
  * Point this session at a different account.

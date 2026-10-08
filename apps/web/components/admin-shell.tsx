@@ -120,6 +120,7 @@ interface ShellUser {
 export function AdminShell({
   user,
   accounts = [],
+  accountsHasMore = false,
   currentAccountId = null,
   messages,
   initialCollapsed = false,
@@ -127,8 +128,10 @@ export function AdminShell({
   children,
 }: {
   user: ShellUser | null;
-  /** Accounts this login may switch between — empty for everyone but operator staff. */
+  /** First page of the accounts this login may switch between — empty for
+   *  everyone but operator staff, who search the rest from the picker. */
   accounts?: AccountOption[];
+  accountsHasMore?: boolean;
   currentAccountId?: string | null;
   /** Active-locale admin catalog (F8) — nav + common labels. */
   messages: AdminMessages;
@@ -253,7 +256,9 @@ export function AdminShell({
           are, and the two read together the way the platform app's do. */}
       <AccountSwitcher
         accounts={accounts}
+        hasMore={accountsHasMore}
         currentAccountId={currentAccountId}
+        fallbackLabel={user?.accountCode}
         collapsed={footerCollapsed}
       />
       <span className="flex min-w-0 items-center gap-inline">

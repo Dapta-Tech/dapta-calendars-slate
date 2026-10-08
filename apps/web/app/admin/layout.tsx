@@ -60,7 +60,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // waits on an upstream call that would return nothing they may use.
   const session = await getSession();
   const canPick = session?.provider === 'workos' && mayPickAccount(session.accessToken);
-  const accounts = canPick && session.provider === 'workos' ? await listWorkspaces(session.accessToken) : [];
+  // Only the first page: the picker searches upstream for the rest, so this
+  // render never pays for a list as long as the customer base.
+  const accounts =
+    canPick && session.provider === 'workos'
+      ? await listWorkspaces(session.accessToken)
+      : { items: [], hasMore: false };
 
   return (
     <ToastProvider>
@@ -70,7 +75,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         initialTheme={initialTheme}
         messages={messages}
         user={{ displayName: me.displayName, handle: me.handle, accountCode: me.accountCode }}
-        accounts={accounts}
+        accounts={accounts.items}
+        accountsHasMore={accounts.hasMore}
         currentAccountId={
           session?.provider === 'workos' ? currentAccountId(session.accessToken) : null
         }
