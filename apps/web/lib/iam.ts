@@ -26,11 +26,19 @@ export interface Workspace {
 
 const iamBase = (): string | null => process.env.IAM_BASE_URL?.replace(/\/$/, '') ?? null;
 
-/** How many workspaces to offer. Beyond this the picker needs search, not a longer list. */
-const LIST_LIMIT = 200;
+/** How many workspaces to offer. Upstream caps this at 100; beyond it the picker needs search. */
+const LIST_LIMIT = 100;
 
 /**
  * The workspaces this login may act in, newest-irrelevant order (upstream's).
+ *
+ * `search-light` and NOT the bare `GET /workspace`, which returns every
+ * workspace on the platform as an unpaginated array with their members —
+ * wrong shape, unbounded size, and no scoping at all. `search-light` is
+ * paginated and upstream decides what it contains: a support login sees every
+ * workspace, anyone else only their own. That makes the gate upstream's, where
+ * it belongs, and leaves `mayPickAccount` as what it claims to be — a decision
+ * about what to DRAW.
  *
  * Returns an empty list on any failure — no upstream, upstream down, token
  * rejected. The picker reads "nothing to choose from" and hides itself, which
@@ -40,7 +48,7 @@ export async function listWorkspaces(accessToken: string): Promise<Workspace[]> 
   const base = iamBase();
   if (!base) return [];
 
-  const res = await fetch(`${base}/workspace?page=1&limit=${LIST_LIMIT}`, {
+  const res = await fetch(`${base}/workspace/search-light?page=1&limit=${LIST_LIMIT}`, {
     headers: { authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   }).catch(() => null);
