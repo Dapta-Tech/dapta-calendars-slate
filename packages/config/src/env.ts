@@ -118,6 +118,20 @@ export const serverEnvSchema = z.object({
   JWT_ISSUER: z.string().optional(),
   JWT_AUDIENCE: z.string().optional(),
 
+  // Email domain of the platform operator's own staff (e.g. `@example.com`,
+  // leading dot/at included). A login from this domain that lands in a customer
+  // account it has never visited is provisioned as `admin` rather than `member`,
+  // so an operator sent in to configure or support an account can see what is
+  // there instead of an empty one. Everyone else keeps the normal rule: the
+  // first member of an account owns it, later arrivals are `member`.
+  //
+  // Unset in a bare fork, and that is the safe default — no domain is special,
+  // nobody is let in. Whoever sets it is asserting that the upstream identity
+  // service will not mint a token for an address at this domain that the
+  // operator does not control, which is the same assertion their own admin
+  // tooling already rests on.
+  OPERATOR_EMAIL_DOMAIN: z.string().optional(),
+
   // Calendar — `disabled` (default) runs with no external calendar: slots
   // subtract only local busy and no events are written out. `external` selects
   // the concrete generic-HTTP adapter (`ExternalCalendarProvider`); selecting it

@@ -26,7 +26,7 @@ import type { ServerEnv } from '@slate/config/env';
 import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
-type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE'>;
+type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE' | 'OPERATOR_EMAIL_DOMAIN'>;
 
 function unauthenticated(message: string): UnauthorizedException {
   return new UnauthorizedException({ error: 'UNAUTHENTICATED', message });
@@ -101,6 +101,20 @@ export class WorkOsAuthProvider implements AuthProvider {
     return row.id;
   }
 
+  /**
+   * Is this login one of the platform operator's own staff?
+   *
+   * The leading `@` is load-bearing and added here if the deployment left it
+   * out: a bare suffix test would also accept `someone@notexample.com`, which
+   * ends with the same characters and is a different company entirely.
+   */
+  private isOperator(email: string | null): boolean {
+    const configured = this.env.OPERATOR_EMAIL_DOMAIN?.trim().toLowerCase();
+    if (!configured || !email) return false;
+    const suffix = configured.startsWith('@') ? configured : `@${configured}`;
+    return email.toLowerCase().endsWith(suffix);
+  }
+
   /** Find (or JIT-create) the local member projected from the token's sub. */
   private async resolveMember(accountId: string, sub: string, claims: JwtClaims): Promise<string> {
     const existing = await this.db.get<{ id: string }>(
@@ -131,11 +145,15 @@ export class WorkOsAuthProvider implements AuthProvider {
     }
 
     // The first member of an account is its owner; later JIT members are `member`.
-    const role: AccountRole = (await this.db.get<{ id: string }>(
+    // The exception is the platform operator's own staff (OPERATOR_EMAIL_DOMAIN),
+    // who arrive in an account precisely because someone asked them to work in it:
+    // `member` can only see its own resources, so they would land on an empty
+    // account and be unable to help. They get `admin` — everything about the
+    // account except transferring it.
+    const occupied = !!(await this.db.get<{ id: string }>(
       sql`SELECT id FROM member WHERE account_id = ${accountId} LIMIT 1`,
-    ))
-      ? 'member'
-      : 'owner';
+    ));
+    const role: AccountRole = !occupied ? 'owner' : this.isOperator(email) ? 'admin' : 'member';
     const id = randomUUID();
     // Auto-handle at creation (short-links §3): the "no handle" state is dead —
     // every member gets `fgomez` (collision → `fgomez2`…) and can rename later.
