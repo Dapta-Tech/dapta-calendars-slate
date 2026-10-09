@@ -1,0 +1,602 @@
+# @slate/shared
+
+## 1.0.0
+
+### Major Changes
+
+- 0915e8f: Add onboarding's two gates: account qualification and per-host setup.
+
+  Qualification is claimed write-once on the account and owed by owner/admin only;
+  setup is owed by every active member with no published event type of their own,
+  invited members included, and has no completion claim — it is satisfied by the
+  event type existing, so a host who deletes their last one is guided again.
+
+  Also corrects the "Get bookable" checklist. It measured the member's handle,
+  which is auto-created for everyone, so it reported "bookable" to every host in
+  the product while their public page rendered nothing. It now measures whether
+  the host has at least one published event type.
+
+  `@slate/shared` note: the `admin.home` keys `setupLinkTitle` / `setupLinkDesc`
+  are replaced by `setupEventTitle` / `setupEventDesc` / `setupEventAction`. The
+  old keys described a shareable link on a row that now measures published event
+  types, so keeping the names would preserve the wrong claim in the catalogue.
+
+### Minor Changes
+
+- 366483e: Add the month-calendar and hour-format helpers the public event page's three-region
+  layout needs.
+
+  - `buildMonthGrid`, `monthKeyOf` and `shiftMonth` lay a month out as whole weeks of
+    `{ dayKey, dayOfMonth, inMonth, isToday, isPast, hasSlots }`. They work on
+    `YYYY-MM-DD` day keys already resolved in the visitor's zone, so the one
+    timezone-sensitive step stays in `zonedDayKey` and the grid is pure calendar
+    arithmetic.
+  - `formatSlotTime`, `formatSlotDateTime` and `groupSlotsByDay` take an optional
+    `hour12`, which is the booking page's 12h/24h toggle. Left unset, the locale
+    decides, so every existing caller renders exactly as before.
+  - New: `zonedTodayKey`, `formatDayKeyLong`, `formatMonthLabel`, `weekdayLabels`,
+    `weekStartsOnFor`.
+  - New `bookingPage` i18n block (`en` + `es`) for the layout's own copy: region
+    names, month navigation, the day column's empty states and the hour toggle.
+
+  All additive; no existing signature or message key changed.
+
+- 7c23eba: Give the booking page its own theme — a tenth style axis, `theme: 'light' | 'dark'`,
+  defaulting to **light** (ADR 0004).
+
+  The host sets it in the studio beside the other nine appearance axes, and the live
+  preview moves with it. It is overridable per embed by a `theme` URL parameter (the
+  tenth, joining the nine that shipped with inline embeds), and it is never influenced
+  by the host's own admin theme preference. There is no `auto` value: following the
+  invitee's `prefers-color-scheme` would make the page look different on different
+  phones and match the host's preview on neither.
+
+  **This changes live pages.** The axis is additive with no migration — `booking_page_style`
+  is `jsonb`, so an absent `theme` reads as the default — which means every page saved
+  before this ships moves from dark to light the day it lands. That is the intended
+  outcome rather than a regression, but it is visible and should be announced rather
+  than discovered.
+
+  **Two surfaces stay on the default for now.** Both team routes and `/manage/{uid}`
+  hold no branding in the data model, so they render light regardless of what the
+  host chose for their personal page. An invitee can therefore book on a dark event
+  page and land on a light manage page from the confirmation email. Giving teams
+  their own branding is a separate piece of work; this is stated so it is not
+  discovered.
+
+  **The document now waits on one profile read.** `<html>` carries the theme, and the
+  root layout is the only place that can stamp it, so resolving a personal booking
+  route's canvas moved a `cache()`d profile fetch onto the critical path of the HTML
+  shell. It is the same fetch the page already made — one per request, not a new
+  round trip — but an API stall now delays the document rather than only the page
+  body. The reasoning is in `apps/web/lib/theme.server.ts`.
+
+  `@slate/shared` also gains `theme` on `PublicBranding` and `defaultBranding()`, so
+  a consumer of that type sees all ten axes. `ThemeAxes` deliberately stays at nine:
+  a studio preset describes a silhouette and must not move a host between canvases.
+
+  `@slate/shared`'s token sheet gains a subtree-capable light theme: the light block
+  was scoped to `:root`, so paper could only ever be the whole document. A bare
+  `[data-theme='light']` selector joins it, which is what lets a light booking page
+  render inside the dark admin — the studio preview is exactly that region. Document-level
+  behaviour is unchanged.
+
+- 750f261: Connect-a-calendar: the explicit check now answers, and the dead manual path is gone.
+
+  `connectChecking`, `connectNotSeenYet`, `connectGaveUp` and `connectCheckFailed` join
+  the connections catalog in both locales.
+
+  **Minor, not patch:** six members are REMOVED from the exported `BookingMessages`
+  interface — `manualTitle`, `manualDesc`, `provider`, `calendarId`, `addConnection`
+  and `addingConnection` — along with the manual-add form they belonged to. A fork that
+  maintains its own locale object literal against that interface has to drop those keys
+  to keep compiling.
+
+- 327819e: A `CrmProvider` port, encrypted per-account credentials, and the CRM write-out
+
+  `@slate/crm` is a new package: the `CrmProvider` port plus a HubSpot adapter,
+  selected by `CRM_PROVIDER` (`disabled` by default). It names its vendor on
+  purpose — ADR 0001 carves CRM out of R15, which governs calendar vendors only —
+  and it is pure HTTP: the token arrives per call, so the adapter never holds a
+  credential and never sees an encryption key. Errors are typed because the retry
+  decision depends on them: `CrmAuthError` is terminal and carries the missing
+  scope names as a list, `CrmPropertyError` is recoverable once, everything else
+  takes the outbox's backoff.
+
+  `@slate/db` gains the first symmetric encryption in the repo. `crypto.ts`
+  implements an AES-256-GCM envelope (`v1.<iv>.<tag>.<ciphertext>`) whose
+  additional authenticated data binds it to `(account, provider)`, so a ciphertext
+  lifted from one account's row cannot be opened in another's. `integrations.ts`
+  owns the new `account_integration` table behind it, and is shaped so a
+  credential can only leave through `resolveProviderToken`: the status type it
+  returns to callers has no cipher field at all. Disconnecting is a soft delete —
+  the credential is scrubbed and the row's id survives, because
+  `booking_reference.destination` points at that id and a new one would turn the
+  first cancellation after a reconnect into a duplicate meeting.
+  `claimBookingDestination` takes an optional reference type so the CRM write-out
+  reuses the existing no-duplicates guard rather than growing a second one.
+
+  `@slate/types` gains the connect contract, deliberately one-directional: the
+  token is described going in and nowhere coming back. `@slate/shared` gains a
+  `crm` message block in `en` and `es` for the few strings a host reads inside
+  their CRM record. `@slate/config` gains `CRM_PROVIDER`,
+  `INTEGRATION_ENCRYPTION_KEY`, `HUBSPOT_PRIVATE_APP_TOKEN` and
+  `CRM_HTTP_TIMEOUT_MS`, all optional — a bare fork sets nothing, enqueues
+  nothing, and needs no key to boot.
+
+  Additive migration in both dialects. No behaviour changes for a deployment that
+  leaves `CRM_PROVIDER` unset.
+
+- 7c38767: Map intake questions onto CRM contact properties, per event type.
+
+  A host wires each question — plus the attendee's phone, notes, time zone and
+  language, and a closed catalog of event metadata — onto contact properties that
+  already exist in the connected portal. Nothing here creates a property: the
+  picker offers only what the portal has, which is what keeps the free tier's
+  custom-property cap out of this feature. One source may feed several properties;
+  each property is claimed by at most one source.
+
+  A mapped answer OVERWRITES the property on every accepted booking; identity
+  never does (ADR 0005). Delivery refines the CRM write-out in exactly one place:
+  a contact the CRM already knows is PATCHed with the mapped properties and never
+  its identity, and a contact it does not know is created with identity plus the
+  mapping in the same call. Everything else about the write-out is unchanged —
+  same outbox row, same idempotency, same meeting engagement, and every answer
+  still renders in the meeting body whether or not it is mapped.
+
+  The picker is filtered to type-compatible properties that are not archived,
+  calculated, hidden or read-only, and the server refuses an incompatible pair on
+  save so a stale editor cannot store a mapping that would deliver nothing. An
+  orphaned mapping — one whose question was deleted or renamed — is flagged and
+  dropped rather than refused, so an ordinary question edit never blocks the save.
+  The list is fetched through the port and cached five minutes per account, with
+  an explicit Refresh that is throttled per account and invalidated whenever a
+  credential is connected or disconnected. Enumeration options auto-match on
+  normalized values, with the mismatch named at configure time and the property
+  omitted at delivery rather than sent and rejected. A thin EN/ES auto-map
+  suggests and never saves.
+
+  Storage is additive: a nullable `crm_property_mappings` JSON column on
+  `event_type` in both dialects, NULL meaning never-configured, which is what
+  every existing event type reads as and delivers as. `booking_attendee.language`
+  is now persisted — the booking contract has always accepted it and this layer
+  dropped it, so a mapping onto it could never have delivered anything.
+
+  Mapped properties are best-effort and the booking is not: the contact write
+  sheds them on any 400 the provider returns, bounded and ending in a minimal
+  attempt, so a portal-side validation rule can never cost a booking its CRM
+  record. A 429 or 5xx still takes the outbox's backoff.
+
+  `CRM_API_BASE_URL` is new and defaults to the vendor's public host: it exists
+  for a self-hoster behind an egress proxy, and so the integration can be
+  exercised end to end against a stub without stubbing anything in product code.
+
+- 7581691: Booking pages default to dark, and the branding engine renders a host's accent exactly as picked.
+
+  Two reversals of ADR 0004, shipped together because both change how live pages look (#162).
+
+  **The default canvas is now `dark`.** `bookingPageStyleSchema.theme` and `DEFAULT_BOOKING_THEME` both move from `light` to `dark`. Any booking page with no explicitly saved `theme` renders dark again, undoing the dark → light move that #109 introduced days earlier.
+
+  **The engine stops adjusting the accent.** `clampAccent`, `accentInk` and `accentEdge` return the host's colour unchanged on both canvases; `brandVars` emits it as `--primary`, `--primary-ink`, `--primary-edge` and `--ring`. `clampAccent` keeps its invalid-hex fallback and its `canvas` parameter.
+
+  **`onAccent` keeps its floor.** It is the black-or-white label on top of the fill, not the host's colour, so a host who picks dark green does not get black text on dark green.
+
+  **New and removed exports.** `accentCanvasContrast` and `MIN_ACCENT_CONTRAST` are added for the studio's non-blocking low-contrast warning. `accentCanvasContrast` truncates to one decimal rather than rounding to nearest, because the studio decides on the same number it displays and a rounded 2.99 would read as a passing 3. `accentWasAdjusted` is removed — it would be constant `false`. The `admin.studio.adjustedNote` message is retired in `en` and `es` and replaced by `lowContrast`; `admin.studio.contrast` is relabelled to name the ground it measures.
+
+  This is a deliberate accessibility regression, decided by the product owner with the tradeoff stated: a host who picks a low-contrast accent ships a booking page whose links and buttons can fail WCAG AA. The studio shows the ratio instead of overriding the choice. See the 2026-09-11 amendment in `docs/adr/0004-the-booking-page-owns-its-own-theme.md`.
+
+- a9ea2ca: Growth attribution, an explicit parameter allowlist, and the contact sync outbox
+
+  `@slate/shared` gains `parseAttribution`, the one definition of which inbound
+  campaign parameters may ever be recorded: exactly seven keys, normalized, with
+  the referrer read from the request header and only when cross-origin. Organic
+  traffic yields nothing rather than a synthetic `direct`. `ATTRIBUTION_COOKIE`
+  and `ATTRIBUTION_WINDOW_MS` ship alongside it, so the parking cookie's lifetime
+  and the account-age window the claim enforces are the same constant.
+
+  `@slate/db` gains `claimAttribution`, which stamps that blob onto an account
+  **write-once** and only inside the ten-minute window, reporting the true winner
+  from an affected-row count on both dialects. It carries no policy of its own —
+  the caller passes an absolute cutoff — so the package needs no dependency on
+  `@slate/shared`. Two nullable columns on `account`, with a numbered additive
+  migration in both dialects and deliberately **no backfill**: `NULL` is the
+  truthful state for every account that predates it. `OutboxKind` gains
+  `dapta_sync` and `iam_onboarding`, which is a type-level change only.
+
+  `@slate/types` gains the `entry_type` vocabulary and a closed schema for the
+  attribution claim body, so an unknown key is rejected at the boundary rather
+  than stored permanently.
+
+  `@slate/config` gains the optional `DAPTA_SYNC_*` destination. Unset — the
+  default, and the only sensible value for a fork — nothing is ever sent: the rows
+  are enqueued and the worker records them as skipped with a reason.
+
+- c8ce5e0: Add the host-facing half of the HubSpot integration: an Integrations tab under
+  Settings, admin-only, where an account connects one private-app token, sees the
+  connection's health, and disconnects.
+
+  `@slate/crm` gains `requiredScopes` on the `CrmProvider` port — the scope names
+  a credential must carry, spelled as the provider spells them. The connect
+  dialog's checklist renders this list, so the setup instructions a host follows
+  and the permissions the adapter actually needs are ONE list that cannot drift.
+  HubSpot returns `HUBSPOT_REQUIRED_SCOPES`, which already existed for exactly
+  this; `DisabledCrmProvider` returns none.
+
+  `@slate/types` gains `IntegrationCapabilities`, the response of a new additive
+  `GET /v1/integrations/capabilities`. The two states in which connecting cannot
+  succeed — no CRM adapter selected, and no `INTEGRATION_ENCRYPTION_KEY` — are
+  deployment configuration a browser could otherwise only discover by pasting a
+  credential and being refused, after being sent off to create a private app. It
+  also carries the adapter's `requiredScopes`. The three routes shipped in H1a are
+  unchanged, and nothing here returns a token.
+
+  `@slate/shared` gains the `admin.integrations` message block in `en` and `es`,
+  plus the `admin.settings.integrations` tab label. Note what is absent from it:
+  the scope names, which come from the adapter rather than from copy so no
+  translator can edit a provider identifier.
+
+- 07e6932: Downscale uploaded images in the browser instead of rejecting them over 1MB.
+
+  `@slate/types` exports `MAX_INLINE_IMAGE_CHARS` and the request-body ceiling
+  that makes it reachable, and `brandingSchema.avatarUrl` / `coverUrl` gain the
+  length cap that `teamInputSchema.logoUrl` already had — they previously had
+  none at all. `@slate/shared` gains the copy for the new resizing, help and
+  size-failure states in both locales.
+
+- d1a4a89: Add the `embed` message block (EN + ES) for the inline embed's copy-snippet dialog: the row action, the dialog title and intro, the snippet label, copy/copied/close, the accent control's two states, and the notes covering auto-resize and the appearance parameters a host can hand-add to an embed address.
+- 7ebb22a: Port the design-system token sheet: the console palette, a four-tier text ladder,
+  and the accent's three jobs as three tokens.
+
+  `tokens.css` is replaced wholesale. `--background` moves from `#222222` to
+  `#0a0c0e`, `--radius` from 8px to 10px, and `--secondary` stops being a saturated
+  purple — so every screen consuming this package changes appearance, on the theme
+  users already see. That is the intended outcome of the reskin, not a regression.
+
+  New tokens: `--primary-ink` (the accent as letters), `--primary-edge` (the accent
+  as lines), `--faint` (a fourth text tier), `--brand-ink` /
+  `--brand-ink-foreground` (a constant ground for fixed-colour artwork),
+  `--radius-monitor`, and the `--acc-h/--acc-s/--acc-l` channels the accent is now
+  composed from. `--input` is no longer the same value as `--border`: a form
+  control's edge has to clear 3:1 where a decorative hairline does not.
+
+  The type scale is pinned end to end. One step changes existing layout rather than
+  only appearance: `text-lg` moves 18px -> 20px, merging into `text-xl` at its call
+  sites. That is the near-duplicate step being collapsed on purpose, but it is the
+  one type change worth announcing.
+
+  The light half of the sheet is authored and unit-tested against its own contrast
+  law (`tokens.spec.ts`, which reads the shipped file), but it is not yet reachable
+  in the app — the root layout still stamps `dark`.
+
+  `branding.ts`: `contrastRatio(a, b)` is now exported. `accentVars` composes
+  `--accent-wash` against `--background` instead of the undefined `--bg-app`, which
+  makes a previously invalid declaration paint.
+
+- 826dd17: Add a per-event-type duplicate-booking guard, off by default. When a host
+  switches it on, one normalized email address may hold at most one upcoming
+  booking on that event; both public write paths honour it, and host-initiated and
+  API-key writes are exempt. A blocked booker gets `409 DUPLICATE_BOOKING` with no
+  slot detail.
+- 03fd0e0: One-off invite links — a token a host mints over an event type they already have,
+  pastes into one message to one intended invitee, and which dies the moment a booking
+  is made against it (#69 / AB2, closing #110).
+
+  **It is a grant, not a meeting.** The new `one_off_link` table holds which event type,
+  the token, who minted it, when, and what consumed it. There is deliberately no duration,
+  no availability and no title: an ad-hoc meeting that exists only as a link would be a
+  second kind of bookable object, and that stays deferred at #69.
+
+  **Like the duplicate-booking guard it ships beside, it is not a security control.**
+  The per-IP rate limiter is. What a one-off link buys is that a link sent to one person
+  cannot be forwarded and re-used a hundred times. It authenticates nobody.
+
+  **It dies on booking, `pending` included, and a cancel never revives it.** A pending
+  booking is a booking for this purpose — the link did its job the moment it produced
+  one. Cancelling that booking leaves the link spent and the host mints another. That
+  rule is asserted directly on both dialects, because it is the one a future refactor
+  will get wrong.
+
+  **The token is stored in clear, unique and re-readable**, which is the opposite of
+  `booking.manage_token_hash` one table over. That inconsistency is the decision, made in
+  [ADR 0003](docs/adr/0003-public-tokens-have-two-storage-policies.md): the host is this
+  token's custodian rather than its recipient, so they copy it again hours or days after
+  minting; presenting it reads no PII and mutates nothing that already exists. Because it
+  is re-readable, revocation is real — the editor lists live links and can withdraw one,
+  which the ADR makes a condition of the storage choice rather than a nicety.
+
+  **Three public codes, three causes.** A consumed or revoked link answers `410`; a token
+  that names nothing answers `404` with the same body any missing route gives, and says
+  nothing about invite links existing at all; AB1's `409 DUPLICATE_BOOKING` is untouched.
+  That split is what constrains the URL shape: a token carried as a query parameter on the
+  normal public event URL could never answer `404`, because that page renders perfectly
+  well without it. So the token is the whole address — `/booking/{token}`, a prefix no
+  account can claim (it is on `RESERVED_PUBLIC_SLUGS`), outside the product prefixes so
+  `?embed=1` and framing are unchanged, and carrying no account code at all, which is why
+  the canonical-code 308 cannot fire on it. A link therefore survives its account claiming
+  a vanity slug, because it stores an event-type id rather than a URL.
+
+  **Both public write paths honour it** — `createBooking` and `createTeamBooking`. Host
+  on-behalf and API-key writes are exempt exactly as they are for AB1, through the same
+  mechanism rather than a second one: they never need a token and a token they happen to
+  carry is neither validated nor burned.
+
+  **`getEventType` and `getTeamEventType` gain an opt-in to see hidden event types.** That
+  is the seam that makes the feature work at all — a one-off link only limits anything over
+  an event hidden from the booking page, and reaching such an event is the whole point. The
+  flag is set only after a token has been resolved and re-checked against that exact event
+  type, and every existing caller keeps today's behaviour. Exemption is not a visibility
+  widening: a hidden event stays as hidden to host and API-key writes as it is today.
+
+  **A link over a still-public event limits nothing, and the editor says so** where the host
+  mints it. Copy plus a condition, never a block — the host may have a reason.
+
+  Migrations are additive and ship in both dialects (postgres `0021`, sqlite `0020`), adding
+  one new table plus a unique index on the token.
+
+- 6016620: Location kind on the event type, snapshotted onto the booking.
+
+  An event type now has a **location kind** — `conferencing`, `in_person`, `phone`
+  or `custom` — with an optional detail, stored as `{ kind, detail? }` in the
+  existing `event_type.locations` column. **Zero migration for that column**: the
+  new `parseEventLocation` (in `@slate/engine`, pure and unit-tested) reads both
+  shapes, so already-saved rows keep working — the legacy conferencing literal
+  coerces to `{ kind: 'conferencing' }`, any other non-empty string to
+  `{ kind: 'custom', detail }`, and null stays null.
+
+  The kind is **snapshotted** onto each booking in a new nullable
+  `booking.location_kind` (additive, both dialects, migrations
+  `postgres/0013` + `sqlite/0012`). A snapshot rather than a lookup:
+  `booking.event_type_id` is nullable, and a host editing the event type later
+  must not retroactively rewrite what a past booking meant. `booking.location`
+  keeps holding the human detail; a booking with no kind (written before this
+  shipped) renders from that raw text exactly as it always did.
+
+  Both R15 breaches on the behavioural path are retired. The conferencing trigger
+  in the calendar seam is now `locationKind === 'conferencing'` instead of a
+  vendor literal compared against `booking.location`, and the shared i18n
+  catalogue no longer names a conferencing platform anywhere.
+
+  One legacy token remains, and deliberately: `LEGACY_CONFERENCING_VALUE` in
+  `@slate/engine` is the exact string already sitting in customer rows, and
+  `parseEventLocation` has to recognise it to read them. It is spelled once, is
+  never written again, and no longer triggers anything on its own — the migrations
+  back-fill it into `location_kind` and blank it out of `location`, so it stops
+  being rendered to humans too.
+
+  `CalendarProvider` gains an optional `conferencingLabel` so the running
+  deployment can name the platform it actually mints links on
+  (`CALENDAR_CONFERENCING_LABEL`, or an overlay's own value, which wins). It is a
+  HOST-facing affordance: the event-type editor reads it off the connections
+  response it already fetches (ADR 0008 — the web app still never imports
+  `@slate/calendar`). Invitee-facing surfaces — the public booking page, the
+  manage page, transactional email — stay generic in C1, so they cannot disagree
+  with each other; the link an invitee actually needs is C2's job. A bare fork
+  leaves the label null and shows generic wording everywhere, which is correct:
+  it has no conferencing to name.
+
+  `@slate/shared` gains `formatLocation` / `formatBookingLocation`, so the public
+  booking page, the manage page and the transactional email all render one Where
+  the same way, in EN and ES.
+
+- 76ed907: Add the retryable session-refresh copy (`admin.session`) in English and Spanish.
+  It is deliberately separate from `login.error`: it is shown when the identity
+  service could not be reached while renewing a session, where nothing is wrong
+  with the person's credentials and they are still signed in, so the copy must not
+  imply they need to sign in again.
+- f64052d: Retire the arrow glyphs from the admin copy the settings cluster, availability,
+  teams, connections and login read, and add the strings the controls that replace
+  them need. `viewPublicTeam`, `tryHandle`, `configureEventTypes`,
+  `inviteFromMembers`, `backToTeams` and `backToTeamsList` lose the `→`/`←` they
+  carried in both locales; the HubSpot connect instructions describe the provider's
+  own navigation in prose rather than with arrows; and `home.copied` and the
+  studio's `available`/`taken` drop the `✓`/`✗` now that those states render a real
+  icon. New keys cover eight destructive confirmations that either faked a dialog
+  with two inline buttons or asked nothing at all, plus the labels the new icon
+  controls need (`common.opensNewTab`, `availability.removeOverride`,
+  `developer.creating`/`loading`).
+
+  The token sheet's contrast law now also covers TRANSLUCENT grounds. Every
+  assertion before this measured a solid token on a solid ground, while the admin
+  is built out of `bg-primary/10` under `text-primary`, `bg-destructive/10` under
+  `text-destructive`, `bg-muted/30…/60` under both text voices, and
+  `bg-background/60` inside a card — none of which had ever been measured. It is
+  arithmetic over the sheet that ships, using the compositing the spec already had,
+  and it pins one number the screens depend on: a translucent accent LINE reads
+  1.6:1 on paper at every alpha the admin uses, which is why every state-bearing
+  border in those screens is now the solid edge token.
+
+- fd12c00: The token sheet gains a spacing scale.
+
+  Role-named tokens on a 4px grid — the content ladder `--sp-tight`, `--sp-inline`,
+  `--sp-field`, `--sp-card`, `--sp-group`, `--sp-section`, the responsive gutter
+  pair `--sp-page-x` / `--sp-page-x-wide` with `--sp-page-y`, and the two control
+  roles `--sp-control-h` (the 44px tap-target floor, R28) and `--sp-control-x`. The
+  gutter and control roles deliberately reuse values the content ladder already
+  defines.
+
+  They are theme-independent, so they sit once on a bare `:root` above both theme
+  blocks, and `tokens.spec.ts` asserts that — along with the 4px grid, the ascending
+  content ladder, and that the set of declared roles is exactly the set the sheet
+  claims, so a token added later is grid-checked without anyone remembering to list
+  it.
+
+  Behaviour change is limited to one thing: the three hand-written `min-height:
+2.75rem` hit-target floors in the web app now read `var(--sp-control-h)`, which is
+  the same 44px. The sweep that migrates the remaining call sites is the second half
+  of #147.
+
+- 73baa49: `--sp-tight` (4px) joins the spacing scale.
+
+  The sweep is what proved it was needed: 72 half-step utilities (`py-0.5`,
+  `gap-1.5`, `px-2.5`) had nowhere on the 4px grid to land, and rounding all of them
+  up to 8px would have visibly fattened every badge and chip in the admin.
+
+  `--sp-roomy` was tried and dropped in the same pass. Its 19 call sites turned out
+  to be dialogs, which the scale already calls `group`, and button padding, which is
+  what `--sp-control-x` is for — a value bucket, not a role.
+
+- 29e39cc: Name the manage view's reschedule context by the kind of event type that owns
+  the booking, so a team booking can be rescheduled at all.
+
+  `bookingViewSchema.reschedule` is now a union of a team context
+  (`{ kind: 'team', accountCode, teamSlug, slug }`) and the personal one
+  (`{ kind?: 'personal', accountCode, handle, slug }`). It used to be the personal
+  shape only, so a team booking was described by the assigned organizer's handle
+  alongside the team event slug — a context that reads as valid but resolves to
+  nothing, because a team event type has `member_id NULL` and `team_id` set. The
+  manage page called the personal availability route, got nothing back, and
+  rendered an empty picker: a team invitee could cancel but never reschedule.
+
+  Additive. `kind` is optional on the personal branch, so a v1 body
+  (`{ accountCode, handle, slug }`) still parses and still means personal, and the
+  two branches stay disjoint on `handle` vs `teamSlug` even without the
+  discriminant.
+
+  `@slate/shared` gains three `BookingMessages.manage` keys (en + es): the line
+  shown when a booking's start instant does not parse, and the title and body for
+  a manage link that no longer opens one — the manage token rotates on every
+  reschedule, so an older emailed link answers 403 by design and now says so
+  instead of throwing.
+
+- c2d68cd: Make the branding engine theme-aware (ADR 0004, reskin slice B1).
+
+  **Breaking:** `clampAccent(hex)` is now `clampAccent(hex, canvas)`, and the
+  canvas is required. A clamp is only meaningful against a ground, so every caller
+  has to say which one it is clamping for — the compiler now makes that
+  unavoidable, and the studio preview and the public render agreeing on it is what
+  keeps "preview == production" true. `accentVars`, `accentWasAdjusted`,
+  `accentLabelContrast` and `brandingStyleVars` take the same second argument.
+
+  The clamp is bidirectional: it lightens toward white on a dark ground and
+  darkens toward black on a light one. The one-directional version lightened in
+  both cases, so a host's navy came out of the engine as a washed pale blue and
+  then disappeared on a light booking page.
+
+  New exports: `BrandCanvas` (`'dark' | 'light'` — the same union the stored
+  `theme` axis will carry), `CANVAS_HEX`, `accentInk` (the accent as letters,
+  4.5:1), `accentEdge` (the accent as rim and focus outline, 3:1), `brandVars`
+  — the one block a branded surface emits, covering `--primary`,
+  `--primary-foreground`, `--primary-ink`, `--primary-edge` and `--ring` on top of
+  the `--accent*` vars — and `contrastRatioExact`, the unrounded ratio.
+
+  Emitting the product tokens is the point. `globals.css` re-points `text-primary`
+  at `--primary-ink` and rims every accent fill with `--primary-edge`, both of
+  which resolve from the PRODUCT palette unless a branded surface overrides them,
+  so a page that set only `--primary` painted the host's links and rims in our
+  lime.
+
+  `--accent-hover` now travels the same way the clamp does. Mixing toward white on
+  a light canvas faded the hover state toward the page behind it.
+
+  **Bug fix: the clamp measured a colour it did not ship.** The step loop tested
+  the running float and only then rounded to 8-bit channels, so a value could
+  clear the floor by 2e-7 and lose up to half a channel step on the way out. Three
+  consequences, all now gone: `clampAccent` returned fills at 2.98:1 against a
+  documented 3:1 floor and `accentInk` returned letters at 4.49:1 against 4.5:1;
+  the clamp was not idempotent, so re-clamping moved a colour again; and because
+  the studio saved a clamped accent that the public page then clamped a second
+  time, the two surfaces rendered different colours — the preview-vs-production
+  split ADR 0004 exists to prevent. The loop now measures the quantized candidate.
+
+  **What changes on a live page.** `--primary-ink` moves for saturated mid-tones
+  that were sitting at the 3:1 fill floor instead of AA: a `#c2261c` host's links
+  go from 4.0:1 to 5.7:1 on the page and 3.8:1 to 5.4:1 on a card; `#2563eb` from
+  3.8:1 to 5.7:1. Light accents such as the DS lime are unchanged at 14.2:1.
+  Separately, the dark canvas is **not** byte-identical to slice F: for the
+  accents that fell in the rounding band, `--primary`, `--primary-edge` and
+  `--ring` also move, because slice F was shipping them below the floor it
+  documented. Swept over the whole sRGB cube, that is 38,980 of 16,777,216
+  colours — 0.23% — on dark, and 0.44% on light. Nothing renders on a light
+  canvas yet; the `theme` axis is slice B2.
+
+### Patch Changes
+
+- 22252c0: Carry the connected account's photo, and give a long description a ceiling.
+
+  `CalendarSummary` and the discovery record gain an OPTIONAL `avatarUrl`, so a
+  calendar backend that knows the connected account's photo can report it. It is
+  stored on `connected_calendar` (additive, nullable, both dialects) and surfaces
+  as `PublicProfile.member.connectedAvatarUrl` — beside the host's own
+  `avatarUrl`, never merged into it: that column feeds the studio's input, and a
+  sync landing there would turn a fallback into a saved value that outlives the
+  connection. A backend that reports nothing behaves exactly as today.
+
+  The booking page's copy gains `bookingPage.descriptionMore` / `descriptionLess`
+  for the description clamp, and the studio gains
+  `studio.photoFromConnectedAccount` — a host whose page is drawing the connected
+  account's photo should be told where that face came from, and that uploading
+  their own replaces it.
+
+  `setConnectionAvatar` takes an `accountId`: it is a new write, and every
+  repository write is account-scoped.
+
+- c64d80c: Take the arrow glyphs out of the copy, and give the strings that became buttons
+  labels that stand on their own.
+
+  `backToBookings` carried a literal `← ` in both locales, which made a translator
+  responsible for a control's affordance. `calendarLinkConnect` ("Connect one") and
+  `noHandleLink` were written as sentence continuations under a `→`; on a button of
+  its own each now names its own destination. `manage.joinMeetingOpensNewTab` is new:
+  the join link's "(opens in a new tab)" was hardcoded English on a page whose locale
+  comes from the invitee's own link.
+
+- 90393cf: Add the i18n copy the `Select` and `ConfirmDialog` primitives own (reskin slice P).
+
+  Two new top-level catalog blocks, siblings of `tzPicker` and `phonePicker` — the
+  shape this catalog already uses for a shared primitive that carries its own copy
+  so callers never thread it through:
+
+  - `select` — `search`, `noResults`
+  - `dialog` — `confirm`, `cancel`
+
+  Plus four keys on `admin.teams` (`deleteTitle`, `deleteBody`, `removeTitle`,
+  `removeBody`) for the two destructive confirmations that become real dialogs. The
+  inline two-button confirm they replace never asked a question, so the question is
+  new copy. Both bodies interpolate `{name}`.
+
+  EN and ES; the `BookingMessages` interface enforces parity. Additive only.
+
+- 72f921c: Move reminders and the follow-up from the account to the event type.
+
+  Each event type carries a list of `{ id, kind, enabled, leadMinutes, subject, body }`
+  rows on the new additive `event_type.reminders` column: every reminder has its own
+  switch, its own lead time and its own copy, capped at 10 plus one follow-up. A new
+  event type is born with 24h + 1h enabled and the follow-up off.
+
+  Reminder copy can quote the event's own intake answers through a new
+  `{{form.<field name>}}` namespace. The prefix is what keeps a question named
+  `location` from shadowing the built-in `{{location}}`, so no new names are reserved
+  and existing saved forms keep working. An unanswered or deleted question renders
+  empty and its line is dropped, exactly as an absent built-in already does.
+
+  Existing event types are given a copy of their account's current lead times and copy
+  by an idempotent migration fixup, so no host loses configuration and no invitee's
+  mail moves. `attendee_reminder`, `host_reminder` and `follow_up` are no longer
+  listed or editable in Settings → Notifications; the 9 transactional keys are
+  unchanged. The host side of a reminder keeps its shipped template — the row's
+  subject and body are the invitee copy.
+
+  Two consequences worth stating. Host-side reminder _copy_ stops being editable
+  (its lead time and its on/off become per-event, which is the upgrade). And a
+  stored `host_reminder: disabled` survives as a legacy **mute** on the host side —
+  it can silence, never enable — so a host who had turned their own copies off does
+  not start receiving them again; an account that never touched it is unaffected.
+
+- 01c172b: Each theme block in `tokens.css` now declares `color-scheme`, so light mode is
+  honest rather than merely painted.
+
+  `color-scheme` is the one part of a theme no token can carry: it is what the
+  browser reads to paint the chrome it owns — `<select>` popups, the internals of
+  `<input type="date">`, autofill backgrounds, the default scrollbar on any region
+  the themed-scrollbar rules do not reach, and the canvas behind an overscroll
+  bounce. Without it a light page still renders all of that dark. It lives in the
+  sheet rather than in the app shell because the sheet is what a self-hoster
+  imports, and a consumer stamping `data-theme` should get the whole theme.
+
+  `tokens.spec.ts` asserts it per block. The existing light / `prefers-color-scheme`
+  parity check reads custom properties only, so a `color-scheme` landing in one
+  light block and missing from the other would otherwise have passed every test in
+  the file.
+
+  The admin catalog gains `admin.common.theme` (`toLight` / `toDark`) in `en` and
+  `es` — the labels on the new product theme switch.

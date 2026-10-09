@@ -1,6 +1,6 @@
 {
   "name": "@slate/crm",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "CrmProvider port + the HubSpot adapter. Open core and vendor-named by ADR 0001 (R15 governs calendar vendors only). Pure HTTP: no DB, no encryption key.",
@@ -8,8 +8,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./mapping": { "types": "./dist/mapping.d.ts", "import": "./dist/mapping.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mapping": {
+      "types": "./dist/mapping.d.ts",
+      "import": "./dist/mapping.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
