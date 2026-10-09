@@ -110,6 +110,59 @@ describe('WorkOsAuthProvider — validates the platform JWT and projects a princ
   });
 });
 
+// The role a JIT member arrives with decides what they can see, and `member`
+// sees only its own resources — which for someone sent in to configure an
+// account means an empty one. OPERATOR_EMAIL_DOMAIN is how a deployment names
+// its own staff; a fork that sets nothing keeps the plain rule.
+describe('WorkOsAuthProvider — the role a JIT member arrives with', () => {
+  let db: Db;
+  const base = { JWT_SECRET: SECRET, JWT_ISSUER: ISS, JWT_AUDIENCE: AUD };
+
+  const roleOf = async (memberId: string): Promise<string | undefined> =>
+    (await db.get<{ role: string }>(sql`SELECT role FROM member WHERE id = ${memberId}`))?.role;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+  });
+
+  it('still makes the first member of an account its owner, operator or not', async () => {
+    const provider = new WorkOsAuthProvider(db, { ...base, OPERATOR_EMAIL_DOMAIN: '@operator.example' });
+    const p = await provider.resolveHost(
+      bearer(mint({ account_id: 'acct_first', sub: 'u_first', email: 'staff@operator.example' })),
+    );
+    expect(await roleOf(p.memberId)).toBe('owner');
+  });
+
+  it('gives operator staff admin when they arrive in an account someone else owns', async () => {
+    const provider = new WorkOsAuthProvider(db, { ...base, OPERATOR_EMAIL_DOMAIN: '@operator.example' });
+    await provider.resolveHost(bearer(mint({ account_id: 'acct_cust', sub: 'u_owner', email: 'owner@customer.io' })));
+    const staff = await provider.resolveHost(
+      bearer(mint({ account_id: 'acct_cust', sub: 'u_staff', email: 'Impl@Operator.Example' })),
+    );
+    expect(await roleOf(staff.memberId)).toBe('admin');
+  });
+
+  it('is not fooled by a domain that merely ends the same way', async () => {
+    const provider = new WorkOsAuthProvider(db, { ...base, OPERATOR_EMAIL_DOMAIN: '@operator.example' });
+    await provider.resolveHost(bearer(mint({ account_id: 'acct_near', sub: 'u_owner', email: 'owner@customer.io' })));
+    const impostor = await provider.resolveHost(
+      bearer(mint({ account_id: 'acct_near', sub: 'u_evil', email: 'evil@notoperator.example' })),
+    );
+    expect(await roleOf(impostor.memberId)).toBe('member');
+  });
+
+  it('leaves a bare fork untouched — no domain configured, nobody is special', async () => {
+    const provider = new WorkOsAuthProvider(db, base);
+    await provider.resolveHost(bearer(mint({ account_id: 'acct_bare', sub: 'u_owner', email: 'owner@customer.io' })));
+    const later = await provider.resolveHost(
+      bearer(mint({ account_id: 'acct_bare', sub: 'u_later', email: 'anyone@operator.example' })),
+    );
+    expect(await roleOf(later.memberId)).toBe('member');
+  });
+});
+
 describe('createAuthProvider — workos wiring stays fail-loud without a secret', () => {
   it('throws for workos when JWT_SECRET is absent (never silent stub fallback)', async () => {
     const db = await createDb('file::memory:');

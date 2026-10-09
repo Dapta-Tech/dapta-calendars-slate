@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
+import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
 import { AppSwitcher } from '@/components/app-switcher';
 import { ThemeToggle } from '@/components/theme-toggle';
 import type { Theme } from '@/lib/theme';
@@ -118,12 +119,20 @@ interface ShellUser {
 
 export function AdminShell({
   user,
+  accounts = [],
+  accountsHasMore = false,
+  currentAccountId = null,
   messages,
   initialCollapsed = false,
   initialTheme,
   children,
 }: {
   user: ShellUser | null;
+  /** First page of the accounts this login may switch between — empty for
+   *  everyone but operator staff, who search the rest from the picker. */
+  accounts?: AccountOption[];
+  accountsHasMore?: boolean;
+  currentAccountId?: string | null;
   /** Active-locale admin catalog (F8) — nav + common labels. */
   messages: AdminMessages;
   /** Server-read cookie value → no collapse-rail FOUC on reload. */
@@ -243,6 +252,15 @@ export function AdminShell({
         footerCollapsed ? 'items-center gap-tight' : 'gap-inline'
       }`}
     >
+      {/* Above the identity row: which account you are acting in frames who you
+          are, and the two read together the way the platform app's do. */}
+      <AccountSwitcher
+        accounts={accounts}
+        hasMore={accountsHasMore}
+        currentAccountId={currentAccountId}
+        fallbackLabel={user?.accountCode}
+        collapsed={footerCollapsed}
+      />
       <span className="flex min-w-0 items-center gap-inline">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full border border-border bg-card text-xs font-semibold text-muted-foreground">
           {initial}
