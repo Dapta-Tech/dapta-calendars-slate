@@ -421,8 +421,9 @@ month calendar asks for the full window so a visitor can page between months
 without a refetch. So 60 days is the normal read, not an edge case.
 
 That read does not reach your backend as one request. `POST /v1/free-busy` is
-called once per connection for each window of **at most 7 days**, up to six calls
-at a time, and the answers are merged. A 60-day read is nine calls per connection.
+called once per connection for each window of **at most 7 days**, at most four calls
+in flight at once, and the answers are merged. A window answered with 429 or a 5xx is
+asked once more after a short pause; any other error fails the read. A 60-day read is nine calls per connection.
 The create-time conflict check reads only the slot being booked, in one call.
 
 **Each answer must hold every busy interval that overlaps its window.** An error

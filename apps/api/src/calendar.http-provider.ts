@@ -12,6 +12,7 @@
  * (loaded by env, see `calendar.provider.ts`) swaps in the real vendor wire +
  * JWT authority without touching this file or the public build.
  */
+import { Logger } from '@nestjs/common';
 import type {
   BusyInterval,
   CalendarProvider,
@@ -48,8 +49,52 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calend
  */
 const BUSY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** How many busy windows are in flight at once, across all connections. */
-const BUSY_CONCURRENCY = 6;
+/**
+ * How many busy windows are in flight at once, across every read this provider
+ * is serving, on every connection.
+ *
+ * Measured on the live backend (2026-10-10): five concurrent reads on one
+ * connection succeed, six fail, every time. Four leaves one in hand. The
+ * ceiling is held by one semaphore per provider instance, not per call: two
+ * visitors opening the same booking page at once must share it, or together
+ * they would ask for eight. The matching page-size margin is BUSY_WINDOW_MS;
+ * this one is about rate.
+ */
+const BUSY_CONCURRENCY = 4;
+
+/** A counting semaphore: `acquire` resolves to the function that releases the slot. */
+class Slots {
+  private free: number;
+  private readonly waiting: Array<() => void> = [];
+  constructor(size: number) {
+    this.free = size;
+  }
+  acquire(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const grant = (): void => {
+        this.free--;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          this.free++;
+          this.waiting.shift()?.();
+        });
+      };
+      if (this.free > 0) grant();
+      else this.waiting.push(grant);
+    });
+  }
+}
+
+/**
+ * A window whose read fails with a status that is about the moment (throttled,
+ * backend error, no response) is asked for once more after this pause. Any
+ * other status is the backend's answer and is not asked again.
+ */
+const BUSY_RETRY_AFTER_MS = 400;
+const retryable = (err: unknown): boolean =>
+  err instanceof CalendarHttpError && (err.status === 0 || err.status === 429 || err.status >= 500);
 
 /**
  * Cut [fromMs, toMs) into consecutive windows of at most `spanMs`. The windows
@@ -210,6 +255,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly busyWindowMs: number;
+  private readonly busySlots = new Slots(BUSY_CONCURRENCY);
+  private readonly logger = new Logger(ExternalCalendarProvider.name);
   private readonly startConnectOverride?: ExternalCalendarOptions['startConnect'];
 
   constructor(opts: ExternalCalendarOptions) {
@@ -239,6 +286,19 @@ export class ExternalCalendarProvider implements CalendarProvider {
     // Per-connection reads, merged: a backend need not offer a batch free-busy
     // (many calendar APIs expose only per-calendar event listing). Each
     // connection is read one window at a time (see BUSY_WINDOW_MS).
+    // One failed window fails the whole read: a partial busy list is exactly
+    // the short answer this exists to prevent, and callers already treat a
+    // throw as "calendar unreadable" (fail-closed). `failed` is shared so the
+    // other windows of this read stop asking once one is lost.
+    let failed = false;
+    const sendWindow = async (req: WireRequest): Promise<unknown> => {
+      const release = await this.busySlots.acquire();
+      try {
+        return await this.send('listBusy', req);
+      } finally {
+        release();
+      }
+    };
     const reads: Array<() => Promise<BusyInterval[]>> = [];
     for (const ref of input.connectionRefs) {
       for (const window of windows) {
@@ -249,24 +309,35 @@ export class ExternalCalendarProvider implements CalendarProvider {
             fromUtc: window.fromUtc,
             toUtc: window.toUtc,
           });
-          return this.wire.parseBusy(await this.send('listBusy', req));
+          try {
+            return this.wire.parseBusy(await sendWindow(req));
+          } catch (err) {
+            if (!retryable(err)) throw err;
+            // The slot is already released: the pause costs nobody else a read.
+            await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_AFTER_MS));
+            if (failed) throw err; // a sibling window was lost meanwhile: this read is over
+            return this.wire.parseBusy(await sendWindow(req));
+          }
         });
       }
     }
 
-    // A bounded pool, in request order. One failed window fails the whole read:
-    // a partial busy list is exactly the short answer this exists to prevent,
-    // and callers already treat a throw as "calendar unreadable" (fail-closed).
+    // A pool in request order. The semaphore above is the real ceiling and it
+    // is shared across reads; this pool only keeps one read from queueing all
+    // of its windows at once behind it.
     const results: BusyInterval[][] = new Array(reads.length);
     let next = 0;
-    let failed = false;
     const worker = async (): Promise<void> => {
       while (!failed && next < reads.length) {
         const i = next++;
         try {
           results[i] = await reads[i]!();
         } catch (err) {
-          failed = true; // the read is lost: stop the other workers asking for more
+          failed = true;
+          // The caller turns this into "calendar unavailable" and keeps the
+          // cause to itself; this line is the only record of WHICH window and
+          // WHY, and it is what made the concurrency limit above visible.
+          this.logger.warn(`busy read failed: ${err instanceof Error ? err.message : String(err)}`);
           throw err;
         }
       }

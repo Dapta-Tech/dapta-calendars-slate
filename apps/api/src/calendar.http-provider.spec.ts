@@ -330,7 +330,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
    * does when only its first page is read: at most `pageSize` of the events
    * that overlap the asked range, in an order that is NOT chronological.
    */
-  function pagedBackend(events: Ev[], pageSize: number, opts: { failOn?: number; instant?: boolean } = {}) {
+  function pagedBackend(events: Ev[], pageSize: number, opts: { failOn?: number; failStatus?: number; instant?: boolean } = {}) {
     const asked: Array<{ fromUtc: string; toUtc: string; ref: string }> = [];
     let inFlight = 0;
     let peak = 0;
@@ -343,7 +343,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
       if (!opts.instant) await new Promise((r) => setTimeout(r, 1));
       inFlight--;
       if (opts.failOn === n) {
-        return { ok: false, status: 503, text: () => Promise.resolve('unavailable') } as Response;
+        return { ok: false, status: opts.failStatus ?? 503, text: () => Promise.resolve('unavailable') } as Response;
       }
       const lo = Date.parse(body.fromUtc);
       const hi = Date.parse(body.toUtc);
@@ -507,7 +507,10 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     expect(asked.filter((a) => a.ref === 'conn-B')).toHaveLength(3);
   });
 
-  it('never has more than six reads in flight', async () => {
+  it('never has more than four reads in flight, however many connections', async () => {
+    // The live backend refuses a sixth concurrent read on a connection; five
+    // pass. Four is the ceiling, with one in hand, and it is global: three
+    // connections do not get twelve.
     const { fetchImpl, asked, peak } = pagedBackend([], 250);
     await providerOver(fetchImpl).listBusy({
       connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
@@ -515,13 +518,75 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
       toUtc: at(FROM + 60 * DAY),
     });
     expect(asked).toHaveLength(27);
-    expect(peak()).toBeLessThanOrEqual(6);
+    expect(peak()).toBeLessThanOrEqual(4);
     expect(peak()).toBeGreaterThan(1);
+  });
+
+  it('two reads at once on one provider share the ceiling of four', async () => {
+    // Two visitors on the same booking page: the backend sees one provider,
+    // and the limit is the backend's, so the two reads must share it.
+    const { fetchImpl, asked, peak } = pagedBackend([], 250);
+    const provider = providerOver(fetchImpl);
+    const read = () => provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) });
+    await Promise.all([read(), read(), read()]);
+    expect(asked).toHaveLength(27);
+    expect(peak()).toBeLessThanOrEqual(4);
+  });
+
+  /** A backend that answers `status` to the Nth read (1-based) and 200 after. */
+  function flakyBackend(statusOnce: number, nth: number) {
+    const asked: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { fromUtc: string };
+      asked.push(body.fromUtc);
+      if (asked.length === nth) {
+        return { ok: false, status: statusOnce, text: () => Promise.resolve('try later') } as Response;
+      }
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, asked };
+  }
+
+  for (const status of [429, 503, 500]) {
+    it(`asks a window once more after a ${status}, and the read completes`, async () => {
+      const { fetchImpl, asked } = flakyBackend(status, 3);
+      const busy = await providerOver(fetchImpl).listBusy({
+        connectionRefs: ['conn-A'],
+        fromUtc: at(FROM),
+        toUtc: at(FROM + 60 * DAY),
+      });
+      expect(busy).toEqual([]);
+      expect(asked).toHaveLength(10); // nine windows, one asked twice
+      // The window asked twice is the same window, not a neighbour.
+      const twice = asked.filter((w) => w === asked[2]);
+      expect(twice).toHaveLength(2);
+    });
+  }
+
+  it('a 4xx that is not a throttle is the answer: no second ask, the read fails', async () => {
+    const { fetchImpl, asked } = flakyBackend(400, 2);
+    await expect(
+      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 14 * DAY) }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(asked.filter((w) => w === asked[1])).toHaveLength(1);
+  });
+
+  it('a window that is throttled twice fails the read (one retry, not a loop)', async () => {
+    const asked: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      asked.push((JSON.parse(String(init.body)) as { fromUtc: string }).fromUtc);
+      return { ok: false, status: 429, text: () => Promise.resolve('slow down') } as Response;
+    }) as unknown as typeof fetch;
+    await expect(
+      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 7 * DAY) }),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(asked).toHaveLength(2);
   });
 
   it('fails the whole read when one window fails — never a partial busy list', async () => {
     const events = fullCalendar(60, 4);
-    const { fetchImpl, asked } = pagedBackend(events, 250, { failOn: 2 });
+    // A 403 is the backend's answer, not a moment to wait out: no second ask.
+    const { fetchImpl, asked } = pagedBackend(events, 250, { failOn: 2, failStatus: 403 });
     await expect(
       providerOver(fetchImpl).listBusy({
         connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
