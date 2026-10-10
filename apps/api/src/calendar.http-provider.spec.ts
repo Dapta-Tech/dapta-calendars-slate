@@ -522,6 +522,17 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     expect(peak()).toBeGreaterThan(1);
   });
 
+  it('two reads at once on one provider share the ceiling of four', async () => {
+    // Two visitors on the same booking page: the backend sees one provider,
+    // and the limit is the backend's, so the two reads must share it.
+    const { fetchImpl, asked, peak } = pagedBackend([], 250);
+    const provider = providerOver(fetchImpl);
+    const read = () => provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) });
+    await Promise.all([read(), read(), read()]);
+    expect(asked).toHaveLength(27);
+    expect(peak()).toBeLessThanOrEqual(4);
+  });
+
   /** A backend that answers `status` to the Nth read (1-based) and 200 after. */
   function flakyBackend(statusOnce: number, nth: number) {
     const asked: string[] = [];
