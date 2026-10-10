@@ -48,8 +48,23 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calend
  */
 const BUSY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** How many busy windows are in flight at once, across all connections. */
-const BUSY_CONCURRENCY = 6;
+/**
+ * How many busy windows are in flight at once, across all connections.
+ *
+ * Measured on the live backend (2026-10-10): five concurrent reads on one
+ * connection succeed, six fail, every time. Four leaves one in hand. The
+ * matching page-size margin is BUSY_WINDOW_MS; this one is about rate.
+ */
+const BUSY_CONCURRENCY = 4;
+
+/**
+ * A window whose read fails with a status that is about the moment (throttled,
+ * backend error, no response) is asked for once more after this pause. Any
+ * other status is the backend's answer and is not asked again.
+ */
+const BUSY_RETRY_AFTER_MS = 400;
+const retryable = (err: unknown): boolean =>
+  err instanceof CalendarHttpError && (err.status === 0 || err.status === 429 || err.status >= 500);
 
 /**
  * Cut [fromMs, toMs) into consecutive windows of at most `spanMs`. The windows
@@ -249,7 +264,13 @@ export class ExternalCalendarProvider implements CalendarProvider {
             fromUtc: window.fromUtc,
             toUtc: window.toUtc,
           });
-          return this.wire.parseBusy(await this.send('listBusy', req));
+          try {
+            return this.wire.parseBusy(await this.send('listBusy', req));
+          } catch (err) {
+            if (!retryable(err)) throw err;
+            await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_AFTER_MS));
+            return this.wire.parseBusy(await this.send('listBusy', req));
+          }
         });
       }
     }
@@ -267,6 +288,10 @@ export class ExternalCalendarProvider implements CalendarProvider {
           results[i] = await reads[i]!();
         } catch (err) {
           failed = true; // the read is lost: stop the other workers asking for more
+          // The caller turns this into "calendar unavailable" and keeps the
+          // cause to itself; this line is the only record of WHICH window and
+          // WHY, and it is what made the concurrency limit above visible.
+          console.warn(`calendar busy read failed: ${err instanceof Error ? err.message : String(err)}`);
           throw err;
         }
       }
