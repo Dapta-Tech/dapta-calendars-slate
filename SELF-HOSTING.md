@@ -155,6 +155,7 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_API_TOKEN` | — | required for the generic REST backend | **yes** |
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
+| `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
@@ -414,16 +415,18 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
-#### Free-busy is read a week at a time, and each answer must be complete
+#### Free-busy is read two weeks at a time, and each answer must be complete
 
 The public availability read caps itself at **60 days**, and the booking page's
 month calendar asks for the full window so a visitor can page between months
 without a refetch. So 60 days is the normal read, not an edge case.
 
 That read does not reach your backend as one request. `POST /v1/free-busy` is
-called once per connection for each window of **at most 7 days**, at most four calls
-in flight at once, and the answers are merged. A window answered with 429 or a 5xx is
-asked once more after a short pause; any other error fails the read. A 60-day read is nine calls per connection.
+called once per connection for each window of **at most 14 days**, at most four calls
+in flight at once and at most four started per second for one host, and the answers are
+merged. A 60-day read is five calls per connection. A window answered with 429 or a 5xx
+is asked again, up to three attempts, waiting your `Retry-After` when you send one; any
+other error fails the read.
 The create-time conflict check reads only the slot being booked, in one call.
 
 **Each answer must hold every busy interval that overlaps its window.** An error
