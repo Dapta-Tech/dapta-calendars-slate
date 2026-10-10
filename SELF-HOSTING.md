@@ -414,20 +414,25 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
-#### The free-busy window is up to 60 days
+#### Free-busy is read a week at a time, and each answer must be complete
 
-`POST /v1/free-busy` is called with the same range the public availability read was
-asked for, and that read caps itself at **60 days**. The booking page's month
-calendar asks for the full window so a visitor can page between months without a
-refetch, so 60 days is the normal request, not an edge case.
+The public availability read caps itself at **60 days**, and the booking page's
+month calendar asks for the full window so a visitor can page between months
+without a refetch. So 60 days is the normal read, not an edge case.
 
-**Your backend must accept a 60-day range.** This path is deliberately
-*fail-closed*: if free-busy errors, the availability read returns zero slots and
-`emptyReason: CALENDAR_UNAVAILABLE` rather than times that might already be taken.
-A backend that rejects or silently truncates a wide range therefore turns every
-public booking page into "times are temporarily unavailable". If your upstream
-calendar API has a narrower limit, page the range inside your backend and merge the
-results — do not pass the limit through.
+That read does not reach your backend as one request. `POST /v1/free-busy` is
+called once per connection for each window of **at most 7 days**, up to six calls
+at a time, and the answers are merged. A 60-day read is nine calls per connection.
+The create-time conflict check reads only the slot being booked, in one call.
+
+**Each answer must hold every busy interval that overlaps its window.** An error
+is safe: this path is *fail-closed*, so if any window errors the availability
+read returns zero slots and `emptyReason: CALENDAR_UNAVAILABLE` rather than times
+that might already be taken. A short answer is not safe: a backend that returns a
+200 with only part of the window (the first page of a paged event listing, for
+instance) makes the missing events look like free time, and visitors are offered
+slots the create-time check then refuses. If your upstream calendar API pages its
+results, follow the pages inside your backend and merge them before answering.
 
 #### Conferencing links
 
