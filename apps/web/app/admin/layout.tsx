@@ -6,6 +6,8 @@ import { adminApi, ApiError } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
 import { ToastProvider } from '@/components/toast';
 import { TimeZoneSync } from '@/components/timezone-sync';
+import { getSession } from '@/lib/auth-session';
+import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
 import { getLocale } from '@/lib/locale';
 import { getProductTheme } from '@/lib/theme.server';
 import { ONBOARDING_SKIP_COOKIE } from '@/lib/onboarding';
@@ -52,6 +54,19 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const initialTheme = await getProductTheme();
   const messages = getMessages(await getLocale()).admin;
 
+  // The account picker, for operator staff only — see `mayPickAccount`. Asked
+  // for here rather than inside the shell because the token must not reach the
+  // browser, and skipped entirely for everyone else so no customer's render
+  // waits on an upstream call that would return nothing they may use.
+  const session = await getSession();
+  const canPick = session?.provider === 'workos' && mayPickAccount(session.accessToken);
+  // Only the first page: the picker searches upstream for the rest, so this
+  // render never pays for a list as long as the customer base.
+  const accounts =
+    canPick && session.provider === 'workos'
+      ? await listWorkspaces(session.accessToken)
+      : { items: [], hasMore: false };
+
   return (
     <ToastProvider>
       <TimeZoneSync currentTimeZone={me.timeZone} />
@@ -60,6 +75,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         initialTheme={initialTheme}
         messages={messages}
         user={{ displayName: me.displayName, handle: me.handle, accountCode: me.accountCode }}
+        accounts={accounts.items}
+        accountsHasMore={accounts.hasMore}
+        currentAccountId={
+          session?.provider === 'workos' ? currentAccountId(session.accessToken) : null
+        }
       >
         {children}
       </AdminShell>
