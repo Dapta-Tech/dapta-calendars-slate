@@ -67,6 +67,11 @@ const BUSY_CONCURRENCY = 4;
  * leaves one in hand for the host's other traffic. Held per provider instance
  * and per subject, so concurrent reads of one host pace each other and reads
  * of different hosts do not.
+ *
+ * Per PROCESS. The backend counts every replica together, so a deployment
+ * with several API replicas gives each its share through
+ * CALENDAR_BUSY_REQUESTS_PER_SECOND (two replicas: 2 each). The retries below
+ * absorb what still slips through.
  */
 const BUSY_REQUESTS_PER_SECOND = 4;
 
@@ -293,6 +298,12 @@ export interface ExternalCalendarOptions {
   /** Injectable for tests; defaults to real time. */
   clock?: Clock;
   /**
+   * Busy requests that may start per second for one host, from THIS process.
+   * The backend's limit is per host across every process, so a deployment
+   * with N replicas sets this to its share (see BUSY_REQUESTS_PER_SECOND).
+   */
+  busyRequestsPerSecond?: number;
+  /**
    * Optional custom connect handshake. Some backends need a multi-step dance
    * (create a request, resolve the end-provider's OAuth URL, …) that the
    * single-request wire contract can't express; when present this replaces
@@ -327,7 +338,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.busyWindowMs = opts.busyWindowMs ?? BUSY_WINDOW_MS;
     this.clock = opts.clock ?? realClock;
-    this.pacer = new Pacer(BUSY_REQUESTS_PER_SECOND, this.clock);
+    this.pacer = new Pacer(opts.busyRequestsPerSecond ?? BUSY_REQUESTS_PER_SECOND, this.clock);
     this.startConnectOverride = opts.startConnect;
     this.conferencingLabel = opts.conferencingLabel ?? null;
   }
@@ -353,10 +364,14 @@ export class ExternalCalendarProvider implements CalendarProvider {
     // throw as "calendar unreadable" (fail-closed). `failed` is shared so the
     // other windows of this read stop asking once one is lost.
     let failed = false;
-    const sendWindow = async (req: WireRequest): Promise<unknown> => {
+    // Paced per host BEFORE a slot is taken, so a request waiting for its
+    // second holds nothing another host could use. The host is the request's
+    // subject when the wire names one, else the connection itself: never one
+    // shared bucket for every host.
+    const sendWindow = async (req: WireRequest, ref: string): Promise<unknown> => {
+      await this.pacer.wait(req.subject ?? ref);
       const release = await this.busySlots.acquire();
       try {
-        await this.pacer.wait(req.subject ?? '');
         return await this.send('listBusy', req);
       } finally {
         release();
@@ -374,7 +389,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
           });
           for (let attempt = 1; ; attempt++) {
             try {
-              return this.wire.parseBusy(await sendWindow(req));
+              return this.wire.parseBusy(await sendWindow(req, ref));
             } catch (err) {
               if (!retryable(err) || attempt >= BUSY_ATTEMPTS || failed) throw err;
               // The slot is already released: the pause costs nobody else a read.

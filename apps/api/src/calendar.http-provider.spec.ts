@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
 import {
   asConnector,
@@ -378,6 +378,24 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     };
   }
 
+  /**
+   * Run `work` under vitest's virtual clock: timers and Date.now are mocked and
+   * advanced in order, so several windows waiting for their second wake in the
+   * sequence real time would give them. Used where more than one request may
+   * be waiting at once.
+   */
+  async function underVirtualTime<T>(work: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers();
+    try {
+      const pending = work();
+      await vi.runAllTimersAsync();
+      return await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+  afterEach(() => vi.useRealTimers());
+
   function providerOver(fetchImpl: typeof fetch, busyWindowMs?: number, clock = fakeClock().clock) {
     return new ExternalCalendarProvider({
       baseUrl: 'https://cal.example.test',
@@ -557,31 +575,38 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     // The backend's own ceiling is five per customer per second. Fifteen reads
     // (three connections of one host) must spread over four seconds, and the
     // pacing is on the clock, not on the backend's answers.
-    const { clock, slept } = fakeClock();
     const stamps: number[] = [];
     const fetchImpl = (async () => {
-      stamps.push(clock.now());
+      stamps.push(Date.now());
       return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
     }) as unknown as typeof fetch;
-    await providerOver(fetchImpl, undefined, clock).listBusy({
-      connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
-      fromUtc: at(FROM),
-      toUtc: at(FROM + 60 * DAY),
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      // One host for every connection: every read is paced by the same subject.
+      wire: new (class extends GenericRestWire {
+        override listBusy(input: ListBusyInput) {
+          return { ...super.listBusy(input), subject: 'the-host' };
+        }
+      })(),
+      fetchImpl,
     });
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['conn-A', 'conn-B', 'conn-C'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+    );
     expect(stamps).toHaveLength(15);
     for (const t of stamps) {
       expect(stamps.filter((u) => u >= t && u < t + 1000).length).toBeLessThanOrEqual(4);
     }
-    expect(slept.length).toBeGreaterThan(0);
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeGreaterThanOrEqual(3000);
   });
 
   it('paces each host separately: two hosts do not slow each other down', async () => {
-    const { clock, slept } = fakeClock();
-    const fetchImpl = (async () => ({
-      ok: true,
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({ busy: [] })),
-    })) as unknown as typeof fetch;
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
     const provider = new ExternalCalendarProvider({
       baseUrl: 'https://cal.example.test',
       tokenSource: new StaticTokenSource('tok-123'),
@@ -592,11 +617,58 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
         }
       })(),
       fetchImpl,
-      clock,
     });
-    // Two hosts, two windows each: four starts, never more than two per host.
-    await provider.listBusy({ connectionRefs: ['host-1', 'host-2'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) });
-    expect(slept).toEqual([]);
+    // Two hosts, 28 days each: two windows per host, four starts, no waiting.
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['host-1', 'host-2'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) }),
+    );
+    expect(stamps).toHaveLength(4);
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(1000);
+  });
+
+  it('a wire that names no subject is paced by connection, never one bucket for every host', async () => {
+    // GenericRestWire sets no subject. Two unrelated hosts each read 60 days
+    // at once: in one shared bucket ten starts need over two seconds; by
+    // connection each host's five windows take just over one.
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      wire: new GenericRestWire(),
+      fetchImpl,
+    });
+    await underVirtualTime(() =>
+      Promise.all([
+        provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+        provider.listBusy({ connectionRefs: ['conn-B'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+      ]),
+    );
+    expect(stamps).toHaveLength(10);
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(2000);
+  });
+
+  it('the per-second budget is an option, for deployments with several replicas', async () => {
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      wire: new GenericRestWire(),
+      fetchImpl,
+      busyRequestsPerSecond: 2,
+    });
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+    );
+    expect(stamps).toHaveLength(5);
+    for (const t of stamps) expect(stamps.filter((u) => u >= t && u < t + 1000).length).toBeLessThanOrEqual(2);
   });
 
   it('waits the backend\'s Retry-After before asking again, when it sends one', async () => {

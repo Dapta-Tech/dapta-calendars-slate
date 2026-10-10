@@ -79,6 +79,7 @@ export function createCalendarProvider(env: ServerEnv): CalendarProvider {
           tokenSource: new StaticTokenSource(env.CALENDAR_API_TOKEN),
           wire: new GenericRestWire(),
           timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
+          busyRequestsPerSecond: env.CALENDAR_BUSY_REQUESTS_PER_SECOND,
           conferencingLabel: env.CALENDAR_CONFERENCING_LABEL ?? null,
         });
       }
@@ -112,6 +113,7 @@ export async function createCalendarProviderAsync(env: ServerEnv): Promise<Calen
       startConnect: backend.startConnect,
       busyWindowMs: backend.busyWindowMs,
       timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
+      busyRequestsPerSecond: env.CALENDAR_BUSY_REQUESTS_PER_SECOND,
       conferencingLabel: backend.conferencingLabel ?? env.CALENDAR_CONFERENCING_LABEL ?? null,
     });
   }
