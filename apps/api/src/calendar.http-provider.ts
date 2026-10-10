@@ -44,23 +44,75 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calend
  *
  * The booking page reads the whole availability window in one go, which is the
  * read most exposed to this. So a long read is cut into windows short enough
- * that one page holds them, and the pieces are unioned. A week is three times
- * shorter than the span a very full calendar has been seen to survive intact.
+ * that one page holds them, and the pieces are unioned. Two weeks sits inside
+ * the three a very full calendar has been seen to survive intact, and keeps a
+ * 60-day read to five requests: the backend's rate limit is per second (see
+ * BUSY_REQUESTS_PER_SECOND), so every window is a second of a visitor's wait.
  */
-const BUSY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const BUSY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
  * How many busy windows are in flight at once, across every read this provider
- * is serving, on every connection.
- *
- * Measured on the live backend (2026-10-10): five concurrent reads on one
- * connection succeed, six fail, every time. Four leaves one in hand. The
- * ceiling is held by one semaphore per provider instance, not per call: two
- * visitors opening the same booking page at once must share it, or together
- * they would ask for eight. The matching page-size margin is BUSY_WINDOW_MS;
- * this one is about rate.
+ * is serving, on every connection. Held by one semaphore per provider instance,
+ * not per call: two visitors opening the same booking page at once share it.
  */
 const BUSY_CONCURRENCY = 4;
+
+/**
+ * How many busy requests may START within any one second for one subject (the
+ * host whose calendar is being read).
+ *
+ * Measured on the live backend (2026-10-10), in its own words: "Rate limit
+ * exceeded: 5 apiRequestsPerCustomerPerSecond", retry after one second. Four
+ * leaves one in hand for the host's other traffic. Held per provider instance
+ * and per subject, so concurrent reads of one host pace each other and reads
+ * of different hosts do not.
+ */
+const BUSY_REQUESTS_PER_SECOND = 4;
+
+/**
+ * A window whose read fails with a status that is about the moment (throttled,
+ * backend error, no response) is asked again, up to this many attempts in all,
+ * pausing for the backend's own Retry-After when it sends one and for a second
+ * per attempt when it does not. Any other status is the backend's answer and
+ * is not asked again.
+ */
+const BUSY_ATTEMPTS = 3;
+const BUSY_RETRY_AFTER_MS = 1000;
+const retryable = (err: unknown): boolean =>
+  err instanceof CalendarHttpError && (err.status === 0 || err.status === 429 || err.status >= 500);
+
+/** Time, as the provider sees it. Injectable so tests need not wait real seconds. */
+export interface Clock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+const realClock: Clock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
+/** Per-subject pacing: at most `perSecond` starts in any rolling second. */
+class Pacer {
+  private readonly starts = new Map<string, number[]>();
+  constructor(
+    private readonly perSecond: number,
+    private readonly clock: Clock,
+  ) {}
+  async wait(subject: string): Promise<void> {
+    for (;;) {
+      const now = this.clock.now();
+      const recent = (this.starts.get(subject) ?? []).filter((t) => now - t < 1000);
+      if (recent.length < this.perSecond) {
+        recent.push(now);
+        this.starts.set(subject, recent);
+        return;
+      }
+      // The oldest start in the window ages out first; wake just after it does.
+      await this.clock.sleep(recent[0]! + 1000 - now + 1);
+    }
+  }
+}
 
 /** A counting semaphore: `acquire` resolves to the function that releases the slot. */
 class Slots {
@@ -87,14 +139,6 @@ class Slots {
   }
 }
 
-/**
- * A window whose read fails with a status that is about the moment (throttled,
- * backend error, no response) is asked for once more after this pause. Any
- * other status is the backend's answer and is not asked again.
- */
-const BUSY_RETRY_AFTER_MS = 400;
-const retryable = (err: unknown): boolean =>
-  err instanceof CalendarHttpError && (err.status === 0 || err.status === 429 || err.status >= 500);
 
 /**
  * Cut [fromMs, toMs) into consecutive windows of at most `spanMs`. The windows
@@ -213,12 +257,24 @@ export function asConnector(p: CalendarProvider): CalendarConnector | null {
     : null;
 }
 
+/** A Retry-After header, as ms to wait: seconds, or an HTTP date. Null when absent or unreadable. */
+function retryAfterMs(res: Response): number | null {
+  const raw = res.headers?.get?.('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const at = Date.parse(raw);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
+
 /** Thrown on any non-2xx backend response so the outbox worker retries. */
 export class CalendarHttpError extends Error {
   constructor(
     readonly status: number,
     readonly op: string,
     detail: string,
+    /** The backend's Retry-After, in ms, when it sent one. */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(`calendar backend ${op} failed (${status}): ${detail}`);
     this.name = 'CalendarHttpError';
@@ -234,6 +290,8 @@ export interface ExternalCalendarOptions {
   timeoutMs?: number;
   /** Longest span of one busy read, in ms. Defaults to a week. */
   busyWindowMs?: number;
+  /** Injectable for tests; defaults to real time. */
+  clock?: Clock;
   /**
    * Optional custom connect handshake. Some backends need a multi-step dance
    * (create a request, resolve the end-provider's OAuth URL, …) that the
@@ -256,6 +314,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
   private readonly timeoutMs: number;
   private readonly busyWindowMs: number;
   private readonly busySlots = new Slots(BUSY_CONCURRENCY);
+  private readonly clock: Clock;
+  private readonly pacer: Pacer;
   private readonly logger = new Logger(ExternalCalendarProvider.name);
   private readonly startConnectOverride?: ExternalCalendarOptions['startConnect'];
 
@@ -266,6 +326,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.busyWindowMs = opts.busyWindowMs ?? BUSY_WINDOW_MS;
+    this.clock = opts.clock ?? realClock;
+    this.pacer = new Pacer(BUSY_REQUESTS_PER_SECOND, this.clock);
     this.startConnectOverride = opts.startConnect;
     this.conferencingLabel = opts.conferencingLabel ?? null;
   }
@@ -294,6 +356,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
     const sendWindow = async (req: WireRequest): Promise<unknown> => {
       const release = await this.busySlots.acquire();
       try {
+        await this.pacer.wait(req.subject ?? '');
         return await this.send('listBusy', req);
       } finally {
         release();
@@ -309,14 +372,16 @@ export class ExternalCalendarProvider implements CalendarProvider {
             fromUtc: window.fromUtc,
             toUtc: window.toUtc,
           });
-          try {
-            return this.wire.parseBusy(await sendWindow(req));
-          } catch (err) {
-            if (!retryable(err)) throw err;
-            // The slot is already released: the pause costs nobody else a read.
-            await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_AFTER_MS));
-            if (failed) throw err; // a sibling window was lost meanwhile: this read is over
-            return this.wire.parseBusy(await sendWindow(req));
+          for (let attempt = 1; ; attempt++) {
+            try {
+              return this.wire.parseBusy(await sendWindow(req));
+            } catch (err) {
+              if (!retryable(err) || attempt >= BUSY_ATTEMPTS || failed) throw err;
+              // The slot is already released: the pause costs nobody else a read.
+              const pause = (err as CalendarHttpError).retryAfterMs ?? BUSY_RETRY_AFTER_MS * attempt;
+              await this.clock.sleep(pause);
+              if (failed) throw err; // a sibling window was lost meanwhile: this read is over
+            }
           }
         });
       }
@@ -435,7 +500,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
       clearTimeout(timer);
     }
     const text = await res.text();
-    if (!res.ok) throw new CalendarHttpError(res.status, op, text.slice(0, 500));
+    if (!res.ok) throw new CalendarHttpError(res.status, op, text.slice(0, 500), retryAfterMs(res));
     if (!text) return null;
     try {
       return JSON.parse(text);

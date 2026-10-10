@@ -45,6 +45,13 @@ export interface CalendarBackend {
    * own platform, so its value wins over CALENDAR_CONFERENCING_LABEL.
    */
   conferencingLabel?: string | null;
+  /**
+   * The longest span this backend answers completely in one busy read, in ms.
+   * A backend that pages its event listing leaves this unset and gets the
+   * provider's default; one that answers free/busy whole may say so and be
+   * read in one request.
+   */
+  busyWindowMs?: number;
 }
 export type CalendarBackendFactory = (env: ServerEnv) => CalendarBackend | Promise<CalendarBackend>;
 
@@ -103,6 +110,7 @@ export async function createCalendarProviderAsync(env: ServerEnv): Promise<Calen
       tokenSource: backend.tokenSource,
       wire: backend.wire,
       startConnect: backend.startConnect,
+      busyWindowMs: backend.busyWindowMs,
       timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
       conferencingLabel: backend.conferencingLabel ?? env.CALENDAR_CONFERENCING_LABEL ?? null,
     });

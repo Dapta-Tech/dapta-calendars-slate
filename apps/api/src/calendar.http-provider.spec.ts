@@ -6,7 +6,7 @@ import {
   ExternalCalendarProvider,
   splitBusyWindow,
 } from './calendar.http-provider';
-import { DisabledCalendarProvider } from '@slate/calendar';
+import { DisabledCalendarProvider, type ListBusyInput } from '@slate/calendar';
 import { computeSlots, type Interval } from '@slate/engine';
 
 interface Call {
@@ -359,12 +359,32 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     return { fetchImpl, asked, peak: () => peak };
   }
 
-  function providerOver(fetchImpl: typeof fetch, busyWindowMs?: number) {
+  /**
+   * A clock the tests drive: `sleep` resolves at once and advances time, so a
+   * pause is observed (in `slept`) without being waited for.
+   */
+  function fakeClock(start = 1_000_000) {
+    let t = start;
+    const slept: number[] = [];
+    return {
+      slept,
+      clock: {
+        now: () => t,
+        sleep: async (ms: number) => {
+          slept.push(ms);
+          t += ms;
+        },
+      },
+    };
+  }
+
+  function providerOver(fetchImpl: typeof fetch, busyWindowMs?: number, clock = fakeClock().clock) {
     return new ExternalCalendarProvider({
       baseUrl: 'https://cal.example.test',
       tokenSource: new StaticTokenSource('tok-123'),
       wire: new GenericRestWire(),
       fetchImpl,
+      clock,
       ...(busyWindowMs ? { busyWindowMs } : {}),
     });
   }
@@ -405,17 +425,17 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     expect(splitBusyWindow(FROM, FROM - DAY, 7 * DAY)).toEqual([[FROM, FROM - DAY]]);
   });
 
-  it('reads the booking page window (60 days) as nine consecutive weeks', async () => {
+  it('reads the booking page window (60 days) as five consecutive windows of at most two weeks', async () => {
     const { fetchImpl, asked } = pagedBackend([], 250);
     await providerOver(fetchImpl).listBusy({
       connectionRefs: ['conn-A'],
       fromUtc: at(FROM),
       toUtc: at(FROM + 60 * DAY),
     });
-    expect(asked).toHaveLength(9);
+    expect(asked).toHaveLength(5);
     const sorted = [...asked].sort((a, b) => Date.parse(a.fromUtc) - Date.parse(b.fromUtc));
     expect(sorted[0]!.fromUtc).toBe(at(FROM));
-    expect(sorted[8]!.toUtc).toBe(at(FROM + 60 * DAY));
+    expect(sorted[4]!.toUtc).toBe(at(FROM + 60 * DAY));
     for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.fromUtc).toBe(sorted[i - 1]!.toUtc);
   });
 
@@ -483,7 +503,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
   });
 
   it('reports an event that crosses a window boundary once, not twice', async () => {
-    const boundary = FROM + 7 * DAY;
+    const boundary = FROM + 14 * DAY;
     const crossing = { startUtc: at(boundary - 15 * 60 * 1000), endUtc: at(boundary + 15 * 60 * 1000) };
     const endsOnIt = { startUtc: at(boundary - 60 * 60 * 1000), endUtc: at(boundary) };
     const startsOnIt = { startUtc: at(boundary), endUtc: at(boundary + 60 * 60 * 1000) };
@@ -491,7 +511,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     const busy = await providerOver(fetchImpl).listBusy({
       connectionRefs: ['conn-A'],
       fromUtc: at(FROM),
-      toUtc: at(FROM + 14 * DAY),
+      toUtc: at(FROM + 28 * DAY),
     });
     expect(busy.map(key).sort()).toEqual([crossing, endsOnIt, startsOnIt].map(key).sort());
   });
@@ -503,8 +523,8 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
       fromUtc: at(FROM),
       toUtc: at(FROM + 21 * DAY),
     });
-    expect(asked.filter((a) => a.ref === 'conn-A')).toHaveLength(3);
-    expect(asked.filter((a) => a.ref === 'conn-B')).toHaveLength(3);
+    expect(asked.filter((a) => a.ref === 'conn-A')).toHaveLength(2);
+    expect(asked.filter((a) => a.ref === 'conn-B')).toHaveLength(2);
   });
 
   it('never has more than four reads in flight, however many connections', async () => {
@@ -517,7 +537,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
       fromUtc: at(FROM),
       toUtc: at(FROM + 60 * DAY),
     });
-    expect(asked).toHaveLength(27);
+    expect(asked).toHaveLength(15);
     expect(peak()).toBeLessThanOrEqual(4);
     expect(peak()).toBeGreaterThan(1);
   });
@@ -529,8 +549,77 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     const provider = providerOver(fetchImpl);
     const read = () => provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) });
     await Promise.all([read(), read(), read()]);
-    expect(asked).toHaveLength(27);
+    expect(asked).toHaveLength(15);
     expect(peak()).toBeLessThanOrEqual(4);
+  });
+
+  it('starts at most four requests per second for one host, however many are queued', async () => {
+    // The backend's own ceiling is five per customer per second. Fifteen reads
+    // (three connections of one host) must spread over four seconds, and the
+    // pacing is on the clock, not on the backend's answers.
+    const { clock, slept } = fakeClock();
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(clock.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    await providerOver(fetchImpl, undefined, clock).listBusy({
+      connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 60 * DAY),
+    });
+    expect(stamps).toHaveLength(15);
+    for (const t of stamps) {
+      expect(stamps.filter((u) => u >= t && u < t + 1000).length).toBeLessThanOrEqual(4);
+    }
+    expect(slept.length).toBeGreaterThan(0);
+  });
+
+  it('paces each host separately: two hosts do not slow each other down', async () => {
+    const { clock, slept } = fakeClock();
+    const fetchImpl = (async () => ({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({ busy: [] })),
+    })) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      // A wire whose subject is the connection ref: one host per ref.
+      wire: new (class extends GenericRestWire {
+        override listBusy(input: ListBusyInput) {
+          return { ...super.listBusy(input), subject: input.connectionRefs[0] };
+        }
+      })(),
+      fetchImpl,
+      clock,
+    });
+    // Two hosts, two windows each: four starts, never more than two per host.
+    await provider.listBusy({ connectionRefs: ['host-1', 'host-2'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) });
+    expect(slept).toEqual([]);
+  });
+
+  it('waits the backend\'s Retry-After before asking again, when it sends one', async () => {
+    const { clock, slept } = fakeClock();
+    let n = 0;
+    const fetchImpl = (async () => {
+      n++;
+      if (n === 2) {
+        return {
+          ok: false,
+          status: 429,
+          headers: new Headers({ 'retry-after': '3' }),
+          text: () => Promise.resolve('slow down'),
+        } as Response;
+      }
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    await providerOver(fetchImpl, undefined, clock).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 28 * DAY),
+    });
+    expect(slept).toContain(3000);
   });
 
   /** A backend that answers `status` to the Nth read (1-based) and 200 after. */
@@ -556,7 +645,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
         toUtc: at(FROM + 60 * DAY),
       });
       expect(busy).toEqual([]);
-      expect(asked).toHaveLength(10); // nine windows, one asked twice
+      expect(asked).toHaveLength(6); // five windows, one asked twice
       // The window asked twice is the same window, not a neighbour.
       const twice = asked.filter((w) => w === asked[2]);
       expect(twice).toHaveLength(2);
@@ -566,12 +655,12 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
   it('a 4xx that is not a throttle is the answer: no second ask, the read fails', async () => {
     const { fetchImpl, asked } = flakyBackend(400, 2);
     await expect(
-      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 14 * DAY) }),
+      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) }),
     ).rejects.toMatchObject({ status: 400 });
     expect(asked.filter((w) => w === asked[1])).toHaveLength(1);
   });
 
-  it('a window that is throttled twice fails the read (one retry, not a loop)', async () => {
+  it('a window that is throttled three times fails the read (bounded attempts, not a loop)', async () => {
     const asked: string[] = [];
     const fetchImpl = (async (_url: string, init: RequestInit) => {
       asked.push((JSON.parse(String(init.body)) as { fromUtc: string }).fromUtc);
@@ -580,7 +669,7 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
     await expect(
       providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 7 * DAY) }),
     ).rejects.toMatchObject({ status: 429 });
-    expect(asked).toHaveLength(2);
+    expect(asked).toHaveLength(3);
   });
 
   it('fails the whole read when one window fails — never a partial busy list', async () => {
@@ -594,9 +683,9 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
         toUtc: at(FROM + 60 * DAY),
       }),
     ).rejects.toBeInstanceOf(CalendarHttpError);
-    // The pool stops asking once a window is lost: far fewer than the 27 reads
+    // The pool stops asking once a window is lost: far fewer than the 15 reads
     // a healthy backend would have been asked for.
-    expect(asked.length).toBeLessThan(27);
+    expect(asked.length).toBeLessThan(15);
   });
 
   /**
