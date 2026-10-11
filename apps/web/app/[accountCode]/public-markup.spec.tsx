@@ -166,6 +166,8 @@ describe('the event page renders byte for byte', () => {
 
 describe('the manage page renders byte for byte', () => {
   it('an upcoming booking, with times to move it to', async () => {
+    // The page wears the host's branding, read through the booking's context.
+    api.getProfile.mockResolvedValue(profile({ ...BASE_STYLE, theme: 'light' }));
     api.getManageView.mockResolvedValue({ ok: true, booking: booking() });
     api.getAvailability.mockResolvedValue(availability());
     const html = await render(
@@ -178,6 +180,7 @@ describe('the manage page renders byte for byte', () => {
   });
 
   it('a cancelled booking', async () => {
+    api.getProfile.mockResolvedValue(profile({ ...BASE_STYLE, theme: 'dark' }));
     api.getManageView.mockResolvedValue({ ok: true, booking: booking({ status: 'cancelled' }) });
     const html = await render(
       ManagePage({

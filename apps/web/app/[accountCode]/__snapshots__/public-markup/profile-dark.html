@@ -1,34 +1,56 @@
 <div data-theme="dark" class="branded-surface tpl-classic card-outline slots-grid day-flat sel-soft bp-ground bg-background text-foreground bp-viewport" style="--accent:#2f6fed;--accent-contrast:#1a1a1c;--accent-hover:#5086f0;--accent-soft:color-mix(in srgb, #2f6fed 16%, transparent);--accent-wash:color-mix(in srgb, #2f6fed 22%, var(--background));--primary:#2f6fed;--primary-foreground:#1a1a1c;--primary-ink:#2f6fed;--primary-edge:#2f6fed;--ring:#2f6fed;--bp-radius:16px;--bp-radius-sm:8px;--bp-btn-radius:8px;--bp-pad:20px;--bp-gap:12px;--bp-slot-pad:12px;--bp-font-display:var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif);--bp-font-body:var(--font-sans, ui-sans-serif, system-ui, sans-serif)">
 <main class="mx-auto w-full max-w-2xl px-6 py-12">
-<div class="bp-cover mb-4 h-24 w-full rounded-md" style="background:var(--accent-wash)">
+<div class="bp-profile">
+<div aria-hidden="true" class="bp-cover">
 </div>
-<header class="mb-8 flex items-center gap-4">
-<div class="flex h-16 w-16 items-center justify-center text-2xl font-semibold" style="background:#2f6fed;color:#1a1a1c;border-radius:var(--bp-radius, 0.75rem)">R</div>
-<div class="flex flex-col gap-0.5">
-<p class="text-sm text-muted-foreground">Northwind Studio</p>
-<h1 class="text-3xl font-semibold tracking-tight">Riley Chen</h1>
-<p class="text-sm text-muted-foreground">Product design reviews and portfolio feedback.</p>
+<header class="bp-profile-head">
+<div class="bp-profile-avatar">
+<div aria-hidden="true" class="bp-avatar bp-avatar-monogram">R</div>
 </div>
+<p class="bp-muted bp-small">Northwind Studio</p>
+<h1 class="bp-profile-name">Riley Chen</h1>
+<p class="bp-profile-bio">Product design reviews and portfolio feedback.</p>
 </header>
-<ul class="flex flex-col gap-3">
+<ul class="bp-card bp-event-list">
 <li>
-<a class="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]" href="/northwind/riley-chen/design-review">
-<span class="flex flex-col">
-<span class="font-medium">Design review</span>
-<span class="text-sm text-muted-foreground">Bring a screen or a flow. We go through it together and you leave with a list.</span>
+<a class="bp-event-row" href="/northwind/riley-chen/design-review">
+<span class="bp-event-row-text">
+<span class="bp-event-row-title">Design review</span>
+<span class="bp-event-row-description">Bring a screen or a flow. We go through it together and you leave with a list.</span>
 </span>
-<span class="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">45 min</span>
+<span class="bp-event-row-length">
+<span class="sr-only">45 min</span>
+<span aria-hidden="true" class="bp-figure">45</span>
+<span aria-hidden="true" class="bp-unit">min</span>
+</span>
+<span aria-hidden="true" class="bp-event-row-chevron">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M9 5l7 7-7 7">
+</path>
+</svg>
+</span>
 </a>
 </li>
 <li>
-<a class="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]" href="/northwind/riley-chen/intro">
-<span class="flex flex-col">
-<span class="font-medium">Intro call</span>
+<a class="bp-event-row" href="/northwind/riley-chen/intro">
+<span class="bp-event-row-text">
+<span class="bp-event-row-title">Intro call</span>
 </span>
-<span class="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">15 min</span>
+<span class="bp-event-row-length">
+<span class="sr-only">15 min</span>
+<span aria-hidden="true" class="bp-figure">15</span>
+<span aria-hidden="true" class="bp-unit">min</span>
+</span>
+<span aria-hidden="true" class="bp-event-row-chevron">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M9 5l7 7-7 7">
+</path>
+</svg>
+</span>
 </a>
 </li>
 </ul>
+</div>
 </main>
 <footer class="bp-embed-footer flex justify-center px-6 pb-8 pt-4">
 <a href="https://example.com/signup?utm_source=dapta-calendars&amp;utm_medium=badge&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground">

@@ -272,11 +272,6 @@ export function EventPanel({
   );
 }
 
-/** A zone id as a person reads it: `America/New_York` is "America/New York". */
-export function readableZone(timeZone: string): string {
-  return timeZone.replace(/_/g, ' ');
-}
-
 // --- The sequence's chrome ----------------------------------------------------
 
 /** The sequence's steps, in order. `details` and `done` are derived in the island. */
@@ -558,6 +553,97 @@ export function ChosenTime({
       {holdLine ? <p className="bp-muted bp-small">{holdLine}</p> : null}
       {holdError ? <p className="bp-error">{holdError}</p> : null}
     </div>
+  );
+}
+
+// --- A booking that exists -------------------------------------------------------
+
+/**
+ * A booking as it stands, for the manage page's event pane: what, when in the
+ * attendee's clock, with whom, where, the way in when it is online, and its
+ * state when it is not simply confirmed. The facts are the confirmation's, in
+ * the same order, so the page an email links to reads like the screen the
+ * booking ended on.
+ */
+export function BookingSummary({
+  m,
+  eyebrow,
+  title,
+  dayLine,
+  timeLine,
+  timeZoneLabel,
+  unreadableTime,
+  withLine,
+  locationLabel,
+  locationKind,
+  joinUrl,
+  statusLine,
+}: {
+  m: BookingMessages;
+  /** The quiet line above the title ("Manage your booking"). */
+  eyebrow: string;
+  title: string;
+  dayLine: string | null;
+  timeLine: string | null;
+  timeZoneLabel: string;
+  /** Said in place of the time when the booking's instant could not be read. */
+  unreadableTime: string;
+  /** "With Riley Chen · sam@example.com" */
+  withLine: string;
+  locationLabel?: string | null;
+  locationKind?: string | null;
+  /** An http(s) join link, or nothing. */
+  joinUrl?: string | null;
+  /** "This booking is cancelled.", when it is not simply confirmed. */
+  statusLine?: string | null;
+}) {
+  return (
+    <section className="bp-event" aria-label={eyebrow}>
+      <p className="bp-muted bp-small">{eyebrow}</p>
+      <h1 className="bp-event-title">{title}</h1>
+      <dl className="bp-facts">
+        <div className="bp-fact">
+          <dt className="sr-only">{m.bookingPage.when}</dt>
+          <dd>
+            <ClockIcon />
+            <span className="bp-fact-text">
+              {dayLine && timeLine ? (
+                <>
+                  {dayLine}
+                  <br />
+                  {timeLine} <span className="bp-muted">({timeZoneLabel})</span>
+                </>
+              ) : (
+                unreadableTime
+              )}
+            </span>
+          </dd>
+        </div>
+        <div className="bp-fact">
+          <dt className="sr-only">{m.bookingPage.who}</dt>
+          <dd>
+            <PersonIcon />
+            <span className="bp-fact-text">{withLine}</span>
+          </dd>
+        </div>
+        {locationLabel ? (
+          <div className="bp-fact">
+            <dt className="sr-only">{m.location.whereLabel}</dt>
+            <dd>
+              <LocationIcon kind={locationKind ?? 'in_person'} />
+              <span className="bp-fact-text">{locationLabel}</span>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {joinUrl ? (
+        <a href={joinUrl} target="_blank" rel="noopener noreferrer" className="bp-btn-outline bp-cta">
+          {m.manage.joinMeeting}
+          <span className="sr-only">{m.manage.joinMeetingOpensNewTab}</span>
+        </a>
+      ) : null}
+      {statusLine ? <p className="bp-error">{statusLine}</p> : null}
+    </section>
   );
 }
 

@@ -5,16 +5,12 @@ import {
   ALL_BOOKING_THEMES,
   DEFAULT_ACCENT,
   THEME_PRESETS,
-  clampAccent,
   accentCanvasContrast,
   accentLabelContrast,
   MIN_ACCENT_CONTRAST,
-  onAccent,
   matchTheme,
-  monogram,
   t,
   type BookingMessages,
-  type BrandCanvas,
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
@@ -30,7 +26,7 @@ import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
-import { BookingPreview, PreviewFrame } from '@/components/booking-preview';
+import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
   checkHandleAction,
   saveStudioAction,
@@ -102,6 +98,7 @@ const ACCENT_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '
 interface EventTypeLite {
   slug: string;
   title: string;
+  description?: string | null;
   lengthMinutes: number;
 }
 
@@ -126,6 +123,8 @@ export interface StudioInit {
   landingEnabled: boolean;
   defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
+  /** The account's name, the quiet line above the host's on their profile. */
+  accountName?: string | null;
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
@@ -744,14 +743,21 @@ export function Studio(init: StudioInit) {
           <PreviewFrame accent={accent} axes={axes} device={device} wide={surface === 'booking'}>
               {surface === 'profile' ? (
                 <ProfilePreview
+                  locale={init.locale}
                   displayName={displayName}
+                  accountName={init.accountName ?? null}
                   bio={bio}
                   avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
-                  accent={accent}
-                  canvas={canvas}
-                  eventTypes={init.eventTypes}
-                  m={m}
+                  // In the order the host set in the Meetings panel, unlisted last,
+                  // exactly as the public page sorts them.
+                  events={[...init.eventTypes].sort((a, b) => {
+                    const rank = (slug: string) => {
+                      const i = eventOrder.indexOf(slug);
+                      return i === -1 ? eventOrder.length + 1 : i;
+                    };
+                    return rank(a.slug) - rank(b.slug);
+                  })}
                 />
               ) : (
                 <BookingPreview
@@ -768,80 +774,6 @@ export function Studio(init: StudioInit) {
     </div>
   );
 }
-
-/* spacing-gate:off — the BP canvas. Everything from here to the marker below is
-   the invitee's view, drawn from the host's own `--bp-*` axes so the preview
-   matches production exactly (#134). The admin spacing scale has no authority
-   here, and a sweep that renames these utilities silently breaks preview == prod.
-   The FRAME around the canvas is admin chrome and does follow the scale. */
-function ProfilePreview({
-  displayName,
-  bio,
-  avatarUrl,
-  coverUrl,
-  accent,
-  canvas,
-  eventTypes,
-  m,
-}: {
-  displayName: string;
-  bio: string;
-  avatarUrl: string;
-  coverUrl: string;
-  accent: string;
-  /** The ground the preview paints on, so the monogram's label is derived
-   *  against the same canvas the public page derives against. */
-  canvas: BrandCanvas;
-  eventTypes: EventTypeLite[];
-  m: StudioMessages;
-}) {
-  return (
-    <div>
-      {coverUrl ? (
-        <img src={coverUrl} alt="" className="bp-cover mb-3 h-24 w-full rounded-md object-cover" />
-      ) : (
-        <div className="bp-cover mb-3 h-20 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
-      )}
-      <div className="mb-4 flex items-center gap-3">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="h-12 w-12 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
-            style={{
-              background: 'var(--accent)',
-              color: onAccent(clampAccent(accent, canvas)),
-              borderRadius: 'var(--bp-radius)',
-            }}
-          >
-            {monogram(displayName)}
-          </div>
-        )}
-        <div>
-          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="text-lg font-semibold">
-            {displayName}
-          </div>
-          {bio ? <div className="text-sm text-muted-foreground">{bio}</div> : null}
-        </div>
-      </div>
-      <div className="flex flex-col" style={{ gap: 'var(--bp-gap)' }}>
-        {(eventTypes.length ? eventTypes : [{ slug: 'intro', title: m.introCall, lengthMinutes: 30 }]).map((et) => (
-          <div key={et.slug} className="bp-card flex items-center justify-between">
-            <span className="font-medium">{et.title}</span>
-            <span className="text-sm text-muted-foreground">{et.lengthMinutes} {m.minSuffix}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* spacing-gate:on */
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   // The `✓`/`✗` the available/taken copy used to carry are icons now, so the

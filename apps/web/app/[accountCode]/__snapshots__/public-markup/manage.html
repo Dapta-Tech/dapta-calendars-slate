@@ -1,204 +1,268 @@
-<div data-theme="dark" class="bp-ground min-h-dvh bg-background text-foreground">
-<main class="mx-auto max-w-xl px-6 py-12">
-<header class="mb-6 flex flex-col gap-1">
-<h1 class="text-2xl font-semibold tracking-tight">Design review</h1>
-<p class="text-muted-foreground">Wednesday, March 4, 2026 at 10:00 AM EST</p>
-<p class="text-sm text-muted-foreground">With Riley Chen · sam@example.com</p>
-<p class="text-sm text-muted-foreground">
-<span class="font-medium text-foreground">Where:</span> Online meeting</p>
-<p class="text-sm">
-<a href="https://meet.example.com/abc-defg" class="inline-flex items-center justify-center gap-inline rounded-md text-sm font-semibold transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] disabled:pointer-events-none disabled:border-transparent disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none border border-border bg-transparent hover:bg-accent h-11 px-group" target="_blank" rel="noopener noreferrer">Join the meeting<span class="sr-only"> (opens in a new tab)</span>
+<div data-theme="light" class="branded-surface tpl-classic card-outline slots-grid day-flat sel-soft bp-ground bg-background text-foreground bp-viewport" style="--accent:#2f6fed;--accent-contrast:#1a1a1c;--accent-hover:#275dc7;--accent-soft:color-mix(in srgb, #2f6fed 16%, transparent);--accent-wash:color-mix(in srgb, #2f6fed 22%, var(--background));--primary:#2f6fed;--primary-foreground:#1a1a1c;--primary-ink:#2f6fed;--primary-edge:#2f6fed;--ring:#2f6fed;--bp-radius:16px;--bp-radius-sm:8px;--bp-btn-radius:8px;--bp-pad:20px;--bp-gap:12px;--bp-slot-pad:12px;--bp-font-display:var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif);--bp-font-body:var(--font-sans, ui-sans-serif, system-ui, sans-serif)">
+<main class="w-full py-10 md:px-6 md:py-12">
+<div class="bp-flow">
+<div class="bp-stage" data-step="calendar">
+<div class="bp-progress" role="progressbar" aria-label="Step 1 of 4" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1">
+<span style="width:25%">
+</span>
+</div>
+<div class="bp-frame bp-card">
+<div class="bp-pane-event bp-region">
+<div class="bp-manage-panel">
+<section class="bp-event" aria-label="Manage your booking">
+<p class="bp-muted bp-small">Manage your booking</p>
+<h1 class="bp-event-title">Design review</h1>
+<dl class="bp-facts">
+<div class="bp-fact">
+<dt class="sr-only">When</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<circle cx="12" cy="12" r="9">
+</circle>
+<path d="M12 7v5l3 2">
+</path>
+</svg>
+<span class="bp-fact-text">Wednesday, March 4, 2026<br/>10:00 – 10:45 AM <span class="bp-muted">(America/New York)</span>
+</span>
+</dd>
+</div>
+<div class="bp-fact">
+<dt class="sr-only">With</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<circle cx="12" cy="8" r="4">
+</circle>
+<path d="M4 21a8 8 0 0 1 16 0">
+</path>
+</svg>
+<span class="bp-fact-text">With Riley Chen · sam@example.com</span>
+</dd>
+</div>
+<div class="bp-fact">
+<dt class="sr-only">Where</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<rect x="2" y="6" width="13" height="12" rx="2">
+</rect>
+<path d="m15 11 6-3v8l-6-3z">
+</path>
+</svg>
+<span class="bp-fact-text">Online meeting</span>
+</dd>
+</div>
+</dl>
+<a href="https://meet.example.com/abc-defg" target="_blank" rel="noopener noreferrer" class="bp-btn-outline bp-cta">Join the meeting<span class="sr-only"> (opens in a new tab)</span>
 </a>
-</p>
-</header>
-<div class="flex flex-col gap-6 ">
-<form class="flex flex-col gap-2 rounded-md border border-border bg-card p-4" action="javascript:throw new Error(&#x27;React form unexpectedly submitted.&#x27;)">
+</section>
+<form class="bp-manage-cancel" action="javascript:throw new Error(&#x27;React form unexpectedly submitted.&#x27;)">
 <input type="hidden" name="uid" value="bk_pinned_0001"/>
 <input type="hidden" name="token" value="tok_pinned"/>
-<input type="hidden" name="newStartUtc" value=""/>
-<span class="text-sm text-muted-foreground">Reschedule to</span>
-<div class="flex max-h-64 flex-col gap-3 overflow-y-auto pr-1">
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Mon, Mar 2</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Tue, Mar 3</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Wed, Mar 4</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Thu, Mar 5</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Fri, Mar 6</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">9:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Mon, Mar 9</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Tue, Mar 10</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Wed, Mar 11</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Thu, Mar 12</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Fri, Mar 13</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Mon, Mar 16</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Tue, Mar 17</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Wed, Mar 18</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Thu, Mar 19</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-<div>
-<h3 class="mb-1 text-xs font-semibold text-muted-foreground">Fri, Mar 20</h3>
-<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">10:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:00 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">11:30 AM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:00 PM</button>
-<button type="button" aria-pressed="false" class="rounded-md border px-2 py-1.5 text-xs transition-transform active:scale-[0.98] border-border bg-background hover:border-primary">12:30 PM</button>
-</div>
-</div>
-</div>
-<button type="submit" disabled="" class="self-start rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98] disabled:opacity-60">Reschedule</button>
+<label class="bp-field" for="reason">
+<span class="bp-label">Cancel this booking</span>
+<input id="reason" placeholder="Reason (optional)" class="bp-input" name="reason"/>
+</label>
+<button type="submit" class="bp-btn-outline bp-cta bp-danger">Cancel booking</button>
 </form>
-<form class="flex flex-col gap-2 rounded-md border border-border bg-card p-4" action="javascript:throw new Error(&#x27;React form unexpectedly submitted.&#x27;)">
-<input type="hidden" name="uid" value="bk_pinned_0001"/>
-<input type="hidden" name="token" value="tok_pinned"/>
-<label class="text-sm text-muted-foreground" for="reason">Cancel this booking</label>
-<input id="reason" placeholder="Reason (optional)" class="rounded-md border border-input bg-background px-3 py-2" name="reason"/>
-<button type="submit" class="rounded-md border border-destructive px-4 py-2 font-semibold text-destructive transition-transform active:scale-[0.98] disabled:opacity-60">Cancel booking</button>
-</form>
+</div>
+</div>
+<div class="bp-pane-main">
+<div class="bp-pick">
+<div class="bp-pane-month bp-region">
+<section aria-label="Choose a date" class="bp-month">
+<div class="bp-month-head">
+<h2 class="bp-month-label">March 2026</h2>
+<div class="bp-month-nav">
+<button type="button" class="bp-icon-btn" disabled="" aria-label="Previous month">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M15 5l-7 7 7 7">
+</path>
+</svg>
+</button>
+<button type="button" class="bp-icon-btn" disabled="" aria-label="Next month">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M9 5l7 7-7 7">
+</path>
+</svg>
+</button>
+</div>
+</div>
+<div class="bp-cal-grid" role="grid" aria-label="March 2026">
+<div role="row" class="bp-cal-week">
+<div role="columnheader" class="bp-cal-weekday">S</div>
+<div role="columnheader" class="bp-cal-weekday">M</div>
+<div role="columnheader" class="bp-cal-weekday">T</div>
+<div role="columnheader" class="bp-cal-weekday">W</div>
+<div role="columnheader" class="bp-cal-weekday">T</div>
+<div role="columnheader" class="bp-cal-weekday">F</div>
+<div role="columnheader" class="bp-cal-weekday">S</div>
+</div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-01" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Sunday, March 1">1</button>
+</div>
+<div role="gridcell" aria-selected="true" class="contents">
+<button type="button" data-day="2026-03-02" class="bp-cal-day" data-state="available" data-today="true" data-selected="true" tabindex="0" aria-label="Monday, March 2, Today">2</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-03" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Tuesday, March 3">3</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-04" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Wednesday, March 4">4</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-05" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Thursday, March 5">5</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-06" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Friday, March 6">6</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-07" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Saturday, March 7">7</button>
+</div>
+</div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-08" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Sunday, March 8">8</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-09" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Monday, March 9">9</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-10" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Tuesday, March 10">10</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-11" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Wednesday, March 11">11</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-12" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Thursday, March 12">12</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-13" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Friday, March 13">13</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-14" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Saturday, March 14">14</button>
+</div>
+</div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-15" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Sunday, March 15">15</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-16" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Monday, March 16">16</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-17" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Tuesday, March 17">17</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-18" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Wednesday, March 18">18</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-19" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Thursday, March 19">19</button>
+</div>
+<div role="gridcell" aria-selected="false" class="contents">
+<button type="button" data-day="2026-03-20" class="bp-cal-day" data-state="available" tabindex="-1" aria-label="Friday, March 20">20</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-21" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Saturday, March 21">21</button>
+</div>
+</div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-22" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Sunday, March 22">22</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-23" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Monday, March 23">23</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-24" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Tuesday, March 24">24</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-25" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Wednesday, March 25">25</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-26" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Thursday, March 26">26</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-27" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Friday, March 27">27</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-28" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Saturday, March 28">28</button>
+</div>
+</div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-29" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Sunday, March 29">29</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-30" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Monday, March 30">30</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-03-31" class="bp-cal-day" data-state="empty" disabled="" tabindex="-1" aria-label="Tuesday, March 31">31</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-01" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Wednesday, April 1">1</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-02" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Thursday, April 2">2</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-03" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Friday, April 3">3</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-04" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Saturday, April 4">4</button>
+</div>
+</div>
+</div>
+</section>
+</div>
+<div class="bp-pane-times bp-region">
+<section aria-label="Choose a time" class="bp-day bp-times">
+<div class="bp-day-head">
+<button type="button" class="bp-back bp-back-phone">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M15 5l-7 7 7 7">
+</path>
+</svg>
+<span>Back to the calendar</span>
+</button>
+<h2 tabindex="-1" class="bp-day-title">Times on Mon, Mar 2</h2>
+<div role="radiogroup" aria-label="Time format" class="bp-segmented">
+<button type="button" role="radio" aria-checked="true" tabindex="0" class="bp-segment">12h</button>
+<button type="button" role="radio" aria-checked="false" tabindex="-1" class="bp-segment">24h</button>
+</div>
+</div>
+<div class="bp-times-tools">
+<p class="bp-muted bp-small">America/New York</p>
+</div>
+<div class="bp-slots">
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">9:30 AM</span>
+</button>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">10:00 AM</span>
+</button>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">10:30 AM</span>
+</button>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">11:00 AM</span>
+</button>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">11:30 AM</span>
+</button>
+</div>
+</section>
+</div>
+</div>
+</div>
+</div>
+</div>
 </div>
 </main>
 <footer class="bp-embed-footer flex justify-center px-6 pb-8 pt-4">
 <a href="https://example.com/signup?utm_source=dapta-calendars&amp;utm_medium=badge&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
 <svg viewBox="0 0 1141.464 715.8" role="presentation" aria-hidden="true" focusable="false" class="h-3.5 w-auto shrink-0">
 <defs>
-<mask id="_R_7_" maskUnits="userSpaceOnUse" x="-600" y="-100" width="1900" height="900">
+<mask id="_R_q_" maskUnits="userSpaceOnUse" x="-600" y="-100" width="1900" height="900">
 <g transform="translate(-461.564 -0.4)">
 <rect x="-100" y="-100" width="1400" height="900" fill="#fff">
 </rect>
@@ -210,7 +274,7 @@
 <g transform="translate(59.6500 59.65) scale(1.000000) translate(-59.65 -59.65)">
 <g transform="translate(461.564 0.4)">
 <g transform="translate(123.865 59.500) scale(1.0619) translate(-123.865 -59.500)">
-<g mask="url(#_R_7_)">
+<g mask="url(#_R_q_)">
 <g transform="translate(-401.914 59.25) scale(0.587166)">
 <g transform="translate(0.000000,966.000000) scale(0.100000,-0.100000)">
 <path d="M7266 9643 c-235 -50 -438 -210 -551 -433 -46 -91 -61 -146 -129

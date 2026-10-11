@@ -270,3 +270,12 @@ export function formatTimeRange(
   });
   return format.formatRange(new Date(startUtc), new Date(endUtc));
 }
+
+/**
+ * A zone id as a person reads it: `America/New_York` is "America/New York".
+ * Pure, so the server-rendered manage page and the client island say a zone
+ * the same way.
+ */
+export function readableZone(timeZone: string): string {
+  return timeZone.replace(/_/g, ' ');
+}
