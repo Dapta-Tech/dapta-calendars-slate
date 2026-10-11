@@ -2412,8 +2412,10 @@ export async function dispatchWebhooks(
           headers['X-Slate-Signature'] =
             `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
         }
-        discardBody(await fetchImpl(h.subscriber_url, webhookRequest(headers, body)));
-        sent++;
+        const res = await fetchImpl(h.subscriber_url, webhookRequest(headers, body));
+        discardBody(res);
+        // Sent means accepted: a 3xx (never followed) or any other non-2xx is not.
+        if (res.ok) sent++;
       } catch {
         /* best-effort — swallow */
       }

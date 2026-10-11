@@ -115,7 +115,8 @@ describe('webhook delivery history (QA fix 10)', () => {
       const items = await listWebhookDeliveries(db, accountId, webhookId);
       expect(items[0]).toMatchObject({ ok: false, statusCode: 302 });
       expect(await pingWebhook(db, accountId, webhookId, KEY, redirect.impl)).toEqual({ ok: false, status: 302 });
-      expect(redirect.seen).toHaveLength(2); // the Location was never requested
+      expect(await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, KEY, redirect.impl)).toBe(0);
+      expect(redirect.seen).toHaveLength(3); // the Location was never requested
     });
 
     it('a timed-out request is a recorded failure the outbox retries', async () => {
