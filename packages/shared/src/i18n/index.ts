@@ -131,6 +131,8 @@ export interface BookingMessages {
     who: string;
     /** The confirmation's first action: download the booking as a calendar file. */
     addToCalendar: string;
+    /** The unit beside a duration set as a figure on the profile ("30 min"). */
+    minutesUnit: string;
   };
   manage: {
     title: string;
@@ -1311,6 +1313,7 @@ export const en: BookingMessages = {
     when: 'When',
     who: 'With',
     addToCalendar: 'Add to calendar',
+    minutesUnit: 'min',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2353,6 +2356,7 @@ export const es: BookingMessages = {
     when: 'Cuándo',
     who: 'Con',
     addToCalendar: 'Añadir al calendario',
+    minutesUnit: 'min',
   },
   scheduling: {
     round_robin: 'Por turnos',

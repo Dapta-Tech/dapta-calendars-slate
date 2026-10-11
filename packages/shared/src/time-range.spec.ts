@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDayLong, formatTimeRange } from './time';
+import { formatDayLong, formatTimeRange, readableZone } from './time';
 
 describe('formatDayLong', () => {
   it('says the day in the visitor zone, with the year', () => {
@@ -24,5 +24,13 @@ describe('formatTimeRange', () => {
 
   it('is in the zone it is asked for', () => {
     expect(formatTimeRange(start, end, 'UTC', 'en', false)).toMatch(/^14:30\s*.\s*15:15$/);
+  });
+});
+
+describe('readableZone', () => {
+  it('says a zone id the way a person reads it', () => {
+    expect(readableZone('America/New_York')).toBe('America/New York');
+    expect(readableZone('America/Argentina/Buenos_Aires')).toBe('America/Argentina/Buenos Aires');
+    expect(readableZone('UTC')).toBe('UTC');
   });
 });
