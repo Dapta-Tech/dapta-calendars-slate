@@ -1,7 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
-import { asConnector, CalendarHttpError, ExternalCalendarProvider } from './calendar.http-provider';
-import { DisabledCalendarProvider } from '@slate/calendar';
+import {
+  asConnector,
+  CalendarHttpError,
+  ExternalCalendarProvider,
+  splitBusyWindow,
+} from './calendar.http-provider';
+import { DisabledCalendarProvider, type ListBusyInput } from '@slate/calendar';
+import { computeSlots, type Interval } from '@slate/engine';
 
 interface Call {
   url: string;
@@ -296,5 +302,546 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     const { provider } = makeProvider([]);
     expect(asConnector(provider)).not.toBeNull();
     expect(asConnector(new DisabledCalendarProvider())).toBeNull();
+  });
+});
+
+/**
+ * Windowed busy reads.
+ *
+ * The defect these pin: a calendar backend that lists events one PAGE at a time
+ * answers a long read with the first page only. Nothing fails — the list is
+ * simply short — and every event that fell off the page becomes a slot offered
+ * as free on a calendar that is busy. The booking page reads its whole window
+ * (60 days) in one go; the create-time check reads one slot. So the page
+ * offered times the check then refused: "That time was just taken."
+ */
+describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const FROM = Date.parse('2026-10-05T19:00:00.000Z');
+  const at = (ms: number) => new Date(ms).toISOString();
+
+  interface Ev {
+    startUtc: string;
+    endUtc: string;
+  }
+
+  /**
+   * A backend holding `events` that answers each read the way a paged listing
+   * does when only its first page is read: at most `pageSize` of the events
+   * that overlap the asked range, in an order that is NOT chronological.
+   */
+  function pagedBackend(events: Ev[], pageSize: number, opts: { failOn?: number; failStatus?: number; instant?: boolean } = {}) {
+    const asked: Array<{ fromUtc: string; toUtc: string; ref: string }> = [];
+    let inFlight = 0;
+    let peak = 0;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { fromUtc: string; toUtc: string; connectionRefs: string[] };
+      asked.push({ fromUtc: body.fromUtc, toUtc: body.toUtc, ref: body.connectionRefs[0]! });
+      const n = asked.length;
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      if (!opts.instant) await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      if (opts.failOn === n) {
+        return { ok: false, status: opts.failStatus ?? 503, text: () => Promise.resolve('unavailable') } as Response;
+      }
+      const lo = Date.parse(body.fromUtc);
+      const hi = Date.parse(body.toUtc);
+      const overlapping = events.filter((e) => Date.parse(e.startUtc) < hi && Date.parse(e.endUtc) > lo);
+      // Deterministic scramble: a paged listing owes nobody chronological order.
+      const scrambled = overlapping
+        .map((e, i) => ({ e, k: (i * 7919) % 10007 }))
+        .sort((a, b) => a.k - b.k)
+        .map((x) => x.e);
+      const text = JSON.stringify({ busy: scrambled.slice(0, pageSize) });
+      return { ok: true, status: 200, text: () => Promise.resolve(text) } as Response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, asked, peak: () => peak };
+  }
+
+  /**
+   * A clock the tests drive: `sleep` resolves at once and advances time, so a
+   * pause is observed (in `slept`) without being waited for.
+   */
+  function fakeClock(start = 1_000_000) {
+    let t = start;
+    const slept: number[] = [];
+    return {
+      slept,
+      clock: {
+        now: () => t,
+        sleep: async (ms: number) => {
+          slept.push(ms);
+          t += ms;
+        },
+      },
+    };
+  }
+
+  /**
+   * Run `work` under vitest's virtual clock: timers and Date.now are mocked and
+   * advanced in order, so several windows waiting for their second wake in the
+   * sequence real time would give them. Used where more than one request may
+   * be waiting at once.
+   */
+  async function underVirtualTime<T>(work: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers();
+    try {
+      const pending = work();
+      await vi.runAllTimersAsync();
+      return await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+  afterEach(() => vi.useRealTimers());
+
+  function providerOver(fetchImpl: typeof fetch, busyWindowMs?: number, clock = fakeClock().clock) {
+    return new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      wire: new GenericRestWire(),
+      fetchImpl,
+      clock,
+      ...(busyWindowMs ? { busyWindowMs } : {}),
+    });
+  }
+
+  /** `perDay` back-to-back 30-minute meetings from 14:00Z, every day of the range. */
+  function fullCalendar(days: number, perDay: number): Ev[] {
+    const out: Ev[] = [];
+    const dayZero = Date.parse('2026-10-05T00:00:00.000Z');
+    for (let d = 0; d < days + 1; d++) {
+      for (let i = 0; i < perDay; i++) {
+        const start = dayZero + d * DAY + 14 * 60 * 60 * 1000 + i * 30 * 60 * 1000;
+        out.push({ startUtc: at(start), endUtc: at(start + 30 * 60 * 1000) });
+      }
+    }
+    return out;
+  }
+  const key = (e: Ev) => `${e.startUtc}|${e.endUtc}`;
+  const inRange = (events: Ev[], lo: number, hi: number) =>
+    events.filter((e) => Date.parse(e.startUtc) < hi && Date.parse(e.endUtc) > lo);
+
+  it('splitBusyWindow tiles the range exactly — no gap, no overlap, nothing past the end', () => {
+    for (const days of [0.02, 1, 6.9, 7, 7.1, 21, 30, 60]) {
+      const to = FROM + days * DAY;
+      const w = splitBusyWindow(FROM, to, 7 * DAY);
+      expect(w[0]![0]).toBe(FROM);
+      expect(w[w.length - 1]![1]).toBe(to);
+      for (let i = 0; i < w.length; i++) {
+        expect(w[i]![1] - w[i]![0]).toBeGreaterThan(0);
+        expect(w[i]![1] - w[i]![0]).toBeLessThanOrEqual(7 * DAY);
+        if (i > 0) expect(w[i]![0]).toBe(w[i - 1]![1]);
+      }
+      expect(w).toHaveLength(Math.ceil(days / 7));
+    }
+  });
+
+  it('splitBusyWindow passes an empty or inverted range through untouched', () => {
+    expect(splitBusyWindow(FROM, FROM, 7 * DAY)).toEqual([[FROM, FROM]]);
+    expect(splitBusyWindow(FROM, FROM - DAY, 7 * DAY)).toEqual([[FROM, FROM - DAY]]);
+  });
+
+  it('reads the booking page window (60 days) as five consecutive windows of at most two weeks', async () => {
+    const { fetchImpl, asked } = pagedBackend([], 250);
+    await providerOver(fetchImpl).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 60 * DAY),
+    });
+    expect(asked).toHaveLength(5);
+    const sorted = [...asked].sort((a, b) => Date.parse(a.fromUtc) - Date.parse(b.fromUtc));
+    expect(sorted[0]!.fromUtc).toBe(at(FROM));
+    expect(sorted[4]!.toUtc).toBe(at(FROM + 60 * DAY));
+    for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.fromUtc).toBe(sorted[i - 1]!.toUtc);
+  });
+
+  it('reads one slot (the create-time check) in exactly one call, as before', async () => {
+    const { fetchImpl, asked } = pagedBackend([], 250);
+    await providerOver(fetchImpl).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: '2026-10-06T18:00:00.000Z',
+      toUtc: '2026-10-06T18:30:00.000Z',
+    });
+    expect(asked).toEqual([
+      { fromUtc: '2026-10-06T18:00:00.000Z', toUtc: '2026-10-06T18:30:00.000Z', ref: 'conn-A' },
+    ]);
+  });
+
+  it('REGRESSION: a full calendar read over 60 days comes back complete', async () => {
+    // 12 meetings a day for 60 days = 720+ events against a 250-event page.
+    const events = fullCalendar(60, 12);
+    const expected = inRange(events, FROM, FROM + 60 * DAY);
+    expect(expected.length).toBeGreaterThan(700);
+
+    // What shipped: one read for the whole window. The page fills and the rest
+    // is dropped without a word. This is the bug, reproduced.
+    const single = pagedBackend(events, 250);
+    const short = await providerOver(single.fetchImpl, 400 * DAY).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 60 * DAY),
+    });
+    expect(single.asked).toHaveLength(1);
+    expect(short).toHaveLength(250);
+
+    // The fix: the same backend, the same page size, read a week at a time.
+    const windowed = pagedBackend(events, 250);
+    const busy = await providerOver(windowed.fetchImpl).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 60 * DAY),
+    });
+    expect(new Set(busy.map(key))).toEqual(new Set(expected.map(key)));
+    expect(busy).toHaveLength(expected.length);
+  });
+
+  it('a long read and the same days read one at a time give the same busy set', async () => {
+    const events = fullCalendar(60, 12);
+    for (const span of [1, 5, 7, 14, 21, 30, 45, 60]) {
+      const wide = pagedBackend(events, 250);
+      const got = await providerOver(wide.fetchImpl).listBusy({
+        connectionRefs: ['conn-A'],
+        fromUtc: at(FROM),
+        toUtc: at(FROM + span * DAY),
+      });
+      const byDay = new Set<string>();
+      for (let d = 0; d < span; d++) {
+        const one = pagedBackend(events, 250);
+        const day = await providerOver(one.fetchImpl).listBusy({
+          connectionRefs: ['conn-A'],
+          fromUtc: at(FROM + d * DAY),
+          toUtc: at(FROM + (d + 1) * DAY),
+        });
+        for (const e of day) byDay.add(key(e));
+      }
+      expect(new Set(got.map(key)), `span ${span}d`).toEqual(byDay);
+    }
+  });
+
+  it('reports an event that crosses a window boundary once, not twice', async () => {
+    const boundary = FROM + 14 * DAY;
+    const crossing = { startUtc: at(boundary - 15 * 60 * 1000), endUtc: at(boundary + 15 * 60 * 1000) };
+    const endsOnIt = { startUtc: at(boundary - 60 * 60 * 1000), endUtc: at(boundary) };
+    const startsOnIt = { startUtc: at(boundary), endUtc: at(boundary + 60 * 60 * 1000) };
+    const { fetchImpl } = pagedBackend([crossing, endsOnIt, startsOnIt], 250);
+    const busy = await providerOver(fetchImpl).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 28 * DAY),
+    });
+    expect(busy.map(key).sort()).toEqual([crossing, endsOnIt, startsOnIt].map(key).sort());
+  });
+
+  it('reads every connection window by window', async () => {
+    const { fetchImpl, asked } = pagedBackend([], 250);
+    await providerOver(fetchImpl).listBusy({
+      connectionRefs: ['conn-A', 'conn-B'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 21 * DAY),
+    });
+    expect(asked.filter((a) => a.ref === 'conn-A')).toHaveLength(2);
+    expect(asked.filter((a) => a.ref === 'conn-B')).toHaveLength(2);
+  });
+
+  it('never has more than four reads in flight, however many connections', async () => {
+    // The live backend refuses a sixth concurrent read on a connection; five
+    // pass. Four is the ceiling, with one in hand, and it is global: three
+    // connections do not get twelve.
+    const { fetchImpl, asked, peak } = pagedBackend([], 250);
+    await providerOver(fetchImpl).listBusy({
+      connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 60 * DAY),
+    });
+    expect(asked).toHaveLength(15);
+    expect(peak()).toBeLessThanOrEqual(4);
+    expect(peak()).toBeGreaterThan(1);
+  });
+
+  it('two reads at once on one provider share the ceiling of four', async () => {
+    // Two visitors on the same booking page: the backend sees one provider,
+    // and the limit is the backend's, so the two reads must share it.
+    const { fetchImpl, asked, peak } = pagedBackend([], 250);
+    const provider = providerOver(fetchImpl);
+    const read = () => provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) });
+    await Promise.all([read(), read(), read()]);
+    expect(asked).toHaveLength(15);
+    expect(peak()).toBeLessThanOrEqual(4);
+  });
+
+  it('starts at most four requests per second for one host, however many are queued', async () => {
+    // The backend's own ceiling is five per customer per second. Fifteen reads
+    // (three connections of one host) must spread over four seconds, and the
+    // pacing is on the clock, not on the backend's answers.
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      // One host for every connection: every read is paced by the same subject.
+      wire: new (class extends GenericRestWire {
+        override listBusy(input: ListBusyInput) {
+          return { ...super.listBusy(input), subject: 'the-host' };
+        }
+      })(),
+      fetchImpl,
+    });
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['conn-A', 'conn-B', 'conn-C'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+    );
+    expect(stamps).toHaveLength(15);
+    for (const t of stamps) {
+      expect(stamps.filter((u) => u >= t && u < t + 1000).length).toBeLessThanOrEqual(4);
+    }
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeGreaterThanOrEqual(3000);
+  });
+
+  it('paces each host separately: two hosts do not slow each other down', async () => {
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      // A wire whose subject is the connection ref: one host per ref.
+      wire: new (class extends GenericRestWire {
+        override listBusy(input: ListBusyInput) {
+          return { ...super.listBusy(input), subject: input.connectionRefs[0] };
+        }
+      })(),
+      fetchImpl,
+    });
+    // Two hosts, 28 days each: two windows per host, four starts, no waiting.
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['host-1', 'host-2'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) }),
+    );
+    expect(stamps).toHaveLength(4);
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(1000);
+  });
+
+  it('a wire that names no subject is paced by connection, never one bucket for every host', async () => {
+    // GenericRestWire sets no subject. Two unrelated hosts each read 60 days
+    // at once: in one shared bucket ten starts need over two seconds; by
+    // connection each host's five windows take just over one.
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      wire: new GenericRestWire(),
+      fetchImpl,
+    });
+    await underVirtualTime(() =>
+      Promise.all([
+        provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+        provider.listBusy({ connectionRefs: ['conn-B'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+      ]),
+    );
+    expect(stamps).toHaveLength(10);
+    expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(2000);
+  });
+
+  it('the per-second budget is an option, for deployments with several replicas', async () => {
+    const stamps: number[] = [];
+    const fetchImpl = (async () => {
+      stamps.push(Date.now());
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    const provider = new ExternalCalendarProvider({
+      baseUrl: 'https://cal.example.test',
+      tokenSource: new StaticTokenSource('tok-123'),
+      wire: new GenericRestWire(),
+      fetchImpl,
+      busyRequestsPerSecond: 2,
+    });
+    await underVirtualTime(() =>
+      provider.listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 60 * DAY) }),
+    );
+    expect(stamps).toHaveLength(5);
+    for (const t of stamps) expect(stamps.filter((u) => u >= t && u < t + 1000).length).toBeLessThanOrEqual(2);
+  });
+
+  it('waits the backend\'s Retry-After before asking again, when it sends one', async () => {
+    const { clock, slept } = fakeClock();
+    let n = 0;
+    const fetchImpl = (async () => {
+      n++;
+      if (n === 2) {
+        return {
+          ok: false,
+          status: 429,
+          headers: new Headers({ 'retry-after': '3' }),
+          text: () => Promise.resolve('slow down'),
+        } as Response;
+      }
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    await providerOver(fetchImpl, undefined, clock).listBusy({
+      connectionRefs: ['conn-A'],
+      fromUtc: at(FROM),
+      toUtc: at(FROM + 28 * DAY),
+    });
+    expect(slept).toContain(3000);
+  });
+
+  /** A backend that answers `status` to the Nth read (1-based) and 200 after. */
+  function flakyBackend(statusOnce: number, nth: number) {
+    const asked: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { fromUtc: string };
+      asked.push(body.fromUtc);
+      if (asked.length === nth) {
+        return { ok: false, status: statusOnce, text: () => Promise.resolve('try later') } as Response;
+      }
+      return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ busy: [] })) } as Response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, asked };
+  }
+
+  for (const status of [429, 503, 500]) {
+    it(`asks a window once more after a ${status}, and the read completes`, async () => {
+      const { fetchImpl, asked } = flakyBackend(status, 3);
+      const busy = await providerOver(fetchImpl).listBusy({
+        connectionRefs: ['conn-A'],
+        fromUtc: at(FROM),
+        toUtc: at(FROM + 60 * DAY),
+      });
+      expect(busy).toEqual([]);
+      expect(asked).toHaveLength(6); // five windows, one asked twice
+      // The window asked twice is the same window, not a neighbour.
+      const twice = asked.filter((w) => w === asked[2]);
+      expect(twice).toHaveLength(2);
+    });
+  }
+
+  it('a 4xx that is not a throttle is the answer: no second ask, the read fails', async () => {
+    const { fetchImpl, asked } = flakyBackend(400, 2);
+    await expect(
+      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 28 * DAY) }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(asked.filter((w) => w === asked[1])).toHaveLength(1);
+  });
+
+  it('a window that is throttled three times fails the read (bounded attempts, not a loop)', async () => {
+    const asked: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      asked.push((JSON.parse(String(init.body)) as { fromUtc: string }).fromUtc);
+      return { ok: false, status: 429, text: () => Promise.resolve('slow down') } as Response;
+    }) as unknown as typeof fetch;
+    await expect(
+      providerOver(fetchImpl).listBusy({ connectionRefs: ['conn-A'], fromUtc: at(FROM), toUtc: at(FROM + 7 * DAY) }),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(asked).toHaveLength(3);
+  });
+
+  it('fails the whole read when one window fails — never a partial busy list', async () => {
+    const events = fullCalendar(60, 4);
+    // A 403 is the backend's answer, not a moment to wait out: no second ask.
+    const { fetchImpl, asked } = pagedBackend(events, 250, { failOn: 2, failStatus: 403 });
+    await expect(
+      providerOver(fetchImpl).listBusy({
+        connectionRefs: ['conn-A', 'conn-B', 'conn-C'],
+        fromUtc: at(FROM),
+        toUtc: at(FROM + 60 * DAY),
+      }),
+    ).rejects.toBeInstanceOf(CalendarHttpError);
+    // The pool stops asking once a window is lost: far fewer than the 15 reads
+    // a healthy backend would have been asked for.
+    expect(asked.length).toBeLessThan(15);
+  });
+
+  /**
+   * The promise the booking page makes: a time it offers can be booked. The
+   * page computes its offer from ONE long busy read; the create path re-reads
+   * just the chosen slot and refuses on any overlap. If the long read is short
+   * of events the two disagree — offered, then refused. Checked here the way a
+   * visitor would hit it, for every event length, against a messy calendar.
+   */
+  describe('what the page offers, the create-time check accepts', () => {
+    const MIN = 60_000;
+    const WEEKDAYS = [1, 2, 3, 4, 5];
+
+    /** ~14 meetings every weekday, every length, at awkward offsets. */
+    function messyCalendar(days: number): Ev[] {
+      let seed = 4242;
+      const rand = (n: number) => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed % n;
+      };
+      const out: Ev[] = [];
+      const dayZero = Date.parse('2026-10-05T05:00:00.000Z'); // 00:00 America/Bogota
+      for (let d = 0; d <= days; d++) {
+        for (let i = 0; i < 14; i++) {
+          const start = dayZero + d * DAY + (8 * 60 + rand(10 * 12) * 5) * MIN;
+          const length = [15, 25, 30, 45, 50, 60, 90][rand(7)]!;
+          out.push({ startUtc: at(start), endUtc: at(start + length * MIN) });
+        }
+      }
+      return out;
+    }
+
+    async function offeredThenChecked(events: Ev[], durationMin: number, busyWindowMs?: number) {
+      const page = pagedBackend(events, 250, { instant: true });
+      const provider = providerOver(page.fetchImpl, busyWindowMs);
+      const fromUtc = at(FROM);
+      const toUtc = at(FROM + 60 * DAY);
+      const busy: Interval[] = (await provider.listBusy({ connectionRefs: ['conn-A'], fromUtc, toUtc })).map(
+        (b) => ({ start: new Date(b.startUtc), end: new Date(b.endUtc) }),
+      );
+      const slots = computeSlots({
+        fromUtc: new Date(fromUtc),
+        toUtc: new Date(toUtc),
+        timeZone: 'America/Bogota',
+        availability: [{ days: WEEKDAYS, startTime: '08:00', endTime: '18:00', date: null }],
+        durationMin,
+        slotIntervalMin: 30,
+        busy,
+        now: new Date(FROM),
+      });
+      // The create-time check, exactly as the booking path runs it: read the
+      // slot's own span, refuse on any overlap.
+      let refused = 0;
+      for (const slot of slots) {
+        const startMs = slot.getTime();
+        const endMs = startMs + durationMin * MIN;
+        const conflict = await provider.listBusy({
+          connectionRefs: ['conn-A'],
+          fromUtc: at(startMs),
+          toUtc: at(endMs),
+        });
+        if (conflict.some((b) => Date.parse(b.startUtc) < endMs && Date.parse(b.endUtc) > startMs)) refused++;
+      }
+      return { offered: slots.length, refused };
+    }
+
+    const events = messyCalendar(60);
+
+    it('the calendar is fuller than one page, so the defect is in play', () => {
+      expect(inRange(events, FROM, FROM + 60 * DAY).length).toBeGreaterThan(250 * 2);
+    });
+
+    for (const durationMin of [15, 30, 45, 60, 90]) {
+      it(`a ${durationMin}-minute event: nothing offered over 60 days is refused at booking`, async () => {
+        const { offered, refused } = await offeredThenChecked(events, durationMin);
+        expect(offered).toBeGreaterThan(0);
+        expect(refused).toBe(0);
+      });
+    }
+
+    it('and with the whole window in a single read (what shipped), offers ARE refused', async () => {
+      const { offered, refused } = await offeredThenChecked(events, 30, 400 * DAY);
+      expect(offered).toBeGreaterThan(0);
+      expect(refused).toBeGreaterThan(0);
+    });
   });
 });

@@ -155,6 +155,7 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_API_TOKEN` | — | required for the generic REST backend | **yes** |
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
+| `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
@@ -414,20 +415,28 @@ GET    /v1/connect/connections?tenantKey=&provider=  → { connections: [{ conne
 `connectionRef` is **opaque** end-to-end: the contract only ever echoes it back, so
 your backend decides what it means.
 
-#### The free-busy window is up to 60 days
+#### Free-busy is read two weeks at a time, and each answer must be complete
 
-`POST /v1/free-busy` is called with the same range the public availability read was
-asked for, and that read caps itself at **60 days**. The booking page's month
-calendar asks for the full window so a visitor can page between months without a
-refetch, so 60 days is the normal request, not an edge case.
+The public availability read caps itself at **60 days**, and the booking page's
+month calendar asks for the full window so a visitor can page between months
+without a refetch. So 60 days is the normal read, not an edge case.
 
-**Your backend must accept a 60-day range.** This path is deliberately
-*fail-closed*: if free-busy errors, the availability read returns zero slots and
-`emptyReason: CALENDAR_UNAVAILABLE` rather than times that might already be taken.
-A backend that rejects or silently truncates a wide range therefore turns every
-public booking page into "times are temporarily unavailable". If your upstream
-calendar API has a narrower limit, page the range inside your backend and merge the
-results — do not pass the limit through.
+That read does not reach your backend as one request. `POST /v1/free-busy` is
+called once per connection for each window of **at most 14 days**, at most four calls
+in flight at once and at most four started per second for one host, and the answers are
+merged. A 60-day read is five calls per connection. A window answered with 429 or a 5xx
+is asked again, up to three attempts, waiting your `Retry-After` when you send one; any
+other error fails the read.
+The create-time conflict check reads only the slot being booked, in one call.
+
+**Each answer must hold every busy interval that overlaps its window.** An error
+is safe: this path is *fail-closed*, so if any window errors the availability
+read returns zero slots and `emptyReason: CALENDAR_UNAVAILABLE` rather than times
+that might already be taken. A short answer is not safe: a backend that returns a
+200 with only part of the window (the first page of a paged event listing, for
+instance) makes the missing events look like free time, and visitors are offered
+slots the create-time check then refuses. If your upstream calendar API pages its
+results, follow the pages inside your backend and merge them before answering.
 
 #### Conferencing links
 

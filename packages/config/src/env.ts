@@ -153,6 +153,12 @@ export const serverEnvSchema = z.object({
   CALENDAR_API_TOKEN: z.string().optional(),
   CALENDAR_BACKEND_MODULE: z.string().optional(),
   CALENDAR_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * Busy requests per second one API process may start for one host. The
+   * calendar backend's own limit is per host across all replicas, so each
+   * replica gets a share (two replicas: 2 each). Default 4, for one replica.
+   */
+  CALENDAR_BUSY_REQUESTS_PER_SECOND: z.coerce.number().int().positive().default(4),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
