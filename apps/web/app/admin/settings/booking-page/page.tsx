@@ -70,6 +70,7 @@ export default async function BookingPageSettings() {
         landingEnabled={style.landingEnabled !== false}
         defaultEventSlug={(style.defaultEventSlug as string) ?? null}
         eventTypes={profile?.eventTypes ?? []}
+        accountName={profile?.account.name ?? null}
         manageableEvents={adminEvents.map((e) => ({ id: e.id, slug: e.slug, title: e.title, hidden: e.hidden }))}
         eventOrder={Array.isArray(style.eventOrder) ? (style.eventOrder as string[]) : []}
       />

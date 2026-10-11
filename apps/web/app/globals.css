@@ -1170,6 +1170,182 @@ body {
   border-color: var(--destructive);
 }
 
+/* ---------------------------------------------------------------------------
+ * The profile (BP3): a host's or a team's landing. The cover, who they are,
+ * then ONE framed list of what can be booked, a hairline between rows and the
+ * duration as a figure, so the durations read as a column. The `cardStyle` axis
+ * frames the list once; the `template` axis sets the cover's height (`banded`
+ * makes it taller: `.tpl-banded .bp-cover`, earlier in this file).
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-cover {
+  display: block;
+  width: 100%;
+  height: 5rem;
+  border-radius: var(--bp-radius);
+  background: var(--accent-wash);
+}
+.branded-surface .bp-cover-image {
+  object-fit: cover;
+}
+.branded-surface .bp-profile-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+  padding-inline: var(--sp-card);
+}
+/* The avatar sits on the cover's lower edge, ringed in the page's own ground so
+   it reads as in front of the cover rather than cut out of it. */
+.branded-surface .bp-profile-avatar {
+  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
+  margin-bottom: var(--sp-inline);
+}
+.branded-surface .bp-profile-avatar .bp-avatar {
+  width: 4.5rem;
+  height: 4.5rem;
+  box-shadow: 0 0 0 4px var(--background);
+  font-size: 1.5rem;
+}
+.branded-surface .bp-profile-name {
+  font-family: var(--bp-font-display);
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-profile-bio {
+  max-width: 36rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-list.bp-card {
+  padding: 0;
+  overflow: hidden;
+}
+.branded-surface .bp-event-list > li + li {
+  border-top: 1px solid var(--border);
+}
+.branded-surface .bp-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--sp-card);
+  min-height: var(--sp-control-h);
+  padding: var(--bp-pad);
+  transition: background-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-event-row:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+.branded-surface .bp-event-row:focus-visible {
+  outline-offset: -2px;
+}
+.branded-surface .bp-event-row-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-event-row-title {
+  font-family: var(--bp-font-display);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-event-row-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-row-length {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-tight);
+  white-space: nowrap;
+}
+.branded-surface .bp-figure {
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.branded-surface .bp-unit {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-row-chevron {
+  display: inline-flex;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-profile-empty {
+  padding-inline: var(--sp-card);
+}
+
+/* ---------------------------------------------------------------------------
+ * The manage page (BP3): the event page's sequence with the booking where the
+ * event panel goes. Cancelling is the quiet action under it: a red OUTLINE,
+ * never a red fill, so it never outshouts the reschedule beside it.
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-manage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+.branded-surface .bp-manage-cancel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-field);
+  padding-top: var(--sp-group);
+  border-top: 1px solid var(--border);
+}
+.branded-surface .bp-btn-outline.bp-danger {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+.branded-surface .bp-btn-outline.bp-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}
+.branded-surface .bp-manage-done {
+  padding: var(--sp-field) var(--sp-card);
+  border-radius: var(--bp-radius-sm);
+  background: var(--accent-soft);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.branded-surface .bp-pending {
+  opacity: 0.6;
+}
+/* On a phone the booking reads first and cancelling comes LAST, after the
+   month a reschedule starts from: the destructive action is not the first
+   thing under the thumb. The event pane and the panel step out of the box tree
+   (`display: contents`) so their pieces can be ordered among the frame's own;
+   nothing is rendered twice. From the two-pane width up cancel stays under the
+   booking in the left pane. */
+@container bp (max-width: 47.999rem) {
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-event:has(> .bp-manage-panel),
+  .branded-surface .bp-stage[data-step='calendar'] .bp-manage-panel {
+    display: contents;
+  }
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-main {
+    order: 1;
+  }
+  .branded-surface .bp-stage[data-step='calendar'] .bp-manage-cancel {
+    order: 2;
+  }
+}
+
 /* --- Inline embed (E) -----------------------------------------------------
    `dc-embed` rides on the same element as `.branded-surface`, so these rules
    out-specify the page-wide ones without `!important` and without touching

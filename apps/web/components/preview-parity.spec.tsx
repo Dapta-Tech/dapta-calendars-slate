@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { THEME_PRESETS } from '@slate/shared';
 
+
 vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
   bookAction: vi.fn(),
   reserveAction: vi.fn(),
@@ -25,7 +26,9 @@ vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
 
 import { BookingFlow } from './booking-flow';
 import { BrandedShell } from './branded-shell';
-import { BookingPreview, PreviewFrame, previewFlowProps } from './booking-preview';
+import { BookingPreview, PreviewFrame, ProfilePreview, previewFlowProps } from './booking-preview';
+import { ProfileView } from './profile-view';
+import { getMessages } from '@slate/shared';
 
 const ACCENT = '#2f6fed';
 const AXES: Record<string, readonly string[]> = {
@@ -125,4 +128,59 @@ describe('the studio preview renders what the public page renders', () => {
     expect(wrapper).not.toBeNull();
     expect(wrapper!.getAttribute('aria-hidden')).toBe('true');
   });
+});
+
+describe('the studio profile preview renders what the public profile renders', () => {
+  const EVENTS = [
+    { slug: 'design-review', title: 'Design review', description: 'Bring a screen.', lengthMinutes: 45 },
+    { slug: 'intro', title: 'Intro call', description: null, lengthMinutes: 15 },
+  ];
+  const view = (doc: Document) =>
+    doc.querySelector('.bp-profile')!.outerHTML.replace(/ href="[^"]*"/g, '').replace(/_R_[a-z0-9_]+_/gi, 'ID');
+
+  for (const [axis, values] of Object.entries(AXES)) {
+    for (const value of values) {
+      it(`${axis}: ${value}`, () => {
+        const style = { ...BASE, [axis]: value } as Record<string, string>;
+        const pub = parse(
+          renderToStaticMarkup(
+            <BrandedShell brandColor={ACCENT} style={style}>
+              <ProfileView
+                m={getMessages('en')}
+                name="Riley Chen"
+                context="Northwind Studio"
+                bio="Product design reviews."
+                avatarUrl={null}
+                coverUrl={null}
+                events={EVENTS}
+                hrefFor={(slug) => `/northwind/riley-chen/${slug}`}
+                emptyText={getMessages('en').landing.noEvents}
+              />
+            </BrandedShell>,
+          ),
+        );
+        const pre = parse(
+          renderToStaticMarkup(
+            <PreviewFrame accent={ACCENT} axes={style as never} device="mobile" wide={false}>
+              <ProfilePreview
+                locale="en"
+                displayName="Riley Chen"
+                accountName="Northwind Studio"
+                bio="Product design reviews."
+                avatarUrl=""
+                coverUrl=""
+                events={EVENTS}
+              />
+            </PreviewFrame>,
+          ),
+        );
+        const shell = pub.querySelector('.branded-surface')!;
+        const frame = pre.querySelector('[data-theme]')!;
+        expect(frame.getAttribute('data-theme')).toBe(shell.getAttribute('data-theme'));
+        expect(vars(frame)).toEqual(vars(shell));
+        expect(brandingClasses(pre.querySelector('.branded-surface')!)).toEqual(brandingClasses(shell));
+        expect(view(pre)).toBe(view(pub));
+      });
+    }
+  }
 });

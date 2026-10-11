@@ -1,10 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { brandVars, brandingClassOf, widgetStyleVars, type PublicBranding, type Slot } from '@slate/shared';
+import {
+  brandVars,
+  brandingClassOf,
+  getMessages,
+  widgetStyleVars,
+  type PublicBranding,
+  type Slot,
+} from '@slate/shared';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import type { BookingField } from '@slate/types';
 import { BookingFlow } from '@/components/booking-flow';
+import { ProfileView, type ProfileEvent } from '@/components/profile-view';
 
 /**
  * The studio's preview of the event page: the REAL island, not a drawing of it.
@@ -197,6 +205,46 @@ export function PreviewFrame({
       >
         {children}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The studio's preview of the host's profile: the same `ProfileView` the public
+ * route renders, from the studio's unsaved values, inert. With no events it
+ * shows the sentence the public page shows, not a made-up sample.
+ */
+export function ProfilePreview({
+  locale,
+  displayName,
+  accountName,
+  bio,
+  avatarUrl,
+  coverUrl,
+  events,
+}: {
+  locale: string;
+  displayName: string;
+  accountName: string | null;
+  bio: string;
+  avatarUrl: string;
+  coverUrl: string;
+  events: Array<Omit<ProfileEvent, 'description'> & { description?: string | null }>;
+}) {
+  const m = getMessages(locale);
+  return (
+    <div aria-hidden="true" inert>
+      <ProfileView
+        m={m}
+        name={displayName}
+        context={accountName}
+        bio={bio || null}
+        avatarUrl={avatarUrl || null}
+        coverUrl={coverUrl || null}
+        events={events.map((e) => ({ ...e, description: e.description ?? null }))}
+        hrefFor={() => '#'}
+        emptyText={m.landing.noEvents}
+      />
     </div>
   );
 }
