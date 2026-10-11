@@ -106,7 +106,7 @@ export async function sweepExpiredReservations(db: Db, now = Date.now()): Promis
 
 export type ReserveOutcome =
   | { ok: true; uid: string; releaseAtMs: number }
-  | { ok: false; reason: 'NOT_FOUND' | 'INVALID_SLOT' | 'RATE_LIMITED' };
+  | { ok: false; reason: 'NOT_FOUND' | 'INVALID_SLOT' | 'RATE_LIMITED' | 'CALENDAR_UNAVAILABLE' };
 
 /**
  * Place a soft hold on a slot. Hardened (M5):
@@ -114,6 +114,13 @@ export type ReserveOutcome =
  *  - validates the requested start is a REAL, currently-bookable slot (no
  *    holding arbitrary/blocked instants to blank out a page's availability);
  *  - caps concurrent unexpired holds per page to blunt hold-spam DoS.
+ *
+ * The slot check reads the host's connected calendar through `calendar`, the
+ * same provider `createBooking` re-checks at create time. Without it a hold was
+ * granted on a time that is busy in the external calendar, and the visitor only
+ * learned at the final step. Busy there means not offered, so `INVALID_SLOT`;
+ * an unreadable calendar fails closed with `CALENDAR_UNAVAILABLE`, the reason
+ * the booking path gives for the same failure.
  */
 export async function reserveSlot(
   db: Db,
@@ -131,6 +138,8 @@ export async function reserveSlot(
      */
     includeHidden?: boolean;
   },
+  /** The wired CalendarProvider. Undefined or disabled: local busy only. */
+  calendar?: CalendarProvider,
 ): Promise<ReserveOutcome> {
   const now = Date.now();
   await sweepExpiredReservations(db, now);
@@ -147,14 +156,19 @@ export async function reserveSlot(
   const endMs = args.startMs + eventType.length_minutes * 60_000;
 
   // The requested start must currently be offered by the availability engine.
-  const avail = await getAvailability(db, {
-    accountCode: args.accountCode,
-    handle: args.handle,
-    slug: args.slug,
-    fromMs: args.startMs,
-    toMs: endMs,
-    includeHidden: args.includeHidden,
-  });
+  const avail = await getAvailability(
+    db,
+    {
+      accountCode: args.accountCode,
+      handle: args.handle,
+      slug: args.slug,
+      fromMs: args.startMs,
+      toMs: endMs,
+      includeHidden: args.includeHidden,
+    },
+    calendar,
+  );
+  if (avail?.emptyReason === 'CALENDAR_UNAVAILABLE') return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
   const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
 
