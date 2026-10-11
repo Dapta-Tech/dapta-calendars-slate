@@ -157,6 +157,32 @@ describe('error visibility — API reason codes', () => {
     expect(hostOut).toEqual({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
   });
 
+  it('a hold checks the external calendar: busy → 400 INVALID_SLOT, unreadable → 409 CALENDAR_UNAVAILABLE', async () => {
+    await db.run(
+      sql`INSERT INTO connected_calendar
+            (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+          VALUES (${randomUUID()}, ${principal.accountId}, ${principal.memberId}, ${'google'}, ${'cal-ext-1'}, 0, 1, ${Date.now()})`,
+    );
+    const slot = (await services().booking.availability({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      ...WINDOW(),
+    }))!.slots[0]!.startUtc;
+    const hold = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startUtc: slot };
+
+    const busy = new InMemoryCalendarProvider();
+    busy.seedBusy('cal-ext-1', [
+      { startUtc: slot, endUtc: new Date(new Date(slot).getTime() + 30 * 60_000).toISOString() },
+    ]);
+    expect(await services(busy).booking.reserve(hold)).toMatchObject({ error: 'INVALID_SLOT', status: 400 });
+    expect(await services(new FailingCalendarProvider()).booking.reserve(hold)).toMatchObject({
+      error: 'CALENDAR_UNAVAILABLE',
+      status: 409,
+    });
+    expect(await services(new InMemoryCalendarProvider()).booking.reserve(hold)).toHaveProperty('reservationUid');
+  });
+
   it('reschedule fails CLOSED on the external calendar: busy target → 409 SLOT_TAKEN, unreadable → 409 CALENDAR_UNAVAILABLE', async () => {
     const CAL_REF = 'cal-ext-1';
     await db.run(

@@ -20,6 +20,7 @@ import {
   listConnections,
   recordConnectionHealth,
   rescheduleBooking,
+  reserveSlot,
 } from './parity';
 import { deleteSchedule } from './crud';
 
@@ -203,6 +204,38 @@ describe('error visibility (SQLite in-memory)', () => {
     // A readable, conflict-free calendar lets the same move through.
     const moved = await move(new InMemoryCalendarProvider());
     expect(moved.ok).toBe(true);
+  });
+
+  it('a hold is checked against the external calendar: busy refuses the slot, unreadable fails closed', async () => {
+    const free = await getAvailability(db, ARGS());
+    const startUtc = free!.slots[0]!.startUtc;
+    const startMs = new Date(startUtc).getTime();
+    const hold = (calendar?: CalendarProvider) =>
+      reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs }, calendar);
+    const holds = async () =>
+      Number((await db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM slot_reservation`))?.n ?? 0);
+
+    await connectConflictCalendar();
+    // Busy in the connected calendar: not an offered slot, so no hold.
+    const busyProvider = new InMemoryCalendarProvider();
+    busyProvider.seedBusy(CAL_REF, [{ startUtc, endUtc: new Date(startMs + 30 * 60_000).toISOString() }]);
+    expect(await hold(busyProvider)).toEqual({ ok: false, reason: 'INVALID_SLOT' });
+    // Unreadable calendar: the booking path's fail-closed reason, no hold.
+    expect(await hold(new FailingCalendarProvider())).toEqual({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
+    expect(await holds()).toBe(0);
+    // Free in the connected calendar: the hold is granted.
+    expect((await hold(new InMemoryCalendarProvider())).ok).toBe(true);
+    expect(await holds()).toBe(1);
+  });
+
+  it('a hold with no calendar wired (the OSS default) behaves as before', async () => {
+    const free = await getAvailability(db, ARGS());
+    const startMs = new Date(free!.slots[0]!.startUtc).getTime();
+    await connectConflictCalendar();
+    const args = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs };
+    expect((await reserveSlot(db, args)).ok).toBe(true);
+    const next = { ...args, startMs: new Date(free!.slots[1]!.startUtc).getTime() };
+    expect((await reserveSlot(db, next, new DisabledCalendarProvider())).ok).toBe(true);
   });
 
   // --- Failure mode 6: genuine emptiness stays reason-less --------------------
