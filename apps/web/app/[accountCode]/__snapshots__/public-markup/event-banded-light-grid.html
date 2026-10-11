@@ -1,17 +1,23 @@
 <div data-theme="light" class="branded-surface tpl-banded card-outline slots-grid day-flat sel-soft bp-ground bg-background text-foreground bp-viewport" style="--accent:#2f6fed;--accent-contrast:#1a1a1c;--accent-hover:#275dc7;--accent-soft:color-mix(in srgb, #2f6fed 16%, transparent);--accent-wash:color-mix(in srgb, #2f6fed 22%, var(--background));--primary:#2f6fed;--primary-foreground:#1a1a1c;--primary-ink:#2f6fed;--primary-edge:#2f6fed;--ring:#2f6fed;--bp-radius:16px;--bp-radius-sm:8px;--bp-btn-radius:8px;--bp-pad:20px;--bp-gap:12px;--bp-slot-pad:12px;--bp-font-display:var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif);--bp-font-body:var(--font-sans, ui-sans-serif, system-ui, sans-serif)">
-<main class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-<div class="bp-canvas grid gap-6 md:grid-cols-2 lg:grid-cols-[16rem_minmax(0,1fr)_17rem] lg:gap-8">
-<div class="md:col-span-2 lg:col-span-1">
-<section aria-label="Event details" class="flex flex-col gap-4">
-<div class="flex items-center gap-3">
-<div aria-hidden="true" class="flex h-11 w-11 shrink-0 items-center justify-center text-base font-semibold" style="background:var(--accent);color:var(--accent-contrast);border-radius:var(--bp-radius)">R</div>
-<p class="min-w-0 break-words text-sm font-medium text-muted-foreground">Riley Chen</p>
+<main class="w-full py-10 md:px-6 md:py-12">
+<div class="bp-flow">
+<div class="bp-stage" data-step="calendar">
+<div class="bp-progress" role="progressbar" aria-label="Step 1 of 4" aria-valuemin="1" aria-valuemax="4" aria-valuenow="1">
+<span style="width:25%">
+</span>
 </div>
-<h1 class="text-2xl font-semibold tracking-tight" style="font-family:var(--bp-font-display)">Design review</h1>
-<dl class="flex flex-col gap-2 text-sm">
-<div class="flex items-center gap-2">
+<div class="bp-frame bp-card">
+<div class="bp-pane-event bp-region">
+<section aria-label="Event details" class="bp-event">
+<div class="bp-host">
+<div aria-hidden="true" class="bp-avatar bp-avatar-monogram">R</div>
+<p class="bp-host-name">Riley Chen</p>
+</div>
+<h1 class="bp-event-title">Design review</h1>
+<dl class="bp-facts">
+<div class="bp-fact">
 <dt class="sr-only">Duration</dt>
-<dd class="flex items-center gap-2">
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <circle cx="12" cy="12" r="9">
 </circle>
@@ -21,52 +27,44 @@
 <span>45 min</span>
 </dd>
 </div>
-<div class="flex items-start gap-2">
+<div class="bp-fact">
 <dt class="sr-only">Where</dt>
-<dd class="flex items-start gap-2">
-<span class="mt-0.5">
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <rect x="2" y="6" width="13" height="12" rx="2">
 </rect>
 <path d="m15 11 6-3v8l-6-3z">
 </path>
 </svg>
-</span>
-<span class="min-w-0 break-words">Online meeting</span>
+<span class="bp-fact-text">Online meeting</span>
 </dd>
 </div>
-</dl>
-<div class="flex flex-col items-start gap-1.5">
-<p id="_R_8m_" class="whitespace-pre-line text-sm text-muted-foreground" style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden">Bring a screen or a flow. We go through it together and you leave with a list.</p>
-<button type="button" aria-expanded="false" aria-controls="_R_8m_" class="text-xs font-medium underline underline-offset-4" style="color:var(--primary-ink, inherit)">Show more</button>
-</div>
-<div class="flex flex-col gap-1.5">
-<span class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+<div class="bp-fact">
+<dt class="sr-only">Timezone</dt>
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <circle cx="12" cy="12" r="9">
 </circle>
 <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18">
 </path>
-</svg>Timezone</span>
-<div class="w-full">
-<div class="relative">
-<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60">
-<span class="truncate">America/New York</span>
-<span class="ml-auto shrink-0 text-xs text-muted-foreground">GMT-5</span>
-<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform">
-<path d="M6 9l6 6 6-6">
-</path>
 </svg>
-</button>
+<span class="bp-fact-text">America/New York</span>
+</dd>
 </div>
-</div>
+</dl>
+<div class="bp-description">
+<p id="_R_136_" class="bp-description-text">Bring a screen or a flow. We go through it together and you leave with a list.</p>
+<button type="button" aria-expanded="false" aria-controls="_R_136_" class="bp-link">Show more</button>
 </div>
 </section>
 </div>
-<section aria-label="Choose a date" class="flex flex-col gap-3">
-<div class="flex items-center justify-between gap-2">
-<h2 class="text-sm font-semibold" style="font-family:var(--bp-font-display)">March 2026</h2>
-<div class="flex items-center gap-1">
+<div class="bp-pane-main">
+<div class="bp-pick">
+<div class="bp-pane-month bp-region">
+<section aria-label="Choose a date" class="bp-month">
+<div class="bp-month-head">
+<h2 class="bp-month-label">March 2026</h2>
+<div class="bp-month-nav">
 <button type="button" class="bp-icon-btn" disabled="" aria-label="Previous month">
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
 <path d="M15 5l-7 7 7 7">
@@ -208,34 +206,60 @@
 </div>
 </div>
 </section>
-<section aria-label="Choose a time" class="bp-daycol flex min-w-0 flex-col gap-3">
-<div class="flex flex-wrap items-center justify-between gap-2">
-<h2 class="text-sm font-semibold text-muted-foreground">Times on Mon, Mar 2</h2>
-<div role="radiogroup" aria-label="Time format" class="flex rounded-md border border-border p-0.5 text-xs">
-<button type="button" role="radio" aria-checked="true" tabindex="0" class="min-h-[44px] rounded-sm px-3 font-medium " style="background:var(--accent);color:var(--accent-contrast)">12h</button>
-<button type="button" role="radio" aria-checked="false" tabindex="-1" class="min-h-[44px] rounded-sm px-3 font-medium text-muted-foreground">24h</button>
+</div>
+<div class="bp-pane-times bp-region">
+<section aria-label="Choose a time" class="bp-day bp-times">
+<div class="bp-day-head">
+<button type="button" class="bp-back bp-back-phone">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M15 5l-7 7 7 7">
+</path>
+</svg>
+<span>Back to the calendar</span>
+</button>
+<h2 tabindex="-1" class="bp-day-title">Times on Mon, Mar 2</h2>
+<div role="radiogroup" aria-label="Time format" class="bp-segmented">
+<button type="button" role="radio" aria-checked="true" tabindex="0" class="bp-segment">12h</button>
+<button type="button" role="radio" aria-checked="false" tabindex="-1" class="bp-segment">24h</button>
 </div>
 </div>
-<div class="bp-daycol-scroll">
+<div class="bp-times-tools">
+<div class="bp-tz">
+<div class="relative">
+<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 bp-tz-trigger">
+<span class="truncate">America/New York</span>
+<span class="ml-auto shrink-0 text-xs text-muted-foreground">GMT-5</span>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform">
+<path d="M6 9l6 6 6-6">
+</path>
+</svg>
+</button>
+</div>
+</div>
+</div>
 <div class="bp-slots">
-<button type="button" class="bp-slot text-sm disabled:opacity-50">
-<span class="whitespace-nowrap">9:30 AM</span>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">9:30 AM</span>
 </button>
-<button type="button" class="bp-slot text-sm disabled:opacity-50">
-<span class="whitespace-nowrap">10:00 AM</span>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">10:00 AM</span>
 </button>
-<button type="button" class="bp-slot text-sm disabled:opacity-50">
-<span class="whitespace-nowrap">10:30 AM</span>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">10:30 AM</span>
 </button>
-<button type="button" class="bp-slot text-sm disabled:opacity-50">
-<span class="whitespace-nowrap">11:00 AM</span>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">11:00 AM</span>
 </button>
-<button type="button" class="bp-slot text-sm disabled:opacity-50">
-<span class="whitespace-nowrap">11:30 AM</span>
+<button type="button" aria-pressed="false" class="bp-slot">
+<span class="bp-slot-time">11:30 AM</span>
 </button>
-</div>
 </div>
 </section>
+</div>
+</div>
+</div>
+</div>
+</div>
 </div>
 </main>
 <footer class="bp-embed-footer flex justify-center px-6 pb-8 pt-4">

@@ -1,14 +1,71 @@
 <div data-theme="dark" class="branded-surface tpl-classic card-outline slots-grid day-flat sel-soft bp-ground bg-background text-foreground bp-viewport" style="--accent: #2f6fed; --accent-contrast: #1a1a1c; --accent-hover: #5086f0; --accent-soft: color-mix(in srgb, #2f6fed 16%, transparent); --accent-wash: color-mix(in srgb, #2f6fed 22%, var(--background)); --primary: #2f6fed; --primary-foreground: #1a1a1c; --primary-ink: #2f6fed; --primary-edge: #2f6fed; --ring: #2f6fed; --bp-radius: 16px; --bp-radius-sm: 8px; --bp-btn-radius: 8px; --bp-pad: 20px; --bp-gap: 12px; --bp-slot-pad: 12px; --bp-font-display: var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif); --bp-font-body: var(--font-sans, ui-sans-serif, system-ui, sans-serif);">
 <main class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-<div class="mx-auto max-w-2xl">
-<section class="bp-card border border-border bg-card p-6 text-card-foreground">
-<h2 class="mb-2 text-xl font-semibold">Booking confirmed</h2>
-<p class="text-muted-foreground">Design review — Monday, March 2, 2026 at 9:30 AM EST</p>
-<p class="mt-1 text-sm text-muted-foreground">A confirmation was sent to sam@example.com.</p>
-<a href="/manage/bk_pinned_0001?token=tok_pinned" class="bp-btn-outline mt-4 text-sm">Manage your booking</a>
-</section>
-<p class="mt-4 text-sm text-muted-foreground">Want your own booking page? <a href="https://example.com/signup?utm_source=dapta-calendars&amp;utm_medium=confirmation&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" target="_blank" rel="noopener noreferrer" class="font-medium text-primary underline underline-offset-4 hover:opacity-80">Get Dapta Calendars — free</a>
+<div class="bp-flow">
+<div class="bp-stage" data-step="done" data-dir="forward">
+<div class="bp-progress" role="progressbar" aria-label="Step 4 of 4" aria-valuemin="1" aria-valuemax="4" aria-valuenow="4">
+<span style="width: 100%;">
+</span>
+</div>
+<section class="bp-card bp-confirmation" aria-labelledby="bp-confirmation-title">
+<div aria-hidden="true" class="bp-confirmation-mark">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 shrink-0">
+<path d="M5 12.5l4.5 4.5L19 7.5">
+</path>
+</svg>
+</div>
+<h2 id="bp-confirmation-title" tabindex="-1" class="bp-confirmation-title">Booking confirmed</h2>
+<p class="bp-muted">A confirmation was sent to sam@example.com.</p>
+<dl class="bp-facts bp-confirmation-facts">
+<div class="bp-fact">
+<dt class="sr-only">What</dt>
+<dd class="bp-strong">Design review</dd>
+</div>
+<div class="bp-fact">
+<dt class="sr-only">When</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<circle cx="12" cy="12" r="9">
+</circle>
+<path d="M12 7v5l3 2">
+</path>
+</svg>
+<span class="bp-fact-text">Monday, March 2, 2026<br>3/2/2026, 9:30 AM – 3/4/2026, 10:45 AM <span class="bp-muted">(America/New York)</span>
+</span>
+</dd>
+</div>
+<div class="bp-fact">
+<dt class="sr-only">With</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<circle cx="12" cy="8" r="4">
+</circle>
+<path d="M4 21a8 8 0 0 1 16 0">
+</path>
+</svg>
+<span class="bp-fact-text">Riley Chen</span>
+</dd>
+</div>
+<div class="bp-fact">
+<dt class="sr-only">Where</dt>
+<dd>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<rect x="2" y="6" width="13" height="12" rx="2">
+</rect>
+<path d="m15 11 6-3v8l-6-3z">
+</path>
+</svg>
+<span class="bp-fact-text">Online meeting</span>
+</dd>
+</div>
+</dl>
+<div class="bp-confirmation-actions">
+<a href="data:text/calendar;charset=utf-8,BEGIN%3AVCALENDAR%0D%0AVERSION%3A2.0%0D%0APRODID%3A-%2F%2FSlate%2F%2FCalendars%2F%2FEN%0D%0ACALSCALE%3AGREGORIAN%0D%0AMETHOD%3APUBLISH%0D%0ABEGIN%3AVEVENT%0D%0AUID%3Abk_pinned_0001%0D%0ADTSTAMP%3A20260302T140000Z%0D%0ADTSTART%3A20260302T143000Z%0D%0ADTEND%3A20260304T154500Z%0D%0ASUMMARY%3ADesign%20review%0D%0ALOCATION%3Ahttps%3A%2F%2Fmeet.example.com%2Fabc-defg%0D%0AEND%3AVEVENT%0D%0AEND%3AVCALENDAR%0D%0A" download="design-review.ics" class="bp-btn bp-cta">Add to calendar</a>
+<a href="/manage/bk_pinned_0001?token=tok_pinned" class="bp-btn-outline bp-cta">Manage your booking</a>
+</div>
+<p class="bp-muted bp-small bp-confirmation-cta">Want your own booking page? <a href="https://example.com/signup?utm_source=dapta-calendars&amp;utm_medium=confirmation&amp;utm_campaign=made-with-dapta&amp;utm_content=northwind" target="_blank" rel="noopener noreferrer" class="bp-link">Get Dapta Calendars free</a>
 </p>
+</section>
+</div>
 </div>
 </main>
 </div>

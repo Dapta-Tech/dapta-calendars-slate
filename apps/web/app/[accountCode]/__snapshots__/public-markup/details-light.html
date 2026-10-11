@@ -1,17 +1,23 @@
 <div data-theme="light" class="branded-surface tpl-classic card-outline slots-grid day-flat sel-soft bp-ground bg-background text-foreground bp-viewport" style="--accent: #2f6fed; --accent-contrast: #1a1a1c; --accent-hover: #275dc7; --accent-soft: color-mix(in srgb, #2f6fed 16%, transparent); --accent-wash: color-mix(in srgb, #2f6fed 22%, var(--background)); --primary: #2f6fed; --primary-foreground: #1a1a1c; --primary-ink: #2f6fed; --primary-edge: #2f6fed; --ring: #2f6fed; --bp-radius: 16px; --bp-radius-sm: 8px; --bp-btn-radius: 8px; --bp-pad: 20px; --bp-gap: 12px; --bp-slot-pad: 12px; --bp-font-display: var(--font-display, Figtree, ui-sans-serif, system-ui, sans-serif); --bp-font-body: var(--font-sans, ui-sans-serif, system-ui, sans-serif);">
 <main class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
-<div class="bp-canvas grid gap-8 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-<div class="flex flex-col gap-4">
-<section aria-label="Event details" class="flex flex-col gap-4">
-<div class="flex items-center gap-3">
-<div aria-hidden="true" class="flex h-11 w-11 shrink-0 items-center justify-center text-base font-semibold" style="background: var(--accent); color: var(--accent-contrast); border-radius: var(--bp-radius);">R</div>
-<p class="min-w-0 break-words text-sm font-medium text-muted-foreground">Riley Chen</p>
+<div class="bp-flow">
+<div class="bp-stage" data-step="details" data-dir="forward">
+<div class="bp-progress" role="progressbar" aria-label="Step 3 of 4" aria-valuemin="1" aria-valuemax="4" aria-valuenow="3">
+<span style="width: 75%;">
+</span>
 </div>
-<h1 class="text-2xl font-semibold tracking-tight" style="font-family: var(--bp-font-display);">Design review</h1>
-<dl class="flex flex-col gap-2 text-sm">
-<div class="flex items-center gap-2">
+<div class="bp-frame bp-card">
+<div class="bp-pane-event bp-region">
+<section aria-label="Event details" class="bp-event">
+<div class="bp-host">
+<div aria-hidden="true" class="bp-avatar bp-avatar-monogram">R</div>
+<p class="bp-host-name">Riley Chen</p>
+</div>
+<h1 class="bp-event-title">Design review</h1>
+<dl class="bp-facts">
+<div class="bp-fact">
 <dt class="sr-only">Duration</dt>
-<dd class="flex items-center gap-2">
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <circle cx="12" cy="12" r="9">
 </circle>
@@ -21,36 +27,55 @@
 <span>45 min</span>
 </dd>
 </div>
-<div class="flex items-start gap-2">
+<div class="bp-fact">
 <dt class="sr-only">Where</dt>
-<dd class="flex items-start gap-2">
-<span class="mt-0.5">
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <rect x="2" y="6" width="13" height="12" rx="2">
 </rect>
 <path d="m15 11 6-3v8l-6-3z">
 </path>
 </svg>
-</span>
-<span class="min-w-0 break-words">Online meeting</span>
+<span class="bp-fact-text">Online meeting</span>
 </dd>
 </div>
-</dl>
-<div class="flex flex-col items-start gap-1.5">
-<p id="_r_0_" class="whitespace-pre-line text-sm text-muted-foreground" style="display: -webkit-box; -webkit-line-clamp: 6; overflow: hidden;">Bring a screen or a flow.</p>
-<button type="button" aria-expanded="false" aria-controls="_r_0_" class="text-xs font-medium underline underline-offset-4" style="color: var(--primary-ink, inherit);">Show more</button>
-</div>
-<div class="flex flex-col gap-1.5">
-<span class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+<div class="bp-fact">
+<dt class="sr-only">Timezone</dt>
+<dd>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
 <circle cx="12" cy="12" r="9">
 </circle>
 <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18">
 </path>
-</svg>Timezone</span>
-<div class="w-full">
+</svg>
+<span class="bp-fact-text">America/New York</span>
+</dd>
+</div>
+</dl>
+<div class="bp-description">
+<p id="_r_2_" class="bp-description-text">Bring a screen or a flow.</p>
+<button type="button" aria-expanded="false" aria-controls="_r_2_" class="bp-link">Show more</button>
+</div>
+</section>
+</div>
+<div class="bp-pane-main">
+<aside aria-label="Your details" class="bp-pane-details bp-region">
+<div class="bp-chosen">
+<button type="button" class="bp-back">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M15 5l-7 7 7 7">
+</path>
+</svg>
+<span>Back to times</span>
+</button>
+<h2 tabindex="-1" class="bp-chosen-title">Design review</h2>
+<p class="bp-chosen-when">
+<span>Monday, March 2, 2026</span>
+<span>9:30 – 10:15 AM</span>
+</p>
+<div class="bp-tz">
 <div class="relative">
-<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60">
+<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 bp-tz-trigger">
 <span class="truncate">America/New York</span>
 <span class="ml-auto shrink-0 text-xs text-muted-foreground">GMT-4</span>
 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform">
@@ -60,12 +85,9 @@
 </button>
 </div>
 </div>
+<p class="bp-muted bp-small">Held until 9:10 AM</p>
 </div>
-</section>
-<button type="button" class="self-start text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">Back to times</button>
-</div>
-<aside aria-label="Your details" class="md:sticky md:top-6 md:self-start">
-<form action="javascript:throw new Error('A React form was unexpectedly submitted. If you called form.submit() manually, consider using form.requestSubmit() instead. If you\'re trying to use event.stopPropagation() in a submit event handler, consider also calling event.preventDefault().')" novalidate="" class="bp-card flex flex-col gap-3 border border-border bg-card p-4">
+<form action="javascript:throw new Error('A React form was unexpectedly submitted. If you called form.submit() manually, consider using form.requestSubmit() instead. If you\'re trying to use event.stopPropagation() in a submit event handler, consider also calling event.preventDefault().')" novalidate="" class="bp-form">
 <input type="hidden" value="northwind" name="accountCode">
 <input type="hidden" value="riley-chen" name="ownerSlug">
 <input type="hidden" value="personal" name="kind">
@@ -73,36 +95,37 @@
 <input type="hidden" value="2026-03-02T14:30:00.000Z" name="startUtc">
 <input type="hidden" value="America/New_York" name="timeZone">
 <input type="hidden" value="res_pinned" name="reservationUid">
-<p class="text-sm font-medium">Monday, March 2, 2026 at 9:30 AM EST</p>
-<p class="text-xs text-muted-foreground">Held until 9:10 AM</p>
-<label class="flex flex-col gap-1 text-sm">
-<span>Your name <span class="text-destructive">*</span>
+<label class="bp-field">
+<span class="bp-label">Your name <span class="bp-required">*</span>
 </span>
-<input required="" aria-invalid="false" class="rounded-md border bg-background px-3 py-2 border-input" value="" name="name">
+<input required="" autocomplete="name" aria-invalid="false" class="bp-input" value="" name="name">
 </label>
-<label class="flex flex-col gap-1 text-sm">
-<span>Your email <span class="text-destructive">*</span>
+<label class="bp-field">
+<span class="bp-label">Your email <span class="bp-required">*</span>
 </span>
-<input required="" aria-invalid="false" class="rounded-md border bg-background px-3 py-2 border-input" type="email" value="" name="email">
+<input required="" autocomplete="email" aria-invalid="false" class="bp-input" type="email" value="" name="email">
 </label>
-<label class="flex flex-col gap-1 text-sm">
-<span>Company<span class="text-destructive"> *</span>
+<label class="bp-field">
+<span class="bp-label">Company<span class="bp-required"> *</span>
 </span>
-<input required="" class="rounded-md border border-input bg-background px-3 py-2" type="text" value="" name="answer_company">
+<input required="" aria-invalid="false" class="bp-input" type="text" value="" name="answer_company">
 </label>
-<label class="flex flex-col gap-1 text-sm">
-<span>What should we look at?</span>
-<textarea name="answer_topic" rows="2" class="rounded-md border border-input bg-background px-3 py-2">
+<label class="bp-field">
+<span class="bp-label">What should we look at?</span>
+<textarea name="answer_topic" rows="3" aria-invalid="false" class="bp-input">
 </textarea>
 </label>
-<label class="flex flex-col gap-1 text-sm">
-<span>Notes (optional)</span>
-<textarea name="notes" rows="2" class="rounded-md border border-input bg-background px-3 py-2">
+<label class="bp-field">
+<span class="bp-label">Notes (optional)</span>
+<textarea name="notes" rows="3" class="bp-input">
 </textarea>
 </label>
-<button type="submit" class="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98] disabled:opacity-60">Confirm booking</button>
+<button type="submit" class="bp-btn bp-cta">Confirm booking</button>
 </form>
 </aside>
+</div>
+</div>
+</div>
 </div>
 </main>
 </div>

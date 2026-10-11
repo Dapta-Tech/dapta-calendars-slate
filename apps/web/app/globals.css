@@ -332,15 +332,6 @@ body {
   border-radius: var(--bp-radius);
   padding: var(--bp-pad);
 }
-/* Sticky day header (Design Quality Bar §3) — grouped slots always keep their
-   date context as the page scrolls; never a row of orphan "AM" fragments. */
-.branded-surface .bp-day > h3 {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--background);
-  padding-block: 0.375rem;
-}
 /* slot chip base + selected treatment (slotSelect). Fixed height + never-wrap
    text → a consistent grid of single-line "11:00 AM" buttons (Bar §4). */
 .branded-surface .bp-slot {
@@ -438,46 +429,19 @@ body {
 .bp-viewport > main {
   margin-block: auto;
 }
-
-/* The three-region event page (BP) needs room for panel + month + day column,
-   so the canvas carries its own cap and `split` widens it — which is what the
-   axis has always claimed to do. */
-.bp-canvas {
-  margin-inline: auto;
-  max-width: 64rem;
-}
-.branded-surface.tpl-split .bp-canvas {
-  max-width: 72rem;
+/* Except the event page's sequence on a phone: there each step owns the screen
+   from the top, so the progress track and the step's title stay where the thumb
+   left them instead of jumping as a short step re-centres. */
+@media (max-width: 47.999rem) {
+  .bp-viewport > main:has(> .bp-flow) {
+    margin-block: 0 auto;
+  }
 }
 
 /* ---------------------------------------------------------------------------
- * BP: month calendar + day column. Everything here is token-driven, so both
- * themes and all nine branding axes reach it the same way the slot chips do.
+ * The month calendar. Everything here is token-driven, so both canvases and
+ * all ten branding axes reach it the same way they reach the slot chips.
  * ------------------------------------------------------------------------ */
-
-/* The slot-layout axis, re-scoped inside the day column. The page-wide rule is
-   3 columns (4 above 640px); in a ~16rem column that is a 65px cell holding a
-   `white-space: nowrap` "10:30 AM", which overflows on every wide screen. Here
-   `list` is one per row and `grid` is two — both axes stay visibly different,
-   neither can overflow, and no other surface changes. */
-.branded-surface .bp-daycol .bp-slots,
-.branded-surface.slots-list .bp-daycol .bp-slots {
-  grid-template-columns: 1fr;
-}
-.branded-surface.slots-grid .bp-daycol .bp-slots {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-/* The day column's own scroller — desktop only. Nesting a fixed-height scroll
-   region inside page scroll is a touch trap: the finger lands in the inner box
-   and the page stops moving. Below `md` the list just flows in the page. */
-@media (min-width: 768px) {
-  .branded-surface .bp-daycol-scroll {
-    max-height: 26rem;
-    overflow-y: auto;
-    /* Room for the scrollbar so a chip's rim is never clipped by it. */
-    padding-right: 0.25rem;
-  }
-}
 
 /* Rows own their own seven-column track rather than `display: contents` on a
    shared one. `contents` has a long history of dropping elements out of the
@@ -601,27 +565,625 @@ body {
   cursor: not-allowed;
 }
 
+/* ---------------------------------------------------------------------------
+ * The event page as a sequence (BP2).
+ *
+ * One tree, laid out by the width of its CONTAINER (`.bp-flow`), not of the
+ * viewport, so the studio's 360px preview and an embed's frame lay out by their
+ * own width exactly as a phone and a desktop do:
+ *
+ *   below 48rem  a phone's sequence: one region owns the screen at a time (the
+ *                event and the month, then the day's times, then the form),
+ *                a 4px track says where you are, and the step slides in
+ *   48 to 68rem  two panes: the event on the left; the month with the day's
+ *                times under it on the right
+ *   68rem up     three across: event, month, the day's times (cal.com's layout)
+ *
+ * Which regions show is decided here from `data-step` on `.bp-stage`; the island
+ * renders every region of the current branch once and never twice. Every value
+ * is a token, a `--bp-*` axis or a booking-surface metric (tokens.css), and no
+ * element below takes a colour utility, so the ten axes and the studio preview
+ * hold for every new piece.
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-flow {
+  container: bp / inline-size;
+  width: 100%;
+}
+.branded-surface .bp-stage {
+  margin-inline: auto;
+  max-width: 32rem;
+  /* The gutter gives way before the calendar does (R28): seven 44px days and
+     six 4px gaps need 332px, so the gutter is 16px from 364px up and shrinks to
+     nothing at 332px, and a day cell is never narrower than a thumb. Below
+     that the gaps go to 2px too (see the narrowest rule below), which is what
+     still fits seven 44px days at 320. */
+  padding-inline: clamp(0px, calc((100cqi - 332px) / 2), var(--sp-page-x));
+}
+@container bp (max-width: 21.5rem) {
+  .branded-surface .bp-stage {
+    padding-inline: clamp(0px, calc((100cqi - 320px) / 2), var(--sp-page-x));
+  }
+  .branded-surface .bp-cal-grid,
+  .branded-surface .bp-cal-week {
+    gap: 0.125rem;
+  }
+}
+
+/* The step track: phones only. */
+.branded-surface .bp-progress {
+  height: var(--bp-progress-h);
+  margin-bottom: var(--sp-group);
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.branded-surface .bp-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--bp-step-ms) var(--bp-ease);
+}
+
+/* The frame: on a phone it is the page itself, with no card around the step; from
+   the two-pane width it is the card (and takes the `cardStyle` axis). */
+.branded-surface .bp-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+@container bp (max-width: 47.999rem) {
+  .branded-surface .bp-frame.bp-card {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+.branded-surface .bp-pane-main {
+  min-width: 0;
+}
+.branded-surface .bp-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+
+/* The phone's sequence: which region owns the screen, and how it arrives. */
+@container bp (max-width: 47.999rem) {
+  /* A step slides in from the side; without this the slide would push the
+     page wider for its 280ms and flash a horizontal scrollbar. `clip`, not
+     `hidden`: it makes no scroll container, so the sticky day title still
+     sticks to the viewport. */
+  .branded-surface .bp-stage {
+    overflow-x: clip;
+    overflow-clip-margin: var(--sp-tight);
+  }
+  .branded-surface .bp-stage[data-step='times'] .bp-pane-event,
+  .branded-surface .bp-stage[data-step='times'] .bp-pane-month,
+  .branded-surface .bp-stage[data-step='details'] .bp-pane-event,
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-times {
+    display: none;
+  }
+  /* A region that goes from hidden to shown restarts its animation, so the step
+     that arrives slides in and nothing else moves. `backwards`, never `both`: a
+     transform left on the region after it lands would make it the containing
+     block of the time zone list's fixed backdrop. */
+  .branded-surface .bp-stage[data-dir='forward'] .bp-region {
+    animation: bp-step-forward var(--bp-step-ms) var(--bp-ease) backwards;
+  }
+  .branded-surface .bp-stage[data-dir='back'] .bp-region {
+    animation: bp-step-back var(--bp-step-ms) var(--bp-ease) backwards;
+  }
+  /* The day stays named as its times scroll (R30 §3), with the way back beside it. */
+  .branded-surface .bp-day-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--background);
+  }
+  .branded-surface.day-boxed .bp-day-head {
+    background: transparent;
+  }
+  .branded-surface .bp-event-title {
+    font-size: 1.25rem;
+    line-height: 1.625rem;
+  }
+  .branded-surface .bp-description-text {
+    -webkit-line-clamp: 3;
+  }
+}
+@keyframes bp-step-forward {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+}
+@keyframes bp-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-1.5rem);
+  }
+}
+
+/* Two panes. */
+@container bp (min-width: 48rem) {
+  .branded-surface .bp-stage {
+    max-width: var(--bp-frame-max);
+    padding-inline: 0;
+  }
+  .branded-surface.tpl-split .bp-stage {
+    max-width: var(--bp-frame-max-split);
+  }
+  .branded-surface .bp-progress,
+  .branded-surface .bp-back.bp-back-phone {
+    display: none;
+  }
+  .branded-surface .bp-frame {
+    display: grid;
+    grid-template-columns: var(--bp-event-col) minmax(0, 1fr);
+    gap: 0;
+    min-height: var(--bp-frame-min-h);
+    padding: 0;
+  }
+  .branded-surface .bp-pane-event {
+    padding: var(--bp-pane-pad);
+    border-inline-end: 1px solid var(--border);
+  }
+  .branded-surface .bp-pane-main {
+    padding: var(--bp-pane-pad);
+  }
+  .branded-surface .bp-month {
+    max-width: 28rem;
+  }
+}
+/* Three across: the day's times beside the month, both tops aligned (R30 §10). */
+@container bp (min-width: 68rem) {
+  .branded-surface .bp-pick {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--bp-times-col);
+    align-items: start;
+    gap: var(--sp-section);
+  }
+  .branded-surface .bp-month {
+    max-width: none;
+  }
+}
+
+/* The event panel. */
+.branded-surface .bp-event {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-card);
+}
+.branded-surface .bp-host {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-avatar {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  object-fit: cover;
+}
+.branded-surface .bp-avatar-monogram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--bp-radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+.branded-surface .bp-host-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-title {
+  font-family: var(--bp-font-display);
+  font-size: 1.5rem;
+  line-height: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.branded-surface .bp-fact dd {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-fact dd > svg {
+  margin-top: 0.125rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-fact-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-description {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-description-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  white-space: pre-line;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-description-text[data-expanded='true'] {
+  display: block;
+  overflow: visible;
+}
+.branded-surface .bp-link {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  color: var(--primary-ink, inherit);
+}
+.branded-surface .bp-muted {
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-small {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.branded-surface .bp-strong {
+  font-weight: 600;
+}
+.branded-surface .bp-empty {
+  padding-block: var(--sp-section);
+}
+
+/* The month's head. */
+.branded-surface .bp-month {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-month-label {
+  font-family: var(--bp-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.branded-surface .bp-month-nav {
+  display: flex;
+  gap: var(--sp-tight);
+}
+
+/* The day's times. */
+.branded-surface .bp-times {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-day-head {
+  display: flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-day-title,
+.branded-surface .bp-chosen-title,
+.branded-surface .bp-confirmation-title {
+  font-family: var(--bp-font-display);
+  font-weight: 600;
+}
+.branded-surface .bp-day-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 1rem;
+}
+/* Headings take focus when a step arrives, for the screen reader's sake; they
+   are not controls and draw no ring. */
+.branded-surface [tabindex='-1']:focus-visible {
+  outline: none;
+}
+.branded-surface .bp-times-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-times .bp-slots,
+.branded-surface.slots-list .bp-times .bp-slots {
+  grid-template-columns: 1fr;
+}
+.branded-surface.slots-grid .bp-times .bp-slots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.branded-surface .bp-slot-time {
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.branded-surface .bp-slot-seats {
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-slot:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The quiet controls beside the times: the zone as a line of text with a
+   chevron, and the 12h/24h pair. */
+.branded-surface .bp-tz {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.branded-surface .bp-tz-trigger {
+  width: auto;
+  max-width: 100%;
+  justify-content: flex-start;
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-tz-trigger:hover {
+  border-color: transparent;
+  color: var(--foreground);
+}
+.branded-surface .bp-tz-panel {
+  right: auto;
+  width: min(20rem, calc(100cqi - 2rem));
+}
+.branded-surface .bp-segmented {
+  display: inline-flex;
+  padding: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.75rem;
+}
+.branded-surface .bp-segment {
+  min-height: var(--sp-control-h);
+  padding-inline: var(--sp-field);
+  border-radius: var(--bp-btn-radius);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-segment[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* A step's way back: a chevron and where it goes. In the day's head on a phone
+   it is the chevron alone, 44px square, with its words for a screen reader. */
+.branded-surface .bp-back {
+  display: inline-flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+  padding-inline-end: var(--sp-inline);
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: color 120ms var(--bp-ease);
+}
+.branded-surface .bp-back:hover {
+  color: var(--foreground);
+}
+.branded-surface .bp-back-phone {
+  width: var(--sp-control-h);
+  justify-content: flex-start;
+  padding: 0;
+}
+.branded-surface .bp-back-phone > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The details step. */
+.branded-surface .bp-pane-details {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-chosen {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-chosen-title {
+  margin-top: var(--sp-inline);
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+}
+.branded-surface .bp-chosen-when {
+  display: flex;
+  flex-direction: column;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 500;
+}
+.branded-surface .bp-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-label {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+}
+.branded-surface .bp-required {
+  color: var(--destructive);
+}
+.branded-surface .bp-input {
+  width: 100%;
+  padding: var(--bp-field-pad-y) var(--bp-field-pad-x);
+  border: 1px solid var(--input);
+  border-radius: var(--bp-radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  /* 16px: a phone does not zoom into a field it is not shrinking to fit. */
+  font-size: 1rem;
+  line-height: 1.5rem;
+  transition: border-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-input:hover {
+  border-color: var(--muted-foreground);
+}
+.branded-surface .bp-input:focus-visible {
+  border-color: var(--accent);
+  outline-offset: 1px;
+}
+.branded-surface .bp-input[aria-invalid='true'] {
+  border-color: var(--destructive);
+}
+.branded-surface .bp-input::placeholder {
+  color: var(--faint);
+}
+.branded-surface textarea.bp-input {
+  resize: vertical;
+}
+.branded-surface .bp-error {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--destructive);
+}
+
+/* The one primary action of a step: full width, 54px. */
+.branded-surface .bp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.branded-surface .bp-cta {
+  width: 100%;
+  min-height: var(--bp-cta-h);
+  padding-inline: var(--sp-group);
+  font-size: 1rem;
+  transition:
+    transform 120ms var(--bp-ease),
+    background-color 120ms var(--bp-ease),
+    border-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-btn.bp-cta:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.branded-surface .bp-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.branded-surface .bp-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* The confirmation, and the cards a failure shows. */
+.branded-surface .bp-confirmation,
+.branded-surface .bp-notice {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  gap: var(--sp-card);
+  margin-inline: auto;
+}
+.branded-surface .bp-confirmation-mark {
+  display: flex;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.branded-surface .bp-confirmation-mark[data-pending='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.branded-surface .bp-confirmation-title {
+  font-size: 1.5rem;
+  line-height: 1.875rem;
+}
+.branded-surface .bp-confirmation-facts {
+  padding-block: var(--sp-card);
+  border-block: 1px solid var(--border);
+}
+.branded-surface .bp-confirmation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-confirmation-cta {
+  text-align: center;
+}
+@container bp (min-width: 48rem) {
+  .branded-surface .bp-confirmation-actions {
+    flex-direction: row;
+  }
+  .branded-surface .bp-confirmation-actions > * {
+    flex: 1 1 0;
+  }
+}
+.branded-surface .bp-notice-title {
+  font-family: var(--bp-font-display);
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+  font-weight: 600;
+}
+.branded-surface .bp-notice.bp-card[data-tone='error'] {
+  border-color: var(--destructive);
+}
+
 /* --- Inline embed (E) -----------------------------------------------------
    `dc-embed` rides on the same element as `.branded-surface`, so these rules
    out-specify the page-wide ones without `!important` and without touching
    them. Only reachable under `?embed=1`; a page opened directly never carries
    the class. */
 
-/* The day column's scroller is switched OFF inside a frame. On a real page a
-   fixed-height inner scroller is right: the window height is fixed and the
-   column should not push the footer off screen. Inside an auto-resizing iframe
-   it is wrong twice — the frame grows to fit its content, so there is nothing
-   for the scroller to save, and a fixed-height scroll region inside a frame
-   inside a scrolling host page is the same touch trap this rule already
-   refuses below `md`, with one more layer on it. Let the FRAME grow instead.
-
-   This is also what makes the height reporter honest: with the scroller on, the
-   document's scroll height is the clipped height, so the number posted to the
-   parent would hide slots behind a scrollbar the host never asked for. */
-.branded-surface.dc-embed .bp-daycol-scroll {
-  max-height: none;
-  overflow: visible;
-  padding-right: 0;
+/* No floor inside a frame. The two-pane frame has a minimum height on a real
+   page (a five-week month and a six-week one do not move the page, and a big
+   screen is framed rather than stranded); inside an auto-resizing iframe that
+   floor is height the host page pays for, and it would make the height
+   reporter post the floor instead of the content. The frame grows with what
+   it holds. */
+.branded-surface.dc-embed .bp-frame {
+  min-height: 0;
 }
 
 /* The badge keeps its place in the embed (#67 — a host's own site is the

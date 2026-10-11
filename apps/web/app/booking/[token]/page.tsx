@@ -153,6 +153,9 @@ export default async function OneOffBookingPage({
   const mainClass = embed
     ? 'mx-auto max-w-6xl px-4 py-4'
     : 'mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12';
+  // The booking flow owns its own gutter on a phone (it gives way before the
+  // calendar does), so its `<main>` adds one only from the two-pane width up.
+  const flowMainClass = embed ? 'w-full py-4 md:px-4' : 'w-full py-10 md:px-6 md:py-12';
 
   // The link was real and is spent — consumed by a booking, or revoked by the
   // host. The invitee is told which of those it is by neither: to them it is one
@@ -227,7 +230,7 @@ export default async function OneOffBookingPage({
         style={mergeEmbedStyle(null, styleOverrides)}
         className={shellClass}
       >
-        <main className={mainClass}>
+        <main className={flowMainClass}>
           <BookingFlow
             accountCode={target.accountCode}
             ownerSlug={target.teamSlug}
@@ -284,7 +287,7 @@ export default async function OneOffBookingPage({
       style={mergeEmbedStyle(profile.member.style, styleOverrides)}
       className={shellClass}
     >
-      <main className={mainClass}>
+      <main className={flowMainClass}>
         <BookingFlow
           accountCode={target.accountCode}
           ownerSlug={target.handle}

@@ -2,8 +2,10 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  formatBookingLocation,
+  formatDayLong,
   formatLocation,
-  formatSlotDateTime,
+  formatTimeRange,
   getMessages,
   groupSlotsByDay,
   isReservedFieldName,
@@ -15,9 +17,19 @@ import {
   type DisplaySlot,
   type Slot,
 } from '@slate/shared';
-import { EventPanel, MonthCalendar } from '@/components/booking-page-parts';
+import {
+  BookingConfirmation,
+  BookingStage,
+  ChoosingFrame,
+  ChosenTime,
+  EventPanel,
+  MonthCalendar,
+  TimesColumn,
+  readableZone,
+  type BookingStep,
+} from '@/components/booking-page-parts';
 
-/** Mirror of the server's attendee-email rule — catches the 400 before a
+/** Mirror of the server's attendee-email rule: catches the 400 before a
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
@@ -28,6 +40,7 @@ import { signupHref } from '@/lib/growth';
 import { TimeZoneSelect } from '@/components/ui/timezone-select';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
+import { calendarFileHref, calendarFileName } from '@/lib/ics';
 
 interface Props {
   accountCode: string;
@@ -94,19 +107,25 @@ interface Hold {
   expiresAt: string;
 }
 
+/** The container width the two-pane layout starts at (globals.css, `@container bp`). */
+const TWO_PANE_PX = 768;
+
 /**
- * The interactive island: pick a timezone, pick a day, pick a slot (which
- * places a soft HOLD), fill the form, book. Slots are absolute UTC instants (a
- * tz switch regroups the calendar AND the column with no refetch). Errors
- * surface by HTTP status: 409 slot-taken and 410 hold-expired both offer a
- * Retry (R22 error+retry). Branding renders via the ancestor `.branded-surface`
- * classes + `--bp-*` vars (preview == prod).
+ * The interactive island: pick a day, pick a time (which places a soft HOLD),
+ * give your details, book. Slots are absolute UTC instants (a tz switch
+ * regroups the calendar AND the times with no refetch). Errors surface by HTTP
+ * status: 409 slot-taken and 410 hold-expired both offer a Retry (R22
+ * error+retry). Branding renders via the ancestor `.branded-surface` classes +
+ * `--bp-*` vars (preview == prod).
  *
- * The layout is the three regions every invitee already knows (BP): the event
- * panel, a month calendar, and the chosen day's times. Once a time is picked
- * the calendar folds away and the form takes its room — the form is the same
- * form, re-parented, not rewritten, and so are the confirmation and every
- * failure card below it.
+ * The page is a SEQUENCE. On a phone one region owns the screen at a time: the
+ * event and the month, then the chosen day's times, then the details form, then
+ * the confirmation, with a 4px track saying where you are. From the two-pane
+ * width up the event sits on the left and the right pane holds the month with
+ * that day's times beside it (or below it, when there is no room); the form
+ * replaces the right pane. ONE tree and one state machine serve both: the step
+ * is stamped on the stage (`data-step`) and globals.css decides, per container
+ * width, which regions show. Nothing is rendered twice.
  */
 export function BookingFlow({
   accountCode,
@@ -185,6 +204,18 @@ export function BookingFlow({
   const [emailError, setEmailError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [result, formAction, pending] = useActionState<BookResult | null, FormData>(bookAction, null);
+
+  /** The half of "choose a time" a phone is on. The two-pane layout shows both. */
+  const [step, setStep] = useState<'calendar' | 'times'>('calendar');
+  /**
+   * Which way the last move went, for the phone's slide. `null` until the
+   * visitor does something, so the first paint does not animate in.
+   */
+  const [dir, setDir] = useState<'forward' | 'back' | null>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const timesTitleRef = useRef<HTMLHeadingElement>(null);
+  const chosenTitleRef = useRef<HTMLHeadingElement>(null);
+  const doneTitleRef = useRef<HTMLHeadingElement>(null);
 
   /**
    * The one host-facing message (E, #67): `dapta-calendars.booking_scheduled`,
@@ -306,6 +337,7 @@ export function BookingFlow({
   const weekStartsOn = weekStartsOnFor(locale);
 
   async function pick(slot: DisplaySlot) {
+    setDir('forward');
     setSelected(slot.startUtc);
     // The last attempt's error stays dismissed: picking a slot used to clear
     // the flag while `result` still held that error, so choosing a new time
@@ -343,6 +375,7 @@ export function BookingFlow({
    * whether or not the hold was still there, and the booker is already gone.
    */
   function retry() {
+    setDir('back');
     setSelected(null);
     if (hold) void releaseAction(hold.uid);
     setHold(null);
@@ -360,6 +393,52 @@ export function BookingFlow({
     setDismissedResult(result);
   }
 
+  // --- The step, and where focus goes when it changes ---------------------
+  // `calendar` and `times` are the two halves of choosing a time and are the
+  // only steps held in state; `details` is "a time is chosen" and `done` is "a
+  // booking came back", both derived.
+  const flowStep: BookingStep = booked ? 'done' : selected ? 'details' : step;
+
+  /**
+   * Focus follows the visitor into the next step, so a screen reader announces
+   * where they landed and a keyboard user does not start from the top. Only
+   * after they have done something (`dir`), so loading the page never moves
+   * focus; and the day's times take focus only on a phone, where they replace
+   * the month, never beside it, where a keyboard user is still walking the grid.
+   */
+  useEffect(() => {
+    if (dir === null) return;
+    const twoPane = (stageRef.current?.getBoundingClientRect().width ?? 0) >= TWO_PANE_PX;
+    if (flowStep === 'done') doneTitleRef.current?.focus();
+    else if (flowStep === 'details') chosenTitleRef.current?.focus();
+    else if (flowStep === 'times' && !twoPane) timesTitleRef.current?.focus();
+    else if (flowStep === 'calendar' && !twoPane && selectedDay) {
+      stageRef.current?.querySelector<HTMLElement>(`[data-day="${selectedDay}"]`)?.focus();
+    }
+    // `selectedDay` is read, not reacted to: focus moves on a STEP change only.
+  }, [flowStep, dir]);
+
+  const timeZoneLabel = readableZone(timeZone);
+
+  /** Choosing a day is the first move forward: on a phone the times take over. */
+  function chooseDay(dayKey: string) {
+    setPickedDay(dayKey);
+    setDir('forward');
+    setStep('times');
+  }
+
+  function backToCalendar() {
+    setDir('back');
+    setStep('calendar');
+  }
+
+  /** The stage every branch below renders into: the progress track, then the step. */
+  const stage = (content: React.ReactNode) => (
+    <BookingStage m={messages} step={flowStep} dir={dir} stageRef={stageRef}>
+      {content}
+    </BookingStage>
+  );
+
   // --- Confirmed ----------------------------------------------------------
   if (result?.ok && result.booking) {
     const b = result.booking;
@@ -368,77 +447,98 @@ export function BookingFlow({
     const ctaHref = signupHref('confirmation', accountCode);
     /**
      * This branch is shared by the personal and the team path, and it must
-     * never be able to THROW: `formatSlotDateTime` raises `RangeError: Invalid
-     * time value` on an unparseable instant, that escapes to the public error
-     * boundary, and the booker is shown a failure screen for a booking that
-     * succeeded — which is how they end up making a second one (#102). The
-     * team route now returns the same full `BookingView` the personal one
-     * does; this is the belt to that braces, so a future shape drift costs the
-     * confirmation a line of detail rather than the confirmation itself.
+     * never be able to THROW: an unparseable instant raises `RangeError:
+     * Invalid time value` in `Intl`, that escapes to the public error boundary,
+     * and the booker is shown a failure screen for a booking that succeeded,
+     * which is how they end up making a second one (#102). The team route
+     * returns the same full `BookingView` the personal one does; this is the
+     * belt to that braces, so a future shape drift costs the confirmation a
+     * line of detail rather than the confirmation itself.
      */
-    const when = Number.isNaN(Date.parse(b.startUtc ?? ''))
-      ? null
-      : formatSlotDateTime(b.startUtc, timeZone, locale, hour12);
+    const startOk = !Number.isNaN(Date.parse(b.startUtc ?? ''));
+    const endOk = !Number.isNaN(Date.parse(b.endUtc ?? ''));
+    const dayLine = startOk ? formatDayLong(b.startUtc, timeZone, locale) : null;
+    const timeLine = startOk && endOk ? formatTimeRange(b.startUtc, b.endUtc, timeZone, locale, hour12) : null;
+    const bookedLocation = formatBookingLocation(b.locationKind, b.location, messages) ?? locationLabel;
     // Dropped rather than interpolated empty: both strings end in the address,
-    // so a missing one renders "A confirmation was sent to ." — worse than
-    // saying nothing.
+    // so a missing one renders "A confirmation was sent to ." which is worse
+    // than saying nothing.
     const attendeeEmail = b.attendee?.email;
-    return (
-      // A confirmation is one column of prose; the wide three-region canvas
-      // above it would stretch a two-line sentence across the whole screen.
-      <div className="mx-auto max-w-2xl">
-        <section className="bp-card border border-border bg-card p-6 text-card-foreground">
-          <h2 className="mb-2 text-xl font-semibold">{isPending ? m.requested : m.confirmed}</h2>
-          <p className="text-muted-foreground">{when ? `${b.title} — ${when}` : b.title}</p>
-          {attendeeEmail ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {isPending
-                ? t(m.awaitingConfirmation, { email: attendeeEmail })
-                : t(m.confirmationSentTo, { email: attendeeEmail })}
+    const sentTo = attendeeEmail
+      ? isPending
+        ? t(m.awaitingConfirmation, { email: attendeeEmail })
+        : t(m.confirmationSentTo, { email: attendeeEmail })
+      : null;
+    // The file a calendar opens: the join link when there is one (it is what a
+    // calendar should open), else the human location.
+    const calendarHref =
+      startOk && endOk
+        ? calendarFileHref({
+            uid: b.uid,
+            title: b.title,
+            startUtc: b.startUtc,
+            endUtc: b.endUtc,
+            location: b.meetingUrl ?? bookedLocation,
+            stamp: nowUtc,
+          })
+        : null;
+    return stage(
+      <BookingConfirmation
+        m={messages}
+        pending={isPending}
+        eventTitle={b.title}
+        dayLine={dayLine}
+        timeLine={timeLine}
+        timeZoneLabel={timeZoneLabel}
+        hostName={b.host?.name ?? hostName}
+        locationLabel={bookedLocation}
+        locationKind={b.locationKind ?? location?.kind ?? null}
+        sentTo={sentTo}
+        titleRef={doneTitleRef}
+        actions={
+          <>
+            {calendarHref ? (
+              <a href={calendarHref} download={calendarFileName(b.title)} className="bp-btn bp-cta">
+                {bp.addToCalendar}
+              </a>
+            ) : null}
+            {b.manageUrl ? (
+              // Inside a frame this must open a new tab. Left to navigate the
+              // frame it drops the invitee into the manage page inside a short
+              // box with nothing to get back with, and `/manage/[uid]` is
+              // `frame-ancestors 'self'`, so it would refuse to render there at
+              // all on the very click that was supposed to help them.
+              <a
+                href={b.manageUrl}
+                {...(embed ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                className="bp-btn-outline bp-cta"
+              >
+                {getMessages(locale).manage.title}
+              </a>
+            ) : null}
+          </>
+        }
+        footer={
+          // Growth loop (R11): a quiet secondary line, a link and never a second
+          // primary CTA (R30), gated by the same open-core badge switch.
+          ctaHref ? (
+            <p className="bp-muted bp-small bp-confirmation-cta">
+              {g.ctaQuestion}{' '}
+              <a href={ctaHref} target="_blank" rel="noopener noreferrer" className="bp-link">
+                {g.ctaAction}
+              </a>
             </p>
-          ) : null}
-          {b.manageUrl ? (
-            // Inside a frame this must open a new tab. Left to navigate the
-            // frame it drops the invitee into the manage page inside a short
-            // box with nothing to get back with — and `/manage/[uid]` is
-            // `frame-ancestors 'self'`, so it would refuse to render there at
-            // all on the very click that was supposed to help them.
-            // A public-page control: it is styled from the booking page's own
-            // tokens, not the admin button set, so a host's brand still owns it.
-            <a
-              href={b.manageUrl}
-              {...(embed ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-              className="bp-btn-outline mt-4 text-sm"
-            >
-              {getMessages(locale).manage.title}
-            </a>
-          ) : null}
-        </section>
-        {/* Growth loop (R11): a quiet secondary line — a link, never a second
-            primary CTA (R30) — gated by the same open-core badge switch. */}
-        {ctaHref ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            {g.ctaQuestion}{' '}
-            <a
-              href={ctaHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-primary underline underline-offset-4 hover:opacity-80"
-            >
-              {g.ctaAction}
-            </a>
-          </p>
-        ) : null}
-      </div>
+          ) : null
+        }
+      />,
     );
   }
 
   // WHICH card to show is decided by `classifyBookingFailure` in
-  // `lib/booking-failure.ts`, not here. The branches overlap on status — the
+  // `lib/booking-failure.ts`, not here. The branches overlap on status (the
   // duplicate guard and a taken slot are both 409, a spent invite link and an
-  // expired hold are both 410 — so the ORDER they are tested in is the whole
-  // decision, and it belongs somewhere it can be tested directly. It has been
-  // wrong twice.
+  // expired hold are both 410), so the ORDER they are tested in is the whole
+  // decision, and it belongs somewhere it can be tested directly.
   //
   // `result !== dismissedResult` is the freshness test: an error the booker has
   // acknowledged stays hidden until the NEXT attempt produces a different
@@ -456,62 +556,50 @@ export function BookingFlow({
   // hand a third party's schedule to anyone who guesses an email, and the
   // person it belongs to already has the confirmation in their inbox.
   if (duplicate) {
-    return (
-      <section className="bp-card mx-auto max-w-2xl border border-destructive bg-card p-6">
-        <h2 className="mb-1 text-lg font-semibold">{m.duplicateGuard.title}</h2>
-        <p className="mb-4 text-sm text-muted-foreground">{m.duplicateGuard.body}</p>
-        <button
-          type="button"
-          onClick={dismissDuplicate}
-          className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98]"
-        >
+    return stage(
+      <section className="bp-card bp-notice" data-tone="error">
+        <h2 className="bp-notice-title">{m.duplicateGuard.title}</h2>
+        <p className="bp-muted">{m.duplicateGuard.body}</p>
+        <button type="button" onClick={dismissDuplicate} className="bp-btn bp-cta">
           {m.duplicateGuard.changeEmail}
         </button>
-      </section>
+      </section>,
     );
   }
 
   // --- One-off link spent (410 / 404) -------------------------------------
-  // The SAME card `/booking/{token}` renders when the link was already dead on
-  // arrival, from the same catalog keys, so a link that dies at submit time and
-  // one that died before the page loaded read identically. Localized, and with
-  // no action: nothing the booker can do on this page resolves it.
+  // The SAME words `/booking/{token}` renders when the link was already dead on
+  // arrival, from the same catalog keys. No action: nothing the booker can do
+  // on this page resolves it.
   if (oneOffGone) {
-    return (
-      <section className="bp-card mx-auto max-w-2xl border border-border bg-card p-6">
-        <h2 className="mb-1 text-lg font-semibold">{m.oneOffLink.usedTitle}</h2>
-        <p className="text-sm text-muted-foreground">{m.oneOffLink.usedBody}</p>
-      </section>
+    return stage(
+      <section className="bp-card bp-notice">
+        <h2 className="bp-notice-title">{m.oneOffLink.usedTitle}</h2>
+        <p className="bp-muted">{m.oneOffLink.usedBody}</p>
+      </section>,
     );
   }
 
   // --- Conflict (409/410): R22 error + retry ------------------------------
   // CALENDAR_UNAVAILABLE (booking blocked fail-closed) gets its own localized
-  // copy — a generic "try again shortly", never internals.
+  // copy: a generic "try again shortly", never internals.
   if (conflict) {
     const calUnavailable = result!.error === 'CALENDAR_UNAVAILABLE';
-    return (
-      <section className="bp-card mx-auto max-w-2xl border border-destructive bg-card p-6">
-        <h2 className="mb-1 text-lg font-semibold">
+    return stage(
+      <section className="bp-card bp-notice" data-tone="error">
+        <h2 className="bp-notice-title">
           {calUnavailable ? m.calendarUnavailableTitle : result!.status === 410 ? m.holdExpired : m.slotTaken}
         </h2>
-        <p className="mb-4 text-sm text-muted-foreground">
-          {calUnavailable ? m.calendarUnavailableBody : result!.message}
-        </p>
-        <button
-          type="button"
-          onClick={retry}
-          className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98]"
-        >
+        <p className="bp-muted">{calUnavailable ? m.calendarUnavailableBody : result!.message}</p>
+        <button type="button" onClick={retry} className="bp-btn bp-cta">
           {m.pickAnother}
         </button>
-      </section>
+      </section>,
     );
   }
 
   // Every slot the page holds is empty for one of three reasons, and the copy
-  // has always distinguished them. Hoisted so both the calendar-less empty
-  // state and the day column can say the right one.
+  // has always distinguished them.
   const emptyCopy =
     emptyReason === 'CALENDAR_UNAVAILABLE'
       ? m.timesUnavailable
@@ -521,16 +609,19 @@ export function BookingFlow({
 
   const timeZoneControl = (
     // Themed combobox, not the native <select>: the OS popup for ~400 zones is
-    // un-brandable and covers the screen (QA2 fix 1). It renders through P's
-    // `Select` — the width comes from this wrapper, per that component's
-    // convention, so the panel and the trigger stay the same width.
-    <div className="w-full">
+    // un-brandable and covers the screen (QA2 fix 1). Quiet here, a line of
+    // text with a chevron, because it is a setting most visitors never touch;
+    // on a phone its list opens over a dimmed page.
+    <div className="bp-tz">
       <TimeZoneSelect
         id="tz"
         value={timeZone}
         onChange={setTimeZone}
         locale={locale}
         ariaLabel={m.timezone}
+        className="bp-tz-trigger"
+        panelClassName="bp-tz-panel"
+        backdrop
       />
     </div>
   );
@@ -546,333 +637,253 @@ export function BookingFlow({
       location={location}
       locationLabel={locationLabel}
       methodLabel={methodLabel}
-      timeZoneControl={timeZoneControl}
+      timeZoneLabel={timeZoneLabel}
     />
   );
 
-  // --- A slot is chosen: panel + form -------------------------------------
-  // The calendar folds away rather than shrinking the form into a 17rem
-  // gutter. Getting back to the times is one button, running the same `retry`
-  // a 409 uses so there is one exit path rather than two that can drift.
+  // --- A time is chosen: the form replaces the right pane -----------------
   if (selected) {
-    return (
-      <div className="bp-canvas grid gap-8 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-4">
-          {panel}
-          <button
-            type="button"
-            onClick={retry}
-            className="self-start text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-          >
-            {bp.backToTimes}
-          </button>
-        </div>
-        <aside aria-label={bp.yourDetails} className="md:sticky md:top-6 md:self-start">
-          <form
-            action={formAction}
-            noValidate
-            // Client-side gate: block the submit (and the field wipe it used
-            // to cause) instead of round-tripping a guaranteed 400.
-            onSubmit={(e) => {
-              if (!validateAll()) e.preventDefault();
-            }}
-            className="bp-card flex flex-col gap-3 border border-border bg-card p-4"
-          >
-            <input type="hidden" name="accountCode" value={accountCode} />
-            <input type="hidden" name="ownerSlug" value={ownerSlug} />
-            <input type="hidden" name="kind" value={mode} />
-            <input type="hidden" name="slug" value={slug} />
-            <input type="hidden" name="startUtc" value={selected} />
-            <input type="hidden" name="timeZone" value={timeZone} />
-            {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
-            {/* The one-off token (#110). A hidden field so the token reaches
-                the server action without this island holding an API base URL;
-                the action forwards it as a header. */}
-            {oneOffToken ? <input type="hidden" name="oneOffToken" value={oneOffToken} /> : null}
-
-            <p className="text-sm font-medium">
-              {formatSlotDateTime(selected, timeZone, locale, hour12)}
-            </p>
-            {hold ? (
-              <p className="text-xs text-muted-foreground">
-                {t(m.heldUntil, {
-                  time: new Intl.DateTimeFormat(locale, {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    // The countdown follows the same 12h/24h choice as the slot
-                    // the booker just picked; two clocks on one card is a bug.
-                    ...(hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
-                  }).format(new Date(hold.expiresAt)),
-                })}
-              </p>
-            ) : holdError ? (
-              <p className="text-xs text-destructive">{holdError}</p>
-            ) : null}
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{m.yourName} <span className="text-destructive">*</span></span>
-              <input
-                name="name"
-                required
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (nameError) setNameError(null);
-                }}
-                aria-invalid={!!nameError}
-                className={`rounded-md border bg-background px-3 py-2 ${
-                  nameError ? 'border-destructive' : 'border-input'
-                }`}
-              />
-              {nameError ? (
-                <span role="alert" className="text-xs text-destructive">
-                  {nameError}
-                </span>
-              ) : null}
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{m.yourEmail} <span className="text-destructive">*</span></span>
-              <input
-                name="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  if (emailError) setEmailError(null);
-                }}
-                onBlur={() =>
-                  setEmailError(
-                    email.trim() && !EMAIL_RE.test(email.trim()) ? m.invalidEmail : null,
-                  )
-                }
-                aria-invalid={!!emailError}
-                className={`rounded-md border bg-background px-3 py-2 ${
-                  emailError ? 'border-destructive' : 'border-input'
-                }`}
-              />
-              {emailError ? (
-                <span role="alert" className="text-xs text-destructive">
-                  {emailError}
-                </span>
-              ) : null}
-            </label>
-
-            {visibleFields.map((f) => {
-              const validate = (v: string) =>
-                setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
-              const setAnswer = (v: string) => setAnswers((a) => ({ ...a, [f.name]: v }));
-              const value = answers[f.name] ?? '';
-              const isMulti = f.type === 'textarea' || f.type === 'guests';
-              return (
-                <label key={f.name} className="flex flex-col gap-1 text-sm">
-                  {/* Required marker stays INLINE with the label (Bar §7). */}
-                  <span>
-                    {f.label}
-                    {f.required ? <span className="text-destructive"> *</span> : null}
-                  </span>
-                  {f.type === 'phone' ? (
-                    <PhoneField
-                      value={value}
-                      onChange={(v) => {
-                        setAnswer(v);
-                        // PhoneField flags too-short numbers inline itself —
-                        // just keep the submit gate in step with what it shows.
-                        setFieldErrors((e) => ({
-                          ...e,
-                          [f.name]: isPhoneValueTooShort(v) ? pm.invalid : null,
-                        }));
-                      }}
-                      locale={locale}
-                      name={`answer_${f.name}`}
-                      required={f.required}
-                      ariaLabel={f.label}
-                      defaultCountry={f.defaultCountry}
-                    />
-                  ) : isMulti ? (
-                    <textarea
-                      name={`answer_${f.name}`}
-                      required={f.required}
-                      rows={2}
-                      placeholder={f.type === 'guests' ? 'guest1@example.com, guest2@example.com' : f.placeholder}
-                      value={value}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      onBlur={(e) => validate(e.target.value)}
-                      className="rounded-md border border-input bg-background px-3 py-2"
-                    />
-                  ) : (
-                    <input
-                      name={`answer_${f.name}`}
-                      type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
-                      required={f.required}
-                      placeholder={f.placeholder}
-                      value={value}
-                      onChange={(e) => setAnswer(e.target.value)}
-                      onBlur={(e) => validate(e.target.value)}
-                      className="rounded-md border border-input bg-background px-3 py-2"
-                    />
-                  )}
-                  {/* Phone shows its own inline error for typed-but-short
-                      numbers — only the required-empty case renders here. */}
-                  {fieldErrors[f.name] && (f.type !== 'phone' || !value.trim()) ? (
-                    <span className="text-xs text-destructive">{fieldErrors[f.name]}</span>
-                  ) : null}
-                </label>
-              );
-            })}
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{m.notes}</span>
-              <textarea
-                name="notes"
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-2"
-              />
-            </label>
-
-            {intakeError ? <p className="text-sm text-destructive">{result!.message}</p> : null}
-
-            <button
-              type="submit"
-              disabled={pending || Object.values(fieldErrors).some(Boolean)}
-              className="bp-btn px-4 py-2 font-semibold transition-transform active:scale-[0.98] disabled:opacity-60"
+    const end = new Date(Date.parse(selected) + lengthMinutes * 60_000).toISOString();
+    const holdLine = hold
+      ? t(m.heldUntil, {
+          time: new Intl.DateTimeFormat(locale, {
+            hour: 'numeric',
+            minute: '2-digit',
+            timeZone,
+            // The hold follows the same 12h/24h choice as the time the booker
+            // just picked; two clocks on one screen is a bug.
+            ...(hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
+          }).format(new Date(hold.expiresAt)),
+        })
+      : null;
+    return stage(
+      <div className="bp-frame bp-card">
+        <div className="bp-pane-event bp-region">{panel}</div>
+        <div className="bp-pane-main">
+          <aside aria-label={bp.yourDetails} className="bp-pane-details bp-region">
+            <ChosenTime
+              m={messages}
+              eventTitle={eventTitle}
+              dayLine={formatDayLong(selected, timeZone, locale)}
+              timeLine={formatTimeRange(selected, end, timeZone, locale, hour12)}
+              timeZoneLabel={timeZoneLabel}
+              timeZoneControl={timeZoneControl}
+              holdLine={holdLine}
+              holdError={holdError}
+              onBack={retry}
+              titleRef={chosenTitleRef}
+            />
+            <form
+              action={formAction}
+              noValidate
+              // Client-side gate: block the submit (and the field wipe it used
+              // to cause) instead of round-tripping a guaranteed 400.
+              onSubmit={(e) => {
+                if (!validateAll()) e.preventDefault();
+              }}
+              className="bp-form"
             >
-              {pending ? m.confirming : m.confirm}
-            </button>
-          </form>
-        </aside>
-      </div>
+              <input type="hidden" name="accountCode" value={accountCode} />
+              <input type="hidden" name="ownerSlug" value={ownerSlug} />
+              <input type="hidden" name="kind" value={mode} />
+              <input type="hidden" name="slug" value={slug} />
+              <input type="hidden" name="startUtc" value={selected} />
+              <input type="hidden" name="timeZone" value={timeZone} />
+              {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
+              {/* The one-off token (#110). A hidden field so the token reaches
+                  the server action without this island holding an API base URL;
+                  the action forwards it as a header. */}
+              {oneOffToken ? <input type="hidden" name="oneOffToken" value={oneOffToken} /> : null}
+
+              <label className="bp-field">
+                {/* Required marker INLINE with the label (R30 §7). */}
+                <span className="bp-label">
+                  {m.yourName} <span className="bp-required">*</span>
+                </span>
+                <input
+                  name="name"
+                  required
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (nameError) setNameError(null);
+                  }}
+                  aria-invalid={!!nameError}
+                  className="bp-input"
+                />
+                {nameError ? (
+                  <span role="alert" className="bp-error">
+                    {nameError}
+                  </span>
+                ) : null}
+              </label>
+              <label className="bp-field">
+                <span className="bp-label">
+                  {m.yourEmail} <span className="bp-required">*</span>
+                </span>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (emailError) setEmailError(null);
+                  }}
+                  onBlur={() =>
+                    setEmailError(email.trim() && !EMAIL_RE.test(email.trim()) ? m.invalidEmail : null)
+                  }
+                  aria-invalid={!!emailError}
+                  className="bp-input"
+                />
+                {emailError ? (
+                  <span role="alert" className="bp-error">
+                    {emailError}
+                  </span>
+                ) : null}
+              </label>
+
+              {visibleFields.map((f) => {
+                const validate = (v: string) =>
+                  setFieldErrors((e) => ({ ...e, [f.name]: validateBookingFieldValue(f.type, v) }));
+                const setAnswer = (v: string) => setAnswers((a) => ({ ...a, [f.name]: v }));
+                const value = answers[f.name] ?? '';
+                const isMulti = f.type === 'textarea' || f.type === 'guests';
+                const error = fieldErrors[f.name];
+                return (
+                  <label key={f.name} className="bp-field">
+                    <span className="bp-label">
+                      {f.label}
+                      {f.required ? <span className="bp-required"> *</span> : null}
+                    </span>
+                    {f.type === 'phone' ? (
+                      <PhoneField
+                        value={value}
+                        onChange={(v) => {
+                          setAnswer(v);
+                          // PhoneField flags too-short numbers inline itself;
+                          // keep the submit gate in step with what it shows.
+                          setFieldErrors((e) => ({
+                            ...e,
+                            [f.name]: isPhoneValueTooShort(v) ? pm.invalid : null,
+                          }));
+                        }}
+                        locale={locale}
+                        name={`answer_${f.name}`}
+                        required={f.required}
+                        ariaLabel={f.label}
+                        defaultCountry={f.defaultCountry}
+                      />
+                    ) : isMulti ? (
+                      <textarea
+                        name={`answer_${f.name}`}
+                        required={f.required}
+                        rows={3}
+                        placeholder={f.type === 'guests' ? 'guest1@example.com, guest2@example.com' : f.placeholder}
+                        value={value}
+                        onChange={(e) => setAnswer(e.target.value)}
+                        onBlur={(e) => validate(e.target.value)}
+                        aria-invalid={!!error}
+                        className="bp-input"
+                      />
+                    ) : (
+                      <input
+                        name={`answer_${f.name}`}
+                        type={f.type === 'email' ? 'email' : f.type === 'number' ? 'number' : 'text'}
+                        required={f.required}
+                        placeholder={f.placeholder}
+                        value={value}
+                        onChange={(e) => setAnswer(e.target.value)}
+                        onBlur={(e) => validate(e.target.value)}
+                        aria-invalid={!!error}
+                        className="bp-input"
+                      />
+                    )}
+                    {/* Phone shows its own inline error for typed-but-short
+                        numbers; only the required-empty case renders here. */}
+                    {error && (f.type !== 'phone' || !value.trim()) ? (
+                      <span className="bp-error">{error}</span>
+                    ) : null}
+                  </label>
+                );
+              })}
+
+              <label className="bp-field">
+                <span className="bp-label">{m.notes}</span>
+                <textarea
+                  name="notes"
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="bp-input"
+                />
+              </label>
+
+              {intakeError ? <p className="bp-error">{result!.message}</p> : null}
+
+              <button
+                type="submit"
+                disabled={pending || Object.values(fieldErrors).some(Boolean)}
+                className="bp-btn bp-cta"
+              >
+                {pending ? m.confirming : m.confirm}
+              </button>
+            </form>
+          </aside>
+        </div>
+      </div>,
     );
   }
 
-  // --- Nothing chosen yet: panel + month calendar + the day's times --------
-  return (
-    <div className="bp-canvas grid gap-6 md:grid-cols-2 lg:grid-cols-[16rem_minmax(0,1fr)_17rem] lg:gap-8">
-      <div className="md:col-span-2 lg:col-span-1">{panel}</div>
-
-      {days.length === 0 ? (
-        // No calendar at all when the page has no times to put in one: an empty
-        // month grid of greyed-out days is a worse answer than the sentence
-        // that says why, and the reason codes already distinguish the three
-        // cases (config error, calendar unreachable, genuinely nothing).
-        <p className="text-muted-foreground md:col-span-2 lg:col-span-2">{emptyCopy}</p>
-      ) : (
-        <>
-          <MonthCalendar
-            m={messages}
-            monthKey={month}
-            availableDayKeys={availableDayKeys}
-            todayKey={todayKey}
-            selectedDayKey={selectedDay}
-            locale={locale}
-            weekStartsOn={weekStartsOn}
-            minMonthKey={minMonth}
-            maxMonthKey={maxMonth}
-            onMonthChange={(next) => {
-              setNavMonth(next);
-              // Drop the explicit pick so the new month falls back to its own
-              // first bookable day, rather than showing a column of times from
-              // a month that is no longer on screen.
-              setPickedDay(null);
-            }}
-            onSelectDay={setPickedDay}
-          />
-
-          <section
-            aria-label={bp.timesRegion}
-            className="bp-daycol flex min-w-0 flex-col gap-3"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-muted-foreground">
-                {dayColumn ? t(bp.timesOn, { day: dayColumn.heading }) : bp.timesRegion}
-              </h2>
-              {/* 12h / 24h. A two-button radio group, not a switch: neither
-                  format is "on", and a switch would have to pick one to be the
-                  default state of. A radio group is one tab stop with arrows
-                  moving between the options (APG), so the roving tabindex and
-                  the arrow handler are part of the role, not decoration. */}
-              <div
-                role="radiogroup"
-                aria-label={bp.timeFormat}
-                className="flex rounded-md border border-border p-0.5 text-xs"
-                onKeyDown={(e) => {
-                  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-                  e.preventDefault();
-                  const group = e.currentTarget;
-                  setHour12((v) => !v);
-                  // Focus follows the selection, or it would sit on the button
-                  // that just became `tabIndex={-1}` and the next Tab would
-                  // leave from nowhere.
-                  requestAnimationFrame(() =>
-                    group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus(),
-                  );
-                }}
-              >
-                {([true, false] as const).map((is12) => (
-                  <button
-                    key={String(is12)}
-                    type="button"
-                    role="radio"
-                    aria-checked={hour12 === is12}
-                    tabIndex={hour12 === is12 ? 0 : -1}
-                    onClick={() => setHour12(is12)}
-                    // 44px, like every other control on the page: a segmented
-                    // toggle is a touch target too, and this one sits at the
-                    // top of the column a thumb reaches for first.
-                    className={`min-h-[44px] rounded-sm px-3 font-medium ${
-                      hour12 === is12 ? '' : 'text-muted-foreground'
-                    }`}
-                    // The accent and ITS OWN contrast colour, not the product's
-                    // `accent-foreground`: on a branded page those are two
-                    // different palettes, and pairing one's fill with the
-                    // other's letters is how a host's accent ends up unreadable.
-                    style={
-                      hour12 === is12
-                        ? { background: 'var(--accent)', color: 'var(--accent-contrast)' }
-                        : undefined
-                    }
-                  >
-                    {is12 ? bp.hour12 : bp.hour24}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {!dayColumn ? (
-              <p className="text-sm text-muted-foreground">
-                {selectedDay ? bp.noTimesOnDay : bp.pickADay}
-              </p>
-            ) : (
-              <div className="bp-daycol-scroll">
-                <div className="bp-slots">
-                  {dayColumn.slots.map((s) => {
-                    const isGroup = (s.capacity ?? 1) > 1;
-                    const full = isGroup && (s.spotsLeft ?? 1) <= 0;
-                    return (
-                      <button
-                        key={s.startUtc}
-                        type="button"
-                        onClick={() => pick(s)}
-                        disabled={full}
-                        className="bp-slot text-sm disabled:opacity-50"
-                      >
-                        <span className="whitespace-nowrap">{s.label}</span>
-                        {isGroup ? (
-                          <span className="whitespace-nowrap text-xs text-muted-foreground">
-                            {full ? m.full : t(m.seatsLeft, { n: s.spotsLeft ?? 0 })}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </div>
+  // --- Choosing a time: the event, the month and the day's times -----------
+  return stage(
+    <ChoosingFrame
+      panel={panel}
+      empty={
+        days.length === 0 ? (
+          // No calendar at all when the page has no times to put in one: an
+          // empty month of greyed-out days is a worse answer than the sentence
+          // that says why.
+          <p className="bp-muted bp-empty">{emptyCopy}</p>
+        ) : undefined
+      }
+      month={
+        <MonthCalendar
+          m={messages}
+          monthKey={month}
+          availableDayKeys={availableDayKeys}
+          todayKey={todayKey}
+          selectedDayKey={selectedDay}
+          locale={locale}
+          weekStartsOn={weekStartsOn}
+          minMonthKey={minMonth}
+          maxMonthKey={maxMonth}
+          onMonthChange={(next) => {
+            setNavMonth(next);
+            // Drop the explicit pick so the new month falls back to its own
+            // first bookable day, rather than showing times from a month that
+            // is no longer on screen.
+            setPickedDay(null);
+          }}
+          onSelectDay={chooseDay}
+        />
+      }
+      times={
+        <TimesColumn
+          m={messages}
+          dayTitle={dayColumn ? t(bp.timesOn, { day: dayColumn.heading }) : null}
+          slots={dayColumn?.slots ?? []}
+          emptyText={selectedDay ? bp.noTimesOnDay : bp.pickADay}
+          onPick={pick}
+          onBack={backToCalendar}
+          hour12={hour12}
+          onHour12Change={setHour12}
+          timeZoneControl={timeZoneControl}
+          titleRef={timesTitleRef}
+        />
+      }
+    />,
   );
 }

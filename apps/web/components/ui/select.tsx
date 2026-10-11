@@ -69,6 +69,8 @@ export function Select({
   locale = 'en',
   searchPlaceholder,
   noResultsText,
+  panelClassName,
+  backdrop = false,
 }: {
   /** The selected option's value. */
   value: string;
@@ -95,6 +97,16 @@ export function Select({
    */
   searchPlaceholder?: string;
   noResultsText?: string;
+  /** Applied to the open panel. For a trigger narrower than its options (a
+   *  quiet inline control), so the panel can be wider than what it hangs from. */
+  panelClassName?: string;
+  /**
+   * Dim the page behind the open panel below the `md` width. A long list on a
+   * phone covers most of the screen, and without a backdrop it reads as part
+   * of the page under it rather than as something on top that a tap outside
+   * dismisses. Off by default: no admin call site wants it.
+   */
+  backdrop?: boolean;
 }) {
   const generic = getMessages(locale).select;
   const m = {
@@ -258,9 +270,20 @@ export function Select({
         </svg>
       </button>
 
+      {open && backdrop ? (
+        // A tap on it is a tap outside: the panel closes, as it would anywhere.
+        <div
+          aria-hidden
+          className="fixed inset-0 z-40 bg-foreground/30 md:hidden"
+          onMouseDown={() => setOpen(false)}
+        />
+      ) : null}
       {open ? (
         <div
-          className="absolute left-0 right-0 top-full z-50 mt-tight flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg"
+          className={cn(
+            'absolute left-0 right-0 top-full z-50 mt-tight flex flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg',
+            panelClassName,
+          )}
           onKeyDown={onKeyDown}
         >
           {searchable ? (
