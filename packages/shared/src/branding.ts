@@ -517,6 +517,50 @@ export function defaultBranding(displayName: string, avatarUrl: string | null = 
   };
 }
 
+// --- What a NEW host is born with -----------------------------------------
+
+/**
+ * The accent a host is born with: ink, the primary of the dForms palette. On
+ * the light canvas a new host is also born with, it is the primary button, the
+ * selected day and the selected time, and nothing on the page is louder than it.
+ */
+export const NEW_HOST_ACCENT = '#1a1a1c';
+
+/** The canvas a host is born with: paper, where the whole category renders. */
+export const NEW_HOST_THEME: BrandCanvas = 'light';
+
+/**
+ * Give a host being CREATED the dForms look, written into their stored branding.
+ *
+ * The distinction this exists for: an ABSENT value and a STORED value are
+ * different things, and only the stored one is safe to change. Every host who
+ * signed up before this stored no accent and no canvas, and the renderer reads
+ * that as the dark, lime page they have been showing invitees all along
+ * (`DEFAULT_ACCENT` and `DEFAULT_BOOKING_THEME` above). Moving what "absent"
+ * means would restyle all of them overnight, so it does not move. A host born
+ * now is written the new look instead, so it is a fact about THEIR config and
+ * the old look stays a fact about everyone else's.
+ *
+ * Only what the caller left out is filled, never what it chose:
+ *
+ *  - Accent: written whenever it is absent.
+ *  - Canvas: written only when the caller named neither an accent nor a canvas.
+ *    A caller that sent an accent alone chose it against the dark default it
+ *    used to get; putting it on paper now could make it illegible.
+ *
+ * Callers are the places a host is made from nothing: the two sign-in providers'
+ * first-login provisioning and the member invite. Nothing that RENDERS calls it.
+ */
+export function withNewHostBranding(
+  current: { brandColor?: string | null; style?: Record<string, unknown> | null } = {},
+): { brandColor: string; style: Record<string, unknown> } {
+  const style: Record<string, unknown> = { ...(current.style ?? {}) };
+  const hasAccent = typeof current.brandColor === 'string' && current.brandColor.trim() !== '';
+  const hasTheme = style.theme === 'light' || style.theme === 'dark';
+  if (!hasAccent && !hasTheme) style.theme = NEW_HOST_THEME;
+  return { brandColor: hasAccent ? current.brandColor! : NEW_HOST_ACCENT, style };
+}
+
 export function monogram(name: string): string {
   return (name.trim().charAt(0) || '?').toUpperCase();
 }

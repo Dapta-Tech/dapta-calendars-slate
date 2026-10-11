@@ -86,6 +86,26 @@ describe('LocalAuthProvider — email-aware dev login', () => {
     expect(again).toEqual(p);
   });
 
+  it('a JIT-provisioned host is born with the new booking page look; the seeded one keeps theirs', async () => {
+    const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
+    const p = await dev.resolveHost(reqWith({ 'x-slate-email': 'riley@example.com' }));
+    const row = await db.get<{ brand_color: string | null; booking_page_style: unknown }>(
+      sql`SELECT brand_color, booking_page_style FROM member WHERE id = ${p.memberId}`,
+    );
+    expect(row!.brand_color).toBe('#1a1a1c');
+    const style =
+      typeof row!.booking_page_style === 'string'
+        ? JSON.parse(row!.booking_page_style)
+        : row!.booking_page_style;
+    expect(style).toEqual({ theme: 'light' });
+    // Logging in again changes nothing: the look is written at birth only.
+    await dev.resolveHost(reqWith({ 'x-slate-email': 'riley@example.com' }));
+    const seeded = await db.get<{ brand_color: string | null }>(
+      sql`SELECT brand_color FROM member WHERE email = 'alex@example.com'`,
+    );
+    expect(seeded!.brand_color).toBe('#cbe84f');
+  });
+
   it('two DIFFERENT emails get ISOLATED accounts', async () => {
     const dev = new LocalAuthProvider(db, { NODE_ENV: 'development' });
     const a = await dev.resolveHost(reqWith({ 'x-slate-email': 'alice@a.example' }));

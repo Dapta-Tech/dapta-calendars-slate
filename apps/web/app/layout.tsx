@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { Figtree, IBM_Plex_Mono } from 'next/font/google';
-import 'primeicons/primeicons.css';
+import { Figtree } from 'next/font/google';
+import './icons.css';
 import { ThemeStamp } from '@/components/theme-stamp';
-import { resolveDocumentTheme } from '@/lib/theme.server';
+import { isPublicDocument, resolveDocumentTheme } from '@/lib/theme.server';
 import './globals.css';
 
 /**
@@ -24,26 +24,6 @@ const figtree = Figtree({
   subsets: ['latin'],
   variable: '--font-figtree',
   display: 'swap',
-});
-
-/**
- * IBM Plex Mono — the voice for things you copy rather than read.
- *
- * Its whole job is the fixed advance and the unambiguous `l`/`1`/`O`/`0`: public
- * links, handles, and the interpolation tokens in the notification template
- * editor, which already asked for `font-mono` and until now got whatever the
- * browser happened to default to. Numbers are NOT one of those — a stat is glanced
- * at, and monospacing one only makes it read as a code sample.
- *
- * Not preloaded: it paints a handful of short strings rather than page furniture,
- * so most routes never need it and the ones that do can swap.
- */
-const plexMono = IBM_Plex_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-plex-mono',
-  display: 'swap',
-  preload: false,
 });
 
 // Customer-facing name comes from the deployment (NEXT_PUBLIC_PRODUCT_NAME,
@@ -82,13 +62,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   //
   // `suppressHydrationWarning` stays: `ThemeToggle` mutates this exact attribute
   // on the client so the flip is a repaint rather than a navigation.
-  const theme = await resolveDocumentTheme();
+  const [theme, isPublic] = await Promise.all([resolveDocumentTheme(), isPublicDocument()]);
 
+  // `bp-ground` on a public document gives `<html>` and `<body>` the booking
+  // page's palette (tokens.css), so a route's skeleton, error boundary and the
+  // body behind a short page all sit on the ground the page itself paints.
+  // `ThemeStamp` and `CanvasStamp` keep it right across soft navigations.
   return (
     <html
       lang="en"
       data-theme={theme}
-      className={`${figtree.variable} ${plexMono.variable}`}
+      className={isPublic ? `${figtree.variable} bp-ground` : figtree.variable}
       suppressHydrationWarning
     >
       <body className="min-h-dvh bg-background text-foreground">

@@ -133,7 +133,13 @@ export default async function TeamPage({
     // no shell there is nothing else to carry the answer up to `<html>` on a
     // soft navigation. A team holds no stored branding, so the answer is the
     // ADR default — and in embed mode the branch above gets it from the shell.
-    <div className="bp-viewport">
+    //
+    // `bp-ground` + the stamped canvas give it the booking page's palette
+    // (tokens.css) rather than the product's, like every other public route.
+    <div
+      data-theme={DEFAULT_BOOKING_CANVAS}
+      className="bp-viewport bp-ground bg-background text-foreground"
+    >
       <CanvasStamp canvas={DEFAULT_BOOKING_CANVAS} />
       {body}
     </div>

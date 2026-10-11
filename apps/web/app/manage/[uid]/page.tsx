@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { notFound } from 'next/navigation';
 import { formatBookingLocation, formatSlotDateTime, getMessages, t } from '@slate/shared';
 import { getManageView, getAvailability, getRescheduleAvailability } from '@/lib/api';
@@ -25,9 +26,10 @@ export const metadata: Metadata = {
 async function ManageLinkInvalid() {
   const locale = await publicLocale();
   const m = getMessages(locale).manage;
+  const canvas = await resolveDocumentTheme();
   return (
-    <>
-      <CanvasStamp canvas={await resolveDocumentTheme()} />
+    <BookingGround canvas={canvas}>
+      <CanvasStamp canvas={canvas} />
       <main className="mx-auto max-w-xl px-6 py-12">
         <h1 className="mb-2 text-2xl font-semibold tracking-tight">{m.linkInvalidTitle}</h1>
         <p className="rounded-md border border-border bg-card p-4 text-muted-foreground">
@@ -35,7 +37,22 @@ async function ManageLinkInvalid() {
         </p>
       </main>
       <MadeWithBadge locale={locale} />
-    </>
+    </BookingGround>
+  );
+}
+
+/**
+ * The page's ground. The manage page is reached from a booking email and carries
+ * no host branding, but it is still part of the invitee's journey, so it paints
+ * the BOOKING ground (tokens.css, `.bp-ground`) rather than the product's: the
+ * product's palette can change without moving it. `min-h-dvh` so the ground
+ * reaches the bottom of a short page instead of stopping under the badge.
+ */
+function BookingGround({ canvas, children }: { canvas: string; children: ReactNode }) {
+  return (
+    <div data-theme={canvas} className="bp-ground min-h-dvh bg-background text-foreground">
+      {children}
+    </div>
   );
 }
 
@@ -125,11 +142,12 @@ export default async function ManagePage({
   const isPast = startUtc !== null && new Date(startUtc).getTime() <= now.getTime();
   const canManage = booking.status === 'accepted' && startUtc !== null && !isPast;
 
+  const canvas = await resolveDocumentTheme();
   return (
-    <>
-      {/* This route renders no `BrandedShell`, so it declares its own canvas —
+    <BookingGround canvas={canvas}>
+      {/* This route renders no `BrandedShell`, so it declares its own canvas:
           the ADR default, because a booking holds no branding of its own. */}
-      <CanvasStamp canvas={await resolveDocumentTheme()} />
+      <CanvasStamp canvas={canvas} />
       <main className="mx-auto max-w-xl px-6 py-12">
         <header className="mb-6 flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">{booking.title}</h1>
@@ -174,6 +192,6 @@ export default async function ManagePage({
       )}
       </main>
       <MadeWithBadge locale={locale} accountCode={booking.reschedule?.accountCode} />
-    </>
+    </BookingGround>
   );
 }

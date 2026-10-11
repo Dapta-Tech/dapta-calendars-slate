@@ -3,9 +3,10 @@
 import { cn } from '@/lib/cn';
 
 /**
- * shadcn-style Switch — a token-driven on/off toggle (lime track when on,
- * muted when off; no raw hex, both themes — Design Quality Bar §11). Renders a
- * real `role="switch"` button so screen readers announce the state.
+ * shadcn-style Switch: a token-driven on/off toggle (Signal Green track when on,
+ * one of the four jobs the signal is rationed to; muted when off; no raw hex,
+ * both themes, Design Quality Bar §11). Renders a real `role="switch"` button
+ * so screen readers announce the state.
  *
  * A2 (#112): the TRACK is 22px, which is what a switch should look like, and
  * was also the whole touch target — half the 44px bar. The `after:` overlay
@@ -38,7 +39,7 @@ export function Switch({
         'relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors',
         "after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-['']",
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        checked ? 'bg-primary' : 'bg-muted-foreground/30',
+        checked ? 'bg-signal' : 'bg-muted-foreground/30',
         disabled && 'cursor-not-allowed opacity-50',
         className,
       )}

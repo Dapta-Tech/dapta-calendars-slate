@@ -1,8 +1,9 @@
 import { getMessages } from '@slate/shared';
 import { signupHref } from '@/lib/growth';
+import { BrandMark, IS_DAPTA_BRAND } from '@/components/brand/brand';
 
 /**
- * "Made with Dapta Calendars" — the growth-loop attribution on every public
+ * "Made with Dapta Calendars": the growth-loop attribution on every public
  * surface (R11). A discreet centered footer pill: semantic tokens only, so it
  * follows dark/light and any host branding without competing with it. Renders
  * only when the deployment configures NEXT_PUBLIC_SIGNUP_URL, and never when
@@ -30,13 +31,12 @@ export function MadeWithBadge({
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
       >
-        <img
-          src="/dapta-mark.png"
-          alt=""
-          width={14}
-          height={14}
-          className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-contain"
-        />
+        {/* The drawn mark, not a pasted PNG: it is ink in `currentColor`, so it
+            follows the badge's own text colour on either canvas. Only on a
+            Dapta build: the PNG it replaces was Dapta's artwork on every fork
+            that set a signup URL, and the brand gate's letter chip is a heading
+            mark, too heavy for a 12px footer line. A fork's badge is its words. */}
+        {IS_DAPTA_BRAND ? <BrandMark className="h-3.5 w-auto shrink-0" /> : null}
         <span>{m.madeWith}</span>
         <span className="sr-only">(opens in a new tab)</span>
       </a>

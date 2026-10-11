@@ -75,6 +75,9 @@ export function ThemeStamp() {
     previous.current = pathname;
 
     if (isProductPath(pathname)) {
+      // Off the booking ground first: the product palette is the one that
+      // answers to the cookie (tokens.css, `.bp-ground`).
+      document.documentElement.classList.remove('bp-ground');
       const want = cookieTheme() ?? PRODUCT_THEME_DEFAULT;
       if (document.documentElement.dataset.theme !== want) {
         document.documentElement.dataset.theme = want;
@@ -86,6 +89,7 @@ export function ThemeStamp() {
     // just rode in on a `<Link>` — the page's own canvas is `CanvasStamp`'s to
     // answer. The public branch reads no cookie at all, which is the point.
     if (from === null || !isProductPath(from)) return;
+    document.documentElement.classList.add('bp-ground');
     if (document.documentElement.dataset.theme !== DEFAULT_BOOKING_CANVAS) {
       document.documentElement.dataset.theme = DEFAULT_BOOKING_CANVAS;
     }

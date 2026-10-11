@@ -21,7 +21,8 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { deriveUniqueHandle, insertAccountWithShortCode, sql } from '@slate/db';
+import { deriveUniqueHandle, insertAccountWithShortCode, jsonParam, sql } from '@slate/db';
+import { withNewHostBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
@@ -158,9 +159,14 @@ export class WorkOsAuthProvider implements AuthProvider {
     // Auto-handle at creation (short-links §3): the "no handle" state is dead —
     // every member gets `fgomez` (collision → `fgomez2`…) and can rename later.
     const handle = await deriveUniqueHandle(this.db, accountId, displayName, email);
+    // Born with the new look (`withNewHostBranding`). In the INSERT rather than
+    // a follow-up UPDATE: on a conflict the existing row is left exactly as it
+    // is, branding included.
+    const born = withNewHostBranding();
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, external_id, email, display_name, handle, role, created_at)
-          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${handle}, ${role}, ${Date.now()})
+      sql`INSERT INTO member (id, account_id, external_id, email, display_name, handle, role, brand_color, booking_page_style, created_at)
+          VALUES (${id}, ${accountId}, ${sub}, ${email}, ${displayName}, ${handle}, ${role},
+            ${born.brandColor}, ${jsonParam(this.db, born.style)}, ${Date.now()})
           ON CONFLICT (account_id, external_id) DO NOTHING`,
     );
     const row = await this.db.get<{ id: string }>(

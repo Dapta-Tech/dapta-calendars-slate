@@ -3,20 +3,19 @@
  *
  * This spec parses `src/tokens.css` itself rather than a TypeScript mirror of the
  * palette, because a mirror is a second source of truth for colour and the whole
- * point of the sheet is that there is one. It resolves the `--acc-h/--acc-s/--acc-l`
- * channels into their `hsl()` compositions and composites the `rgba()` hairline and
+ * point of the sheet is that there is one. It composites the `rgba()` hairline and
  * input edge over the grounds they actually sit on, so what is measured is the
  * colour a viewer sees and not the string a developer typed.
  *
- * It exists because the light theme is authored, tested and — until slice T — not
- * reachable in the running app. Nobody can catch a 1.3:1 link by looking at a
- * screen that never renders it, and the failure mode of "simplify the light block
- * back into a tonal mirror of the dark one" is invisible until it ships. Here it is
- * pure arithmetic, so it is caught for free.
+ * Four palettes are measured: the product's dark and light themes (plus the
+ * `prefers-color-scheme` mirror of light), and the two BOOKING GROUNDS a host's
+ * page paints on. The booking grounds are also pinned value for value, because
+ * their job is to never move (see "The booking page is not the product" in the
+ * sheet's header).
  *
  * The ratios use the engine's own `contrastRatio`, so the sheet and the engine can
  * never disagree about what 4.5:1 means. Note that `contrastRatio` rounds to
- * NEAREST: that slack is accepted here (see below) and nowhere that decides —
+ * NEAREST: that slack is accepted here (see below) and nowhere that decides;
  * `accentCanvasContrast` truncates precisely because the studio acts on it.
  */
 import { readFileSync } from 'node:fs';
@@ -26,24 +25,18 @@ import { contrastRatio } from './branding';
 /* `contrastRatio` rounds to one decimal (it exists to drive a UI readout), so a
    true 4.45:1 reports as 4.5 and clears this bar. That 1% of slack is accepted
    rather than worked around: using the engine's own function is the point of this
-   spec — the sheet and the engine must agree on what a ratio is — and every value
-   the sheet actually ships sits well clear of the boundary (the tightest is
-   4.7:1). If a future token lands inside 0.05 of a threshold, tighten the token
-   rather than the assertion. */
-const AA = 4.5; // WCAG 1.4.3 — body text.
-const NON_TEXT = 3; // WCAG 1.4.11 — anything that identifies a control or its state.
+   spec, and every value the sheet ships sits clear of the boundary. If a future
+   token lands inside 0.05 of a threshold, tighten the token rather than the
+   assertion. */
+const AA = 4.5; // WCAG 1.4.3: body text.
+const NON_TEXT = 3; // WCAG 1.4.11: anything that identifies a control or its state.
 
 const TOKENS_CSS = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8');
 
 /* The type scale and radius ladder are NOT asserted here. They are mapped in the
    web app's `@theme inline` block, and reading that file from a package spec would
-   make `@slate/shared` depend on `apps/web` — the one direction ARCHITECTURE.md
-   forbids outright ("nothing depends on an app"), test-only file read or not. The
-   app has no test runner and this slice does not stand one up, so the scale and the
-   ladder are verified by hand instead (see the QA checklist on the pull request).
-   The colour law stays here, because it is the part that bites silently: a scale
-   whose steps cross is visible the moment anyone looks at the screen, and a 1.3:1
-   link on a theme nobody has rendered yet is not. */
+   make `@slate/shared` depend on `apps/web`, the one direction ARCHITECTURE.md
+   forbids outright ("nothing depends on an app"). */
 
 // --- CSS reading -----------------------------------------------------------
 
@@ -77,13 +70,10 @@ function declarations(body: string): Record<string, string> {
 }
 
 /**
- * The PLAIN (non-custom) property declarations in a rule body — the mirror of
- * `declarations()` above, which reads `--*` only.
- *
- * A theme block is not only its tokens. `color-scheme` is a plain property and
- * decides what the BROWSER paints for itself, so a parity check that reads
- * custom properties alone is blind to half of what a theme declares. The two
- * readers together are the whole rule.
+ * The PLAIN (non-custom) property declarations in a rule body, the mirror of
+ * `declarations()` above, which reads `--*` only. `color-scheme` is a plain
+ * property and decides what the BROWSER paints for itself, so a parity check that
+ * reads custom properties alone is blind to half of what a theme declares.
  */
 function plainDeclarations(body: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -101,16 +91,30 @@ const PREFERS_BODY = ruleBody(
   ruleBody(sheet, '@media (prefers-color-scheme: light)'),
   ":root:not([data-theme='dark'])",
 );
+const BP_DARK_BODY = ruleBody(sheet, ".bp-ground[data-theme='dark']");
+const BP_LIGHT_BODY = ruleBody(sheet, ".bp-ground[data-theme='light']");
 const BASE = declarations(BASE_BODY);
 const LIGHT = declarations(LIGHT_BODY);
 const PREFERS = declarations(PREFERS_BODY);
+const BP_DARK = declarations(BP_DARK_BODY);
+const BP_LIGHT = declarations(BP_LIGHT_BODY);
 
-/** A theme is the base declarations with that theme's overrides applied. */
-const THEMES: Record<string, Record<string, string>> = {
+/**
+ * A theme is the base declarations with that theme's overrides applied. A booking
+ * ground sits inside a document that already resolved the base, so it is the
+ * base plus its own block; the product's light block is NOT under it, because the
+ * ground redeclares every role it paints.
+ */
+const PRODUCT_THEMES: Record<string, Record<string, string>> = {
   dark: BASE,
   light: { ...BASE, ...LIGHT },
   'prefers-color-scheme: light': { ...BASE, ...PREFERS },
 };
+const BOOKING_GROUNDS: Record<string, Record<string, string>> = {
+  'booking ground, dark': { ...BASE, ...BP_DARK },
+  'booking ground, light': { ...BASE, ...BP_LIGHT },
+};
+const ALL_THEMES = { ...PRODUCT_THEMES, ...BOOKING_GROUNDS };
 
 // --- Colour resolution -----------------------------------------------------
 
@@ -155,6 +159,10 @@ function resolve(token: string, vars: Record<string, string>): Rgba {
   const value = vars[token];
   if (value === undefined) throw new Error(`token not declared: ${token}`);
 
+  // A token that is another token (`--focus: var(--primary-edge)`) paints as it.
+  const alias = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value);
+  if (alias) return resolve(alias[1], vars);
+
   const hex = /^#([0-9a-f]{6})$/i.exec(value);
   if (hex) {
     const n = parseInt(hex[1], 16);
@@ -191,7 +199,7 @@ function toHex({ r, g, b }: Rgba): string {
   return `#${part(r)}${part(g)}${part(b)}`;
 }
 
-/** A token as it actually paints on a ground — translucency composited away. */
+/** A token as it actually paints on a ground, translucency composited away. */
 function over(token: string, ground: string, vars: Record<string, string>): string {
   const fg = resolve(token, vars);
   const bg = resolve(ground, vars);
@@ -211,7 +219,7 @@ function ratio(token: string, ground: string, vars: Record<string, string>): num
 
 // --- The law ---------------------------------------------------------------
 
-describe.each(Object.entries(THEMES))('token sheet contrast law — %s', (_theme, vars) => {
+describe.each(Object.entries(ALL_THEMES))('token sheet contrast law: %s', (_theme, vars) => {
   it('body text clears AA on its own ground', () => {
     expect(ratio('--foreground', '--background', vars)).toBeGreaterThanOrEqual(AA);
     expect(ratio('--card-foreground', '--card', vars)).toBeGreaterThanOrEqual(AA);
@@ -226,29 +234,31 @@ describe.each(Object.entries(THEMES))('token sheet contrast law — %s', (_theme
 
   it('the faint tier clears AA on page, card and the raised surface', () => {
     // `--muted` is the ground this tier lands on most often: it is the fill of
-    // every badge and chip, and it is where the Forms value was re-authored.
+    // every badge and chip.
     for (const ground of ['--background', '--card', '--muted']) {
       expect(ratio('--faint', ground, vars)).toBeGreaterThanOrEqual(AA);
     }
   });
 
-  it('the accent as LETTERS clears AA on page and card', () => {
-    // 88 `text-primary` call sites resolve here. This is the assertion that fails
-    // loudest if someone flattens the light block back into a mirror of the dark.
+  it('the primary as LETTERS clears AA on page and card', () => {
     expect(ratio('--primary-ink', '--background', vars)).toBeGreaterThanOrEqual(AA);
     expect(ratio('--primary-ink', '--card', vars)).toBeGreaterThanOrEqual(AA);
   });
 
-  it('the accent as LINES clears 3:1 on page, card and the raised surface', () => {
-    // The muted wash matters: a selected nav row sits inside it, not on the page
-    // behind it, and that is the one ground an earlier value failed on.
+  it('the primary as LINES clears 3:1 on page, card and the raised surface', () => {
     for (const ground of ['--background', '--card', '--muted']) {
       expect(ratio('--primary-edge', ground, vars)).toBeGreaterThanOrEqual(NON_TEXT);
     }
   });
 
-  it('the accent fill carries its own label at AA', () => {
+  it('the primary fill carries its own label at AA', () => {
     expect(ratio('--primary-foreground', '--primary', vars)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it('the focus ring clears 3:1 on page, card and the raised surface', () => {
+    for (const ground of ['--background', '--card', '--muted']) {
+      expect(ratio('--focus', ground, vars)).toBeGreaterThanOrEqual(NON_TEXT);
+    }
   });
 
   it('the destructive voice clears AA everywhere it paints', () => {
@@ -261,15 +271,33 @@ describe.each(Object.entries(THEMES))('token sheet contrast law — %s', (_theme
   it('the form-control edge clears 3:1 over card and over page', () => {
     // The decorative hairline is deliberately NOT asked to carry this; a text
     // field's border is the only thing saying "you can type here", which is the
-    // WCAG 1.4.11 case. `--input` is why it stopped being the same value.
+    // WCAG 1.4.11 case. `--input` is why it is not the same value.
     expect(ratio('--input', '--card', vars)).toBeGreaterThanOrEqual(NON_TEXT);
     expect(ratio('--input', '--background', vars)).toBeGreaterThanOrEqual(NON_TEXT);
   });
 
   it('the constant brand tile carries its foreground at AA', () => {
-    // This pair does not flip with the theme — see `--brand-ink` in tokens.css —
-    // so it has to clear on both.
     expect(ratio('--brand-ink-foreground', '--brand-ink', vars)).toBeGreaterThanOrEqual(AA);
+  });
+});
+
+describe.each(Object.entries(PRODUCT_THEMES))('the signal and the data channel: %s', (_theme, vars) => {
+  it('the signal fill carries ink at AA, and never white', () => {
+    expect(ratio('--signal-foreground', '--signal', vars)).toBeGreaterThanOrEqual(AA);
+    expect(contrastRatio('#ffffff', over('--signal', '--signal', vars))).toBeLessThan(AA);
+  });
+
+  it('the signal edge clears 3:1 on page and card', () => {
+    for (const ground of ['--background', '--card']) {
+      expect(ratio('--signal-edge', ground, vars)).toBeGreaterThanOrEqual(NON_TEXT);
+    }
+  });
+
+  it('the signal and warning as LETTERS clear AA on page and card', () => {
+    for (const ground of ['--background', '--card']) {
+      expect(ratio('--signal-ink', ground, vars)).toBeGreaterThanOrEqual(AA);
+      expect(ratio('--warning-ink', ground, vars)).toBeGreaterThanOrEqual(AA);
+    }
   });
 });
 
@@ -279,60 +307,139 @@ describe('token sheet structure', () => {
     // of them is the hardest kind of theme bug to notice by eye.
     expect(Object.keys(PREFERS).sort()).toEqual(Object.keys(LIGHT).sort());
     expect(PREFERS).toEqual(LIGHT);
-    // Plain properties too, not just tokens. `color-scheme` is the one the sheet
-    // declares today, and it slipped past this check while it read `--*` alone —
-    // so the check now covers the whole declaration, not the instance that
-    // exposed the gap.
     expect(plainDeclarations(PREFERS_BODY)).toEqual(plainDeclarations(LIGHT_BODY));
   });
 
   it('every theme block tells the browser which half it is on', () => {
     // `color-scheme` is the one part of a theme no token can carry: it is what
-    // the USER AGENT reads to paint the things it owns — `<select>` popups, the
-    // internals of `<input type='date'>`, autofill, the default scrollbar, the
-    // canvas behind an overscroll bounce. A theme block without it renders the
-    // browser's own chrome for the OTHER palette.
-    //
-    // Asserted per block by value, because the parity check above only proves
-    // the two LIGHT blocks agree with each other — it would be equally happy if
-    // both said `dark`.
+    // the USER AGENT reads to paint the things it owns. Asserted per block by
+    // value, because the parity check above would be equally happy if both
+    // light blocks said `dark`.
     expect(plainDeclarations(BASE_BODY)['color-scheme']).toBe('dark');
     expect(plainDeclarations(LIGHT_BODY)['color-scheme']).toBe('light');
     expect(plainDeclarations(PREFERS_BODY)['color-scheme']).toBe('light');
+    expect(plainDeclarations(BP_DARK_BODY)['color-scheme']).toBe('dark');
+    expect(plainDeclarations(BP_LIGHT_BODY)['color-scheme']).toBe('light');
   });
 
-  it('the accent is one value on dark, so the rim is invisible there', () => {
-    // The whole ink/edge machinery is a no-op on the theme users see today. If
-    // this ever fails, the dark theme has grown a visible rim on every fill.
-    expect(toHex(resolve('--primary-ink', BASE))).toBe(toHex(resolve('--primary', BASE)));
-    expect(toHex(resolve('--primary-edge', BASE))).toBe(toHex(resolve('--primary', BASE)));
-  });
-
-  it('the accent is composed from channels, never written as a literal', () => {
-    for (const token of ['--primary', '--primary-ink', '--primary-edge']) {
-      expect(BASE[token]).toMatch(/^hsl\(/);
+  it('ink does the work: on both product themes the primary IS the ink of that theme', () => {
+    // The primary action and the selected state are the text colour, not a brand
+    // colour. If this fails, a saturated colour has been put back on the primary.
+    for (const vars of Object.values(PRODUCT_THEMES)) {
+      expect(toHex(resolve('--primary', vars))).toBe(toHex(resolve('--foreground', vars)));
+      expect(toHex(resolve('--primary-ink', vars))).toBe(toHex(resolve('--primary', vars)));
+      expect(toHex(resolve('--primary-edge', vars))).toBe(toHex(resolve('--primary', vars)));
     }
-    expect(BASE['--acc-h']).toBeDefined();
-    expect(BASE['--acc-s']).toBeDefined();
-    expect(BASE['--acc-l']).toBeDefined();
+  });
+
+  it('green is rationed to one token family: no other product token is saturated', () => {
+    // Saturation in HSL terms, above which a colour reads as a hue rather than a
+    // grey. The signal, the warning and the destructive red are the only ones
+    // allowed past it; anything else that crosses is a new colour on the page.
+    const ALLOWED = new Set([
+      '--signal',
+      '--signal-edge',
+      '--signal-ink',
+      '--focus',
+      '--ring',
+      '--warning',
+      '--warning-ink',
+      '--destructive',
+    ]);
+    for (const vars of Object.values(PRODUCT_THEMES)) {
+      for (const token of Object.keys(vars)) {
+        if (ALLOWED.has(token) || token.startsWith('--sp-') || token.startsWith('--radius')) continue;
+        const rgb = resolve(token, vars);
+        const max = Math.max(rgb.r, rgb.g, rgb.b);
+        const min = Math.min(rgb.r, rgb.g, rgb.b);
+        expect(max - min, `${token} is saturated`).toBeLessThan(24);
+      }
+    }
+  });
+
+  it('the booking ground keeps its focus ring on the host accent', () => {
+    expect(BP_DARK['--focus']).toBe('var(--primary-edge)');
+    expect(BP_LIGHT['--focus']).toBe('var(--primary-edge)');
+  });
+});
+
+/* The booking ground, pinned. These are the values every live booking page was
+   designed against before the dForms language, and the public-markup snapshots
+   only prove the MARKUP did not move: colour lives here. A change to any value in
+   these two blocks restyles live pages, so it has to change this literal too, in
+   a PR that says so. */
+describe('the booking ground does not move', () => {
+  it('dark', () => {
+    expect(BP_DARK).toEqual({
+      '--background': '#0a0c0e',
+      '--foreground': '#e8edf2',
+      '--card': '#101418',
+      '--card-foreground': '#e8edf2',
+      '--popover': '#0d1013',
+      '--popover-foreground': '#e8edf2',
+      '--primary': 'hsl(68 76% 61%)',
+      '--primary-foreground': '#0c0e07',
+      '--primary-edge': 'hsl(68 76% 61%)',
+      '--primary-ink': 'hsl(68 76% 61%)',
+      '--secondary': '#7d8fa1',
+      '--secondary-foreground': '#0a0c0e',
+      '--muted': '#161c22',
+      '--muted-foreground': '#93a1ae',
+      '--accent': '#161c22',
+      '--accent-foreground': '#e8edf2',
+      '--faint': '#758592',
+      '--destructive': '#ff3b30',
+      '--destructive-foreground': '#0a0c0e',
+      '--border': 'rgba(148, 170, 190, 0.16)',
+      '--input': 'rgba(148, 170, 190, 0.58)',
+      '--ring': 'hsl(68 76% 61% / 0.45)',
+      '--focus': 'var(--primary-edge)',
+      '--radius': '0.625rem',
+      '--radius-monitor': '16px',
+    });
+  });
+
+  it('light', () => {
+    expect(BP_LIGHT).toEqual({
+      '--background': '#f4f6f8',
+      '--foreground': '#0d1013',
+      '--card': '#ffffff',
+      '--card-foreground': '#0d1013',
+      '--popover': '#ffffff',
+      '--popover-foreground': '#0d1013',
+      '--primary': 'hsl(68 76% 61%)',
+      '--primary-foreground': '#0c0e07',
+      '--primary-edge': 'hsl(68 76% 28%)',
+      '--primary-ink': 'hsl(68 76% 26%)',
+      '--secondary': '#5a6875',
+      '--secondary-foreground': '#ffffff',
+      '--muted': '#dfe4ea',
+      '--muted-foreground': '#55636f',
+      '--accent': '#dfe4ea',
+      '--accent-foreground': '#0d1013',
+      '--faint': '#586470',
+      '--destructive': '#c2261c',
+      '--destructive-foreground': '#ffffff',
+      '--border': 'rgba(20, 32, 44, 0.22)',
+      '--input': 'rgba(20, 32, 44, 0.5)',
+      '--ring': 'hsl(68 76% 28%)',
+      '--focus': 'var(--primary-edge)',
+      '--radius': '0.625rem',
+      '--radius-monitor': '16px',
+    });
   });
 });
 
 // --- The law, on translucent grounds ---------------------------------------
 
-/* A2 (#112). Everything above measures a SOLID token on a SOLID ground. The admin
-   is not built that way: a status pill is `bg-primary/10` under `text-primary`, an
+/* Everything above measures a SOLID token on a SOLID ground. The admin is not
+   built that way: a status chip is `bg-signal/20` under `text-foreground`, an
    error banner is `bg-destructive/10` under `text-destructive`, a control strip is
-   `bg-muted/40` under `text-muted-foreground`, and a connection's controls sit on
-   `bg-background/60` over the card. Tailwind's `/N` modifier makes each of those a
-   DIFFERENT colour from the token it names, and none of them was ever measured.
+   `bg-muted/40` under `text-muted-foreground`. Tailwind's `/N` modifier makes each
+   of those a DIFFERENT colour from the token it names, so each is measured here.
 
-   The compositing this needs already exists — `over()` is what resolves the
-   hairline and the input edge — so this is arithmetic on values that are already
-   parsed. No second source of truth for colour, no browser, no screenshot.
-
-   The alphas listed here are the ones the screens actually paint. A new wash at a
-   new opacity means a new entry here; that is the point of the list. */
+   The alphas listed are the ones the screens paint. A new wash at a new opacity
+   means a new entry here; that is the point of the list. */
 
 /** A token at `alpha`, composited over a ground token, as the viewer sees it. */
 function washOver(
@@ -352,7 +459,7 @@ function washOver(
   });
 }
 
-/** A token painted onto an already-composited hex — the second layer of a wash. */
+/** A token painted onto an already-composited hex: the second layer of a wash. */
 function onPainted(token: string, paintedHex: string, vars: Record<string, string>): string {
   const fg = resolve(token, vars);
   if (fg.a >= 1) return toHex(fg);
@@ -385,23 +492,29 @@ function ratioOnWash(
 /** Every ground a wash lands on in the admin: the page, and a card on it. */
 const WASH_GROUNDS = ['--background', '--card'] as const;
 
-describe.each(Object.entries(THEMES))('the law on translucent grounds — %s', (_theme, vars) => {
-  it('the accent wash carries accent letters at AA', () => {
+describe.each(Object.entries(PRODUCT_THEMES))('the law on translucent grounds: %s', (_theme, vars) => {
+  it('the primary wash carries primary letters at AA', () => {
     // The "invited" pill on Members, the "connected" badge on Integrations, and
     // the studio's unsaved-changes chip. `text-primary` resolves to
-    // `--primary-ink` (globals.css overrides the utility), so that is what is
-    // measured — not the fill it is sitting on.
+    // `--primary-ink` (globals.css overrides the utility), so that is measured.
     for (const ground of WASH_GROUNDS) {
       for (const alpha of [0.1, 0.15]) {
-        expect(
-          ratioOnWash('--primary-ink', ['--primary', alpha], ground, vars),
-        ).toBeGreaterThanOrEqual(AA);
+        expect(ratioOnWash('--primary-ink', ['--primary', alpha], ground, vars)).toBeGreaterThanOrEqual(AA);
+      }
+    }
+  });
+
+  it('a status chip wash carries ink at AA', () => {
+    // `StatusChip`: `bg-signal/20` (confirmed), `bg-warning/20` (pending) and
+    // `bg-muted` (cancelled), each under `text-foreground`.
+    for (const ground of WASH_GROUNDS) {
+      for (const wash of ['--signal', '--warning'] as const) {
+        expect(ratioOnWash('--foreground', [wash, 0.2], ground, vars)).toBeGreaterThanOrEqual(AA);
       }
     }
   });
 
   it('the destructive wash carries destructive letters at AA', () => {
-    // Every error banner and every failed/disabled pill in the settings cluster.
     for (const ground of WASH_GROUNDS) {
       for (const alpha of [0.05, 0.1]) {
         expect(
@@ -412,36 +525,24 @@ describe.each(Object.entries(THEMES))('the law on translucent grounds — %s', (
   });
 
   it('the raised-deck washes carry both text voices at AA', () => {
-    // `bg-muted/30|/40|/50|/60` — the connect dialog's waiting panel, the sync
-    // note, the summary strip, the empty-state medallion.
     for (const ground of WASH_GROUNDS) {
       for (const alpha of [0.3, 0.4, 0.5, 0.6]) {
         expect(
           ratioOnWash('--muted-foreground', ['--muted', alpha], ground, vars),
         ).toBeGreaterThanOrEqual(AA);
-        expect(
-          ratioOnWash('--foreground', ['--muted', alpha], ground, vars),
-        ).toBeGreaterThanOrEqual(AA);
+        expect(ratioOnWash('--foreground', ['--muted', alpha], ground, vars)).toBeGreaterThanOrEqual(AA);
       }
     }
   });
 
   it('a page wash inside a card carries both text voices at AA', () => {
-    // `bg-background/60` — the per-connection controls strip, a panel of page
-    // colour floating on the card it belongs to.
     expect(
       ratioOnWash('--muted-foreground', ['--background', 0.6], '--card', vars),
     ).toBeGreaterThanOrEqual(AA);
-    expect(
-      ratioOnWash('--foreground', ['--background', 0.6], '--card', vars),
-    ).toBeGreaterThanOrEqual(AA);
+    expect(ratioOnWash('--foreground', ['--background', 0.6], '--card', vars)).toBeGreaterThanOrEqual(AA);
   });
 
   it('a SOLID line drawn around a washed panel still clears 3:1', () => {
-    // The banner and badge borders in the settings cluster, drawn around the
-    // washes above rather than on bare card. Solid, because a TRANSLUCENT accent
-    // line does not survive paper — see the light-only assertion below, which is
-    // what forced every state-bearing border in A2's screens to drop its `/40`.
     for (const ground of WASH_GROUNDS) {
       for (const alpha of [0.05, 0.1, 0.15]) {
         expect(
@@ -455,31 +556,6 @@ describe.each(Object.entries(THEMES))('the law on translucent grounds — %s', (
   });
 });
 
-/* Deliberately OUTSIDE the per-theme block: this is a statement about the LIGHT
-   palette specifically, and running it under `describe.each` would have measured
-   light twice and dark never — dark, where the accent is already the page's
-   brightest value, would fail it and should. */
-describe('why no border in these screens is a washed accent', () => {
-  it('a washed accent line cannot carry state on paper, at any alpha the admin uses', () => {
-    // Pinned as a fact, not a preference. `border-primary/40` measures 1.6:1 on
-    // white: below the 3:1 a control-state indicator owes WCAG 1.4.11, and no
-    // alpha in the admin's range fixes it, because `--primary-edge` is already
-    // the darkest legible step of the hue. Every border in A2's screens that says
-    // something (connected, destination, failed) is therefore solid, and a washed
-    // border only ever decorates a panel whose TEXT carries the meaning.
-    //
-    // If a future palette makes this pass, the constraint has gone away and the
-    // comment above is stale — which is the failure this assertion exists to catch.
-    const light = THEMES.light!;
-    for (const alpha of [0.4, 0.5, 0.6]) {
-      expect(
-        contrastRatio(washOver('--primary-edge', alpha, '--card', light), over('--card', '--card', light)),
-      ).toBeLessThan(NON_TEXT);
-    }
-  });
-});
-
-
 /* The spacing scale (SP, #147).
 
    The header of this file explains why the type and radius scales are NOT
@@ -487,7 +563,7 @@ describe('why no border in these screens is a washed accent', () => {
    reading that from a package spec would make `@slate/shared` depend on an app.
    Spacing is the exception on both halves of that argument. It is declared in
    THIS sheet, so reading it creates no such dependency; and unlike a crossed type
-   step, an off-grid spacing step is invisible on screen — it reads as "this row
+   step, an off-grid spacing step is invisible on screen: it reads as "this row
    is slightly off" and survives every review, which is exactly how 74 distinct
    values accumulated across 17 roles before the scale existed.
 
@@ -550,7 +626,7 @@ describe('the spacing scale', () => {
     expect(pxOf('control-h')).toBeGreaterThanOrEqual(44);
   });
 
-  it('is theme-independent — every step is declared on a bare :root', () => {
+  it('is theme-independent: every step is declared on a bare :root', () => {
     // Walk the sheet tracking the selector of the block currently open. A regex
     // over "the text after the last @media" would also match a block placed at
     // the end of the file: a test that can only pass by accident.
@@ -564,7 +640,7 @@ describe('the spacing scale', () => {
         // `:root` ALONE, not a selector list that happens to contain it. The
         // base colour rule is `:root, [data-theme='dark']`, and a spacing token
         // parked there would simply not exist inside a `[data-theme='light']`
-        // subtree — the booking page's own canvas is exactly such a subtree.
+        // subtree, and the booking page's own canvas is exactly such a subtree.
         const selector = open.at(-1) ?? '';
         expect(
           selector,

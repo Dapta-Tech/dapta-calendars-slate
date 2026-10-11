@@ -766,10 +766,14 @@ export function Studio(init: StudioInit) {
               invitee's. Stamped on the frame rather than on an inner element so
               the padding around the canvas is the canvas's own ground and not a
               rim of the admin's; `overflow-x-auto` already clips it to the
-              rounded corners. */}
+              rounded corners.
+
+              `bp-ground` gives the frame the BOOKING page's palette for that
+              canvas (tokens.css), the same one `BrandedShell` resolves, so the
+              admin's own palette never leaks into the preview. */}
           <div
             data-theme={canvas}
-            className="overflow-x-auto rounded-xl border border-border bg-background p-card text-foreground sm:p-group"
+            className="bp-ground overflow-x-auto rounded-xl border border-border bg-background p-card text-foreground sm:p-group"
             style={previewVars}
           >
             <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>

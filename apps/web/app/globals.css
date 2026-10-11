@@ -1,10 +1,10 @@
 @import 'tailwindcss';
 
-/* Ported design tokens (dark-first) — the shadcn CSS-variable contract. */
+/* Design tokens: the shadcn CSS-variable contract (the dForms language). */
 @import '@slate/shared/tokens.css';
 
 /* Map the token variables into Tailwind's theme so components use semantic
-   utilities (bg-background, text-foreground, bg-primary, border-border …) —
+   utilities (bg-background, text-foreground, bg-primary, border-border …),
    never arbitrary values or raw hex. */
 @theme inline {
   --color-background: var(--background);
@@ -26,53 +26,79 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Faint Slate — the quietest legible voice (telemetry labels, hints, inactive
+  /* Faint: the quietest legible voice (telemetry labels, hints, inactive
      states). A fourth text step the old two-tone scale had no room for. */
   --color-faint: var(--faint);
   /* The constant dark tile that fixed-colour brand artwork sits on, and its
-     foreground. Same values in both themes on purpose — see `--brand-ink` in
+     foreground. Same values in both themes on purpose; see `--brand-ink` in
      tokens.css. */
   --color-brand-ink: var(--brand-ink);
   --color-brand-ink-foreground: var(--brand-ink-foreground);
 
-  /* The accent at a lightness that reads against this theme's page — the rim on an
-     accent fill, the focus outline, and the mark on a selected control.
-
-     THE RULE, in one line: the accent has three jobs and three tokens.
-       FILL    `bg-primary`          — `--primary`, the brand lime, rimmed below
-       LETTERS `text-primary`        — `--primary-ink`, overridden below
-       LINES   `border-primary-edge` — this token, used directly at the call site
-     A border is the one job that is NOT overridden here, because `border-primary`
-     is nine different classes once you count `/40 /50 /60`, `hover:`, `checked:`
-     and `focus-within:` — overriding the bare one would have silently left the
-     other eight on the raw lime, which in light mode is a 1.27:1 line. So the call
-     sites name this token themselves and every opacity variant follows for free.
-     On dark `--primary-edge` IS `--primary`, so none of this changes that theme. */
+  /* The primary has three jobs and three tokens.
+       FILL    `bg-primary`          : `--primary`, ink on light and paper on dark
+       LETTERS `text-primary`        : `--primary-ink`, overridden below
+       LINES   `border-primary-edge` : this token, named at the call site
+     In the dForms palette the three resolve to the same ink. They stay separate
+     because the call sites already name them and a branded booking surface sets
+     all three from the host's accent; and a border is the one job that cannot be
+     overridden centrally: `border-primary` is nine different classes once you
+     count `/40 /50 /60`, `hover:`, `checked:` and `focus-within:`. */
   --color-primary-edge: var(--primary-edge);
+
+  /* Signal Green: the one saturated working colour, rationed to a switch that is
+     on, progress, a confirmed booking and focus. `bg-signal` always pairs with
+     `text-signal-foreground` (ink); white on it is 1.8:1. */
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-edge: var(--signal-edge);
+  --color-signal-ink: var(--signal-ink);
+  /* The one data channel: something not settled yet (a pending booking, an
+     unsaved change). The base is for dots and washes (`bg-warning/20`); `-ink`
+     is the same hue as text. */
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  /* The navigation rail's ground, one tonal step off the page. */
+  --color-sidebar: var(--sidebar);
+  /* The ground of a WORK surface (a preview, a bulk action). */
+  --color-panel: var(--panel);
 
   /* The WHOLE radius scale is pinned here, not just `md`: overriding one step
      leaves `rounded-lg/xl/2xl` on Tailwind's defaults, so the scale contradicts
      itself — a `rounded-lg` chip ends up sharper than the `rounded-md` button next
      to it. One ladder, softest at the card step. `rounded-full` is left alone: it
-     is avatars and status dots, not a corner decision. */
+     is avatars and status dots, not a corner decision.
+
+     The control step is 8px, not the 10 it was. 6 / 8 / 12 / 16 / 20 is a ladder
+     whose rungs are all on the 4px grid the spacing scale already obeys; 10 was
+     the one step off it, and it is the step every button, input and select
+     draws. It is also the sibling product's value, so the two admins read as one
+     family at the size people look at most. The booking page keeps 10: it reads
+     `--radius` from its own ground in tokens.css, and its corners are the host's
+     `corners` axis anyway. */
   --radius-sm: 6px;
-  --radius-md: var(--radius); /* 10px */
+  --radius-md: var(--radius); /* 8px */
   --radius-lg: 12px;
   --radius-xl: var(--radius-monitor); /* 16px — the card step the sheet always claimed */
   --radius-2xl: 20px;
 
-  /* Two voices, no third font. Figtree does all the talking; IBM Plex Mono is
-     reserved for strings you COPY rather than read — links, slugs, hex, keys,
-     template variables — where a fixed advance and an unambiguous l/1/O/0 do real
-     work. Numbers are NOT one of those: a stat is glanced at, and monospacing it
-     only made it read as code. Both self-hosted via next/font (`--font-figtree`,
-     `--font-plex-mono`) and both OFL, which is what lets next/font bake the files
-     into the build and into every clone of this repo. Until now `--font-mono` was
-     not defined at all, so the two `font-mono` call sites in the notifications
-     editor silently rendered in the browser default. Each falls back to a system
-     stack if its variable is ever absent. */
+  /* One voice. Figtree does all the talking, links, slugs, keys and hex values
+     included: the design system has no monospaced face, so none is loaded (IBM
+     Plex Mono was, for strings you copy). Figures keep their steady width with
+     `tabular-nums` instead (see `code` in the base layer below).
+     Self-hosted via next/font (`--font-figtree`) under the OFL, which is what
+     lets next/font bake the files into the build and into every clone of this
+     repo. Falls back to a system stack if the variable is ever absent. The
+     booking page's `sans` font axis reads this same variable, so it is the same
+     face as the admin; its other two faces are the host's choice.
+
+     `--font-mono` is the SAME stack, on purpose. Seventeen admin call sites
+     still say `font-mono` (keys, URLs, template variables) and Tailwind's
+     preflight draws every `<code>` from this token; pointing the role at the
+     sans retires the second face everywhere at once without touching a screen,
+     which is the next phase's job. */
   --font-sans: var(--font-figtree), Figtree, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-figtree), Figtree, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /* The type scale, pinned end to end. Before this it was eight Tailwind defaults
      plus ten arbitrary `text-[10px]` / `text-[11px]` sites — a scale nobody could
@@ -143,6 +169,17 @@
   * {
     border-color: var(--border);
   }
+
+  /* What a monospaced face used to buy a key or a URL: figures that line up.
+     The face is the sans now (see `--font-mono`), so the alignment is kept the
+     way the rest of the type scale keeps it. */
+  code,
+  kbd,
+  samp,
+  pre,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* Point the accent-as-TEXT utility at `--primary-ink` instead of `--primary`.
@@ -153,49 +190,41 @@
    for the mirror image of the reason the wildcard border rule is in `@layer base`
    (QA2 BUG-2): here we WANT an explicit color utility on the same element to still
    win. The `hover:` variant is listed because its pseudo-class outranks a bare
-   class. */
+   class. In the dForms palette `--primary-ink` equals `--primary` on both themes,
+   so the override paints nothing different there; it is what makes a branded
+   booking surface's `text-primary` the HOST's colour (ADR 0004). */
 @layer utilities {
   .text-primary,
   .hover\:text-primary:hover {
     color: var(--primary-ink);
   }
 
-  /* Rim every accent fill with `--primary-edge`, so the fill's SHAPE clears 3:1
-     against the page it sits on (WCAG 1.4.11). This is about the PRODUCT tokens:
-     on dark the edge equals the fill and paints nothing; on light it is the
-     difference between the primary action being a recognisable control and being
-     a pale smear at 1.27:1. On a `.branded-surface` the rule still applies but
-     paints nothing on either ground — `brandVars` emits edge == primary since
-     ADR 0004's amendment, so a host's fill is deliberately unrimmed and whatever
-     contrast it has against the page is the contrast they chose.
-     An `inset` box-shadow rather than a border because a border would add 2px to
-     every accent fill and reflow all of them. Opacity-modified variants
-     (`bg-primary/10`, `bg-primary/15`) are different classes and untouched — they
-     are washes, not fills.
+  /* Rim every signal fill with `--signal-edge`, so the fill's SHAPE clears 3:1
+     against the page it sits on (WCAG 1.4.11): Signal Green on paper is 1.6:1,
+     and the edge is what makes a switch that is on read as a control. An `inset`
+     box-shadow rather than a border, so the rim adds no size and reflows nothing.
+     Opacity-modified washes (`bg-signal/20`) are different classes and untouched.
 
-     THE SIZE RULE this implies: `bg-primary` is for fills big enough to HAVE an
-     interior — buttons, chips, badges. A 1px rim on a 6px dot leaves 4px of fill
-     and reads as a donut. Below about 10px the accent is a MARK, not a fill, and it
-     takes `bg-primary-edge` instead: the edge colour carrying the whole shape,
-     which is identical on dark and a legible dark-olive on light. The connection
-     status dot, the radio's checked dot and the date picker's has-slots marker all
-     use that, and a new one should too.
+     This used to be a rule on `bg-primary`, when the primary was a lime that
+     needed it. The primary is ink now, which clears 3:1 on every ground by
+     itself, so that rule is gone. On a branded booking surface it painted
+     nothing anyway: `brandVars` emits edge == primary, so a host's fill is
+     deliberately unrimmed (ADR 0004's amendment).
 
-     TWO THINGS THIS RULE DOES NOT REACH, both by construction:
-     1. A DISABLED accent fill. `disabled:bg-muted` swaps `background-color` only,
-        so the rim outlives the fill and a disabled button wears a lime ring around
-        a muted body. Any call site that disables an accent fill must also carry
-        `disabled:shadow-none` — `button.tsx` and `new-schedule-button.tsx` do.
-     2. VARIANT-PREFIXED fills. `checked:bg-primary` compiles to a different class
-        (`.checked\:bg-primary:checked`) and gets no rim. It is listed here rather
-        than fixed because raising this rule's specificity to catch it would also
-        beat `focus-visible:ring-2`, which sets `box-shadow` too — the rim would eat
-        the focus ring. There are two such sites, not the one this note first
-        claimed: `checkbox.tsx` and `radio.tsx` both carried `checked:border-primary`.
-        Both now carry `checked:border-primary-edge` instead (reskin slice P, #97) —
-        the edge colour on the border does the job the rim cannot. A NEW
-        variant-prefixed accent fill must do the same. On dark none of this shows. */
-  .bg-primary {
+     A variant-prefixed fill (`checked:bg-signal`) compiles to a different class
+     and gets no rim; such a call site carries `checked:border-signal-edge` on its
+     border instead, which does the same job. */
+  .bg-signal {
+    box-shadow: inset 0 0 0 1px var(--signal-edge);
+  }
+
+  /* The old rim, kept where it still paints: inside the booking ground, whose
+     palette is frozen (tokens.css). On a branded surface it paints nothing
+     (edge == primary); on the manage page's light canvas it is the olive edge
+     that makes the lime fill a recognisable control. Removing it there would
+     move a public page, which this palette change does not do. `:where()` keeps
+     the specificity of the old bare rule, so a focus ring still wins over it. */
+  :where(.bp-ground) .bg-primary {
     box-shadow: inset 0 0 0 1px var(--primary-edge);
   }
 }
@@ -208,15 +237,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Lime focus ring (WCAG) honored everywhere.
-   Uses `--primary-edge`, not `--primary`: the outline is the one thing that must be
-   findable on every surface, and the PRODUCT accent flattens to 1.27:1 over paper —
-   the focus indicator would be the least visible thing on a focused control in
-   light mode. On dark the edge IS the accent, so nothing changes there. On a
-   branded page the two tokens are equal by construction, so the ring is the host's
-   accent and carries whatever contrast they picked. */
+/* Focus ring, honored everywhere. Green is the focus colour of this language;
+   `--focus` is the signal at a lightness that clears 3:1 on each theme's page,
+   card and raised fill (`tokens.spec.ts`). On a booking page the ground points
+   `--focus` at `--primary-edge`, so the ring stays the host's accent and carries
+   whatever contrast they picked, exactly as it did before this palette. */
 :focus-visible {
-  outline: 2px solid var(--primary-edge);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 

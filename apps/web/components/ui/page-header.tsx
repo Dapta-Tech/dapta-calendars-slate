@@ -2,11 +2,13 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 /**
- * The admin screen header system. Two consistent shapes so every admin surface
- * behaves the same (Design Quality Bar — one system, predictable back-nav):
+ * The admin screen header system. Consistent shapes so every admin surface
+ * behaves the same (Design Quality Bar: one system, predictable back-nav):
  *
  *  • PageHeader — LIST / index pages. Title (+ optional subtitle) on the left,
  *    a single primary action (the green Create) top-right. No nested headers.
+ *  • StatementHeader: SETTINGS and HOME. Title plus a one-line statement of
+ *    what the page holds, both at title size.
  *  • FormHeader — CREATE / EDIT pages. A back affordance to the parent list,
  *    the record title, and optional sticky actions (Save) top-right. Sticky so
  *    the primary action stays reachable while the form scrolls.
@@ -29,6 +31,32 @@ export function PageHeader({
       <div className="min-w-0">
         <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
         {subtitle ? <p className="mt-tight text-muted-foreground">{subtitle}</p> : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * The header of a SETTINGS area or a home screen: the title in ink and, on a
+ * second line at the same size, what the area holds in the faint voice, so the
+ * page opens with a statement rather than a title and a 14px caption. The
+ * statement has to be short (it is set at heading size).
+ */
+export function StatementHeader({
+  title,
+  statement,
+  action,
+}: {
+  title: string;
+  statement: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="mb-section flex flex-wrap items-end justify-between gap-x-group gap-y-card">
+      <div className="min-w-0">
+        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+        <p className="text-3xl font-bold tracking-tight text-faint">{statement}</p>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

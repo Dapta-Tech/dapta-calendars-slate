@@ -44,6 +44,7 @@ export function CanvasStamp({ canvas }: { canvas: BrandCanvas }) {
     // entire dark console. That is ADR 0004 broken in the other direction by a
     // one-line change, which is exactly the kind of thing a guard is for.
     if (isProductPath(window.location.pathname)) return;
+    document.documentElement.classList.add('bp-ground');
     if (document.documentElement.dataset.theme !== canvas) {
       document.documentElement.dataset.theme = canvas;
     }
