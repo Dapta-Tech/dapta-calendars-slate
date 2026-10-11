@@ -513,7 +513,18 @@ export class AdminService {
     return rows;
   }
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
-    return createConnection(this.db, { accountId: p.accountId, memberId: p.memberId, ...body });
+    // Name every field. The controller hands over the raw request body (there is
+    // no global ValidationPipe), so spreading it here let a caller overwrite the
+    // principal's `accountId`/`memberId` and attach a connection to anyone.
+    return createConnection(this.db, {
+      accountId: p.accountId,
+      memberId: p.memberId,
+      provider: body.provider,
+      externalId: body.externalId,
+      primaryEmail: body.primaryEmail,
+      isDestination: body.isDestination,
+      checkConflicts: body.checkConflicts,
+    });
   }
   deleteConnection(p: HostPrincipal, id: string) {
     return deleteConnection(this.db, p.memberId, id);
@@ -801,7 +812,15 @@ export class AdminService {
     return listApiKeys(this.db, p.accountId);
   }
   createApiKey(p: HostPrincipal, body: { name: string; scopes: string[]; eventTypeIds?: string[]; expiresAtMs?: number }) {
-    return createApiKey(this.db, { accountId: p.accountId, ...body });
+    // Name every field, as in `createConnection`: a spread raw body could set
+    // `accountId` and mint a key for another account.
+    return createApiKey(this.db, {
+      accountId: p.accountId,
+      name: body.name,
+      scopes: body.scopes,
+      eventTypeIds: Array.isArray(body.eventTypeIds) ? body.eventTypeIds : undefined,
+      expiresAtMs: typeof body.expiresAtMs === 'number' ? body.expiresAtMs : undefined,
+    });
   }
   revokeApiKey(p: HostPrincipal, id: string) {
     return revokeApiKey(this.db, p.accountId, id);
@@ -851,7 +870,13 @@ export class AdminService {
         message: `This deployment cannot store a webhook signing secret: ${resolved.reason}`,
       });
     }
-    return createWebhook(this.db, { accountId: p.accountId, ...body, key: resolved.key });
+    return createWebhook(this.db, {
+      accountId: p.accountId,
+      subscriberUrl: body.subscriberUrl,
+      eventTriggers: body.eventTriggers,
+      secret: body.secret,
+      key: resolved.key,
+    });
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);

@@ -388,6 +388,12 @@ export async function updateEventType(
 }
 
 export async function deleteEventType(db: Db, accountId: string, id: string): Promise<boolean> {
+  // Child rows carry no account_id: scope by the parent first, so the function
+  // is safe on its own and not only behind the controller's ownership check.
+  const owned = await db.get<{ id: string }>(
+    sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+  );
+  if (!owned) return true;
   await db.run(sql`DELETE FROM event_type_host WHERE event_type_id = ${id}`);
   await db.run(sql`DELETE FROM event_type_conflict_calendar WHERE event_type_id = ${id}`);
   await db.run(sql`DELETE FROM event_type WHERE account_id = ${accountId} AND id = ${id}`);
@@ -677,6 +683,12 @@ export async function deleteTeam(db: Db, accountId: string, id: string): Promise
     sql`SELECT id FROM event_type WHERE account_id = ${accountId} AND team_id = ${id} LIMIT 1`,
   );
   if (et) return { ok: false, reason: 'CONFLICT', message: 'Delete the team’s event types first.' };
+  // The membership rows carry no account_id, so resolve the team inside the
+  // caller's account first: an id from another account deletes nothing.
+  const team = await db.get<{ id: string }>(
+    sql`SELECT id FROM team WHERE account_id = ${accountId} AND id = ${id} LIMIT 1`,
+  );
+  if (!team) return { ok: true, value: { id } };
   await db.run(sql`DELETE FROM team_membership WHERE team_id = ${id}`);
   await db.run(sql`DELETE FROM team WHERE account_id = ${accountId} AND id = ${id}`);
   return { ok: true, value: { id } };
