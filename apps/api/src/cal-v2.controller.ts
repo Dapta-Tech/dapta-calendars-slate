@@ -13,6 +13,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NestInterceptor,
   Param,
   Post,
@@ -73,6 +74,8 @@ export class CalV2RequestIdInterceptor implements NestInterceptor {
 /** Keep every v2 failure in one predictable, PII-bounded Cal-style envelope. */
 @Catch()
 export class CalV2ExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger("CalV2");
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const request = http.getRequest<V2Request>();
@@ -117,6 +120,18 @@ export class CalV2ExceptionFilter implements ExceptionFilter {
         NOT_FOUND: "RESOURCE_NOT_FOUND",
       };
       code = normalized[code] ?? code;
+    }
+    // This filter catches everything on the v2 surface, which also takes the
+    // job of Nest's default filter: the only place an unexpected failure would
+    // have been logged. A 5xx keeps its cause here, keyed by the request id the
+    // caller was given, and only here: the body stays generic.
+    if (statusCode >= 500) {
+      const route = (request as { route?: { path?: unknown } }).route?.path;
+      const method = (request as { method?: unknown }).method;
+      this.logger.error(
+        `v2 ${typeof method === "string" ? method : "?"} ${typeof route === "string" ? route : "(unmatched)"} ${statusCode} ${requestId}`,
+        exception instanceof Error ? exception.stack : String(exception),
+      );
     }
     response.setHeader("X-Request-Id", requestId);
     response
