@@ -1,4 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { GenericRestWire, StaticTokenSource } from './calendar.backend.generic';
 import {
   asConnector,
@@ -767,6 +768,60 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
    * of events the two disagree — offered, then refused. Checked here the way a
    * visitor would hit it, for every event length, against a messy calendar.
    */
+  describe('one log line per busy read', () => {
+    function capture() {
+      const lines: Array<{ level: 'log' | 'warn'; text: string }> = [];
+      const log = vi.spyOn(Logger.prototype, 'log').mockImplementation((m: unknown) => {
+        lines.push({ level: 'log', text: String(m) });
+      });
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation((m: unknown) => {
+        lines.push({ level: 'warn', text: String(m) });
+      });
+      return { lines, restore: () => (log.mockRestore(), warn.mockRestore()) };
+    }
+
+    it('a successful read logs counts and timing, nothing that names the calendar', async () => {
+      const page = pagedBackend(fullCalendar(30, 2), 250, { instant: true });
+      const out = capture();
+      try {
+        await providerOver(page.fetchImpl).listBusy({
+          connectionRefs: ['conn-A'],
+          fromUtc: at(FROM),
+          toUtc: at(FROM + 30 * DAY),
+        });
+      } finally {
+        out.restore();
+      }
+      expect(out.lines).toHaveLength(1);
+      expect(out.lines[0]!.level).toBe('log');
+      expect(out.lines[0]!.text).toMatch(
+        new RegExp(`^busy read: connections=1 windows=${page.asked.length} retries=0 intervals=\\d+ ms=\\d+$`),
+      );
+      expect(out.lines[0]!.text).not.toContain('conn-A');
+      expect(out.lines[0]!.text).not.toContain('tok-123');
+    });
+
+    it('a failed read logs one warning with the same counts', async () => {
+      const page = pagedBackend(fullCalendar(30, 2), 250, { failOn: 2, failStatus: 403, instant: true });
+      const out = capture();
+      try {
+        await expect(
+          providerOver(page.fetchImpl).listBusy({
+            connectionRefs: ['conn-A'],
+            fromUtc: at(FROM),
+            toUtc: at(FROM + 30 * DAY),
+          }),
+        ).rejects.toThrow();
+      } finally {
+        out.restore();
+      }
+      expect(out.lines.filter((l) => l.level === 'warn')).toHaveLength(1);
+      expect(out.lines.filter((l) => l.level === 'log')).toHaveLength(0);
+      expect(out.lines[0]!.text).toMatch(/^busy read failed: connections=1 windows=\d+ retries=0 ms=\d+: /);
+      expect(out.lines[0]!.text).not.toContain('conn-A');
+    });
+  });
+
   describe('what the page offers, the create-time check accepts', () => {
     const MIN = 60_000;
     const WEEKDAYS = [1, 2, 3, 4, 5];

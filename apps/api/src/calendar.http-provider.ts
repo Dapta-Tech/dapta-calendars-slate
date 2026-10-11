@@ -345,6 +345,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
     if (input.connectionRefs.length === 0) return [];
+    const started = this.clock.now();
+    let retries = 0;
     const fromMs = Date.parse(input.fromUtc);
     const toMs = Date.parse(input.toUtc);
     // An unparseable bound is sent as given, in one read — never rewritten.
@@ -393,6 +395,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
             } catch (err) {
               if (!retryable(err) || attempt >= BUSY_ATTEMPTS || failed) throw err;
               // The slot is already released: the pause costs nobody else a read.
+              retries++;
               const pause = (err as CalendarHttpError).retryAfterMs ?? BUSY_RETRY_AFTER_MS * attempt;
               await this.clock.sleep(pause);
               if (failed) throw err; // a sibling window was lost meanwhile: this read is over
@@ -417,7 +420,10 @@ export class ExternalCalendarProvider implements CalendarProvider {
           // The caller turns this into "calendar unavailable" and keeps the
           // cause to itself; this line is the only record of WHICH window and
           // WHY, and it is what made the concurrency limit above visible.
-          this.logger.warn(`busy read failed: ${err instanceof Error ? err.message : String(err)}`);
+          this.logger.warn(
+            `busy read failed: connections=${input.connectionRefs.length} windows=${windows.length} ` +
+              `retries=${retries} ms=${this.clock.now() - started}: ${err instanceof Error ? err.message : String(err)}`,
+          );
           throw err;
         }
       }
@@ -435,6 +441,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
       seen.add(key);
       out.push(interval);
     }
+    // One line per read, so pacing and backend latency are visible in the logs
+    // without a load test. Counts and timing only: no refs, no event detail.
+    this.logger.log(
+      `busy read: connections=${input.connectionRefs.length} windows=${windows.length} ` +
+        `retries=${retries} intervals=${out.length} ms=${this.clock.now() - started}`,
+    );
     return out;
   }
 
