@@ -469,8 +469,8 @@ export function BookingFlow({
         ? t(m.awaitingConfirmation, { email: attendeeEmail })
         : t(m.confirmationSentTo, { email: attendeeEmail })
       : null;
-    // The file a calendar opens: the join link when there is one (it is what a
-    // calendar should open), else the human location.
+    // The file a calendar opens: the join link as its location when there is
+    // one (it is what a calendar should open), else the human location.
     const calendarHref =
       startOk && endOk
         ? calendarFileHref({
@@ -478,7 +478,8 @@ export function BookingFlow({
             title: b.title,
             startUtc: b.startUtc,
             endUtc: b.endUtc,
-            location: b.meetingUrl ?? bookedLocation,
+            location: bookedLocation,
+            url: b.meetingUrl,
             stamp: nowUtc,
           })
         : null;
@@ -868,6 +869,8 @@ export function BookingFlow({
             setPickedDay(null);
           }}
           onSelectDay={chooseDay}
+          // Arrows walk the month without leaving it; only choosing a day does.
+          onCursorDay={setPickedDay}
         />
       }
       times={

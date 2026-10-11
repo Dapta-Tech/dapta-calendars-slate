@@ -676,6 +676,7 @@ export function MonthCalendar({
   maxMonthKey,
   onMonthChange,
   onSelectDay,
+  onCursorDay,
 }: {
   m: BookingMessages;
   monthKey: string;
@@ -687,7 +688,15 @@ export function MonthCalendar({
   minMonthKey: string;
   maxMonthKey: string;
   onMonthChange: (monthKey: string) => void;
+  /** A day was ACTIVATED (click, Enter, Space): the visitor chose it. */
   onSelectDay: (dayKey: string) => void;
+  /**
+   * The keyboard cursor moved onto a day (arrows, Home, End). Moving is not
+   * choosing: on a phone choosing a day moves to its times, and an arrow key
+   * must not do that. Defaults to `onSelectDay` for a caller that does not
+   * tell the two apart.
+   */
+  onCursorDay?: (dayKey: string) => void;
 }) {
   const grid: CalendarMonth = useMemo(
     () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn }),
@@ -721,7 +730,7 @@ export function MonthCalendar({
     const i = bookable.indexOf(cursor);
     const next = bookable[Math.min(Math.max(i + delta, 0), bookable.length - 1)];
     if (!next || next === cursor) return;
-    onSelectDay(next);
+    (onCursorDay ?? onSelectDay)(next);
     // The cell is re-rendered with the new cursor before focus moves.
     requestAnimationFrame(() =>
       gridRef.current?.querySelector<HTMLElement>(`[data-day="${next}"]`)?.focus(),

@@ -6,7 +6,8 @@ const input = {
   title: 'Design review; with notes, please',
   startUtc: '2026-03-02T14:30:00.000Z',
   endUtc: '2026-03-02T15:15:00.000Z',
-  location: 'https://meet.example.com/abc',
+  location: 'Online meeting',
+  url: 'https://meet.example.com/abc?pwd=a,b;c',
   stamp: '2026-03-01T10:00:00.000Z',
 };
 
@@ -27,12 +28,20 @@ describe('buildCalendarFile', () => {
     expect(ics).not.toContain('ATTENDEE');
   });
 
+  it('writes the join link verbatim as URL, and as the location a calendar opens', () => {
+    const ics = buildCalendarFile(input);
+    expect(ics).toContain('URL:https://meet.example.com/abc?pwd=a,b;c\r\n');
+    expect(ics).toContain('LOCATION:https://meet.example.com/abc?pwd=a\\,b\\;c\r\n');
+    expect(buildCalendarFile({ ...input, url: 'javascript:alert(1)' })).not.toContain('URL:');
+    expect(buildCalendarFile({ ...input, url: null })).toContain('LOCATION:Online meeting\r\n');
+  });
+
   it('escapes TEXT values', () => {
     expect(buildCalendarFile(input)).toContain('SUMMARY:Design review\\; with notes\\, please\r\n');
   });
 
   it('folds long lines at 75 octets', () => {
-    const ics = buildCalendarFile({ ...input, title: 'x'.repeat(200), location: null });
+    const ics = buildCalendarFile({ ...input, title: 'x'.repeat(200), location: null, url: null });
     for (const line of ics.split('\r\n')) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
     expect(ics).not.toContain('LOCATION');
   });

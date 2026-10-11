@@ -51,8 +51,15 @@ export interface CalendarFileInput {
   title: string;
   startUtc: string;
   endUtc: string;
-  /** A human location, or the join link when there is one. */
+  /** Where, in words ("Online meeting", an address). */
   location?: string | null;
+  /**
+   * The join link. Like the emailed invite, it becomes both `LOCATION` (a bare
+   * link is what calendars linkify) and `URL`; and `URL` is a URI, not TEXT,
+   * so it is written verbatim: TEXT-escaping it would backslash the `,` and
+   * `;` in a real query string and break the link. Only http(s) is accepted.
+   */
+  url?: string | null;
   /** The instant the file is made; injected so the output is testable. */
   stamp: string;
 }
@@ -71,7 +78,10 @@ export function buildCalendarFile(input: CalendarFileInput): string {
     `DTEND:${icsUtc(input.endUtc)}`,
     `SUMMARY:${icsText(input.title)}`,
   ];
-  if (input.location) lines.push(`LOCATION:${icsText(input.location)}`);
+  const url = input.url && /^https?:\/\/[^\s]+$/i.test(input.url) ? input.url : null;
+  const location = url ?? input.location;
+  if (location) lines.push(`LOCATION:${icsText(location)}`);
+  if (url) lines.push(`URL:${url}`);
   lines.push('END:VEVENT', 'END:VCALENDAR');
   return `${lines.map(fold).join('\r\n')}\r\n`;
 }
