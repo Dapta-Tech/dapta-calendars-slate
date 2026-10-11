@@ -233,3 +233,40 @@ const CURATED_ZONES: readonly string[] = [
   'Asia/Tokyo',
   'Australia/Sydney',
 ];
+
+/**
+ * The chosen day as a line of its own, with the year: "Monday, March 2, 2026".
+ * The booking page restates the chosen time in two lines (this, then the time
+ * range) instead of one long string, so neither wraps mid-thought at 360px.
+ */
+export function formatDayLong(utcIso: string, timeZone: string, locale = 'en-US'): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone,
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(utcIso));
+}
+
+/**
+ * A meeting's start and end as one range in `timeZone`: "9:30 to 10:15 AM" in
+ * the locale's own shape (`formatRange` decides the separator and whether the
+ * day period is said once or twice). `hour12` follows the page's 12h/24h toggle,
+ * exactly as `formatSlotTime` does.
+ */
+export function formatTimeRange(
+  startUtc: string,
+  endUtc: string,
+  timeZone: string,
+  locale = 'en-US',
+  hour12?: boolean,
+): string {
+  const format = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(hour12 === undefined ? {} : hour12 ? { hour12: true } : { hourCycle: 'h23' as const }),
+  });
+  return format.formatRange(new Date(startUtc), new Date(endUtc));
+}

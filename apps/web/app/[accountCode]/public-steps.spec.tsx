@@ -133,7 +133,10 @@ describe('the confirmation renders byte for byte', () => {
     it(theme, async () => {
       const el = await mount(theme);
       await pickFirstTime(el);
-      actions.bookAction.mockResolvedValue({ ok: true, booking: booking({ startUtc: '2026-03-02T14:30:00.000Z' }) });
+      actions.bookAction.mockResolvedValue({
+        ok: true,
+        booking: booking({ startUtc: '2026-03-02T14:30:00.000Z', endUtc: '2026-03-02T15:15:00.000Z' }),
+      });
       await act(async () => {
         type(el, 'input[name="name"]', 'Sam Visitor');
         type(el, 'input[name="email"]', 'sam@example.com');
@@ -147,4 +150,24 @@ describe('the confirmation renders byte for byte', () => {
       await expect(pretty(el.innerHTML)).toMatchFileSnapshot(`${SNAP}/confirmation-${theme}.html`);
     });
   }
+});
+
+describe('the month: moving is not choosing', () => {
+  it('an arrow key moves the day without leaving the month; activating a day goes to its times', async () => {
+    const el = await mount('light');
+    const stage = el.querySelector<HTMLElement>('.bp-stage')!;
+    const first = el.querySelector<HTMLButtonElement>('.bp-cal-day[tabindex="0"]')!;
+    const before = first.dataset.day;
+    await act(async () => {
+      first.focus();
+      first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+    // The cursor moved to the next bookable day, and the phone is still on the month.
+    expect(el.querySelector('.bp-cal-day[data-selected="true"]')!.getAttribute('data-day')).not.toBe(before);
+    expect(stage.dataset.step).toBe('calendar');
+    await act(async () => {
+      el.querySelector<HTMLButtonElement>('.bp-cal-day[data-selected="true"]')!.click();
+    });
+    expect(stage.dataset.step).toBe('times');
+  });
 });

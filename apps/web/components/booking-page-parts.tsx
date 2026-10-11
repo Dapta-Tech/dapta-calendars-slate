@@ -8,22 +8,25 @@ import {
   t,
   type BookingMessages,
   type CalendarMonth,
+  type DisplaySlot,
 } from '@slate/shared';
 
 /**
- * The three-region event page's presentational pieces (BP), split out of
- * `booking-flow.tsx` so that file keeps holding the thing that is actually hard
- * — the hold/book/error state machine — rather than a month grid's markup.
+ * The event page's presentational pieces, split out of `booking-flow.tsx` so
+ * that file keeps holding the thing that is actually hard (the step, hold,
+ * book and error state machine) rather than a month grid's markup.
  *
  * Every piece is a pure render over props. None of them fetch, none of them own
- * booking state, and all of them draw from the same `bp-*` class contract as
- * the slot chips, so the nine `bookingPageStyle` axes reach them with no extra
- * wiring (preview == prod).
+ * booking state, and all of them are drawn by the `bp-*` class contract in
+ * globals.css, never by a colour utility, so the ten style axes reach every one
+ * of them with no extra wiring. The studio's preview composes these same pieces,
+ * which is what makes preview == production a property of the code
+ * (`preview-parity.spec.tsx`).
  */
 
 // --- Icons ----------------------------------------------------------------
-// Inline, `currentColor`, 1em — so they inherit the branded text colour and
-// the density axis's font size instead of needing their own tokens.
+// Inline, `currentColor`, 1em, so they inherit the branded text colour and the
+// density axis's font size instead of needing their own tokens.
 
 function Icon({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -62,7 +65,7 @@ function GlobeIcon() {
 
 /**
  * The Where, as a picture. Keyed on the location KIND, which is a
- * vendor-neutral value — a generic camera for conferencing, never a platform's
+ * vendor-neutral value: a generic camera for conferencing, never a platform's
  * mark (R15 / ADR 0008). An unknown kind falls back to the pin rather than
  * rendering nothing, so a location the host did configure always shows.
  */
@@ -92,6 +95,23 @@ function LocationIcon({ kind }: { kind: string }) {
   }
 }
 
+function CheckIcon() {
+  return (
+    <Icon className="h-5 w-5 shrink-0">
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </Icon>
+  );
+}
+
+function PersonIcon() {
+  return (
+    <Icon>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </Icon>
+  );
+}
+
 export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
   return (
     <Icon className="h-4 w-4">
@@ -100,47 +120,31 @@ export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
   );
 }
 
-// --- Left region: the event panel -----------------------------------------
+// --- The event panel --------------------------------------------------------
 
 /**
  * A description with a ceiling.
  *
- * The panel shares a column with the calendar, so an unbounded `<p>` here is a
- * panel of unbounded height: a host who pastes an agenda pushes the duration,
- * the location and the timezone picker off the fold, and the invitee scrolls
- * past a wall of text to reach the thing they came for. Six lines is enough to
- * read what the meeting is; the rest is one click away.
+ * The panel shares the viewport with the calendar, so an unbounded `<p>` here is
+ * a panel of unbounded height: a host who pastes an agenda pushes the duration,
+ * the location and the time zone off the fold. Six lines is enough to read what
+ * the meeting is (three on a phone, where the panel is a header); the rest is one
+ * click away.
  *
- * The full text is always in the DOM — the clamp is `-webkit-line-clamp`, which
+ * The full text is always in the DOM: the clamp is `-webkit-line-clamp`, which
  * hides overflow visually and leaves it to a screen reader and to the page's own
  * indexing. `whitespace-pre-line` survives so the host's own line breaks do.
  *
- * The toggle renders unconditionally rather than measuring: a measurement here
- * would have to run after layout, after webfonts, and again on every resize, and
- * getting it wrong strands text behind a control that is not there. A "Show
- * more" on a description that happens to be five lines costs a click that does
- * nothing visible; the other way round costs the text.
+ * The toggle renders unconditionally rather than measuring: a measurement would
+ * have to run after layout, after webfonts and on every resize, and getting it
+ * wrong strands text behind a control that is not there.
  */
 function EventDescription({ m, description }: { m: BookingMessages; description: string }) {
   const [expanded, setExpanded] = useState(false);
-  // The toggle announces a state, so it has to say what it is the state OF.
   const descriptionId = useId();
   return (
-    <div className="flex flex-col items-start gap-1.5">
-      <p
-        id={descriptionId}
-        className="whitespace-pre-line text-sm text-muted-foreground"
-        style={
-          expanded
-            ? undefined
-            : {
-                display: '-webkit-box',
-                WebkitBoxOrient: 'vertical',
-                WebkitLineClamp: 6,
-                overflow: 'hidden',
-              }
-        }
-      >
+    <div className="bp-description">
+      <p id={descriptionId} className="bp-description-text" data-expanded={expanded ? 'true' : undefined}>
         {description}
       </p>
       <button
@@ -148,8 +152,7 @@ function EventDescription({ m, description }: { m: BookingMessages; description:
         aria-expanded={expanded}
         aria-controls={descriptionId}
         onClick={() => setExpanded((v) => !v)}
-        className="text-xs font-medium underline underline-offset-4"
-        style={{ color: 'var(--primary-ink, inherit)' }}
+        className="bp-link"
       >
         {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
       </button>
@@ -157,10 +160,37 @@ function EventDescription({ m, description }: { m: BookingMessages; description:
   );
 }
 
+/** The host's photo, or the monogram tile the profile page and the studio draw. */
+export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUrl?: string | null }) {
+  return avatarUrl ? (
+    // Intrinsic size given so the row does not reflow when the image lands. Not
+    // `next/image`: the URL is host-supplied (or a data URL) and the optimizer
+    // would need a remote allowlist per account.
+    <img
+      src={avatarUrl}
+      alt=""
+      width={44}
+      height={44}
+      // The photo may come from the connected account, i.e. a provider CDN. Do
+      // not hand that CDN the booking page's URL on every render.
+      referrerPolicy="no-referrer"
+      className="bp-avatar"
+    />
+  ) : (
+    <div aria-hidden className="bp-avatar bp-avatar-monogram">
+      {monogram(hostName)}
+    </div>
+  );
+}
+
 /**
- * Who, what, how long, where, and in whose clock. Everything an invitee needs
- * to decide BEFORE they look at a time — which is why it sits first in the DOM
- * and first in the mobile stack.
+ * Who, what, how long, where, and in whose clock. Everything an invitee needs to
+ * decide BEFORE they look at a time, which is why it sits first in the DOM.
+ *
+ * On a phone it is the compact header of the first step and steps out of the
+ * way once a day is picked; from the two-pane width up it is the left pane and
+ * stays. The time zone is a FACT here; the control that changes it lives with
+ * the times, where the visitor is looking when they need it.
  */
 export function EventPanel({
   m,
@@ -172,7 +202,7 @@ export function EventPanel({
   location,
   locationLabel,
   methodLabel,
-  timeZoneControl,
+  timeZoneLabel,
 }: {
   m: BookingMessages;
   hostName: string;
@@ -181,107 +211,448 @@ export function EventPanel({
   description?: string | null;
   lengthMinutes: number;
   location?: { kind: string } | null;
-  /** Already rendered by `formatLocation` — never a join URL (C2 owns that). */
+  /** Already rendered by `formatLocation`; never a join URL (C2 owns that). */
   locationLabel?: string | null;
   /** Team scheduling method; personal events pass nothing. */
   methodLabel?: string | null;
-  timeZoneControl: ReactNode;
+  /** The zone the times are shown in, as a person reads it. */
+  timeZoneLabel: string;
 }) {
   return (
-    <section aria-label={m.bookingPage.detailsRegion} className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        {avatarUrl ? (
-          // Intrinsic size given so the row does not reflow when the image
-          // lands. Not `next/image`: the URL is host-supplied (or a data URL)
-          // and the optimizer would need a remote allowlist per account.
-          <img
-            src={avatarUrl}
-            alt=""
-            width={44}
-            height={44}
-            // The photo may come from the connected account, i.e. a provider CDN.
-            // Do not hand that CDN the booking page's URL on every render.
-            referrerPolicy="no-referrer"
-            className="h-11 w-11 shrink-0 rounded-full object-cover"
-          />
-        ) : (
-          // B1's initial tile: the same monogram the profile page and the studio
-          // preview draw, so a host with no photo is not a hole on one surface
-          // and a letter on another.
-          <div
-            aria-hidden
-            className="flex h-11 w-11 shrink-0 items-center justify-center text-base font-semibold"
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--accent-contrast)',
-              borderRadius: 'var(--bp-radius)',
-            }}
-          >
-            {monogram(hostName)}
-          </div>
-        )}
-        <p className="min-w-0 break-words text-sm font-medium text-muted-foreground">{hostName}</p>
+    <section aria-label={m.bookingPage.detailsRegion} className="bp-event">
+      <div className="bp-host">
+        <HostAvatar hostName={hostName} avatarUrl={avatarUrl} />
+        <p className="bp-host-name">{hostName}</p>
       </div>
 
-      <h1
-        className="text-2xl font-semibold tracking-tight"
-        style={{ fontFamily: 'var(--bp-font-display)' }}
-      >
-        {eventTitle}
-      </h1>
+      <h1 className="bp-event-title">{eventTitle}</h1>
 
-      {/* The facts come BEFORE the prose. They are fixed-height and they are what
-          an invitee needs in order to decide; a host who writes forty lines of
-          description used to push the duration and the timezone a thousand
-          pixels down the page, below the calendar. */}
-      <dl className="flex flex-col gap-2 text-sm">
-        {/* Duration. One length exists in the model today, so this is a static
-            chip rather than a disabled picker — a disabled control tells the
-            invitee something was taken away, and nothing was. When multiple
-            durations land it becomes the trigger and nothing around it moves. */}
-        <div className="flex items-center gap-2">
+      {/* The facts come BEFORE the prose: they are fixed-height and they are what
+          an invitee needs in order to decide. */}
+      <dl className="bp-facts">
+        {/* One duration exists in the model today, so this is a fact rather than
+            a disabled picker: a disabled control tells the invitee something was
+            taken away, and nothing was. */}
+        <div className="bp-fact">
           <dt className="sr-only">{m.bookingPage.duration}</dt>
-          <dd className="flex items-center gap-2">
+          <dd>
             <ClockIcon />
             <span>{t(m.booking.durationMinutes, { minutes: lengthMinutes })}</span>
           </dd>
         </div>
 
         {locationLabel ? (
-          <div className="flex items-start gap-2">
+          <div className="bp-fact">
             <dt className="sr-only">{m.location.whereLabel}</dt>
-            <dd className="flex items-start gap-2">
-              <span className="mt-0.5">
-                <LocationIcon kind={location?.kind ?? 'in_person'} />
-              </span>
-              <span className="min-w-0 break-words">{locationLabel}</span>
+            <dd>
+              <LocationIcon kind={location?.kind ?? 'in_person'} />
+              <span className="bp-fact-text">{locationLabel}</span>
             </dd>
           </div>
         ) : null}
 
+        <div className="bp-fact">
+          <dt className="sr-only">{m.booking.timezone}</dt>
+          <dd>
+            <GlobeIcon />
+            <span className="bp-fact-text">{timeZoneLabel}</span>
+          </dd>
+        </div>
+
         {methodLabel ? (
-          <div className="flex items-center gap-2">
+          <div className="bp-fact">
             <dt className="sr-only">{m.bookingPage.method}</dt>
-            <dd className="text-muted-foreground">{methodLabel}</dd>
+            <dd className="bp-muted">{methodLabel}</dd>
           </div>
         ) : null}
-
       </dl>
 
       {description ? <EventDescription m={m} description={description} /> : null}
-
-      <div className="flex flex-col gap-1.5">
-        <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <GlobeIcon />
-          {m.booking.timezone}
-        </span>
-        {timeZoneControl}
-      </div>
     </section>
   );
 }
 
-// --- Centre region: the month calendar ------------------------------------
+/** A zone id as a person reads it: `America/New_York` is "America/New York". */
+export function readableZone(timeZone: string): string {
+  return timeZone.replace(/_/g, ' ');
+}
+
+// --- The sequence's chrome ----------------------------------------------------
+
+/** The sequence's steps, in order. `details` and `done` are derived in the island. */
+export type BookingStep = 'calendar' | 'times' | 'details' | 'done';
+export const STEP_NUMBER: Record<BookingStep, number> = { calendar: 1, times: 2, details: 3, done: 4 };
+
+/**
+ * The stage every state of the event page renders into: the container the
+ * layout queries (`.bp-flow`), the step stamped for globals.css to lay out
+ * (`data-step`), the direction of the last move for the phone's slide
+ * (`data-dir`), and the progress track. The island and the studio's preview
+ * both render through this, so their outer markup cannot drift.
+ */
+export function BookingStage({
+  m,
+  step,
+  dir,
+  stageRef,
+  children,
+}: {
+  m: BookingMessages;
+  step: BookingStep;
+  dir?: 'forward' | 'back' | null;
+  stageRef?: React.Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  return (
+    <div className="bp-flow">
+      <div ref={stageRef} className="bp-stage" data-step={step} data-dir={dir ?? undefined}>
+        <ProgressTrack m={m} step={STEP_NUMBER[step]} of={4} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The frame while a time is being chosen: the event pane, and the right pane
+ * holding the month and the day's times (or, with no times at all, the sentence
+ * that says why). Shared by the island and the studio's preview.
+ */
+export function ChoosingFrame({
+  panel,
+  month,
+  times,
+  empty,
+}: {
+  panel: ReactNode;
+  month?: ReactNode;
+  times?: ReactNode;
+  /** Rendered instead of the month and the times when there are none. */
+  empty?: ReactNode;
+}) {
+  return (
+    <div className="bp-frame bp-card">
+      <div className="bp-pane-event bp-region">{panel}</div>
+      <div className="bp-pane-main">
+        {empty ?? (
+          <div className="bp-pick">
+            <div className="bp-pane-month bp-region">{month}</div>
+            <div className="bp-pane-times bp-region">{times}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where the visitor is in the sequence, as a 4px track (phones only; the
+ * two-pane layout shows every step's context at once and needs no track).
+ * `step` is 1-based out of `of`.
+ */
+export function ProgressTrack({ m, step, of }: { m: BookingMessages; step: number; of: number }) {
+  return (
+    <div
+      className="bp-progress"
+      role="progressbar"
+      aria-label={t(m.bookingPage.progress, { step, of })}
+      aria-valuemin={1}
+      aria-valuemax={of}
+      aria-valuenow={step}
+    >
+      <span style={{ width: `${(step / of) * 100}%` }} />
+    </div>
+  );
+}
+
+/** The back affordance of a step: a chevron and the place it goes back to. */
+export function BackButton({ label, onClick, className }: { label: string; onClick: () => void; className?: string }) {
+  return (
+    <button type="button" onClick={onClick} className={`bp-back${className ? ` ${className}` : ''}`}>
+      <ChevronIcon direction="left" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+// --- The day's times ---------------------------------------------------------
+
+/**
+ * 12h / 24h. A two-button radio group, not a switch: neither format is "on". A
+ * radio group is one tab stop with arrows moving between the options (APG), so
+ * the roving tabindex and the arrow handler are part of the role, not decoration.
+ */
+export function HourFormatToggle({
+  m,
+  hour12,
+  onChange,
+}: {
+  m: BookingMessages;
+  hour12: boolean;
+  onChange: (hour12: boolean) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={m.bookingPage.timeFormat}
+      className="bp-segmented"
+      onKeyDown={(e) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        e.preventDefault();
+        const group = e.currentTarget;
+        onChange(!hour12);
+        // Focus follows the selection, or it would sit on the button that just
+        // became `tabIndex={-1}` and the next Tab would leave from nowhere.
+        requestAnimationFrame(() => group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
+      }}
+    >
+      {([true, false] as const).map((is12) => (
+        <button
+          key={String(is12)}
+          type="button"
+          role="radio"
+          aria-checked={hour12 === is12}
+          tabIndex={hour12 === is12 ? 0 : -1}
+          onClick={() => onChange(is12)}
+          className="bp-segment"
+        >
+          {is12 ? m.bookingPage.hour12 : m.bookingPage.hour24}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One bookable time. Single line, fixed height, never wraps (R30 §4). */
+export function SlotChip({
+  m,
+  slot,
+  onPick,
+  selected = false,
+}: {
+  m: BookingMessages;
+  slot: DisplaySlot;
+  onPick?: (slot: DisplaySlot) => void;
+  selected?: boolean;
+}) {
+  const isGroup = (slot.capacity ?? 1) > 1;
+  const full = isGroup && (slot.spotsLeft ?? 1) <= 0;
+  return (
+    <button
+      type="button"
+      onClick={onPick ? () => onPick(slot) : undefined}
+      disabled={full}
+      aria-pressed={selected}
+      className="bp-slot"
+    >
+      <span className="bp-slot-time">{slot.label}</span>
+      {isGroup ? (
+        <span className="bp-slot-seats">{full ? m.booking.full : t(m.booking.seatsLeft, { n: slot.spotsLeft ?? 0 })}</span>
+      ) : null}
+    </button>
+  );
+}
+
+/**
+ * The chosen day's times: the day as a title (sticky on a phone, with the way
+ * back to the month beside it), the time zone and the hour format as quiet
+ * controls, and the times themselves, flowing in the page. No inner scroller
+ * (R30 §2): a long day makes the page longer, and the page scrolls.
+ *
+ * It is a `.bp-day` group, which is what gives the `dayGroup` axis something to
+ * draw: `flat` leaves the times on the page, `boxed` frames them.
+ */
+export function TimesColumn({
+  m,
+  dayTitle,
+  slots,
+  emptyText,
+  onPick,
+  onBack,
+  hour12,
+  onHour12Change,
+  timeZoneControl,
+  titleRef,
+}: {
+  m: BookingMessages;
+  /** "Monday, March 2", or null before any day is chosen. */
+  dayTitle: string | null;
+  slots: DisplaySlot[];
+  /** Shown instead of the times when there are none. */
+  emptyText: string;
+  onPick?: (slot: DisplaySlot) => void;
+  /** The phone's way back to the month. Hidden from the two-pane width up. */
+  onBack?: () => void;
+  hour12: boolean;
+  onHour12Change: (hour12: boolean) => void;
+  timeZoneControl: ReactNode;
+  titleRef?: React.Ref<HTMLHeadingElement>;
+}) {
+  return (
+    <section aria-label={m.bookingPage.timesRegion} className="bp-day bp-times">
+      <div className="bp-day-head">
+        {onBack ? <BackButton label={m.bookingPage.backToCalendar} onClick={onBack} className="bp-back-phone" /> : null}
+        <h2 ref={titleRef} tabIndex={-1} className="bp-day-title">
+          {dayTitle ?? m.bookingPage.timesRegion}
+        </h2>
+        <HourFormatToggle m={m} hour12={hour12} onChange={onHour12Change} />
+      </div>
+      <div className="bp-times-tools">{timeZoneControl}</div>
+      {slots.length ? (
+        <div className="bp-slots">
+          {slots.map((s) => (
+            <SlotChip key={s.startUtc} m={m} slot={s} onPick={onPick} />
+          ))}
+        </div>
+      ) : (
+        <p className="bp-muted">{emptyText}</p>
+      )}
+    </section>
+  );
+}
+
+// --- The details step ---------------------------------------------------------
+
+/**
+ * The time the visitor chose, restated at the top of the form, so the last
+ * screen before "Confirm" says what is being confirmed. The hold is quiet text
+ * under the time, not a banner: it is a fact, not a warning.
+ */
+export function ChosenTime({
+  m,
+  eventTitle,
+  dayLine,
+  timeLine,
+  timeZoneLabel,
+  holdLine,
+  holdError,
+  onBack,
+  titleRef,
+  timeZoneControl,
+}: {
+  m: BookingMessages;
+  eventTitle: string;
+  /** "Monday, March 2, 2026" */
+  dayLine: string;
+  /** "9:30 to 10:15 AM" */
+  timeLine: string;
+  timeZoneLabel: string;
+  /** The zone control, so the time can still be read in another zone here. */
+  timeZoneControl?: ReactNode;
+  holdLine?: string | null;
+  holdError?: string | null;
+  onBack: () => void;
+  titleRef?: React.Ref<HTMLHeadingElement>;
+}) {
+  return (
+    <div className="bp-chosen">
+      <BackButton label={m.bookingPage.backToTimes} onClick={onBack} />
+      <h2 ref={titleRef} tabIndex={-1} className="bp-chosen-title">
+        {eventTitle}
+      </h2>
+      <p className="bp-chosen-when">
+        <span>{dayLine}</span>
+        <span>{timeLine}</span>
+      </p>
+      {timeZoneControl ?? <p className="bp-muted bp-small">{timeZoneLabel}</p>}
+      {holdLine ? <p className="bp-muted bp-small">{holdLine}</p> : null}
+      {holdError ? <p className="bp-error">{holdError}</p> : null}
+    </div>
+  );
+}
+
+// --- The confirmation -----------------------------------------------------------
+
+/**
+ * The booking, said back: what, when in the visitor's own clock, with whom and
+ * where, then the two things a person does next. A single column; the
+ * attribution badge sits under the page, not in here.
+ */
+export function BookingConfirmation({
+  m,
+  pending,
+  eventTitle,
+  dayLine,
+  timeLine,
+  timeZoneLabel,
+  hostName,
+  locationLabel,
+  locationKind,
+  sentTo,
+  actions,
+  footer,
+  titleRef,
+}: {
+  m: BookingMessages;
+  pending: boolean;
+  eventTitle: string;
+  dayLine: string | null;
+  timeLine: string | null;
+  timeZoneLabel: string;
+  hostName?: string | null;
+  locationLabel?: string | null;
+  locationKind?: string | null;
+  /** "A confirmation was sent to …", already localised; null drops the line. */
+  sentTo: string | null;
+  actions: ReactNode;
+  footer?: ReactNode;
+  titleRef?: React.Ref<HTMLHeadingElement>;
+}) {
+  return (
+    <section className="bp-card bp-confirmation" aria-labelledby="bp-confirmation-title">
+      <div aria-hidden className="bp-confirmation-mark" data-pending={pending ? 'true' : undefined}>
+        {pending ? <ClockIcon /> : <CheckIcon />}
+      </div>
+      <h2 id="bp-confirmation-title" ref={titleRef} tabIndex={-1} className="bp-confirmation-title">
+        {pending ? m.booking.requested : m.booking.confirmed}
+      </h2>
+      {sentTo ? <p className="bp-muted">{sentTo}</p> : null}
+
+      <dl className="bp-facts bp-confirmation-facts">
+        <div className="bp-fact">
+          <dt className="sr-only">{m.bookingPage.what}</dt>
+          <dd className="bp-strong">{eventTitle}</dd>
+        </div>
+        {dayLine && timeLine ? (
+          <div className="bp-fact">
+            <dt className="sr-only">{m.bookingPage.when}</dt>
+            <dd>
+              <ClockIcon />
+              <span className="bp-fact-text">
+                {dayLine}
+                <br />
+                {timeLine} <span className="bp-muted">({timeZoneLabel})</span>
+              </span>
+            </dd>
+          </div>
+        ) : null}
+        {hostName ? (
+          <div className="bp-fact">
+            <dt className="sr-only">{m.bookingPage.who}</dt>
+            <dd>
+              <PersonIcon />
+              <span className="bp-fact-text">{hostName}</span>
+            </dd>
+          </div>
+        ) : null}
+        {locationLabel ? (
+          <div className="bp-fact">
+            <dt className="sr-only">{m.location.whereLabel}</dt>
+            <dd>
+              <LocationIcon kind={locationKind ?? 'in_person'} />
+              <span className="bp-fact-text">{locationLabel}</span>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+
+      <div className="bp-confirmation-actions">{actions}</div>
+      {footer}
+    </section>
+  );
+}
+
+// --- The month calendar ------------------------------------------------------
 
 /**
  * One month at a time. Availability comes from the day keys the slot list
@@ -305,6 +676,7 @@ export function MonthCalendar({
   maxMonthKey,
   onMonthChange,
   onSelectDay,
+  onCursorDay,
 }: {
   m: BookingMessages;
   monthKey: string;
@@ -316,7 +688,15 @@ export function MonthCalendar({
   minMonthKey: string;
   maxMonthKey: string;
   onMonthChange: (monthKey: string) => void;
+  /** A day was ACTIVATED (click, Enter, Space): the visitor chose it. */
   onSelectDay: (dayKey: string) => void;
+  /**
+   * The keyboard cursor moved onto a day (arrows, Home, End). Moving is not
+   * choosing: on a phone choosing a day moves to its times, and an arrow key
+   * must not do that. Defaults to `onSelectDay` for a caller that does not
+   * tell the two apart.
+   */
+  onCursorDay?: (dayKey: string) => void;
 }) {
   const grid: CalendarMonth = useMemo(
     () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn }),
@@ -350,7 +730,7 @@ export function MonthCalendar({
     const i = bookable.indexOf(cursor);
     const next = bookable[Math.min(Math.max(i + delta, 0), bookable.length - 1)];
     if (!next || next === cursor) return;
-    onSelectDay(next);
+    (onCursorDay ?? onSelectDay)(next);
     // The cell is re-rendered with the new cursor before focus moves.
     requestAnimationFrame(() =>
       gridRef.current?.querySelector<HTMLElement>(`[data-day="${next}"]`)?.focus(),
@@ -405,12 +785,10 @@ export function MonthCalendar({
   };
 
   return (
-    <section aria-label={m.bookingPage.calendarRegion} className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
-          {grid.label}
-        </h2>
-        <div className="flex items-center gap-1">
+    <section aria-label={m.bookingPage.calendarRegion} className="bp-month">
+      <div className="bp-month-head">
+        <h2 className="bp-month-label">{grid.label}</h2>
+        <div className="bp-month-nav">
           <button
             type="button"
             className="bp-icon-btn"

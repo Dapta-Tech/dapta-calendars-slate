@@ -117,8 +117,8 @@ export default async function BookingPage({
       <main
         className={
           embed
-            ? 'mx-auto max-w-6xl px-4 py-4'
-            : 'mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-12'
+            ? 'w-full py-4 md:px-4'
+            : 'w-full py-10 md:px-6 md:py-12'
         }
       >
         <BookingFlow
