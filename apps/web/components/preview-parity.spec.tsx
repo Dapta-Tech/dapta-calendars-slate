@@ -1,0 +1,128 @@
+// @vitest-environment jsdom
+/**
+ * Preview == production, asserted rather than promised.
+ *
+ * The studio renders a host's event page inside `PreviewFrame`; the public route
+ * renders it inside `BrandedShell`. For every value of every one of the ten
+ * style axes, this renders both from the SAME stored config and checks that
+ * they agree on everything that decides how the page looks: the canvas they
+ * stamp, the custom properties they emit, the branding classes, the booking
+ * ground, and the page's own HTML, element for element.
+ *
+ * The page's HTML can only agree because the preview renders the real island
+ * (`BookingFlow`), not a copy of its markup. If someone ever puts a mock back,
+ * the last assertion is the one that fails.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { THEME_PRESETS } from '@slate/shared';
+
+vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
+  bookAction: vi.fn(),
+  reserveAction: vi.fn(),
+  releaseAction: vi.fn(),
+}));
+
+import { BookingFlow } from './booking-flow';
+import { BrandedShell } from './branded-shell';
+import { BookingPreview, PreviewFrame, previewFlowProps } from './booking-preview';
+
+const ACCENT = '#2f6fed';
+const AXES: Record<string, readonly string[]> = {
+  template: ['classic', 'split', 'banded'],
+  cardStyle: ['outline', 'elevated', 'filled'],
+  corners: ['sharp', 'soft', 'round'],
+  buttons: ['rounded', 'pill', 'square'],
+  density: ['comfortable', 'compact'],
+  font: ['sans', 'rounded', 'serif'],
+  slotLayout: ['grid', 'list'],
+  dayGroup: ['flat', 'boxed'],
+  slotSelect: ['soft', 'solid'],
+  theme: ['dark', 'light'],
+};
+const BASE = { ...THEME_PRESETS.modern, theme: 'light' };
+const SAMPLE = { hostName: 'Riley Chen', avatarUrl: null, eventTitle: 'Intro call', locale: 'en' };
+
+function parse(html: string): Document {
+  return new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+}
+
+/** `--a: 1; --b: 2` as a map, so order does not matter. */
+function vars(el: Element): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const decl of (el.getAttribute('style') ?? '').split(';')) {
+    const i = decl.indexOf(':');
+    if (i > 0) out[decl.slice(0, i).trim()] = decl.slice(i + 1).trim();
+  }
+  return out;
+}
+
+const BRANDING = /^(branded-surface|tpl-|card-|slots-|day-|sel-)/;
+function brandingClasses(el: Element): string[] {
+  return [...el.classList].filter((c) => BRANDING.test(c)).sort();
+}
+
+/** `useId` values depend on where in a tree a component sits; nothing else may differ. */
+function page(doc: Document): string {
+  const flow = doc.querySelector('.bp-flow');
+  expect(flow, 'no .bp-flow rendered').not.toBeNull();
+  return flow!.outerHTML.replace(/_R_[a-z0-9_]+_/gi, 'ID');
+}
+
+function renderPreview(style: Record<string, string>, device: 'desktop' | 'mobile') {
+  return parse(
+    renderToStaticMarkup(
+      <PreviewFrame accent={ACCENT} axes={style as never} device={device} wide>
+        <BookingPreview {...SAMPLE} device={device} />
+      </PreviewFrame>,
+    ),
+  );
+}
+
+function renderPublic(style: Record<string, string>) {
+  return parse(
+    renderToStaticMarkup(
+      <BrandedShell brandColor={ACCENT} style={style}>
+        <main>
+          <BookingFlow {...previewFlowProps(SAMPLE)} />
+        </main>
+      </BrandedShell>,
+    ),
+  );
+}
+
+describe('the studio preview renders what the public page renders', () => {
+  for (const [axis, values] of Object.entries(AXES)) {
+    for (const value of values) {
+      it(`${axis}: ${value}`, () => {
+        const style = { ...BASE, [axis]: value } as Record<string, string>;
+        const pub = renderPublic(style);
+        const shell = pub.querySelector('.branded-surface')!;
+
+        for (const device of ['mobile', 'desktop'] as const) {
+          const pre = renderPreview(style, device);
+          const frame = pre.querySelector('[data-theme]')!;
+          const surface = pre.querySelector('.branded-surface')!;
+
+          // The same ground, painted from the same frozen palette.
+          expect(frame.getAttribute('data-theme')).toBe(shell.getAttribute('data-theme'));
+          expect(frame.classList.contains('bp-ground')).toBe(true);
+          expect(shell.classList.contains('bp-ground')).toBe(true);
+          // The same custom properties, from the same functions and canvas.
+          expect(vars(frame)).toEqual(vars(shell));
+          // The same class-driven axes.
+          expect(brandingClasses(surface)).toEqual(brandingClasses(shell));
+          // The same page.
+          expect(page(pre)).toBe(page(pub));
+        }
+      });
+    }
+  }
+
+  it('is inert: the host cannot click, focus or hear the picture of their page', () => {
+    const pre = renderPreview(BASE as Record<string, string>, 'mobile');
+    const wrapper = pre.querySelector('.bp-flow')!.closest('[inert]');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper!.getAttribute('aria-hidden')).toBe('true');
+  });
+});
