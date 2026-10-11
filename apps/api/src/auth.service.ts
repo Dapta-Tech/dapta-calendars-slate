@@ -4,6 +4,7 @@ import { verifyApiKey, getMemberRole } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { AUTH_PROVIDER, DB } from './tokens';
 import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
+import { annotateRequestAccount } from './request-log';
 
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
@@ -36,6 +37,7 @@ export class AuthService {
    */
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
     const id = await this.provider.resolveHost(req);
+    annotateRequestAccount(req, id.accountId);
     const role = (await getMemberRole(this.db, id.accountId, id.memberId)) ?? 'member';
     return { ...id, role };
   }
@@ -48,6 +50,7 @@ export class AuthService {
     const principal = key ? await verifyApiKey(this.db, key) : null;
     if (!principal)
       throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'Invalid API key.' });
+    annotateRequestAccount(req, principal.accountId);
     if (!principal.scopes.includes(requiredScope))
       throw new ForbiddenException({ error: 'FORBIDDEN', message: `Missing scope: ${requiredScope}` });
     return principal;

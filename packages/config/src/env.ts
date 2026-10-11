@@ -219,6 +219,11 @@ export const serverEnvSchema = z.object({
   // and can be rotated at will. 1 = one load balancer (the common deploy);
   // 2 = a CDN in front of that load balancer; 0 = no proxy, use the socket.
   RATE_LIMIT_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
+  // One log line per request (method, route template, status, duration, request
+  // id, error code, account). JSON when NODE_ENV=production, a human line
+  // otherwise. Never carries query strings, bodies, headers or client addresses.
+  REQUEST_LOG_ENABLED: boolish.default('true'),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
