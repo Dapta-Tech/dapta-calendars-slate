@@ -5,6 +5,7 @@ import { loadServerEnv } from '@slate/config/env';
 import { MAX_REQUEST_BODY } from '@slate/types';
 import { json, type NextFunction, type Request, type Response } from 'express';
 import { AppModule } from './app.module';
+import { securityHeaders } from './security-headers';
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -42,6 +43,8 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
     bodyParser: false,
   });
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
   const large = json({ limit: MAX_REQUEST_BODY });
   const small = json({ limit: DEFAULT_BODY_LIMIT });
   app.use((req: Request, res: Response, next: NextFunction) => {
