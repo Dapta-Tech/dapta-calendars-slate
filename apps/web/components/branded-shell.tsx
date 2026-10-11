@@ -73,10 +73,15 @@ export function BrandedShell({
   // page under the light document default, or the studio preview inside the
   // admin), and a subtree that re-establishes a theme has to repaint its own
   // ground or it reads as text of one theme sitting on the ground of the other.
+  //
+  // `bp-ground` is what makes that ground the BOOKING page's rather than the
+  // product's: tokens.css keys the frozen booking palette on it, so the admin's
+  // palette can change without moving a live page. The studio's preview frame
+  // carries the same class for the same reason (preview == prod).
   return (
     <div
       data-theme={canvas}
-      className={`${cls} bg-background text-foreground${className ? ` ${className}` : ''}`}
+      className={`${cls} bp-ground bg-background text-foreground${className ? ` ${className}` : ''}`}
       style={vars}
     >
       {/* Carries this canvas up to `<html>` on a soft navigation. Inert on a

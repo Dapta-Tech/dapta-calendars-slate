@@ -15,6 +15,7 @@ components, each under its own license:
 - nodemailer — MIT License
 - zod — MIT License
 - Turborepo, Changesets — MIT License
+- Lucide icon outlines, generated into apps/web/app/icons.css: ISC License
 
 The design tokens and scheduling engine originate from Dapta's internal
 Calendars codebase and are released here under the MIT License.

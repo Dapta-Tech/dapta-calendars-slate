@@ -111,9 +111,6 @@ importers:
       next:
         specifier: ^16.2.10
         version: 16.2.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      primeicons:
-        specifier: ^7.0.0
-        version: 7.0.0
       react:
         specifier: ^19.2.0
         version: 19.2.7
@@ -148,6 +145,9 @@ importers:
       jsdom:
         specifier: 25.0.1
         version: 25.0.1
+      lucide-static:
+        specifier: 1.49.0
+        version: 1.49.0
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.2
@@ -2355,6 +2355,9 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
+  lucide-static@1.49.0:
+    resolution: {integrity: sha512-gSjtl7bR2v26oDInh2Wua1PrF2BRRXl9inhnLWcFfnRqRShmgZvlFRisPHqTfU7kxsuZU8ThNjAFotbInrzKow==}
+
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -2629,9 +2632,6 @@ packages:
     resolution: {integrity: sha512-/FVl766LpUfB5vXgCYOYa0MeV/441Ia99AeICQIQFTY/Nw0roZwULcXpku5i1/m5kt/baz+s4Zogspd839HSMg==}
     engines: {node: '>=14'}
     hasBin: true
-
-  primeicons@7.0.0:
-    resolution: {integrity: sha512-jK3Et9UzwzTsd6tzl2RmwrVY/b8raJ3QZLzoDACj+oTJ0oX7L9Hy+XnVwgo4QVKlKpnP/Ur13SXV/pVh4LzaDw==}
 
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
@@ -5010,6 +5010,8 @@ snapshots:
 
   lru-cache@10.4.3: {}
 
+  lucide-static@1.49.0: {}
+
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -5240,8 +5242,6 @@ snapshots:
   prettier@2.8.8: {}
 
   prettier@3.9.5: {}
-
-  primeicons@7.0.0: {}
 
   proxy-addr@2.0.7:
     dependencies:

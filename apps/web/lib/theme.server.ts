@@ -159,3 +159,22 @@ export async function resolveDocumentTheme(): Promise<Theme> {
   if (path === null) return DEFAULT_BOOKING_CANVAS;
   return bookingCanvasOf(await storedBookingStyle(path));
 }
+
+/**
+ * Whether this document is a PUBLIC one, i.e. whether `<html>` should carry the
+ * booking ground (`bp-ground`, tokens.css) rather than the product palette.
+ *
+ * It matters for everything a public route paints OUTSIDE its own shell: the
+ * route's `loading.tsx` skeleton, the error boundary, the body behind a short
+ * embed and the overscroll canvas. Before the product palette and the booking
+ * ground were two palettes this was the same colour either way; now a public
+ * skeleton on the product palette would flash a different ground before the
+ * page arrives.
+ *
+ * Same boundary and same failure direction as `resolveDocumentTheme`: a missing
+ * path header is treated as public.
+ */
+export async function isPublicDocument(): Promise<boolean> {
+  const path = (await headers()).get(PATH_HEADER);
+  return path === null || !isProductPath(path);
+}
