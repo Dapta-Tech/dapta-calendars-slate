@@ -13,7 +13,7 @@ import type { NextFunction, Request, Response } from 'express';
  *   method, route TEMPLATE (`/v1/bookings/:uid`, never the raw path: uids,
  *   tokens and handles live in paths), status, duration, request id, the
  *   `error` code when the body carries one, and the account when known (the
- *   public account code from the route, or the authenticated account id).
+ *   `:accountCode` route parameter, or the authenticated account id).
  *
  *   No query string (manage tokens still ride `?token=` on old links), no
  *   bodies, no headers, no client address, no emails or names. A route that
@@ -67,6 +67,10 @@ export function annotateRequestAccount(req: unknown, accountId: string): void {
   if (req && typeof req === 'object') (req as Annotated)[ACCOUNT_ID] = accountId;
 }
 
+/**
+ * The one request-id rule for the whole API (this middleware and the v2
+ * interceptor): keep a caller's id when it is safe to echo and log, else mint.
+ */
 export function requestIdFrom(raw: string | string[] | undefined): string {
   const value = Array.isArray(raw) ? raw[0] : raw;
   return value && SAFE_REQUEST_ID.test(value) ? value : `req_${randomUUID()}`;
@@ -89,11 +93,14 @@ function routeTemplate(req: Request): string {
   return typeof path === 'string' ? `${req.baseUrl ?? ''}${path}` : '(unmatched)';
 }
 
+/**
+ * The account code from the matched route's `:accountCode` parameter only. The
+ * query string is never read, not even for this one field: whatever a caller
+ * puts there would otherwise reach the log.
+ */
 function accountCode(req: Request): string | undefined {
-  const fromParams = (req.params as Record<string, unknown> | undefined)?.['accountCode'];
-  const fromQuery = (req.query as Record<string, unknown> | undefined)?.['accountCode'];
-  const code = typeof fromParams === 'string' ? fromParams : typeof fromQuery === 'string' ? fromQuery : undefined;
-  return code && SAFE_ACCOUNT_CODE.test(code) ? code : undefined;
+  const code = (req.params as Record<string, unknown> | undefined)?.['accountCode'];
+  return typeof code === 'string' && SAFE_ACCOUNT_CODE.test(code) ? code : undefined;
 }
 
 export function formatPretty(l: RequestLogLine): string {

@@ -154,6 +154,13 @@ describe('request log', () => {
     expect(lines.join('\n')).not.toContain(EMAIL);
   });
 
+  it('never takes the account from the query string', async () => {
+    await fetch(`${base}/v1/bookings/uid-42?token=${TOKEN}&accountCode=secretlookingvalue`);
+    const [line] = await settle();
+    expect(line).not.toHaveProperty('account');
+    expect(lines.join('\n')).not.toContain('secretlookingvalue');
+  });
+
   it('an unmatched path is logged without the path itself', async () => {
     await fetch(`${base}/v1/nothing/${TOKEN}`);
     const [line] = await settle();
