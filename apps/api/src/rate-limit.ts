@@ -7,7 +7,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { ServerEnv } from '@slate/config/env';
-import { RATE_LIMITER } from './tokens';
+import { ENV, RATE_LIMITER } from './tokens';
 
 /**
  * Rate limiting for the unauthenticated public surface (P1-5). The old service
@@ -82,15 +82,36 @@ export function createRateLimiter(env: ServerEnv): RateLimiter {
   return new TokenBucketRateLimiter(env.RATE_LIMIT_CAPACITY, env.RATE_LIMIT_REFILL_PER_SEC);
 }
 
-/** The client IP, honoring a single proxy hop (ALB/CDN sets x-forwarded-for). */
-function clientKey(req: {
-  headers?: Record<string, unknown>;
-  ip?: string;
-  socket?: { remoteAddress?: string };
-}): string {
-  const xff = req.headers?.['x-forwarded-for'];
-  const fwd = Array.isArray(xff) ? xff[0] : typeof xff === 'string' ? xff.split(',')[0] : undefined;
-  return (fwd?.trim() || req.ip || req.socket?.remoteAddress || 'unknown').toString();
+/**
+ * The client address the limiter keys on.
+ *
+ * Each proxy APPENDS the address it received the connection from to
+ * `X-Forwarded-For`, so only the rightmost `trustedHops` entries were written
+ * by infrastructure; everything to their left came from the client. Keying on
+ * the first entry (as this did before) let any caller send a fresh value per
+ * request and never be throttled. With `trustedHops` proxies the client is the
+ * entry `trustedHops` from the right. A request carrying fewer entries than
+ * that did not pass through every proxy, so the leftmost entry is the best
+ * answer there is. `trustedHops = 0`, or no header, uses the socket address.
+ */
+export function clientKey(
+  req: {
+    headers?: Record<string, unknown>;
+    ip?: string;
+    socket?: { remoteAddress?: string };
+  },
+  trustedHops = 1,
+): string {
+  const socket = (req.socket?.remoteAddress || req.ip || 'unknown').toString();
+  if (trustedHops <= 0) return socket;
+  const raw = req.headers?.['x-forwarded-for'];
+  const joined = Array.isArray(raw) ? raw.join(',') : typeof raw === 'string' ? raw : '';
+  const hops = joined
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  if (hops.length === 0) return socket;
+  return hops[Math.max(0, hops.length - trustedHops)]!;
 }
 
 /**
@@ -99,12 +120,17 @@ function clientKey(req: {
  */
 @Injectable()
 export class RateLimitGuard implements CanActivate {
-  constructor(@Inject(RATE_LIMITER) private readonly limiter: RateLimiter) {}
+  constructor(
+    @Inject(RATE_LIMITER) private readonly limiter: RateLimiter,
+    @Inject(ENV) private readonly env: Pick<ServerEnv, 'RATE_LIMIT_TRUSTED_PROXY_HOPS'>,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const http = context.switchToHttp();
     const req = http.getRequest();
-    const { allowed, retryAfterMs } = this.limiter.take(clientKey(req));
+    const { allowed, retryAfterMs } = this.limiter.take(
+      clientKey(req, this.env.RATE_LIMIT_TRUSTED_PROXY_HOPS),
+    );
     if (!allowed) {
       const res = http.getResponse<{ header?: (k: string, v: string) => void; setHeader?: (k: string, v: string) => void }>();
       const seconds = Math.ceil(retryAfterMs / 1000).toString();

@@ -213,6 +213,12 @@ export const serverEnvSchema = z.object({
   RATE_LIMIT_ENABLED: boolish.default('true'),
   RATE_LIMIT_CAPACITY: z.coerce.number().int().positive().default(60),
   RATE_LIMIT_REFILL_PER_SEC: z.coerce.number().positive().default(1),
+  // How many reverse proxies in front of the API append to X-Forwarded-For. The
+  // limiter keys on the address the NEAREST trusted proxy saw, counted from the
+  // right of the header: the entries to its left are whatever the client sent
+  // and can be rotated at will. 1 = one load balancer (the common deploy);
+  // 2 = a CDN in front of that load balancer; 0 = no proxy, use the socket.
+  RATE_LIMIT_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
