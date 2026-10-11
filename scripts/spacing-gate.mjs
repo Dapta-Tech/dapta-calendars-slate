@@ -95,6 +95,11 @@ const ALLOW = [
     utility: 'py-16',
     why: 'A whole-section failure state is a deliberate void, not a padded row; it is taller than any content rhythm on purpose.',
   },
+  {
+    file: 'apps/web/components/brand/calendars-logo.tsx',
+    utility: 'm-2909',
+    why: 'Not a class: the relative moveto command "m-2909 -4148" inside the SVG path data of the dC mark. Path data is artwork, not spacing.',
+  },
 ];
 
 /**

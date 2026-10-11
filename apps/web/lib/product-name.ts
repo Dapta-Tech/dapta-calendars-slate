@@ -1,0 +1,21 @@
+/**
+ * What this build calls the product, and whether it is Dapta's own build.
+ *
+ * The name comes from the deployment (`NEXT_PUBLIC_PRODUCT_NAME`, inlined at
+ * build time): a bare fork keeps the default `Calendars` or names itself, and
+ * gets a neutral typographic brand. Dapta's pipeline sets it to name the real
+ * product, and only then may Dapta's artwork render (see
+ * `components/brand/brand.tsx`). Same principle as `MadeWithBadge`: a fork is
+ * never forced to carry Dapta branding.
+ *
+ * Both spellings Dapta's pipeline has used identify a Dapta build, so deploying
+ * this ahead of a pipeline change cannot silently turn Dapta's own build into a
+ * fork (the marks would vanish and the chrome would fall back to a letter chip).
+ */
+const RAW_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
+
+/** True only on a build that identifies itself as Dapta's own. */
+export const IS_DAPTA_BRAND = RAW_NAME === 'Dapta Calendars' || RAW_NAME === 'dCalendars';
+
+/** The customer-facing product name, exactly as the deployment set it. */
+export const PRODUCT_NAME = RAW_NAME;
