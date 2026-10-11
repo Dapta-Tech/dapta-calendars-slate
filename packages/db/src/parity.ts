@@ -2278,6 +2278,49 @@ export async function updateWebhook(
  * egress (SSRF guard) and signs like a real dispatch. Returns the delivery
  * result — never throws.
  */
+/**
+ * How long one webhook request may take, end to end. A subscriber is a URL an
+ * account admin typed; without a bound a slow one holds the outbox drain (one
+ * row at a time, shared by every account and every side effect) for as long as
+ * the HTTP client's own defaults allow, which is minutes.
+ */
+export const WEBHOOK_TIMEOUT_MS = 10_000;
+
+/**
+ * Request options every webhook call shares.
+ *
+ * `redirect: 'manual'`: the SSRF check (`checkWebhookUrl`) vets the URL we were
+ * given, not where a 3xx points. Following it would let a public endpoint
+ * bounce the request to a private address the check exists to refuse, so a
+ * redirect is answered as what it is: a non-2xx, failed delivery.
+ */
+function webhookRequest(headers: Record<string, string>, body: string): RequestInit {
+  return {
+    method: 'POST',
+    headers,
+    body,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+  };
+}
+
+function urlHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '(unparseable URL)';
+  }
+}
+
+/** We never read a subscriber's answer; release its socket instead of buffering it. */
+function discardBody(res: Response | undefined): void {
+  try {
+    void res?.body?.cancel().catch(() => undefined);
+  } catch {
+    /* a Response-like test double without a stream */
+  }
+}
+
 export async function pingWebhook(
   db: Db,
   accountId: string,
@@ -2308,11 +2351,8 @@ export async function pingWebhook(
   if (secret)
     headers['X-Slate-Signature'] = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
   try {
-    const res = await fetchImpl(h.subscriber_url, {
-      method: 'POST',
-      headers,
-      body,
-    });
+    const res = await fetchImpl(h.subscriber_url, webhookRequest(headers, body));
+    discardBody(res);
     return { ok: res.ok, status: res.status };
   } catch {
     return { ok: false, message: 'Subscriber unreachable.' };
@@ -2372,8 +2412,10 @@ export async function dispatchWebhooks(
           headers['X-Slate-Signature'] =
             `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
         }
-        await fetchImpl(h.subscriber_url, { method: 'POST', headers, body });
-        sent++;
+        const res = await fetchImpl(h.subscriber_url, webhookRequest(headers, body));
+        discardBody(res);
+        // Sent means accepted: a 3xx (never followed) or any other non-2xx is not.
+        if (res.ok) sent++;
       } catch {
         /* best-effort — swallow */
       }
@@ -2558,7 +2600,9 @@ export async function deliverWebhookEvent(
     });
   if (!(await checkWebhookUrl(hook.subscriber_url)).ok) {
     await record(false, null, 'URL blocked at egress');
-    throw new Error(`webhook URL blocked at egress: ${hook.subscriber_url}`);
+    // The host only: subscriber URLs often carry a token in the path or query,
+    // and this message reaches the worker log and `outbox.last_error`.
+    throw new Error(`webhook URL blocked at egress: ${urlHost(hook.subscriber_url)}`);
   }
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -2592,11 +2636,10 @@ export async function deliverWebhookEvent(
   }
   let res: Response | undefined;
   try {
-    res = (await fetchImpl(hook.subscriber_url, {
-      method: 'POST',
-      headers,
-      body: args.body,
-    })) as Response | undefined;
+    res = (await fetchImpl(hook.subscriber_url, webhookRequest(headers, args.body))) as
+      | Response
+      | undefined;
+    discardBody(res);
   } catch (err) {
     await record(false, null, err instanceof Error ? err.message : 'fetch failed');
     throw err;
