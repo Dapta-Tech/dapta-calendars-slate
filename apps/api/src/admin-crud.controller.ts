@@ -67,6 +67,7 @@ import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { DB } from './tokens';
+import { withNewHostBranding } from '@slate/shared';
 
 function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
   try {
@@ -205,7 +206,8 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     const input = parse(memberInviteSchema, body);
-    const member = unwrapCrud(await inviteMember(this.db, p.accountId, input));
+    // An invited member is a new host: born with the new look, like a sign-up.
+    const member = unwrapCrud(await inviteMember(this.db, p.accountId, input, withNewHostBranding()));
 
     // O2 (#65 → Growth funnel): the invitee reaches Dapta's marketing CRM the
     // moment their membership row exists, NOT at template pick — an invitee who

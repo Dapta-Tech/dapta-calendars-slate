@@ -15,7 +15,8 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { deriveUniqueHandle, getAccountByCode, insertAccountWithShortCode, sql } from '@slate/db';
+import { deriveUniqueHandle, getAccountByCode, insertAccountWithShortCode, jsonParam, sql } from '@slate/db';
+import { withNewHostBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 // The concrete `workos` adapter. The cycle (adapter imports the port/`header`
 // from here) is safe: each side references the other only inside function
@@ -157,9 +158,13 @@ export class LocalAuthProvider implements AuthProvider {
     const memberId = randomUUID();
     // Auto-handle at creation (short-links §3) — the "no handle" state is dead.
     const handle = await deriveUniqueHandle(this.db, account.id, null, email);
+    // Born with the new look (`withNewHostBranding`): written into THIS row
+    // only, so every host created before it keeps the page they have.
+    const born = withNewHostBranding();
     await this.db.run(
-      sql`INSERT INTO member (id, account_id, email, display_name, handle, role, created_at)
-          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${handle}, ${role}, ${Date.now()})`,
+      sql`INSERT INTO member (id, account_id, email, display_name, handle, role, brand_color, booking_page_style, created_at)
+          VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${handle}, ${role},
+            ${born.brandColor}, ${jsonParam(this.db, born.style)}, ${Date.now()})`,
     );
     return { accountId: account.id, memberId };
   }

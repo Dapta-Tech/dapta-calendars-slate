@@ -82,6 +82,27 @@ describe('account roles + member management (owner/admin/member)', () => {
     if (clamped.ok) expect(clamped.value.role).toBe('member');
   });
 
+  it('stores the branding an invite is born with, and none when the caller gives none', async () => {
+    const born = await inviteMember(
+      db,
+      accountId,
+      { email: 'born@example.com' },
+      { brandColor: '#1a1a1c', style: { theme: 'light' } },
+    );
+    const bare = await inviteMember(db, accountId, { email: 'bare@example.com' });
+    if (!born.ok || !bare.ok) throw new Error('invite failed');
+    const read = async (id: string) =>
+      db.get<{ brand_color: string | null; booking_page_style: unknown }>(
+        sql`SELECT brand_color, booking_page_style FROM member WHERE id = ${id}`,
+      );
+    const a = await read(born.value.id);
+    expect(a!.brand_color).toBe('#1a1a1c');
+    expect(JSON.parse(String(a!.booking_page_style))).toEqual({ theme: 'light' });
+    const b = await read(bare.value.id);
+    expect(b!.brand_color).toBeNull();
+    expect(b!.booking_page_style).toBeNull();
+  });
+
   it('changes roles but guards the last owner (demote)', async () => {
     // Promote/adjust staff freely.
     const up = await changeMemberRole(db, accountId, jordan, 'admin');

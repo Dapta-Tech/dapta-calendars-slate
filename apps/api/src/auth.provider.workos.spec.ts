@@ -45,6 +45,20 @@ describe('WorkOsAuthProvider — validates the platform JWT and projects a princ
     expect(mem!.email).toBe('a@x.io');
   });
 
+  it('a member provisioned on first login is born with the new booking page look', async () => {
+    const provider = new WorkOsAuthProvider(db, env);
+    const p = await provider.resolveHost(bearer(mint({ account_id: 'ext_acct_9', sub: 'ext_user_9', email: 'b@x.io', name: 'Bo' })));
+    const row = await db.get<{ brand_color: string | null; booking_page_style: unknown }>(
+      sql`SELECT brand_color, booking_page_style FROM member WHERE id = ${p.memberId}`,
+    );
+    expect(row!.brand_color).toBe('#1a1a1c');
+    const style =
+      typeof row!.booking_page_style === 'string'
+        ? JSON.parse(row!.booking_page_style)
+        : row!.booking_page_style;
+    expect(style).toEqual({ theme: 'light' });
+  });
+
   it('is idempotent — a second login resolves the SAME rows (no duplicates)', async () => {
     const provider = new WorkOsAuthProvider(db, env);
     const t = mint({ account_id: 'ext_acct_2', sub: 'ext_user_2' });
