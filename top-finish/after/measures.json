@@ -1,0 +1,506 @@
+[
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 320,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 320,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 320,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 360,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 360,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 360,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 320,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 320,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 320,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 360,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 360,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 360,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "light",
+  "w": 1440,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "en",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "en",
+  "button": {
+   "text": "Create your free calendar",
+   "w": 211,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 320,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 360,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "profile",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "event",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "es",
+  "button": null,
+  "lineRows": null,
+  "docOverflow": false
+ },
+ {
+  "tag": "after",
+  "page": "confirm",
+  "canvas": "dark",
+  "w": 1440,
+  "lang": "es",
+  "button": {
+   "text": "Crea tu calendario gratis",
+   "w": 204,
+   "h": 44,
+   "overflow": false,
+   "cls": "bp-btn bp-growth-btn"
+  },
+  "lineRows": 1,
+  "docOverflow": false
+ }
+]
