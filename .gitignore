@@ -63,3 +63,8 @@ WORKOS-STATUS.md
 AUTH-WEB-CONTRACT.md
 CALENDAR-INTEGRATION-PLAN.md
 *-STATUS.md
+
+# Browser suite output (apps/web/e2e)
+apps/web/e2e/.results/
+apps/web/e2e/.report/
+apps/web/e2e/.results-logs/
