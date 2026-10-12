@@ -57,7 +57,8 @@ import {
   updateMemberSettings,
   updateSchedule,
   cancelBooking,
-  cacheEntitlement,
+  getBrandingSwitch,
+  setHideBranding,
   setVanitySlug,
   sql,
   type VanityOutcome,
@@ -85,8 +86,9 @@ import {
   type IntegrationCapabilities,
   type IntegrationConnectInput,
   type IntegrationStatusView,
+  type BrandingSettingView,
 } from '@slate/types';
-import { getMessages } from '@slate/shared';
+import { getMessages, showDaptaBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
@@ -94,10 +96,9 @@ import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
+import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
-/** How long a cached Dapta AI entitlement verdict stays fresh before re-asking upstream. */
-const ENTITLEMENT_TTL_MS = 6 * 3600_000;
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
@@ -966,36 +967,17 @@ export class AdminService {
    * the unlock is the customer's Dapta AI subscription, validated upstream and
    * CACHED on the account row (TTL) so nothing user-facing blocks on the
    * entitlement service. `PREMIUM_FEATURES=open` (the OSS default) short-circuits.
+   * The cache and its refresh live in `EntitlementGate`, the same class the
+   * public pages' branding decision reads it through.
    */
-  private async isEntitled(accountId: string): Promise<boolean> {
-    if (this.premiumMode === 'open') return true;
-    const acc = await this.db.get<{
-      external_id: string | null;
-      dapta_entitlement: string | null;
-      entitlement_checked_at: number | null;
-    }>(
-      sql`SELECT external_id, dapta_entitlement, entitlement_checked_at
-          FROM account WHERE id = ${accountId} LIMIT 1`,
-    );
-    if (!acc) return false;
-    const checked = acc.entitlement_checked_at ? Number(acc.entitlement_checked_at) : 0;
-    if (checked && Date.now() - checked < ENTITLEMENT_TTL_MS) {
-      return acc.dapta_entitlement === 'paid';
-    }
-    if (!this.entitlements.enabled) return acc.dapta_entitlement === 'paid';
-    // Refresh from the source of truth: keyed by the account owner's email
-    // (the upstream service resolves customers by owner email) + org id.
-    const owner = await this.db.get<{ email: string | null }>(
-      sql`SELECT email FROM member
-          WHERE account_id = ${accountId} AND role = 'owner' AND status = 'active'
-          ORDER BY created_at ASC LIMIT 1`,
-    );
-    const paid = await this.entitlements.isPaidCustomer({
-      ownerEmail: owner?.email,
-      externalOrgId: acc.external_id,
-    });
-    await cacheEntitlement(this.db, accountId, paid ? 'paid' : 'free');
-    return paid;
+  private isEntitled(accountId: string): Promise<boolean> {
+    return this.gate.isEntitled(accountId);
+  }
+
+  private _gate?: EntitlementGate;
+  private get gate(): EntitlementGate {
+    this._gate ??= new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    return this._gate;
   }
 
   /** The Settings surface's view of the vanity feature. */
@@ -1019,6 +1001,41 @@ export class AdminService {
     const entitled = await this.isEntitled(p.accountId);
     if (!canClaimVanitySlug(this.premiumMode, entitled)) return { ok: false, reason: 'NOT_ENTITLED' };
     return setVanitySlug(this.db, p.accountId, slug);
+  }
+
+  // --- Dapta branding on the public pages (included with Dapta AI) --------
+
+  /**
+   * The Settings view of the branding switch. `canHide` refreshes a stale
+   * verdict inline (`isEntitled`), so a host who just subscribed sees the
+   * switch unlock; `showing` is what the public pages carry right now.
+   */
+  async brandingStatus(p: HostPrincipal): Promise<BrandingSettingView> {
+    const canHide = await this.isEntitled(p.accountId);
+    const row = await getBrandingSwitch(this.db, p.accountId);
+    const hideBranding = row?.hideBranding ?? false;
+    return {
+      hideBranding,
+      canHide,
+      showing: showDaptaBranding({
+        hideBranding,
+        entitlement: canHide ? 'paid' : 'free',
+        premiumMode: this.premiumMode,
+      }),
+    };
+  }
+
+  /**
+   * Store the account's choice. Turning the branding OFF needs the
+   * entitlement; turning it back ON never does. Caller enforces the admin role.
+   */
+  async setBranding(
+    p: HostPrincipal,
+    hideBranding: boolean,
+  ): Promise<{ ok: true; branding: BrandingSettingView } | { ok: false; reason: 'NOT_ENTITLED' }> {
+    if (hideBranding && !(await this.isEntitled(p.accountId))) return { ok: false, reason: 'NOT_ENTITLED' };
+    await setHideBranding(this.db, p.accountId, hideBranding);
+    return { ok: true, branding: await this.brandingStatus(p) };
   }
 
   /**

@@ -29,6 +29,9 @@ export const account = sqliteTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: integer('entitlement_checked_at'),
+  // The account's choice to hide the Dapta branding on its public pages (0/1).
+  // Honoured only while the verdict above reads 'paid': see showDaptaBranding.
+  hideBranding: integer('hide_branding').notNull().default(0),
   // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
   // by Forms' question bank. Written once, alongside the claim below.
   // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
