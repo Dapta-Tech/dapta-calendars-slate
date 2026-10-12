@@ -433,6 +433,8 @@ export interface PublicProfile {
     title: string;
     description: string | null;
     lengthMinutes: number;
+    location: ReturnType<typeof parseEventLocation>;
+    timeZone: string;
   }>;
 }
 

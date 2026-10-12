@@ -278,6 +278,24 @@ describe('a month that cannot be read is never shown as a month with no times', 
     });
   }
 
+  it('an empty visible month and a failed next month keep the calendar, never the unavailable sentence', async () => {
+    let fail = true;
+    fetchMock.mockImplementation(async () =>
+      fail ? { ok: false, json: async () => ({ ok: false }) } : { ok: true, json: async () => ({ ok: true, slots: APRIL }) },
+    );
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: true, slots: [] });
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(monthLabel(el)).toBe('March 2026');
+    fail = false;
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Next month"]')!.click());
+    await act(async () => {});
+    expect(monthLabel(el)).toBe('April 2026');
+    expect(day(el, '2026-04-06').dataset.state).toBe('available');
+  });
+
   it('a later month failing stays not yet known, and is asked again when visited', async () => {
     let fail = true;
     fetchMock.mockImplementation(async () =>

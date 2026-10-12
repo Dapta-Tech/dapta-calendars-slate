@@ -104,9 +104,12 @@ export function useProgressiveSlots({
     inflight.current = inflight.current.filter((s) => s.fromMs !== span.fromMs || s.toMs !== span.toMs);
     if (!alive.current) return;
     setState((s) => {
-      // A window that could not be read is not a window with no times.
+      // A window that could not be read is not a window with no times. Only
+      // when nothing at all has been read does the page say so; once any
+      // window has answered (even with no times), the failed one just stays
+      // "not yet known" and is asked again when the visitor goes to it.
       if (!chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE') {
-        return s.slots.length === 0 ? { ...s, unavailable: true } : s;
+        return s.known.length === 0 ? { ...s, unavailable: true } : s;
       }
       // A configuration reason (no schedule, no hours) holds for every window.
       if (chunk.emptyReason) {
