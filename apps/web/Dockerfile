@@ -33,6 +33,9 @@ ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
 ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
 ARG NEXT_PUBLIC_PLATFORM_URL=
 ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
+# Where "Create your free calendar" and the "Made with" badge send a visitor. Unset = neither renders (a fork shows no Dapta growth surface).
+ARG NEXT_PUBLIC_SIGNUP_URL=
+ENV NEXT_PUBLIC_SIGNUP_URL=$NEXT_PUBLIC_SIGNUP_URL
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
@@ -51,6 +54,9 @@ ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
 ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
 ARG NEXT_PUBLIC_PLATFORM_URL=
 ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
+# Where "Create your free calendar" and the "Made with" badge send a visitor. Unset = neither renders (a fork shows no Dapta growth surface).
+ARG NEXT_PUBLIC_SIGNUP_URL=
+ENV NEXT_PUBLIC_SIGNUP_URL=$NEXT_PUBLIC_SIGNUP_URL
 WORKDIR /app
 # Next standalone bundles the server + its minimal node_modules.
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
