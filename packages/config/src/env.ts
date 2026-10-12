@@ -224,6 +224,20 @@ export const serverEnvSchema = z.object({
   // id, error code, account). JSON when NODE_ENV=production, a human line
   // otherwise. Never carries query strings, bodies, headers or client addresses.
   REQUEST_LOG_ENABLED: boolish.default('true'),
+
+  // --- Growth loop in booking emails ---
+  // The signup destination the invitee's email footer links to ("Made with ...
+  // Create your free calendar"), the API-side twin of the web's
+  // NEXT_PUBLIC_SIGNUP_URL, which is also read here so one value set for both
+  // apps is enough. Unset (a bare fork): the email names no product at all.
+  // Not `.url()` on purpose: a malformed value must never stop the API booting;
+  // `buildSignupUrl` drops anything that is not http(s).
+  SIGNUP_URL: z.string().optional(),
+  NEXT_PUBLIC_SIGNUP_URL: z.string().optional(),
+  // Turns the footer line off even with a destination (same spellings as the
+  // web's NEXT_PUBLIC_HIDE_BADGE, which is read as the fallback).
+  HIDE_BADGE: z.string().optional(),
+  NEXT_PUBLIC_HIDE_BADGE: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

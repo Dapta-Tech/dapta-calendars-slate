@@ -1,6 +1,6 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
-import { renderBrandedHtml, type Audience, type EmailKind } from './email-layout';
+import { renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
 import {
   renderTemplate,
   templateVars,
@@ -83,7 +83,14 @@ export interface BookingNotification {
  * per-side notification settings can silence one without the other.
  */
 export class BookingNotifier {
-  constructor(private readonly email: EmailProvider) {}
+  /**
+   * `growth.signupUrl`: the deployment's signup destination for the invitee's
+   * footer line. Absent (a bare fork, every existing caller): no line.
+   */
+  constructor(
+    private readonly email: EmailProvider,
+    private readonly growth: EmailGrowth = {},
+  ) {}
 
   /** Recipient set for the notification's audience, deduped, empties dropped. */
   private recipients(n: BookingNotification): string[] {
@@ -115,7 +122,7 @@ export class BookingNotifier {
     const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
     const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
     const vars = templateVars(n, locale);
-    const html = renderBrandedHtml(kind, vars, locale, audience);
+    const html = renderBrandedHtml(kind, vars, locale, audience, this.growth);
     if (n.template) {
       const base = renderTemplate(n.template, vars);
       return { subject: base.subject, text: base.text, html };
