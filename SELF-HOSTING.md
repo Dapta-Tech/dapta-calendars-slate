@@ -156,6 +156,7 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
+| `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
