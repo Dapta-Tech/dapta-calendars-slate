@@ -69,7 +69,8 @@ test('switching time zone on the details step keeps the instant, shows the new z
 
 test('keyboard only: arrows to a day, Enter, Tab to a time, type, submit', async ({ page }) => {
   const email = visitorEmail('kbd');
-  await page.goto(PAGE);
+  // Hydrated first: a key pressed on server-rendered markup reaches no handler.
+  await page.goto(PAGE, { waitUntil: 'networkidle' });
   const firstOpen = page.getByRole('grid').getByRole('button', { disabled: false }).first();
   await firstOpen.focus();
   // Arrows move the cursor without picking (#194): times stay as they were.
@@ -78,8 +79,9 @@ test('keyboard only: arrows to a day, Enter, Tab to a time, type, submit', async
   await page.keyboard.press('Enter');
   const firstTime = timesRegion(page).getByRole('button', { name: TIME }).first();
   await expect(firstTime).toBeVisible();
-  await firstTime.focus();
-  await page.keyboard.press('Enter');
+  await page.waitForLoadState('networkidle');
+  // Focus and key in one step: the list can re-render between the two.
+  await firstTime.press('Enter');
   await expect(page.getByRole('textbox', { name: /your name/i })).toBeVisible();
   await page.getByRole('textbox', { name: /your name/i }).focus();
   await page.keyboard.type('Ada Visitor');
