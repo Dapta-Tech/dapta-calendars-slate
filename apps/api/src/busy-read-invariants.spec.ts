@@ -209,6 +209,10 @@ describe('busy-read invariants (generic adapter, stand-in backend)', () => {
 describe('GenericRestWire.parseBusy fails closed', () => {
   const wire = new GenericRestWire();
 
+  it('a zero-length entry blocks nothing and is no reason to withhold the month', () => {
+    expect(wire.parseBusy({ busy: [{ startUtc: '2030-01-01T10:00:00Z', endUtc: '2030-01-01T10:00:00Z' }] })).toHaveLength(1);
+  });
+
   it('reads a clean answer, an empty list included', () => {
     expect(wire.parseBusy({ busy: [] })).toEqual([]);
     expect(
@@ -235,6 +239,7 @@ describe('GenericRestWire.parseBusy fails closed', () => {
     ['busy as an object', { busy: {} }],
     ['an entry that is a string', { busy: ['2030-01-01T10:00:00Z'] }],
     ['an entry with numbers for times', { busy: [{ startUtc: 1, endUtc: 2 }] }],
+    ['an entry that ends before it starts', { busy: [{ startUtc: '2030-01-01T11:00:00Z', endUtc: '2030-01-01T10:00:00Z' }] }],
   ])('throws on %s, and the cause names no body content', (_label, raw) => {
     let caught: unknown;
     try {

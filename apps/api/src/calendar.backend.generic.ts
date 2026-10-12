@@ -109,8 +109,12 @@ export class GenericRestWire implements CalendarWire {
       const endUtc = b['endUtc'];
       if (typeof startUtc !== 'string' || typeof endUtc !== 'string')
         throw new CalendarBodyError('busy entry without times');
-      if (Number.isNaN(Date.parse(startUtc)) || Number.isNaN(Date.parse(endUtc)))
-        throw new CalendarBodyError('busy entry with unreadable times');
+      const startMs = Date.parse(startUtc);
+      const endMs = Date.parse(endUtc);
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) throw new CalendarBodyError('busy entry with unreadable times');
+      // Reversed is malformed. Zero-length is not: it blocks no time, and
+      // refusing it would withhold a healthy calendar's month.
+      if (endMs < startMs) throw new CalendarBodyError('busy entry that ends before it starts');
       return { startUtc, endUtc };
     });
   }
