@@ -157,7 +157,8 @@ export interface CalendarWriteContext {
    * would invite them to a second copy of an event they already own.
    */
   copyAttendeeEmails: string[];
-  /** The destinations that belong to the organizer (their own calendars). */
+  /** The organizer's own calendars: today's destination and any other they
+   *  have connected, so an event stored on a former destination stays theirs. */
   organizerDestinationRefs: string[];
   organizerEmail: string | null;
   /** The organizer's locale — the co-hosts' event body is written in it. */
@@ -285,6 +286,18 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
         if (memberId === b.host_member_id) organizerRefs.add(ref);
       }
     }
+  }
+
+  // Which stored events are the organizer's own is a matter of whose calendar
+  // holds them, not of today's destination: a host who switched destination
+  // still owns the event written to the old one, and its reschedule must keep
+  // them on it. So every calendar the organizer has connected counts, while
+  // `destinationRefs` stays the calendars written to now.
+  if (b.host_member_id) {
+    const owned = await db.all<{ external_id: string }>(
+      sql`SELECT external_id FROM connected_calendar WHERE member_id = ${b.host_member_id}`,
+    );
+    for (const row of owned) organizerRefs.add(row.external_id);
   }
 
   // Two guest lists, each address once (compared the way the duplicate guard

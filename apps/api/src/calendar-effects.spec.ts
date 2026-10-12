@@ -176,6 +176,24 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       // The room is still requested on the organizer's destination only.
       expect(provider.created.map((c) => !!c.requestConferenceLink)).toEqual([false, false]);
     });
+
+    it('stays on their event after they switch destination calendar, on the reschedule', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      // The host makes another of their calendars the destination; the event
+      // already written stays on the old one, which is still theirs.
+      await db.run(sql`UPDATE connected_calendar SET is_destination = 0 WHERE external_id = ${CAL_REF}`);
+      await db.run(
+        sql`INSERT INTO connected_calendar
+              (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${memberId}, ${'google'}, ${'cal-dest-new'}, ${null}, ${1}, ${1}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      expect(provider.updated.map((u) => u.connectionRef)).toEqual([CAL_REF]);
+      expect(provider.updated[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
+    });
   });
 
   it('DH1: a retried/concurrent write is idempotent — no duplicate external event', async () => {
