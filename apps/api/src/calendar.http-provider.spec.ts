@@ -197,6 +197,8 @@ describe('ExternalCalendarProvider (generic HTTP adapter)', () => {
     const health = await bad.provider.checkConnection('conn-A');
     expect(health.ok).toBe(false);
     expect(health.detail).toMatch(/401/);
+    // The backend's response body never reaches the host or the stored health.
+    expect(health.detail).not.toContain('expired');
   });
 
   it('throws CalendarHttpError on a non-2xx write so the outbox retries', async () => {

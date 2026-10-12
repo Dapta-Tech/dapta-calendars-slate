@@ -297,6 +297,17 @@ export function failureCause(err: unknown): string {
   return 'cause=unknown';
 }
 
+/**
+ * The same, as a sentence a host may read on the connections screen (and that
+ * is stored as the connection's last health detail). Still never the message.
+ */
+export function failureDetail(err: unknown): string {
+  if (err instanceof CalendarHttpError)
+    return `The calendar backend refused ${err.op} (HTTP ${err.status}).`;
+  if (err instanceof Error) return `The calendar backend could not be reached (${err.name}).`;
+  return 'The calendar backend could not be reached.';
+}
+
 export interface ExternalCalendarOptions {
   baseUrl: string;
   tokenSource: CalendarTokenSource;
@@ -490,8 +501,9 @@ export class ExternalCalendarProvider implements CalendarProvider {
         await this.send('checkConnection', this.wire.checkConnection(connectionRef)),
       );
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      return { ok: false, detail };
+      // The detail reaches the host's screen and the connection's stored
+      // health; the error's message would carry the backend's response body.
+      return { ok: false, detail: failureDetail(err) };
     }
   }
 

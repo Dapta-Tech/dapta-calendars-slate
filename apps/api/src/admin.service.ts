@@ -84,7 +84,7 @@ import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
-import { asConnector } from './calendar.http-provider';
+import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -816,7 +816,8 @@ export class AdminService {
     } catch (e) {
       return {
         ok: false,
-        healthDetail: e instanceof Error ? e.message : 'Could not read events.',
+        // Never the error's message: for a backend refusal it is the response body.
+        healthDetail: failureDetail(e),
         busyCount: null,
         conflictCheckEnabled: row.checkConflicts,
         checkedAt,
