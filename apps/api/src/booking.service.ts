@@ -256,19 +256,25 @@ export class BookingService {
     oneOffToken?: string,
   ): Promise<{ reservationUid: string; expiresAt: string } | ServiceError> {
     const input = reserveSlotSchema.parse(raw);
-    const held = await reserveSlot(this.db, {
-      accountCode: input.accountCode,
-      handle: input.handle,
-      slug: input.slug,
-      startMs: new Date(input.startUtc).getTime(),
-      // Same opt-in as `availability` above: without it the hold 404s on the
-      // hidden event and the invitee cannot get past the slot picker (#110).
-      includeHidden: await this.oneOffOpens(oneOffToken, {
+    const held = await reserveSlot(
+      this.db,
+      {
         accountCode: input.accountCode,
         handle: input.handle,
         slug: input.slug,
-      }),
-    });
+        startMs: new Date(input.startUtc).getTime(),
+        // Same opt-in as `availability` above: without it the hold 404s on the
+        // hidden event and the invitee cannot get past the slot picker (#110).
+        includeHidden: await this.oneOffOpens(oneOffToken, {
+          accountCode: input.accountCode,
+          handle: input.handle,
+          slug: input.slug,
+        }),
+      },
+      // A time busy in the host's connected calendar is refused at the hold,
+      // not only at booking (no-op on the OSS default disabled provider).
+      this.calendar.provider,
+    );
     if (!held.ok) {
       if (held.reason === 'NOT_FOUND')
         return {
@@ -281,6 +287,13 @@ export class BookingService {
           error: 'RATE_LIMITED',
           message: 'Too many active holds. Try again shortly.',
           status: 429,
+        };
+      // Same code, message and status as the booking path's fail-closed read.
+      if (held.reason === 'CALENDAR_UNAVAILABLE')
+        return {
+          error: 'CALENDAR_UNAVAILABLE',
+          message: 'This time could not be confirmed right now. Please try again in a few minutes.',
+          status: 409,
         };
       return {
         error: 'INVALID_SLOT',

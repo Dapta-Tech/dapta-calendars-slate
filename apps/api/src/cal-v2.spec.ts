@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { HttpException, type ArgumentsHost } from "@nestjs/common";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HttpException, Logger, type ArgumentsHost } from "@nestjs/common";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApiKey, createDb, migrate, seed, sql, type Db } from "@slate/db";
 import { InMemoryCalendarProvider } from "@slate/calendar";
 import { loadServerEnv } from "@slate/config/env";
@@ -795,5 +795,49 @@ describe("Cal-compatible v2 R1 contract", () => {
         requestId: "req_contract_test",
       },
     });
+  });
+
+  it("an unexpected failure is logged with its cause and request id, and the body stays generic", () => {
+    const errors: unknown[][] = [];
+    const spy = vi
+      .spyOn(Logger.prototype, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args);
+      });
+    const bodies: unknown[] = [];
+    const response = {
+      status() {
+        return response;
+      },
+      json(value: unknown) {
+        bodies.push(value);
+      },
+      setHeader() {},
+    };
+    const host = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {},
+          method: "POST",
+          route: { path: "/v2/bookings" },
+          v2RequestId: "req_boom",
+        }),
+        getResponse: () => response,
+      }),
+    } as unknown as ArgumentsHost;
+    try {
+      new CalV2ExceptionFilter().catch(new Error("connection refused"), host);
+      new CalV2ExceptionFilter().catch(
+        new HttpException({ error: "NOT_FOUND" }, 404),
+        host,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors).toHaveLength(1);
+    expect(errors[0]![0]).toBe("v2 POST /v2/bookings 500 req_boom");
+    expect(String(errors[0]![1])).toContain("connection refused");
+    expect(bodies[0]).toMatchObject({ error: { code: "INTERNAL_ERROR", requestId: "req_boom" } });
+    expect(JSON.stringify(bodies[0])).not.toContain("connection refused");
   });
 });

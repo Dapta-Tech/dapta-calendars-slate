@@ -1,63 +1,73 @@
 /**
- * Design tokens → shadcn/Tailwind CSS-variable contract. Dark-first, mapped 1:1
- * from the source design system. Consumed by apps/web/app/globals.css. Semantic
- * names only — components reference these via Tailwind theme tokens, never raw
- * hex. The lime accent always pairs with near-black foreground (WCAG AA).
+ * Design tokens: the shadcn CSS-variable contract. Consumed by
+ * apps/web/app/globals.css. Semantic names only: components reference these via
+ * Tailwind theme tokens, never raw hex.
  *
- * The palette is the "Master Control Room" language shared with the marketing
- * site's own design doc, so the marketing surface and the product read
- * as one thing: a blue-cooled monochrome console lit by exactly two signals.
+ * The palette is the dForms language, shared with the sibling product and the
+ * marketing site: a neutral monochrome in ink and paper, with one saturated
+ * signal. Judge any screen against the five rules below; a colour that none of
+ * them names does not belong on it.
  *
- * ── The two lights ─────────────────────────────────────────────────────────
- * Program Lime is the only saturated working color — actions, live data, active
- * states, focus, progress. Tally Red is the only other saturated color.
+ * ── Ink does the work ──────────────────────────────────────────────────────
+ * The primary action, the selected state and the active mark are all INK
+ * (`--primary`). What is active gets heavier, it does not get louder. On the dark
+ * theme the same role inverts to paper. A screen with ten controls on it has, at
+ * most, one green thing.
  *
- * The landing reserves Tally Red for "we are on air" and forbids it for errors,
- * because a landing page has no error states. The product does: validation,
- * delete confirmations, failed deliveries. So HERE the red's one job is
- * destructive/error — the same discipline (one red, one meaning), applied to a
- * surface that actually has failures. Nothing else may be saturated: an element
- * that needs emphasis earns lime or it stays slate.
+ * ── One signal ─────────────────────────────────────────────────────────────
+ * Signal Green (`--signal`) is the only saturated working colour, and it is
+ * rationed: a switch that is on, progress, a booking that is confirmed, and
+ * focus. It always carries ink on top, never white (white on it is 1.8:1). Red
+ * (`--destructive`) is the only other saturated colour and its one job is
+ * destructive or error.
  *
- * This law governs PRODUCT CHROME only. A host's booking-page accent is theirs,
- * including the purple this sheet just retired — see ADR 0004.
+ * ── One data channel ───────────────────────────────────────────────────────
+ * Warning Amber (`--warning`) carries MEANING rather than emphasis, and has one
+ * job: something that is not settled yet (a booking waiting for the host, an
+ * unsaved change). Its `-ink` twin is the same hue at a lightness that reads as
+ * TEXT on this theme's surfaces; the base value is for dots and low-alpha washes.
+ * The sibling product's second channel (Score Purple) is not carried: nothing
+ * here scores anything.
  *
  * ── The surface ladder ─────────────────────────────────────────────────────
- * Depth is tonal, not shadowed: Control-Room Black → Bezel Graphite → Monitor
- * Panel → Raised Deck, separated by one cool hairline. Stacking two steps plus a
- * border IS elevation.
+ * Depth is tonal and bordered, never shadowed. Chrome sits on the page; the rail
+ * on `--sidebar`, one step below it; a work surface (a preview, a bulk action) on
+ * `--panel`; raised fills on `--muted`. One hairline separates them.
  *
- * ── The live channel ───────────────────────────────────────────────────────
- * The accent is composed from `--acc-h/--acc-s/--acc-l` rather than written as a
- * literal, so hue and saturation can be retuned in one place (and match the
- * landing's runtime tweaks contract). Never hardcode the lime.
+ * ── The booking page is not the product ────────────────────────────────────
+ * Everything above is what WE paint: the admin, the onboarding, the manage page.
+ * A host's booking page is theirs (ADR 0004). It reads this sheet only for ROLES
+ * (`--card`, `--border`, `--muted-foreground`), and its values for those roles
+ * are frozen in the BOOKING GROUND blocks at the end of this file, keyed on the
+ * `bp-ground` class the public shell and the studio preview both carry. So the
+ * product can change its palette without moving a single live booking page, and
+ * the studio preview keeps matching production because both read the same block.
+ * A booking page that should look like the product does so through the host's
+ * own stored config (`withNewHostBranding` in branding.ts), never through here.
  *
  * ── Provenance ─────────────────────────────────────────────────────────────
- * Ported wholesale from the Dapta Forms sheet, comments included — the comments
- * carry the reasoning behind each measured value, and re-deriving that later
- * costs more than carrying it. Both repos are MIT under the same owner. The
- * deviations from that sheet, so a future re-port knows what was deliberate:
+ * The colour blocks are the dForms sheet's values. Calendars' own additions, so a
+ * future re-port knows what was deliberate:
  *
- *   1. `--secondary` takes Forms' Neutral Trace slate. Calendars painted a
- *      saturated purple in three places (the pending-booking badge, the studio's
- *      unsaved-changes chip, the notification template-variable chip); all three
- *      are re-mapped in this slice, and a third saturated colour is not allowed.
- *   2. `--brand-ink` / `--brand-ink-foreground` are carried even though Calendars
- *      has no app switcher yet. They are two declarations, the sheet is a unit,
- *      and the brand mark work will want them.
- *   3. The `prefers-color-scheme` block additionally declares `--primary` and
- *      `--primary-foreground`. They are identical to the base values, so this
- *      changes nothing that paints — it makes the two light blocks a literal
- *      value-for-value match, which is what `tokens.spec.ts` asserts.
- *   4. Each theme block declares `color-scheme`. Forms carries it on the app
- *      shell; here it belongs to the sheet, because the sheet is what a
- *      self-hoster imports and a theme that does not tell the browser which half
- *      it is on leaves the user agent's own chrome painted for the other one.
+ *   1. The spacing scale (below). The sibling sheet has none.
+ *   2. Each theme block declares `color-scheme`. The sheet is what a self-hoster
+ *      imports, and a theme that does not tell the browser which half it is on
+ *      leaves the user agent's own chrome painted for the other one.
+ *   3. The light block is `:root[data-theme='light'], [data-theme='light']`, so
+ *      paper is re-establishable on a SUBTREE (the studio previews a host's light
+ *      page inside a dark admin) and the root-level rule stays the more specific.
+ *   4. `--focus` is its own token, as in the sibling sheet, and the booking ground
+ *      points it back at the host's accent. On light it is one step darker than
+ *      the sibling's (`#1d9a55`, not `#1fa35a`, and `--ring` with it), because
+ *      the sibling's value measures 2.9:1 on the raised fill.
+ *   5. The booking ground blocks. The sibling product keeps its public palette in
+ *      the public renderer's own stylesheet; here the values are tokens and live
+ *      in the token sheet, because "no raw hex outside tokens.css" is a rule this
+ *      repo enforces.
  *
  * Everything the sheet declares is asserted by `tokens.spec.ts`, which reads THIS
- * FILE. Both halves are reachable in the running app: the root layout stamps the
- * theme per request, from the host's cookie on a product route and from the
- * booking page's own canvas on a public one (ADR 0004).
+ * FILE: the contrast law for both product themes and both booking grounds, the
+ * light/prefers parity, and the spacing scale.
  */
 
 /* ============================================================================
@@ -67,7 +77,7 @@
    about space. Padding, gaps and margins were picked per screen, and the numbers
    below are what that produced.
 
-   THE AUDIT, reproducible — every `p/px/py/pt/pb`, `m*`, `gap*`, `space-*` and
+   THE AUDIT, reproducible: every `p/px/py/pt/pb`, `m*`, `gap*`, `space-*` and
    inset utility in the 60 `.tsx` files under `apps/web/app/admin` and
    `apps/web/components`, at `develop` 0199efa: **74 distinct values across 17 spacing roles**, in the 51
    of those files that space anything at all. The worst three roles alone:
@@ -79,7 +89,7 @@
 
    Nothing lines up because nothing said what to line up to.
 
-   These are theme-independent — a light page and a dark page are the same shape —
+   These are theme-independent (a light page and a dark page are the same shape),
    so they are declared once, above both theme blocks, and no theme block may
    redefine one. `tokens.spec.ts` asserts that.
 
@@ -95,7 +105,7 @@
 
    Values are `rem` on purpose, unlike the radius and type ladders, which are `px`:
    space should follow the reader's text size, a corner and a cap height should
-   not. `tokens.spec.ts` parses `rem` — normalising this block to `px` breaks it.
+   not. `tokens.spec.ts` parses `rem`; normalising this block to `px` breaks it.
 
    ROLES, tightest to loosest:
      tight    4px   inside a badge or chip, and the gap in a tight label stack.
@@ -122,8 +132,8 @@
    rather than a taste decision:
      control-h  44px   the minimum height of anything tappable (R28). The audit
                        found this hand-written as `min-h-[44px]` at 36 call sites
-                       in scope, 39 across `apps/web` — a real rule with no name.
-     control-x  16px   the standard control's inner horizontal padding — the
+                       in scope, 39 across `apps/web`: a real rule with no name.
+     control-x  16px   the standard control's inner horizontal padding, the
                        Button primitive's default size. Its `sm` and `lg` steps
                        sit a rung either side on the content ladder, because a
                        control ladder needs three values and a token is one.
@@ -151,10 +161,7 @@
    The selector list is what makes the dark palette re-establishable on a SUBTREE
    rather than only on the document: `:root` alone means a nested
    `data-theme="dark"` element inherits whatever the root resolved to, so there is
-   no way to say "this region is dark" inside a light document. The booking page
-   needs exactly that — ADR 0004 gives it a theme of its own, independent of the
-   host's admin preference, and the studio preview has to render the invitee's
-   view rather than the AUTHOR's. */
+   no way to say "this region is dark" inside a light document. */
 :root,
 [data-theme='dark'] {
   /* Tell the BROWSER which half of the sheet is in force, not just our own
@@ -162,195 +169,137 @@
      nothing else: `<select>` popups, the internals of `<input type='date'>`,
      autofill backgrounds, the default scrollbar on any region the themed
      scrollbar rules do not reach, and the canvas behind an overscroll bounce.
-     Without it a light page still renders the browser's own chrome dark, which
-     is the one part of the theme no token can reach. It inherits, so a subtree
-     that re-establishes a theme re-establishes this too. */
+     It inherits, so a subtree that re-establishes a theme re-establishes this. */
   color-scheme: dark;
 
-  /* Accent channels — retune the lime here, never at a call site. */
-  --acc-h: 68;
-  --acc-s: 76%;
-  --acc-l: 61%;
+  /* Base surfaces. */
+  --background: #1a1a1c; /* Ink: the page */
+  --foreground: #fefefe; /* Snow: never pure white */
+  --card: #222225;
+  --card-foreground: #fefefe;
+  --popover: #222225; /* menus, inputs */
+  --popover-foreground: #fefefe;
+  /* The navigation rail's own ground, one step BELOW the page so the rail recedes
+     and the content reads as the lit surface. */
+  --sidebar: #161618;
+  /* The ground of a work surface (a preview, a bulk action): darker than the
+     page here, so the cards placed on it read as lit. */
+  --panel: #111113;
 
-  /* Cool-hairline alpha. The blue-gray base never changes; only this does. */
-  --border-a: 0.16;
+  /* Primary: the main action and every selected or active state. Ink on paper,
+     paper on ink, so on this theme it is Snow carrying ink letters. */
+  --primary: #fefefe;
+  --primary-foreground: #1a1a1c;
+  /* The primary as a LINE (active bar, selected outline, small marks) and as
+     LETTERS (links, active labels). Same value as the fill in this language: the
+     three tokens stay separate because the call sites already name them, and a
+     branded booking surface sets all three from the host's accent. */
+  --primary-edge: #fefefe;
+  --primary-ink: #fefefe;
 
-  /* Base surfaces — the four-step console ladder. */
-  --background: #0a0c0e; /* Control-Room Black — the void of the room */
-  --foreground: #e8edf2; /* Signal White — never pure white */
-  --card: #101418; /* Monitor Panel — card/monitor body */
-  --card-foreground: #e8edf2;
-  --popover: #0d1013; /* Bezel Graphite — bezels, inputs, menus */
-  --popover-foreground: #e8edf2;
+  /* Signal Green: a switch that is on, progress, confirmed. `--signal-edge` rims
+     the fill and `--focus` draws the focus ring, at a lightness that clears 3:1
+     on this theme's page. */
+  --signal: #3ddc84;
+  --signal-foreground: #1a1a1c;
+  --signal-edge: #3ddc84;
+  --signal-ink: #5fe39b;
+  --focus: #3ddc84;
 
-  /* Accent — Program Lime; pairs with Lime Ink, the only text allowed on it. */
-  --primary: hsl(var(--acc-h) var(--acc-s) var(--acc-l));
-  --primary-foreground: #0c0e07; /* Lime Ink */
+  /* The data channel. See the header. */
+  --warning: #f5a524;
+  --warning-ink: #ffcb70;
 
-  /* The accent at a lightness that READS AGAINST THIS THEME'S PAGE.
-     Two jobs, one value: the rim on an accent fill, and the focus outline.
-     WCAG 1.4.11 wants 3:1 for anything that identifies a control or its state, and
-     a solid lime fill only clears that on a dark ground — on paper it is 1.27:1, so
-     the primary action stops being identifiable as a shape. Darkening the FILL was
-     the other way out and it is worse: no lightness of this hue carries a white
-     label at 4.5:1 (3.57:1 at the darkest usable step), so the fill would have to
-     go olive and the one saturated brand colour would be gone from light mode
-     entirely. Rimming the bright fill instead keeps the lime and moves the 3:1
-     burden to a 1px edge that costs no layout. On dark this equals the fill, so the
-     rim is invisible and the outline is the lime it always was. */
-  --primary-edge: hsl(var(--acc-h) var(--acc-s) var(--acc-l));
+  /* Brand Ink: the one ground in this file that DOES NOT FLIP with the theme.
+     Third-party brand marks are fixed artwork, so the tile behind them has to
+     stay dark precisely because the mark cannot change. Declared once here and
+     deliberately absent from the light block. Use it ONLY behind fixed-colour
+     artwork; anything drawn in `currentColor` belongs on a real surface token. */
+  --brand-ink: #1a1a1c;
+  --brand-ink-foreground: #fefefe;
 
-  /* The accent as LETTERS rather than as a fill.
-     A 61%-light lime is a superb text color on a near-black ground (14:1) and an
-     illegible one on paper (1.3:1) — and `text-primary` is used in 88 places here,
-     so on the light theme every one of them would be invisible. `bg-primary` must
-     stay bright (a dark fill with Lime Ink on it is not this accent), so the fill
-     and the letters need different lightnesses off the same hue. On dark they are
-     the same value; on light this drops to a deep lime that clears AA on both paper
-     and card. globals.css points the `text-primary` utility here. */
-  --primary-ink: hsl(var(--acc-h) var(--acc-s) var(--acc-l));
+  /* Secondary: the neutral data voice ("this exists but is not the point"). */
+  --secondary: #a9a9b1;
+  --secondary-foreground: #1a1a1c;
 
-  /* Brand Ink — the one ground in this file that DOES NOT FLIP with the theme.
-     Every other token here is a pair, because the app's own artwork is drawn in
-     `currentColor` and follows. Third-party brand marks are not: a fixed white
-     PNG on a light popover paints white-on-white and leaves an empty space where
-     a logo should be. A themed ground cannot fix that — the ground has to stay
-     dark precisely because the mark cannot change. So this is declared once, in
-     `:root`, and deliberately absent from the `[data-theme='light']` block below:
-     a tile that inverted with the theme would re-break the thing it exists to fix.
-     Use it ONLY behind fixed-colour artwork; anything drawn in `currentColor`
-     belongs on a real surface token. */
-  --brand-ink: #0d1013;
+  /* Muted / raised fills. */
+  --muted: #2a2a2f;
+  --muted-foreground: #a9a9b1; /* 7.4:1 on the page, 6.1:1 on the fill */
+  --accent: #2a2a2f;
+  --accent-foreground: #fefefe;
 
-  /* Its foreground, constant for the same reason. A mark drawn in `currentColor`
-     sitting on this tile cannot take `--foreground`: on the light theme that is
-     near-black, so a mark's `currentColor` paths would vanish into the tile and
-     leave whatever is fixed-colour floating on its own. 15.7:1 on `--brand-ink`. */
-  --brand-ink-foreground: #e8edf2;
+  /* Faint: labels, hints, metadata. Lifted one step above the palette's 400 so
+     it still clears AA on the raised fill, where it lands most often (5.0:1 on
+     card, 4.5:1 on `--muted`). */
+  --faint: #909099;
 
-  /* Secondary — Neutral Trace. The non-accent data voice: "this exists but is
-     not the point." It replaces the saturated purple this sheet used to carry;
-     a third saturated color is not allowed in this world, and slate is exactly
-     what the system offers for data that must read as distinct without competing
-     with the program bus. */
-  --secondary: #7d8fa1;
-  --secondary-foreground: #0a0c0e;
+  /* Feedback. */
+  --destructive: #f2686c;
+  --destructive-foreground: #1a1a1c;
 
-  /* Muted / raised surfaces — the top step of the ladder. */
-  --muted: #161c22; /* Raised Deck */
-  --muted-foreground: #93a1ae; /* Dimmed Slate — body copy, secondary values */
-  --accent: #161c22;
-  --accent-foreground: #e8edf2;
+  /* Lines & focus. One hairline for every decorative border; form controls get
+     an edge that clears 3:1, because a text field's border is the only thing
+     saying "you can type here" (WCAG 1.4.11). */
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.36);
+  --ring: #3ddc84;
 
-  /* Faint Slate — telemetry labels, hints, metadata, inactive states. The
-     quietest legible voice; below this a value is not text, it is noise.
-
-     Lifted from #71818f, which measured 4.28:1 on `--muted` — under AA for the
-     10px it carries, and `--muted` is exactly where this tier lands most often
-     (it is the ground of every badge and chip). The tier has to clear AA on the
-     RAISED surface, not merely on the card: 4.52:1 there, 4.87:1 on card, 5.16:1
-     on the page. The cost is the step down from `--muted-foreground`, which
-     narrows from 1.52:1 to 1.44:1 — still a readable tone change, and a legible
-     label at a slightly smaller step beats an illegible one at a wider step. */
-  --faint: #758592;
-
-  /* Feedback — Tally Red, the second and last light. */
-  --destructive: #ff3b30;
-  --destructive-foreground: #0a0c0e;
-
-  /* Lines & focus — every DECORATIVE border in this world is the one cool hairline.
-     `--input` is deliberately no longer the same value. A hairline at 1.3:1 is the
-     right weight for separating two panels, and the wrong weight for a text field
-     whose own fill matches its container: there the border is the only thing saying
-     "you can type here", which is exactly the case WCAG 1.4.11 requires 3:1 for.
-     So the hairline stays a hairline and form controls get an edge that clears it. */
-  --border: rgba(148, 170, 190, var(--border-a));
-  --input: rgba(148, 170, 190, 0.58); /* 3.4:1 on card and on page */
-  --ring: hsl(var(--acc-h) var(--acc-s) var(--acc-l) / 0.45);
-
-  /* Corner rounding.
-     The landing is a strictly square world — hairline rectangles, radius only on
-     the monitor frame. Ported literally to a dense application surface it read as
-     harsh: a marketing page has a dozen edges and an admin has hundreds, and at
-     that density hard corners stop looking deliberate and start looking unstyled.
-     So the product keeps the palette and the hairlines and softens the corners
-     one step past where they were before the redesign. The full scale is mapped in
-     globals.css — pinning only `md` leaves `rounded-lg/xl/2xl` on Tailwind's
-     defaults, and the scale then contradicts itself. */
-  --radius: 0.625rem; /* 10px — controls: buttons, inputs, selects */
+  /* Corner rounding. Controls 8, cards 16; the full ladder is in globals.css. */
+  --radius: 0.5rem; /* 8px: buttons, inputs, selects, menu rows */
   --radius-monitor: 16px; /* cards and framed surfaces */
 }
 
-/* Light theme override — honored via the theme toggle / prefers-color-scheme.
-   The landing is dark-only, so this is the same language translated rather than
-   ported: cool paper instead of cool void, graphite ink instead of signal white,
-   the same single lime, the same one hairline.
-   ─────────────────────────────────────────────────────────────────────────────
-   It is NOT a tonal mirror of the dark theme, and trying to make it one is what
-   broke it the first time. On a near-black ground a hairline at 16% alpha and a
-   61%-light lime are both high-contrast; the same two values on paper are 1.3:1
-   and 1.27:1 — invisible. Paper has less range below it than the void has above
-   it, so every separating value here is authored for paper rather than derived
-   from its dark counterpart. Measured, against page / white card / muted wash:
-     accent edge 4.2 / 4.5 / 3.5 · input edge 3.2 / 3.3 · hairline 1.6 / 1.6
-     faint 5.6 / 6.1 / 4.7 · destructive 5.4 / 5.9 / 4.6 · muted-fg 5.7 / 6.2
-   The accent edge is checked against the MUTED WASH too, not just the page: it
-   also marks the selected nav row, and that mark sits inside the wash rather than
-   on the page behind it. At 32% light it cleared page and card and failed there at
-   2.79:1 — the one ground it actually had to work on.
-   KEEP THIS BLOCK AND THE `prefers-color-scheme` BLOCK BELOW IDENTICAL.
-   ─────────────────────────────────────────────────────────────────────────────
+/* Light theme.
    TWO selectors, for the same reason the dark rule above carries two. The bare
-   `[data-theme='light']` is what makes paper re-establishable on a SUBTREE:
-   without it `:root` is the only element that can be light, and a light region
-   inside a dark document is impossible. The booking page's studio preview is
-   exactly that region — a host on the dark admin previewing their own light
-   page — and B2 is the slice that makes a host able to ask for it. The
-   `:root`-qualified selector stays first and more specific, so the document-level
-   behaviour is byte-for-byte what it was. */
+   `[data-theme='light']` is what makes paper re-establishable on a SUBTREE; the
+   `:root`-qualified one stays first and more specific, so the document-level
+   behaviour does not depend on source order.
+   KEEP THIS BLOCK AND THE `prefers-color-scheme` BLOCK BELOW IDENTICAL. */
 :root[data-theme='light'],
 [data-theme='light'] {
   color-scheme: light;
-  --background: #f4f6f8;
-  --foreground: #0d1013;
+  --background: #ffffff;
+  --foreground: #1a1a1c;
   --card: #ffffff;
-  --card-foreground: #0d1013;
+  --card-foreground: #1a1a1c;
   --popover: #ffffff;
-  --popover-foreground: #0d1013;
-  /* The fill stays the brand lime; the EDGE carries the 3:1. See `--primary-edge`
-     in the base block for why darkening the fill was the wrong trade. */
-  --primary: hsl(var(--acc-h) var(--acc-s) var(--acc-l));
-  --primary-foreground: #0c0e07;
-  --primary-edge: hsl(var(--acc-h) var(--acc-s) 28%);
-  /* 26% light: 4.7:1 on the paper ground, 5.1:1 on a white card. */
-  --primary-ink: hsl(var(--acc-h) var(--acc-s) 26%);
-  --secondary: #5a6875;
+  --popover-foreground: #1a1a1c;
+  --sidebar: #fafafa;
+  --panel: #f2f2f3;
+  --primary: #1a1a1c;
+  --primary-foreground: #ffffff;
+  --primary-edge: #1a1a1c;
+  --primary-ink: #1a1a1c;
+  /* The fill stays the brand green; the EDGE carries the 3:1 (3.3:1 on paper).
+     Darkening the fill instead would lose the one saturated brand colour. */
+  --signal: #3ddc84;
+  --signal-foreground: #1a1a1c;
+  --signal-edge: #1fa35a;
+  --signal-ink: #0e7a3f; /* 5.4:1 on paper */
+  /* One step darker than `--signal-edge`: the ring also lands on `--muted` (a
+     selected row, a chip), where the edge value measures 2.9:1. 3.2:1 there. */
+  --focus: #1d9a55;
+  --warning: #f5a524;
+  --warning-ink: #8a5700;
+  --secondary: #67676f;
   --secondary-foreground: #ffffff;
-  /* One step darker than a near-white wash so a `bg-muted` fill is a visible step
-     off a white card at all, rather than the 1.08:1 it used to be. It still does
-     not reach 3:1 — a grey chip on paper cannot — which is why selected states
-     now carry an accent mark as well as the wash. */
-  --muted: #dfe4ea;
-  --muted-foreground: #55636f;
-  --accent: #dfe4ea;
-  --accent-foreground: #0d1013;
-  /* Was #6b7885: 3.84:1 on muted, i.e. the token shipped failing AA. */
-  --faint: #586470;
-  /* Was #d42a1f: 3.96:1 on muted. */
-  --destructive: #c2261c;
+  --muted: #f2f2f3;
+  --muted-foreground: #45454c; /* 9.5:1 on paper, 8.5:1 on the fill */
+  --accent: #f2f2f3;
+  --accent-foreground: #1a1a1c;
+  --faint: #67676f; /* 5.6:1 on paper, 5.0:1 on the fill */
+  /* 5.3:1 on paper and 4.7:1 on the fill, so it works as error TEXT as well as
+     a button fill carrying white. */
+  --destructive: #cd2b31;
   --destructive-foreground: #ffffff;
-  --border: rgba(20, 32, 44, 0.22);
-  --input: rgba(20, 32, 44, 0.5);
-  /* Opaque, not 50% alpha: the old value flattened to 1.39:1 over paper, so the
-     focus ring was the least visible thing on a focused control. */
-  --ring: hsl(var(--acc-h) var(--acc-s) 28%);
+  --border: #e6e6e8;
+  --input: #8f8f96;
+  --ring: #1d9a55;
 }
 
 /* The no-attribute fallback: whoever renders this sheet stamped no `data-theme`,
-   so the OS decides. This app does not reach it — the root layout always stamps a
-   theme. It stays for a self-host that embeds these tokens without our layout,
-   which would otherwise get the dark base on a light-mode machine with no way to
-   opt out.
+   so the OS decides. This app does not reach it (the root layout always stamps a
+   theme); it stays for a self-host that embeds these tokens without our layout.
 
    Must stay value-for-value identical to the `[data-theme='light']` block above:
    both apply at once when light is pinned, and a token that lands in only one of
@@ -358,28 +307,152 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     color-scheme: light;
-    --background: #f4f6f8;
-    --foreground: #0d1013;
+    --background: #ffffff;
+    --foreground: #1a1a1c;
     --card: #ffffff;
-    --card-foreground: #0d1013;
+    --card-foreground: #1a1a1c;
     --popover: #ffffff;
-    --popover-foreground: #0d1013;
-    --primary: hsl(var(--acc-h) var(--acc-s) var(--acc-l));
-    --primary-foreground: #0c0e07;
-    --primary-edge: hsl(var(--acc-h) var(--acc-s) 28%);
-    --primary-ink: hsl(var(--acc-h) var(--acc-s) 26%);
-    --secondary: #5a6875;
+    --popover-foreground: #1a1a1c;
+    --sidebar: #fafafa;
+    --panel: #f2f2f3;
+    --primary: #1a1a1c;
+    --primary-foreground: #ffffff;
+    --primary-edge: #1a1a1c;
+    --primary-ink: #1a1a1c;
+    --signal: #3ddc84;
+    --signal-foreground: #1a1a1c;
+    --signal-edge: #1fa35a;
+    --signal-ink: #0e7a3f;
+    --focus: #1d9a55;
+    --warning: #f5a524;
+    --warning-ink: #8a5700;
+    --secondary: #67676f;
     --secondary-foreground: #ffffff;
-    --muted: #dfe4ea;
-    --muted-foreground: #55636f;
-    --accent: #dfe4ea;
-    --accent-foreground: #0d1013;
-    --faint: #586470;
-    --destructive: #c2261c;
+    --muted: #f2f2f3;
+    --muted-foreground: #45454c;
+    --accent: #f2f2f3;
+    --accent-foreground: #1a1a1c;
+    --faint: #67676f;
+    --destructive: #cd2b31;
     --destructive-foreground: #ffffff;
-    --border: rgba(20, 32, 44, 0.22);
-    --input: rgba(20, 32, 44, 0.5);
-    --ring: hsl(var(--acc-h) var(--acc-s) 28%);
+    --border: #e6e6e8;
+    --input: #8f8f96;
+    --ring: #1d9a55;
   }
 }
 
+/* ============================================================================
+   THE BOOKING GROUND
+
+   The surface a host's booking page paints on, per canvas. These are the values
+   this sheet carried before the dForms language (the "Control Room" palette), and
+   they are frozen here on purpose: every live booking page was designed, and
+   chosen by its host, against them. See the header, "The booking page is not the
+   product".
+
+   Keyed on `.bp-ground` + the canvas the element stamps, never on the document:
+   `BrandedShell` (every public page that carries host branding) and the studio's
+   preview frame both carry the class and both stamp `data-theme`, so preview and
+   production resolve one block. A light booking page inside a dark admin, or a
+   dark one inside a light document, gets its own ground either way.
+
+   The accent family (`--primary`, `--primary-ink`, `--primary-edge`, `--ring`,
+   `--accent*`) is ALSO set inline by `brandVars` from the host's accent, and an
+   inline declaration wins, so the values below for those tokens are only the
+   ground a bare `.bp-ground` would show with no host behind it. `--focus` points
+   at `--primary-edge` so the focus ring stays the host's accent, as it always was.
+
+   The radius stays 10px here while the product moves to 8: an input or a select
+   on a booking page is the host's control, not ours.
+   ============================================================================ */
+.bp-ground[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #0a0c0e;
+  --foreground: #e8edf2;
+  --card: #101418;
+  --card-foreground: #e8edf2;
+  --popover: #0d1013;
+  --popover-foreground: #e8edf2;
+  --primary: hsl(68 76% 61%);
+  --primary-foreground: #0c0e07;
+  --primary-edge: hsl(68 76% 61%);
+  --primary-ink: hsl(68 76% 61%);
+  --secondary: #7d8fa1;
+  --secondary-foreground: #0a0c0e;
+  --muted: #161c22;
+  --muted-foreground: #93a1ae;
+  --accent: #161c22;
+  --accent-foreground: #e8edf2;
+  --faint: #758592;
+  --destructive: #ff3b30;
+  --destructive-foreground: #0a0c0e;
+  --border: rgba(148, 170, 190, 0.16);
+  --input: rgba(148, 170, 190, 0.58);
+  --ring: hsl(68 76% 61% / 0.45);
+  --focus: var(--primary-edge);
+  --radius: 0.625rem;
+  --radius-monitor: 16px;
+}
+
+.bp-ground[data-theme='light'] {
+  color-scheme: light;
+  --background: #f4f6f8;
+  --foreground: #0d1013;
+  --card: #ffffff;
+  --card-foreground: #0d1013;
+  --popover: #ffffff;
+  --popover-foreground: #0d1013;
+  --primary: hsl(68 76% 61%);
+  --primary-foreground: #0c0e07;
+  --primary-edge: hsl(68 76% 28%);
+  --primary-ink: hsl(68 76% 26%);
+  --secondary: #5a6875;
+  --secondary-foreground: #ffffff;
+  --muted: #dfe4ea;
+  --muted-foreground: #55636f;
+  --accent: #dfe4ea;
+  --accent-foreground: #0d1013;
+  --faint: #586470;
+  --destructive: #c2261c;
+  --destructive-foreground: #ffffff;
+  --border: rgba(20, 32, 44, 0.22);
+  --input: rgba(20, 32, 44, 0.5);
+  --ring: hsl(68 76% 28%);
+  --focus: var(--primary-edge);
+  --radius: 0.625rem;
+  --radius-monitor: 16px;
+}
+
+/* ============================================================================
+   THE BOOKING SURFACE'S METRICS
+
+   The event page's own measures, theme-independent, on every branded surface
+   (the public shell and the studio preview both carry `.branded-surface`). The
+   host's axes (`--bp-radius`, `--bp-pad`, `--bp-gap`, the fonts) are emitted
+   inline by `widgetStyleVars`; these are the page's, not the host's.
+
+     ease / step     one curve and one duration for every move between steps,
+                     the curve the sibling product's public form uses
+     field pad       a text field's padding: 14px over 16px, so a 16px input
+                     (no zoom on focus on a phone) is 52px tall
+     cta             the primary button's height on the booking page, 54px
+     progress        the phone's step track
+     frame           the two-pane frame's width cap (and the split template's),
+                     its floor height (so a five-week month and a six-week one
+                     do not move the page, and a 1440 x 900 screen is framed, not
+                     stranded: R30 §9), and its two side columns
+   ============================================================================ */
+.branded-surface {
+  --bp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --bp-step-ms: 280ms;
+  --bp-field-pad-y: 0.875rem;
+  --bp-field-pad-x: 1rem;
+  --bp-cta-h: 3.375rem;
+  --bp-progress-h: 4px;
+  --bp-frame-max: 72rem;
+  --bp-frame-max-split: 80rem;
+  --bp-frame-min-h: 42rem;
+  --bp-event-col: 20rem;
+  --bp-times-col: 17rem;
+  --bp-pane-pad: calc(var(--bp-pad, 1.25rem) + var(--sp-inline));
+}

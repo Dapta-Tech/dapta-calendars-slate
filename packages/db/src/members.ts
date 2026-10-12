@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Db } from './client';
 import type { CrudResult } from './crud';
 import { deriveUniqueHandle } from './short-links';
+import { jsonParam } from './repository';
 
 /** Account-level roles, most-privileged first. */
 export const ACCOUNT_ROLES = ['owner', 'admin', 'member'] as const;
@@ -119,6 +120,12 @@ export async function inviteMember(
   db: Db,
   accountId: string,
   input: { email: string; role?: 'admin' | 'member'; displayName?: string | null },
+  /**
+   * The booking-page branding the new member is born with. The caller supplies
+   * it (`withNewHostBranding` in `@slate/shared`) because this package does not
+   * own the design language; absent, the row stores none, as it always did.
+   */
+  branding?: { brandColor: string | null; style: Record<string, unknown> | null },
 ): Promise<CrudResult<MemberView>> {
   const email = input.email.trim().toLowerCase();
   if (!email) return { ok: false, reason: 'CONFLICT', message: 'An email is required.' };
@@ -135,9 +142,10 @@ export async function inviteMember(
   // moment they accept — no "set a handle" step, freely renameable later.
   const handle = await deriveUniqueHandle(db, accountId, input.displayName, email);
   await db.run(
-    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, created_at)
+    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at)
         VALUES (${id}, ${accountId}, ${email}, ${input.displayName ?? EMAIL_LOCAL(email)},
-          ${handle}, ${role}, ${'invited'}, ${Date.now()})`,
+          ${handle}, ${role}, ${'invited'}, ${branding?.brandColor ?? null},
+          ${jsonParam(db, branding?.style ?? null)}, ${Date.now()})`,
   );
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
 }

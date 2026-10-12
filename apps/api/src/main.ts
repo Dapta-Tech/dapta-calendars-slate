@@ -5,6 +5,8 @@ import { loadServerEnv } from '@slate/config/env';
 import { MAX_REQUEST_BODY } from '@slate/types';
 import { json, type NextFunction, type Request, type Response } from 'express';
 import { AppModule } from './app.module';
+import { securityHeaders } from './security-headers';
+import { requestLogger } from './request-log';
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -42,6 +44,11 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
     bodyParser: false,
   });
+  // First, so a request refused by the body parser (413, bad JSON) is logged too.
+  if (env.REQUEST_LOG_ENABLED)
+    app.use(requestLogger({ format: env.NODE_ENV === 'production' ? 'json' : 'pretty' }));
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
   const large = json({ limit: MAX_REQUEST_BODY });
   const small = json({ limit: DEFAULT_BODY_LIMIT });
   app.use((req: Request, res: Response, next: NextFunction) => {

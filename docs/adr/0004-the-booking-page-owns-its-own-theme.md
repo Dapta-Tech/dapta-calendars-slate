@@ -196,3 +196,41 @@ reinstates the clamp.
   product cannot keep for any host whose brand colour is dark" is accepted as a
   cost rather than answered. A dark brand colour on a light booking page is now
   the host's to notice, with the warning to notice it by.
+
+## Amendment, 2026-10-11: what a NEW host is born with
+
+The product palette moved to the dForms language (paper, ink, one Signal Green).
+The booking page's own rules above stand unchanged; this amendment only says what
+a host who has never chosen anything is given, and where that decision lives.
+
+### Absent still means dark
+
+`DEFAULT_BOOKING_THEME` stays `dark` and `DEFAULT_ACCENT` stays the lime. Those
+two constants answer the question "what does a stored config with nothing in it
+render", and every host who signed up before today has nothing in it. Moving them
+would restyle every one of those live pages overnight, which is exactly what the
+September amendment above was careful not to do twice.
+
+### New hosts are written the new look, at creation
+
+`withNewHostBranding` (`@slate/shared`) writes `theme: 'light'` and the ink accent
+(`#1a1a1c`) into the stored branding of a host created from nothing: first sign-in
+under either auth provider, and an invite. It fills only what the caller left out,
+and it never runs at render. So the new look is a fact about the new host's own
+config, visible and changeable in the studio like any other choice, and the old
+look stays a fact about everyone else's.
+
+This is the original decision of this ADR (the invitee is a stranger and the
+category renders on paper) applied where it cannot move an existing page: at
+birth.
+
+### The product palette no longer reaches the booking page
+
+The booking page used to read its ground (page, card, border, muted text) from
+the product's token blocks, so a product palette change was a booking page
+change. Those values are now frozen in their own blocks, `.bp-ground[data-theme]`
+in `tokens.css`, carried by `BrandedShell`, the studio preview frame, the manage
+and team landing pages and `<html>` on a public document. The product can move
+again without a booking page moving with it, and preview == production still
+holds because the studio frame reads the same block.
+

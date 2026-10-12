@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NoopRateLimiter, TokenBucketRateLimiter } from './rate-limit';
+import { NoopRateLimiter, RateLimitGuard, TokenBucketRateLimiter, clientKey } from './rate-limit';
 
 describe('rate limiting (P1-5)', () => {
   it('allows a burst up to capacity, then throttles with a retry hint', () => {
@@ -34,5 +34,49 @@ describe('rate limiting (P1-5)', () => {
   it('noop limiter never throttles (RATE_LIMIT_ENABLED=false)', () => {
     const rl = new NoopRateLimiter();
     for (let i = 0; i < 1000; i++) expect(rl.take('ip').allowed).toBe(true);
+  });
+
+  describe('client key behind proxies', () => {
+    const req = (xff?: string | string[], socket = '10.0.0.5') => ({
+      headers: xff === undefined ? {} : { 'x-forwarded-for': xff },
+      socket: { remoteAddress: socket },
+    });
+
+    it('one trusted hop: the entry the load balancer appended, not what the client sent', () => {
+      expect(clientKey(req('203.0.113.7'), 1)).toBe('203.0.113.7');
+      expect(clientKey(req('1.1.1.1, 203.0.113.7'), 1)).toBe('203.0.113.7');
+      expect(clientKey(req('9.9.9.9, 8.8.8.8, 203.0.113.7'), 1)).toBe('203.0.113.7');
+    });
+
+    it('two trusted hops (CDN + load balancer): the address the CDN saw', () => {
+      expect(clientKey(req('1.1.1.1, 203.0.113.7, 198.51.100.2'), 2)).toBe('203.0.113.7');
+    });
+
+    it('fewer entries than hops: the leftmost; no header or zero hops: the socket', () => {
+      expect(clientKey(req('203.0.113.7'), 2)).toBe('203.0.113.7');
+      expect(clientKey(req(undefined), 1)).toBe('10.0.0.5');
+      expect(clientKey(req('1.1.1.1, 203.0.113.7'), 0)).toBe('10.0.0.5');
+    });
+
+    it('a repeated header is read as one list', () => {
+      expect(clientKey(req(['1.1.1.1', '203.0.113.7']), 1)).toBe('203.0.113.7');
+    });
+
+    it('rotating the client-supplied part no longer escapes the bucket', () => {
+      const now = 0;
+      const guard = new RateLimitGuard(new TokenBucketRateLimiter(2, 1, () => now), {
+        RATE_LIMIT_TRUSTED_PROXY_HOPS: 1,
+      });
+      const ctx = (spoof: string) =>
+        ({
+          switchToHttp: () => ({
+            getRequest: () => req(`${spoof}, 203.0.113.7`),
+            getResponse: () => ({ setHeader: () => undefined }),
+          }),
+        }) as never;
+      expect(guard.canActivate(ctx('1.0.0.1'))).toBe(true);
+      expect(guard.canActivate(ctx('1.0.0.2'))).toBe(true);
+      expect(() => guard.canActivate(ctx('1.0.0.3'))).toThrow();
+    });
   });
 });

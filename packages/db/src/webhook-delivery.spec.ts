@@ -4,7 +4,14 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { loadEncryptionKey } from './crypto';
-import { deliverWebhookEvent, listWebhookDeliveries, createWebhook } from './parity';
+import {
+  WEBHOOK_TIMEOUT_MS,
+  createWebhook,
+  deliverWebhookEvent,
+  dispatchWebhooks,
+  listWebhookDeliveries,
+  pingWebhook,
+} from './parity';
 
 /** W (#75): the secret rides the envelope now, so every path needs the key. */
 const KEY = loadEncryptionKey(randomBytes(32).toString('base64'));
@@ -71,5 +78,55 @@ describe('webhook delivery history (QA fix 10)', () => {
       sql`SELECT COUNT(*) AS n FROM webhook_delivery WHERE webhook_id = ${webhookId}`,
     );
     expect(Number(rows!.n)).toBe(50);
+  });
+
+  describe('bounded and redirect-proof requests', () => {
+    /** Records the init of every call, answers with `status`. */
+    const recording = (status: number, headers: Record<string, string> = {}) => {
+      const seen: RequestInit[] = [];
+      const impl = (async (_url: string, init: RequestInit) => {
+        seen.push(init);
+        return new Response(status === 204 ? null : 'x', { status, headers });
+      }) as unknown as typeof fetch;
+      return { seen, impl };
+    };
+
+    it('every call carries a timeout signal and never follows redirects', async () => {
+      const deliver = recording(200);
+      await deliverWebhookEvent(db, { webhookId, body, key: KEY }, deliver.impl);
+      const ping = recording(200);
+      await pingWebhook(db, accountId, webhookId, KEY, ping.impl);
+      const dispatch = recording(200);
+      expect(await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, KEY, dispatch.impl)).toBe(1);
+
+      for (const init of [...deliver.seen, ...ping.seen, ...dispatch.seen]) {
+        expect(init.redirect).toBe('manual');
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+        expect(init.signal!.aborted).toBe(false);
+      }
+      expect(WEBHOOK_TIMEOUT_MS).toBeLessThanOrEqual(15_000);
+    });
+
+    it('a redirect is a failed delivery, recorded with its status, and a failed ping', async () => {
+      const redirect = recording(302, { location: 'http://127.0.0.1/internal' });
+      await expect(deliverWebhookEvent(db, { webhookId, body, key: KEY }, redirect.impl)).rejects.toThrow(
+        'HTTP 302',
+      );
+      const items = await listWebhookDeliveries(db, accountId, webhookId);
+      expect(items[0]).toMatchObject({ ok: false, statusCode: 302 });
+      expect(await pingWebhook(db, accountId, webhookId, KEY, redirect.impl)).toEqual({ ok: false, status: 302 });
+      expect(await dispatchWebhooks(db, accountId, 'booking.created', { uid: 'x' }, KEY, redirect.impl)).toBe(0);
+      expect(redirect.seen).toHaveLength(3); // the Location was never requested
+    });
+
+    it('a timed-out request is a recorded failure the outbox retries', async () => {
+      const timedOut = (async () => {
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      }) as typeof fetch;
+      await expect(deliverWebhookEvent(db, { webhookId, body, key: KEY }, timedOut)).rejects.toThrow();
+      const items = await listWebhookDeliveries(db, accountId, webhookId);
+      expect(items[0]).toMatchObject({ ok: false, statusCode: null });
+      expect(items[0]!.error).toContain('timeout');
+    });
   });
 });

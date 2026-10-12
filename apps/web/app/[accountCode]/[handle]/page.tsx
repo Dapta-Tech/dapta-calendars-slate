@@ -1,13 +1,12 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound, permanentRedirect, redirect } from 'next/navigation';
-import { DEFAULT_ACCENT, clampAccent, getMessages, monogram, onAccent, t } from '@slate/shared';
+import { getMessages, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
-import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { ProfileView } from '@/components/profile-view';
 import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
 import {
   EMBED_ROOT_CLASS,
@@ -81,16 +80,9 @@ export default async function ProfilePage({
     // full-chrome event page inside the frame.
     redirect(withSearchParams(`/${code}/${handle}/${defaultSlug}`, query));
   }
-  // The style the shell below will render with, derived ONCE. The canvas comes
-  // out of it, and the monogram tile sits inside that shell, so the two have to
-  // resolve the accent through the same call. `clampAccent` no longer alters
-  // the colour (ADR 0004's amendment) but it still owns the invalid-hex
-  // fallback, which is what an embed's `brand_color` override can hand it.
+  // The style the shell below renders with, derived ONCE: the canvas and every
+  // axis come out of it, and the embed's overrides are already merged in.
   const style = mergeEmbedStyle(m.style, styleOverrides);
-  const accent = clampAccent(
-    accentOverride ?? m.brandColor ?? DEFAULT_ACCENT,
-    bookingCanvasOf(style),
-  );
   const headerAvatar = resolveAvatarUrl(m.avatarUrl, m.connectedAvatarUrl);
   const bio = (m.style as { bio?: string } | null)?.bio ?? null;
   const name = m.displayName ?? m.handle;
@@ -110,61 +102,21 @@ export default async function ProfilePage({
       className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto w-full max-w-2xl px-6 py-12'}>
-        {m.coverUrl ? (
-          <img src={m.coverUrl} alt="" className="bp-cover mb-4 h-32 w-full rounded-md object-cover" />
-        ) : (
-          <div className="bp-cover mb-4 h-24 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
-        )}
-        <header className="mb-8 flex items-center gap-4">
-          {headerAvatar ? (
-            <img
-              src={headerAvatar}
-              alt=""
-              referrerPolicy="no-referrer"
-              className="h-16 w-16 rounded-full object-cover"
-            />
-          ) : (
-            <div
-              className="flex h-16 w-16 items-center justify-center text-2xl font-semibold"
-              style={{ background: accent, color: onAccent(accent), borderRadius: 'var(--bp-radius, 0.75rem)' }}
-            >
-              {monogram(name)}
-            </div>
-          )}
-          <div className="flex flex-col gap-0.5">
-            <p className="text-sm text-muted-foreground">{profile.account.name}</p>
-            <h1 className="text-3xl font-semibold tracking-tight">{name}</h1>
-            {bio ? <p className="text-sm text-muted-foreground">{bio}</p> : null}
-          </div>
-        </header>
-
-        <ul className="flex flex-col gap-3">
-          {eventTypes.map((et) => (
-            <li key={et.slug}>
-              <Link
-                // Inside a frame this navigates the frame, which is the embed
-                // working — but only if the mode and the overrides travel with
-                // it. Without them, picking an event from a styled embed lands
-                // on an unstyled full-chrome page in a 700px box.
-                href={withSearchParams(`/${code}/${handle}/${et.slug}`, query)}
-                className="bp-card flex items-center justify-between text-card-foreground transition-transform hover:border-primary active:scale-[0.99]"
-              >
-                <span className="flex flex-col">
-                  <span className="font-medium">{et.title}</span>
-                  {et.description ? (
-                    <span className="text-sm text-muted-foreground">{et.description}</span>
-                  ) : null}
-                </span>
-                <span className="rounded-sm bg-muted px-2 py-1 text-sm text-muted-foreground">
-                  {t(msg.booking.durationMinutes, { minutes: et.lengthMinutes })}
-                </span>
-              </Link>
-            </li>
-          ))}
-          {eventTypes.length === 0 ? (
-            <li className="text-muted-foreground">{msg.landing.noEvents}</li>
-          ) : null}
-        </ul>
+        <ProfileView
+          m={msg}
+          name={name}
+          context={profile.account.name}
+          bio={bio}
+          avatarUrl={headerAvatar}
+          coverUrl={m.coverUrl}
+          events={eventTypes}
+          // Inside a frame this navigates the frame, which is the embed working,
+          // but only if the mode and the overrides travel with it. Without them,
+          // picking an event from a styled embed lands on an unstyled full-chrome
+          // page in a 700px box.
+          hrefFor={(slug) => withSearchParams(`/${code}/${handle}/${slug}`, query)}
+          emptyText={msg.landing.noEvents}
+        />
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />
       {embed ? <EmbedResizeReporter /> : null}

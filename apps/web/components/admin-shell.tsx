@@ -7,6 +7,7 @@ import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
 import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
 import { AppSwitcher } from '@/components/app-switcher';
+import { BrandMark, PRODUCT_NAME } from '@/components/brand/brand';
 import { ThemeToggle } from '@/components/theme-toggle';
 import type { Theme } from '@/lib/theme';
 
@@ -43,8 +44,6 @@ const NAV: NavItem[] = [
 ];
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
-// Customer-facing name (build-time inlined); 'Slate' never surfaces in the UI.
-const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
 // Dapta's icon system is PrimeIcons (pi pi-*) — the same set the production
 // Angular admin panel uses. Nav glyphs map 1:1 to their pi names; sized at the
@@ -189,7 +188,9 @@ export function AdminShell({
 
   const brand = (
     <div className={`flex items-center gap-inline ${railCollapsed ? 'flex-col px-0' : 'px-inline'}`}>
-      <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+      {/* The mark carries the name only while the wordmark span is hidden, so
+          assistive tech hears the product once either way. */}
+      <BrandMark className="h-6 w-auto text-foreground" labelled={railCollapsed} />
       {!railCollapsed ? <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span> : null}
       <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
@@ -297,7 +298,7 @@ export function AdminShell({
         >
           <i aria-hidden className="pi pi-bars" style={{ fontSize: 20 }} />
         </button>
-        <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+        <BrandMark className="h-6 w-auto text-foreground" />
         <span className="text-sm font-semibold">{PRODUCT_NAME}</span>
       </header>
 
@@ -335,7 +336,7 @@ export function AdminShell({
         inert={!drawerOpen || undefined}
       >
         <div className="flex items-center gap-inline px-inline">
-          <span className="rounded-md bg-primary px-inline py-tight text-sm font-semibold text-primary-foreground">{PRODUCT_NAME.charAt(0)}</span>
+          <BrandMark className="h-6 w-auto text-foreground" />
           <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
           <AppSwitcher messages={c.switcher} />
         </div>

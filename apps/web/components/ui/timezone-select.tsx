@@ -48,6 +48,8 @@ export function TimeZoneSelect({
   id,
   ariaLabel,
   className,
+  panelClassName,
+  backdrop,
 }: {
   /** IANA zone (e.g. 'America/Mexico_City'). */
   value: string;
@@ -57,6 +59,10 @@ export function TimeZoneSelect({
   id?: string;
   ariaLabel?: string;
   className?: string;
+  /** Passed through to `Select`. */
+  panelClassName?: string;
+  /** Passed through to `Select`: dim the page behind the open list on a phone. */
+  backdrop?: boolean;
 }) {
   const m = getMessages(locale).tzPicker;
   // Offsets are computed once per zone list (they only shift on DST
@@ -82,6 +88,8 @@ export function TimeZoneSelect({
       id={id}
       ariaLabel={ariaLabel}
       className={className}
+      panelClassName={panelClassName}
+      backdrop={backdrop}
       locale={locale}
       searchPlaceholder={m.search}
       noResultsText={m.noResults}

@@ -31,7 +31,7 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@/lib/api', () => ({ getProfile: (...args: unknown[]) => getProfile(...args) }));
 
-const { resolveDocumentTheme } = await import('./theme.server');
+const { isPublicDocument, resolveDocumentTheme } = await import('./theme.server');
 
 /** Resolve for one request. `theme` is what the page has STORED. */
 function request(path: string | null, opts: { query?: string; cookie?: string; stored?: unknown } = {}) {
@@ -159,5 +159,23 @@ describe('resolveDocumentTheme — which paths carry a stored theme', () => {
     cookieStore.theme = 'light';
     getProfile.mockRejectedValue(new Error('API /v1/profiles/acme/alex-rivera failed: 500'));
     await expect(resolveDocumentTheme()).resolves.toBe('dark');
+  });
+});
+
+describe('isPublicDocument: which documents sit on the booking ground', () => {
+  it('is false for the product and true for every public surface', async () => {
+    for (const path of ['/', '/admin', '/admin/settings/booking-page', '/login', '/onboarding']) {
+      headerStore.path = path;
+      expect(await isPublicDocument(), path).toBe(false);
+    }
+    for (const path of ['/acme/alex', '/acme/alex/intro', '/acme/team/sales', '/manage/abc', '/booking/tok']) {
+      headerStore.path = path;
+      expect(await isPublicDocument(), path).toBe(true);
+    }
+  });
+
+  it('fails to public when the path header is missing, like the theme does', async () => {
+    headerStore.path = null;
+    expect(await isPublicDocument()).toBe(true);
   });
 });

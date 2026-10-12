@@ -5,22 +5,12 @@ import {
   ALL_BOOKING_THEMES,
   DEFAULT_ACCENT,
   THEME_PRESETS,
-  brandVars,
-  widgetStyleVars,
-  brandingClassOf,
-  clampAccent,
   accentCanvasContrast,
   accentLabelContrast,
   MIN_ACCENT_CONTRAST,
-  buildMonthGrid,
-  formatDayHeading,
-  onAccent,
   matchTheme,
-  monogram,
   t,
-  weekStartsOnFor,
   type BookingMessages,
-  type BrandCanvas,
   type PublicBranding,
 } from '@slate/shared';
 import { useRouter } from 'next/navigation';
@@ -36,7 +26,7 @@ import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
-import { ChevronIcon } from '@/components/booking-page-parts';
+import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
   checkHandleAction,
   saveStudioAction,
@@ -108,6 +98,7 @@ const ACCENT_PRESETS = ['#cbe84f', '#9059fc', '#4f9cff', '#4fd18b', '#ff9f4f', '
 interface EventTypeLite {
   slug: string;
   title: string;
+  description?: string | null;
   lengthMinutes: number;
 }
 
@@ -132,6 +123,8 @@ export interface StudioInit {
   landingEnabled: boolean;
   defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
+  /** The account's name, the quiet line above the host's on their profile. */
+  accountName?: string | null;
   manageableEvents: { id: string; slug: string; title: string; hidden: boolean }[];
   eventOrder: string[];
   messages: StudioMessages;
@@ -221,16 +214,8 @@ export function Studio(init: StudioInit) {
   // shell uses. Never the admin's own `data-theme`: a host previewing their page
   // is looking at a stranger's screen, not their own (ADR 0004).
   const canvas = bookingCanvasOf(axes);
-  // `brandVars`, not `accentVars`: the preview has to emit the PRODUCT accent
-  // tokens too. Emitting only `--accent*` left `--primary-ink`/`--primary-edge`
-  // resolving from the admin palette, so the preview drew the host's links and
-  // rims in our lime while the real page drew them in the host's colour — the
-  // exact "preview == prod" break ADR 0004 is written against. Same function and
-  // same canvas as BrandedShell, so the two cannot drift.
-  const previewVars = useMemo(
-    () => ({ ...brandVars(accent, bookingCanvasOf(axes)), ...widgetStyleVars(axes) }) as Record<string, string>,
-    [accent, axes],
-  );
+  // The preview's vars (`brandVars` + `widgetStyleVars`, the same functions and
+  // the same canvas as BrandedShell) are emitted by `PreviewFrame`.
   // The engine no longer corrects an illegible accent (ADR 0004's 2026-09-11
   // amendment), so the studio's job on this field changed from reporting a
   // correction to reporting a number. Measured against the ground the INVITEE
@@ -750,312 +735,45 @@ export function Studio(init: StudioInit) {
             </div>
           </div>
 
-          {/* The FRAME is chrome; everything inside it is BP's canvas and is not
-              touched by this sweep (preview == prod, #134). `overflow-x-auto` so
-              the fixed 360px mobile preview scrolls inside its frame instead of
-              widening the studio at 360px.
-
-              B2: the frame STAMPS the invitee's canvas and paints its ground.
-              Emitting only the branding vars and letting `--background`,
-              `--card` and `--foreground` fall through to the admin shell was
-              enough while there was one canvas; the moment a host can put their
-              page on paper it is the harder version of the preview != prod bug,
-              because `--accent-wash` is `color-mix(…, var(--background))`. The
-              accent would match the live page exactly while every wash and card
-              ground behind it came from the AUTHOR's theme instead of the
-              invitee's. Stamped on the frame rather than on an inner element so
-              the padding around the canvas is the canvas's own ground and not a
-              rim of the admin's; `overflow-x-auto` already clips it to the
-              rounded corners. */}
-          <div
-            data-theme={canvas}
-            className="overflow-x-auto rounded-xl border border-border bg-background p-card text-foreground sm:p-group"
-            style={previewVars}
-          >
-            <div className={`${brandingClassOf(axes)} ${device === 'mobile' ? 'mx-auto w-[360px]' : 'mx-auto max-w-md'}`}>
+          {/* The FRAME is chrome; everything inside it is the invitee's page.
+              `PreviewFrame` (components/booking-preview.tsx) stamps the
+              invitee's canvas, paints the booking ground and emits the same
+              branding vars and classes `BrandedShell` does, which
+              `preview-parity.spec.tsx` checks. */}
+          <PreviewFrame accent={accent} axes={axes} device={device} wide={surface === 'booking'}>
               {surface === 'profile' ? (
                 <ProfilePreview
+                  locale={init.locale}
                   displayName={displayName}
+                  accountName={init.accountName ?? null}
                   bio={bio}
                   avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
-                  accent={accent}
-                  canvas={canvas}
-                  eventTypes={init.eventTypes}
-                  m={m}
+                  // In the order the host set in the Meetings panel, unlisted last,
+                  // exactly as the public page sorts them.
+                  events={[...init.eventTypes].sort((a, b) => {
+                    const rank = (slug: string) => {
+                      const i = eventOrder.indexOf(slug);
+                      return i === -1 ? eventOrder.length + 1 : i;
+                    };
+                    return rank(a.slug) - rank(b.slug);
+                  })}
                 />
               ) : (
                 <BookingPreview
-                  displayName={displayName}
-                  avatarUrl={previewAvatarUrl}
-                  accent={accent}
-                  canvas={canvas}
+                  hostName={displayName}
+                  avatarUrl={previewAvatarUrl || null}
+                  eventTitle={m.introCall}
                   locale={init.locale}
-                  m={m}
+                  device={device}
                 />
               )}
-            </div>
-          </div>
+          </PreviewFrame>
         </div>
       </div>
     </div>
   );
 }
-
-/* spacing-gate:off — the BP canvas. Everything from here to the marker below is
-   the invitee's view, drawn from the host's own `--bp-*` axes so the preview
-   matches production exactly (#134). The admin spacing scale has no authority
-   here, and a sweep that renames these utilities silently breaks preview == prod.
-   The FRAME around the canvas is admin chrome and does follow the scale. */
-function ProfilePreview({
-  displayName,
-  bio,
-  avatarUrl,
-  coverUrl,
-  accent,
-  canvas,
-  eventTypes,
-  m,
-}: {
-  displayName: string;
-  bio: string;
-  avatarUrl: string;
-  coverUrl: string;
-  accent: string;
-  /** The ground the preview paints on, so the monogram's label is derived
-   *  against the same canvas the public page derives against. */
-  canvas: BrandCanvas;
-  eventTypes: EventTypeLite[];
-  m: StudioMessages;
-}) {
-  return (
-    <div>
-      {coverUrl ? (
-        <img src={coverUrl} alt="" className="bp-cover mb-3 h-24 w-full rounded-md object-cover" />
-      ) : (
-        <div className="bp-cover mb-3 h-20 w-full rounded-md" style={{ background: 'var(--accent-wash)' }} />
-      )}
-      <div className="mb-4 flex items-center gap-3">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="h-12 w-12 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-12 w-12 items-center justify-center text-lg font-semibold"
-            style={{
-              background: 'var(--accent)',
-              color: onAccent(clampAccent(accent, canvas)),
-              borderRadius: 'var(--bp-radius)',
-            }}
-          >
-            {monogram(displayName)}
-          </div>
-        )}
-        <div>
-          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="text-lg font-semibold">
-            {displayName}
-          </div>
-          {bio ? <div className="text-sm text-muted-foreground">{bio}</div> : null}
-        </div>
-      </div>
-      <div className="flex flex-col" style={{ gap: 'var(--bp-gap)' }}>
-        {(eventTypes.length ? eventTypes : [{ slug: 'intro', title: m.introCall, lengthMinutes: 30 }]).map((et) => (
-          <div key={et.slug} className="bp-card flex items-center justify-between">
-            <span className="font-medium">{et.title}</span>
-            <span className="text-sm text-muted-foreground">{et.lengthMinutes} {m.minSuffix}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The booking-flow preview, rebuilt to BP's three regions — event panel, month
- * calendar, day column — so the axes this studio exists to demonstrate land on
- * the markup the public page actually ships (`bp-card`, `bp-cal-*`, `bp-daycol`,
- * `bp-slots`, `bp-slot`, `bp-icon-btn`).
- *
- * It is still a MOCK, not the live island: `BookingFlow` needs slots, server
- * actions and a real account, and this preview deliberately has none of those.
- * The whole thing stays out of the tab order and the a11y tree for the reason
- * it always did — nothing here can be clicked, so nothing here should invite a
- * click. The sample dates are fixed rather than derived from today, so the
- * preview renders identically on the server and after hydration.
- */
-function BookingPreview({
-  displayName,
-  avatarUrl,
-  accent,
-  canvas,
-  locale,
-  m,
-}: {
-  displayName: string;
-  avatarUrl: string;
-  accent: string;
-  /** As in `ProfilePreview` — the canvas the label is derived against. */
-  canvas: BrandCanvas;
-  locale: string;
-  m: StudioMessages;
-}) {
-  // The sample MONTH is fixed; how it READS is not. Month names, weekday
-  // initials and which day a week starts on are locale decisions, and the
-  // public page makes them — a Spanish admin previewing a Sunday-first English
-  // grid is being shown a page that does not exist. Built from the same
-  // helpers the real calendar uses, on a fixed key, so it is localized and
-  // still renders identically on the server and after hydration.
-  const grid = useMemo(
-    () =>
-      buildMonthGrid(PREVIEW_MONTH_KEY, {
-        availableDayKeys: PREVIEW_AVAILABLE,
-        todayKey: PREVIEW_TODAY,
-        locale,
-        weekStartsOn: weekStartsOnFor(locale),
-      }),
-    [locale],
-  );
-  const selectedLabel = useMemo(
-    () => formatDayHeading(PREVIEW_SELECTED_INSTANT, 'UTC', locale),
-    [locale],
-  );
-
-  return (
-    <div aria-hidden="true" className="flex flex-col gap-4">
-      {/* Event panel */}
-      <div className="flex items-center gap-3">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt=""
-            width={40}
-            height={40}
-            referrerPolicy="no-referrer"
-            className="h-10 w-10 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="flex h-10 w-10 items-center justify-center text-base font-semibold"
-            style={{
-              background: 'var(--accent)',
-              color: onAccent(clampAccent(accent, canvas)),
-              borderRadius: 'var(--bp-radius)',
-            }}
-          >
-            {monogram(displayName)}
-          </div>
-        )}
-        <div className="min-w-0">
-          <div style={{ fontFamily: 'var(--bp-font-display)' }} className="truncate font-medium">
-            {m.introCall}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            30 {m.minSuffix} · {displayName}
-          </div>
-        </div>
-      </div>
-
-      {/* One column, always. The preview box is `max-w-md` on desktop and
-          360px on mobile, so a viewport-width `sm:` breakpoint inside it is
-          always true and the "mobile" preview would render the two-column
-          desktop layout at ~28px per calendar cell — a preview of a page that
-          does not exist. The public page stacks these two regions below `lg`,
-          and every width this box takes is below `lg`. */}
-      <div className="flex flex-col gap-4">
-        {/* Month calendar */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-semibold" style={{ fontFamily: 'var(--bp-font-display)' }}>
-              {grid.label}
-            </span>
-            <div className="flex gap-1">
-              {/* The same chevron the public page draws, so the preview shows
-                  the control that ships rather than a stand-in for it. */}
-              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
-                <ChevronIcon direction="left" />
-              </span>
-              <span className="bp-icon-btn h-9 min-h-0 w-9 min-w-0">
-                <ChevronIcon direction="right" />
-              </span>
-            </div>
-          </div>
-          <div className="bp-cal-grid">
-            <div className="bp-cal-week">
-              {grid.weekdayLabels.map((d, i) => (
-                <div key={`${d}-${i}`} className="bp-cal-weekday">
-                  {d}
-                </div>
-              ))}
-            </div>
-            {grid.weeks.map((week) => (
-              <div className="bp-cal-week" key={week[0]!.dayKey}>
-                {week.map((day) => (
-                  <span
-                    key={day.dayKey}
-                    className="bp-cal-day"
-                    data-state={
-                      !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty'
-                    }
-                    data-today={day.isToday ? 'true' : undefined}
-                    data-selected={day.dayKey === PREVIEW_SELECTED ? 'true' : undefined}
-                  >
-                    {day.dayOfMonth}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Day column */}
-        <div className="bp-daycol flex min-w-0 flex-col gap-2">
-          <span className="text-xs font-semibold text-muted-foreground">{selectedLabel}</span>
-          <div className="bp-slots">
-            {['9:00', '9:30', '10:00', '10:30'].map((s, i) => (
-              <span key={s} className="bp-slot text-sm" aria-pressed={i === 0}>
-                {s}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Fixed sample data for the preview. Deliberately not derived from `new Date()`
-// — a preview that changes shape at midnight is a preview that fails to render
-// the same way twice, and this one is server-rendered before it hydrates. The
-// KEYS are fixed; how they read is the locale's business, which is why they go
-// through `buildMonthGrid` rather than being spelled out in English.
-const PREVIEW_MONTH_KEY = '2026-09';
-const PREVIEW_TODAY = '2026-09-10';
-const PREVIEW_SELECTED = '2026-09-14';
-/** UTC noon of the selected day — the day column's heading. */
-const PREVIEW_SELECTED_INSTANT = '2026-09-14T12:00:00.000Z';
-const PREVIEW_AVAILABLE = [
-  '2026-09-10',
-  '2026-09-11',
-  '2026-09-14',
-  '2026-09-15',
-  '2026-09-16',
-  '2026-09-17',
-  '2026-09-18',
-  '2026-09-21',
-  '2026-09-22',
-  '2026-09-23',
-  '2026-09-24',
-  '2026-09-25',
-  '2026-09-28',
-  '2026-09-29',
-  '2026-09-30',
-];
-
-/* spacing-gate:on */
 
 function HandleHint({ state, m }: { state: HandleState; m: StudioMessages }) {
   // The `✓`/`✗` the available/taken copy used to carry are icons now, so the

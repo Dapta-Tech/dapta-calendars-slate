@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { BrandMark, IS_DAPTA_BRAND, PRODUCT_NAME } from '@/components/brand/brand';
 
 /**
  * App-switcher — the discreet exit to the wider Dapta suite (ported from the
@@ -23,7 +24,6 @@ interface SwitcherMessages {
   forms: string;
 }
 
-const PRODUCT_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL || '';
 
 /** The platform URL (from NEXT_PUBLIC_PLATFORM_URL) carrying app-switcher UTM tags. */
@@ -124,9 +124,15 @@ export function AppSwitcher({
             aria-current="true"
             className="flex items-center gap-field rounded-sm bg-muted px-inline py-inline text-sm font-medium"
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-              {PRODUCT_NAME.charAt(0)}
-            </span>
+            {/* The dark tile is for the drawn mark; a fork's letter chip already
+                carries its own fill and sits on the row like the other items. */}
+            {IS_DAPTA_BRAND ? (
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink">
+                <BrandMark className="h-3.5 w-auto text-brand-ink-foreground" />
+              </span>
+            ) : (
+              <BrandMark />
+            )}
             <span className="flex-1 truncate">{PRODUCT_NAME}</span>
             <i aria-hidden className="pi pi-check text-primary" style={{ fontSize: 14 }} />
           </span>

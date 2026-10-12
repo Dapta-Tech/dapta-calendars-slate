@@ -121,6 +121,18 @@ export interface BookingMessages {
      *  the fold. */
     descriptionMore: string;
     descriptionLess: string;
+    /** The phone's way back from a day's times to the month. */
+    backToCalendar: string;
+    /** The 4px progress track's accessible name: "Step 2 of 4". */
+    progress: string;
+    /** Term names for the confirmation's facts, read by a screen reader only. */
+    what: string;
+    when: string;
+    who: string;
+    /** The confirmation's first action: download the booking as a calendar file. */
+    addToCalendar: string;
+    /** The unit beside a duration set as a figure on the profile ("30 min"). */
+    minutesUnit: string;
   };
   manage: {
     title: string;
@@ -1295,6 +1307,13 @@ export const en: BookingMessages = {
     backToTimes: 'Back to times',
     descriptionMore: 'Show more',
     descriptionLess: 'Show less',
+    backToCalendar: 'Back to the calendar',
+    progress: 'Step {step} of {of}',
+    what: 'What',
+    when: 'When',
+    who: 'With',
+    addToCalendar: 'Add to calendar',
+    minutesUnit: 'min',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -1351,7 +1370,7 @@ export const en: BookingMessages = {
   growth: {
     madeWith: 'Made with Dapta Calendars',
     ctaQuestion: 'Want your own booking page?',
-    ctaAction: 'Get Dapta Calendars — free',
+    ctaAction: 'Get Dapta Calendars free',
     seoProfile: 'Book time with {name} online.',
     seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
   },
@@ -2331,6 +2350,13 @@ export const es: BookingMessages = {
     backToTimes: 'Volver a los horarios',
     descriptionMore: 'Ver más',
     descriptionLess: 'Ver menos',
+    backToCalendar: 'Volver al calendario',
+    progress: 'Paso {step} de {of}',
+    what: 'Qué',
+    when: 'Cuándo',
+    who: 'Con',
+    addToCalendar: 'Añadir al calendario',
+    minutesUnit: 'min',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -2387,7 +2413,7 @@ export const es: BookingMessages = {
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
     ctaQuestion: '¿Quieres tu propia página de reservas?',
-    ctaAction: 'Consigue Dapta Calendars — gratis',
+    ctaAction: 'Consigue Dapta Calendars gratis',
     seoProfile: 'Reserva un horario con {name} en línea.',
     seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
   },

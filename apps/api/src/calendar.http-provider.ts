@@ -286,6 +286,28 @@ export class CalendarHttpError extends Error {
   }
 }
 
+/**
+ * What a failed read is allowed to say about itself in a log line: the class,
+ * and for a backend refusal the operation and status. Never the message, which
+ * for a CalendarHttpError is the backend's own response body.
+ */
+export function failureCause(err: unknown): string {
+  if (err instanceof CalendarHttpError) return `cause=${err.name} op=${err.op} status=${err.status}`;
+  if (err instanceof Error) return `cause=${err.name}`;
+  return 'cause=unknown';
+}
+
+/**
+ * The same, as a sentence a host may read on the connections screen (and that
+ * is stored as the connection's last health detail). Still never the message.
+ */
+export function failureDetail(err: unknown): string {
+  if (err instanceof CalendarHttpError)
+    return `The calendar backend refused ${err.op} (HTTP ${err.status}).`;
+  if (err instanceof Error) return `The calendar backend could not be reached (${err.name}).`;
+  return 'The calendar backend could not be reached.';
+}
+
 export interface ExternalCalendarOptions {
   baseUrl: string;
   tokenSource: CalendarTokenSource;
@@ -345,6 +367,8 @@ export class ExternalCalendarProvider implements CalendarProvider {
 
   async listBusy(input: ListBusyInput): Promise<BusyInterval[]> {
     if (input.connectionRefs.length === 0) return [];
+    const started = this.clock.now();
+    let retries = 0;
     const fromMs = Date.parse(input.fromUtc);
     const toMs = Date.parse(input.toUtc);
     // An unparseable bound is sent as given, in one read — never rewritten.
@@ -393,6 +417,7 @@ export class ExternalCalendarProvider implements CalendarProvider {
             } catch (err) {
               if (!retryable(err) || attempt >= BUSY_ATTEMPTS || failed) throw err;
               // The slot is already released: the pause costs nobody else a read.
+              retries++;
               const pause = (err as CalendarHttpError).retryAfterMs ?? BUSY_RETRY_AFTER_MS * attempt;
               await this.clock.sleep(pause);
               if (failed) throw err; // a sibling window was lost meanwhile: this read is over
@@ -417,7 +442,13 @@ export class ExternalCalendarProvider implements CalendarProvider {
           // The caller turns this into "calendar unavailable" and keeps the
           // cause to itself; this line is the only record of WHICH window and
           // WHY, and it is what made the concurrency limit above visible.
-          this.logger.warn(`busy read failed: ${err instanceof Error ? err.message : String(err)}`);
+          // Only the error's class, the operation and the HTTP status are
+          // written: a CalendarHttpError's message carries the backend's
+          // response body, which can quote event or attendee data.
+          this.logger.warn(
+            `busy read failed: connections=${input.connectionRefs.length} windows=${windows.length} ` +
+              `retries=${retries} ms=${this.clock.now() - started}: ${failureCause(err)}`,
+          );
           throw err;
         }
       }
@@ -435,6 +466,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
       seen.add(key);
       out.push(interval);
     }
+    // One line per read, so pacing and backend latency are visible in the logs
+    // without a load test. Counts and timing only: no refs, no event detail.
+    this.logger.log(
+      `busy read: connections=${input.connectionRefs.length} windows=${windows.length} ` +
+        `retries=${retries} intervals=${out.length} ms=${this.clock.now() - started}`,
+    );
     return out;
   }
 
@@ -464,8 +501,9 @@ export class ExternalCalendarProvider implements CalendarProvider {
         await this.send('checkConnection', this.wire.checkConnection(connectionRef)),
       );
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      return { ok: false, detail };
+      // The detail reaches the host's screen and the connection's stored
+      // health; the error's message would carry the backend's response body.
+      return { ok: false, detail: failureDetail(err) };
     }
   }
 

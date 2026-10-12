@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   Optional,
@@ -83,7 +84,7 @@ import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
-import { asConnector } from './calendar.http-provider';
+import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -512,8 +513,36 @@ export class AdminService {
     }
     return rows;
   }
+  /**
+   * Store a connection the caller names by hand. Only for deployments with no
+   * external calendar provider (the OSS default), where a manual reference is
+   * all there is.
+   *
+   * With a provider wired, a connection ref is not a label: the adapter derives
+   * from it which upstream identity to act as, and this route stores whatever
+   * string it is given. A hand-written ref could therefore point at a calendar
+   * the caller never connected. There, connections come only from the connect
+   * flow (`/v1/connections/token` then `/v1/connections/discover`), which binds
+   * refs found under the caller's own identities.
+   */
   createConnection(p: HostPrincipal, body: { provider: string; externalId: string; primaryEmail?: string; isDestination?: boolean; checkConflicts?: boolean }) {
-    return createConnection(this.db, { accountId: p.accountId, memberId: p.memberId, ...body });
+    if (this.provider.enabled)
+      throw new ForbiddenException({
+        error: 'CONNECT_FLOW_REQUIRED',
+        message: 'Connect calendars through the connect flow; manual connections are disabled on this deployment.',
+      });
+    // Name every field. The controller hands over the raw request body (there is
+    // no global ValidationPipe), so spreading it here let a caller overwrite the
+    // principal's `accountId`/`memberId` and attach a connection to anyone.
+    return createConnection(this.db, {
+      accountId: p.accountId,
+      memberId: p.memberId,
+      provider: body.provider,
+      externalId: body.externalId,
+      primaryEmail: body.primaryEmail,
+      isDestination: body.isDestination,
+      checkConflicts: body.checkConflicts,
+    });
   }
   deleteConnection(p: HostPrincipal, id: string) {
     return deleteConnection(this.db, p.memberId, id);
@@ -787,7 +816,8 @@ export class AdminService {
     } catch (e) {
       return {
         ok: false,
-        healthDetail: e instanceof Error ? e.message : 'Could not read events.',
+        // Never the error's message: for a backend refusal it is the response body.
+        healthDetail: failureDetail(e),
         busyCount: null,
         conflictCheckEnabled: row.checkConflicts,
         checkedAt,
@@ -801,7 +831,15 @@ export class AdminService {
     return listApiKeys(this.db, p.accountId);
   }
   createApiKey(p: HostPrincipal, body: { name: string; scopes: string[]; eventTypeIds?: string[]; expiresAtMs?: number }) {
-    return createApiKey(this.db, { accountId: p.accountId, ...body });
+    // Name every field, as in `createConnection`: a spread raw body could set
+    // `accountId` and mint a key for another account.
+    return createApiKey(this.db, {
+      accountId: p.accountId,
+      name: body.name,
+      scopes: body.scopes,
+      eventTypeIds: Array.isArray(body.eventTypeIds) ? body.eventTypeIds : undefined,
+      expiresAtMs: typeof body.expiresAtMs === 'number' ? body.expiresAtMs : undefined,
+    });
   }
   revokeApiKey(p: HostPrincipal, id: string) {
     return revokeApiKey(this.db, p.accountId, id);
@@ -851,7 +889,13 @@ export class AdminService {
         message: `This deployment cannot store a webhook signing secret: ${resolved.reason}`,
       });
     }
-    return createWebhook(this.db, { accountId: p.accountId, ...body, key: resolved.key });
+    return createWebhook(this.db, {
+      accountId: p.accountId,
+      subscriberUrl: body.subscriberUrl,
+      eventTriggers: body.eventTriggers,
+      secret: body.secret,
+      key: resolved.key,
+    });
   }
   deleteWebhook(p: HostPrincipal, id: string) {
     return deleteWebhook(this.db, p.accountId, id);

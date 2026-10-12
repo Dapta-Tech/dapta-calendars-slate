@@ -340,6 +340,8 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
 | `RATE_LIMIT_CAPACITY` | `60` | burst | no |
 | `RATE_LIMIT_REFILL_PER_SEC` | `1` | sustained refill | no |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `1` | reverse proxies in front of the API that append to `X-Forwarded-For` (1 = one load balancer, 2 = CDN + load balancer, 0 = exposed directly). The limiter keys on the entry this many from the right | no |
+| `REQUEST_LOG_ENABLED` | `true` | one line per request (method, route template, status, duration, request id, error code, account); JSON when `NODE_ENV=production`. Never logs query strings, bodies, headers or client addresses | no |
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every

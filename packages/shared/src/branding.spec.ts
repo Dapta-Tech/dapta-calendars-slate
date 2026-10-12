@@ -13,6 +13,9 @@ import {
   clampAccent,
   contrastRatioExact,
   onAccent,
+  NEW_HOST_ACCENT,
+  NEW_HOST_THEME,
+  withNewHostBranding,
   type BrandCanvas,
 } from './branding';
 
@@ -457,5 +460,42 @@ describe('brandVars — the single block a branded surface emits', () => {
         }
       }
     });
+  });
+});
+
+describe('withNewHostBranding: what a host is born with', () => {
+  it('writes ink on paper into an empty config', () => {
+    expect(withNewHostBranding()).toEqual({ brandColor: NEW_HOST_ACCENT, style: { theme: NEW_HOST_THEME } });
+    expect(withNewHostBranding({ brandColor: null, style: null })).toEqual({
+      brandColor: '#1a1a1c',
+      style: { theme: 'light' },
+    });
+  });
+
+  it('never overwrites what the caller chose', () => {
+    expect(withNewHostBranding({ brandColor: '#e5484d', style: { theme: 'dark', slotLayout: 'list' } })).toEqual({
+      brandColor: '#e5484d',
+      style: { theme: 'dark', slotLayout: 'list' },
+    });
+  });
+
+  it('leaves the canvas alone when an accent was chosen against the old dark default', () => {
+    expect(withNewHostBranding({ brandColor: '#e5484d' }).style).toEqual({});
+  });
+
+  it('fills the accent when only a canvas was chosen', () => {
+    expect(withNewHostBranding({ style: { theme: 'dark' } })).toEqual({
+      brandColor: NEW_HOST_ACCENT,
+      style: { theme: 'dark' },
+    });
+  });
+
+  it('does not move what an ABSENT config renders: old hosts keep the dark lime page', () => {
+    expect(DEFAULT_ACCENT).toBe('#cbe84f');
+    expect(DEFAULT_BOOKING_THEME).toBe('dark');
+  });
+
+  it('is legible on the canvas it is born on', () => {
+    expect(accentCanvasContrast(NEW_HOST_ACCENT, NEW_HOST_THEME)).toBeGreaterThanOrEqual(MIN_ACCENT_CONTRAST);
   });
 });

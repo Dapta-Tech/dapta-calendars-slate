@@ -1,10 +1,10 @@
 @import 'tailwindcss';
 
-/* Ported design tokens (dark-first) — the shadcn CSS-variable contract. */
+/* Design tokens: the shadcn CSS-variable contract (the dForms language). */
 @import '@slate/shared/tokens.css';
 
 /* Map the token variables into Tailwind's theme so components use semantic
-   utilities (bg-background, text-foreground, bg-primary, border-border …) —
+   utilities (bg-background, text-foreground, bg-primary, border-border …),
    never arbitrary values or raw hex. */
 @theme inline {
   --color-background: var(--background);
@@ -26,53 +26,79 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Faint Slate — the quietest legible voice (telemetry labels, hints, inactive
+  /* Faint: the quietest legible voice (telemetry labels, hints, inactive
      states). A fourth text step the old two-tone scale had no room for. */
   --color-faint: var(--faint);
   /* The constant dark tile that fixed-colour brand artwork sits on, and its
-     foreground. Same values in both themes on purpose — see `--brand-ink` in
+     foreground. Same values in both themes on purpose; see `--brand-ink` in
      tokens.css. */
   --color-brand-ink: var(--brand-ink);
   --color-brand-ink-foreground: var(--brand-ink-foreground);
 
-  /* The accent at a lightness that reads against this theme's page — the rim on an
-     accent fill, the focus outline, and the mark on a selected control.
-
-     THE RULE, in one line: the accent has three jobs and three tokens.
-       FILL    `bg-primary`          — `--primary`, the brand lime, rimmed below
-       LETTERS `text-primary`        — `--primary-ink`, overridden below
-       LINES   `border-primary-edge` — this token, used directly at the call site
-     A border is the one job that is NOT overridden here, because `border-primary`
-     is nine different classes once you count `/40 /50 /60`, `hover:`, `checked:`
-     and `focus-within:` — overriding the bare one would have silently left the
-     other eight on the raw lime, which in light mode is a 1.27:1 line. So the call
-     sites name this token themselves and every opacity variant follows for free.
-     On dark `--primary-edge` IS `--primary`, so none of this changes that theme. */
+  /* The primary has three jobs and three tokens.
+       FILL    `bg-primary`          : `--primary`, ink on light and paper on dark
+       LETTERS `text-primary`        : `--primary-ink`, overridden below
+       LINES   `border-primary-edge` : this token, named at the call site
+     In the dForms palette the three resolve to the same ink. They stay separate
+     because the call sites already name them and a branded booking surface sets
+     all three from the host's accent; and a border is the one job that cannot be
+     overridden centrally: `border-primary` is nine different classes once you
+     count `/40 /50 /60`, `hover:`, `checked:` and `focus-within:`. */
   --color-primary-edge: var(--primary-edge);
+
+  /* Signal Green: the one saturated working colour, rationed to a switch that is
+     on, progress, a confirmed booking and focus. `bg-signal` always pairs with
+     `text-signal-foreground` (ink); white on it is 1.8:1. */
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-edge: var(--signal-edge);
+  --color-signal-ink: var(--signal-ink);
+  /* The one data channel: something not settled yet (a pending booking, an
+     unsaved change). The base is for dots and washes (`bg-warning/20`); `-ink`
+     is the same hue as text. */
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  /* The navigation rail's ground, one tonal step off the page. */
+  --color-sidebar: var(--sidebar);
+  /* The ground of a WORK surface (a preview, a bulk action). */
+  --color-panel: var(--panel);
 
   /* The WHOLE radius scale is pinned here, not just `md`: overriding one step
      leaves `rounded-lg/xl/2xl` on Tailwind's defaults, so the scale contradicts
      itself — a `rounded-lg` chip ends up sharper than the `rounded-md` button next
      to it. One ladder, softest at the card step. `rounded-full` is left alone: it
-     is avatars and status dots, not a corner decision. */
+     is avatars and status dots, not a corner decision.
+
+     The control step is 8px, not the 10 it was. 6 / 8 / 12 / 16 / 20 is a ladder
+     whose rungs are all on the 4px grid the spacing scale already obeys; 10 was
+     the one step off it, and it is the step every button, input and select
+     draws. It is also the sibling product's value, so the two admins read as one
+     family at the size people look at most. The booking page keeps 10: it reads
+     `--radius` from its own ground in tokens.css, and its corners are the host's
+     `corners` axis anyway. */
   --radius-sm: 6px;
-  --radius-md: var(--radius); /* 10px */
+  --radius-md: var(--radius); /* 8px */
   --radius-lg: 12px;
   --radius-xl: var(--radius-monitor); /* 16px — the card step the sheet always claimed */
   --radius-2xl: 20px;
 
-  /* Two voices, no third font. Figtree does all the talking; IBM Plex Mono is
-     reserved for strings you COPY rather than read — links, slugs, hex, keys,
-     template variables — where a fixed advance and an unambiguous l/1/O/0 do real
-     work. Numbers are NOT one of those: a stat is glanced at, and monospacing it
-     only made it read as code. Both self-hosted via next/font (`--font-figtree`,
-     `--font-plex-mono`) and both OFL, which is what lets next/font bake the files
-     into the build and into every clone of this repo. Until now `--font-mono` was
-     not defined at all, so the two `font-mono` call sites in the notifications
-     editor silently rendered in the browser default. Each falls back to a system
-     stack if its variable is ever absent. */
+  /* One voice. Figtree does all the talking, links, slugs, keys and hex values
+     included: the design system has no monospaced face, so none is loaded (IBM
+     Plex Mono was, for strings you copy). Figures keep their steady width with
+     `tabular-nums` instead (see `code` in the base layer below).
+     Self-hosted via next/font (`--font-figtree`) under the OFL, which is what
+     lets next/font bake the files into the build and into every clone of this
+     repo. Falls back to a system stack if the variable is ever absent. The
+     booking page's `sans` font axis reads this same variable, so it is the same
+     face as the admin; its other two faces are the host's choice.
+
+     `--font-mono` is the SAME stack, on purpose. Seventeen admin call sites
+     still say `font-mono` (keys, URLs, template variables) and Tailwind's
+     preflight draws every `<code>` from this token; pointing the role at the
+     sans retires the second face everywhere at once without touching a screen,
+     which is the next phase's job. */
   --font-sans: var(--font-figtree), Figtree, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--font-figtree), Figtree, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   /* The type scale, pinned end to end. Before this it was eight Tailwind defaults
      plus ten arbitrary `text-[10px]` / `text-[11px]` sites — a scale nobody could
@@ -143,6 +169,17 @@
   * {
     border-color: var(--border);
   }
+
+  /* What a monospaced face used to buy a key or a URL: figures that line up.
+     The face is the sans now (see `--font-mono`), so the alignment is kept the
+     way the rest of the type scale keeps it. */
+  code,
+  kbd,
+  samp,
+  pre,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* Point the accent-as-TEXT utility at `--primary-ink` instead of `--primary`.
@@ -153,49 +190,41 @@
    for the mirror image of the reason the wildcard border rule is in `@layer base`
    (QA2 BUG-2): here we WANT an explicit color utility on the same element to still
    win. The `hover:` variant is listed because its pseudo-class outranks a bare
-   class. */
+   class. In the dForms palette `--primary-ink` equals `--primary` on both themes,
+   so the override paints nothing different there; it is what makes a branded
+   booking surface's `text-primary` the HOST's colour (ADR 0004). */
 @layer utilities {
   .text-primary,
   .hover\:text-primary:hover {
     color: var(--primary-ink);
   }
 
-  /* Rim every accent fill with `--primary-edge`, so the fill's SHAPE clears 3:1
-     against the page it sits on (WCAG 1.4.11). This is about the PRODUCT tokens:
-     on dark the edge equals the fill and paints nothing; on light it is the
-     difference between the primary action being a recognisable control and being
-     a pale smear at 1.27:1. On a `.branded-surface` the rule still applies but
-     paints nothing on either ground — `brandVars` emits edge == primary since
-     ADR 0004's amendment, so a host's fill is deliberately unrimmed and whatever
-     contrast it has against the page is the contrast they chose.
-     An `inset` box-shadow rather than a border because a border would add 2px to
-     every accent fill and reflow all of them. Opacity-modified variants
-     (`bg-primary/10`, `bg-primary/15`) are different classes and untouched — they
-     are washes, not fills.
+  /* Rim every signal fill with `--signal-edge`, so the fill's SHAPE clears 3:1
+     against the page it sits on (WCAG 1.4.11): Signal Green on paper is 1.6:1,
+     and the edge is what makes a switch that is on read as a control. An `inset`
+     box-shadow rather than a border, so the rim adds no size and reflows nothing.
+     Opacity-modified washes (`bg-signal/20`) are different classes and untouched.
 
-     THE SIZE RULE this implies: `bg-primary` is for fills big enough to HAVE an
-     interior — buttons, chips, badges. A 1px rim on a 6px dot leaves 4px of fill
-     and reads as a donut. Below about 10px the accent is a MARK, not a fill, and it
-     takes `bg-primary-edge` instead: the edge colour carrying the whole shape,
-     which is identical on dark and a legible dark-olive on light. The connection
-     status dot, the radio's checked dot and the date picker's has-slots marker all
-     use that, and a new one should too.
+     This used to be a rule on `bg-primary`, when the primary was a lime that
+     needed it. The primary is ink now, which clears 3:1 on every ground by
+     itself, so that rule is gone. On a branded booking surface it painted
+     nothing anyway: `brandVars` emits edge == primary, so a host's fill is
+     deliberately unrimmed (ADR 0004's amendment).
 
-     TWO THINGS THIS RULE DOES NOT REACH, both by construction:
-     1. A DISABLED accent fill. `disabled:bg-muted` swaps `background-color` only,
-        so the rim outlives the fill and a disabled button wears a lime ring around
-        a muted body. Any call site that disables an accent fill must also carry
-        `disabled:shadow-none` — `button.tsx` and `new-schedule-button.tsx` do.
-     2. VARIANT-PREFIXED fills. `checked:bg-primary` compiles to a different class
-        (`.checked\:bg-primary:checked`) and gets no rim. It is listed here rather
-        than fixed because raising this rule's specificity to catch it would also
-        beat `focus-visible:ring-2`, which sets `box-shadow` too — the rim would eat
-        the focus ring. There are two such sites, not the one this note first
-        claimed: `checkbox.tsx` and `radio.tsx` both carried `checked:border-primary`.
-        Both now carry `checked:border-primary-edge` instead (reskin slice P, #97) —
-        the edge colour on the border does the job the rim cannot. A NEW
-        variant-prefixed accent fill must do the same. On dark none of this shows. */
-  .bg-primary {
+     A variant-prefixed fill (`checked:bg-signal`) compiles to a different class
+     and gets no rim; such a call site carries `checked:border-signal-edge` on its
+     border instead, which does the same job. */
+  .bg-signal {
+    box-shadow: inset 0 0 0 1px var(--signal-edge);
+  }
+
+  /* The old rim, kept where it still paints: inside the booking ground, whose
+     palette is frozen (tokens.css). On a branded surface it paints nothing
+     (edge == primary); on the manage page's light canvas it is the olive edge
+     that makes the lime fill a recognisable control. Removing it there would
+     move a public page, which this palette change does not do. `:where()` keeps
+     the specificity of the old bare rule, so a focus ring still wins over it. */
+  :where(.bp-ground) .bg-primary {
     box-shadow: inset 0 0 0 1px var(--primary-edge);
   }
 }
@@ -208,15 +237,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Lime focus ring (WCAG) honored everywhere.
-   Uses `--primary-edge`, not `--primary`: the outline is the one thing that must be
-   findable on every surface, and the PRODUCT accent flattens to 1.27:1 over paper —
-   the focus indicator would be the least visible thing on a focused control in
-   light mode. On dark the edge IS the accent, so nothing changes there. On a
-   branded page the two tokens are equal by construction, so the ring is the host's
-   accent and carries whatever contrast they picked. */
+/* Focus ring, honored everywhere. Green is the focus colour of this language;
+   `--focus` is the signal at a lightness that clears 3:1 on each theme's page,
+   card and raised fill (`tokens.spec.ts`). On a booking page the ground points
+   `--focus` at `--primary-edge`, so the ring stays the host's accent and carries
+   whatever contrast they picked, exactly as it did before this palette. */
 :focus-visible {
-  outline: 2px solid var(--primary-edge);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -304,15 +331,6 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--bp-radius);
   padding: var(--bp-pad);
-}
-/* Sticky day header (Design Quality Bar §3) — grouped slots always keep their
-   date context as the page scrolls; never a row of orphan "AM" fragments. */
-.branded-surface .bp-day > h3 {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--background);
-  padding-block: 0.375rem;
 }
 /* slot chip base + selected treatment (slotSelect). Fixed height + never-wrap
    text → a consistent grid of single-line "11:00 AM" buttons (Bar §4). */
@@ -411,46 +429,19 @@ body {
 .bp-viewport > main {
   margin-block: auto;
 }
-
-/* The three-region event page (BP) needs room for panel + month + day column,
-   so the canvas carries its own cap and `split` widens it — which is what the
-   axis has always claimed to do. */
-.bp-canvas {
-  margin-inline: auto;
-  max-width: 64rem;
-}
-.branded-surface.tpl-split .bp-canvas {
-  max-width: 72rem;
+/* Except the event page's sequence on a phone: there each step owns the screen
+   from the top, so the progress track and the step's title stay where the thumb
+   left them instead of jumping as a short step re-centres. */
+@media (max-width: 47.999rem) {
+  .bp-viewport > main:has(> .bp-flow) {
+    margin-block: 0 auto;
+  }
 }
 
 /* ---------------------------------------------------------------------------
- * BP: month calendar + day column. Everything here is token-driven, so both
- * themes and all nine branding axes reach it the same way the slot chips do.
+ * The month calendar. Everything here is token-driven, so both canvases and
+ * all ten branding axes reach it the same way they reach the slot chips.
  * ------------------------------------------------------------------------ */
-
-/* The slot-layout axis, re-scoped inside the day column. The page-wide rule is
-   3 columns (4 above 640px); in a ~16rem column that is a 65px cell holding a
-   `white-space: nowrap` "10:30 AM", which overflows on every wide screen. Here
-   `list` is one per row and `grid` is two — both axes stay visibly different,
-   neither can overflow, and no other surface changes. */
-.branded-surface .bp-daycol .bp-slots,
-.branded-surface.slots-list .bp-daycol .bp-slots {
-  grid-template-columns: 1fr;
-}
-.branded-surface.slots-grid .bp-daycol .bp-slots {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-/* The day column's own scroller — desktop only. Nesting a fixed-height scroll
-   region inside page scroll is a touch trap: the finger lands in the inner box
-   and the page stops moving. Below `md` the list just flows in the page. */
-@media (min-width: 768px) {
-  .branded-surface .bp-daycol-scroll {
-    max-height: 26rem;
-    overflow-y: auto;
-    /* Room for the scrollbar so a chip's rim is never clipped by it. */
-    padding-right: 0.25rem;
-  }
-}
 
 /* Rows own their own seven-column track rather than `display: contents` on a
    shared one. `contents` has a long history of dropping elements out of the
@@ -574,27 +565,801 @@ body {
   cursor: not-allowed;
 }
 
+/* ---------------------------------------------------------------------------
+ * The event page as a sequence (BP2).
+ *
+ * One tree, laid out by the width of its CONTAINER (`.bp-flow`), not of the
+ * viewport, so the studio's 360px preview and an embed's frame lay out by their
+ * own width exactly as a phone and a desktop do:
+ *
+ *   below 48rem  a phone's sequence: one region owns the screen at a time (the
+ *                event and the month, then the day's times, then the form),
+ *                a 4px track says where you are, and the step slides in
+ *   48 to 68rem  two panes: the event on the left; the month with the day's
+ *                times under it on the right
+ *   68rem up     three across: event, month, the day's times (cal.com's layout)
+ *
+ * Which regions show is decided here from `data-step` on `.bp-stage`; the island
+ * renders every region of the current branch once and never twice. Every value
+ * is a token, a `--bp-*` axis or a booking-surface metric (tokens.css), and no
+ * element below takes a colour utility, so the ten axes and the studio preview
+ * hold for every new piece.
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-flow {
+  container: bp / inline-size;
+  width: 100%;
+}
+.branded-surface .bp-stage {
+  margin-inline: auto;
+  max-width: 32rem;
+  /* The gutter gives way before the calendar does (R28): seven 44px days and
+     six 4px gaps need 332px, so the gutter is 16px from 364px up and shrinks to
+     nothing at 332px, and a day cell is never narrower than a thumb. Below
+     that the gaps go to 2px too (see the narrowest rule below), which is what
+     still fits seven 44px days at 320. */
+  padding-inline: clamp(0px, calc((100cqi - 332px) / 2), var(--sp-page-x));
+}
+@container bp (max-width: 21.5rem) {
+  .branded-surface .bp-stage {
+    padding-inline: clamp(0px, calc((100cqi - 320px) / 2), var(--sp-page-x));
+  }
+  .branded-surface .bp-cal-grid,
+  .branded-surface .bp-cal-week {
+    gap: 0.125rem;
+  }
+}
+
+/* The step track: phones only. */
+.branded-surface .bp-progress {
+  height: var(--bp-progress-h);
+  margin-bottom: var(--sp-group);
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.branded-surface .bp-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--bp-step-ms) var(--bp-ease);
+}
+
+/* The frame: on a phone it is the page itself, with no card around the step; from
+   the two-pane width it is the card (and takes the `cardStyle` axis). */
+.branded-surface .bp-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+@container bp (max-width: 47.999rem) {
+  .branded-surface .bp-frame.bp-card {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+.branded-surface .bp-pane-main {
+  min-width: 0;
+}
+.branded-surface .bp-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+
+/* The phone's sequence: which region owns the screen, and how it arrives. */
+@container bp (max-width: 47.999rem) {
+  /* A step slides in from the side; without this the slide would push the
+     page wider for its 280ms and flash a horizontal scrollbar. `clip`, not
+     `hidden`: it makes no scroll container, so the sticky day title still
+     sticks to the viewport. */
+  .branded-surface .bp-stage {
+    overflow-x: clip;
+    overflow-clip-margin: var(--sp-tight);
+  }
+  .branded-surface .bp-stage[data-step='times'] .bp-pane-event,
+  .branded-surface .bp-stage[data-step='times'] .bp-pane-month,
+  .branded-surface .bp-stage[data-step='details'] .bp-pane-event,
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-times {
+    display: none;
+  }
+  /* A region that goes from hidden to shown restarts its animation, so the step
+     that arrives slides in and nothing else moves. `backwards`, never `both`: a
+     transform left on the region after it lands would make it the containing
+     block of the time zone list's fixed backdrop. */
+  .branded-surface .bp-stage[data-dir='forward'] .bp-region {
+    animation: bp-step-forward var(--bp-step-ms) var(--bp-ease) backwards;
+  }
+  .branded-surface .bp-stage[data-dir='back'] .bp-region {
+    animation: bp-step-back var(--bp-step-ms) var(--bp-ease) backwards;
+  }
+  /* The day stays named as its times scroll (R30 §3), with the way back beside it. */
+  .branded-surface .bp-day-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--background);
+  }
+  .branded-surface.day-boxed .bp-day-head {
+    background: transparent;
+  }
+  .branded-surface .bp-event-title {
+    font-size: 1.25rem;
+    line-height: 1.625rem;
+  }
+  .branded-surface .bp-description-text {
+    -webkit-line-clamp: 3;
+  }
+}
+@keyframes bp-step-forward {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem);
+  }
+}
+@keyframes bp-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-1.5rem);
+  }
+}
+
+/* Two panes. */
+@container bp (min-width: 48rem) {
+  .branded-surface .bp-stage {
+    max-width: var(--bp-frame-max);
+    padding-inline: 0;
+  }
+  .branded-surface.tpl-split .bp-stage {
+    max-width: var(--bp-frame-max-split);
+  }
+  .branded-surface .bp-progress,
+  .branded-surface .bp-back.bp-back-phone {
+    display: none;
+  }
+  .branded-surface .bp-frame {
+    display: grid;
+    grid-template-columns: var(--bp-event-col) minmax(0, 1fr);
+    gap: 0;
+    min-height: var(--bp-frame-min-h);
+    padding: 0;
+  }
+  .branded-surface .bp-pane-event {
+    padding: var(--bp-pane-pad);
+    border-inline-end: 1px solid var(--border);
+  }
+  .branded-surface .bp-pane-main {
+    padding: var(--bp-pane-pad);
+  }
+  .branded-surface .bp-month {
+    max-width: 28rem;
+  }
+}
+/* Three across: the day's times beside the month, both tops aligned (R30 §10). */
+@container bp (min-width: 68rem) {
+  .branded-surface .bp-pick {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--bp-times-col);
+    align-items: start;
+    gap: var(--sp-section);
+  }
+  .branded-surface .bp-month {
+    max-width: none;
+  }
+}
+
+/* The event panel. */
+.branded-surface .bp-event {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-card);
+}
+.branded-surface .bp-host {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-avatar {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  object-fit: cover;
+}
+.branded-surface .bp-avatar-monogram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--bp-radius);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+.branded-surface .bp-host-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-title {
+  font-family: var(--bp-font-display);
+  font-size: 1.5rem;
+  line-height: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.branded-surface .bp-fact dd {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-fact dd > svg {
+  margin-top: 0.125rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-fact-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-description {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-description-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  white-space: pre-line;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-description-text[data-expanded='true'] {
+  display: block;
+  overflow: visible;
+}
+.branded-surface .bp-link {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  color: var(--primary-ink, inherit);
+}
+.branded-surface .bp-muted {
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-small {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.branded-surface .bp-strong {
+  font-weight: 600;
+}
+.branded-surface .bp-empty {
+  padding-block: var(--sp-section);
+}
+
+/* The month's head. */
+.branded-surface .bp-month {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-month-label {
+  font-family: var(--bp-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+.branded-surface .bp-month-nav {
+  display: flex;
+  gap: var(--sp-tight);
+}
+
+/* The day's times. */
+.branded-surface .bp-times {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-field);
+}
+.branded-surface .bp-day-head {
+  display: flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-day-title,
+.branded-surface .bp-chosen-title,
+.branded-surface .bp-confirmation-title {
+  font-family: var(--bp-font-display);
+  font-weight: 600;
+}
+.branded-surface .bp-day-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 1rem;
+}
+/* Headings take focus when a step arrives, for the screen reader's sake; they
+   are not controls and draw no ring. */
+.branded-surface [tabindex='-1']:focus-visible {
+  outline: none;
+}
+.branded-surface .bp-times-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-times .bp-slots,
+.branded-surface.slots-list .bp-times .bp-slots {
+  grid-template-columns: 1fr;
+}
+.branded-surface.slots-grid .bp-times .bp-slots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.branded-surface .bp-slot-time {
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.branded-surface .bp-slot-seats {
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-slot:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The quiet controls beside the times: the zone as a line of text with a
+   chevron, and the 12h/24h pair. */
+.branded-surface .bp-tz {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.branded-surface .bp-tz-trigger {
+  width: auto;
+  max-width: 100%;
+  justify-content: flex-start;
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-tz-trigger:hover {
+  border-color: transparent;
+  color: var(--foreground);
+}
+.branded-surface .bp-tz-panel {
+  right: auto;
+  width: min(20rem, calc(100cqi - 2rem));
+}
+.branded-surface .bp-segmented {
+  display: inline-flex;
+  padding: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.75rem;
+}
+.branded-surface .bp-segment {
+  min-height: var(--sp-control-h);
+  padding-inline: var(--sp-field);
+  border-radius: var(--bp-btn-radius);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-segment[aria-checked='true'] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* A step's way back: a chevron and where it goes. In the day's head on a phone
+   it is the chevron alone, 44px square, with its words for a screen reader. */
+.branded-surface .bp-back {
+  display: inline-flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+  padding-inline-end: var(--sp-inline);
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: color 120ms var(--bp-ease);
+}
+.branded-surface .bp-back:hover {
+  color: var(--foreground);
+}
+.branded-surface .bp-back-phone {
+  width: var(--sp-control-h);
+  justify-content: flex-start;
+  padding: 0;
+}
+.branded-surface .bp-back-phone > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The details step. */
+.branded-surface .bp-pane-details {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-chosen {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-chosen-title {
+  margin-top: var(--sp-inline);
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+}
+.branded-surface .bp-chosen-when {
+  display: flex;
+  flex-direction: column;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 500;
+}
+.branded-surface .bp-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-label {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+}
+.branded-surface .bp-required {
+  color: var(--destructive);
+}
+.branded-surface .bp-input {
+  width: 100%;
+  padding: var(--bp-field-pad-y) var(--bp-field-pad-x);
+  border: 1px solid var(--input);
+  border-radius: var(--bp-radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  /* 16px: a phone does not zoom into a field it is not shrinking to fit. */
+  font-size: 1rem;
+  line-height: 1.5rem;
+  transition: border-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-input:hover {
+  border-color: var(--muted-foreground);
+}
+.branded-surface .bp-input:focus-visible {
+  border-color: var(--accent);
+  outline-offset: 1px;
+}
+.branded-surface .bp-input[aria-invalid='true'] {
+  border-color: var(--destructive);
+}
+.branded-surface .bp-input::placeholder {
+  color: var(--faint);
+}
+.branded-surface textarea.bp-input {
+  resize: vertical;
+}
+.branded-surface .bp-error {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--destructive);
+}
+
+/* The one primary action of a step: full width, 54px. */
+.branded-surface .bp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+.branded-surface .bp-cta {
+  width: 100%;
+  min-height: var(--bp-cta-h);
+  padding-inline: var(--sp-group);
+  font-size: 1rem;
+  transition:
+    transform 120ms var(--bp-ease),
+    background-color 120ms var(--bp-ease),
+    border-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-btn.bp-cta:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.branded-surface .bp-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.branded-surface .bp-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* The confirmation, and the cards a failure shows. */
+.branded-surface .bp-confirmation,
+.branded-surface .bp-notice {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  gap: var(--sp-card);
+  margin-inline: auto;
+}
+.branded-surface .bp-confirmation-mark {
+  display: flex;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.branded-surface .bp-confirmation-mark[data-pending='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.branded-surface .bp-confirmation-title {
+  font-size: 1.5rem;
+  line-height: 1.875rem;
+}
+.branded-surface .bp-confirmation-facts {
+  padding-block: var(--sp-card);
+  border-block: 1px solid var(--border);
+}
+.branded-surface .bp-confirmation-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-inline);
+}
+.branded-surface .bp-confirmation-cta {
+  text-align: center;
+}
+@container bp (min-width: 48rem) {
+  .branded-surface .bp-confirmation-actions {
+    flex-direction: row;
+  }
+  .branded-surface .bp-confirmation-actions > * {
+    flex: 1 1 0;
+  }
+}
+.branded-surface .bp-notice-title {
+  font-family: var(--bp-font-display);
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+  font-weight: 600;
+}
+.branded-surface .bp-notice.bp-card[data-tone='error'] {
+  border-color: var(--destructive);
+}
+
+/* ---------------------------------------------------------------------------
+ * The profile (BP3): a host's or a team's landing. The cover, who they are,
+ * then ONE framed list of what can be booked, a hairline between rows and the
+ * duration as a figure, so the durations read as a column. The `cardStyle` axis
+ * frames the list once; the `template` axis sets the cover's height (`banded`
+ * makes it taller: `.tpl-banded .bp-cover`, earlier in this file).
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-group);
+}
+.branded-surface .bp-cover {
+  display: block;
+  width: 100%;
+  height: 5rem;
+  border-radius: var(--bp-radius);
+  background: var(--accent-wash);
+}
+.branded-surface .bp-cover-image {
+  object-fit: cover;
+}
+.branded-surface .bp-profile-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-tight);
+  padding-inline: var(--sp-card);
+}
+/* The avatar sits on the cover's lower edge, ringed in the page's own ground so
+   it reads as in front of the cover rather than cut out of it. */
+.branded-surface .bp-profile-avatar {
+  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
+  margin-bottom: var(--sp-inline);
+}
+.branded-surface .bp-profile-avatar .bp-avatar {
+  width: 4.5rem;
+  height: 4.5rem;
+  box-shadow: 0 0 0 4px var(--background);
+  font-size: 1.5rem;
+}
+.branded-surface .bp-profile-name {
+  font-family: var(--bp-font-display);
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-profile-bio {
+  max-width: 36rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-list.bp-card {
+  padding: 0;
+  overflow: hidden;
+}
+.branded-surface .bp-event-list > li + li {
+  border-top: 1px solid var(--border);
+}
+.branded-surface .bp-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--sp-card);
+  min-height: var(--sp-control-h);
+  padding: var(--bp-pad);
+  transition: background-color 120ms var(--bp-ease);
+}
+.branded-surface .bp-event-row:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+.branded-surface .bp-event-row:focus-visible {
+  outline-offset: -2px;
+}
+.branded-surface .bp-event-row-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-tight);
+}
+.branded-surface .bp-event-row-title {
+  font-family: var(--bp-font-display);
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.branded-surface .bp-event-row-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-row-length {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-tight);
+  white-space: nowrap;
+}
+.branded-surface .bp-figure {
+  font-size: 1.25rem;
+  line-height: 1.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.branded-surface .bp-unit {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-event-row-chevron {
+  display: inline-flex;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-profile-empty {
+  padding-inline: var(--sp-card);
+}
+
+/* ---------------------------------------------------------------------------
+ * The manage page (BP3): the event page's sequence with the booking where the
+ * event panel goes. Cancelling is the quiet action under it: a red OUTLINE,
+ * never a red fill, so it never outshouts the reschedule beside it.
+ * ------------------------------------------------------------------------ */
+.branded-surface .bp-manage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-section);
+}
+.branded-surface .bp-manage-cancel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-field);
+  padding-top: var(--sp-group);
+  border-top: 1px solid var(--border);
+}
+.branded-surface .bp-btn-outline.bp-danger {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+.branded-surface .bp-btn-outline.bp-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}
+.branded-surface .bp-manage-done {
+  padding: var(--sp-field) var(--sp-card);
+  border-radius: var(--bp-radius-sm);
+  background: var(--accent-soft);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.branded-surface .bp-pending {
+  opacity: 0.6;
+}
+/* On a phone the booking reads first and cancelling comes LAST, after the
+   month a reschedule starts from: the destructive action is not the first
+   thing under the thumb. The event pane and the panel step out of the box tree
+   (`display: contents`) so their pieces can be ordered among the frame's own;
+   nothing is rendered twice. From the two-pane width up cancel stays under the
+   booking in the left pane. */
+@container bp (max-width: 47.999rem) {
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-event:has(> .bp-manage-panel),
+  .branded-surface .bp-stage[data-step='calendar'] .bp-manage-panel {
+    display: contents;
+  }
+  .branded-surface .bp-stage[data-step='calendar'] .bp-pane-main {
+    order: 1;
+  }
+  .branded-surface .bp-stage[data-step='calendar'] .bp-manage-cancel {
+    order: 2;
+  }
+}
+
 /* --- Inline embed (E) -----------------------------------------------------
    `dc-embed` rides on the same element as `.branded-surface`, so these rules
    out-specify the page-wide ones without `!important` and without touching
    them. Only reachable under `?embed=1`; a page opened directly never carries
    the class. */
 
-/* The day column's scroller is switched OFF inside a frame. On a real page a
-   fixed-height inner scroller is right: the window height is fixed and the
-   column should not push the footer off screen. Inside an auto-resizing iframe
-   it is wrong twice — the frame grows to fit its content, so there is nothing
-   for the scroller to save, and a fixed-height scroll region inside a frame
-   inside a scrolling host page is the same touch trap this rule already
-   refuses below `md`, with one more layer on it. Let the FRAME grow instead.
-
-   This is also what makes the height reporter honest: with the scroller on, the
-   document's scroll height is the clipped height, so the number posted to the
-   parent would hide slots behind a scrollbar the host never asked for. */
-.branded-surface.dc-embed .bp-daycol-scroll {
-  max-height: none;
-  overflow: visible;
-  padding-right: 0;
+/* No floor inside a frame. The two-pane frame has a minimum height on a real
+   page (a five-week month and a six-week one do not move the page, and a big
+   screen is framed rather than stranded); inside an auto-resizing iframe that
+   floor is height the host page pays for, and it would make the height
+   reporter post the floor instead of the content. The frame grows with what
+   it holds. */
+.branded-surface.dc-embed .bp-frame {
+  min-height: 0;
 }
 
 /* The badge keeps its place in the embed (#67 — a host's own site is the
