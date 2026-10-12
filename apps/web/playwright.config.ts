@@ -33,13 +33,19 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    {
+      name: 'desktop',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      testIgnore: /api-.*\.spec\.ts/,
+    },
     {
       name: 'mobile',
       use: { ...devices['Pixel 7'], viewport: { width: 360, height: 780 } },
-      // The API-level files assert server behaviour; once is enough.
       testIgnore: /api-.*\.spec\.ts/,
     },
+    // Server behaviour, once, after both browser runs: the request-log check
+    // reads the log of every booking those runs made.
+    { name: 'api', testMatch: /api-.*\.spec\.ts/, dependencies: ['desktop', 'mobile'] },
   ],
   webServer: [
     {

@@ -38,8 +38,9 @@ const childEnv = {
   RATE_LIMIT_ENABLED: 'true',
   RATE_LIMIT_TRUSTED_PROXY_HOPS: '1',
   ...(which === 'limited'
-    ? { RATE_LIMIT_CAPACITY: '5', RATE_LIMIT_REFILL_PER_SEC: '0.2' }
-    : { RATE_LIMIT_CAPACITY: '100000', RATE_LIMIT_REFILL_PER_SEC: '1000' }),
+    ? // One outbox worker per database: two would race for the same rows.
+      { RATE_LIMIT_CAPACITY: '5', RATE_LIMIT_REFILL_PER_SEC: '0.2', OUTBOX_WORKER_ENABLED: 'false' }
+    : { RATE_LIMIT_CAPACITY: '100000', RATE_LIMIT_REFILL_PER_SEC: '1000', OUTBOX_POLL_MS: '1000' }),
 };
 
 if (which === 'main') {
