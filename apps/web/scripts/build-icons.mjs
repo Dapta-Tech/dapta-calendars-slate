@@ -65,6 +65,22 @@ const MAP = {
 /** Not icons: the spin modifier class. */
 const NOT_ICONS = new Set(['spin']);
 
+/**
+ * Remove XML comments until none is left: one pass can leave a new `<!--`
+ * behind when a comment's removal joins its neighbours (CodeQL's
+ * incomplete-sanitization rule). An unterminated `<!--` is cut to the end.
+ */
+function stripComments(text) {
+  let out = text;
+  for (;;) {
+    const next = out.replace(/<!--[\s\S]*?-->/g, '');
+    if (next === out) break;
+    out = next;
+  }
+  const open = out.indexOf('<!--');
+  return open === -1 ? out : out.slice(0, open);
+}
+
 function svgFor(spec) {
   const [name, mode] = spec.split(':');
   let svg;
@@ -73,8 +89,7 @@ function svgFor(spec) {
   } catch {
     throw new Error(`lucide-static has no icon named "${name}"`);
   }
-  const inner = svg
-    .replace(/<!--[\s\S]*?-->/g, '')
+  const inner = stripComments(svg)
     .replace(/<svg[\s\S]*?>/, '')
     .replace(/<\/svg>/, '')
     .replace(/\s*\n\s*/g, '')

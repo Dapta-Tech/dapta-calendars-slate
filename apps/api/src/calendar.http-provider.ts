@@ -286,6 +286,28 @@ export class CalendarHttpError extends Error {
   }
 }
 
+/**
+ * What a failed read is allowed to say about itself in a log line: the class,
+ * and for a backend refusal the operation and status. Never the message, which
+ * for a CalendarHttpError is the backend's own response body.
+ */
+export function failureCause(err: unknown): string {
+  if (err instanceof CalendarHttpError) return `cause=${err.name} op=${err.op} status=${err.status}`;
+  if (err instanceof Error) return `cause=${err.name}`;
+  return 'cause=unknown';
+}
+
+/**
+ * The same, as a sentence a host may read on the connections screen (and that
+ * is stored as the connection's last health detail). Still never the message.
+ */
+export function failureDetail(err: unknown): string {
+  if (err instanceof CalendarHttpError)
+    return `The calendar backend refused ${err.op} (HTTP ${err.status}).`;
+  if (err instanceof Error) return `The calendar backend could not be reached (${err.name}).`;
+  return 'The calendar backend could not be reached.';
+}
+
 export interface ExternalCalendarOptions {
   baseUrl: string;
   tokenSource: CalendarTokenSource;
@@ -420,9 +442,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
           // The caller turns this into "calendar unavailable" and keeps the
           // cause to itself; this line is the only record of WHICH window and
           // WHY, and it is what made the concurrency limit above visible.
+          // Only the error's class, the operation and the HTTP status are
+          // written: a CalendarHttpError's message carries the backend's
+          // response body, which can quote event or attendee data.
           this.logger.warn(
             `busy read failed: connections=${input.connectionRefs.length} windows=${windows.length} ` +
-              `retries=${retries} ms=${this.clock.now() - started}: ${err instanceof Error ? err.message : String(err)}`,
+              `retries=${retries} ms=${this.clock.now() - started}: ${failureCause(err)}`,
           );
           throw err;
         }
@@ -476,8 +501,9 @@ export class ExternalCalendarProvider implements CalendarProvider {
         await this.send('checkConnection', this.wire.checkConnection(connectionRef)),
       );
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      return { ok: false, detail };
+      // The detail reaches the host's screen and the connection's stored
+      // health; the error's message would carry the backend's response body.
+      return { ok: false, detail: failureDetail(err) };
     }
   }
 
