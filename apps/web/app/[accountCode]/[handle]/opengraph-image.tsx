@@ -6,6 +6,7 @@ import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { bookingCardResponse, emptyCardResponse, OG_SIZE } from '@/lib/og-card';
 import { cardImageDataUri } from '@/lib/og-image-source';
 import { IS_DAPTA_BRAND, PRODUCT_NAME } from '@/lib/product-name';
+import { brandingShown } from '@/lib/growth';
 import type { BookingButtons, BookingCorners } from '@slate/shared';
 
 /**
@@ -43,6 +44,8 @@ export default async function ProfileCard({ params }: { params: Promise<{ accoun
     title: name,
     subtitle: typeof style.bio === 'string' ? style.bio : null,
     cta: messages.growth.shareCardCta,
-    productName: IS_DAPTA_BRAND ? PRODUCT_NAME : null,
+    // The product mark is Dapta branding: an account that turned it off
+    // while paying gets a card with the host alone (`showDaptaBranding`).
+    productName: IS_DAPTA_BRAND && brandingShown(profile) ? PRODUCT_NAME : null,
   });
 }

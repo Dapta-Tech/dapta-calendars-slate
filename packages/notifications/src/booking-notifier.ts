@@ -59,6 +59,13 @@ export interface BookingNotification {
   templateLocale?: string | null;
   /** True while the booking awaits host confirmation (drives {{pending_note}}). */
   pending?: boolean;
+  /**
+   * Whether this account's mail carries the Dapta branding (the invitee's
+   * "Made with" line), as the API decided it with `showDaptaBranding`. Filled at
+   * DELIVERY time like `meetingUrl`, so a row queued weeks ahead follows a lapse.
+   * Only `false` hides the line; absent (old rows, forks) keeps it.
+   */
+  showBranding?: boolean;
   /** Public book-again URL for this event type (drives {{booking_link}}). */
   bookingLink?: string | null;
   /**
@@ -122,7 +129,8 @@ export class BookingNotifier {
     const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
     const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
     const vars = templateVars(n, locale);
-    const html = renderBrandedHtml(kind, vars, locale, audience, this.growth);
+    const growth = n.showBranding === false ? { ...this.growth, signupUrl: null } : this.growth;
+    const html = renderBrandedHtml(kind, vars, locale, audience, growth);
     if (n.template) {
       const base = renderTemplate(n.template, vars);
       return { subject: base.subject, text: base.text, html };

@@ -241,6 +241,59 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
     expect(String(log.mock.calls[1]![0])).toContain('free -> paid');
   });
 
+  it("the invitee's email follows the same switch, decided when the mail is sent", async () => {
+    const sent: string[] = [];
+    const provider = {
+      send: (m: { html?: string }) => {
+        sent.push(m.html ?? '');
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    const email = new EmailEffects(
+      new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/' }),
+      db,
+      undefined,
+      undefined,
+      undefined,
+      upstream,
+      'locked',
+    );
+    // A queued row as the enqueue side snapshots it, here with a stale
+    // `showBranding: false`: delivery reads the account, never the snapshot.
+    const row = JSON.stringify({
+      accountId,
+      uid: 'bk_branding_mail',
+      title: 'Intro call',
+      startUtc: '2026-10-20T15:00:00.000Z',
+      endUtc: '2026-10-20T15:30:00.000Z',
+      host: { name: 'Alex Rivera', email: 'host@example.test' },
+      attendee: { name: 'Sam Guest', email: 'guest@example.test', timeZone: 'UTC' },
+      audience: 'attendee',
+      showBranding: false,
+    });
+    const madeWith = () => sent.at(-1)!.includes('Made with Dapta Calendars');
+
+    await email.deliver('confirmation', row);
+    expect(madeWith()).toBe(true); // on by default
+
+    await admin().setBranding(owner, true); // paying, switched off
+    await email.deliver('confirmation', row);
+    expect(madeWith()).toBe(false);
+    expect(sent.at(-1)).not.toContain('https://signup.example.test/');
+
+    // A lapse: the row sent after the refresh lands carries the line again,
+    // and the send itself never waited on the upstream.
+    upstream.paid = false;
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS);
+    const calls = upstream.calls;
+    await email.deliver('reminder', row);
+    expect(madeWith()).toBe(false);
+    await settle();
+    expect(upstream.calls).toBe(calls + 1);
+    await email.deliver('reminder', row);
+    expect(madeWith()).toBe(true);
+  });
+
   describe('the settings routes', () => {
     let auth: FakeAuth;
     let host: HostController;
