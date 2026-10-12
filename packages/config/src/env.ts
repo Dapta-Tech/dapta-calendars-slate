@@ -159,6 +159,14 @@ export const serverEnvSchema = z.object({
    * replica gets a share (two replicas: 2 each). Default 4, for one replica.
    */
   CALENDAR_BUSY_REQUESTS_PER_SECOND: z.coerce.number().int().positive().default(4),
+  /**
+   * The longest span, in days, of one busy request to the calendar backend. A
+   * longer read is split into windows this long. Default 14, safe for a backend
+   * that lists events (a long listing can come back short on a full calendar).
+   * Raise it only when the backend answers a free/busy query, which is whole for
+   * any span; then a 60-day read is one request per connection.
+   */
+  CALENDAR_BUSY_WINDOW_DAYS: z.coerce.number().int().min(1).max(90).default(14),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
