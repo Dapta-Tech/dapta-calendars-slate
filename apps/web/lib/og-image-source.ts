@@ -18,11 +18,18 @@
  *     hostname is checked, then RESOLVED, and any loopback, private,
  *     link-local or unique-local address is refused (the same classes as the
  *     webhook guard in `@slate/db`, `webhook-url.ts`, which this app does not
- *     depend on). Redirects are refused outright: following one would land on
- *     a hostname none of these checks saw.
+ *     depend on). The check runs AT CONNECTION TIME: the request goes out
+ *     through `node:https` with a `lookup` that resolves the name, refuses the
+ *     connection unless every address is public, and hands the socket exactly
+ *     those addresses. A separate pre-check followed by `fetch` would resolve
+ *     the name twice, and a rebinding DNS answer could pass the first and point
+ *     the second inward. Redirects are never followed (`https.get` does not),
+ *     so a Location header cannot move the request to an unchecked host.
  *
  * Every failure path returns null.
  */
+import { request as httpsRequest } from 'node:https';
+import type { LookupFunction } from 'node:net';
 import { isIP } from 'node:net';
 
 /** Satori's decoders. WebP and AVIF are absent because it has none. */
@@ -78,16 +85,71 @@ export function isPublicAddress(ip: string): boolean {
   return false;
 }
 
-async function reachesOnlyPublicAddresses(url: URL, resolve: OgDnsResolver): Promise<boolean> {
-  const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host)) return isPublicAddress(host);
-  try {
-    const ips = await resolve(host);
-    return ips.length > 0 && ips.every(isPublicAddress);
-  } catch {
-    return false;
-  }
+/**
+ * A socket `lookup` that resolves the host and refuses the connection unless
+ * every address is public, then connects to exactly those addresses. Because
+ * the check and the connection share one resolution, a DNS answer that changes
+ * between them (rebinding) has nothing to change. Exported for its spec.
+ */
+export function pinnedLookup(resolve: OgDnsResolver): LookupFunction {
+  return (hostname, options, callback) => {
+    const host = hostname.replace(/^\[|\]$/g, '');
+    const answer = isIP(host) ? Promise.resolve([host]) : resolve(host);
+    answer.then(
+      (ips) => {
+        if (ips.length === 0 || !ips.every(isPublicAddress)) {
+          callback(Object.assign(new Error(`refused: ${host} is not public`), { code: 'EREFUSED' }), '', 4);
+          return;
+        }
+        const all = ips.map((address) => ({ address, family: isIP(address) }));
+        if ((options as { all?: boolean }).all) (callback as unknown as (e: null, a: typeof all) => void)(null, all);
+        else callback(null, all[0]!.address, all[0]!.family);
+      },
+      (err: NodeJS.ErrnoException) => callback(err, '', 4),
+    );
+  };
 }
+
+/** What a transport hands back: status, type, declared length, and the body. */
+export interface ImageResponse {
+  status: number;
+  contentType: string;
+  /** The body, read up to the cap; null when it ran past it. */
+  body: Buffer | null;
+}
+export type ImageTransport = (url: URL, lookup: LookupFunction) => Promise<ImageResponse>;
+
+/** One GET over `node:https`, through the pinned lookup, bounded in time and size. */
+const httpsTransport: ImageTransport = (url, lookup) =>
+  new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      url,
+      // No Referer and no cookies are ever sent; `https` follows no redirects.
+      { method: 'GET', lookup, timeout: FETCH_TIMEOUT_MS, headers: { accept: 'image/*' } },
+      (res) => {
+        const contentType = String(res.headers['content-type'] ?? '');
+        if (Number(res.headers['content-length'] ?? '0') > MAX_BYTES) {
+          res.destroy();
+          resolve({ status: res.statusCode ?? 0, contentType, body: null });
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on('data', (c: Buffer) => {
+          size += c.byteLength;
+          if (size > MAX_BYTES) {
+            res.destroy();
+            resolve({ status: res.statusCode ?? 0, contentType, body: null });
+          } else chunks.push(c);
+        });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, contentType, body: Buffer.concat(chunks) }));
+        res.on('error', reject);
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.end();
+  });
 
 /** An inline `data:` image the card can draw as is: a decodable type, bounded. */
 function inlineImage(raw: string): string | null {
@@ -103,7 +165,7 @@ function inlineImage(raw: string): string | null {
  */
 export async function cardImageDataUri(
   raw: string | null | undefined,
-  opts?: { resolve?: OgDnsResolver },
+  opts?: { resolve?: OgDnsResolver; transport?: ImageTransport },
 ): Promise<string | null> {
   const trimmed = raw?.trim();
   if (!trimmed) return null;
@@ -117,26 +179,17 @@ export async function cardImageDataUri(
   }
   if (url.protocol !== 'https:') return null;
   if (BLOCKED_HOST.some((re) => re.test(url.hostname))) return null;
-  if (!(await reachesOnlyPublicAddresses(url, opts?.resolve ?? defaultResolver))) return null;
 
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: 'error',
-      // The photo belongs to someone else's CDN; never send it the card's URL.
-      referrerPolicy: 'no-referrer',
-      cache: 'force-cache',
-    });
-    if (!res.ok) return null;
-    const type = (res.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+    const transport = opts?.transport ?? httpsTransport;
+    const res = await transport(url, pinnedLookup(opts?.resolve ?? defaultResolver));
+    // A redirect is a 3xx here, never followed: it is simply not an image.
+    if (res.status < 200 || res.status >= 300 || !res.body) return null;
+    const type = res.contentType.split(';')[0]?.trim().toLowerCase() ?? '';
     if (!DECODABLE.has(type)) return null;
-    // Content-Length is a hint, not a promise, so the body is measured too.
-    if (Number(res.headers.get('content-length') ?? '0') > MAX_BYTES) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength > MAX_BYTES) return null;
-    return `data:${type};base64,${buffer.toString('base64')}`;
+    return `data:${type};base64,${res.body.toString('base64')}`;
   } catch {
-    // Timeout, DNS, TLS, an aborted body: all the same answer.
+    // Refused address, timeout, DNS, TLS, an aborted body: all the same answer.
     return null;
   }
 }
