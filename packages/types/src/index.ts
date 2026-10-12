@@ -741,6 +741,15 @@ export const publicProfileSchema = z.object({
       title: z.string(),
       description: z.string().nullable(),
       lengthMinutes: z.number().int().positive(),
+      /**
+       * Where the meeting happens, and the zone its times are shown in by
+       * default. The event page paints its panel and its month from these
+       * before any availability is read, so the first paint waits on no
+       * calendar. Optional on the wire so an older API still parses; the page
+       * falls back to no location and the host's own zone.
+       */
+      location: eventLocationSchema.nullable().optional(),
+      timeZone: z.string().optional(),
     }),
   ),
 });
@@ -763,6 +772,8 @@ export const teamProfileSchema = z.object({
       description: z.string().nullable(),
       lengthMinutes: z.number().int().positive(),
       schedulingType: z.enum(schedulingType).nullable(),
+      /** Where the meeting happens; see `publicProfileSchema`. Optional on the wire. */
+      location: eventLocationSchema.nullable().optional(),
     }),
   ),
   /** The workspace brand kit, which a team page renders directly (a team

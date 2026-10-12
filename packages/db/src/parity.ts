@@ -30,6 +30,7 @@ import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } fro
 import { sql, type Db } from './client';
 import {
   bookingStartOutOfRange,
+  busyReadSpan,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -354,6 +355,7 @@ export interface TeamProfileView {
     description: string | null;
     lengthMinutes: number;
     schedulingType: string | null;
+    location: ReturnType<typeof parseEventLocation>;
   }>;
   /** The workspace brand kit, rendered directly by team pages; null = none. */
   brand: BrandKit | null;
@@ -386,8 +388,9 @@ export async function getTeamProfile(
     description: string | null;
     length_minutes: number;
     scheduling_type: string | null;
+    locations: unknown;
   }>(
-    sql`SELECT slug, title, description, length_minutes, scheduling_type FROM event_type
+    sql`SELECT slug, title, description, length_minutes, scheduling_type, locations FROM event_type
         WHERE account_id = ${account.id} AND team_id = ${team.id} AND hidden = 0
         ORDER BY length_minutes ASC`,
   );
@@ -406,6 +409,7 @@ export async function getTeamProfile(
       description: r.description,
       lengthMinutes: r.length_minutes,
       schedulingType: r.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
     })),
     brand: (await getAccountBranding(db, account.id))?.config ?? null,
   };
@@ -532,15 +536,17 @@ async function hostFreeSlotMs(
   // (never offer times we couldn't conflict-check) and reports why.
   let busy: Interval[] = [];
   if (!opts.rulesOnly) {
+    // Past both edges by a slot and its buffers; see `busyReadSpan`.
+    const read = busyReadSpan(fromMs, toMs, et);
     let externalBusy: Interval[];
     try {
-      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, fromMs, toMs);
+      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, read.fromMs, read.toMs);
     } catch {
       return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
     }
     busy = [
-      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs, undefined, opts.excludeBookingId)),
-      ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
+      ...(await loadBusyForHost(db, host.member_id, read.fromMs, read.toMs, undefined, opts.excludeBookingId)),
+      ...(await loadReservationBusy(db, host.member_id, read.fromMs, read.toMs, now.getTime())),
       ...externalBusy,
     ];
   }
