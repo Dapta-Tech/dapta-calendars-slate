@@ -67,11 +67,16 @@ describe.each(['en', 'es'] as const)('lifecycle emails (%s)', (locale) => {
     it.each(KINDS)('%s', async (kind) => {
       const m = await render(kind, locale, audience);
       const attachment = m.attachments?.[0];
+      // The deployment's support address is product config, not what these
+      // snapshots pin; it stays out of the public repo's fixtures.
+      const html = String(m.html).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?=["<])/g, (a) =>
+        a.endsWith('@example.com') ? a : '<support address>',
+      );
       expect({
         to: m.to,
         subject: m.subject,
         text: m.text,
-        html: m.html,
+        html,
         attachment: attachment ? { filename: attachment.filename, contentType: attachment.contentType } : null,
         ics: attachment ? String(attachment.content) : null,
       }).toMatchSnapshot();

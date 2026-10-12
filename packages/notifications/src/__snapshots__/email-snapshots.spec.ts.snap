@@ -26,7 +26,7 @@ exports[`lifecycle emails (en) > to the attendee > cancellation 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -87,7 +87,7 @@ exports[`lifecycle emails (en) > to the attendee > confirmation 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">The calendar invite (invite.ics) is attached.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -149,7 +149,7 @@ exports[`lifecycle emails (en) > to the attendee > pending 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -191,7 +191,7 @@ exports[`lifecycle emails (en) > to the attendee > reminder 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -237,7 +237,7 @@ exports[`lifecycle emails (en) > to the attendee > reschedule 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">The updated calendar invite is attached.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -303,7 +303,7 @@ exports[`lifecycle emails (en) > to the host > cancellation 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -364,7 +364,7 @@ exports[`lifecycle emails (en) > to the host > confirmation 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">The calendar invite (invite.ics) is attached.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -424,7 +424,7 @@ exports[`lifecycle emails (en) > to the host > pending 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -466,7 +466,7 @@ exports[`lifecycle emails (en) > to the host > reminder 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -510,7 +510,7 @@ exports[`lifecycle emails (en) > to the host > reschedule 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">The updated calendar invite is attached.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Automated message from Dapta Calendars. Need help? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Automated message from Dapta Calendars. Need help? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -574,7 +574,7 @@ exports[`lifecycle emails (es) > to the attendee > cancellation 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -635,7 +635,7 @@ exports[`lifecycle emails (es) > to the attendee > confirmation 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">La invitación de calendario (invite.ics) va adjunta.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -697,7 +697,7 @@ exports[`lifecycle emails (es) > to the attendee > pending 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -739,7 +739,7 @@ exports[`lifecycle emails (es) > to the attendee > reminder 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -785,7 +785,7 @@ exports[`lifecycle emails (es) > to the attendee > reschedule 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">La invitación actualizada va adjunta.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -851,7 +851,7 @@ exports[`lifecycle emails (es) > to the host > cancellation 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -912,7 +912,7 @@ exports[`lifecycle emails (es) > to the host > confirmation 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">La invitación de calendario (invite.ics) va adjunta.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -972,7 +972,7 @@ exports[`lifecycle emails (es) > to the host > pending 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -1014,7 +1014,7 @@ exports[`lifecycle emails (es) > to the host > reminder 1`] = `
       
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
@@ -1058,7 +1058,7 @@ exports[`lifecycle emails (es) > to the host > reschedule 1`] = `
       <div style="color:#6a6a6c;font-size:12px;line-height:1.5;margin-top:16px;">La invitación actualizada va adjunta.</div>
     </td></tr>
     <tr><td style="padding:18px 6px 4px;color:#9a9a9c;font-size:12px;line-height:1.5;">
-      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:support@daptatech.com" style="color:#1a1a1c;">support@daptatech.com</a>
+      Mensaje automático de Dapta Calendars. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#1a1a1c;"><support address></a>
     </td></tr>
   </table>
 </div>",
