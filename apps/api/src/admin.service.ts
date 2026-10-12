@@ -46,6 +46,10 @@ import {
   revokeApiKey,
   setConnectionPrimaryEmail,
   updateBranding,
+  getBrandBackupState,
+  revertBranding,
+  snapshotBranding,
+  type BrandApplySource,
   updateHandle,
   updateMemberSettings,
   updateSchedule,
@@ -192,8 +196,27 @@ export class AdminService {
     return checkHandleAvailable(this.db, p.accountId, handle, p.memberId);
   }
 
-  updateBranding(p: HostPrincipal, patch: Parameters<typeof updateBranding>[2]) {
+  /**
+   * Save the studio. When the save applies a whole look (`backupAs`), what is
+   * stored now is kept first, so the host can take the look back once.
+   */
+  async updateBranding(
+    p: HostPrincipal,
+    patch: Parameters<typeof updateBranding>[2],
+    backupAs?: BrandApplySource,
+  ) {
+    if (backupAs) await snapshotBranding(this.db, p.memberId, backupAs);
     return updateBranding(this.db, p.memberId, patch);
+  }
+
+  /** Whether the host's page carries an applied look they can revert, and since when. */
+  brandBackupState(p: HostPrincipal) {
+    return getBrandBackupState(this.db, p.memberId);
+  }
+
+  /** Put the host's look back as it was before the last apply, once. */
+  revertBranding(p: HostPrincipal) {
+    return revertBranding(this.db, p.memberId);
   }
 
   updateSettings(p: HostPrincipal, patch: Parameters<typeof updateMemberSettings>[2]) {

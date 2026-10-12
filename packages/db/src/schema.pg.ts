@@ -82,6 +82,9 @@ export const member = pgTable('member', {
   brandColor: text('brand_color'),
   layout: text('layout'),
   bookingPageStyle: jsonb('booking_page_style'),
+  // The look before the last apply (0022): one step of undo, never rendered.
+  brandBackup: jsonb('brand_backup'),
+  brandAppliedAt: bigint('brand_applied_at', { mode: 'number' }),
   timeZone: text('time_zone').notNull().default('UTC'),
   weekStart: text('week_start').notNull().default('sunday'),
   locale: text('locale'),

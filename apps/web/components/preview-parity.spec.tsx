@@ -15,7 +15,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { THEME_PRESETS } from '@slate/shared';
+import { NEW_HOST_ACCENT, NEW_HOST_THEME, THEME_PRESETS } from '@slate/shared';
 
 
 vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
@@ -121,6 +121,39 @@ describe('the studio preview renders what the public page renders', () => {
       });
     }
   }
+
+  // "Use the new look" sets the accent and all ten axes at once. The preview
+  // the host decides on has to be the page they get.
+  it('the new look: ink on paper, the minimal set', () => {
+    const style = { ...THEME_PRESETS.minimal, theme: NEW_HOST_THEME } as Record<string, string>;
+    const pub = parse(
+      renderToStaticMarkup(
+        <BrandedShell brandColor={NEW_HOST_ACCENT} style={style}>
+          <main>
+            <BookingFlow {...previewFlowProps(SAMPLE)} />
+          </main>
+        </BrandedShell>,
+      ),
+    );
+    const shell = pub.querySelector('.branded-surface')!;
+    for (const device of ['mobile', 'desktop'] as const) {
+      const pre = parse(
+        renderToStaticMarkup(
+          <PreviewFrame accent={NEW_HOST_ACCENT} axes={style as never} device={device} wide>
+            <BookingPreview {...SAMPLE} device={device} />
+          </PreviewFrame>,
+        ),
+      );
+      const frame = pre.querySelector('[data-theme]')!;
+      expect(frame.getAttribute('data-theme')).toBe('light');
+      expect(frame.getAttribute('data-theme')).toBe(shell.getAttribute('data-theme'));
+      expect(vars(frame)).toEqual(vars(shell));
+      expect(brandingClasses(pre.querySelector('.branded-surface')!)).toEqual(brandingClasses(shell));
+      expect(page(pre)).toBe(page(pub));
+      // The zone control is part of the page both render, the same control.
+      expect(pre.querySelector('.bp-flow #tz')!.outerHTML).toBe(pub.querySelector('.bp-flow #tz')!.outerHTML);
+    }
+  });
 
   it('is inert: the host cannot click, focus or hear the picture of their page', () => {
     const pre = renderPreview(BASE as Record<string, string>, 'mobile');

@@ -46,6 +46,8 @@ export interface StudioPayload {
   coverUrl?: string | null;
   brandColor?: string | null;
   style?: Record<string, unknown>;
+  /** This save applies the new look: keep what is stored now as a backup first. */
+  backupAs?: 'new-look';
 }
 
 /**
@@ -85,11 +87,24 @@ export async function saveStudioAction(payload: StudioPayload): Promise<SaveResu
       coverUrl: payload.coverUrl,
       brandColor: payload.brandColor,
       style: payload.style,
+      ...(payload.backupAs ? { backupAs: payload.backupAs } : {}),
     });
     revalidatePath('/admin/settings/booking-page');
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     return { ok: false, field: 'branding', message: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/** Put the host's look back as it was before the last apply ("Revert"). */
+export async function revertLookAction(): Promise<{ ok: boolean }> {
+  try {
+    await adminApi.revertBranding();
+    revalidatePath('/admin/settings/booking-page');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false };
   }
 }

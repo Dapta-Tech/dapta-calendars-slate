@@ -338,6 +338,10 @@ export const adminApi = {
   // Branding
   profile: (code: string, handle: string) => req<Profile>('GET', `/v1/profiles/${code}/${handle}`),
   updateBranding: (b: unknown) => req('PATCH', '/v1/booking-page', b),
+  /** Whether an applied look can be reverted, what applied it and when. */
+  bookingPageState: () =>
+    req<{ backup: { source: 'new-look' | 'kit'; appliedAt: number } | null }>('GET', '/v1/booking-page'),
+  revertBranding: () => req<{ ok: boolean }>('POST', '/v1/booking-page/revert'),
 };
 
 export interface EventType {

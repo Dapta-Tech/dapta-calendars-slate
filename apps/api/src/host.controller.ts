@@ -19,7 +19,7 @@ import {
 import {
   apiScope,
   attributionClaimSchema,
-  brandingSchema,
+  brandingWriteSchema,
   integrationConnectSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
@@ -255,18 +255,35 @@ export class HostController {
     return { ok: true };
   }
 
+  /** The studio's look state: whether an applied look can be reverted. */
+  @Get('booking-page')
+  async bookingPageState(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return { backup: await this.admin.brandBackupState(p) };
+  }
+
   @Patch('booking-page')
   async updateBranding(@Req() req: ReqLike, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     try {
-      const patch = brandingSchema.parse(body);
-      await this.admin.updateBranding(p, patch);
+      const { backupAs, ...patch } = brandingWriteSchema.parse(body);
+      await this.admin.updateBranding(p, patch, backupAs);
       return { ok: true };
     } catch (err) {
       if (err instanceof ZodError)
         throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
       throw err;
     }
+  }
+
+  /** Undo the last applied look on the host's own page, once. */
+  @Post('booking-page/revert')
+  @HttpCode(200)
+  async revertBranding(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    const reverted = await this.admin.revertBranding(p);
+    if (!reverted) throw new NotFoundException({ error: 'NOTHING_TO_REVERT', message: 'There is no applied look to revert.' });
+    return { ok: true };
   }
 
   // Host bookings (R29 on-behalf; singular attendee shape).
