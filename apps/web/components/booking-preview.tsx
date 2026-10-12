@@ -231,7 +231,10 @@ export function ProfilePreview({
   coverUrl,
   events,
   logoUrl = null,
+  accountCode = null,
 }: {
+  /** The account's public code, for the call to action's link (as the profile). */
+  accountCode?: string | null;
   locale: string;
   displayName: string;
   accountName: string | null;
@@ -242,7 +245,8 @@ export function ProfilePreview({
   events: Array<Omit<ProfileEvent, 'description'> & { description?: string | null }>;
 }) {
   const m = getMessages(locale);
-  const cta = signupHref('profile');
+  // The same link the public profile carries, campaign tags included.
+  const cta = signupHref('profile', accountCode);
   return (
     <div aria-hidden="true" inert>
       <ProfileView

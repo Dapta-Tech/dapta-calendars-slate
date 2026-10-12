@@ -145,7 +145,7 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com']);
     });
 
-    it('on a team booking with a co-host, on every host destination, organizer before co-host', async () => {
+    it("on a team booking: first on the organizer's event, and never on a co-host's copy", async () => {
       const provider = new RecordingCalendarProvider();
       const effects = new CalendarEffects(provider, db);
       const uid = await bookFirstSlot();
@@ -163,10 +163,17 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
       );
       await (effects as unknown as Awaitable).writeEvent(uid);
       expect(provider.created.map((c) => c.connectionRef)).toEqual([CAL_REF, 'cal-dest-2']);
-      for (const body of provider.created) {
-        expect(body.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
-      }
-      // The room is still minted on the organizer's destination only.
+      // The organizer's own event: organizer first, then the guest, then the co-host.
+      expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
+      // The co-host's copy: the list it always had. Listing the organizer there
+      // would invite them to a second copy of an event they already own.
+      expect(provider.created[1]!.attendeeEmails).toEqual(['sam@example.com', 'jordan@example.com']);
+      // The reschedule keeps the same split.
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      const byRef = Object.fromEntries(provider.updated.map((u) => [u.connectionRef, u.attendeeEmails]));
+      expect(byRef[CAL_REF]).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
+      expect(byRef['cal-dest-2']).toEqual(['sam@example.com', 'jordan@example.com']);
+      // The room is still requested on the organizer's destination only.
       expect(provider.created.map((c) => !!c.requestConferenceLink)).toEqual([false, false]);
     });
   });

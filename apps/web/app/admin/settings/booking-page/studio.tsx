@@ -878,6 +878,7 @@ export function Studio(init: StudioInit) {
           <PreviewFrame accent={accent} axes={axes} device={device} wide={surface === 'booking'}>
               {surface === 'profile' ? (
                 <ProfilePreview
+                  accountCode={init.accountCode || null}
                   locale={init.locale}
                   displayName={displayName}
                   accountName={init.accountName ?? null}

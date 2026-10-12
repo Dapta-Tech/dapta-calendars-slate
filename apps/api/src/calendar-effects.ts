@@ -7,6 +7,7 @@ import {
   enqueueOutbox,
   fillBookingReference,
   loadBookingForCalendarWrite,
+  attendeesFor,
   loadBookingReferences,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
@@ -144,7 +145,7 @@ export class CalendarEffects {
         title: ctx.title,
         startUtc: ctx.startUtc,
         endUtc: ctx.endUtc,
-        attendeeEmails: ctx.attendeeEmails,
+        attendeeEmails: attendeesFor(ctx, ref.destination ?? ctx.destinationRefs[0]),
         organizerEmail: ctx.organizerEmail,
         requestConferenceLink: wantsLink && isOrganizer && !storedUrl,
         timeZone: ctx.attendeeTimeZone,
@@ -207,7 +208,7 @@ export class CalendarEffects {
           title: ctx.title,
           startUtc: ctx.startUtc,
           endUtc: ctx.endUtc,
-          attendeeEmails: ctx.attendeeEmails,
+          attendeeEmails: attendeesFor(ctx, connectionRef),
           organizerEmail: ctx.organizerEmail,
           // Co-hosts get the organizer's room as text; only the organizer's
           // destination is allowed to mint one.
