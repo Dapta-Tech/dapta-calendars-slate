@@ -176,21 +176,78 @@ export async function reserveSlot(
   const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
 
-  // Per-page hold cap (rate limit).
-  const active = await db.get<{ n: number }>(
-    sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
-  );
-  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return { ok: false, reason: 'RATE_LIMITED' };
-
   const uid = randomUUID();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
-  await db.run(
-    sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
-          slot_end_ms, uid, release_at_ms, is_seat, created_at)
-        VALUES (${randomUUID()}, ${account.id}, ${eventType.id}, ${member.id}, ${args.startMs},
-          ${endMs}, ${uid}, ${releaseAtMs}, 0, ${now})`,
-  );
+  const placed = await insertHoldGuarded(db, {
+    accountId: account.id,
+    eventTypeId: eventType.id,
+    memberId: member.id,
+    startMs: args.startMs,
+    endMs,
+    uid,
+    releaseAtMs,
+    now,
+  });
+  if (placed !== 'ok') return { ok: false, reason: placed };
   return { ok: true, uid, releaseAtMs };
+}
+
+/**
+ * The hold write, serialised per host. The availability read above is a
+ * snapshot: twenty visitors who pick the same time at once all see it free, and
+ * a plain check-then-insert let every one of them hold it (the QA battery saw 18
+ * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-page cap be
+ * overrun the same way. Each loser then filled in the form and was refused only
+ * at the last step.
+ *
+ * So the overlap and the cap are checked again INSIDE a transaction that holds
+ * the host's row: SQLite's synchronous transaction runs alone, and Postgres
+ * takes `SELECT ... FOR UPDATE` on the member, the same lock the brand backup
+ * write uses. The overlap test is the one `loadReservationBusy` applies, so a
+ * time this refuses is a time the next availability read would not offer.
+ */
+async function insertHoldGuarded(
+  db: Db,
+  h: {
+    accountId: string;
+    eventTypeId: string;
+    memberId: string;
+    startMs: number;
+    endMs: number;
+    uid: string;
+    releaseAtMs: number;
+    now: number;
+  },
+): Promise<'ok' | 'INVALID_SLOT' | 'RATE_LIMITED'> {
+  const overlap = sql`SELECT 1 AS hit FROM slot_reservation
+      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}
+        AND slot_start_ms < ${h.endMs} AND slot_end_ms > ${h.startMs} LIMIT 1`;
+  const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
+      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}`;
+  const insert = sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
+        slot_end_ms, uid, release_at_ms, is_seat, created_at)
+      VALUES (${randomUUID()}, ${h.accountId}, ${h.eventTypeId}, ${h.memberId}, ${h.startMs},
+        ${h.endMs}, ${h.uid}, ${h.releaseAtMs}, 0, ${h.now})`;
+
+  if (db.dialect === 'sqlite') {
+    const native = db.sqlite!;
+    return native.txn(() => {
+      if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
+      const n = native.drizzle.get<{ n: number }>(active);
+      if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
+      native.drizzle.run(insert);
+      return 'ok' as const;
+    });
+  }
+  return db.pg!.drizzle.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM member WHERE id = ${h.memberId} FOR UPDATE`);
+    const hit = (await tx.execute(overlap)) as unknown as unknown[];
+    if (hit.length > 0) return 'INVALID_SLOT' as const;
+    const rows = (await tx.execute(active)) as unknown as Array<{ n: number | string }>;
+    if (Number(rows[0]?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
+    await tx.execute(insert);
+    return 'ok' as const;
+  });
 }
 
 // --- Identity / multi-tenant ----------------------------------------------
