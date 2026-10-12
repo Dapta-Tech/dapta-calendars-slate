@@ -219,6 +219,14 @@ export const serverEnvSchema = z.object({
   // and can be rotated at will. 1 = one load balancer (the common deploy);
   // 2 = a CDN in front of that load balancer; 0 = no proxy, use the socket.
   RATE_LIMIT_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+  // A secret shared with the web app (both read INTERNAL_API_SECRET). The web
+  // calls the API server side on a visitor's behalf, so without it every
+  // visitor of every booking page arrives from the web server's address and
+  // shares one bucket. With it set on both, the web sends the visitor's address
+  // beside the secret and the limiter keys on that address. Unset = off. A
+  // forwarded address without the matching secret is ignored, so nobody else
+  // who can reach the API can mint fresh buckets.
+  INTERNAL_API_SECRET: z.string().min(32).optional(),
 
   // One log line per request (method, route template, status, duration, request
   // id, error code, account). JSON when NODE_ENV=production, a human line

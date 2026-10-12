@@ -35,7 +35,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
 import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { classifyBookingFailure } from '@/lib/booking-failure';
-import { type BookResult } from '@/lib/api';
+import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
