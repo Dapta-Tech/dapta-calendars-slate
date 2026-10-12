@@ -690,6 +690,42 @@ export function BookingSummary({
   );
 }
 
+// --- The free-calendar call to action ----------------------------------------
+
+/**
+ * What this page runs on, and a real way to get one: a quiet line, then one
+ * button. Under a confirmation and at the foot of a profile, below the content
+ * it must not compete with, never inside the booking's own card. The button is
+ * the page's own primary (`bp-btn`, so the host's accent and the `buttons`
+ * axis), sized to its words rather than to the column, the restraint of the
+ * sibling product's done screen.
+ *
+ * Rendered only when the deployment configures a signup destination
+ * (`signupHref`); the callers pass nothing otherwise and the page is exactly
+ * what it was.
+ */
+export function GrowthCta({
+  m,
+  href,
+  quiet = false,
+}: {
+  m: BookingMessages;
+  href: string;
+  /** An outline button, for a step that already has its primary action (the
+   *  confirmation's "Add to calendar"): one primary per step (R30). */
+  quiet?: boolean;
+}) {
+  return (
+    <aside aria-label={m.growth.ctaButton} className="bp-growth">
+      <p className="bp-muted bp-growth-line">{m.growth.ctaLine}</p>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={`${quiet ? 'bp-btn-outline' : 'bp-btn'} bp-growth-btn`}>
+        {m.growth.ctaButton}
+        <span className="sr-only"> {m.growth.ctaOpensNewTab}</span>
+      </a>
+    </aside>
+  );
+}
+
 // --- The confirmation -----------------------------------------------------------
 
 /**
@@ -724,10 +760,11 @@ export function BookingConfirmation({
   /** "A confirmation was sent to …", already localised; null drops the line. */
   sentTo: string | null;
   actions: ReactNode;
+  /** Rendered below the card (the free-calendar call to action). */
   footer?: ReactNode;
   titleRef?: React.Ref<HTMLHeadingElement>;
 }) {
-  return (
+  const card = (
     <section className="bp-card bp-confirmation" aria-labelledby="bp-confirmation-title">
       <div aria-hidden className="bp-confirmation-mark" data-pending={pending ? 'true' : undefined}>
         {pending ? <ClockIcon /> : <CheckIcon />}
@@ -776,8 +813,18 @@ export function BookingConfirmation({
       </dl>
 
       <div className="bp-confirmation-actions">{actions}</div>
-      {footer}
     </section>
+  );
+  // Below the card, not in it: the booking's card says what happened and what
+  // to do with it; what this page runs on comes after. A fragment, so a page
+  // with no footer renders exactly as it did.
+  return footer ? (
+    <>
+      {card}
+      {footer}
+    </>
+  ) : (
+    card
   );
 }
 

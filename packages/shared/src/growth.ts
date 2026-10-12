@@ -11,7 +11,7 @@
  */
 
 /** UTM values are fixed product-wide; only the medium varies by surface. */
-export type SignupMedium = 'badge' | 'confirmation';
+export type SignupMedium = 'badge' | 'confirmation' | 'profile';
 
 export const UTM_SOURCE = 'dapta-calendars';
 export const UTM_CAMPAIGN = 'made-with-dapta';

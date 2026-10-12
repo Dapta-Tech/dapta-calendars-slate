@@ -137,7 +137,8 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
     const ctx = await loadBookingForCalendarWrite(db, booked.booking.uid);
     expect(ctx).not.toBeNull();
     expect(ctx!.destinationRefs).toEqual([CAL_REF]);
-    expect(ctx!.attendeeEmails).toEqual(['sam@example.com']);
+    // Organizer first (the event shows its host), then the guest.
+    expect(ctx!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
     expect(ctx!.organizerEmail).toBe('alex@example.com');
 
     // Persist a reference, read it back, then clear it (the cancel path).

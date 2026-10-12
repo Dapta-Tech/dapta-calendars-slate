@@ -21,6 +21,7 @@ import {
   ChoosingFrame,
   ChosenTime,
   EventPanel,
+  GrowthCta,
   MonthCalendar,
   TimesColumn,
   type BookingStep,
@@ -392,7 +393,6 @@ export function BookingFlow({
   if (result?.ok && result.booking) {
     const b = result.booking;
     const isPending = b.status === 'pending';
-    const g = getMessages(locale).growth;
     const ctaHref = signupHref('confirmation', accountCode);
     /**
      * This branch is shared by the personal and the team path, and it must
@@ -469,16 +469,10 @@ export function BookingFlow({
           </>
         }
         footer={
-          // Growth loop (R11): a quiet secondary line, a link and never a second
-          // primary CTA (R30), gated by the same open-core badge switch.
-          ctaHref ? (
-            <p className="bp-muted bp-small bp-confirmation-cta">
-              {g.ctaQuestion}{' '}
-              <a href={ctaHref} target="_blank" rel="noopener noreferrer" className="bp-link">
-                {g.ctaAction}
-              </a>
-            </p>
-          ) : null
+          // Growth loop (R11), below the card: what this page runs on and a way
+          // to get one, as an OUTLINE button, since "Add to calendar" is this
+          // step's one primary (R30). Gated by the open-core badge switch.
+          ctaHref ? <GrowthCta m={messages} href={ctaHref} quiet /> : null
         }
       />,
     );

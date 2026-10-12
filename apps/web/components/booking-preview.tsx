@@ -13,6 +13,8 @@ import { bookingCanvasOf } from '@/lib/booking-canvas';
 import type { BookingField } from '@slate/types';
 import { BookingFlow } from '@/components/booking-flow';
 import { ProfileView, type ProfileEvent } from '@/components/profile-view';
+import { GrowthCta } from '@/components/booking-page-parts';
+import { signupHref } from '@/lib/growth';
 
 /**
  * The studio's preview of the event page: the REAL island, not a drawing of it.
@@ -229,7 +231,10 @@ export function ProfilePreview({
   coverUrl,
   events,
   logoUrl = null,
+  accountCode = null,
 }: {
+  /** The account's public code, for the call to action's link (as the profile). */
+  accountCode?: string | null;
   locale: string;
   displayName: string;
   accountName: string | null;
@@ -240,6 +245,8 @@ export function ProfilePreview({
   events: Array<Omit<ProfileEvent, 'description'> & { description?: string | null }>;
 }) {
   const m = getMessages(locale);
+  // The same link the public profile carries, campaign tags included.
+  const cta = signupHref('profile', accountCode);
   return (
     <div aria-hidden="true" inert>
       <ProfileView
@@ -253,6 +260,9 @@ export function ProfilePreview({
         hrefFor={() => '#'}
         emptyText={m.landing.noEvents}
         logoUrl={logoUrl}
+        // The public profile ends with this when the deployment has a signup
+        // destination; the picture of it does too.
+        footer={cta ? <GrowthCta m={m} href={cta} /> : null}
       />
     </div>
   );

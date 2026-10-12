@@ -191,3 +191,57 @@ describe('the manage page renders byte for byte', () => {
     await expect(html).toMatchFileSnapshot(`${SNAP}/manage-cancelled.html`);
   });
 });
+
+/** A host's verdict: a link with one event type opens the event, not a list of one. */
+describe('the handle route', () => {
+  const profilePage = (query: Record<string, string> = {}) =>
+    ProfilePage({
+      params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen' }),
+      searchParams: Promise.resolve(query),
+    });
+  const oneEvent = (style: Record<string, unknown>) => {
+    const p = profile({ ...BASE_STYLE, ...style });
+    return { ...p, eventTypes: p.eventTypes.slice(0, 1) };
+  };
+
+  it('goes straight to the only event, carrying the query', async () => {
+    api.getProfile.mockResolvedValue(oneEvent({ landingEnabled: true }));
+    await expect(profilePage()).rejects.toThrow('redirect /northwind/riley-chen/design-review');
+    await expect(profilePage({ embed: '1' })).rejects.toThrow('redirect /northwind/riley-chen/design-review?embed=1');
+  });
+
+  it('keeps the profile with ?landing=1 or "Always show my profile"', async () => {
+    api.getProfile.mockResolvedValue(oneEvent({}));
+    expect(await render(profilePage({ landing: '1' }))).toContain('bp-profile');
+    api.getProfile.mockResolvedValue(oneEvent({ showProfile: true }));
+    expect(await render(profilePage())).toContain('bp-profile');
+  });
+
+  it('keeps the profile with two event types (the pins above)', async () => {
+    api.getProfile.mockResolvedValue(profile(BASE_STYLE));
+    expect(await render(profilePage())).toContain('bp-event-list');
+  });
+});
+
+/** With no signup destination the pages carry no call to action at all. */
+describe('without a signup destination', () => {
+  it('renders no free-calendar block on the profile, and no cover band either', async () => {
+    const saved = process.env.NEXT_PUBLIC_SIGNUP_URL;
+    delete process.env.NEXT_PUBLIC_SIGNUP_URL;
+    try {
+      api.getProfile.mockResolvedValue(profile(BASE_STYLE));
+      const html = await render(
+        ProfilePage({
+          params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen' }),
+          searchParams: Promise.resolve({}),
+        }),
+      );
+      expect(html).not.toContain('bp-growth');
+      expect(html).not.toContain('bp-embed-footer');
+      expect(html).not.toContain('bp-cover');
+    } finally {
+      process.env.NEXT_PUBLIC_SIGNUP_URL = saved;
+    }
+  });
+});
+

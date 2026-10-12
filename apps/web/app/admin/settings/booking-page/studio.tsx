@@ -27,6 +27,7 @@ import { cn } from '@/lib/cn';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
+import { describeLanding, landingTarget } from '@/lib/landing';
 import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
@@ -125,6 +126,8 @@ export interface StudioInit {
   accent: string;
   axes: Axes;
   landingEnabled: boolean;
+  /** "Always show my profile", the opt-out from one event opening directly. */
+  showProfile?: boolean;
   defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
   /** The account's name, the quiet line above the host's on their profile. */
@@ -165,6 +168,7 @@ export function Studio(init: StudioInit) {
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
   const [landingEnabled, setLandingEnabled] = useState(init.landingEnabled);
+  const [showProfile, setShowProfile] = useState(init.showProfile ?? false);
   const [defaultEventSlug, setDefaultEventSlug] = useState(init.defaultEventSlug ?? '');
   // Slug order: saved order first, then any events not yet in it.
   const [eventOrder, setEventOrder] = useState<string[]>(() => {
@@ -217,13 +221,17 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder }),
-    [displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder],
+    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder }),
+    [displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
 
   const activeTheme = useMemo(() => matchTheme(axes), [axes]);
+  const linkTarget = landingTarget({
+    style: { landingEnabled, defaultEventSlug: defaultEventSlug || null, ...(showProfile ? { showProfile: true } : {}) },
+    eventSlugs: init.eventTypes.map((e) => e.slug),
+  });
   // The canvas the INVITEE will see, read through the same resolver the public
   // shell uses. Never the admin's own `data-theme`: a host previewing their page
   // is looking at a stranger's screen, not their own (ADR 0004).
@@ -311,6 +319,7 @@ export function Studio(init: StudioInit) {
     setAccent(init.accent);
     setAxes(init.axes);
     setLandingEnabled(init.landingEnabled);
+    setShowProfile(init.showProfile ?? false);
     setDefaultEventSlug(init.defaultEventSlug ?? '');
     setAdoptingNewLook(false);
     setEventOrder(() => {
@@ -348,6 +357,8 @@ export function Studio(init: StudioInit) {
           // The kit's logo rides through a save untouched; the studio does not
           // edit it (the brand kit does), and dropping it here would remove it.
           ...(init.logoUrl ? { logoUrl: init.logoUrl } : {}),
+          // Written only when ticked: absent is the automatic behaviour.
+          ...(showProfile ? { showProfile: true } : {}),
         },
         // Applying the new look keeps what is stored now as a one-step backup,
         // so it can be reverted. Only when the look on screen still IS the new
@@ -784,6 +795,19 @@ export function Studio(init: StudioInit) {
                 />
                 {m.showLandingPage}
               </label>
+              {/* What the link does, from the same decision the public route
+                  makes (lib/landing.ts), so the host is told what visitors get. */}
+              {landingEnabled && init.eventTypes.length === 1 ? (
+                <label className="flex min-h-control cursor-pointer items-center gap-inline text-sm">
+                  <Checkbox checked={showProfile} onChange={(e) => setShowProfile(e.target.checked)} />
+                  {m.alwaysShowProfile}
+                </label>
+              ) : null}
+              {landingEnabled ? (
+                <p data-testid="studio-link-opens" className="text-xs text-muted-foreground">
+                  {describeLanding(linkTarget, init.eventTypes, m)}
+                </p>
+              ) : null}
               {!landingEnabled ? (
                 // A <div>, not a <label>: the picker's trigger is a <button>.
                 <div className="flex flex-col gap-tight text-sm">
@@ -854,6 +878,7 @@ export function Studio(init: StudioInit) {
           <PreviewFrame accent={accent} axes={axes} device={device} wide={surface === 'booking'}>
               {surface === 'profile' ? (
                 <ProfilePreview
+                  accountCode={init.accountCode || null}
                   locale={init.locale}
                   displayName={displayName}
                   accountName={init.accountName ?? null}

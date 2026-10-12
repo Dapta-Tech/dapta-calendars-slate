@@ -16,6 +16,7 @@ import { isLocationKind, type Interval, type LocationKind } from '@slate/engine'
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { parseJsonColumn } from './repository';
+import { normalizeAttendeeEmail } from './duplicate-guard';
 
 /**
  * Connection refs used for CONFLICT checking (availability). Only calendars the
@@ -144,7 +145,21 @@ export interface CalendarWriteContext {
    */
   locationKind: LocationKind | null;
   attendeeTimeZone: string | null;
+  /**
+   * The guest list for the ORGANIZER's own event: the organizer first, then the
+   * invitee(s), then any co-hosts, each address once. Use `attendeesFor(ctx,
+   * ref)`, which picks this or `copyAttendeeEmails` by who owns the calendar.
+   */
   attendeeEmails: string[];
+  /**
+   * The guest list for a CO-HOST's copy of the event: the invitee(s) and the
+   * co-hosts, without the organizer. Listing the organizer on a co-host's copy
+   * would invite them to a second copy of an event they already own.
+   */
+  copyAttendeeEmails: string[];
+  /** The organizer's own calendars: today's destination and any other they
+   *  have connected, so an event stored on a former destination stays theirs. */
+  organizerDestinationRefs: string[];
   organizerEmail: string | null;
   /** The organizer's locale — the co-hosts' event body is written in it. */
   organizerLocale: string | null;
@@ -161,6 +176,33 @@ export interface CalendarWriteContext {
   destinationRefs: string[];
   /** Optional provider calendar beneath each connection, selected by the v2 pilot. */
   destinationCalendarIds: Record<string, string>;
+}
+
+/** Each address once, in first-seen order, compared as the duplicate guard does. */
+function uniqueEmails(emails: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const email of emails) {
+    const key = normalizeAttendeeEmail(email);
+    if (!email || !key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
+}
+
+/**
+ * The guest list for the event written to `connectionRef`: the organizer-first
+ * list on the organizer's own calendars, the co-host copy's list everywhere
+ * else.
+ */
+export function attendeesFor(
+  ctx: Pick<CalendarWriteContext, 'attendeeEmails' | 'copyAttendeeEmails' | 'organizerDestinationRefs'>,
+  connectionRef: string | null | undefined,
+): string[] {
+  return connectionRef && ctx.organizerDestinationRefs.includes(connectionRef)
+    ? ctx.attendeeEmails
+    : ctx.copyAttendeeEmails;
 }
 
 /**
@@ -226,6 +268,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   // be a silent wrong-calendar write.
   const isSingleHost = hostMemberIds.length <= 1;
   const destinationSet = new Set<string>();
+  const organizerRefs = new Set<string>();
   const destinationCalendarIds: Record<string, string> = {};
   const metadata = parseJsonColumn<{
     _destinationCalendar?: { connectionRef?: string; externalId?: string };
@@ -233,20 +276,45 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
   const requestedDestination = metadata._destinationCalendar;
   if (isSingleHost && requestedDestination?.connectionRef && requestedDestination.externalId) {
     destinationSet.add(requestedDestination.connectionRef);
+    organizerRefs.add(requestedDestination.connectionRef);
     destinationCalendarIds[requestedDestination.connectionRef] = requestedDestination.externalId;
   } else {
     for (const memberId of hostMemberIds) {
       const scopedEventTypeId = isSingleHost ? b.event_type_id : undefined;
       for (const ref of await loadDestinationConnectionRefs(db, memberId, scopedEventTypeId)) {
         destinationSet.add(ref);
+        if (memberId === b.host_member_id) organizerRefs.add(ref);
       }
     }
   }
 
-  // On multi-host bookings the co-hosts join the invite as attendees (the
-  // organizer is the booking's primary host, so exclude their email).
-  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e && e !== b.host_email);
-  const attendeeEmails = [...new Set([...attendees.map((a) => a.email), ...coHostEmails])].filter(Boolean);
+  // Which stored events are the organizer's own is a matter of whose calendar
+  // holds them, not of today's destination: a host who switched destination
+  // still owns the event written to the old one, and its reschedule must keep
+  // them on it. So every calendar the organizer has connected counts, while
+  // `destinationRefs` stays the calendars written to now.
+  if (b.host_member_id) {
+    const owned = await db.all<{ external_id: string }>(
+      sql`SELECT external_id FROM connected_calendar WHERE member_id = ${b.host_member_id}`,
+    );
+    for (const row of owned) organizerRefs.add(row.external_id);
+  }
+
+  // Two guest lists, each address once (compared the way the duplicate guard
+  // compares them). On the ORGANIZER's own event: the organizer first, then the
+  // invitee(s), then any co-hosts, so the event shows its host (Google lists
+  // the organizer among the guests only when the address is also an attendee).
+  // That calendar is the organizer's own, and neither Google nor Microsoft
+  // invites a calendar's own owner, so this adds no invite. On a CO-HOST's copy
+  // the organizer is left off, or they would be invited to a second copy of an
+  // event they already own; that copy keeps the list it always had.
+  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e);
+  const guestEmails = attendees.map((a) => a.email);
+  const organizerKey = normalizeAttendeeEmail(b.host_email);
+  const attendeeEmails = uniqueEmails([b.host_email, ...guestEmails, ...coHostEmails]);
+  const copyAttendeeEmails = uniqueEmails([...guestEmails, ...coHostEmails]).filter(
+    (e) => normalizeAttendeeEmail(e) !== organizerKey,
+  );
 
   return {
     bookingId: b.id,
@@ -258,6 +326,8 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     locationKind: isLocationKind(b.location_kind) ? b.location_kind : null,
     attendeeTimeZone: b.attendee_time_zone,
     attendeeEmails,
+    copyAttendeeEmails,
+    organizerDestinationRefs: [...organizerRefs],
     organizerEmail: b.host_email,
     organizerLocale: b.host_locale,
     destinationRefs: [...destinationSet],

@@ -226,6 +226,7 @@ describe('the studio profile preview renders what the public profile renders', (
  */
 describe('the brand kit preview renders what a page wearing the kit renders', () => {
   const LOGO = 'https://cdn.example.test/northwind.svg';
+  const COVER = 'https://cdn.example.test/cover.png';
   const KITS = {
     empty: {},
     'accent only': { accent: '#2f6fed' },
@@ -274,13 +275,26 @@ describe('the brand kit preview renders what a page wearing the kit renders', ()
     expect(withLogo).toContain(`src="${LOGO}"`);
 
     const m = getMessages('en');
-    const profile = (logoUrl: string | null) =>
+    const profile = (logoUrl: string | null, coverUrl: string | null = null) =>
       renderToStaticMarkup(
-        <ProfileView m={m} name="Riley Chen" events={[]} hrefFor={() => '#'} emptyText="-" logoUrl={logoUrl} />,
+        <ProfileView
+          m={m}
+          name="Riley Chen"
+          events={[]}
+          hrefFor={() => '#'}
+          emptyText="-"
+          logoUrl={logoUrl}
+          coverUrl={coverUrl}
+        />,
       );
     expect(profile(null)).toBe(
       renderToStaticMarkup(<ProfileView m={m} name="Riley Chen" events={[]} hrefFor={() => '#'} emptyText="-" />),
     );
-    expect(profile(LOGO)).toContain('bp-cover-wrap');
+    // Over a real cover the logo sits on it; with no cover there is still no
+    // band, the logo stands alone at the top.
+    expect(profile(LOGO, COVER)).toContain('bp-cover-wrap');
+    const alone = profile(LOGO);
+    expect(alone).toContain('bp-profile-logo');
+    expect(alone).not.toContain('bp-cover');
   });
 });
