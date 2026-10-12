@@ -30,6 +30,7 @@ import { resolveAvatarUrl } from '@/lib/avatar';
 import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
+  applyKitAction,
   checkHandleAction,
   revertLookAction,
   saveStudioAction,
@@ -140,6 +141,10 @@ export interface StudioInit {
   opensNewTab: string;
   /** The look the host can take back once (the new look, or a brand kit). */
   lookBackup?: { source: 'new-look' | 'kit'; appliedAt: number } | null;
+  /** The workspace logo this page carries (snapshotted by "Apply brand kit"). */
+  logoUrl?: string;
+  /** Whether the workspace has a brand kit to apply. */
+  hasBrandKit?: boolean;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -172,6 +177,7 @@ export function Studio(init: StudioInit) {
   /** The host clicked "Use the new look" and has not saved yet. */
   const [adoptingNewLook, setAdoptingNewLook] = useState(false);
   const [reverting, startRevert] = useTransition();
+  const [applyingKit, startApplyKit] = useTransition();
 
   /**
    * The host's public landing path, derived once so the copyable link and the
@@ -270,6 +276,19 @@ export function Studio(init: StudioInit) {
     setAxes({ ...THEME_PRESETS.minimal, theme: NEW_HOST_THEME });
     setAdoptingNewLook(true);
   };
+  // Applying writes the kit onto what is STORED, so unsaved edits here would
+  // either be lost or silently overwrite the kit; the control asks for a save
+  // first instead.
+  const applyKit = () =>
+    startApplyKit(async () => {
+      const r = await applyKitAction();
+      if (r.ok) {
+        toast.success(m.kitAppliedToast);
+        router.refresh();
+      } else {
+        toast.error(m.applyKitFailed);
+      }
+    });
   const revertLook = () =>
     startRevert(async () => {
       const r = await revertLookAction();
@@ -320,7 +339,16 @@ export function Studio(init: StudioInit) {
         // host moves their page to the other ground. That trap is what the
         // amendment removed, and writing the pick is what keeps it removed.
         brandColor: accent,
-        style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
+        style: {
+          ...axes,
+          bio: bio.trim() || null,
+          landingEnabled,
+          defaultEventSlug: defaultEventSlug || null,
+          eventOrder,
+          // The kit's logo rides through a save untouched; the studio does not
+          // edit it (the brand kit does), and dropping it here would remove it.
+          ...(init.logoUrl ? { logoUrl: init.logoUrl } : {}),
+        },
         // Applying the new look keeps what is stored now as a one-step backup,
         // so it can be reverted. Only when the look on screen still IS the new
         // look: a host who clicked it and then reshaped the axes is saving
@@ -588,6 +616,22 @@ export function Studio(init: StudioInit) {
                   </Button>
                 </div>
               ) : null}
+              {init.hasBrandKit ? (
+                <div className="flex flex-col gap-tight">
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={applyKit}
+                    disabled={applyingKit || pending || isDirty}
+                    className="self-start"
+                  >
+                    {applyingKit ? m.applyingKit : m.applyKit}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {isDirty ? m.applyKitSaveFirst : m.applyKitHint}
+                  </span>
+                </div>
+              ) : null}
               <Button
                 variant="outline"
                 size="lg"
@@ -816,6 +860,7 @@ export function Studio(init: StudioInit) {
                   bio={bio}
                   avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
+                  logoUrl={init.logoUrl || null}
                   // In the order the host set in the Meetings panel, unlisted last,
                   // exactly as the public page sorts them.
                   events={[...init.eventTypes].sort((a, b) => {
@@ -833,6 +878,7 @@ export function Studio(init: StudioInit) {
                   eventTitle={m.introCall}
                   locale={init.locale}
                   device={device}
+                  logoUrl={init.logoUrl || null}
                 />
               )}
           </PreviewFrame>

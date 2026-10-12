@@ -9,6 +9,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
+import { logoOf } from '@/lib/brand-kit';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -135,6 +136,7 @@ export default async function BookingPage({
           description={listing?.description ?? null}
           hostName={hostName}
           avatarUrl={resolveAvatarUrl(profile.member.avatarUrl, profile.member.connectedAvatarUrl)}
+          logoUrl={logoOf(profile.member.style)}
           location={availability.eventType.location}
           nowUtc={from}
           embed={embed}

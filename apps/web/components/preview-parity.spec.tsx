@@ -15,7 +15,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { NEW_HOST_ACCENT, NEW_HOST_THEME, THEME_PRESETS } from '@slate/shared';
+import { DEFAULT_ACCENT, NEW_HOST_ACCENT, NEW_HOST_THEME, THEME_PRESETS } from '@slate/shared';
+import { teamBranding } from '@/lib/brand-kit';
 
 
 vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
@@ -216,4 +217,70 @@ describe('the studio profile preview renders what the public profile renders', (
       });
     }
   }
+});
+
+/**
+ * The brand kit screen previews a page wearing the kit through the same
+ * `PreviewFrame`, and a team page wears the kit through `teamBranding`. For
+ * every kit, including a logo, the two must be the same page.
+ */
+describe('the brand kit preview renders what a page wearing the kit renders', () => {
+  const LOGO = 'https://cdn.example.test/northwind.svg';
+  const KITS = {
+    empty: {},
+    'accent only': { accent: '#2f6fed' },
+    'full, light': { accent: '#2f6fed', theme: 'light', font: 'serif', corners: 'round', buttons: 'pill', cardStyle: 'filled', logoUrl: LOGO },
+    'full, dark': { accent: '#ff6fae', theme: 'dark', font: 'rounded', corners: 'sharp', buttons: 'square', cardStyle: 'elevated', logoUrl: LOGO },
+  } as const;
+
+  for (const [name, kit] of Object.entries(KITS)) {
+    it(name, () => {
+      const b = teamBranding(kit as never);
+      const logoUrl = (b.style?.logoUrl as string | undefined) ?? null;
+      const pub = parse(
+        renderToStaticMarkup(
+          <BrandedShell brandColor={b.brandColor} style={b.style}>
+            <main>
+              <BookingFlow {...previewFlowProps({ ...SAMPLE, logoUrl })} />
+            </main>
+          </BrandedShell>,
+        ),
+      );
+      const shell = pub.querySelector('.branded-surface')!;
+      for (const device of ['mobile', 'desktop'] as const) {
+        const pre = parse(
+          renderToStaticMarkup(
+            <PreviewFrame accent={b.brandColor ?? DEFAULT_ACCENT} axes={(b.style ?? {}) as never} device={device} wide>
+              <BookingPreview {...SAMPLE} device={device} logoUrl={logoUrl} />
+            </PreviewFrame>,
+          ),
+        );
+        const frame = pre.querySelector('[data-theme]')!;
+        expect(frame.getAttribute('data-theme')).toBe(shell.getAttribute('data-theme'));
+        expect(vars(frame)).toEqual(vars(shell));
+        expect(brandingClasses(pre.querySelector('.branded-surface')!)).toEqual(brandingClasses(shell));
+        expect(page(pre)).toBe(page(pub));
+        expect(!!pre.querySelector('.bp-event .bp-logo')).toBe(!!logoUrl);
+      }
+    });
+  }
+
+  it('draws nothing new for a page without a logo, and the logo when there is one', () => {
+    const plain = renderToStaticMarkup(<BookingFlow {...previewFlowProps(SAMPLE)} />);
+    const nulled = renderToStaticMarkup(<BookingFlow {...previewFlowProps({ ...SAMPLE, logoUrl: null })} />);
+    expect(nulled).toBe(plain);
+    expect(plain).not.toContain('bp-logo');
+    const withLogo = renderToStaticMarkup(<BookingFlow {...previewFlowProps({ ...SAMPLE, logoUrl: LOGO })} />);
+    expect(withLogo).toContain(`src="${LOGO}"`);
+
+    const m = getMessages('en');
+    const profile = (logoUrl: string | null) =>
+      renderToStaticMarkup(
+        <ProfileView m={m} name="Riley Chen" events={[]} hrefFor={() => '#'} emptyText="-" logoUrl={logoUrl} />,
+      );
+    expect(profile(null)).toBe(
+      renderToStaticMarkup(<ProfileView m={m} name="Riley Chen" events={[]} hrefFor={() => '#'} emptyText="-" />),
+    );
+    expect(profile(LOGO)).toContain('bp-cover-wrap');
+  });
 });

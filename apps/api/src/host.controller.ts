@@ -11,6 +11,7 @@ import {
   NotFoundException,
   Param,
   Patch,
+  Put,
   Post,
   Optional,
   Query,
@@ -20,6 +21,7 @@ import {
   apiScope,
   attributionClaimSchema,
   brandingWriteSchema,
+  brandKitSchema,
   integrationConnectSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
@@ -274,6 +276,39 @@ export class HostController {
         throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
       throw err;
     }
+  }
+
+  /**
+   * The workspace brand kit. Every member reads it (their studio offers "Apply
+   * kit"); only an admin or owner replaces it, since it is workspace-wide.
+   */
+  @Get('brand-kit')
+  async getBrandKit(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.brandKit(p);
+  }
+
+  @Put('brand-kit')
+  async putBrandKit(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    try {
+      return await this.admin.saveBrandKit(p, brandKitSchema.parse(body));
+    } catch (err) {
+      if (err instanceof ZodError)
+        throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
+      throw err;
+    }
+  }
+
+  /** Snapshot the kit into the caller's own booking page, keeping a backup. */
+  @Post('booking-page/apply-kit')
+  @HttpCode(200)
+  async applyBrandKit(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    const applied = await this.admin.applyBrandKitToMe(p);
+    if (!applied) throw new NotFoundException({ error: 'NO_BRAND_KIT', message: 'This workspace has no brand kit yet.' });
+    return { ok: true };
   }
 
   /** Undo the last applied look on the host's own page, once. */

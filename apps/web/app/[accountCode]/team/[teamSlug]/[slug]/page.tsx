@@ -6,6 +6,7 @@ import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
+import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import {
@@ -89,11 +90,15 @@ export default async function TeamBookingPage({
   }
 
   const listing = team.eventTypes.find((e) => e.slug === slug);
+  const kit = teamBranding(team.brand);
 
   return (
     <BrandedShell
-      brandColor={accentOverride}
-      style={mergeEmbedStyle(null, styleOverrides)}
+      // A team stores no branding: it wears the workspace brand kit directly,
+      // and the defaults when there is none (`teamBranding` is then null/null,
+      // what this passed before there was a kit).
+      brandColor={accentOverride ?? kit.brandColor}
+      style={mergeEmbedStyle(kit.style, styleOverrides)}
       className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       {/* No link back to the team page, for the same reason the personal event
@@ -123,6 +128,7 @@ export default async function TeamBookingPage({
           // is booking with, and B1's initial tile covers a team with no logo.
           hostName={team.team.name}
           avatarUrl={team.team.logoUrl}
+          logoUrl={logoOf(kit.style)}
           location={availability.eventType.location}
           methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
           nowUtc={from}

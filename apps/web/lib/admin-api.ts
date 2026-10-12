@@ -11,6 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
+import type { BrandKit } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -342,6 +343,12 @@ export const adminApi = {
   bookingPageState: () =>
     req<{ backup: { source: 'new-look' | 'kit'; appliedAt: number } | null }>('GET', '/v1/booking-page'),
   revertBranding: () => req<{ ok: boolean }>('POST', '/v1/booking-page/revert'),
+  /** The workspace brand kit (every member reads it; admins write it). */
+  getBrandKit: () => req<{ config: BrandKit | null; updatedAt: number | null }>('GET', '/v1/brand-kit'),
+  putBrandKit: (kit: BrandKit) =>
+    req<{ config: BrandKit; updatedAt: number }>('PUT', '/v1/brand-kit', kit),
+  /** Snapshot the kit into the caller's own booking page. */
+  applyBrandKit: () => req<{ ok: boolean }>('POST', '/v1/booking-page/apply-kit'),
 };
 
 export interface EventType {

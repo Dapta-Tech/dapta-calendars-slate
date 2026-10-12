@@ -68,6 +68,8 @@ interface Props {
   /** Host display name, or the team name on a team event. */
   hostName: string;
   avatarUrl?: string | null;
+  /** The workspace logo from the brand kit, or nothing. */
+  logoUrl?: string | null;
   /** Raw location — the label comes from `formatLocation`, the icon from the kind. */
   location?: { kind: string; detail?: string | null } | null;
   /** Team scheduling method label; personal events pass nothing. */
@@ -140,6 +142,7 @@ export function BookingFlow({
   description,
   hostName,
   avatarUrl,
+  logoUrl,
   location,
   methodLabel,
   nowUtc,
@@ -579,6 +582,7 @@ export function BookingFlow({
       // The HOST's zone, which the page opened in: a fact about them that does
       // not move when the visitor reads the times in their own zone.
       timeZoneLabel={readableZone(initialTimeZone)}
+      logoUrl={logoUrl}
     />
   );
 

@@ -1066,6 +1066,35 @@ export interface BookingMessages {
       connectedToast: string;
       disconnectedToast: string;
     };
+    /** The workspace brand kit screen. */
+    brandKit: {
+      title: string;
+      statement: string;
+      statusSet: string;
+      statusUnset: string;
+      logo: string;
+      logoHint: string;
+      accent: string;
+      accentHint: string;
+      canvas: string;
+      canvasHint: string;
+      font: string;
+      corners: string;
+      buttons: string;
+      cardStyle: string;
+      shapeHint: string;
+      keepPageOwn: string;
+      save: string;
+      saving: string;
+      saved: string;
+      saveFailed: string;
+      readOnly: string;
+      preview: string;
+      previewHint: string;
+      howItWorks: string;
+      howItWorksBody: string;
+      updatedOn: string;
+    };
     bookingPageHeader: {
       title: string;
       subtitle: string;
@@ -1126,6 +1155,17 @@ export interface BookingMessages {
       revertingLook: string;
       lookReverted: string;
       revertFailed: string;
+      /** The two studio tabs: the host's own page, and the workspace kit. */
+      tabYourPage: string;
+      tabBrandKit: string;
+      /** Snapshot the workspace kit into this page. */
+      applyKit: string;
+      applyingKit: string;
+      applyKitHint: string;
+      kitAppliedToast: string;
+      applyKitFailed: string;
+      /** Shown instead of Apply kit while the studio has unsaved edits. */
+      applyKitSaveFirst: string;
       axisTemplate: string;
       axisCardStyle: string;
       axisCorners: string;
@@ -2172,6 +2212,34 @@ export const en: BookingMessages = {
       connectedToast: 'HubSpot connected.',
       disconnectedToast: 'HubSpot disconnected.',
     },
+    brandKit: {
+      title: 'Brand kit',
+      statement: 'One look for every page in your workspace.',
+      statusSet: 'Saved',
+      statusUnset: 'Not set yet',
+      logo: 'Logo',
+      logoHint: 'Shown at the top of the event panel and over the profile cover, as uploaded: use a version that reads on your canvas.',
+      accent: 'Accent',
+      accentHint: 'Buttons, the selected day and time, links.',
+      canvas: 'Canvas',
+      canvasHint: 'The ground the page paints on.',
+      font: 'Font',
+      corners: 'Corners',
+      buttons: 'Buttons',
+      cardStyle: 'Card style',
+      shapeHint: 'Layout, density and how times are listed stay each page\'s own.',
+      keepPageOwn: 'Keep each page\'s own',
+      save: 'Save kit',
+      saving: 'Saving…',
+      saved: 'Brand kit saved.',
+      saveFailed: 'Could not save the brand kit.',
+      readOnly: 'Only an admin or owner can change the brand kit.',
+      preview: 'Preview',
+      previewHint: 'A booking page wearing this kit.',
+      howItWorks: 'How it reaches a page',
+      howItWorksBody: 'A host applies the kit from their booking page studio; it is copied onto their page and can be reverted once. Editing the kit later never changes a page by itself. Team pages wear the kit directly.',
+      updatedOn: 'Updated {date}',
+    },
     bookingPageHeader: {
       title: 'Booking Page',
       subtitle: 'Style your public page. Preview updates live — what you see is what visitors get.',
@@ -2220,6 +2288,14 @@ export const en: BookingMessages = {
       revertingLook: 'Reverting…',
       lookReverted: 'Your previous look is back.',
       revertFailed: 'Could not revert. Try again.',
+      tabYourPage: 'Your page',
+      tabBrandKit: 'Brand kit',
+      applyKit: 'Apply brand kit',
+      applyingKit: 'Applying…',
+      applyKitHint: "Your workspace's logo, colours, font and shape, copied onto this page. You can revert it once.",
+      kitAppliedToast: 'Brand kit applied to your page.',
+      applyKitFailed: 'Could not apply the brand kit. Try again.',
+      applyKitSaveFirst: 'Save or reset your changes first, then apply the kit.',
       axisTemplate: 'Template',
       axisCardStyle: 'Card style',
       axisCorners: 'Corners',
@@ -3231,6 +3307,34 @@ export const es: BookingMessages = {
       connectedToast: 'HubSpot conectado.',
       disconnectedToast: 'HubSpot desconectado.',
     },
+    brandKit: {
+      title: 'Kit de marca',
+      statement: 'Un solo estilo para todas las páginas de tu espacio.',
+      statusSet: 'Guardado',
+      statusUnset: 'Sin definir',
+      logo: 'Logo',
+      logoHint: 'Se muestra arriba del panel del evento y sobre la portada del perfil, tal como la subes: usa una versión que se lea sobre tu fondo.',
+      accent: 'Color de acento',
+      accentHint: 'Botones, el día y la hora elegidos, enlaces.',
+      canvas: 'Fondo',
+      canvasHint: 'El fondo sobre el que se pinta la página.',
+      font: 'Fuente',
+      corners: 'Esquinas',
+      buttons: 'Botones',
+      cardStyle: 'Estilo de tarjeta',
+      shapeHint: 'La plantilla, la densidad y cómo se listan los horarios siguen siendo de cada página.',
+      keepPageOwn: 'Mantener el de cada página',
+      save: 'Guardar kit',
+      saving: 'Guardando…',
+      saved: 'Kit de marca guardado.',
+      saveFailed: 'No se pudo guardar el kit de marca.',
+      readOnly: 'Solo un administrador o propietario puede cambiar el kit de marca.',
+      preview: 'Vista previa',
+      previewHint: 'Una página de reservas con este kit.',
+      howItWorks: 'Cómo llega a una página',
+      howItWorksBody: 'Cada anfitrión aplica el kit desde el estudio de su página de reservas; se copia en su página y se puede revertir una vez. Editar el kit después nunca cambia una página por sí solo. Las páginas de equipo usan el kit directamente.',
+      updatedOn: 'Actualizado el {date}',
+    },
     bookingPageHeader: {
       title: 'Página de reservas',
       subtitle: 'Personaliza tu página pública. La vista previa se actualiza en vivo — lo que ves es lo que reciben los visitantes.',
@@ -3279,6 +3383,14 @@ export const es: BookingMessages = {
       revertingLook: 'Revirtiendo…',
       lookReverted: 'Tu estilo anterior está de vuelta.',
       revertFailed: 'No se pudo revertir. Inténtalo de nuevo.',
+      tabYourPage: 'Tu página',
+      tabBrandKit: 'Kit de marca',
+      applyKit: 'Aplicar kit de marca',
+      applyingKit: 'Aplicando…',
+      applyKitHint: 'El logo, los colores, la fuente y la forma de tu espacio de trabajo, copiados en esta página. Puedes revertirlo una vez.',
+      kitAppliedToast: 'Kit de marca aplicado a tu página.',
+      applyKitFailed: 'No se pudo aplicar el kit de marca. Inténtalo de nuevo.',
+      applyKitSaveFirst: 'Guarda o descarta tus cambios antes de aplicar el kit.',
       axisTemplate: 'Plantilla',
       axisCardStyle: 'Estilo de tarjeta',
       axisCorners: 'Esquinas',

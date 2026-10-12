@@ -13,7 +13,7 @@
  * look, and re-applying must not turn the backup into an applied look (the rule
  * the sibling product's brand kit follows).
  *
- * Revert restores only the LOOK: the accent and the ten style axes. Everything
+ * Revert restores only the LOOK: the accent, the ten style axes and the logo. Everything
  * else in the style object (bio, landing switch, default event, event order) is
  * the host's content and keeps whatever it is now. When nothing but the look
  * changed since the apply, the stored value comes back exactly as it was.
@@ -26,7 +26,7 @@ import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 /** What applied the look the backup undoes. */
 export type BrandApplySource = 'new-look' | 'kit';
 
-/** The style keys that make up a look: the ten axes, no content. */
+/** The style keys that make up a look: the ten axes and the kit's logo, no content. */
 export const LOOK_STYLE_KEYS = [
   'template',
   'cardStyle',
@@ -38,6 +38,8 @@ export const LOOK_STYLE_KEYS = [
   'dayGroup',
   'slotSelect',
   'theme',
+  // The kit's logo: a revert of a kit apply takes the logo back with it.
+  'logoUrl',
 ] as const;
 
 interface StoredBackup {

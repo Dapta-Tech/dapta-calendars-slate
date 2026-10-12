@@ -112,6 +112,15 @@ export const availability = sqliteTable('availability', {
   date: text('date'),
 });
 
+// The workspace brand kit (0022): one row per account; snapshotted into a
+// member's branding on "Apply kit", rendered directly by team pages.
+export const accountBranding = sqliteTable('account_branding', {
+  accountId: text('account_id').primaryKey(),
+  config: text('config').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const team = sqliteTable('team', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
@@ -524,4 +533,5 @@ export const sqliteSchema = {
   notificationSetting,
   accountIntegration,
   oneOffLink,
+  accountBranding,
 };

@@ -67,11 +67,14 @@ export function previewFlowProps({
   avatarUrl,
   eventTitle,
   locale,
+  logoUrl = null,
 }: {
   hostName: string;
   avatarUrl: string | null;
   eventTitle: string;
   locale: string;
+  /** The brand kit's logo, when the page being previewed wears one. */
+  logoUrl?: string | null;
 }) {
   return {
     accountCode: 'preview',
@@ -85,6 +88,7 @@ export function previewFlowProps({
     lengthMinutes: 30,
     hostName,
     avatarUrl,
+    logoUrl,
     location: null,
     nowUtc: PREVIEW_NOW,
   };
@@ -126,16 +130,18 @@ export function BookingPreview({
   eventTitle,
   locale,
   device,
+  logoUrl = null,
 }: {
   hostName: string;
   avatarUrl: string | null;
   eventTitle: string;
   locale: string;
   device: 'desktop' | 'mobile';
+  logoUrl?: string | null;
 }) {
   const props = useMemo(
-    () => previewFlowProps({ hostName, avatarUrl, eventTitle, locale }),
-    [hostName, avatarUrl, eventTitle, locale],
+    () => previewFlowProps({ hostName, avatarUrl, eventTitle, locale, logoUrl }),
+    [hostName, avatarUrl, eventTitle, locale, logoUrl],
   );
   const flow = <BookingFlow {...props} />;
   return (
@@ -222,6 +228,7 @@ export function ProfilePreview({
   avatarUrl,
   coverUrl,
   events,
+  logoUrl = null,
 }: {
   locale: string;
   displayName: string;
@@ -229,6 +236,7 @@ export function ProfilePreview({
   bio: string;
   avatarUrl: string;
   coverUrl: string;
+  logoUrl?: string | null;
   events: Array<Omit<ProfileEvent, 'description'> & { description?: string | null }>;
 }) {
   const m = getMessages(locale);
@@ -244,6 +252,7 @@ export function ProfilePreview({
         events={events.map((e) => ({ ...e, description: e.description ?? null }))}
         hrefFor={() => '#'}
         emptyText={m.landing.noEvents}
+        logoUrl={logoUrl}
       />
     </div>
   );
