@@ -99,4 +99,42 @@ describe('server-side visitor calls forward the visitor to the API (F1)', () => 
       expect(call.headers['x-slate-client-ip']).toBeUndefined();
     }
   });
+
+  it('treats a secret shorter than the API accepts as unset: nothing is forwarded', async () => {
+    process.env.INTERNAL_API_SECRET = SECRET.slice(0, 31);
+    await everyVisitorCall();
+    expect(sent).toHaveLength(12);
+    for (const call of sent) {
+      expect(call.headers['x-slate-internal']).toBeUndefined();
+      expect(call.headers['x-slate-client-ip']).toBeUndefined();
+    }
+  });
+});
+
+describe('INTERNAL_API_SECRET at web startup', () => {
+  async function startWith(value: string | undefined) {
+    if (value === undefined) delete process.env.INTERNAL_API_SECRET;
+    else process.env.INTERNAL_API_SECRET = value;
+    process.env.NEXT_RUNTIME = 'nodejs';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { register } = await import('../instrumentation');
+    await register();
+    const calls = warn.mock.calls.map((c) => String(c[0]));
+    warn.mockRestore();
+    delete process.env.NEXT_RUNTIME;
+    return calls;
+  }
+
+  it('warns once when it is set but shorter than 32 characters, without echoing the value', async () => {
+    const short = 'short-secret-value';
+    const calls = await startWith(short);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/INTERNAL_API_SECRET is shorter than 32 characters; treating it as unset/);
+    expect(calls[0]).not.toContain(short);
+  });
+
+  it('says nothing when it is unset or long enough', async () => {
+    expect(await startWith(undefined)).toEqual([]);
+    expect(await startWith(SECRET)).toEqual([]);
+  });
 });

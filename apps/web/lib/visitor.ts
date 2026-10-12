@@ -1,6 +1,7 @@
 import 'server-only';
 import { headers } from 'next/headers';
 import { visitorForwardHeaders } from '@slate/shared';
+import { internalApiSecret } from '@/lib/internal-secret';
 
 /**
  * How many reverse proxies in front of the web app append to
@@ -19,11 +20,13 @@ function trustedHops(): number {
  * visitor of every booking page shares the web server's rate-limit bucket.
  * With INTERNAL_API_SECRET set (the same value on the API), each call carries
  * the visitor's address beside the secret, and the API counts the visitor.
- * Empty when the secret is unset, outside a request, or when the address is
- * not known: the API then keys on the web server, as it always did.
+ * Empty when the secret is unset or too short for the API to accept (the
+ * startup warning in instrumentation.ts says so), outside a request, or when
+ * the address is not known: the API then keys on the web server, as it always
+ * did.
  */
 export async function visitorHeaders(): Promise<Record<string, string>> {
-  const secret = process.env.INTERNAL_API_SECRET;
+  const secret = internalApiSecret();
   if (!secret) return {};
   let xff: string | null;
   try {
