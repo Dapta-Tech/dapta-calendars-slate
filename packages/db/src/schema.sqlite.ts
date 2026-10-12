@@ -83,6 +83,9 @@ export const member = sqliteTable('member', {
   brandColor: text('brand_color'),
   layout: text('layout'),
   bookingPageStyle: text('booking_page_style'),
+  // The look before the last apply (0021): one step of undo, never rendered.
+  brandBackup: text('brand_backup'),
+  brandAppliedAt: integer('brand_applied_at'),
   timeZone: text('time_zone').notNull().default('UTC'),
   weekStart: text('week_start').notNull().default('sunday'),
   locale: text('locale'),

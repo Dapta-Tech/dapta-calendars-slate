@@ -8,11 +8,13 @@ export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const [profile, adminEvents, locale, vanity] = await Promise.all([
+  const [profile, adminEvents, locale, vanity, lookState] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
     adminApi.listEventTypes(),
     getLocale(),
     adminApi.vanityStatus().catch(() => ({ vanitySlug: null, shortCode: '', canClaim: false })),
+    // A failed read costs the Revert control, never the studio.
+    adminApi.bookingPageState().catch(() => ({ backup: null })),
   ]);
   const msgs = getMessages(locale);
   const t = msgs.admin;
@@ -46,6 +48,11 @@ export default async function BookingPageSettings() {
       <h1 className="mb-tight text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
       <p className="mb-group text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
       <Studio
+        // Remounted from what is stored when an applied look appears or goes:
+        // a revert writes the stored look back, and the studio's own state has
+        // to start from it rather than from the look it just replaced.
+        key={lookState.backup?.appliedAt ?? 'none'}
+        lookBackup={lookState.backup}
         messages={t.studio}
         opensNewTab={t.common.opensNewTab}
         embedMessages={msgs.embed}

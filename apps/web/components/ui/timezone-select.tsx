@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { commonTimeZones, getMessages } from '@slate/shared';
+import { commonTimeZones, getMessages, zoneOffsetLabel } from '@slate/shared';
 import { Select, type SelectOption } from '@/components/ui/select';
 
 /**
@@ -26,20 +26,6 @@ import { Select, type SelectOption } from '@/components/ui/select';
  * container, as `Select` documents — a width passed here would leave the panel
  * wider than the trigger it hangs from. Neither admin call site passes one.
  */
-
-/** Current UTC offset for a zone, e.g. "GMT-7" — picking is much easier with
- *  the offset in view. Invalid zones (shouldn't happen) just omit it. */
-function zoneOffset(tz: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      timeZoneName: 'shortOffset',
-    }).formatToParts(new Date());
-    return parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
-  } catch {
-    return '';
-  }
-}
 
 export function TimeZoneSelect({
   value,
@@ -74,7 +60,7 @@ export function TimeZoneSelect({
       commonTimeZones(value).map((z) => ({
         value: z,
         label: z.replaceAll('_', ' '),
-        hint: zoneOffset(z),
+        hint: zoneOffsetLabel(z),
       })),
     [value],
   );

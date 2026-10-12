@@ -48,13 +48,12 @@
 <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18">
 </path>
 </svg>
-<span class="bp-fact-text">America/New York</span>
+<span class="bp-fact-text">America/New York, the host&#x27;s time</span>
 </dd>
 </div>
 </dl>
 <div class="bp-description">
 <p id="_R_136_" class="bp-description-text">Bring a screen or a flow. We go through it together and you leave with a list.</p>
-<button type="button" aria-expanded="false" aria-controls="_R_136_" class="bp-link">Show more</button>
 </div>
 </section>
 </div>
@@ -204,6 +203,29 @@
 <button type="button" data-day="2026-04-04" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Saturday, April 4">4</button>
 </div>
 </div>
+<div role="row" class="bp-cal-week">
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-05" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Sunday, April 5">5</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-06" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Monday, April 6">6</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-07" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Tuesday, April 7">7</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-08" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Wednesday, April 8">8</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-09" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Thursday, April 9">9</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-10" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Friday, April 10">10</button>
+</div>
+<div role="gridcell" class="contents">
+<button type="button" data-day="2026-04-11" class="bp-cal-day" data-state="outside" disabled="" tabindex="-1" aria-label="Saturday, April 11">11</button>
+</div>
+</div>
 </div>
 </section>
 </div>
@@ -225,11 +247,17 @@
 </div>
 <div class="bp-times-tools">
 <div class="bp-tz">
-<div class="relative">
-<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="flex min-h-control w-full items-center justify-between gap-inline rounded-md border border-input bg-background px-field py-inline text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 bp-tz-trigger">
-<span class="truncate">America/New York</span>
-<span class="ml-auto shrink-0 text-xs text-muted-foreground">GMT-5</span>
-<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform">
+<div class="bp-zone">
+<button type="button" id="tz" aria-label="Timezone" aria-haspopup="listbox" aria-expanded="false" class="bp-zone-trigger">
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0">
+<circle cx="12" cy="12" r="9">
+</circle>
+<path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18">
+</path>
+</svg>
+<span class="bp-zone-name">America/New York</span>
+<span class="bp-zone-offset">GMT-5</span>
+<svg aria-hidden="true" viewBox="0 0 24 24" class="bp-zone-chevron">
 <path d="M6 9l6 6 6-6">
 </path>
 </svg>
@@ -254,6 +282,13 @@
 <span class="bp-slot-time">11:30 AM</span>
 </button>
 </div>
+<button type="button" class="bp-next-day">
+<span>Next day with times: Tue, Mar 3</span>
+<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+<path d="M9 5l7 7-7 7">
+</path>
+</svg>
+</button>
 </section>
 </div>
 </div>

@@ -492,6 +492,17 @@ export const brandingSchema = z.object({
 });
 export type Branding = z.infer<typeof brandingSchema>;
 
+/**
+ * The studio's save: the branding, plus an optional marker that this save
+ * applies a whole look ("Use the new look"). With the marker the API keeps what
+ * is stored now as a one-step backup before writing, so the host can revert it.
+ * The marker is never stored on the branding itself.
+ */
+export const brandingWriteSchema = brandingSchema.extend({
+  backupAs: z.enum(['new-look']).optional(),
+});
+export type BrandingWrite = z.infer<typeof brandingWriteSchema>;
+
 // --- Reschedule / cancel --------------------------------------------------
 
 /**

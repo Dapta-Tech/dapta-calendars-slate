@@ -133,6 +133,15 @@ export interface BookingMessages {
     addToCalendar: string;
     /** The unit beside a duration set as a figure on the profile ("30 min"). */
     minutesUnit: string;
+    /** The zone picker's sticky group labels: the zone the times are shown in,
+     *  the visitor's own zone when it differs, then every zone. */
+    zoneCurrent: string;
+    zoneLocal: string;
+    zoneAll: string;
+    /** The event panel's time zone fact: the HOST's zone, said as theirs. */
+    hostTimeZone: string;
+    /** The quiet link under a short day's times: "Next day with times: Tue, Oct 13". */
+    nextTimes: string;
   };
   manage: {
     title: string;
@@ -1103,6 +1112,20 @@ export interface BookingMessages {
       coverImage: string;
       custom: string;
       customizeAppearance: string;
+      /** One click to the look a new host is born with (ink on paper, the
+       *  minimal set). Previewed first, applied on Save, revertible once. */
+      newLook: string;
+      newLookHint: string;
+      /** Said while the new look is in the preview but not saved yet. */
+      newLookPreviewing: string;
+      /** "New look applied on Oct 12, 2026." with the Revert beside it. */
+      newLookApplied: string;
+      /** The brand kit's twin of `newLookApplied`. */
+      kitApplied: string;
+      revertLook: string;
+      revertingLook: string;
+      lookReverted: string;
+      revertFailed: string;
       axisTemplate: string;
       axisCardStyle: string;
       axisCorners: string;
@@ -1314,6 +1337,11 @@ export const en: BookingMessages = {
     who: 'With',
     addToCalendar: 'Add to calendar',
     minutesUnit: 'min',
+    zoneCurrent: 'Showing times in',
+    zoneLocal: 'Your time zone',
+    zoneAll: 'All time zones',
+    hostTimeZone: "{zone}, the host's time",
+    nextTimes: 'Next day with times: {day}',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2183,6 +2211,15 @@ export const en: BookingMessages = {
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
+      newLook: 'Use the new look',
+      newLookHint: 'Ink on paper and the minimal set, the look new pages start with. You see it here first.',
+      newLookPreviewing: 'Previewing the new look. Save to put it on your page; you can revert it after.',
+      newLookApplied: 'New look applied on {date}.',
+      kitApplied: 'Brand kit applied on {date}.',
+      revertLook: 'Revert',
+      revertingLook: 'Reverting…',
+      lookReverted: 'Your previous look is back.',
+      revertFailed: 'Could not revert. Try again.',
       axisTemplate: 'Template',
       axisCardStyle: 'Card style',
       axisCorners: 'Corners',
@@ -2357,6 +2394,11 @@ export const es: BookingMessages = {
     who: 'Con',
     addToCalendar: 'Añadir al calendario',
     minutesUnit: 'min',
+    zoneCurrent: 'Horarios mostrados en',
+    zoneLocal: 'Tu zona horaria',
+    zoneAll: 'Todas las zonas horarias',
+    hostTimeZone: '{zone}, hora del anfitrión',
+    nextTimes: 'Siguiente día con horarios: {day}',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -3228,6 +3270,15 @@ export const es: BookingMessages = {
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',
+      newLook: 'Usar el nuevo estilo',
+      newLookHint: 'Tinta sobre papel y el conjunto mínimo, el estilo con el que empiezan las páginas nuevas. Lo ves aquí primero.',
+      newLookPreviewing: 'Vista previa del nuevo estilo. Guarda para ponerlo en tu página; después puedes revertirlo.',
+      newLookApplied: 'Nuevo estilo aplicado el {date}.',
+      kitApplied: 'Kit de marca aplicado el {date}.',
+      revertLook: 'Revertir',
+      revertingLook: 'Revirtiendo…',
+      lookReverted: 'Tu estilo anterior está de vuelta.',
+      revertFailed: 'No se pudo revertir. Inténtalo de nuevo.',
       axisTemplate: 'Plantilla',
       axisCardStyle: 'Estilo de tarjeta',
       axisCorners: 'Esquinas',

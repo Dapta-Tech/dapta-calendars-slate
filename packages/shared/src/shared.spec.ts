@@ -89,6 +89,19 @@ describe('month calendar grid (BP)', () => {
     expect(grid.label).toBe('September 2026');
   });
 
+  // The booking page asks for six weeks so a five-week month is as tall as a
+  // six-week one; the padding is next month's days, never this month's.
+  it('pads to a minimum number of weeks with the next month', () => {
+    const plain = buildMonthGrid('2026-10', { availableDayKeys: [], todayKey: '2026-10-12' });
+    expect(plain.weeks).toHaveLength(5);
+    const six = buildMonthGrid('2026-10', { availableDayKeys: [], todayKey: '2026-10-12', minWeeks: 6 });
+    expect(six.weeks).toHaveLength(6);
+    expect(six.weeks[5]!.every((d) => !d.inMonth && d.dayKey.startsWith('2026-11'))).toBe(true);
+    // A month that already needs six weeks is not padded to seven.
+    const august = buildMonthGrid('2026-08', { availableDayKeys: [], todayKey: '2026-08-12', minWeeks: 6 });
+    expect(august.weeks).toHaveLength(6);
+  });
+
   it('rotates the first column for a Monday-start locale', () => {
     const grid = buildMonthGrid('2026-09', {
       availableDayKeys: [],

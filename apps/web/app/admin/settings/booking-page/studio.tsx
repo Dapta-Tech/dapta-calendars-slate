@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   ALL_BOOKING_THEMES,
   DEFAULT_ACCENT,
+  NEW_HOST_ACCENT,
+  NEW_HOST_THEME,
   THEME_PRESETS,
   accentCanvasContrast,
   accentLabelContrast,
@@ -29,6 +31,7 @@ import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
   checkHandleAction,
+  revertLookAction,
   saveStudioAction,
   toggleEventHiddenAction,
   type SaveResult,
@@ -135,6 +138,8 @@ export interface StudioInit {
   locale: string;
   /** Screen-reader suffix for the link that opens the public page (A2, #112). */
   opensNewTab: string;
+  /** The look the host can take back once (the new look, or a brand kit). */
+  lookBackup?: { source: 'new-look' | 'kit'; appliedAt: number } | null;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -164,6 +169,9 @@ export function Studio(init: StudioInit) {
   });
   const [embedOpen, setEmbedOpen] = useState(false);
   const [eventPending, startEvent] = useTransition();
+  /** The host clicked "Use the new look" and has not saved yet. */
+  const [adoptingNewLook, setAdoptingNewLook] = useState(false);
+  const [reverting, startRevert] = useTransition();
 
   /**
    * The host's public landing path, derived once so the copyable link and the
@@ -253,6 +261,26 @@ export function Studio(init: StudioInit) {
   const applyTheme = (t: keyof typeof THEME_PRESETS) =>
     setAxes((a) => ({ ...THEME_PRESETS[t], theme: a.theme }));
   const setAxis = (k: keyof Axes, v: string) => setAxes((a) => ({ ...a, [k]: v as never }));
+  // The look a host is born with since PR #193: ink on paper, the minimal set.
+  // A host who already has it has nothing to adopt.
+  const isNewLook =
+    accent.toLowerCase() === NEW_HOST_ACCENT && activeTheme === 'minimal' && axes.theme === NEW_HOST_THEME;
+  const adoptNewLook = () => {
+    setAccent(NEW_HOST_ACCENT);
+    setAxes({ ...THEME_PRESETS.minimal, theme: NEW_HOST_THEME });
+    setAdoptingNewLook(true);
+  };
+  const revertLook = () =>
+    startRevert(async () => {
+      const r = await revertLookAction();
+      if (r.ok) {
+        toast.success(m.lookReverted);
+        // The page remounts the studio from what is stored now (see its key).
+        router.refresh();
+      } else {
+        toast.error(m.revertFailed);
+      }
+    });
   const handleBlocksSave = handleState === 'taken' || handleState === 'invalid' || handleState === 'checking';
 
   const reset = () => {
@@ -265,6 +293,7 @@ export function Studio(init: StudioInit) {
     setAxes(init.axes);
     setLandingEnabled(init.landingEnabled);
     setDefaultEventSlug(init.defaultEventSlug ?? '');
+    setAdoptingNewLook(false);
     setEventOrder(() => {
       const all = init.manageableEvents.map((e) => e.slug);
       const ordered = init.eventOrder.filter((s) => all.includes(s));
@@ -292,6 +321,11 @@ export function Studio(init: StudioInit) {
         // amendment removed, and writing the pick is what keeps it removed.
         brandColor: accent,
         style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
+        // Applying the new look keeps what is stored now as a one-step backup,
+        // so it can be reverted. Only when the look on screen still IS the new
+        // look: a host who clicked it and then reshaped the axes is saving
+        // their own look, which is an ordinary save.
+        ...(adoptingNewLook && isNewLook ? { backupAs: 'new-look' as const } : {}),
       };
 
       let r: SaveResult;
@@ -313,6 +347,8 @@ export function Studio(init: StudioInit) {
         setSaved('ok');
         setSaveMsg(null);
         initialSnapshot.current = snapshot;
+        if (payload.backupAs) router.refresh();
+        setAdoptingNewLook(false);
       } else {
         setSaved('err');
         setSaveMsg(r.message ?? m.saveFailed);
@@ -535,6 +571,37 @@ export function Studio(init: StudioInit) {
 
           {/* APPEARANCE */}
           <Section title={m.appearance}>
+            {/* The look new pages start with, one click away for a host who has
+                their own, previewed before it is saved and revertible once. */}
+            <div className="mb-field flex flex-col gap-tight border-b border-border pb-field">
+              {init.lookBackup ? (
+                <div className="flex flex-wrap items-center justify-between gap-inline">
+                  <span className="text-sm" suppressHydrationWarning>
+                    {t(init.lookBackup.source === 'kit' ? m.kitApplied : m.newLookApplied, {
+                      date: new Intl.DateTimeFormat(init.locale, { dateStyle: 'medium' }).format(
+                        new Date(init.lookBackup.appliedAt),
+                      ),
+                    })}
+                  </span>
+                  <Button variant="outline" size="lg" onClick={revertLook} disabled={reverting || pending}>
+                    {reverting ? m.revertingLook : m.revertLook}
+                  </Button>
+                </div>
+              ) : null}
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={adoptNewLook}
+                disabled={isNewLook}
+                aria-pressed={isNewLook}
+                className="self-start"
+              >
+                {m.newLook}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {adoptingNewLook && isNewLook && isDirty ? m.newLookPreviewing : m.newLookHint}
+              </span>
+            </div>
             <div className="mb-field flex flex-wrap gap-inline">
               {ALL_BOOKING_THEMES.map((themeName) => (
                 <Button
