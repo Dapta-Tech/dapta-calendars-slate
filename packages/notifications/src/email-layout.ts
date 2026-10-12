@@ -154,6 +154,22 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): 
         note: '',
       };
     case 'pending':
+      // The host's copy of a request is a request TO them. It used to wear the
+      // invitee's words ("We've sent your request to <you>") and the invitee's
+      // "Cancel request" button over the invitee's own manage link, so the one
+      // button in the host's mail withdrew the request they were asked to
+      // accept. Confirming or declining happens in the host's bookings, not
+      // through an invitee link, so the host copy carries no button.
+      if (audience === 'host')
+        return {
+          status: es ? 'Por confirmar' : 'Needs your OK',
+          color: C.warning,
+          intro: es
+            ? `${who} pidió esta hora. Confírmala o recházala desde tus reservas.`
+            : `${who} asked for this time. Confirm or decline it from your bookings.`,
+          action: null,
+          note: '',
+        };
       return {
         status: es ? 'Pendiente' : 'Pending',
         color: C.warning,
