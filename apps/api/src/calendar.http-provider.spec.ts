@@ -817,8 +817,12 @@ describe('ExternalCalendarProvider.listBusy — windowed reads', () => {
       }
       expect(out.lines.filter((l) => l.level === 'warn')).toHaveLength(1);
       expect(out.lines.filter((l) => l.level === 'log')).toHaveLength(0);
-      expect(out.lines[0]!.text).toMatch(/^busy read failed: connections=1 windows=\d+ retries=0 ms=\d+: /);
+      expect(out.lines[0]!.text).toMatch(
+        /^busy read failed: connections=1 windows=\d+ retries=0 ms=\d+: cause=CalendarHttpError op=\S+ status=403$/,
+      );
       expect(out.lines[0]!.text).not.toContain('conn-A');
+      // The backend's response body (the error's message) never reaches the log.
+      expect(out.lines[0]!.text).not.toContain('calendar backend');
     });
   });
 

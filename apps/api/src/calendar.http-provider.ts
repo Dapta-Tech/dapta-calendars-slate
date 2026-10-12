@@ -286,6 +286,17 @@ export class CalendarHttpError extends Error {
   }
 }
 
+/**
+ * What a failed read is allowed to say about itself in a log line: the class,
+ * and for a backend refusal the operation and status. Never the message, which
+ * for a CalendarHttpError is the backend's own response body.
+ */
+export function failureCause(err: unknown): string {
+  if (err instanceof CalendarHttpError) return `cause=${err.name} op=${err.op} status=${err.status}`;
+  if (err instanceof Error) return `cause=${err.name}`;
+  return 'cause=unknown';
+}
+
 export interface ExternalCalendarOptions {
   baseUrl: string;
   tokenSource: CalendarTokenSource;
@@ -420,9 +431,12 @@ export class ExternalCalendarProvider implements CalendarProvider {
           // The caller turns this into "calendar unavailable" and keeps the
           // cause to itself; this line is the only record of WHICH window and
           // WHY, and it is what made the concurrency limit above visible.
+          // Only the error's class, the operation and the HTTP status are
+          // written: a CalendarHttpError's message carries the backend's
+          // response body, which can quote event or attendee data.
           this.logger.warn(
             `busy read failed: connections=${input.connectionRefs.length} windows=${windows.length} ` +
-              `retries=${retries} ms=${this.clock.now() - started}: ${err instanceof Error ? err.message : String(err)}`,
+              `retries=${retries} ms=${this.clock.now() - started}: ${failureCause(err)}`,
           );
           throw err;
         }
