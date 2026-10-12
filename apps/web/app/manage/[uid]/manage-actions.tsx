@@ -91,6 +91,8 @@ export function ManageActions({
     selectedDay,
     setPickedDay,
     dayColumn,
+    nextDay,
+    goToDay,
   } = useBookingMonth({ slots, timeZone, locale, hour12, nowUtc });
 
   useEffect(() => {
@@ -269,6 +271,7 @@ export function ManageActions({
             hour12={hour12}
             onHour12Change={setHour12}
             timeZoneControl={<p className="bp-muted bp-small">{zone}</p>}
+            next={nextDay ? { heading: nextDay.heading, onGo: () => goToDay(nextDay.dayKey) } : null}
           />
         }
       />

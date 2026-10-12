@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildMonthGrid,
   monogram,
@@ -127,35 +127,54 @@ export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
  *
  * The panel shares the viewport with the calendar, so an unbounded `<p>` here is
  * a panel of unbounded height: a host who pastes an agenda pushes the duration,
- * the location and the time zone off the fold. Six lines is enough to read what
- * the meeting is (three on a phone, where the panel is a header); the rest is one
- * click away.
+ * the location and the time zone off the fold. Four lines are enough to read
+ * what the meeting is; the rest is one click away.
  *
- * The full text is always in the DOM: the clamp is `-webkit-line-clamp`, which
- * hides overflow visually and leaves it to a screen reader and to the page's own
- * indexing. `whitespace-pre-line` survives so the host's own line breaks do.
- *
- * The toggle renders unconditionally rather than measuring: a measurement would
- * have to run after layout, after webfonts and on every resize, and getting it
- * wrong strands text behind a control that is not there.
+ * "Show more" appears only when the text actually runs past four lines. It is
+ * measured after layout (and again whenever the panel changes width, which is
+ * also when webfonts land), and it starts ABSENT, so the server's HTML and the
+ * first client render agree and a short description never carries a control
+ * that opens nothing. The full text is always in the DOM: the clamp is
+ * `-webkit-line-clamp`, which hides overflow visually and leaves it to a screen
+ * reader and to the page's own indexing. `white-space: pre-line` keeps the
+ * host's own line breaks.
  */
 function EventDescription({ m, description }: { m: BookingMessages; description: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
   const descriptionId = useId();
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || expanded) return;
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, description]);
   return (
     <div className="bp-description">
-      <p id={descriptionId} className="bp-description-text" data-expanded={expanded ? 'true' : undefined}>
+      <p
+        ref={textRef}
+        id={descriptionId}
+        className="bp-description-text"
+        data-expanded={expanded ? 'true' : undefined}
+      >
         {description}
       </p>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={descriptionId}
-        onClick={() => setExpanded((v) => !v)}
-        className="bp-link"
-      >
-        {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
-      </button>
+      {overflows || expanded ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={descriptionId}
+          onClick={() => setExpanded((v) => !v)}
+          className="bp-link"
+        >
+          {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -215,7 +234,8 @@ export function EventPanel({
   locationLabel?: string | null;
   /** Team scheduling method; personal events pass nothing. */
   methodLabel?: string | null;
-  /** The zone the times are shown in, as a person reads it. */
+  /** The HOST's zone, as a person reads it: a fact about them, not a setting.
+   *  The visitor's own zone is the control beside the times. */
   timeZoneLabel: string;
 }) {
   return (
@@ -255,7 +275,7 @@ export function EventPanel({
           <dt className="sr-only">{m.booking.timezone}</dt>
           <dd>
             <GlobeIcon />
-            <span className="bp-fact-text">{timeZoneLabel}</span>
+            <span className="bp-fact-text">{t(m.bookingPage.hostTimeZone, { zone: timeZoneLabel })}</span>
           </dd>
         </div>
 
@@ -468,6 +488,7 @@ export function TimesColumn({
   onHour12Change,
   timeZoneControl,
   titleRef,
+  next,
 }: {
   m: BookingMessages;
   /** "Monday, March 2", or null before any day is chosen. */
@@ -482,6 +503,12 @@ export function TimesColumn({
   onHour12Change: (hour12: boolean) => void;
   timeZoneControl: ReactNode;
   titleRef?: React.Ref<HTMLHeadingElement>;
+  /**
+   * The next day with times, when there is one. The list ends with a quiet way
+   * to it, so a day with two times is a short list that says where to look
+   * next, never a column of empty space or filler.
+   */
+  next?: { heading: string; onGo: () => void } | null;
 }) {
   return (
     <section aria-label={m.bookingPage.timesRegion} className="bp-day bp-times">
@@ -502,6 +529,12 @@ export function TimesColumn({
       ) : (
         <p className="bp-muted">{emptyText}</p>
       )}
+      {next ? (
+        <button type="button" onClick={next.onGo} className="bp-next-day">
+          <span>{t(m.bookingPage.nextTimes, { day: next.heading })}</span>
+          <ChevronIcon direction="right" />
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -785,7 +818,9 @@ export function MonthCalendar({
   onCursorDay?: (dayKey: string) => void;
 }) {
   const grid: CalendarMonth = useMemo(
-    () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn }),
+    // Six weeks, always: the frame sizes to its content, so every month has to
+    // be the same height or the page would move between months.
+    () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn, minWeeks: 6 }),
     [monthKey, availableDayKeys, todayKey, locale, weekStartsOn],
   );
   const canGoBack = monthKey > minMonthKey;

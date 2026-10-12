@@ -159,9 +159,16 @@ export function buildMonthGrid(
     locale?: string;
     /** 0 = Sunday (default), 1 = Monday. */
     weekStartsOn?: number;
+    /**
+     * Pad the grid with the next month's days up to this many weeks. The
+     * booking page asks for 6 so every month is the same height: the frame
+     * sizes to its content, and a five-week month and a six-week one must not
+     * move the page under the visitor's pointer.
+     */
+    minWeeks?: number;
   },
 ): CalendarMonth {
-  const { availableDayKeys, todayKey, locale = 'en-US', weekStartsOn = 0 } = options;
+  const { availableDayKeys, todayKey, locale = 'en-US', weekStartsOn = 0, minWeeks = 0 } = options;
   const available = availableDayKeys instanceof Set ? availableDayKeys : new Set(availableDayKeys);
 
   const [year, month] = monthKey.split('-').map(Number);
@@ -171,7 +178,7 @@ export function buildMonthGrid(
   // How many trailing days of the previous month the first row has to borrow.
   const lead = (firstWeekday - weekStartsOn + 7) % 7;
   // Whole weeks only, so every row has seven cells and the grid never ragged-ends.
-  const cellCount = Math.ceil((lead + daysInMonth) / 7) * 7;
+  const cellCount = Math.max(Math.ceil((lead + daysInMonth) / 7), minWeeks) * 7;
 
   // One formatter for the whole grid. Constructing an `Intl.DateTimeFormat`
   // per cell costs 42 of them on every render — every day pick, every month

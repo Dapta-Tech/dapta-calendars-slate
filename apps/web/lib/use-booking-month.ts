@@ -93,6 +93,22 @@ export function useBookingMonth({
 
   const dayColumn = selectedDay ? (dayMap.get(selectedDay) ?? null) : null;
 
+  /**
+   * The first day after the one on screen that has times, in any month. A
+   * short day ends its list with a quiet way to it rather than with empty
+   * space (or filler) under three chips.
+   */
+  const nextDay = useMemo(() => {
+    if (!selectedDay) return null;
+    return days.find((d) => d.dayKey > selectedDay) ?? null;
+  }, [days, selectedDay]);
+
+  /** Show a given day: its month, and that day's times. */
+  const goToDay = (dayKey: string) => {
+    setNavMonth(monthKeyOf(dayKey));
+    setPickedDay(dayKey);
+  };
+
   return {
     days,
     availableDayKeys,
@@ -104,5 +120,7 @@ export function useBookingMonth({
     selectedDay,
     setPickedDay,
     dayColumn,
+    nextDay,
+    goToDay,
   };
 }

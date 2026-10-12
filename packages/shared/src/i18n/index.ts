@@ -133,6 +133,15 @@ export interface BookingMessages {
     addToCalendar: string;
     /** The unit beside a duration set as a figure on the profile ("30 min"). */
     minutesUnit: string;
+    /** The zone picker's sticky group labels: the zone the times are shown in,
+     *  the visitor's own zone when it differs, then every zone. */
+    zoneCurrent: string;
+    zoneLocal: string;
+    zoneAll: string;
+    /** The event panel's time zone fact: the HOST's zone, said as theirs. */
+    hostTimeZone: string;
+    /** The quiet link under a short day's times: "Next day with times: Tue, Oct 13". */
+    nextTimes: string;
   };
   manage: {
     title: string;
@@ -1314,6 +1323,11 @@ export const en: BookingMessages = {
     who: 'With',
     addToCalendar: 'Add to calendar',
     minutesUnit: 'min',
+    zoneCurrent: 'Showing times in',
+    zoneLocal: 'Your time zone',
+    zoneAll: 'All time zones',
+    hostTimeZone: "{zone}, the host's time",
+    nextTimes: 'Next day with times: {day}',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2357,6 +2371,11 @@ export const es: BookingMessages = {
     who: 'Con',
     addToCalendar: 'Añadir al calendario',
     minutesUnit: 'min',
+    zoneCurrent: 'Horarios mostrados en',
+    zoneLocal: 'Tu zona horaria',
+    zoneAll: 'Todas las zonas horarias',
+    hostTimeZone: '{zone}, hora del anfitrión',
+    nextTimes: 'Siguiente día con horarios: {day}',
   },
   scheduling: {
     round_robin: 'Por turnos',

@@ -34,7 +34,7 @@ import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[h
 import { classifyBookingFailure } from '@/lib/booking-failure';
 import { type BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
-import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
@@ -276,6 +276,8 @@ export function BookingFlow({
     selectedDay,
     setPickedDay,
     dayColumn,
+    nextDay,
+    goToDay,
   } = useBookingMonth({ slots, timeZone, locale, hour12, nowUtc });
   const locationLabel = formatLocation(location ?? null, messages);
   const weekStartsOn = weekStartsOnFor(locale);
@@ -556,18 +558,10 @@ export function BookingFlow({
     // Themed combobox, not the native <select>: the OS popup for ~400 zones is
     // un-brandable and covers the screen (QA2 fix 1). Quiet here, a line of
     // text with a chevron, because it is a setting most visitors never touch;
-    // on a phone its list opens over a dimmed page.
+    // on a phone its list rises as a sheet over a dimmed page. Drawn by the
+    // `bp-*` contract (`ZonePicker`), never by the admin's `Select`.
     <div className="bp-tz">
-      <TimeZoneSelect
-        id="tz"
-        value={timeZone}
-        onChange={setTimeZone}
-        locale={locale}
-        ariaLabel={m.timezone}
-        className="bp-tz-trigger"
-        panelClassName="bp-tz-panel"
-        backdrop
-      />
+      <ZonePicker id="tz" value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
     </div>
   );
 
@@ -582,7 +576,9 @@ export function BookingFlow({
       location={location}
       locationLabel={locationLabel}
       methodLabel={methodLabel}
-      timeZoneLabel={timeZoneLabel}
+      // The HOST's zone, which the page opened in: a fact about them that does
+      // not move when the visitor reads the times in their own zone.
+      timeZoneLabel={readableZone(initialTimeZone)}
     />
   );
 
@@ -829,6 +825,7 @@ export function BookingFlow({
           onHour12Change={setHour12}
           timeZoneControl={timeZoneControl}
           titleRef={timesTitleRef}
+          next={nextDay ? { heading: nextDay.heading, onGo: () => goToDay(nextDay.dayKey) } : null}
         />
       }
     />,
