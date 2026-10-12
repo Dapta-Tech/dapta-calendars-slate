@@ -4,7 +4,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { getAccountByCode, getMember } from './repository';
 import { updateBranding } from './parity';
-import { getBrandBackupState, revertBranding, snapshotBranding } from './brand-backup';
+import { applyLook, getBrandBackupState, revertBranding, snapshotBranding } from './brand-backup';
 
 /**
  * Apply a look, then revert it: the stored branding comes back byte for byte.
@@ -102,5 +102,18 @@ describe('booking page look: apply and revert (SQLite in-memory)', () => {
     expect(style.template).toBe('classic');
     expect(style.theme).toBeUndefined();
     expect(style.bio).toBe('New words.');
+  });
+
+  it('applies a look and its backup in one write, and nothing when there is nothing to write', async () => {
+    const before = await raw();
+    expect(await applyLook(db, memberId, 'new-look', () => null)).toBe(false);
+    expect(await raw()).toEqual(before);
+    expect(await getBrandBackupState(db, memberId)).toBeNull();
+
+    expect(await applyLook(db, memberId, 'new-look', () => NEW_LOOK)).toBe(true);
+    expect((await raw())!.brand_color).toBe('#1a1a1c');
+    expect((await getBrandBackupState(db, memberId))?.source).toBe('new-look');
+    await revertBranding(db, memberId);
+    expect(await raw()).toEqual({ ...before, brand_backup: null });
   });
 });

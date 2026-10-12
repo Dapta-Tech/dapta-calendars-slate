@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { updateBranding } from './parity';
-import { getBrandBackupState, revertBranding, snapshotBranding } from './brand-backup';
+import { applyLook, getBrandBackupState, revertBranding, snapshotBranding } from './brand-backup';
 
 /**
  * Apply then revert against a REAL Postgres. The SQLite twin
@@ -73,5 +73,24 @@ describePg('booking page look: apply and revert (real Postgres)', () => {
     const cleared = await raw();
     expect(cleared!.brand_color).toBeNull();
     expect(cleared!.booking_page_style).toBeNull();
+  });
+
+  // The review's race: a revert landing between an apply's backup and its
+  // write. With the row locked for the whole read-decide-write, whatever order
+  // they run in, a live look other than the host's own always has a backup.
+  it('never leaves an applied look without its backup when apply and revert race', async () => {
+    await db.run(sql`UPDATE member SET brand_color = '#cbe84f', booking_page_style = NULL,
+                     brand_backup = NULL, brand_applied_at = NULL WHERE id = ${memberId}`);
+    for (let i = 0; i < 20; i++) {
+      await Promise.all([
+        applyLook(db, memberId, 'new-look', () => ({ brandColor: '#1a1a1c', style: { theme: 'light' } })),
+        revertBranding(db, memberId),
+      ]);
+      const r = await db.get<{ brand_color: string | null; brand_backup: unknown }>(
+        sql`SELECT brand_color, brand_backup FROM member WHERE id = ${memberId}`,
+      );
+      if (r!.brand_color === '#1a1a1c') expect(r!.brand_backup).not.toBeNull();
+      await revertBranding(db, memberId);
+    }
   });
 });

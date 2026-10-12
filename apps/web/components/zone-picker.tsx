@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { commonTimeZones, getMessages, readableZone } from '@slate/shared';
+import { commonTimeZones, detectTimeZone, getMessages, readableZone, zoneOffsetLabel } from '@slate/shared';
+import { GlobeIcon } from '@/components/booking-page-parts';
 
 /**
  * The booking page's time zone control: a quiet line of text that opens a
@@ -29,25 +30,6 @@ import { commonTimeZones, getMessages, readableZone } from '@slate/shared';
  *  - type to filter, arrows, Home and End, Enter to choose, Escape to close.
  *    Escape stops there and never closes a dialog behind it.
  */
-
-/** Current UTC offset for a zone, e.g. "GMT-5". Invalid zones omit it. */
-export function zoneOffset(tz: string, at: Date = new Date()): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(at);
-    return parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
-  } catch {
-    return '';
-  }
-}
-
-/** The browser's own zone, or null where it cannot be read. Client only. */
-function browserZone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
-  } catch {
-    return null;
-  }
-}
 
 interface Row {
   zone: string;
@@ -92,13 +74,13 @@ export function ZonePicker({
   // The visitor's zone is read on open, not on render: the server cannot know
   // it, and reading it during render would make the HTML disagree on hydration.
   useEffect(() => {
-    if (open) setLocal(browserZone());
+    if (open) setLocal(detectTimeZone());
   }, [open]);
 
   const groups = useMemo<Group[]>(() => {
     if (!open) return [];
     const now = new Date();
-    const row = (zone: string): Row => ({ zone, label: readableZone(zone), offset: zoneOffset(zone, now) });
+    const row = (zone: string): Row => ({ zone, label: readableZone(zone), offset: zoneOffsetLabel(zone, now) });
     const q = query.trim().toLowerCase();
     const all = commonTimeZones(value);
     if (q) {
@@ -207,9 +189,9 @@ export function ZonePicker({
         onClick={() => (open ? setOpen(false) : openPanel())}
         className="bp-zone-trigger"
       >
-        <GlobeGlyph />
+        <GlobeIcon />
         <span className="bp-zone-name">{readableZone(value)}</span>
-        <span className="bp-zone-offset">{zoneOffset(value)}</span>
+        <span className="bp-zone-offset">{zoneOffsetLabel(value)}</span>
         <svg aria-hidden viewBox="0 0 24 24" className="bp-zone-chevron" data-open={open ? 'true' : undefined}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -284,15 +266,6 @@ export function ZonePicker({
         </>
       ) : null}
     </div>
-  );
-}
-
-function GlobeGlyph() {
-  return (
-    <svg aria-hidden viewBox="0 0 24 24" className="bp-zone-globe">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18" />
-    </svg>
   );
 }
 

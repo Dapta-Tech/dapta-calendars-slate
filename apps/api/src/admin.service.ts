@@ -48,7 +48,7 @@ import {
   updateBranding,
   getBrandBackupState,
   revertBranding,
-  snapshotBranding,
+  applyLook,
   type BrandApplySource,
   updateHandle,
   updateMemberSettings,
@@ -205,7 +205,8 @@ export class AdminService {
     patch: Parameters<typeof updateBranding>[2],
     backupAs?: BrandApplySource,
   ) {
-    if (backupAs) await snapshotBranding(this.db, p.memberId, backupAs);
+    // One transaction: the backup and the write cannot be split by a revert.
+    if (backupAs) return applyLook(this.db, p.memberId, backupAs, () => patch);
     return updateBranding(this.db, p.memberId, patch);
   }
 

@@ -58,6 +58,7 @@ import {
   type OneOffLinkRecord,
 } from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
+import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
 import { enqueueOutbox } from './outbox';
@@ -301,26 +302,11 @@ export async function checkHandleAvailable(
 
 // --- Branding / studio persistence ----------------------------------------
 
-export interface BrandingPatch {
-  displayName?: string | null;
-  avatarUrl?: string | null;
-  coverUrl?: string | null;
-  brandColor?: string | null;
-  layout?: string | null;
-  style?: Record<string, unknown>;
-}
+export type { BrandingPatch } from './branding-sql';
 
 export async function updateBranding(db: Db, memberId: string, patch: BrandingPatch): Promise<boolean> {
-  const sets: ReturnType<typeof sql>[] = [];
-  if ('displayName' in patch) sets.push(sql`display_name = ${patch.displayName ?? null}`);
-  if ('avatarUrl' in patch) sets.push(sql`avatar_url = ${patch.avatarUrl ?? null}`);
-  if ('coverUrl' in patch) sets.push(sql`cover_url = ${patch.coverUrl ?? null}`);
-  if ('brandColor' in patch) sets.push(sql`brand_color = ${patch.brandColor ?? null}`);
-  if ('layout' in patch) sets.push(sql`layout = ${patch.layout ?? null}`);
-  if ('style' in patch) sets.push(sql`booking_page_style = ${jsonParam(db, patch.style ?? null)}`);
-  if (sets.length === 0) return true;
-  const assignments = sets.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
-  await db.run(sql`UPDATE member SET ${assignments} WHERE id = ${memberId}`);
+  const stmt = brandingUpdateSql(db, memberId, patch);
+  if (stmt) await db.run(stmt);
   return true;
 }
 
