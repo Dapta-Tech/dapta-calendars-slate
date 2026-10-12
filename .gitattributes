@@ -8,6 +8,7 @@
 *.gif binary
 *.ico binary
 *.woff binary
+*.ttf binary
 *.woff2 binary
 
 # Lockfile — keep diffs collapsed in reviews

@@ -190,6 +190,10 @@ export interface BookingMessages {
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
+    /** An event page's title, as its link preview says it. */
+    seoEventTitle: string;
+    /** The button drawn on a link preview card. */
+    shareCardCta: string;
   };
   /** Public landing pages — the host profile and the team entry page (#141). */
   landing: {
@@ -1458,7 +1462,9 @@ export const en: BookingMessages = {
     ctaButton: 'Create your free calendar',
     ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
-    seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
+    seoEvent: '{minutes} min with {name}. Pick a time that works for you.',
+    seoEventTitle: '{event} with {name}',
+    shareCardCta: 'Book a time',
   },
   landing: {
     timesIn: 'Times in {timeZone}',
@@ -2559,7 +2565,9 @@ export const es: BookingMessages = {
     ctaButton: 'Crea tu calendario gratis',
     ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
-    seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+    seoEvent: '{minutes} min con {name}. Elige la hora que te funcione.',
+    seoEventTitle: '{event} con {name}',
+    shareCardCta: 'Reserva una hora',
   },
   landing: {
     timesIn: 'Horarios en {timeZone}',
