@@ -30,6 +30,13 @@
  *   - On PATCH (a reschedule) return `meetingUrl` only if the room actually
  *     changed. Returning `null` is the right answer for a backend that keeps the
  *     same room across a move: a null NEVER overwrites the stored URL.
+ *
+ * GUESTS (both POST and PATCH). `attendeeEmails` lists the ORGANIZER FIRST
+ * (`organizerEmail`, the owner of the calendar being written), then the
+ * invitee(s), then any co-hosts, each address once. Add them all as attendees,
+ * in that order, so the event shows the host in its guest list; do not send an
+ * invitation to the address that owns the calendar you are writing to (the
+ * organizer on their destination, the co-host on theirs).
  *   DELETE /v1/connections/:ref/events/:externalEventId  → 204
  *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,avatarUrl?,isPrimary?}] }
  *   GET    /v1/connections/:ref                          → { ok, detail }

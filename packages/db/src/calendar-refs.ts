@@ -243,10 +243,22 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     }
   }
 
-  // On multi-host bookings the co-hosts join the invite as attendees (the
-  // organizer is the booking's primary host, so exclude their email).
-  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e && e !== b.host_email);
-  const attendeeEmails = [...new Set([...attendees.map((a) => a.email), ...coHostEmails])].filter(Boolean);
+  // The guest list, ORGANIZER FIRST, then the invitee(s), then any co-hosts,
+  // each address once (compared without case). The organizer is on the list so
+  // the event shows them as the host in their own calendar and in the guest's
+  // (Google lists the organizer among the guests only when the address is also
+  // an attendee); the calendar that writes the event belongs to the organizer,
+  // and neither Google nor Microsoft sends an invitation to the calendar's own
+  // owner, so this adds no invite. Co-hosts' destinations get the same list.
+  const coHostEmails = coHosts.map((h) => h.email).filter((e): e is string => !!e);
+  const attendeeEmails: string[] = [];
+  const seen = new Set<string>();
+  for (const email of [b.host_email, ...attendees.map((a) => a.email), ...coHostEmails]) {
+    const key = email?.trim().toLowerCase();
+    if (!email || !key || seen.has(key)) continue;
+    seen.add(key);
+    attendeeEmails.push(email);
+  }
 
   return {
     bookingId: b.id,
