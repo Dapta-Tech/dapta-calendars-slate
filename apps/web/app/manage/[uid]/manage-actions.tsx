@@ -40,6 +40,7 @@ function tokenFromUrl(url: string): string | null {
  */
 export function ManageActions({
   uid,
+  canReschedule = true,
   token: initialToken,
   slots,
   timeZone,
@@ -50,6 +51,8 @@ export function ManageActions({
   nowUtc,
 }: {
   uid: string;
+  /** False for a request still waiting on the host: it can only be withdrawn. */
+  canReschedule?: boolean;
   token: string;
   slots: Slot[];
   /** The attendee's zone: the times are offered in the clock they booked in. */
@@ -131,7 +134,7 @@ export function ManageActions({
   if (cancelRes?.ok) {
     return (
       <BookingStage m={messages} step="done">
-        {notice(m.cancelled)}
+        {notice(canReschedule ? m.cancelled : m.requestCancelled)}
       </BookingStage>
     );
   }
@@ -155,7 +158,7 @@ export function ManageActions({
       <input type="hidden" name="uid" value={uid} />
       <input type="hidden" name="token" value={token} />
       <label className="bp-field" htmlFor="reason">
-        <span className="bp-label">{m.cancelThis}</span>
+        <span className="bp-label">{canReschedule ? m.cancelThis : m.cancelThisRequest}</span>
         <input id="reason" name="reason" placeholder={m.cancelReason} className="bp-input" />
       </label>
       {cancelRes && !cancelRes.ok ? (
@@ -164,10 +167,25 @@ export function ManageActions({
         </p>
       ) : null}
       <button type="submit" disabled={cancelPending} className="bp-btn-outline bp-cta bp-danger">
-        {cancelPending ? m.cancelling : m.cancel}
+        {cancelPending ? m.cancelling : canReschedule ? m.cancel : m.cancelRequest}
       </button>
     </form>
   );
+
+  // A request still waiting on the host: the booking and the way to withdraw
+  // it, and no calendar, since a new time would be a new request.
+  if (!canReschedule) {
+    return (
+      <BookingStage m={messages} step="done">
+        <section className="bp-card bp-notice">
+          <div className="bp-manage-panel">
+            {summary}
+            {cancel}
+          </div>
+        </section>
+      </BookingStage>
+    );
+  }
 
   const panel = (
     <div className="bp-manage-panel">
