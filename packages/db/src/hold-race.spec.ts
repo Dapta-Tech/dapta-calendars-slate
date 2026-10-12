@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
@@ -93,5 +93,49 @@ describe.each(engines)('reserveSlot under concurrency (%s)', (_name, url) => {
           WHERE m.handle = ${handle} AND s.release_at_ms > ${Date.now()}`,
     );
     expect(Number(active?.n)).toBe(10);
+  });
+});
+
+/**
+ * A hold lasts ten minutes and then lets go on its own: the time is offered
+ * again and a second visitor can hold it. Only `Date` is faked; the database
+ * runs for real.
+ */
+describe('a hold expires after ten minutes', () => {
+  let db: Db;
+
+  beforeAll(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+  });
+  afterAll(async () => {
+    vi.useRealTimers();
+    if (db) await db.close();
+  });
+
+  it('is offered again at 10:01, and not at 9:59', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = Date.now();
+    const page = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call' };
+    const read = async () => {
+      const a = await getAvailability(db, { ...page, fromMs: t0, toMs: t0 + 10 * 86_400_000 });
+      return (a?.slots ?? []).map((s) => new Date(s.startUtc).getTime());
+    };
+    const [start] = await read();
+    const first = await reserveSlot(db, { ...page, startMs: start! });
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.releaseAtMs - t0).toBe(10 * 60_000);
+    expect(await read()).not.toContain(start);
+
+    vi.setSystemTime(t0 + 9 * 60_000 + 59_000);
+    expect(await read()).not.toContain(start);
+    expect(await reserveSlot(db, { ...page, startMs: start! })).toEqual({ ok: false, reason: 'INVALID_SLOT' });
+
+    vi.setSystemTime(t0 + 10 * 60_000 + 1_000);
+    expect(await read()).toContain(start);
+    const second = await reserveSlot(db, { ...page, startMs: start! });
+    expect(second.ok).toBe(true);
+    vi.useRealTimers();
   });
 });
