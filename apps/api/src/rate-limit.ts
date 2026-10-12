@@ -133,8 +133,23 @@ export function vouchedClient(
   const given = headerOf(req, INTERNAL_SECRET_HEADER);
   if (given === undefined) return { kind: 'none' };
   if (!secretMatches(given, secret)) return { kind: 'forged' };
-  const address = headerOf(req, CLIENT_IP_HEADER)?.trim();
-  return address && isIP(address) !== 0 ? { kind: 'visitor', address } : { kind: 'none' };
+  const address = normalizeAddress(headerOf(req, CLIENT_IP_HEADER) ?? '');
+  return address ? { kind: 'visitor', address } : { kind: 'none' };
+}
+
+/**
+ * One spelling per address, so one visitor is one bucket: an IPv6 zone id
+ * (`fe80::1%eth0`) is dropped, an IPv4-mapped IPv6 address (`::ffff:1.2.3.4`)
+ * becomes the IPv4 address it carries, and IPv6 is lower-cased. Answers null
+ * for anything that is not an IP literal.
+ */
+export function normalizeAddress(raw: string): string | null {
+  let address = raw.trim().toLowerCase();
+  const zone = address.indexOf('%');
+  if (zone !== -1) address = address.slice(0, zone);
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (mapped) address = mapped[1]!;
+  return isIP(address) !== 0 ? address : null;
 }
 
 const FORGED_REPORT_MS = 60_000;

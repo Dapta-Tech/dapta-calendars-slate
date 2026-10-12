@@ -29,8 +29,12 @@ import {
 const SECRET = 'test-secret-'.padEnd(32, 'x');
 const sent: Array<{ url: string; headers: Record<string, string> }> = [];
 
+// The in-cluster API the deployment names explicitly; the secret goes nowhere else.
+const INTERNAL_API = 'http://api.internal.test';
+
 beforeEach(() => {
   sent.length = 0;
+  process.env.API_URL = INTERNAL_API;
   incoming = new Headers({ 'x-forwarded-for': '9.9.9.9, 203.0.113.7' });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     sent.push({ url, headers: { ...(init.headers as Record<string, string>) } });
@@ -41,6 +45,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.INTERNAL_API_SECRET;
   delete process.env.RATE_LIMIT_TRUSTED_PROXY_HOPS;
+  delete process.env.API_URL;
 });
 
 /** Every server-side call the web makes on a visitor's behalf. */
@@ -100,6 +105,17 @@ describe('server-side visitor calls forward the visitor to the API (F1)', () => 
     }
   });
 
+  it('never sends the secret when API_URL is unset (the public NEXT_PUBLIC_API_URL fallback)', async () => {
+    process.env.INTERNAL_API_SECRET = SECRET;
+    delete process.env.API_URL;
+    await everyVisitorCall();
+    expect(sent).toHaveLength(12);
+    for (const call of sent) {
+      expect(call.headers['x-slate-internal'], call.url).toBeUndefined();
+      expect(call.headers['x-slate-client-ip'], call.url).toBeUndefined();
+    }
+  });
+
   it('treats a secret shorter than the API accepts as unset: nothing is forwarded', async () => {
     process.env.INTERNAL_API_SECRET = SECRET.slice(0, 31);
     await everyVisitorCall();
@@ -112,9 +128,11 @@ describe('server-side visitor calls forward the visitor to the API (F1)', () => 
 });
 
 describe('INTERNAL_API_SECRET at web startup', () => {
-  async function startWith(value: string | undefined) {
+  async function startWith(value: string | undefined, apiUrl: string | null = INTERNAL_API) {
     if (value === undefined) delete process.env.INTERNAL_API_SECRET;
     else process.env.INTERNAL_API_SECRET = value;
+    if (apiUrl === null) delete process.env.API_URL;
+    else process.env.API_URL = apiUrl;
     process.env.NEXT_RUNTIME = 'nodejs';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { register } = await import('../instrumentation');
@@ -133,7 +151,14 @@ describe('INTERNAL_API_SECRET at web startup', () => {
     expect(calls[0]).not.toContain(short);
   });
 
-  it('says nothing when it is unset or long enough', async () => {
+  it('warns once when it is set but API_URL is not, without echoing the value', async () => {
+    const calls = await startWith(SECRET, null);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/INTERNAL_API_SECRET is set but API_URL is not/);
+    expect(calls[0]).not.toContain(SECRET);
+  });
+
+  it('says nothing when it is unset, or long enough with API_URL set', async () => {
     expect(await startWith(undefined)).toEqual([]);
     expect(await startWith(SECRET)).toEqual([]);
   });

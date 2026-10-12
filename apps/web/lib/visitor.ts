@@ -20,14 +20,18 @@ function trustedHops(): number {
  * visitor of every booking page shares the web server's rate-limit bucket.
  * With INTERNAL_API_SECRET set (the same value on the API), each call carries
  * the visitor's address beside the secret, and the API counts the visitor.
- * Empty when the secret is unset or too short for the API to accept (the
- * startup warning in instrumentation.ts says so), outside a request, or when
- * the address is not known: the API then keys on the web server, as it always
- * did.
+ * Empty when the secret is unset or too short for the API to accept, when
+ * API_URL is not set explicitly (the startup warning in instrumentation.ts
+ * says so for both), outside a request, or when the address is not known: the
+ * API then keys on the web server, as it always did.
  */
 export async function visitorHeaders(): Promise<Record<string, string>> {
   const secret = internalApiSecret();
-  if (!secret) return {};
+  // Only to an API named explicitly by the server-side API_URL (an in-cluster
+  // or private address). The fallbacks in lib/api.ts (NEXT_PUBLIC_API_URL, the
+  // public API host, or localhost) may cross the internet, and the secret must
+  // never travel there.
+  if (!secret || !process.env.API_URL) return {};
   let xff: string | null;
   try {
     xff = (await headers()).get('x-forwarded-for');

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { NoopRateLimiter, RateLimitGuard, TokenBucketRateLimiter, clientKey, vouchedClient } from './rate-limit';
+import { loadServerEnv } from '@slate/config/env';
+import {
+  NoopRateLimiter,
+  RateLimitGuard,
+  TokenBucketRateLimiter,
+  clientKey,
+  normalizeAddress,
+  vouchedClient,
+} from './rate-limit';
 
 describe('rate limiting (P1-5)', () => {
   it('allows a burst up to capacity, then throttles with a retry hint', () => {
@@ -119,6 +127,44 @@ describe('rate limiting (P1-5)', () => {
         '1 public request(s) carried a wrong internal secret',
         '5 public request(s) carried a wrong internal secret',
       ]);
+    });
+  });
+
+  describe('one spelling per vouched address', () => {
+    it('drops an IPv6 zone id, unwraps IPv4-mapped IPv6, and lower-cases IPv6', () => {
+      expect(normalizeAddress('fe80::1%eth0')).toBe('fe80::1');
+      expect(normalizeAddress('::ffff:203.0.113.7')).toBe('203.0.113.7');
+      expect(normalizeAddress('::FFFF:203.0.113.7')).toBe('203.0.113.7');
+      expect(normalizeAddress(' 2001:DB8::7 ')).toBe('2001:db8::7');
+      expect(normalizeAddress('203.0.113.7')).toBe('203.0.113.7');
+    });
+
+    it('still refuses anything that is not an IP literal', () => {
+      for (const bad of ['', '%eth0', '::ffff:999.1.1.1', 'example.com', '203.0.113.7:443']) {
+        expect(normalizeAddress(bad)).toBeNull();
+      }
+    });
+
+    it('so the mapped and the plain spelling of one visitor share one bucket', () => {
+      const SECRET = 'test-secret-'.padEnd(32, 'x');
+      const as = (ip: string) =>
+        vouchedClient({ headers: { 'x-slate-internal': SECRET, 'x-slate-client-ip': ip } }, SECRET);
+      expect(as('::ffff:203.0.113.7')).toEqual(as('203.0.113.7'));
+      expect(as('fe80::1%eth0')).toEqual(as('FE80::1'));
+    });
+  });
+
+  describe('optional secrets: an empty value means unset', () => {
+    it('INTERNAL_API_SECRET="" boots with the feature off; a short value is still refused', () => {
+      expect(loadServerEnv({ INTERNAL_API_SECRET: '' }).INTERNAL_API_SECRET).toBeUndefined();
+      expect(() => loadServerEnv({ INTERNAL_API_SECRET: 'short' })).toThrow(/INTERNAL_API_SECRET/);
+      const ok = 'test-secret-'.padEnd(32, 'x');
+      expect(loadServerEnv({ INTERNAL_API_SECRET: ok }).INTERNAL_API_SECRET).toBe(ok);
+    });
+
+    it('EMAIL_HTTP_SIGNING_SECRET="" boots too; a short value is still refused', () => {
+      expect(loadServerEnv({ EMAIL_HTTP_SIGNING_SECRET: '' }).EMAIL_HTTP_SIGNING_SECRET).toBeUndefined();
+      expect(() => loadServerEnv({ EMAIL_HTTP_SIGNING_SECRET: 'short' })).toThrow(/EMAIL_HTTP_SIGNING_SECRET/);
     });
   });
 });

@@ -1,13 +1,6 @@
-import 'reflect-metadata';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Controller, Get, Module, Param, UseGuards } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { AddressInfo } from 'node:net';
-import { loadServerEnv } from '@slate/config/env';
 import { CLIENT_IP_HEADER, INTERNAL_SECRET_HEADER, visitorForwardHeaders } from '@slate/shared';
-import { RateLimitGuard, createRateLimiter } from './rate-limit';
-import { ENV, RATE_LIMITER } from './tokens';
+import { startPublicApi, type PublicApiFixture } from './visitor-rate-limit.fixture';
 
 /**
  * QA finding F1: the web app calls the API server side, so every visitor of
@@ -15,47 +8,23 @@ import { ENV, RATE_LIMITER } from './tokens';
  * and shared one bucket. Here 40 visitors open a booking page at once through
  * the web (two API calls each: profile, then availability), with the default
  * limits (burst 60, 1/s). Every request reaches this API from one socket, as
- * every call from the web pod does.
+ * every call from the web pod does. The headers come from the same builder the
+ * web uses; apps/web/lib/visitor-through-api.spec.ts drives the web's own API
+ * client against this fixture end to end.
  */
 // A stand-in, at the 32-character minimum the API accepts.
 const SECRET = 'test-secret-'.padEnd(32, 'x');
 const VISITORS = 40;
 
-@Controller('v1')
-@UseGuards(RateLimitGuard)
-class PublicFixture {
-  @Get('profiles/:accountCode/:handle')
-  profile(@Param('handle') handle: string) {
-    return { handle };
-  }
-
-  @Get('availability')
-  availability() {
-    return { slots: [] };
-  }
-}
-
-let app: NestExpressApplication | undefined;
+let api: PublicApiFixture | undefined;
 afterEach(async () => {
-  await app?.close();
-  app = undefined;
+  await api?.close();
+  api = undefined;
 });
 
 async function startApi(apiEnv: Record<string, string>) {
-  const env = loadServerEnv(apiEnv);
-  @Module({
-    controllers: [PublicFixture],
-    providers: [
-      { provide: ENV, useValue: env },
-      { provide: RATE_LIMITER, useValue: createRateLimiter(env) },
-      RateLimitGuard,
-    ],
-  })
-  class FixtureModule {}
-  app = await NestFactory.create<NestExpressApplication>(FixtureModule, { logger: false });
-  await app.listen(0, '127.0.0.1');
-  const guard = app.get(RateLimitGuard);
-  return { base: `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`, guard };
+  api = await startPublicApi(apiEnv);
+  return api;
 }
 
 /**

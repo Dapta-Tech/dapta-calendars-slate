@@ -16,6 +16,15 @@ const boolish = z
   .transform((v) => v === 'true' || v === '1' || v === 'yes')
   .pipe(z.boolean());
 
+/**
+ * An optional secret where an empty value means unset. Deploy tooling often
+ * renders a missing secret as `NAME=` rather than leaving it out, and a
+ * minimum length would otherwise refuse that empty string and stop the app
+ * from booting, when the documented meaning of "not set" is "feature off".
+ */
+const optionalSecret = (minLength: number) =>
+  z.preprocess((v) => (v === '' ? undefined : v), z.string().min(minLength).optional());
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -48,7 +57,7 @@ export const serverEnvSchema = z.object({
   // Stable non-secret service id and server-only HMAC secret. The secret is
   // loaded from the deployment secret manager and is never transmitted.
   EMAIL_HTTP_CLIENT_ID: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional(),
-  EMAIL_HTTP_SIGNING_SECRET: z.string().min(32).optional(),
+  EMAIL_HTTP_SIGNING_SECRET: optionalSecret(32),
   // DEPRECATED: pre-HMAC static service key. Still read (never-break-env-vars)
   // as a Bearer fallback on the transactional wire; migrate to the pair above.
   EMAIL_HTTP_API_KEY: z.string().optional(),
@@ -226,7 +235,7 @@ export const serverEnvSchema = z.object({
   // beside the secret and the limiter keys on that address. Unset = off. A
   // forwarded address without the matching secret is ignored, so nobody else
   // who can reach the API can mint fresh buckets.
-  INTERNAL_API_SECRET: z.string().min(32).optional(),
+  INTERNAL_API_SECRET: optionalSecret(32),
 
   // One log line per request (method, route template, status, duration, request
   // id, error code, account). JSON when NODE_ENV=production, a human line
