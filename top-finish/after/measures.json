@@ -33,10 +33,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -75,10 +75,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -117,10 +117,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -159,10 +159,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -201,10 +201,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -243,10 +243,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -285,10 +285,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -327,10 +327,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -369,10 +369,10 @@
   "lang": "en",
   "button": {
    "text": "Create your free calendar",
-   "w": 211,
+   "w": 213,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -411,10 +411,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -453,10 +453,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
@@ -495,10 +495,10 @@
   "lang": "es",
   "button": {
    "text": "Crea tu calendario gratis",
-   "w": 204,
+   "w": 206,
    "h": 44,
    "overflow": false,
-   "cls": "bp-btn bp-growth-btn"
+   "cls": "bp-btn-outline bp-growth-btn"
   },
   "lineRows": 1,
   "docOverflow": false
