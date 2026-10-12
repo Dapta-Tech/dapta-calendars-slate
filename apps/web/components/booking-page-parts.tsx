@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildMonthGrid,
-  monogram,
+  initials,
   shiftMonth,
   t,
   type BookingMessages,
@@ -179,7 +179,12 @@ function EventDescription({ m, description }: { m: BookingMessages; description:
   );
 }
 
-/** The host's photo, or the monogram tile the profile page and the studio draw. */
+/**
+ * The host's photo, or their monogram: two initials ("RC" for Riley Chen) in
+ * the accent as ink on a tint of it, shaped by the `corners` axis (a square, a
+ * softened square or a disc). The profile page, the event panel and the studio
+ * all draw this one.
+ */
 export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUrl?: string | null }) {
   return avatarUrl ? (
     // Intrinsic size given so the row does not reflow when the image lands. Not
@@ -197,7 +202,7 @@ export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUr
     />
   ) : (
     <div aria-hidden className="bp-avatar bp-avatar-monogram">
-      {monogram(hostName)}
+      {initials(hostName)}
     </div>
   );
 }
@@ -715,12 +720,15 @@ export function BookingSummary({
 // --- The free-calendar call to action ----------------------------------------
 
 /**
- * What this page runs on, and a real way to get one: a quiet line, then one
- * button. Under a confirmation and at the foot of a profile, below the content
- * it must not compete with, never inside the booking's own card. The button is
- * the page's own primary (`bp-btn`, so the host's accent and the `buttons`
- * axis), sized to its words rather than to the column, the restraint of the
- * sibling product's done screen.
+ * What this page runs on, and a real way to get one: one short line, then one
+ * button. The SAME block under a confirmation, at the foot of a profile and at
+ * the foot of a team landing, below the content it must not compete with and
+ * never inside the booking's own card. The button takes the host's accent and
+ * the `buttons` axis, sized to its words rather than to the column: the page's
+ * own primary (`bp-btn`) on the profile and the team landing, and the outline
+ * variant (`quiet`) under a confirmation, whose one primary is "Add to
+ * calendar" (R30: one primary per screen). The line names the product once;
+ * the "Made with" badge under it is the only other mention on the page.
  *
  * Rendered only when the deployment configures a signup destination
  * (`signupHref`); the callers pass nothing otherwise and the page is exactly
@@ -733,8 +741,7 @@ export function GrowthCta({
 }: {
   m: BookingMessages;
   href: string;
-  /** An outline button, for a step that already has its primary action (the
-   *  confirmation's "Add to calendar"): one primary per step (R30). */
+  /** The outline variant, for a screen that already has its primary. */
   quiet?: boolean;
 }) {
   return (

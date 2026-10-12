@@ -180,7 +180,8 @@ export interface BookingMessages {
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
-    /** The quiet line above the free-calendar button: what this page runs on. */
+    /** The one short line above the free-calendar button. It names the product
+     *  once; the "Made with" badge below is the only other mention. */
     ctaLine: string;
     /** The button under a confirmation and at the foot of a profile. */
     ctaButton: string;
@@ -189,6 +190,10 @@ export interface BookingMessages {
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
+    /** An event page's title, as its link preview says it. */
+    seoEventTitle: string;
+    /** The button drawn on a link preview card. */
+    shareCardCta: string;
   };
   /** Public landing pages — the host profile and the team entry page (#141). */
   landing: {
@@ -1144,6 +1149,10 @@ export interface BookingMessages {
        *  account has one — so the host knows where the face on their page comes
        *  from, and that uploading their own replaces it. */
       photoFromConnectedAccount: string;
+      /** The host removed the connected account's photo from their page. */
+      connectedPhotoHidden: string;
+      removeConnectedPhoto: string;
+      useConnectedPhoto: string;
       coverImage: string;
       custom: string;
       customizeAppearance: string;
@@ -1449,11 +1458,13 @@ export const en: BookingMessages = {
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
-    ctaLine: 'This page runs on Dapta Calendars, free for anyone.',
+    ctaLine: 'Dapta Calendars is free for anyone.',
     ctaButton: 'Create your free calendar',
     ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
-    seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
+    seoEvent: '{minutes} min with {name}. Pick a time that works for you.',
+    seoEventTitle: '{event} with {name}',
+    shareCardCta: 'Book a time',
   },
   landing: {
     timesIn: 'Times in {timeZone}',
@@ -2288,7 +2299,10 @@ export const en: BookingMessages = {
         'Low contrast: {ratio}:1 against your page background. Links and buttons may be hard to read. Your color is used exactly as picked.',
       photoAvatar: 'Photo / avatar',
       photoFromConnectedAccount:
-        'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
+        'Your page shows the photo from your connected calendar. Upload one to use your own.',
+      connectedPhotoHidden: 'The photo from your connected calendar is off. Your page shows your initials.',
+      removeConnectedPhoto: 'Remove',
+      useConnectedPhoto: 'Use it again',
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
@@ -2547,11 +2561,13 @@ export const es: BookingMessages = {
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
-    ctaLine: 'Esta página funciona con Dapta Calendars, gratis para cualquiera.',
+    ctaLine: 'Dapta Calendars es gratis para todos.',
     ctaButton: 'Crea tu calendario gratis',
     ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
-    seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+    seoEvent: '{minutes} min con {name}. Elige la hora que te funcione.',
+    seoEventTitle: '{event} con {name}',
+    shareCardCta: 'Reserva una hora',
   },
   landing: {
     timesIn: 'Horarios en {timeZone}',
@@ -3388,7 +3404,10 @@ export const es: BookingMessages = {
         'Contraste bajo: {ratio}:1 sobre el fondo de tu página. Los enlaces y botones pueden ser difíciles de leer. Tu color se usa tal como lo elegiste.',
       photoAvatar: 'Foto / avatar',
       photoFromConnectedAccount:
-        'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
+        'Tu página muestra la foto de tu calendario conectado. Sube una para usar la tuya.',
+      connectedPhotoHidden: 'La foto de tu calendario conectado está desactivada. Tu página muestra tus iniciales.',
+      removeConnectedPhoto: 'Quitar',
+      useConnectedPhoto: 'Usarla de nuevo',
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',

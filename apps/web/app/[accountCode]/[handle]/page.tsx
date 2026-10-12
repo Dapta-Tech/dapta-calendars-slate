@@ -8,7 +8,7 @@ import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
-import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
+import { resolveAvatarUrl } from '@/lib/avatar';
 import { landingTarget, wantsProfile } from '@/lib/landing';
 import { signupHref } from '@/lib/growth';
 import { GrowthCta } from '@/components/booking-page-parts';
@@ -22,7 +22,9 @@ import {
 } from '@/lib/embed';
 
 // Per-page SEO/OG from host data (R11 audit). getProfile is request-cached, so
-// this shares the page's fetch. Only public profile fields are used.
+// this shares the page's fetch. Only public profile fields are used. The image
+// is `opengraph-image.tsx` beside this file (the host's own card), so no
+// `images` here: an explicit list would replace it.
 export async function generateMetadata({
   params,
   searchParams,
@@ -37,13 +39,14 @@ export async function generateMetadata({
   const name = profile.member.displayName ?? profile.member.handle;
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
   const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
-  const title = `${name} — ${profile.account.name}`;
-  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
+  // The card's headline is the name; the account rides along only when it says
+  // something the name does not.
+  const title = profile.account.name && profile.account.name !== name ? `${name} · ${profile.account.name}` : name;
   return {
     title,
     description,
-    openGraph: { title, description, type: 'profile', images },
-    twitter: { card: 'summary', title, description, images },
+    openGraph: { title, description, type: 'profile' },
+    twitter: { card: 'summary_large_image', title, description },
     // An embedded URL is this same page with different chrome — never a second
     // indexable copy of it.
     ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),

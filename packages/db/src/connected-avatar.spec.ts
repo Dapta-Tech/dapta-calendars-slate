@@ -3,7 +3,7 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { getAccountByCode, getMember, getPublicProfile } from './repository';
-import { createConnection, setConnectionAvatar } from './parity';
+import { createConnection, listConnections, setConnectionAvatar, updateBranding } from './parity';
 
 /**
  * The avatar precedence the public page draws through.
@@ -82,6 +82,28 @@ describe('connected-account avatar (SQLite in-memory)', () => {
     await setConnectionAvatar(db, 'some-other-account', memberId, 'conn-A', 'https://cdn.example.test/theirs.jpg');
     const profile = await getPublicProfile(db, 'acme', 'alex-rivera');
     expect(profile!.member.connectedAvatarUrl).toBe('https://cdn.example.test/mine.jpg');
+  });
+
+  it('is withheld from the public page once the host removed it, and offered back to the host', async () => {
+    await connect('conn-A', 'https://cdn.example.test/a.jpg', true);
+    await updateBranding(db, memberId, { style: { hideConnectedPhoto: true } });
+    const profile = await getPublicProfile(db, 'acme', 'alex-rivera');
+    // The URL never reaches the public response; the page draws the monogram.
+    expect(profile!.member.connectedAvatarUrl).toBeNull();
+    expect(profile!.member.style).toEqual({ hideConnectedPhoto: true });
+    // The host's own list still carries it, so the studio can bring it back.
+    const mine = await listConnections(db, memberId);
+    expect(mine.map((c) => c.avatarUrl)).toEqual(['https://cdn.example.test/a.jpg']);
+  });
+
+  it('removing the connected photo never touches an uploaded one', async () => {
+    await connect('conn-A', 'https://cdn.example.test/a.jpg', true);
+    await updateBranding(db, memberId, {
+      avatarUrl: 'https://cdn.example.test/mine.png',
+      style: { hideConnectedPhoto: true },
+    });
+    const profile = await getPublicProfile(db, 'acme', 'alex-rivera');
+    expect(profile!.member.avatarUrl).toBe('https://cdn.example.test/mine.png');
   });
 
   it('never writes the synced photo onto the member', async () => {

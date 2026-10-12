@@ -9,7 +9,7 @@ import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
-import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
+import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
 import {
   EMBED_ROOT_CLASS,
@@ -37,20 +37,23 @@ export async function generateMetadata({
   const event = profile?.eventTypes.find((e) => e.slug === slug);
   if (!profile || !event) return {};
   const name = profile.member.displayName ?? profile.member.handle;
-  const title = `${event.title} — ${name}`;
+  // Title and description say what the card says: the event, the host, the
+  // length. The image is `opengraph-image.tsx` beside this file, so no
+  // `images` here: an explicit list would replace the host's card.
+  const growth = getMessages(await publicLocale(lang)).growth;
+  const title = t(growth.seoEventTitle, { event: event.title, name });
   const description =
     event.description ||
-    t(getMessages(await publicLocale(lang)).growth.seoEvent, {
+    t(growth.seoEvent, {
       event: event.title,
       name,
       minutes: event.lengthMinutes,
     });
-  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
   return {
     title,
     description,
-    openGraph: { title, description, type: 'website', images },
-    twitter: { card: 'summary', title, description, images },
+    openGraph: { title, description, type: 'website' },
+    twitter: { card: 'summary_large_image', title, description },
     // An embedded URL is this same page with different chrome. Left indexable
     // it becomes a second copy of the host's booking page in search results,
     // reachable from any snippet's `src`.

@@ -423,6 +423,8 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /** The connected account's photo; absent on an older API. */
+  avatarUrl?: string | null;
   /**
    * Display name for the conferencing this deployment mints, injected at
    * runtime (ADR 0008). Null on a bare fork ⇒ the editor shows generic wording.

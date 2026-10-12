@@ -1,4 +1,5 @@
 import { adminApi } from '@/lib/admin-api';
+import { connectedPhotoOf } from '@/lib/avatar';
 import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const [profile, adminEvents, locale, vanity, lookState, kit] = await Promise.all([
+  const [profile, adminEvents, locale, vanity, lookState, kit, connections] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
     adminApi.listEventTypes(),
     getLocale(),
@@ -20,6 +21,9 @@ export default async function BookingPageSettings() {
     adminApi.bookingPageState().catch(() => ({ backup: null })),
     // Same rule: a failed read costs "Apply brand kit", never the studio.
     adminApi.getBrandKit().catch(() => ({ config: null, updatedAt: null })),
+    // Only for the connected photo: a studio that cannot list connections still
+    // opens, it just has no photo to offer.
+    adminApi.listConnections().catch(() => []),
   ]);
   const msgs = getMessages(locale);
   const t = msgs.admin;
@@ -77,8 +81,10 @@ export default async function BookingPageSettings() {
         avatarUrl={profile?.member.avatarUrl ?? ''}
         // The preview's fallback, NOT the input's value: the field stays the
         // host's own choice, and the preview still draws what the live page
-        // draws when that choice is empty.
-        connectedAvatarUrl={profile?.member.connectedAvatarUrl ?? ''}
+        // draws when that choice is empty. From the host's own connections, so
+        // it is still known after the host removed it from the page.
+        connectedAvatarUrl={connectedPhotoOf(connections) ?? profile?.member.connectedAvatarUrl ?? ''}
+        hideConnectedPhoto={style.hideConnectedPhoto === true}
         coverUrl={profile?.member.coverUrl ?? ''}
         accent={accent}
         axes={axes}
