@@ -163,6 +163,10 @@ export interface BookingMessages {
     statusCancelled: string;
     statusRejected: string;
     cancelThis: string;
+    /** The pending-request variants: the host has not confirmed it yet. */
+    cancelThisRequest: string;
+    cancelRequest: string;
+    requestCancelled: string;
     noOpenTimes: string;
     joinMeeting: string;
     /** Appended to the join link for screen readers. It opens in a new tab, and
@@ -1439,6 +1443,9 @@ export const en: BookingMessages = {
     statusCancelled: 'cancelled',
     statusRejected: 'rejected',
     cancelThis: 'Cancel this booking',
+    cancelThisRequest: 'Cancel this request',
+    cancelRequest: 'Cancel request',
+    requestCancelled: 'Your request has been cancelled.',
     noOpenTimes: 'No open times in the next 3 weeks.',
     joinMeeting: 'Join the meeting',
     joinMeetingOpensNewTab: ' (opens in a new tab)',
@@ -2537,6 +2544,9 @@ export const es: BookingMessages = {
     statusCancelled: 'cancelada',
     statusRejected: 'rechazada',
     cancelThis: 'Cancelar esta reserva',
+    cancelThisRequest: 'Cancelar esta solicitud',
+    cancelRequest: 'Cancelar solicitud',
+    requestCancelled: 'Tu solicitud fue cancelada.',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     joinMeeting: 'Unirse a la reunión',
     joinMeetingOpensNewTab: ' (se abre en una pestaña nueva)',
