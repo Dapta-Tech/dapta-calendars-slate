@@ -1145,6 +1145,10 @@ export interface BookingMessages {
        *  account has one — so the host knows where the face on their page comes
        *  from, and that uploading their own replaces it. */
       photoFromConnectedAccount: string;
+      /** The host removed the connected account's photo from their page. */
+      connectedPhotoHidden: string;
+      removeConnectedPhoto: string;
+      useConnectedPhoto: string;
       coverImage: string;
       custom: string;
       customizeAppearance: string;
@@ -2289,7 +2293,10 @@ export const en: BookingMessages = {
         'Low contrast: {ratio}:1 against your page background. Links and buttons may be hard to read. Your color is used exactly as picked.',
       photoAvatar: 'Photo / avatar',
       photoFromConnectedAccount:
-        'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
+        'Your page shows the photo from your connected calendar. Upload one to use your own.',
+      connectedPhotoHidden: 'The photo from your connected calendar is off. Your page shows your initials.',
+      removeConnectedPhoto: 'Remove',
+      useConnectedPhoto: 'Use it again',
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
@@ -3389,7 +3396,10 @@ export const es: BookingMessages = {
         'Contraste bajo: {ratio}:1 sobre el fondo de tu página. Los enlaces y botones pueden ser difíciles de leer. Tu color se usa tal como lo elegiste.',
       photoAvatar: 'Foto / avatar',
       photoFromConnectedAccount:
-        'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
+        'Tu página muestra la foto de tu calendario conectado. Sube una para usar la tuya.',
+      connectedPhotoHidden: 'La foto de tu calendario conectado está desactivada. Tu página muestra tus iniciales.',
+      removeConnectedPhoto: 'Quitar',
+      useConnectedPhoto: 'Usarla de nuevo',
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',

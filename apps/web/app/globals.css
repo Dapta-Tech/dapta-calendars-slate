@@ -824,14 +824,21 @@ body {
   border-radius: 9999px;
   object-fit: cover;
 }
+/* The monogram is a mark, not a placeholder: the accent as ink on a tint of
+   itself, its shape from the `corners` axis (`--bp-avatar-radius`). The ink is
+   the accent pulled a third of the way to the page's own text colour, so a pale
+   accent still reads on its tint on either canvas while keeping its hue. */
 .branded-surface .bp-avatar-monogram {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--bp-radius);
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border-radius: var(--bp-avatar-radius, 50%);
+  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--accent) 66%, var(--foreground));
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 .branded-surface .bp-host-name {
   min-width: 0;

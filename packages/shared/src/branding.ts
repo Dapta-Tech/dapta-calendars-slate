@@ -407,10 +407,15 @@ export const DEFAULT_SLOT_SELECT: BookingSlotSelect = 'soft';
  */
 export const DEFAULT_BOOKING_THEME: BrandCanvas = 'dark';
 
-const CORNER_RADII: Record<BookingCorners, { card: string; sm: string }> = {
-  sharp: { card: '4px', sm: '3px' },
-  soft: { card: '16px', sm: '8px' },
-  round: { card: '28px', sm: '16px' },
+/**
+ * `avatar` is the monogram tile's shape, as a share of its own size so the
+ * 44px panel tile and the 72px profile tile keep one shape: a square on
+ * `sharp`, a softened square on `soft`, a disc on `round`.
+ */
+const CORNER_RADII: Record<BookingCorners, { card: string; sm: string; avatar: string }> = {
+  sharp: { card: '4px', sm: '3px', avatar: '12%' },
+  soft: { card: '16px', sm: '8px', avatar: '30%' },
+  round: { card: '28px', sm: '16px', avatar: '50%' },
 };
 
 const BUTTON_RADII: Record<BookingButtons, string> = {
@@ -456,6 +461,7 @@ export function widgetStyleVars(b: Partial<WidgetAxes>): Record<string, string> 
   return {
     '--bp-radius': corners.card,
     '--bp-radius-sm': corners.sm,
+    '--bp-avatar-radius': corners.avatar,
     '--bp-btn-radius': BUTTON_RADII[b.buttons ?? DEFAULT_BUTTONS],
     '--bp-pad': density.pad,
     '--bp-gap': density.gap,
@@ -563,6 +569,24 @@ export function withNewHostBranding(
 
 export function monogram(name: string): string {
   return (name.trim().charAt(0) || '?').toUpperCase();
+}
+
+/**
+ * The booking page's monogram: the first letter of the first and of the last
+ * word ("Riley Chen" is "RC"), one letter for a one-word name, "?" for none.
+ * Letters are taken as code points, so a name that starts with an accented or
+ * astral character keeps it whole. Words that start with no letter or digit
+ * (a stray "-" or "(") are skipped rather than drawn.
+ */
+export function initials(name: string): string {
+  const firsts = name
+    .trim()
+    .split(/\s+/)
+    .map((w) => Array.from(w).find((ch) => /[\p{L}\p{N}]/u.test(ch)))
+    .filter((ch): ch is string => ch !== undefined);
+  if (firsts.length === 0) return '?';
+  const pair = firsts.length === 1 ? [firsts[0]!] : [firsts[0]!, firsts[firsts.length - 1]!];
+  return pair.join('').toLocaleUpperCase();
 }
 
 // --- Theme presets (studio) — set all 9 axes at once; active theme DERIVED ---

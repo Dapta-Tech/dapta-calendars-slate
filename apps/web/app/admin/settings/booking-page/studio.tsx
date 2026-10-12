@@ -122,6 +122,8 @@ export interface StudioInit {
    *  value — the field holds the host's own choice and saving must not turn a
    *  synced URL into a stored one. */
   connectedAvatarUrl: string;
+  /** The host removed that photo from their page: the monogram shows instead. */
+  hideConnectedPhoto?: boolean;
   coverUrl: string;
   accent: string;
   axes: Axes;
@@ -159,11 +161,17 @@ export function Studio(init: StudioInit) {
   const [vanity, setVanity] = useState(init.vanity.vanitySlug ?? '');
   const [bio, setBio] = useState(init.bio);
   const [avatarUrl, setAvatarUrl] = useState(init.avatarUrl);
+  const [hideConnectedPhoto, setHideConnectedPhoto] = useState(init.hideConnectedPhoto ?? false);
   // What the PUBLIC page will draw, through the same helper it uses. The input
   // above stays bound to `avatarUrl`; only the preview resolves the fallback,
   // so a preview showing a letter while the live page shows a face cannot
   // happen and an empty field still saves as empty.
-  const previewAvatarUrl = resolveAvatarUrl(avatarUrl, init.connectedAvatarUrl) ?? '';
+  const previewAvatarUrl =
+    resolveAvatarUrl(avatarUrl, hideConnectedPhoto ? null : init.connectedAvatarUrl) ?? '';
+  // The connected photo exists and the host's own field is empty: the one case
+  // where the studio offers to remove it from the page (or bring it back).
+  const connectedPhoto = resolveAvatarUrl(null, init.connectedAvatarUrl);
+  const offersConnectedPhoto = !avatarUrl.trim() && connectedPhoto !== null;
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
@@ -221,8 +229,8 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder }),
-    [displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder],
+    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, hideConnectedPhoto, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder }),
+    [displayName, handle, vanity, bio, avatarUrl, hideConnectedPhoto, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
@@ -315,6 +323,7 @@ export function Studio(init: StudioInit) {
     setHandle(init.handle);
     setBio(init.bio);
     setAvatarUrl(init.avatarUrl);
+    setHideConnectedPhoto(init.hideConnectedPhoto ?? false);
     setCoverUrl(init.coverUrl);
     setAccent(init.accent);
     setAxes(init.axes);
@@ -359,6 +368,8 @@ export function Studio(init: StudioInit) {
           ...(init.logoUrl ? { logoUrl: init.logoUrl } : {}),
           // Written only when ticked: absent is the automatic behaviour.
           ...(showProfile ? { showProfile: true } : {}),
+          // Same rule: written only when the host removed the connected photo.
+          ...(hideConnectedPhoto ? { hideConnectedPhoto: true } : {}),
         },
         // Applying the new look keeps what is stored now as a one-step backup,
         // so it can be reverted. Only when the look on screen still IS the new
@@ -599,8 +610,30 @@ export function Studio(init: StudioInit) {
                   and a host who never opens this field would otherwise have no
                   idea where the face on their page came from — or that leaving
                   this empty is what keeps it. */}
-              {!avatarUrl.trim() && previewAvatarUrl ? (
-                <p className="text-xs text-muted-foreground">{m.photoFromConnectedAccount}</p>
+              {offersConnectedPhoto ? (
+                <div className="flex flex-wrap items-center gap-inline">
+                  {hideConnectedPhoto ? null : (
+                    <img
+                      src={connectedPhoto ?? undefined}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    />
+                  )}
+                  <p role="status" className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    {hideConnectedPhoto ? m.connectedPhotoHidden : m.photoFromConnectedAccount}
+                  </p>
+                  {/* Never touches the field above: removing the synced photo is
+                      a switch on the page, and an upload still wins over both. */}
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    className="text-xs"
+                    onClick={() => setHideConnectedPhoto((h) => !h)}
+                  >
+                    {hideConnectedPhoto ? m.useConnectedPhoto : m.removeConnectedPhoto}
+                  </Button>
+                </div>
               ) : null}
             </Field>
             <Field label={m.coverImage}>

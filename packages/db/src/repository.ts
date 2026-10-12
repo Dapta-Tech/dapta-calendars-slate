@@ -472,8 +472,11 @@ export async function getPublicProfile(
   // schedules from, so its photo is the one an invitee should recognise. Only
   // fetched when the host set no avatar of their own; their choice wins and
   // there is nothing to fall back to.
+  // A host who removed that photo in the studio gets their monogram, and the
+  // URL never leaves the server: the public response carries null.
+  const style = parseJsonColumn<Record<string, unknown> | null>(member.booking_page_style, null);
   let connectedAvatar: string | null = null;
-  if (!member.avatar_url) {
+  if (!member.avatar_url && style?.hideConnectedPhoto !== true) {
     const avatars = await db.all<{ avatar_url: string | null }>(
       sql`SELECT avatar_url FROM connected_calendar
           WHERE account_id = ${account.id} AND member_id = ${member.id}
@@ -495,7 +498,7 @@ export async function getPublicProfile(
       coverUrl: member.cover_url,
       brandColor: member.brand_color,
       layout: member.layout,
-      style: parseJsonColumn<Record<string, unknown> | null>(member.booking_page_style, null),
+      style,
     },
     eventTypes: rows.map((r) => ({
       slug: r.slug,

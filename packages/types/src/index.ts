@@ -444,6 +444,13 @@ export const bookingPageStyleSchema = z.object({
    * "Always show my profile"; absent means the automatic behaviour.
    */
   showProfile: z.boolean().optional(),
+  /**
+   * The host removed the photo their connected calendar account carries, so
+   * their page draws the monogram instead of that fallback. Written only by the
+   * studio's "Remove" beside that photo; absent means the fallback is used. Has
+   * no effect on a photo the host uploaded, which always wins.
+   */
+  hideConnectedPhoto: z.boolean().optional(),
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 

@@ -53,3 +53,21 @@ export function resolveOgImages(
   const avatar = resolveAvatarUrl(explicit, connected);
   return avatar && HTTP_URL.test(avatar) ? [avatar] : undefined;
 }
+
+/**
+ * The photo the host's connected calendar carries, as the studio offers it to
+ * remove or restore. The same order the public page uses (`getPublicProfile`):
+ * the destination calendar first, the account the host actually schedules
+ * from, then any other connection that has one.
+ *
+ * Read from the host's own connections rather than from the public profile on
+ * purpose: once the host removes the photo, the public profile stops carrying
+ * it, and the studio still has to show what "Use it again" would bring back.
+ */
+export function connectedPhotoOf(
+  connections: ReadonlyArray<{ isDestination: boolean; avatarUrl?: string | null }>,
+): string | null {
+  const withPhoto = connections.filter((c) => resolveAvatarUrl(null, c.avatarUrl));
+  const pick = withPhoto.find((c) => c.isDestination) ?? withPhoto[0];
+  return pick ? resolveAvatarUrl(null, pick.avatarUrl) : null;
+}

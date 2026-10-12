@@ -1849,6 +1849,9 @@ export interface ConnectionView {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /** The connected account's photo, when the backend reported one. Only the
+   *  host's own list carries it (the studio offers to remove or restore it). */
+  avatarUrl: string | null;
 }
 
 export async function listConnections(db: Db, memberId: string): Promise<ConnectionView[]> {
@@ -1862,9 +1865,10 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     last_check_at: number | null;
     last_check_ok: number | null;
     last_check_detail: string | null;
+    avatar_url: string | null;
   }>(
     sql`SELECT id, provider, external_id, primary_email, is_destination, check_conflicts,
-               last_check_at, last_check_ok, last_check_detail
+               last_check_at, last_check_ok, last_check_detail, avatar_url
         FROM connected_calendar WHERE member_id = ${memberId}`,
   );
   return rows.map((r) => ({
@@ -1877,6 +1881,7 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     lastCheckAt: r.last_check_at == null ? null : Number(r.last_check_at),
     lastCheckOk: r.last_check_ok == null ? null : !!r.last_check_ok,
     lastCheckDetail: r.last_check_detail,
+    avatarUrl: r.avatar_url,
   }));
 }
 

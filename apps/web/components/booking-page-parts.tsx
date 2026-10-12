@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildMonthGrid,
-  monogram,
+  initials,
   shiftMonth,
   t,
   type BookingMessages,
@@ -179,7 +179,12 @@ function EventDescription({ m, description }: { m: BookingMessages; description:
   );
 }
 
-/** The host's photo, or the monogram tile the profile page and the studio draw. */
+/**
+ * The host's photo, or their monogram: two initials ("RC" for Riley Chen) in
+ * the accent as ink on a tint of it, shaped by the `corners` axis (a square, a
+ * softened square or a disc). The profile page, the event panel and the studio
+ * all draw this one.
+ */
 export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUrl?: string | null }) {
   return avatarUrl ? (
     // Intrinsic size given so the row does not reflow when the image lands. Not
@@ -197,7 +202,7 @@ export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUr
     />
   ) : (
     <div aria-hidden className="bp-avatar bp-avatar-monogram">
-      {monogram(hostName)}
+      {initials(hostName)}
     </div>
   );
 }
