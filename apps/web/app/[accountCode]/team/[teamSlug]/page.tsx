@@ -8,6 +8,8 @@ import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
+import { GrowthCta } from '@/components/booking-page-parts';
+import { signupHref } from '@/lib/growth';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -70,6 +72,8 @@ export default async function TeamPage({
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
   const kit = teamBranding(team.brand);
 
+  const teamCta = signupHref('profile', code);
+
   return (
     <BrandedShell
       // A team stores no branding: it wears the workspace brand kit directly,
@@ -93,6 +97,7 @@ export default async function TeamPage({
           hrefFor={(slug: string) => withSearchParams(`/${code}/team/${teamSlug}/${slug}`, query)}
           emptyText={msg.landing.noTeamEvents}
           logoUrl={logoOf(kit.style)}
+          footer={teamCta ? <GrowthCta m={msg} href={teamCta} /> : null}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={code} />

@@ -178,8 +178,12 @@ export interface BookingMessages {
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
-    ctaQuestion: string;
-    ctaAction: string;
+    /** The quiet line above the free-calendar button: what this page runs on. */
+    ctaLine: string;
+    /** The button under a confirmation and at the foot of a profile. */
+    ctaButton: string;
+    /** Screen-reader suffix: the button opens a new tab. */
+    ctaOpensNewTab: string;
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
@@ -1190,6 +1194,11 @@ export interface BookingMessages {
       sendVisitorsTo: string;
       chooseEvent: string;
       pickDefaultEvent: string;
+      /** What the host's link does, said as a fact under the landing switch. */
+      linkOpensEvent: string;
+      linkOpensProfile: string;
+      /** The opt-out from "one event type opens it directly". */
+      alwaysShowProfile: string;
       eventHidden: string;
       eventShown: string;
       couldNotUpdateVisibility: string;
@@ -1437,8 +1446,9 @@ export const en: BookingMessages = {
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
-    ctaQuestion: 'Want your own booking page?',
-    ctaAction: 'Get Dapta Calendars free',
+    ctaLine: 'This page runs on Dapta Calendars, free for anyone.',
+    ctaButton: 'Create your free calendar',
+    ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
     seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
   },
@@ -2317,6 +2327,9 @@ export const en: BookingMessages = {
       sendVisitorsTo: 'Send visitors directly to',
       chooseEvent: 'Choose an event…',
       pickDefaultEvent: 'Pick a default event, or keep the landing page on.',
+      linkOpensEvent: 'Your link opens {event} directly.',
+      linkOpensProfile: 'Your link opens your profile.',
+      alwaysShowProfile: 'Always show my profile, even with one event type',
       eventHidden: 'Event hidden.',
       eventShown: 'Event shown.',
       couldNotUpdateVisibility: 'Could not update visibility.',
@@ -2530,8 +2543,9 @@ export const es: BookingMessages = {
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
-    ctaQuestion: '¿Quieres tu propia página de reservas?',
-    ctaAction: 'Consigue Dapta Calendars gratis',
+    ctaLine: 'Esta página funciona con Dapta Calendars, gratis para cualquiera.',
+    ctaButton: 'Crea tu calendario gratis',
+    ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
     seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
   },
@@ -3412,6 +3426,9 @@ export const es: BookingMessages = {
       sendVisitorsTo: 'Enviar a los visitantes directamente a',
       chooseEvent: 'Elige un evento…',
       pickDefaultEvent: 'Elige un evento predeterminado o deja activa la página de inicio.',
+      linkOpensEvent: 'Tu enlace abre {event} directamente.',
+      linkOpensProfile: 'Tu enlace abre tu perfil.',
+      alwaysShowProfile: 'Mostrar siempre mi perfil, aunque tenga un solo tipo de evento',
       eventHidden: 'Evento oculto.',
       eventShown: 'Evento visible.',
       couldNotUpdateVisibility: 'No se pudo actualizar la visibilidad.',

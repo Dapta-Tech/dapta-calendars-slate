@@ -83,6 +83,7 @@ export default async function BookingPageSettings() {
         accent={accent}
         axes={axes}
         landingEnabled={style.landingEnabled !== false}
+        showProfile={style.showProfile === true}
         defaultEventSlug={(style.defaultEventSlug as string) ?? null}
         eventTypes={profile?.eventTypes ?? []}
         accountName={profile?.account.name ?? null}

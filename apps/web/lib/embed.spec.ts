@@ -269,7 +269,7 @@ describe('embedSrcPath / embedSnippet', () => {
  * what the page does rather than how it looks.
  */
 describe('EMBED_STYLE_PARAMS covers the appearance half of the contract', () => {
-  const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio'];
+  const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio', 'showProfile'];
   // The brand kit's logo is an image the workspace owns, not an axis: a snippet
   // URL must never be able to paint a third party's image onto a host's page.
   const NOT_FROM_A_URL = [...BEHAVIOUR_KEYS, 'logoUrl'];

@@ -438,6 +438,12 @@ export const bookingPageStyleSchema = z.object({
    * image ceiling as the avatar and the cover.
    */
   logoUrl: z.string().url().max(1_500_000).nullable().optional(),
+  /**
+   * Always open the profile, even when the host has a single event type (whose
+   * link otherwise goes straight to that event). Written only by the studio's
+   * "Always show my profile"; absent means the automatic behaviour.
+   */
+  showProfile: z.boolean().optional(),
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 

@@ -1385,8 +1385,29 @@ body {
   flex-direction: column;
   gap: var(--sp-inline);
 }
-.branded-surface .bp-confirmation-cta {
+/* What this page runs on, and a way to get one (`GrowthCta`): centred under
+   the content, a quiet line then a button sized to its words on the 44px step.
+   Colour and radius come from `bp-btn` / `bp-btn-outline` and the axes. */
+.branded-surface .bp-growth {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-field);
+  margin-inline: auto;
+  margin-top: var(--sp-section);
   text-align: center;
+}
+.branded-surface .bp-growth-line {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.branded-surface .bp-growth-btn {
+  min-height: var(--sp-control-h);
+  padding-inline: var(--sp-group);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 @container bp (min-width: 48rem) {
   .branded-surface .bp-confirmation-actions {
@@ -1423,10 +1444,14 @@ body {
   width: 100%;
   height: 5rem;
   border-radius: var(--bp-radius);
-  background: var(--accent-wash);
+  background: var(--muted);
 }
 .branded-surface .bp-cover-image {
   object-fit: cover;
+}
+/* The kit's logo with no cover under it: no band, aligned with the head. */
+.branded-surface .bp-profile-logo {
+  margin-inline: var(--sp-card);
 }
 .branded-surface .bp-profile-head {
   display: flex;
@@ -1438,8 +1463,13 @@ body {
 /* The avatar sits on the cover's lower edge, ringed in the page's own ground so
    it reads as in front of the cover rather than cut out of it. */
 .branded-surface .bp-profile-avatar {
-  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
   margin-bottom: var(--sp-inline);
+}
+/* Only a real cover image is overlapped: with no cover there is no band (a
+   host's verdict: a tinted strip with nothing in it reads as a stray bar). */
+.branded-surface .bp-cover + .bp-profile-head .bp-profile-avatar,
+.branded-surface .bp-cover-wrap + .bp-profile-head .bp-profile-avatar {
+  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
 }
 .branded-surface .bp-profile-avatar .bp-avatar {
   width: 4.5rem;
