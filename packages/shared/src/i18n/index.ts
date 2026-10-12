@@ -940,6 +940,22 @@ export interface BookingMessages {
       save: string;
       saving: string;
     };
+    /** Settings → General: the account's Dapta branding switch (included with Dapta AI). */
+    brandingSetting: {
+      title: string;
+      hint: string;
+      switchLabel: string;
+      /** Not entitled: the sentence, linked to the Dapta AI app when the deployment names it. */
+      included: string;
+      /** Off, but the subscription lapsed: the stored choice shows greyed. */
+      lapsed: string;
+      membersReadOnly: string;
+      chipShowing: string;
+      chipHidden: string;
+      chipShowingAgain: string;
+      saved: string;
+      saveFailed: string;
+    };
     notifications: {
       title: string;
       subtitle: string;
@@ -2077,6 +2093,19 @@ export const en: BookingMessages = {
       save: 'Save',
       saving: 'Saving…',
     },
+    brandingSetting: {
+      title: 'Dapta branding',
+      hint: 'The "Made with Dapta Calendars" badge and the free-calendar invitation on your public pages.',
+      switchLabel: 'Show Dapta branding on my pages',
+      included: 'Included with your Dapta AI subscription',
+      lapsed: 'Your Dapta AI subscription ended, the branding is showing again',
+      membersReadOnly: 'Only owners and admins can change this.',
+      chipShowing: 'Showing',
+      chipHidden: 'Hidden',
+      chipShowingAgain: 'Showing again',
+      saved: 'Saved.',
+      saveFailed: 'Could not save. Try again.',
+    },
     notifications: {
       title: 'Notifications',
       subtitle: 'Choose which booking emails go out and edit their templates.',
@@ -3184,6 +3213,19 @@ export const es: BookingMessages = {
       saved: 'Guardado.',
       save: 'Guardar',
       saving: 'Guardando…',
+    },
+    brandingSetting: {
+      title: 'Marca de Dapta',
+      hint: 'La insignia "Hecho con Dapta Calendars" y la invitación a crear un calendario gratis en tus páginas públicas.',
+      switchLabel: 'Mostrar la marca de Dapta en mis páginas',
+      included: 'Incluido con tu suscripción de Dapta AI',
+      lapsed: 'Tu suscripción de Dapta AI terminó, la marca se muestra de nuevo',
+      membersReadOnly: 'Solo los propietarios y administradores pueden cambiar esto.',
+      chipShowing: 'Visible',
+      chipHidden: 'Oculta',
+      chipShowingAgain: 'Visible de nuevo',
+      saved: 'Guardado.',
+      saveFailed: 'No se pudo guardar. Inténtalo de nuevo.',
     },
     notifications: {
       title: 'Notificaciones',

@@ -10,7 +10,7 @@ import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { landingTarget, wantsProfile } from '@/lib/landing';
-import { signupHref } from '@/lib/growth';
+import { brandingShown, signupHref } from '@/lib/growth';
 import { GrowthCta } from '@/components/booking-page-parts';
 import {
   EMBED_ROOT_CLASS,
@@ -105,7 +105,8 @@ export default async function ProfilePage({
   };
   const eventTypes = [...profile.eventTypes].sort((a, b) => rank(a.slug) - rank(b.slug));
   // A host's verdict: a way to make your own page, at the foot of theirs.
-  const profileCta = signupHref('profile', code);
+  const branding = brandingShown(profile);
+  const profileCta = signupHref('profile', code, branding);
 
   return (
     <BrandedShell
@@ -132,7 +133,7 @@ export default async function ProfilePage({
           footer={profileCta ? <GrowthCta m={msg} href={profileCta} /> : null}
         />
       </main>
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+      <MadeWithBadge locale={locale} accountCode={accountCode} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );

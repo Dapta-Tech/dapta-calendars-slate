@@ -104,6 +104,7 @@ async function mount(initial: Promise<AvailabilityChunk>, locale = 'en') {
             avatarUrl={null}
             location={fixture.eventType.location}
             nowUtc={NOW}
+            showBranding
           />
         </main>
       </BrandedShell>,

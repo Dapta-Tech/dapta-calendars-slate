@@ -10,6 +10,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { brandingShown } from '@/lib/growth';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -143,9 +144,10 @@ export default async function TeamBookingPage({
           methodLabel={schedulingMethodLabel(messages, listing.schedulingType)}
           nowUtc={from}
           embed={embed}
+          showBranding={brandingShown(team)}
         />
       </main>
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+      <MadeWithBadge locale={locale} accountCode={accountCode} show={brandingShown(team)} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );

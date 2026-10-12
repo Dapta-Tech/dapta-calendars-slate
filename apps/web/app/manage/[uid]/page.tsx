@@ -16,6 +16,7 @@ import { ManageActions } from './manage-actions';
 import { BookingStage, BookingSummary } from '@/components/booking-page-parts';
 import { BrandedShell } from '@/components/branded-shell';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { brandingShown } from '@/lib/growth';
 
 // Token-gated personal page: never indexed, and the title stays generic so no
 // booking detail leaks into link previews or crawlers.
@@ -68,7 +69,9 @@ async function ManageLinkInvalid() {
           </section>
         </BookingStage>
       </main>
-      <MadeWithBadge locale={locale} />
+      {/* A stale or wrong token opens no booking, so there is no account whose
+          choice to hide the branding could apply: the default holds. */}
+      <MadeWithBadge locale={locale} show />
     </BrandedShell>
   );
 }
@@ -204,7 +207,7 @@ export default async function ManagePage({
           </BookingStage>
         )}
       </main>
-      <MadeWithBadge locale={locale} accountCode={booking.reschedule?.accountCode} />
+      <MadeWithBadge locale={locale} accountCode={booking.reschedule?.accountCode} show={brandingShown(booking)} />
     </BrandedShell>
   );
 }

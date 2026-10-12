@@ -1,5 +1,6 @@
 import { adminApi } from '@/lib/admin-api';
 import { connectedPhotoOf } from '@/lib/avatar';
+import { brandingShown } from '@/lib/growth';
 import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
@@ -75,6 +76,9 @@ export default async function BookingPageSettings() {
         accountCode={me?.accountCode ?? ''}
         vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
         subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}
+        // The profile preview ends as the live profile does: with the
+        // free-calendar block only while the account's pages carry the branding.
+        showBranding={brandingShown(profile)}
         displayName={displayName}
         handle={me?.handle ?? ''}
         bio={(style.bio as string) ?? ''}

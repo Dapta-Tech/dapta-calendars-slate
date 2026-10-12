@@ -11,6 +11,7 @@ import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
+import { brandingShown } from '@/lib/growth';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -158,12 +159,14 @@ export default async function BookingPage({
           location={listing.location ?? null}
           nowUtc={from}
           embed={embed}
+          showBranding={brandingShown(profile)}
         />
       </main>
       {/* The badge stays inside the embed (#67): a host's own site is the
           growth loop's highest-value placement. NEXT_PUBLIC_HIDE_BADGE still
-          removes it, so a bare fork carries no Dapta branding. */}
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+          removes it, so a bare fork carries no Dapta branding, and an account
+          that turned the branding off while paying for Dapta AI has none. */}
+      <MadeWithBadge locale={locale} accountCode={accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );
