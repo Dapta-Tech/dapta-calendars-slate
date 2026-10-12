@@ -9,6 +9,8 @@ import {
   getMessages,
   readableZone,
   isReservedFieldName,
+  monthKeyOf,
+  shiftMonth,
   t,
   validateBookingFieldValue,
   weekStartsOnFor,
@@ -40,20 +42,35 @@ import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
+import { horizonMonthKey } from '@/lib/availability-window';
+import { useProgressiveSlots, type ProgressiveAvailability } from '@/lib/use-progressive-slots';
 
 interface Props {
   accountCode: string;
   /** Member handle (personal) or team slug (team). */
   ownerSlug: string;
   slug: string;
-  slots: Slot[];
+  /**
+   * Every time the page offers, when the caller has them all up front: the
+   * studio's preview and the one-off link page. The public event pages pass
+   * `availability` instead, and the island reads the times a month at a time.
+   */
+  slots?: Slot[];
+  /**
+   * The month on screen's read, already in flight from the server, and where
+   * to read the rest from (see `useProgressiveSlots`). The page paints before
+   * it answers: the month is drawn, its days "not yet known", and they settle
+   * when the times arrive.
+   */
+  availability?: ProgressiveAvailability;
   /**
    * Why `slots` is empty, when it's a config error (API reason code). Public
    * pages map every code to GENERIC copy — internals are never named here;
    * the actionable detail lives on the admin surfaces.
    */
   emptyReason?: string;
-  bookingFields: BookingField[];
+  /** The intake questions; with `availability` they arrive with the first read. */
+  bookingFields?: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
   /** Visitor locale ('en' | 'es') for EN/ES copy. */
@@ -133,8 +150,9 @@ export function BookingFlow({
   ownerSlug,
   slug,
   slots,
+  availability,
   emptyReason,
-  bookingFields,
+  bookingFields = [],
   initialTimeZone,
   mode = 'personal',
   locale = 'en',
@@ -154,12 +172,14 @@ export function BookingFlow({
   const m = messages.booking;
   const bp = messages.bookingPage;
   const pm = messages.phonePicker;
+  const progress = useProgressiveSlots({ staticSlots: slots, availability, nowUtc });
+  const fields = progress.bookingFields ?? bookingFields;
   // Reserved names (name/email/notes) are fixed attendee fields this form
   // always asks by itself — a legacy custom question reusing one would ask
   // the attendee twice (QA3 fix 3).
   const visibleFields = useMemo(
-    () => bookingFields.filter((f) => !isReservedFieldName(f.name)),
-    [bookingFields],
+    () => fields.filter((f) => !isReservedFieldName(f.name)),
+    [fields],
   );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   /**
@@ -282,7 +302,57 @@ export function BookingFlow({
     dayColumn,
     nextDay,
     goToDay,
-  } = useBookingMonth({ slots, timeZone, locale, hour12, nowUtc });
+  } = useBookingMonth({
+    slots: progress.slots,
+    timeZone,
+    locale,
+    hour12,
+    nowUtc,
+    // Read a month at a time, the page cannot tell where the times end until
+    // it has them all, so the visitor may walk to the booking horizon.
+    lastMonthKey: progress.progressive ? horizonMonthKey(timeZone, progress.horizonMs) : undefined,
+  });
+  const { ensureMonth, isKnown } = progress;
+  /** Whether the month on screen has been read: its days settle when it has. */
+  const monthKnown = isKnown(month, timeZone);
+
+  // "Next day with times" only names a day the page can vouch for: every month
+  // from the chosen day's to that day's has been read, so no earlier day with
+  // times can still be waiting on a read.
+  const nextKnownDay = useMemo(() => {
+    if (!nextDay || !selectedDay) return null;
+    for (let m = monthKeyOf(selectedDay); m <= monthKeyOf(nextDay.dayKey); m = shiftMonth(m, 1)) {
+      if (!isKnown(m, timeZone)) return null;
+    }
+    return nextDay;
+  }, [nextDay, selectedDay, isKnown, timeZone]);
+
+  // The month on screen is read the moment it is on screen (a no-op for the
+  // first one, which the server already started, and for any month in hand).
+  useEffect(() => {
+    ensureMonth(month, timeZone);
+  }, [ensureMonth, month, timeZone]);
+
+  // Once it has settled, the next month is read before the visitor asks, so
+  // "next" lands on days that are already known.
+  useEffect(() => {
+    if (monthKnown && month < maxMonth) ensureMonth(shiftMonth(month, 1), timeZone);
+  }, [ensureMonth, monthKnown, month, maxMonth, timeZone]);
+
+  // A host whose times start in a later month: with nothing found yet, keep
+  // reading forward, so the page can open on the month the times start in, as
+  // it did when it read everything at once.
+  const nothingYet =
+    progress.progressive && progress.slots.length === 0 && !progress.everythingKnown && !progress.unavailable;
+  useEffect(() => {
+    if (!nothingYet) return;
+    for (let m = minMonth; m <= maxMonth; m = shiftMonth(m, 1)) {
+      if (!isKnown(m, timeZone)) {
+        ensureMonth(m, timeZone);
+        return;
+      }
+    }
+  }, [nothingYet, ensureMonth, isKnown, minMonth, maxMonth, timeZone]);
   const locationLabel = formatLocation(location ?? null, messages);
   const weekStartsOn = weekStartsOnFor(locale);
 
@@ -543,13 +613,19 @@ export function BookingFlow({
   }
 
   // Every slot the page holds is empty for one of three reasons, and the copy
-  // has always distinguished them.
+  // has always distinguished them. A read that did not answer is the first.
+  const reason = progress.unavailable ? 'CALENDAR_UNAVAILABLE' : (progress.emptyReason ?? emptyReason);
   const emptyCopy =
-    emptyReason === 'CALENDAR_UNAVAILABLE'
+    reason === 'CALENDAR_UNAVAILABLE'
       ? m.timesUnavailable
-      : emptyReason
+      : reason
         ? m.noTimesNow
         : m.noSlots;
+  // The sentence replaces the calendar only once the page KNOWS there is
+  // nothing: every month read, or a reason that holds for all of them. Until
+  // then the month stays drawn with its days not yet known.
+  const nothingToOffer =
+    days.length === 0 && (progress.everythingKnown || progress.unavailable || !!progress.emptyReason);
 
   const timeZoneControl = (
     // Themed combobox, not the native <select>: the OS popup for ~400 zones is
@@ -781,7 +857,7 @@ export function BookingFlow({
     <ChoosingFrame
       panel={panel}
       empty={
-        days.length === 0 ? (
+        nothingToOffer ? (
           // No calendar at all when the page has no times to put in one: an
           // empty month of greyed-out days is a worse answer than the sentence
           // that says why.
@@ -799,6 +875,9 @@ export function BookingFlow({
           weekStartsOn={weekStartsOn}
           minMonthKey={minMonth}
           maxMonthKey={maxMonth}
+          pending={!monthKnown}
+          // Pointing at "next" is reason enough to read it.
+          onNextMonthIntent={() => ensureMonth(shiftMonth(month, 1), timeZone)}
           onMonthChange={(next) => {
             setNavMonth(next);
             // Drop the explicit pick so the new month falls back to its own
@@ -817,13 +896,14 @@ export function BookingFlow({
           dayTitle={dayColumn ? t(bp.timesOn, { day: dayColumn.heading }) : null}
           slots={dayColumn?.slots ?? []}
           emptyText={selectedDay ? bp.noTimesOnDay : bp.pickADay}
+          pending={!monthKnown}
           onPick={pick}
           onBack={backToCalendar}
           hour12={hour12}
           onHour12Change={setHour12}
           timeZoneControl={timeZoneControl}
           titleRef={timesTitleRef}
-          next={nextDay ? { heading: nextDay.heading, onGo: () => goToDay(nextDay.dayKey) } : null}
+          next={nextKnownDay ? { heading: nextKnownDay.heading, onGo: () => goToDay(nextKnownDay.dayKey) } : null}
         />
       }
     />,

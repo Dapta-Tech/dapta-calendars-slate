@@ -433,6 +433,8 @@ export interface PublicProfile {
     title: string;
     description: string | null;
     lengthMinutes: number;
+    location: ReturnType<typeof parseEventLocation>;
+    timeZone: string;
   }>;
 }
 
@@ -445,15 +447,26 @@ export async function getPublicProfile(
   if (!account) return undefined;
   const member = await getMember(db, account.id, handle);
   if (!member || !member.handle) return undefined;
+  // Each event's display zone resolves exactly the way `getAvailability` below
+  // resolves it: the event's own schedule, else the host's default schedule,
+  // (also when the event's own reference dangles), else the host. The event
+  // page draws its month in this zone before it has
+  // read a single slot, so the two must never disagree.
   const rows = await db.all<{
     slug: string;
     title: string;
     description: string | null;
     length_minutes: number;
+    locations: unknown;
+    schedule_time_zone: string | null;
   }>(
-    sql`SELECT slug, title, description, length_minutes FROM event_type
-        WHERE account_id = ${account.id} AND member_id = ${member.id} AND hidden = 0
-        ORDER BY length_minutes ASC`,
+    sql`SELECT e.slug, e.title, e.description, e.length_minutes, e.locations,
+               COALESCE(own.time_zone, dflt.time_zone) AS schedule_time_zone
+        FROM event_type e
+        LEFT JOIN schedule own ON own.id = e.schedule_id
+        LEFT JOIN schedule dflt ON own.id IS NULL AND dflt.id = ${member.default_schedule_id ?? null}
+        WHERE e.account_id = ${account.id} AND e.member_id = ${member.id} AND e.hidden = 0
+        ORDER BY e.length_minutes ASC`,
   );
   // The destination connection first — that is the account the host actually
   // schedules from, so its photo is the one an invitee should recognise. Only
@@ -489,6 +502,8 @@ export async function getPublicProfile(
       title: r.title,
       description: r.description,
       lengthMinutes: r.length_minutes,
+      location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
+      timeZone: r.schedule_time_zone ?? member.time_zone,
     })),
   };
 }
@@ -603,6 +618,28 @@ export async function resolveScheduleTimeZone(
   );
 }
 
+/**
+ * The span busy time must be read over for slots that START in
+ * [fromMs, toMs).
+ *
+ * A slot is offered by its start, but it is tested against busy time for its
+ * whole length plus both buffers, so a slot starting just before `toMs` runs
+ * past it and one starting at `fromMs` reaches back before it. Read over the
+ * bare window and an event sitting right past either edge is never seen: the
+ * slot is offered free and the create-time check, which reads only that slot,
+ * then refuses it. That used to matter only at the 60-day horizon; the booking
+ * page now reads a month at a time, so every month edge is a window edge.
+ */
+export function busyReadSpan(
+  fromMs: number,
+  toMs: number,
+  eventType: { length_minutes: number; before_event_buffer?: number | null; after_event_buffer?: number | null },
+): { fromMs: number; toMs: number } {
+  const before = (eventType.before_event_buffer ?? 0) * 60_000;
+  const after = (eventType.length_minutes + (eventType.after_event_buffer ?? 0)) * 60_000;
+  return { fromMs: fromMs - before, toMs: toMs + after };
+}
+
 export async function getAvailability(
   db: Db,
   args: {
@@ -683,9 +720,10 @@ export async function getAvailability(
   // External busy is FAIL-CLOSED: if the connected calendar can't be read we
   // withhold slots (with a visible reason) rather than offer times that may
   // double-book — and rather than 500 on the whole request.
+  const read = busyReadSpan(args.fromMs, args.toMs, eventType);
   let externalBusy: Interval[];
   try {
-    externalBusy = await loadExternalBusy(db, calendar, member.id, args.fromMs, args.toMs, eventType.id);
+    externalBusy = await loadExternalBusy(db, calendar, member.id, read.fromMs, read.toMs, eventType.id);
   } catch {
     return {
       eventType: eventTypeOut,
@@ -697,8 +735,8 @@ export async function getAvailability(
 
   const busy = [
     // Group events don't self-block: their own bookings stay offered until full.
-    ...(await loadBusyForHost(db, member.id, args.fromMs, args.toMs, isGroup ? eventType.id : undefined)),
-    ...(await loadReservationBusy(db, member.id, args.fromMs, args.toMs, args.now?.getTime())),
+    ...(await loadBusyForHost(db, member.id, read.fromMs, read.toMs, isGroup ? eventType.id : undefined)),
+    ...(await loadReservationBusy(db, member.id, read.fromMs, read.toMs, args.now?.getTime())),
     ...externalBusy,
   ];
 

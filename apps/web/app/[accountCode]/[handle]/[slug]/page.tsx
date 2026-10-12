@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, t } from '@slate/shared';
-import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getAvailability, getProfile } from '@/lib/api';
+import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
@@ -57,8 +58,11 @@ export async function generateMetadata({
   };
 }
 
-// Public booking page. A Server Component fetches slots (free SEO + streaming);
-// the interactive slot picker + form is a client island (BookingFlow).
+// Public booking page. The Server Component renders the event and its month
+// from the profile alone and STARTS the visible month's availability read
+// without waiting for it: the read streams into the client island
+// (BookingFlow), which reads the later months itself as the visitor nears them.
+// Nothing on the critical path talks to a calendar.
 export default async function BookingPage({
   params,
   searchParams,
@@ -76,18 +80,13 @@ export default async function BookingPage({
 
   const now = new Date();
   const from = now.toISOString();
-  // The widest single read the contract allows, not 21 days: the month calendar
-  // (BP) needs a whole month per view, and the availability service clamps its
-  // own window to this same bound (#136), so asking for more silently gets this
-  // and asking for 21 left the calendar unable to fill its own grid.
-  const to = new Date(now.getTime() + MAX_AVAILABILITY_WINDOW_MS).toISOString();
 
-  const [profile, availability] = await Promise.all([
-    getProfile(accountCode, handle),
-    getAvailability({ accountCode, handle, slug, from, to }),
-  ]);
-
-  if (!profile || !availability) notFound();
+  const profile = await getProfile(accountCode, handle);
+  // The public listing is the event's existence check: it holds every event
+  // the availability route answers for on this URL (hidden ones are reached
+  // only through `/booking/{token}`).
+  const listing = profile?.eventTypes.find((e) => e.slug === slug);
+  if (!profile || !listing) notFound();
 
   // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
   const code = profile!.account.code;
@@ -98,11 +97,25 @@ export default async function BookingPage({
     permanentRedirect(withSearchParams(`/${code}/${handle}/${slug}`, query));
   }
 
-  // The event's own description lives on the public listing, not on the
-  // availability contract — the same row `generateMetadata` above already
-  // reads, so the panel costs no extra call.
-  const listing = profile.eventTypes.find((e) => e.slug === slug);
   const hostName = profile.member.displayName ?? profile.member.handle;
+  // The zone the month is drawn in, resolved by the API the same way the
+  // availability read resolves it, so the grid painted now is the grid the
+  // times land in.
+  const timeZone = listing.timeZone ?? profile.member.timeZone;
+
+  // The visible month, from now to the end of the month on screen. Started
+  // here, awaited by nobody on the server: it rides the response stream and
+  // settles the grid when it lands. A failed read is an answer too (the island
+  // says the times are unavailable), never a thrown page.
+  const span = firstWindow(timeZone, now.getTime());
+  const visible = {
+    from: new Date(span.fromMs).toISOString(),
+    to: new Date(span.toMs).toISOString(),
+  };
+  const initial: Promise<AvailabilityChunk> = getAvailability({ accountCode, handle, slug, ...visible }).then(
+    toChunk,
+    () => ({ ok: false }) as const,
+  );
 
   return (
     <BrandedShell
@@ -126,18 +139,20 @@ export default async function BookingPage({
           accountCode={accountCode}
           ownerSlug={handle}
           slug={slug}
-          slots={availability.slots}
-          emptyReason={availability.emptyReason}
-          bookingFields={availability.eventType.bookingFields}
-          initialTimeZone={availability.timeZone}
+          availability={{
+            initial,
+            window: visible,
+            source: { kind: 'personal', accountCode: code, owner: handle, slug },
+          }}
+          initialTimeZone={timeZone}
           locale={locale}
-          eventTitle={availability.eventType.title}
-          lengthMinutes={availability.eventType.lengthMinutes}
-          description={listing?.description ?? null}
+          eventTitle={listing.title}
+          lengthMinutes={listing.lengthMinutes}
+          description={listing.description ?? null}
           hostName={hostName}
           avatarUrl={resolveAvatarUrl(profile.member.avatarUrl, profile.member.connectedAvatarUrl)}
           logoUrl={logoOf(profile.member.style)}
-          location={availability.eventType.location}
+          location={listing.location ?? null}
           nowUtc={from}
           embed={embed}
         />

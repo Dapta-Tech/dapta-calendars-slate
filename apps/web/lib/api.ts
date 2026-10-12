@@ -8,6 +8,7 @@ import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
 import type {
   AvailabilityResponse,
   BookingView,
+  EventLocationDto,
   OneOffLinkTargetView,
   PublicProfile,
 } from '@slate/types';
@@ -45,7 +46,15 @@ export const getProfile = cache(
 export interface TeamProfile {
   account: { code: string; name: string };
   team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
-  eventTypes: Array<{ slug: string; title: string; description: string | null; lengthMinutes: number }>;
+  eventTypes: Array<{
+    slug: string;
+    title: string;
+    description: string | null;
+    lengthMinutes: number;
+    schedulingType?: string | null;
+    /** Optional on the wire: an older API does not send it. */
+    location?: EventLocationDto | null;
+  }>;
   /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
   brand?: BrandKit | null;
 }

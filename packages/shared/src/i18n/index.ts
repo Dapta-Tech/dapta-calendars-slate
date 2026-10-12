@@ -105,6 +105,8 @@ export interface BookingMessages {
     today: string;
     /** The day column before any day is chosen. */
     pickADay: string;
+    /** Announced (not shown) while the month's times are still being read. */
+    readingTimes: string;
     /** A chosen day that turns out to have nothing bookable on it. */
     noTimesOnDay: string;
     /** Heading over the day column: "Times on Mon, Sep 14". */
@@ -1370,6 +1372,7 @@ export const en: BookingMessages = {
     nextMonth: 'Next month',
     today: 'Today',
     pickADay: 'Pick a day to see the times available.',
+    readingTimes: 'Finding the times available this month.',
     noTimesOnDay: 'No times available on this day.',
     timesOn: 'Times on {day}',
     timeFormat: 'Time format',
@@ -2467,6 +2470,7 @@ export const es: BookingMessages = {
     nextMonth: 'Mes siguiente',
     today: 'Hoy',
     pickADay: 'Elige un día para ver los horarios disponibles.',
+    readingTimes: 'Buscando los horarios disponibles de este mes.',
     noTimesOnDay: 'No hay horarios disponibles este día.',
     timesOn: 'Horarios del {day}',
     timeFormat: 'Formato de hora',
