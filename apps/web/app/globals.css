@@ -1422,7 +1422,8 @@ body {
 /* What this page runs on, and a way to get one (`GrowthCta`): centred under
    the content, one short line then a button sized to its words on the 44px
    step. The same block on the confirmation, the profile and the team landing;
-   colour and radius come from `bp-btn` and the axes. */
+   colour and radius come from `bp-btn` (or `bp-btn-outline` on the
+   confirmation, whose primary is "Add to calendar") and the axes. */
 .branded-surface .bp-growth {
   display: flex;
   max-width: 32rem;

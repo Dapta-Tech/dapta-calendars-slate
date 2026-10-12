@@ -723,20 +723,31 @@ export function BookingSummary({
  * What this page runs on, and a real way to get one: one short line, then one
  * button. The SAME block under a confirmation, at the foot of a profile and at
  * the foot of a team landing, below the content it must not compete with and
- * never inside the booking's own card. The button is the page's own primary
- * (`bp-btn`: the host's accent and the `buttons` axis), sized to its words
- * rather than to the column. The line names the product once; the "Made with"
- * badge under it is the only other mention on the page.
+ * never inside the booking's own card. The button takes the host's accent and
+ * the `buttons` axis, sized to its words rather than to the column: the page's
+ * own primary (`bp-btn`) on the profile and the team landing, and the outline
+ * variant (`quiet`) under a confirmation, whose one primary is "Add to
+ * calendar" (R30: one primary per screen). The line names the product once;
+ * the "Made with" badge under it is the only other mention on the page.
  *
  * Rendered only when the deployment configures a signup destination
  * (`signupHref`); the callers pass nothing otherwise and the page is exactly
  * what it was.
  */
-export function GrowthCta({ m, href }: { m: BookingMessages; href: string }) {
+export function GrowthCta({
+  m,
+  href,
+  quiet = false,
+}: {
+  m: BookingMessages;
+  href: string;
+  /** The outline variant, for a screen that already has its primary. */
+  quiet?: boolean;
+}) {
   return (
     <aside aria-label={m.growth.ctaButton} className="bp-growth">
       <p className="bp-muted bp-growth-line">{m.growth.ctaLine}</p>
-      <a href={href} target="_blank" rel="noopener noreferrer" className="bp-btn bp-growth-btn">
+      <a href={href} target="_blank" rel="noopener noreferrer" className={`${quiet ? 'bp-btn-outline' : 'bp-btn'} bp-growth-btn`}>
         {m.growth.ctaButton}
         <span className="sr-only"> {m.growth.ctaOpensNewTab}</span>
       </a>

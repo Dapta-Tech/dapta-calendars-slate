@@ -540,9 +540,10 @@ export function BookingFlow({
         }
         footer={
           // Growth loop (R11), below the card: the same block the profile and
-          // the team landing end with, so the product reads as one thing on
-          // every page. Gated by the open-core badge switch.
-          ctaHref ? <GrowthCta m={messages} href={ctaHref} /> : null
+          // the team landing end with, as the OUTLINE variant here, since "Add
+          // to calendar" is this screen's one primary (R30). Gated by the
+          // open-core badge switch.
+          ctaHref ? <GrowthCta m={messages} href={ctaHref} quiet /> : null
         }
       />,
     );
