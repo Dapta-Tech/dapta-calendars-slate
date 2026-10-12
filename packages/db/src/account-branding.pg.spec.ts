@@ -56,4 +56,13 @@ describePg('workspace brand kit (real Postgres)', () => {
     await revertBranding(db, memberId);
     expect(await raw()).toEqual(before);
   });
+
+  it('takes two first saves at once without a key violation', async () => {
+    const other = randomUUID();
+    await Promise.all([
+      upsertAccountBranding(db, other, { accent: '#111111' }),
+      upsertAccountBranding(db, other, { accent: '#222222' }),
+    ]);
+    expect(['#111111', '#222222']).toContain((await getAccountBranding(db, other))!.config.accent);
+  });
 });

@@ -34,25 +34,23 @@ export async function getAccountBranding(db: Db, accountId: string): Promise<Acc
   };
 }
 
-/** Create or replace the account's kit. Returns the stored row. */
+/**
+ * Create or replace the account's kit, as ONE statement: two first saves at
+ * once must not both INSERT and have the second fail on the primary key.
+ * `ON CONFLICT ... DO UPDATE` is the same syntax on SQLite and Postgres, and
+ * `created_at` keeps the first save's time. Returns the stored row.
+ */
 export async function upsertAccountBranding(
   db: Db,
   accountId: string,
   config: BrandKit,
 ): Promise<AccountBrandingRow> {
   const now = Date.now();
-  const existing = await getAccountBranding(db, accountId);
-  if (existing) {
-    await db.run(
-      sql`UPDATE account_branding SET config = ${jsonParam(db, config)}, updated_at = ${now}
-          WHERE account_id = ${accountId}`,
-    );
-  } else {
-    await db.run(
-      sql`INSERT INTO account_branding (account_id, config, created_at, updated_at)
-          VALUES (${accountId}, ${jsonParam(db, config)}, ${now}, ${now})`,
-    );
-  }
+  await db.run(
+    sql`INSERT INTO account_branding (account_id, config, created_at, updated_at)
+        VALUES (${accountId}, ${jsonParam(db, config)}, ${now}, ${now})
+        ON CONFLICT (account_id) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`,
+  );
   return (await getAccountBranding(db, accountId))!;
 }
 
