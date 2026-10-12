@@ -5,6 +5,7 @@ import {
   formatDayKeyLong,
   formatSlotDateTime,
   formatSlotTime,
+  isValidTimeZone,
   zoneOffsetLabel,
   zoneOffsetMinutes,
   zonedDayKey,
@@ -105,7 +106,8 @@ describe('the zone list and the detected zone', () => {
   });
 
   it('detects the runtime zone, and says UTC when it cannot', () => {
-    expect(detectTimeZone()).toMatch(/\//);
+    // Whatever the runtime is set to (CI runners are often plain UTC), a real zone.
+    expect(isValidTimeZone(detectTimeZone())).toBe(true);
     const spy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => {
       throw new Error('no Intl');
     });

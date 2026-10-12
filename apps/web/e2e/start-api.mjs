@@ -18,7 +18,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../..');
 const api = resolve(root, 'apps/api');
 const which = process.argv[2] ?? 'main';
-const env = (k, d) => process.env[k] ?? d;
+// An empty value counts as unset: CI passes E2E_DATABASE_URL='' on the SQLite leg.
+const env = (k, d) => process.env[k] || d;
 const webPort = env('E2E_WEB_PORT', '3411');
 const port = which === 'limited' ? env('E2E_LIMITED_API_PORT', '4412') : env('E2E_API_PORT', '4411');
 const sqliteFile = resolve(root, '.data/e2e.db');
