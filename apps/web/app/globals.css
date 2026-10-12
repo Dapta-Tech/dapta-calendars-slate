@@ -515,6 +515,26 @@ body {
   color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
   cursor: default;
 }
+/* Not yet known: the month's times are still being read. The day stands where
+   it will settle, the same cell at the same size, with a soft fill instead of a
+   verdict, so nothing moves when it becomes bookable or not (R22: a skeleton,
+   never a spinner). The breathing stops under reduced motion (the global rule
+   above). */
+.branded-surface .bp-cal-day[data-state='pending'] {
+  color: var(--muted-foreground);
+  background: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+  animation: bp-quiet 1.6s var(--ease-standard, ease) infinite alternate;
+}
+@keyframes bp-quiet {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
 /* Today: the number in full ink and a dot in the host's accent under it, so it
    reads as today on either canvas, bookable or not, and "today" and "selected"
    can both be true at once and still be told apart. */
@@ -967,6 +987,13 @@ body {
 .branded-surface .bp-slot:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* A time's place, held while the month is read: a slot chip's box with nothing
+   in it, so the column already stands at the height the times will fill. */
+.branded-surface .bp-slot-placeholder {
+  border-color: transparent;
+  background: var(--muted);
+  animation: bp-quiet 1.6s var(--ease-standard, ease) infinite alternate;
 }
 
 /* The quiet controls beside the times: the zone as a line of text with a

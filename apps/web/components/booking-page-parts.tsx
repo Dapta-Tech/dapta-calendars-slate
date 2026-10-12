@@ -487,6 +487,12 @@ export function SlotChip({
  * It is a `.bp-day` group, which is what gives the `dayGroup` axis something to
  * draw: `flat` leaves the times on the page, `boxed` frames them.
  */
+/**
+ * Placeholder rows while a month's times are read: about what a working day
+ * offers, so the column already stands at the height it will settle at.
+ */
+const PENDING_SLOT_ROWS = 6;
+
 export function TimesColumn({
   m,
   dayTitle,
@@ -499,6 +505,7 @@ export function TimesColumn({
   timeZoneControl,
   titleRef,
   next,
+  pending = false,
 }: {
   m: BookingMessages;
   /** "Monday, March 2", or null before any day is chosen. */
@@ -506,6 +513,12 @@ export function TimesColumn({
   slots: DisplaySlot[];
   /** Shown instead of the times when there are none. */
   emptyText: string;
+  /**
+   * The month's times are still being read. The column keeps its shape with
+   * quiet placeholder rows the size of a time, so nothing below it moves when
+   * the real ones arrive, and says nothing it does not know yet.
+   */
+  pending?: boolean;
   onPick?: (slot: DisplaySlot) => void;
   /** The phone's way back to the month. Hidden from the two-pane width up. */
   onBack?: () => void;
@@ -521,7 +534,7 @@ export function TimesColumn({
   next?: { heading: string; onGo: () => void } | null;
 }) {
   return (
-    <section aria-label={m.bookingPage.timesRegion} className="bp-day bp-times">
+    <section aria-label={m.bookingPage.timesRegion} aria-busy={pending || undefined} className="bp-day bp-times">
       <div className="bp-day-head">
         {onBack ? <BackButton label={m.bookingPage.backToCalendar} onClick={onBack} className="bp-back-phone" /> : null}
         <h2 ref={titleRef} tabIndex={-1} className="bp-day-title">
@@ -530,7 +543,16 @@ export function TimesColumn({
         <HourFormatToggle m={m} hour12={hour12} onChange={onHour12Change} />
       </div>
       <div className="bp-times-tools">{timeZoneControl}</div>
-      {slots.length ? (
+      {pending ? (
+        <div className="bp-slots" data-pending="true">
+          <span className="sr-only" role="status">
+            {m.bookingPage.readingTimes}
+          </span>
+          {Array.from({ length: PENDING_SLOT_ROWS }).map((_, i) => (
+            <span key={i} aria-hidden="true" className="bp-slot bp-slot-placeholder" />
+          ))}
+        </div>
+      ) : slots.length ? (
         <div className="bp-slots">
           {slots.map((s) => (
             <SlotChip key={s.startUtc} m={m} slot={s} onPick={onPick} />
@@ -853,6 +875,8 @@ export function MonthCalendar({
   onMonthChange,
   onSelectDay,
   onCursorDay,
+  pending = false,
+  onNextMonthIntent,
 }: {
   m: BookingMessages;
   monthKey: string;
@@ -873,6 +897,14 @@ export function MonthCalendar({
    * tell the two apart.
    */
   onCursorDay?: (dayKey: string) => void;
+  /**
+   * The month's times are still being read. Its days are drawn, today onward
+   * in a quiet "not yet known" state, never marked bookable or not, and they
+   * settle in place when the times arrive: same cells, same size.
+   */
+  pending?: boolean;
+  /** The visitor pointed at or focused "next": a hint to read that month now. */
+  onNextMonthIntent?: () => void;
 }) {
   const grid: CalendarMonth = useMemo(
     // Six weeks, always: the frame sizes to its content, so every month has to
@@ -981,6 +1013,8 @@ export function MonthCalendar({
             className="bp-icon-btn"
             disabled={!canGoForward}
             aria-label={m.bookingPage.nextMonth}
+            onPointerEnter={canGoForward ? onNextMonthIntent : undefined}
+            onFocus={canGoForward ? onNextMonthIntent : undefined}
             onClick={() => onMonthChange(shiftMonth(monthKey, 1))}
           >
             <ChevronIcon direction="right" />
@@ -1000,6 +1034,7 @@ export function MonthCalendar({
         className="bp-cal-grid"
         role="grid"
         aria-label={grid.label}
+        aria-busy={pending || undefined}
         onKeyDown={onGridKeyDown}
       >
         <div role="row" className="bp-cal-week">
@@ -1012,7 +1047,13 @@ export function MonthCalendar({
         {grid.weeks.map((week) => (
           <div role="row" className="bp-cal-week" key={week[0]!.dayKey}>
             {week.map((day) => {
-              const state = !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty';
+              const state = !day.inMonth
+                ? 'outside'
+                : day.hasSlots
+                  ? 'available'
+                  : pending && day.dayKey >= todayKey
+                    ? 'pending'
+                    : 'empty';
               const canPick = state === 'available';
               const isSelected = canPick && day.dayKey === selectedDayKey;
               return (
