@@ -66,6 +66,12 @@ function enc(ref: string): string {
   return encodeURIComponent(ref);
 }
 
+/** A 200 whose body is not the contract's shape. Not retried: the same backend
+ *  gives the same answer, and the read must fail closed now. */
+export class CalendarBodyError extends Error {
+  override readonly name = 'CalendarBodyError';
+}
+
 function asRecord(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
 }
@@ -84,16 +90,29 @@ export class GenericRestWire implements CalendarWire {
       },
     };
   }
+  /**
+   * FAILS CLOSED. An answer this cannot read throws, and the availability read
+   * withholds the month with `CALENDAR_UNAVAILABLE`. It used to return `[]` for
+   * a body with no `busy` list and drop entries it could not read, and an empty
+   * list means "free all month": a backend answering 200 with the wrong shape
+   * had every busy time offered to visitors. The private overlay's parser
+   * already refuses these; this is the same rule on the public wire. The error
+   * names the defect only, never the body.
+   */
   parseBusy(raw: unknown): BusyInterval[] {
-    const busy = asRecord(raw)['busy'];
-    if (!Array.isArray(busy)) return [];
-    return busy
-      .map((b) => asRecord(b))
-      .filter((b) => typeof b['startUtc'] === 'string' && typeof b['endUtc'] === 'string')
-      .map((b) => ({
-        startUtc: String(b['startUtc']),
-        endUtc: String(b['endUtc']),
-      }));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new CalendarBodyError('not an object');
+    const busy = (raw as Record<string, unknown>)['busy'];
+    if (!Array.isArray(busy)) throw new CalendarBodyError('no busy list');
+    return busy.map((entry) => {
+      const b = asRecord(entry);
+      const startUtc = b['startUtc'];
+      const endUtc = b['endUtc'];
+      if (typeof startUtc !== 'string' || typeof endUtc !== 'string')
+        throw new CalendarBodyError('busy entry without times');
+      if (Number.isNaN(Date.parse(startUtc)) || Number.isNaN(Date.parse(endUtc)))
+        throw new CalendarBodyError('busy entry with unreadable times');
+      return { startUtc, endUtc };
+    });
   }
 
   createEvent(input: CreateEventInput): WireRequest {
