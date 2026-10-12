@@ -2,6 +2,7 @@
  * Server-side API client. The web app talks to the Slate API over HTTP (never
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
+import type { BrandKit } from '@slate/types';
 import { cache } from 'react';
 import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
 import type {
@@ -45,6 +46,8 @@ export interface TeamProfile {
   account: { code: string; name: string };
   team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
   eventTypes: Array<{ slug: string; title: string; description: string | null; lengthMinutes: number }>;
+  /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
+  brand?: BrandKit | null;
 }
 
 // cache(): generateMetadata and the page share one team-profile fetch per request.

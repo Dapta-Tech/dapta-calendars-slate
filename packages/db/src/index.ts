@@ -27,3 +27,4 @@ export { seed, type SeedResult } from './seed';
 export { sqliteSchema } from './schema.sqlite';
 export { pgSchema } from './schema.pg';
 export * from './brand-backup';
+export * from './account-branding';

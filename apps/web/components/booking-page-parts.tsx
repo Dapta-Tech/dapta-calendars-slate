@@ -222,6 +222,7 @@ export function EventPanel({
   locationLabel,
   methodLabel,
   timeZoneLabel,
+  logoUrl,
 }: {
   m: BookingMessages;
   hostName: string;
@@ -237,6 +238,9 @@ export function EventPanel({
   /** The HOST's zone, as a person reads it: a fact about them, not a setting.
    *  The visitor's own zone is the control beside the times. */
   timeZoneLabel: string;
+  /** The workspace logo (brand kit), at the head of the panel. Absent draws
+   *  nothing, so a page without a kit renders as it did before. */
+  logoUrl?: string | null;
 }) {
   return (
     <section aria-label={m.bookingPage.detailsRegion} className="bp-event">
@@ -288,6 +292,12 @@ export function EventPanel({
       </dl>
 
       {description ? <EventDescription m={m} description={description} /> : null}
+      {/* LAST in the DOM and first on screen (`order` in globals.css): a slot
+          ahead of the description would shift React's `useId` for every page,
+          logo or not, and the pins prove a page without a kit does not move.
+          It is decorative (the host's name is the next line), so the reading
+          order loses nothing. */}
+      {logoUrl ? <img src={logoUrl} alt="" referrerPolicy="no-referrer" className="bp-logo" /> : null}
     </section>
   );
 }

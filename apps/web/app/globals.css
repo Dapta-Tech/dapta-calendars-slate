@@ -759,6 +759,33 @@ body {
   }
 }
 
+/* The workspace logo (brand kit). Sized as a wordmark: a fixed height, the
+   width it needs up to a ceiling, never stretched. In the event panel it heads
+   the panel; on the profile it sits on the cover's top edge. */
+.branded-surface .bp-logo {
+  display: block;
+  width: auto;
+  height: var(--bp-logo-h);
+  max-width: var(--bp-logo-max-w);
+  object-fit: contain;
+  object-position: left center;
+}
+.branded-surface .bp-event > .bp-logo {
+  order: -1;
+}
+.branded-surface .bp-cover-wrap {
+  position: relative;
+}
+.branded-surface .bp-cover-logo {
+  position: absolute;
+  top: var(--sp-card);
+  left: var(--sp-card);
+  padding: var(--sp-tight) var(--sp-inline);
+  box-sizing: content-box;
+  border-radius: var(--bp-radius-sm);
+  background: var(--background);
+}
+
 /* The event panel. */
 .branded-surface .bp-event {
   display: flex;

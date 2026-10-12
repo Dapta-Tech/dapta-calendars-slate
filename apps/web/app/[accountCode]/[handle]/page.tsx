@@ -4,6 +4,7 @@ import { getMessages, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
+import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
@@ -116,6 +117,7 @@ export default async function ProfilePage({
           // page in a 700px box.
           hrefFor={(slug) => withSearchParams(`/${code}/${handle}/${slug}`, query)}
           emptyText={msg.landing.noEvents}
+          logoUrl={logoOf(m.style)}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} />

@@ -111,6 +111,15 @@ export const availability = pgTable('availability', {
   date: text('date'),
 });
 
+// The workspace brand kit (0023): one row per account; snapshotted into a
+// member's branding on "Apply kit", rendered directly by team pages.
+export const accountBranding = pgTable('account_branding', {
+  accountId: text('account_id').primaryKey(),
+  config: jsonb('config').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+});
+
 export const team = pgTable('team', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),
@@ -561,4 +570,5 @@ export const pgSchema = {
   notificationSetting,
   accountIntegration,
   oneOffLink,
+  accountBranding,
 };

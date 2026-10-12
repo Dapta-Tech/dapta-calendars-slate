@@ -431,6 +431,13 @@ export const bookingPageStyleSchema = z.object({
   landingEnabled: z.boolean().default(true),
   defaultEventSlug: z.string().nullable().optional(),
   bio: z.string().max(2000).nullable().optional(),
+  /**
+   * The workspace logo, snapshotted from the brand kit on "Apply kit". Drawn in
+   * the event panel's header and over the profile's cover; absent draws
+   * nothing, so a host who never applied a kit renders as before. Same inline
+   * image ceiling as the avatar and the cover.
+   */
+  logoUrl: z.string().url().max(1_500_000).nullable().optional(),
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 
@@ -498,6 +505,71 @@ export type Branding = z.infer<typeof brandingSchema>;
  * is stored now as a one-step backup before writing, so the host can revert it.
  * The marker is never stored on the branding itself.
  */
+/**
+ * The workspace brand kit (`/v1/brand-kit`): a logo, the accent and canvas,
+ * and the four shape axes a brand decides. Every field is optional; an absent
+ * one means the kit does not set that axis and a page keeps its own.
+ *
+ * A host's page never reads the kit live. "Apply kit" SNAPSHOTS it into the
+ * host's own stored branding (`withBrandKit` below), keeping the previous look
+ * as a one-step backup, so a kit edit never moves a live page. Team pages
+ * store no branding of their own and render the kit directly.
+ */
+export const brandKitSchema = z
+  .object({
+    logoUrl: z.string().url().max(MAX_INLINE_IMAGE_CHARS).nullable().optional(),
+    accent: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional(),
+    theme: z.enum(['light', 'dark']).optional(),
+    font: z.enum(['sans', 'rounded', 'serif']).optional(),
+    corners: z.enum(['sharp', 'soft', 'round']).optional(),
+    buttons: z.enum(['rounded', 'pill', 'square']).optional(),
+    cardStyle: z.enum(['outline', 'elevated', 'filled']).optional(),
+  })
+  .strict();
+export type BrandKit = z.infer<typeof brandKitSchema>;
+
+/** The kit's style keys, in the order they are written into a page's style. */
+export const BRAND_KIT_STYLE_KEYS = ['theme', 'font', 'corners', 'buttons', 'cardStyle', 'logoUrl'] as const;
+
+const kitSets = (v: unknown) => v !== undefined && v !== null && v !== '';
+
+/** Whether a kit sets anything at all (an empty kit is no kit). */
+export function hasBrandKit(kit: BrandKit | null | undefined): kit is BrandKit {
+  if (!kit) return false;
+  return kitSets(kit.accent) || BRAND_KIT_STYLE_KEYS.some((k) => kitSets(kit[k]));
+}
+
+/**
+ * A page's stored branding with the kit laid over it: the one merge "Apply
+ * kit" writes into a host's branding and a team page renders. Only what the
+ * kit sets is overwritten; an axis the kit leaves out keeps the page's own
+ * value, and a kit with no logo removes nothing. Here rather than in
+ * `@slate/shared` because `@slate/db` applies it and stays free of that
+ * package; the web app reads it from here too, so there is one merge.
+ */
+export function withBrandKit(
+  current: { brandColor: string | null; style: Record<string, unknown> | null },
+  kit: BrandKit | null | undefined,
+): { brandColor: string | null; style: Record<string, unknown> | null } {
+  if (!hasBrandKit(kit)) return current;
+  const style: Record<string, unknown> = { ...(current.style ?? {}) };
+  let touched = false;
+  for (const key of BRAND_KIT_STYLE_KEYS) {
+    if (kitSets(kit[key])) {
+      style[key] = kit[key];
+      touched = true;
+    }
+  }
+  return {
+    brandColor: kitSets(kit.accent) ? (kit.accent as string) : current.brandColor,
+    style: touched ? style : current.style,
+  };
+}
+
 export const brandingWriteSchema = brandingSchema.extend({
   backupAs: z.enum(['new-look']).optional(),
 });
@@ -687,6 +759,10 @@ export const teamProfileSchema = z.object({
       schedulingType: z.enum(schedulingType).nullable(),
     }),
   ),
+  /** The workspace brand kit, which a team page renders directly (a team
+   *  stores no branding of its own). Optional on the wire so an older API
+   *  still parses; absent and null both mean the defaults. */
+  brand: brandKitSchema.nullable().optional(),
 });
 export type TeamProfile = z.infer<typeof teamProfileSchema>;
 

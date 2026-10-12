@@ -47,6 +47,9 @@ import {
   setConnectionPrimaryEmail,
   updateBranding,
   getBrandBackupState,
+  applyBrandKit,
+  getAccountBranding,
+  upsertAccountBranding,
   revertBranding,
   applyLook,
   type BrandApplySource,
@@ -218,6 +221,23 @@ export class AdminService {
   /** Put the host's look back as it was before the last apply, once. */
   revertBranding(p: HostPrincipal) {
     return revertBranding(this.db, p.memberId);
+  }
+
+  /** The workspace brand kit; every member may read it (their page can use it). */
+  async brandKit(p: HostPrincipal) {
+    const row = await getAccountBranding(this.db, p.accountId);
+    return { config: row?.config ?? null, updatedAt: row?.updatedAt ?? null };
+  }
+
+  /** Replace the workspace brand kit. The caller checks the admin role. */
+  async saveBrandKit(p: HostPrincipal, config: Parameters<typeof upsertAccountBranding>[2]) {
+    const row = await upsertAccountBranding(this.db, p.accountId, config);
+    return { config: row.config, updatedAt: row.updatedAt };
+  }
+
+  /** Snapshot the kit into the caller's own booking page ("Apply kit"). */
+  applyBrandKitToMe(p: HostPrincipal) {
+    return applyBrandKit(this.db, p.accountId, p.memberId);
   }
 
   updateSettings(p: HostPrincipal, patch: Parameters<typeof updateMemberSettings>[2]) {

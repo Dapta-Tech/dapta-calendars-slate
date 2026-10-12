@@ -108,3 +108,15 @@ export async function revertLookAction(): Promise<{ ok: boolean }> {
     return { ok: false };
   }
 }
+
+/** Copy the workspace brand kit onto the host's own page ("Apply brand kit"). */
+export async function applyKitAction(): Promise<{ ok: boolean }> {
+  try {
+    await adminApi.applyBrandKit();
+    revalidatePath('/admin/settings/booking-page');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false };
+  }
+}

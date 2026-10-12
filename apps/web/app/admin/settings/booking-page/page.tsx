@@ -3,18 +3,23 @@ import { DEFAULT_ACCENT, defaultBranding, getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { Studio } from './studio';
+import { StudioTabs } from './studio-tabs';
+import { hasBrandKit } from '@slate/types';
+import { logoOf } from '@/lib/brand-kit';
 
 export const dynamic = 'force-dynamic';
 
 export default async function BookingPageSettings() {
   const me = await adminApi.me();
-  const [profile, adminEvents, locale, vanity, lookState] = await Promise.all([
+  const [profile, adminEvents, locale, vanity, lookState, kit] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : Promise.resolve(null),
     adminApi.listEventTypes(),
     getLocale(),
     adminApi.vanityStatus().catch(() => ({ vanitySlug: null, shortCode: '', canClaim: false })),
     // A failed read costs the Revert control, never the studio.
     adminApi.bookingPageState().catch(() => ({ backup: null })),
+    // Same rule: a failed read costs "Apply brand kit", never the studio.
+    adminApi.getBrandKit().catch(() => ({ config: null, updatedAt: null })),
   ]);
   const msgs = getMessages(locale);
   const t = msgs.admin;
@@ -47,12 +52,15 @@ export default async function BookingPageSettings() {
     <div className="mx-auto max-w-6xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       <h1 className="mb-tight text-3xl font-semibold tracking-tight">{t.bookingPageHeader.title}</h1>
       <p className="mb-group text-muted-foreground">{t.bookingPageHeader.subtitle}</p>
+      <StudioTabs yourPage={t.studio.tabYourPage} brandKit={t.studio.tabBrandKit} />
       <Studio
         // Remounted from what is stored when an applied look appears or goes:
         // a revert writes the stored look back, and the studio's own state has
         // to start from it rather than from the look it just replaced.
         key={lookState.backup?.appliedAt ?? 'none'}
         lookBackup={lookState.backup}
+        logoUrl={logoOf(style) ?? ''}
+        hasBrandKit={hasBrandKit(kit.config)}
         messages={t.studio}
         opensNewTab={t.common.opensNewTab}
         embedMessages={msgs.embed}

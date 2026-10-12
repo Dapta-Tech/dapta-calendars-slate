@@ -59,6 +59,8 @@ import {
 } from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
+import { getAccountBranding } from './account-branding';
+import type { BrandKit } from '@slate/types';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
 import { enqueueOutbox } from './outbox';
@@ -353,6 +355,8 @@ export interface TeamProfileView {
     lengthMinutes: number;
     schedulingType: string | null;
   }>;
+  /** The workspace brand kit, rendered directly by team pages; null = none. */
+  brand: BrandKit | null;
 }
 
 async function getTeamBySlug(db: Db, accountId: string, teamSlug: string) {
@@ -403,6 +407,7 @@ export async function getTeamProfile(
       lengthMinutes: r.length_minutes,
       schedulingType: r.scheduling_type,
     })),
+    brand: (await getAccountBranding(db, account.id))?.config ?? null,
   };
 }
 

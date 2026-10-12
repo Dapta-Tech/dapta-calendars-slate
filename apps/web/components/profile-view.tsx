@@ -34,6 +34,7 @@ export function ProfileView({
   events,
   hrefFor,
   emptyText,
+  logoUrl,
 }: {
   m: BookingMessages;
   /** The heading: the host's name, or the team's. */
@@ -49,13 +50,25 @@ export function ProfileView({
   hrefFor: (slug: string) => string;
   /** The sentence shown instead of an empty list. */
   emptyText: string;
+  /** The workspace logo (brand kit), drawn over the cover. Absent: the cover
+   *  renders exactly as it did before there was a kit. */
+  logoUrl?: string | null;
 }) {
+  const cover = coverUrl ? (
+    <img src={coverUrl} alt="" className="bp-cover bp-cover-image" />
+  ) : (
+    <div aria-hidden className="bp-cover" />
+  );
   return (
     <div className="bp-profile">
-      {coverUrl ? (
-        <img src={coverUrl} alt="" className="bp-cover bp-cover-image" />
+      {logoUrl ? (
+        <div className="bp-cover-wrap">
+          {cover}
+          {/* Decorative here: the account's name is the line under it. */}
+          <img src={logoUrl} alt="" referrerPolicy="no-referrer" className="bp-logo bp-cover-logo" />
+        </div>
       ) : (
-        <div aria-hidden className="bp-cover" />
+        cover
       )}
       <header className="bp-profile-head">
         <div className="bp-profile-avatar">

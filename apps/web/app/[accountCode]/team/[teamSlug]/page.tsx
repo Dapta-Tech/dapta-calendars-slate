@@ -4,6 +4,7 @@ import { getMessages, readableZone, t } from '@slate/shared';
 import { getTeamProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
+import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
@@ -67,11 +68,15 @@ export default async function TeamPage({
   // renders the defaults (the console and the lime, ADR 0004) unless an embed
   // snippet overrides them, through the same shell every other public page uses.
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
+  const kit = teamBranding(team.brand);
 
   return (
     <BrandedShell
-      brandColor={accentOverride}
-      style={mergeEmbedStyle(null, styleOverrides)}
+      // A team stores no branding: it wears the workspace brand kit directly,
+      // and the defaults when there is none (`teamBranding` is then null/null,
+      // what this passed before there was a kit).
+      brandColor={accentOverride ?? kit.brandColor}
+      style={mergeEmbedStyle(kit.style, styleOverrides)}
       className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       <main className={embed ? 'mx-auto max-w-2xl px-4 py-4' : 'mx-auto w-full max-w-2xl px-6 py-12'}>
@@ -87,6 +92,7 @@ export default async function TeamPage({
           // full-chrome page inside the frame.
           hrefFor={(slug: string) => withSearchParams(`/${code}/team/${teamSlug}/${slug}`, query)}
           emptyText={msg.landing.noTeamEvents}
+          logoUrl={logoOf(kit.style)}
         />
       </main>
       <MadeWithBadge locale={locale} accountCode={code} />

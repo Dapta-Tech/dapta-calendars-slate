@@ -441,6 +441,7 @@
                      and its two side columns. It has no floor height: the frame
                      is as tall as what it holds, and the month always draws six
                      weeks so moving between months does not move the page
+     logo            the brand kit's logo: a wordmark's height and widest run
      zone            the time zone list: its popover width and list height from
                      the two-pane width up, the sheet's ceiling on a phone, and
                      the one shadow a popover over the page casts
@@ -460,5 +461,7 @@
   --bp-zone-w: 22rem;
   --bp-zone-list-h: 20rem;
   --bp-sheet-max-h: 75dvh;
+  --bp-logo-h: 2rem;
+  --bp-logo-max-w: 10rem;
   --bp-popover-shadow: 0 0.75rem 2rem -0.75rem color-mix(in srgb, var(--foreground) 28%, transparent);
 }
