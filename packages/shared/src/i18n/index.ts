@@ -180,7 +180,8 @@ export interface BookingMessages {
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
-    /** The quiet line above the free-calendar button: what this page runs on. */
+    /** The one short line above the free-calendar button. It names the product
+     *  once; the "Made with" badge below is the only other mention. */
     ctaLine: string;
     /** The button under a confirmation and at the foot of a profile. */
     ctaButton: string;
@@ -1449,7 +1450,7 @@ export const en: BookingMessages = {
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
-    ctaLine: 'This page runs on Dapta Calendars, free for anyone.',
+    ctaLine: 'Dapta Calendars is free for anyone.',
     ctaButton: 'Create your free calendar',
     ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
@@ -2547,7 +2548,7 @@ export const es: BookingMessages = {
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
-    ctaLine: 'Esta página funciona con Dapta Calendars, gratis para cualquiera.',
+    ctaLine: 'Dapta Calendars es gratis para todos.',
     ctaButton: 'Crea tu calendario gratis',
     ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
