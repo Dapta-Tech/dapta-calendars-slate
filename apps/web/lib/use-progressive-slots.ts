@@ -29,9 +29,17 @@ export interface ProgressiveAvailability {
  * How long to wait before asking again for a window that did not answer, one
  * entry per retry: a blip clears within seconds, and an outage is asked five
  * times over half a minute rather than hammered. After the last, the window
- * stays "not yet known" until the visitor goes to it again.
+ * stays "not yet known" until the visitor goes to it again. Each wait is
+ * jittered (`retryDelay`), so the pages one blip hit do not all ask again at
+ * the same instant.
  */
 export const RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000];
+
+/** The wait before retry `attempt`, spread over half to one and a half times its base. */
+export function retryDelay(attempt: number, random: () => number = Math.random): number | undefined {
+  const base = RETRY_DELAYS_MS[attempt];
+  return base === undefined ? undefined : Math.round(base * (0.5 + random()));
+}
 
 /** Fetches one later window; injectable so specs can watch the order. */
 export type WindowLoader = (source: AvailabilitySource, span: Span) => Promise<AvailabilityChunk>;
@@ -39,7 +47,8 @@ export type WindowLoader = (source: AvailabilitySource, span: Span) => Promise<A
 const fetchWindow: WindowLoader = async (source, span) => {
   try {
     const res = await fetch(availabilityUrl(source, span), { cache: 'no-store' });
-    return res.ok ? ((await res.json()) as AvailabilityChunk) : { ok: false };
+    if (res.ok) return (await res.json()) as AvailabilityChunk;
+    return res.status === 400 || res.status === 404 ? { ok: false, final: true } : { ok: false };
   } catch {
     return { ok: false };
   }
@@ -73,9 +82,10 @@ function mergeSlots(a: Slot[], b: Slot[]): Slot[] {
  * next month as soon as the one on screen settles, and any other month when the
  * visitor goes to it (or points at the arrow that goes there). A month whose
  * read failed stays "not yet known", is asked again on its own after a short
- * backoff (`RETRY_DELAYS_MS`), and again whenever the visitor comes to it, so a
- * page never claims a month has no times when it simply does not know, and a
- * passing failure does not strand the visitor.
+ * backoff (`RETRY_DELAYS_MS`; never a request the route refused as such) and
+ * again whenever the visitor comes to it, so a page never claims a month has
+ * no times when it simply does not know, and a passing failure does not
+ * strand the visitor.
  */
 export function useProgressiveSlots({
   staticSlots,
@@ -120,13 +130,15 @@ export function useProgressiveSlots({
   // and a bounded number of times. Without it nothing asked again unless the
   // visitor moved: a failed visible month left the "times unavailable" sentence
   // in place of the calendar for good, and a failed month on screen stayed
-  // unsettled. Assigned after every render, so a retry that fires later reads
-  // what the page knows THEN, with the current source and loader.
+  // unsettled. Assigned after every render, and the timer reads its refs when
+  // it fires, so a retry asks with what the page knows THEN and with the
+  // current source and loader, not the ones of the render that scheduled it.
   const retryLater = useRef<(span: Span, attempt: number) => void>(() => {});
   const apply = useCallback((span: Span, chunk: AvailabilityChunk, attempt = 0) => {
     inflight.current = inflight.current.filter((s) => s.fromMs !== span.fromMs || s.toMs !== span.toMs);
     if (!alive.current) return;
-    if (!chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE') retryLater.current(span, attempt);
+    const failed = !chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE';
+    if (failed && !(!chunk.ok && chunk.final)) retryLater.current(span, attempt);
     setState((s) => {
       // A window that could not be read is not a window with no times. Only
       // when nothing at all has been read does the page say so; once any
@@ -181,14 +193,16 @@ export function useProgressiveSlots({
   const read = useCallback((want: Span) => fetchMissing(want, state.known), [fetchMissing, state.known]);
 
   const knownNow = useRef(state.known);
+  const fetchNow = useRef(fetchMissing);
   useEffect(() => {
     knownNow.current = state.known;
+    fetchNow.current = fetchMissing;
     retryLater.current = (span, attempt) => {
-      const delay = RETRY_DELAYS_MS[attempt];
+      const delay = retryDelay(attempt);
       if (delay === undefined) return;
       const timer = setTimeout(() => {
         timers.current.delete(timer);
-        if (alive.current) fetchMissing(span, knownNow.current, attempt + 1);
+        if (alive.current) fetchNow.current(span, knownNow.current, attempt + 1);
       }, delay);
       timers.current.add(timer);
     };

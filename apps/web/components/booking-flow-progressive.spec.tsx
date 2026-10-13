@@ -24,7 +24,7 @@ vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import type { AvailabilityChunk } from '@/lib/availability-source';
-import { RETRY_DELAYS_MS } from '@/lib/use-progressive-slots';
+import { RETRY_DELAYS_MS, retryDelay } from '@/lib/use-progressive-slots';
 import { BASE_STYLE, NOW, TIME_ZONE, availability } from '@/app/[accountCode]/__fixtures__/public-surface';
 
 const fixture = availability();
@@ -343,9 +343,36 @@ describe('a failed read is asked again on its own, a bounded number of times', (
 
   beforeAll(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The jitter at its midpoint, so each wait is exactly its base delay.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
   });
   afterAll(() => {
+    vi.mocked(Math.random).mockRestore();
     vi.useRealTimers();
+  });
+
+  it('spreads each wait over half to one and a half times its base, and stops after the last', () => {
+    expect(retryDelay(0, () => 0)).toBe(RETRY_DELAYS_MS[0]! / 2);
+    expect(retryDelay(4, () => 0.5)).toBe(RETRY_DELAYS_MS[4]);
+    expect(retryDelay(4, () => 0.999)).toBeLessThan(RETRY_DELAYS_MS[4]! * 1.5);
+    expect(retryDelay(RETRY_DELAYS_MS.length)).toBeUndefined();
+  });
+
+  it('a window the route refuses as such (400, 404) is not asked again', async () => {
+    for (const status of [400, 404]) {
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(async () => ({ ok: false, status, json: async () => ({ error: 'X' }) }));
+      const first = deferred();
+      await mount(first.promise);
+      await land(first, { ok: true, slots: MARCH });
+      await act(async () => {});
+      expect(reads(), String(status)).toHaveLength(1);
+      await wait(5 * 60_000);
+      expect(reads(), String(status)).toHaveLength(1);
+      act(() => root?.unmount());
+      root = null;
+      container?.remove();
+    }
   });
 
   it('the visible month failing comes back: asked again after a second, the calendar returns', async () => {
@@ -426,8 +453,11 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     const first = deferred();
     await mount(first.promise);
     await land(first, { ok: false });
+    expect(vi.getTimerCount()).toBe(1);
     act(() => root?.unmount());
     root = null;
+    // The waiting retry is cancelled, not merely ignored when it fires.
+    expect(vi.getTimerCount()).toBe(0);
     await wait(60_000);
     expect(reads()).toEqual([]);
   });

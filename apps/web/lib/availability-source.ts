@@ -16,7 +16,15 @@ export type AvailabilityChunk =
       /** The event's intake questions; the island needs them only once. */
       bookingFields?: BookingField[];
     }
-  | { ok: false };
+  | {
+      ok: false;
+      /**
+       * The route refused the request itself (400, 404): asking again cannot
+       * answer it, so the island does not retry. Absent on a failure that may
+       * pass (the API unreachable, a 5xx, a timeout).
+       */
+      final?: boolean;
+    };
 
 /** Which event a page reads availability for. Public identifiers only. */
 export interface AvailabilitySource {
