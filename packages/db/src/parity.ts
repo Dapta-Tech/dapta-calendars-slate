@@ -201,12 +201,15 @@ export async function reserveSlot(
  * at the last step.
  *
  * So the overlap and the cap are checked again INSIDE a transaction that holds
- * the host's row: SQLite's synchronous transaction runs alone, and Postgres
+ * the host's row: SQLite's synchronous transaction runs alone in this process
+ * and, begun IMMEDIATE, alone across processes sharing the file too; Postgres
  * takes `SELECT ... FOR UPDATE` on the member, the same lock the brand backup
  * write uses. The overlap test is the one `loadReservationBusy` applies, so a
  * time this refuses is a time the next availability read would not offer.
+ *
+ * @internal Exported for the cross-process spec; callers use `reserveSlot`.
  */
-async function insertHoldGuarded(
+export async function insertHoldGuarded(
   db: Db,
   h: {
     accountId: string;
@@ -231,13 +234,19 @@ async function insertHoldGuarded(
 
   if (db.dialect === 'sqlite') {
     const native = db.sqlite!;
-    return native.txn(() => {
-      if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
-      const n = native.drizzle.get<{ n: number }>(active);
-      if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
-      native.drizzle.run(insert);
-      return 'ok' as const;
-    });
+    // IMMEDIATE: a second API process on the same file waits for this write
+    // lock and then reads the hold, so it answers INVALID_SLOT. A deferred
+    // transaction would read first, then fail to upgrade with SQLITE_BUSY.
+    return native.txn(
+      () => {
+        if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
+        const n = native.drizzle.get<{ n: number }>(active);
+        if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
+        native.drizzle.run(insert);
+        return 'ok' as const;
+      },
+      { immediate: true },
+    );
   }
   return db.pg!.drizzle.transaction(async (tx) => {
     await tx.execute(sql`SELECT id FROM member WHERE id = ${h.memberId} FOR UPDATE`);
