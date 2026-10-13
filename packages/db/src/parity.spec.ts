@@ -19,6 +19,7 @@ import {
   getTeamProfile,
   listBookings,
   listConnections,
+  releaseSlot,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
@@ -267,7 +268,10 @@ describe('parity (SQLite in-memory)', () => {
       const out = await book(at);
       expect(out.ok, new Date(at).toISOString()).toBe(false);
       if (!out.ok) expect(out.reason).toBe('RESERVATION_EXPIRED');
-      const n = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM booking WHERE start_ms = ${at}`);
+      const n = await db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking b JOIN member m ON m.id = b.host_member_id
+            WHERE m.handle = 'alex-rivera' AND b.start_ms = ${at}`,
+      );
       expect(Number(n?.n)).toBe(0);
     }
     // The time it holds books, and the booking consumes the hold.
@@ -301,6 +305,9 @@ describe('parity (SQLite in-memory)', () => {
     // A refused booking leaves the hold where it was, for the time it holds.
     const left = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE uid = ${held.uid}`);
     expect(Number(left?.n)).toBe(1);
+    // Give it back: a hold left standing counts against the host's cap of ten
+    // for every later test in this file.
+    await releaseSlot(db, held.uid);
   });
 
   it('M5 — reserveSlot rejects an instant that is not a real bookable slot', async () => {
