@@ -24,6 +24,7 @@ vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import type { AvailabilityChunk } from '@/lib/availability-source';
+import { RETRY_DELAYS_MS, retryDelay } from '@/lib/use-progressive-slots';
 import { BASE_STYLE, NOW, TIME_ZONE, availability } from '@/app/[accountCode]/__fixtures__/public-surface';
 
 const fixture = availability();
@@ -317,5 +318,306 @@ describe('a month that cannot be read is never shown as a month with no times', 
       '2026-04-01T04:00:00.000Z',
       '2026-05-01T04:00:00.000Z',
     ]);
+  });
+});
+
+/**
+ * A read that fails once must not strand the visitor. The visible month used to
+ * fail into the "times unavailable" sentence and never ask again (nothing did
+ * unless the visitor moved, and with the sentence in place of the calendar
+ * there was nowhere to move), so a passing API error ended the page.
+ */
+describe('a failed read is asked again on its own, a bounded number of times', () => {
+  /** A March day the fixture offers times on. */
+  const MARCH_DAY = '2026-03-02';
+  const failing = () => ({ ok: false, json: async () => ({ ok: false }) });
+  const sameWindow = (r: { from: string; to: string }, w: { from: string; to: string }) =>
+    Date.parse(r.from) === Date.parse(w.from) && Date.parse(r.to) === Date.parse(w.to);
+  /** Let a retry's timer fire, then its read land and render. */
+  async function wait(ms: number) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+    await act(async () => {});
+  }
+
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The jitter at its midpoint, so each wait is exactly its base delay.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  });
+  afterAll(() => {
+    vi.mocked(Math.random).mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('spreads each wait over half to one and a half times its base, and stops after the last', () => {
+    expect(retryDelay(0, () => 0)).toBe(RETRY_DELAYS_MS[0]! / 2);
+    expect(retryDelay(4, () => 0.5)).toBe(RETRY_DELAYS_MS[4]);
+    expect(retryDelay(4, () => 0.999)).toBeLessThan(RETRY_DELAYS_MS[4]! * 1.5);
+    expect(retryDelay(RETRY_DELAYS_MS.length)).toBeUndefined();
+  });
+
+  it('a window the route refuses as such (400, 404) is not asked again', async () => {
+    for (const status of [400, 404]) {
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(async () => ({ ok: false, status, json: async () => ({ error: 'X' }) }));
+      const first = deferred();
+      await mount(first.promise);
+      await land(first, { ok: true, slots: MARCH });
+      await act(async () => {});
+      expect(reads(), String(status)).toHaveLength(1);
+      await wait(5 * 60_000);
+      expect(reads(), String(status)).toHaveLength(1);
+      act(() => root?.unmount());
+      root = null;
+      container?.remove();
+    }
+  });
+
+  it('the visible month failing comes back: asked again after a second, the calendar returns', async () => {
+    answerLaterMonths((from) => (Date.parse(from) < Date.parse(FIRST.to) ? MARCH : []));
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesUnavailable);
+    expect(reads()).toEqual([]);
+
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(sameWindow(reads()[0]!, FIRST)).toBe(true);
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(monthLabel(el)).toBe('March 2026');
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it('an outage is asked five more times, backing off, then left alone with the sentence', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const [i, delay] of RETRY_DELAYS_MS.entries()) {
+      await wait(delay - 1);
+      expect(reads(), `before retry ${i + 1}`).toHaveLength(i);
+      await wait(1);
+      expect(reads(), `retry ${i + 1}`).toHaveLength(i + 1);
+    }
+    await wait(5 * 60_000);
+    expect(reads()).toHaveLength(RETRY_DELAYS_MS.length);
+    expect(reads().every((r) => sameWindow(r, FIRST))).toBe(true);
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesUnavailable);
+  });
+
+  it('is retried even when the next month was read beside it (no merged span claims it is still in flight)', async () => {
+    let failMarch = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      const q = new URL(url, 'http://localhost').searchParams;
+      const march = Date.parse(q.get('from')!) < Date.parse(FIRST.to);
+      if (march && failMarch) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: march ? MARCH : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    // April is asked for while March is still in flight: adjacent windows.
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Next month"]')!.focus());
+    await land(first, { ok: false });
+    failMarch = false;
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(reads().some((r) => sameWindow(r, FIRST))).toBe(true);
+    expect(monthLabel(el)).toBe('March 2026');
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it('a later month that failed on screen settles on its own', async () => {
+    let failApril = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      const april = new URL(url, 'http://localhost').searchParams.get('from') === '2026-04-01T04:00:00.000Z';
+      if (april && failApril) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: april ? APRIL : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: true, slots: MARCH });
+    await act(async () => {});
+    // The visitor goes to April while its read is failing: it stays unsettled.
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Next month"]')!.click());
+    await act(async () => {});
+    expect(monthLabel(el)).toBe('April 2026');
+    expect(day(el, '2026-04-06').dataset.state).not.toBe('available');
+    failApril = false;
+    await wait(RETRY_DELAYS_MS[1]!);
+    expect(day(el, '2026-04-06').dataset.state).toBe('available');
+  });
+
+  it('past the last retry, "Try again" asks once more and the calendar returns', async () => {
+    let up = false;
+    fetchMock.mockImplementation(async (url: string) => {
+      const from = new URL(url, 'http://localhost').searchParams.get('from')!;
+      if (!up) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: Date.parse(from) < Date.parse(FIRST.to) ? MARCH : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    expect(reads()).toHaveLength(RETRY_DELAYS_MS.length);
+    expect(vi.getTimerCount()).toBe(0);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    expect(button.textContent).toBe(getMessages('en').booking.retry);
+    expect(el.querySelector('.bp-empty')!.getAttribute('role')).toBe('status');
+    // Busy while it asks: one press, one read.
+    let answer!: () => void;
+    fetchMock.mockImplementationOnce(
+      (url: string) =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+          void url;
+        }),
+    );
+    up = true;
+    button.focus();
+    await act(async () => button.click());
+    // Busy, and still focusable (aria-disabled, not disabled).
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    // A second press while it asks reads nothing more.
+    const before = reads().length;
+    await act(async () => button.click());
+    expect(reads()).toHaveLength(before);
+    await act(async () => {
+      answer();
+    });
+    await act(async () => {});
+    // The visible month once more (then the next one, as it settles).
+    expect(sameWindow(reads()[RETRY_DELAYS_MS.length]!, FIRST)).toBe(true);
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+    // Focus lands on the calendar, not on the page the button left.
+    expect((document.activeElement as HTMLElement | null)?.dataset.day).toMatch(/^2026-03-/);
+  });
+
+  it('a press that still finds nothing says so, keeps focus on the button, and can be pressed again', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    button.focus();
+    await act(async () => button.click());
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesStillUnavailable);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    const before = reads().length;
+    await act(async () => button.click());
+    await act(async () => {});
+    expect(reads()).toHaveLength(before + 1);
+  });
+
+  it('a visitor who moved focus elsewhere during the read keeps it when the calendar returns', async () => {
+    let answer!: () => void;
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+        }),
+    );
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    button.focus();
+    await act(async () => button.click());
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    await act(async () => {
+      answer();
+    });
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
+  it('"Try again" pressed while a retry is already out waits for that read', async () => {
+    let answer!: () => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+        }),
+    );
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    // The automatic retry goes out and has not answered.
+    await act(async () => {
+      vi.advanceTimersByTime(RETRY_DELAYS_MS[0]!);
+    });
+    expect(reads()).toHaveLength(1);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    await act(async () => button.click());
+    // No second read of the same month, and busy until the one out answers.
+    expect(reads()).toHaveLength(1);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    await act(async () => {
+      answer();
+    });
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')).toBeNull();
+  });
+
+  it('a visible month that failed, then answered with a reason, says the reason, not "unavailable"', async () => {
+    let failed = false;
+    fetchMock.mockImplementation(async () =>
+      failed ? { ok: true, json: async () => ({ ok: true, slots: [], emptyReason: 'NO_AVAILABILITY' }) } : failing(),
+    );
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    failed = true;
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.noTimesNow);
+    expect(el.querySelector('.bp-empty + button')).toBeNull();
+  });
+
+  it('no "Try again" when the page knows there is nothing to offer', async () => {
+    answerLaterMonths();
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: true, slots: [], emptyReason: 'NO_AVAILABILITY' });
+    expect(el.querySelector('.bp-empty')).not.toBeNull();
+    expect(el.querySelector('.bp-empty + button')).toBeNull();
+  });
+
+  it('one window has one retry waiting, however many of its reads fail', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    expect(vi.getTimerCount()).toBe(1);
+    // The visitor asks for the same month by hand while its retry waits.
+    await act(async () => el.querySelector<HTMLButtonElement>('.bp-empty + button')!.click());
+    await act(async () => {});
+    expect(reads()).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('a page that goes away cancels what it was waiting to ask', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    await mount(first.promise);
+    await land(first, { ok: false });
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => root?.unmount());
+    root = null;
+    // The waiting retry is cancelled, not merely ignored when it fires.
+    expect(vi.getTimerCount()).toBe(0);
+    await wait(60_000);
+    expect(reads()).toEqual([]);
   });
 });

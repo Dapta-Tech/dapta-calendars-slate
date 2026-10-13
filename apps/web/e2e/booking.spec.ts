@@ -10,19 +10,43 @@ import { E2E, HOST, parseIcs, standInBusy, standInCalls, visitorEmail, waitForCa
  */
 const PAGE = `/${HOST.accountCode}/${HOST.handle}/${HOST.slug}`;
 
-/** The first day the month offers, then its first time. Returns the time's label. */
-async function pickFirstTime(page: Page, skipTimes = 0): Promise<string> {
+/**
+ * The first day the month offers, then its first or its last time. Returns the
+ * time's label.
+ *
+ * Never "the third time", or any count past one. How many times that day
+ * still has is not something a test can count on: it is today or the next
+ * weekday depending on the hour the suite runs (the host asks two hours'
+ * notice), and every earlier test in both canvases books or holds times on
+ * it. The reschedule once took the third, and at 13:03 UTC the mobile run
+ * found only two left. The first and the last exist whenever the day has any.
+ */
+async function pickTime(page: Page, which: 'first' | 'last' = 'first'): Promise<string> {
   const day = page.getByRole('grid').getByRole('button', { disabled: false }).first();
   await day.click();
-  const times = page.getByRole('region', { name: /choose a time|elige una hora/i }).getByRole('button', {
-    name: /^\d{1,2}:\d{2}( [AP]M)?$/,
-  });
+  const times = page
+    .getByRole('region', { name: /choose a time|elige una hora/i })
+    .getByRole('button', { name: /^\d{1,2}:\d{2}( [AP]M)?$/ });
   await expect(times.first()).toBeVisible();
-  const chosen = times.nth(skipTimes);
-  const label = (await chosen.textContent())!.trim();
+  const chosen = which === 'first' ? times.first() : times.last();
+  // One spelling of the space before AM/PM, whichever the page renders.
+  const label = (await chosen.textContent())!.trim().replace(/\s/g, ' ');
   await chosen.click();
   return label;
 }
+
+/**
+ * The zone the manage page reads times in: the booking's, which is the zone
+ * the booking page opened in, the host's. The browser runs in the same one
+ * (`timezoneId` in playwright.config.ts), so it is also the visitor's clock.
+ */
+const ZONE = 'America/New_York';
+
+/** An instant as the manage page labels it: 12-hour, in `ZONE`. */
+const timeLabel = (iso: string) =>
+  new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ZONE })
+    .format(new Date(iso))
+    .replace(/\s/g, ' ');
 
 async function fillDetails(page: Page, email: string): Promise<void> {
   await page.getByRole('textbox', { name: /your name/i }).fill('Ada Visitor');
@@ -36,6 +60,8 @@ test.describe('one booking, end to end', () => {
   let manageUrl = '';
   let uid = '';
   let startUtc = '';
+  /** The calendar event the booking wrote, once the move has named it. */
+  let eventId = '';
   const email = visitorEmail('life');
 
   test('every time the page offers is free on the host calendar', async ({ request }) => {
@@ -54,7 +80,7 @@ test.describe('one booking, end to end', () => {
 
   test('book: day, time, details, confirmation', async ({ page }) => {
     await page.goto(PAGE);
-    await pickFirstTime(page);
+    await pickTime(page);
     await fillDetails(page, email);
     await page.getByRole('button', { name: /confirm booking/i }).click();
     const done = page.getByRole('region', { name: /booking confirmed/i });
@@ -113,9 +139,14 @@ test.describe('one booking, end to end', () => {
   });
 
   test('reschedule moves the same calendar event', async ({ page }) => {
+    const since = Date.now();
     await page.goto(manageUrl);
     const creates = (await standInCalls('createEvent')).length;
-    await pickFirstTime(page, 2);
+    // Any time the manage page offers is a real move: the booking's own time is
+    // taken, so it is never among them. The LAST of the first open day: the
+    // first sits closest to the two-hour notice line, and a run that crosses
+    // it between loading the page and moving would be refused for the notice.
+    const label = await pickTime(page, 'last');
     await page.getByRole('button', { name: /reschedule|confirm|move/i }).last().click();
     await expect(page.getByRole('main')).toContainText(/rescheduled|moved|new time|updated/i);
     // A move rotates the manage link (older emails stop opening it); the page
@@ -123,8 +154,18 @@ test.describe('one booking, end to end', () => {
     const before = manageUrl;
     await expect.poll(() => page.url()).not.toBe(before);
     manageUrl = page.url();
-    const update = await waitForCall('updateEvent');
+    // THIS booking's move (its visitor, after this test began), never the other
+    // canvas's: both canvases' writes land on the one stand-in.
+    const update = await waitForCall(
+      'updateEvent',
+      (c) => c.at >= since && ((c.body?.['attendeeEmails'] as string[] | undefined) ?? []).includes(email),
+    );
     expect(update.path).toMatch(/^\/v1\/events\/evt_/);
+    eventId = update.path.split('/').pop()!;
+    // Moved to the time the visitor picked, off the one it was booked at.
+    const movedTo = String(update.body?.['startUtc']);
+    expect(movedTo).not.toBe(startUtc);
+    expect(timeLabel(movedTo)).toBe(label);
     const created = await waitForCall('createEvent', (c) => c.body?.['startUtc'] === startUtc);
     void created;
     // A move, not a cancel plus a new invite: no second event was created.
@@ -136,7 +177,8 @@ test.describe('one booking, end to end', () => {
     await page.getByRole('textbox', { name: /cancel this booking/i }).fill('Plans changed');
     await page.getByRole('button', { name: /^cancel booking$/i }).click();
     await expect(page.getByRole('main')).toContainText(/cancelled|canceled/i);
-    await waitForCall('deleteEvent');
+    // The event the move kept, not any delete the other canvas already made.
+    await waitForCall('deleteEvent', (c) => c.path.endsWith(`/events/${eventId}`));
   });
 
   // Follow-up, not fixed in this PR: the confirmation screen builds its
