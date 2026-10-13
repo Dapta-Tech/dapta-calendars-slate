@@ -550,7 +550,7 @@ export class BookingService {
     );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
-    const ctx = await this.db.get<RescheduleContextRow>(
+    const ctx = await this.db.get<RescheduleContextRow & { host_name: string | null }>(
       // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
       // page's reschedule link never resurrects a legacy alias.
       //
@@ -562,7 +562,7 @@ export class BookingService {
       // rather than `bk.team_id`: the EVENT TYPE decides which public route
       // serves it, and it is the event type the picker has to resolve.
       sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug,
-                 et.team_id AS team_id, tm.slug AS team_slug
+                 et.team_id AS team_id, tm.slug AS team_slug, m.display_name AS host_name
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
@@ -576,7 +576,10 @@ export class BookingService {
       title: b.title,
       startUtc: new Date(Number(b.start_ms)).toISOString(),
       endUtc: new Date(Number(b.end_ms)).toISOString(),
-      host: { name: null, handle: ctx?.handle ?? null },
+      // The host's name, as the create response gives it. It was a constant
+      // null here, so the manage page fell back to the attendee's own name and
+      // told the visitor they were meeting themselves.
+      host: { name: ctx?.host_name ?? null, handle: ctx?.handle ?? null },
       attendee: {
         name: attendee?.name ?? '',
         email: attendee?.email ?? '',

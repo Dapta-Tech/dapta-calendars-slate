@@ -1,0 +1,957 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`lifecycle emails (en) > to the attendee > cancellation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=CANCEL",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#cd2b31;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#cd2b31;margin:0 8px 1px 0;vertical-align:middle;"></span>Cancelled</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Alex Rivera was cancelled. Reason: Plans changed</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:2
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CANCELLED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Cancelled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Sam Guest,
+
+Your booking "Intro Call" (Mon, Aug 3, 11:00 AM EDT) has been cancelled.
+Reason: Plans changed",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the attendee > confirmation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmed</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Alex Rivera is confirmed. The calendar invite is attached.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Manage your booking</a></td></tr></table>
+      <div style="color:#67676f;font-size:13px;line-height:20px;margin-top:16px;">From your booking you can reschedule or cancel it.</div>
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:0
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Confirmed: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Sam Guest,
+
+Your booking "Intro Call" is confirmed.
+When: Mon, Aug 3, 11:00 AM EDT
+Host: Alex Rivera
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1
+Manage your booking: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the attendee > pending 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#8a5700;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#8a5700;margin:0 8px 1px 0;vertical-align:middle;"></span>Pending</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">We sent your request to Alex Rivera. You'll get a confirmation once it's accepted.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Manage your request</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Request received: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Sam Guest,
+
+We received your request to book "Intro Call".
+When: Mon, Aug 3, 11:00 AM EDT
+Host: Alex Rivera
+This is pending confirmation. You'll get another email once it's confirmed.
+Cancel this request: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the attendee > reminder 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#1a1a1c;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#1a1a1c;margin:0 8px 1px 0;vertical-align:middle;"></span>Reminder</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">A reminder about your meeting with Alex Rivera.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Manage your booking</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Reminder: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Sam Guest,
+
+Reminder: "Intro Call" starts in 1 hour(s).
+When: Mon, Aug 3, 11:00 AM EDT
+Host: Alex Rivera
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1
+Manage your booking: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the attendee > reschedule 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Rescheduled</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Alex Rivera has a new time. The updated invite is attached.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Was</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">Sun, Aug 2, 11:00 AM EDT</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">With</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Manage your booking</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:1
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Rescheduled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Sam Guest,
+
+Your booking "Intro Call" has been rescheduled.
+Was: Sun, Aug 2, 11:00 AM EDT
+Now: Mon, Aug 3, 11:00 AM EDT
+Host: Alex Rivera
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1
+Manage your booking: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the host > cancellation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=CANCEL",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#cd2b31;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#cd2b31;margin:0 8px 1px 0;vertical-align:middle;"></span>Cancelled</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest was cancelled. Reason: Plans changed</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:2
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CANCELLED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Cancelled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Alex Rivera,
+
+The booking "Intro Call" (Mon, Aug 3, 11:00 AM EDT) with Sam Guest has been cancelled.
+Reason: Plans changed",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the host > confirmation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmed</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest is confirmed. The calendar invite is attached.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:0
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "New booking: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Alex Rivera,
+
+Sam Guest (sam@example.com) booked "Intro Call".
+When: Mon, Aug 3, 11:00 AM EDT
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the host > pending 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#8a5700;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#8a5700;margin:0 8px 1px 0;vertical-align:middle;"></span>Needs your OK</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Sam Guest asked for this time. Confirm or decline it from your bookings.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "New booking: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Alex Rivera,
+
+Sam Guest (sam@example.com) booked "Intro Call".
+When: Mon, Aug 3, 11:00 AM EDT
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1
+This request is pending your confirmation.",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the host > reminder 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#1a1a1c;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#1a1a1c;margin:0 8px 1px 0;vertical-align:middle;"></span>Reminder</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">A reminder about your meeting with Sam Guest.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Reminder: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Alex Rivera,
+
+Reminder: "Intro Call" with Sam Guest starts in 1 hour(s).
+When: Mon, Aug 3, 11:00 AM EDT
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (en) > to the host > reschedule 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Rescheduled</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest has a new time. The updated invite is attached.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Was</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">Sun, Aug 2, 11:00 AM EDT</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>This is an automated message. Need help? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:1
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Rescheduled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "text": "Hi Alex Rivera,
+
+The booking "Intro Call" with Sam Guest has been rescheduled.
+Was: Sun, Aug 2, 11:00 AM EDT
+Now: Mon, Aug 3, 11:00 AM EDT
+Where: Online meeting
+Join the meeting: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the attendee > cancellation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=CANCEL",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#cd2b31;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#cd2b31;margin:0 8px 1px 0;vertical-align:middle;"></span>Cancelada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Alex Rivera fue cancelada. Motivo: Plans changed</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:2
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CANCELLED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Cancelada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Sam Guest,
+
+Tu reserva "Intro Call" (lun, 3 ago, 11:00 GMT-4) ha sido cancelada.
+Motivo: Plans changed",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the attendee > confirmation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Alex Rivera quedó confirmada. La invitación de calendario va adjunta.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Gestionar tu reserva</a></td></tr></table>
+      <div style="color:#67676f;font-size:13px;line-height:20px;margin-top:16px;">Desde tu reserva puedes reagendarla o cancelarla.</div>
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:0
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Confirmada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Sam Guest,
+
+Tu reserva "Intro Call" está confirmada.
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Anfitrión: Alex Rivera
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1
+Gestiona tu reserva: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the attendee > pending 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#8a5700;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#8a5700;margin:0 8px 1px 0;vertical-align:middle;"></span>Pendiente</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Enviamos tu solicitud a Alex Rivera. Recibirás la confirmación cuando la acepte.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Gestionar tu solicitud</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Solicitud recibida: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Sam Guest,
+
+Recibimos tu solicitud para reservar "Intro Call".
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Anfitrión: Alex Rivera
+Está pendiente de confirmación. Recibirás otro correo cuando se confirme.
+Cancelar esta solicitud: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the attendee > reminder 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#1a1a1c;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#1a1a1c;margin:0 8px 1px 0;vertical-align:middle;"></span>Recordatorio</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Un recordatorio de tu reunión con Alex Rivera.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Gestionar tu reserva</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Recordatorio: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Sam Guest,
+
+Recordatorio: "Intro Call" comienza en 1 hora(s).
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Anfitrión: Alex Rivera
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1
+Gestiona tu reserva: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the attendee > reschedule 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Reagendada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Alex Rivera tiene una nueva hora. La invitación actualizada va adjunta.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Antes</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">dom, 2 ago, 11:00 GMT-4</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Con</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Alex Rivera</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;"><tr><td style="background:#1a1a1c;border-radius:10px;"><a href="https://app.example.com/manage/bk-snapshot?token=tok" style="display:inline-block;padding:14px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:10px;">Gestionar tu reserva</a></td></tr></table>
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:1
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Reprogramada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Sam Guest,
+
+Tu reserva "Intro Call" ha sido reprogramada.
+Antes: dom, 2 ago, 11:00 GMT-4
+Ahora: lun, 3 ago, 11:00 GMT-4
+Anfitrión: Alex Rivera
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1
+Gestiona tu reserva: https://app.example.com/manage/bk-snapshot?token=tok",
+  "to": [
+    "sam@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the host > cancellation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=CANCEL",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#cd2b31;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#cd2b31;margin:0 8px 1px 0;vertical-align:middle;"></span>Cancelada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest fue cancelada. Motivo: Plans changed</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:2
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CANCELLED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Cancelada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Alex Rivera,
+
+La reserva "Intro Call" (lun, 3 ago, 11:00 GMT-4) con Sam Guest ha sido cancelada.
+Motivo: Plans changed",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the host > confirmation 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Confirmada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest quedó confirmada. La invitación de calendario va adjunta.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:0
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Alex Rivera,
+
+Sam Guest (sam@example.com) reservó "Intro Call".
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the host > pending 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#8a5700;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#8a5700;margin:0 8px 1px 0;vertical-align:middle;"></span>Por confirmar</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Sam Guest pidió esta hora. Confírmala o recházala desde tus reservas.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Alex Rivera,
+
+Sam Guest (sam@example.com) reservó "Intro Call".
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1
+Esta solicitud está pendiente de tu confirmación.",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the host > reminder 1`] = `
+{
+  "attachment": null,
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#1a1a1c;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#1a1a1c;margin:0 8px 1px 0;vertical-align:middle;"></span>Recordatorio</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Un recordatorio de tu reunión con Sam Guest.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": null,
+  "subject": "Recordatorio: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Alex Rivera,
+
+Recordatorio: "Intro Call" con Sam Guest comienza en 1 hora(s).
+Cuándo: lun, 3 ago, 11:00 GMT-4
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
+
+exports[`lifecycle emails (es) > to the host > reschedule 1`] = `
+{
+  "attachment": {
+    "contentType": "text/calendar; method=REQUEST",
+    "filename": "invite.ics",
+  },
+  "html": "<div style="margin:0;padding:32px 12px;background:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:#ffffff;border:1px solid #e6e6e8;border-radius:16px;padding:32px 28px;">
+      <div style="font-size:13px;line-height:18px;font-weight:600;color:#0e7a3f;margin:0 0 12px;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#0e7a3f;margin:0 8px 1px 0;vertical-align:middle;"></span>Reagendada</div>
+      <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
+      <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest tiene una nueva hora. La invitación actualizada va adjunta.</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Antes</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">dom, 2 ago, 11:00 GMT-4</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+      </table>
+      
+      
+    </td></tr>
+    <tr><td style="padding:20px 8px 4px;color:#67676f;font-size:12px;line-height:18px;text-align:center;">
+      <div>Este es un mensaje automático. ¿Necesitas ayuda? <a href="mailto:<support address>" style="color:#67676f;"><support address></a></div>
+    </td></tr>
+  </table>
+</div>",
+  "ics": "BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Slate//Calendars//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:bk-snapshot
+SEQUENCE:1
+DTSTAMP:20260709T120000Z
+DTSTART:20260803T150000Z
+DTEND:20260803T153000Z
+SUMMARY:Intro Call
+STATUS:CONFIRMED
+LOCATION:https://meet.example.test/room-1
+URL:https://meet.example.test/room-1
+ORGANIZER;CN=Alex Rivera:mailto:alex@example.com
+ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
+END:VEVENT
+END:VCALENDAR
+",
+  "subject": "Reprogramada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "text": "Hola Alex Rivera,
+
+La reserva "Intro Call" con Sam Guest ha sido reprogramada.
+Antes: dom, 2 ago, 11:00 GMT-4
+Ahora: lun, 3 ago, 11:00 GMT-4
+Dónde: Online meeting
+Unirse a la reunión: https://meet.example.test/room-1",
+  "to": [
+    "alex@example.com",
+  ],
+}
+`;
