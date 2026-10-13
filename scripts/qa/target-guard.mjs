@@ -66,7 +66,7 @@ function denied(api, denyHosts) {
  * anything that is not loopback without `--i-know-this-is-not-prod`. Exits 2
  * with the reason; returns quietly when the target is allowed.
  */
-export async function guardTarget(args) {
+export function guardTarget(args) {
   const api = String(args.api);
   const hit = denied(api, args['deny-hosts']);
   if (hit) {
@@ -86,7 +86,7 @@ export async function guardTarget(args) {
 }
 
 /** For scripts that must only ever talk to an API on this machine. No override. */
-export async function requireLoopback(api, what = '--api') {
+export function requireLoopback(api, what = '--api') {
   if (isLoopbackTarget(api)) return;
   console.error(`refusing ${what} ${api}: this script only runs against a local API (loopback)`);
   process.exit(2);

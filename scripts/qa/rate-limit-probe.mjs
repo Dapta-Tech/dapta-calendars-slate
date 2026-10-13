@@ -20,7 +20,7 @@ if (!args.api || !args.page) {
   console.error('usage: --api <base url> --page <accountCode>/<handle> [--max 120]');
   process.exit(2);
 }
-await guardTarget(args);
+guardTarget(args);
 const [accountCode, handle] = args.page.split('/');
 const url = `${args.api.replace(/\/$/, '')}/v1/profiles/${encodeURIComponent(accountCode)}/${encodeURIComponent(handle)}`;
 const max = Number(args.max ?? 120);

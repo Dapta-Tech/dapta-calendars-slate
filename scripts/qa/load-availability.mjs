@@ -28,7 +28,7 @@ if (!args.api || !args.page) {
   console.error('usage: --api <base url> --page <accountCode>/<handle>/<slug> [--levels 1,5,10,20] [--reads 30]');
   process.exit(2);
 }
-await guardTarget(args);
+guardTarget(args);
 const [accountCode, handle, slug] = args.page.split('/');
 const levels = (args.levels ?? '1,5,10,20').split(',').map(Number);
 const reads = Number(args.reads ?? 30);

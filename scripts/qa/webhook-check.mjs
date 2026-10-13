@@ -33,7 +33,7 @@ for (const k of ['api', 'public', 'host-email', 'page'])
     process.exit(2);
   }
 const api = args.api.replace(/\/$/, '');
-await requireLoopback(api);
+requireLoopback(api);
 const pub = args.public.replace(/\/$/, '');
 const port = Number(args.port ?? 4520);
 const watchS = Number(args.watch ?? 90);

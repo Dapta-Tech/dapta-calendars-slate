@@ -40,7 +40,7 @@ const daysOut = Number(args['days-out'] ?? 3);
 const probes = Number(args.probes ?? 5);
 const headers = { 'content-type': 'application/json', 'user-agent': 'calendars-qa-holds/1.0' };
 const won = [];
-await guardTarget(args);
+guardTarget(args);
 
 async function availability(fromMs, toMs) {
   const qs = new URLSearchParams({
