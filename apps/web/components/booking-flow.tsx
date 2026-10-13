@@ -363,13 +363,54 @@ export function BookingFlow({
   const locationLabel = formatLocation(location ?? null, messages);
   const weekStartsOn = weekStartsOnFor(locale);
 
-  // The time the visitor is on now, read when a hold answers: a hold that
-  // lands after they went back or picked another time belongs to nothing on
-  // screen. A ref, because the answer arrives in a closure of an older render.
-  const pickedRef = useRef<string | null>(null);
+  // Which pick is current, read when a hold answers: a hold that lands after
+  // the visitor went back, picked again (the same time included) or left the
+  // page belongs to nothing on screen. A counter, not the time, so going back
+  // and re-picking the same time is still a new pick. Refs, because the
+  // answer arrives in a closure of an older render.
+  const pickSeq = useRef(0);
+  // The hold request of the latest pick, while it is out, and the last
+  // release nobody waited for (from `retry()`, or of a hold that answered for
+  // a pick already left). The next pick waits for both before asking for its
+  // own hold: Next runs a page's server actions one at a time, so without the
+  // wait a re-pick of the same time could be queued ahead of the release of
+  // its older hold and be refused as still held.
+  const pendingReserve = useRef<Promise<unknown> | null>(null);
+  const pendingRelease = useRef<Promise<void> | null>(null);
+  function releaseLater(uid: string) {
+    const release = Promise.resolve(releaseAction(uid)).catch(() => {});
+    pendingRelease.current = release;
+    void release.finally(() => {
+      if (pendingRelease.current === release) pendingRelease.current = null;
+    });
+  }
+  useEffect(
+    () => () => {
+      pickSeq.current += 1;
+    },
+    [],
+  );
+
+  // The hold the form carried when it was submitted (null: none).
+  const submittedHold = useRef<string | null>(null);
+  // A booking that lands ends the pick. A booker quick enough to confirm
+  // before the hold answered booked without it: Next runs a page's server
+  // actions one at a time, so the hold lands while the booking waits, and the
+  // form had already gone without it. That hold, stored or still on its way,
+  // is given back instead of counting against the host's cap of ten live
+  // holds for ten minutes. A hold the form did carry was consumed by the
+  // booking and is left alone.
+  useEffect(() => {
+    if (!bookedUid) return;
+    pickSeq.current += 1;
+    if (hold && hold.uid !== submittedHold.current) {
+      void releaseAction(hold.uid);
+      setHold(null);
+    }
+  }, [bookedUid, hold]);
 
   async function pick(slot: DisplaySlot) {
-    pickedRef.current = slot.startUtc;
+    const seq = ++pickSeq.current;
     setDir('forward');
     setSelected(slot.startUtc);
     // The last attempt's error stays dismissed: picking a slot used to clear
@@ -387,22 +428,25 @@ export function BookingFlow({
     const previous = hold;
     setHold(null);
     if (previous) await releaseAction(previous.uid);
-    if (pickedRef.current !== slot.startUtc) return; // moved on during the release
+    if (pendingReserve.current) await Promise.resolve(pendingReserve.current).catch(() => {});
+    if (pendingRelease.current) await pendingRelease.current;
+    if (pickSeq.current !== seq) return; // moved on during the wait
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.
     if (mode !== 'personal') return;
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.
     if ((slot.capacity ?? 1) > 1) return;
-    const r = await reserveAction(
-      { accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc },
-      oneOffToken,
-    );
-    if (pickedRef.current !== slot.startUtc) {
-      // The visitor left this time while it was being held. Give the hold
-      // straight back: kept, it would hide the time from everyone for ten
-      // minutes, or ride the form for another time into a 410.
-      if (r.ok && r.reservationUid) void releaseAction(r.reservationUid);
+    const reserving = reserveAction({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc }, oneOffToken);
+    pendingReserve.current = reserving;
+    const r = await reserving;
+    if (pendingReserve.current === reserving) pendingReserve.current = null;
+    if (pickSeq.current !== seq) {
+      // The visitor left this pick while it was being held. Give the hold
+      // straight back (its error, if any, is about nothing on screen): kept,
+      // it would hide the time from everyone for ten minutes, or ride the form
+      // for another time into a 410.
+      if (r.ok && r.reservationUid) releaseLater(r.reservationUid);
       return;
     }
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
@@ -420,10 +464,10 @@ export function BookingFlow({
    * whether or not the hold was still there, and the booker is already gone.
    */
   function retry() {
-    pickedRef.current = null;
+    pickSeq.current += 1;
     setDir('back');
     setSelected(null);
-    if (hold) void releaseAction(hold.uid);
+    if (hold) releaseLater(hold.uid);
     setHold(null);
     setHoldError(null);
     setDismissedResult(result);
@@ -722,6 +766,7 @@ export function BookingFlow({
               // to cause) instead of round-tripping a guaranteed 400.
               onSubmit={(e) => {
                 if (!validateAll()) e.preventDefault();
+                else submittedHold.current = hold?.uid ?? null;
               }}
               className="bp-form"
             >

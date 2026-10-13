@@ -20,7 +20,7 @@ vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => actions);
 
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
-import { BASE_STYLE, NOW, TIME_ZONE, availability } from '@/app/[accountCode]/__fixtures__/public-surface';
+import { BASE_STYLE, NOW, TIME_ZONE, availability, booking } from '@/app/[accountCode]/__fixtures__/public-surface';
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -42,6 +42,12 @@ function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => (resolve = r));
   return { promise, resolve };
+}
+
+function type(el: HTMLElement, selector: string, value: string) {
+  const input = el.querySelector<HTMLInputElement>(selector)!;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 const held = (uid: string) => ({ ok: true, reservationUid: uid, expiresAt: '2026-03-02T14:10:00.000Z' });
@@ -123,5 +129,171 @@ describe('the booking form carries only the hold on the time it shows', () => {
     });
     expect(formHold(el)).toBe('res_second');
     expect(actions.releaseAction).not.toHaveBeenCalledWith('res_second');
+  });
+
+  it('going back and re-picking the SAME time: the old pick\'s answer is given back, no error shown', async () => {
+    const el = await mount();
+    const first = deferred<ReturnType<typeof held>>();
+    const second = deferred<{ ok: boolean; message?: string; reservationUid?: string; expiresAt?: string }>();
+    actions.reserveAction.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await act(async () => slots(el)[0]!.click());
+    await act(async () => backToTimes(el).click());
+    await act(async () => slots(el)[0]!.click());
+    // The re-pick does not ask for its hold while the old one is out.
+    expect(actions.reserveAction).toHaveBeenCalledTimes(1);
+    // The first pick's hold answers after the visitor came back to the time.
+    await act(async () => {
+      first.resolve(held('res_old'));
+      await first.promise;
+    });
+    expect(formHold(el)).toBeNull();
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_old');
+    // The old hold is given back BEFORE the new one is asked for, so the
+    // server never sees the time as still held by the visitor's own old pick.
+    expect(actions.reserveAction).toHaveBeenCalledTimes(2);
+    expect(actions.releaseAction.mock.invocationCallOrder[0]!).toBeLessThan(
+      actions.reserveAction.mock.invocationCallOrder[1]!,
+    );
+    await act(async () => {
+      second.resolve(held('res_new'));
+      await second.promise;
+    });
+    expect(formHold(el)).toBe('res_new');
+    expect(el.textContent).not.toMatch(/not available to hold/i);
+  });
+
+  it('an old pick that answers with an error shows nothing', async () => {
+    const el = await mount();
+    const first = deferred<{ ok: boolean; message?: string }>();
+    actions.reserveAction.mockReturnValueOnce(first.promise).mockResolvedValueOnce(held('res_b'));
+    await act(async () => slots(el)[0]!.click());
+    await act(async () => backToTimes(el).click());
+    await act(async () => slots(el)[1]!.click());
+    await act(async () => {
+      first.resolve({ ok: false, message: 'That time is not available to hold.' });
+      await first.promise;
+    });
+    expect(formHold(el)).toBe('res_b');
+    expect(el.textContent).not.toMatch(/not available to hold/i);
+  });
+
+  it('the next pick waits for the release "back to times" sent, then holds', async () => {
+    const el = await mount();
+    actions.reserveAction.mockResolvedValueOnce(held('res_a'));
+    await act(async () => slots(el)[0]!.click());
+    expect(formHold(el)).toBe('res_a');
+    const release = deferred<void>();
+    actions.releaseAction.mockReturnValueOnce(release.promise);
+    await act(async () => backToTimes(el).click());
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_a');
+    actions.reserveAction.mockResolvedValueOnce(held('res_a2'));
+    await act(async () => slots(el)[0]!.click());
+    // Re-picking the time just let go: no hold is asked for while its release is in flight.
+    expect(actions.reserveAction).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release.resolve();
+      await release.promise;
+    });
+    expect(actions.reserveAction).toHaveBeenCalledTimes(2);
+    expect(formHold(el)).toBe('res_a2');
+  });
+
+  it('a hold that answers after the page is gone is given back', async () => {
+    const el = await mount();
+    const reserve = deferred<ReturnType<typeof held>>();
+    actions.reserveAction.mockReturnValueOnce(reserve.promise);
+    await act(async () => slots(el)[0]!.click());
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => {
+      reserve.resolve(held('res_gone'));
+      await reserve.promise;
+    });
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_gone');
+  });
+
+  it('a hold that answers after the booking landed (a fast confirm) is given back', async () => {
+    const el = await mount();
+    const reserve = deferred<ReturnType<typeof held>>();
+    actions.reserveAction.mockReturnValueOnce(reserve.promise);
+    await act(async () => slots(el)[0]!.click());
+    const at = el.querySelector<HTMLInputElement>('input[name="startUtc"]')!.value;
+    actions.bookAction.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      booking: booking({ startUtc: at, endUtc: new Date(Date.parse(at) + 45 * 60_000).toISOString() }),
+    });
+    await act(async () => {
+      type(el, 'input[name="name"]', 'Sam Visitor');
+      type(el, 'input[name="email"]', 'sam@example.com');
+      type(el, 'input[name="answer_company"]', 'Example Co');
+    });
+    await act(async () => {
+      el.querySelector<HTMLFormElement>('form')!.requestSubmit();
+    });
+    expect(actions.bookAction).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('input[name="name"]')).toBeNull();
+    await act(async () => {
+      reserve.resolve(held('res_after'));
+      await reserve.promise;
+    });
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_after');
+  });
+
+  it('a hold stored after a fast confirm went without it is given back once the booking lands; one it carried is not', async () => {
+    const fill = async (el: HTMLElement) => {
+      await act(async () => {
+        type(el, 'input[name="name"]', 'Sam Visitor');
+        type(el, 'input[name="email"]', 'sam@example.com');
+        type(el, 'input[name="answer_company"]', 'Example Co');
+      });
+    };
+    const landed = (el: HTMLElement) => {
+      const at = el.querySelector<HTMLInputElement>('input[name="startUtc"]')!.value;
+      return {
+        ok: true,
+        status: 201,
+        booking: booking({ startUtc: at, endUtc: new Date(Date.parse(at) + 45 * 60_000).toISOString() }),
+      };
+    };
+
+    // Submitted before the hold answered; the hold lands while the booking waits.
+    let el = await mount();
+    const reserve = deferred<ReturnType<typeof held>>();
+    actions.reserveAction.mockReturnValueOnce(reserve.promise);
+    await act(async () => slots(el)[0]!.click());
+    await fill(el);
+    const book = deferred<ReturnType<typeof landed>>();
+    actions.bookAction.mockReturnValueOnce(book.promise);
+    const answer = landed(el);
+    await act(async () => {
+      el.querySelector<HTMLFormElement>('form')!.requestSubmit();
+    });
+    await act(async () => {
+      reserve.resolve(held('res_stored'));
+      await reserve.promise;
+    });
+    expect(actions.releaseAction).not.toHaveBeenCalled();
+    await act(async () => {
+      book.resolve(answer);
+      await book.promise;
+    });
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_stored');
+
+    // The ordinary path: the hold rode the form, the booking consumed it.
+    act(() => root?.unmount());
+    container?.remove();
+    vi.clearAllMocks();
+    el = await mount();
+    actions.reserveAction.mockResolvedValueOnce(held('res_carried'));
+    await act(async () => slots(el)[0]!.click());
+    expect(formHold(el)).toBe('res_carried');
+    await fill(el);
+    actions.bookAction.mockResolvedValueOnce(landed(el));
+    await act(async () => {
+      el.querySelector<HTMLFormElement>('form')!.requestSubmit();
+    });
+    expect(el.querySelector('input[name="name"]')).toBeNull();
+    expect(actions.releaseAction).not.toHaveBeenCalled();
   });
 });
