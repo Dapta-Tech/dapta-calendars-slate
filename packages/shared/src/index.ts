@@ -12,3 +12,4 @@ export * from './branding';
 export * from './growth';
 export * from './location';
 export * from './i18n';
+export * from './forwarded';
