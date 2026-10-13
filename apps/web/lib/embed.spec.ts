@@ -269,13 +269,16 @@ describe('embedSrcPath / embedSnippet', () => {
  * what the page does rather than how it looks.
  */
 describe('EMBED_STYLE_PARAMS covers the appearance half of the contract', () => {
-  const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio'];
+  const BEHAVIOUR_KEYS = ['landingEnabled', 'defaultEventSlug', 'bio', 'showProfile', 'hideConnectedPhoto'];
+  // The brand kit's logo is an image the workspace owns, not an axis: a snippet
+  // URL must never be able to paint a third party's image onto a host's page.
+  const NOT_FROM_A_URL = [...BEHAVIOUR_KEYS, 'logoUrl'];
 
   it('maps every appearance axis and no behaviour key', () => {
     const inContract = Object.keys(bookingPageStyleSchema.shape);
-    const expected = inContract.filter((k) => !BEHAVIOUR_KEYS.includes(k)).sort();
+    const expected = inContract.filter((k) => !NOT_FROM_A_URL.includes(k)).sort();
     expect(Object.values(EMBED_STYLE_PARAMS).slice().sort()).toEqual(expected);
-    for (const key of BEHAVIOUR_KEYS) {
+    for (const key of NOT_FROM_A_URL) {
       expect(Object.values(EMBED_STYLE_PARAMS)).not.toContain(key);
     }
   });

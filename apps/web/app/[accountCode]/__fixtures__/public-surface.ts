@@ -55,12 +55,17 @@ export function profile(style: Record<string, unknown>, brandColor: string | nul
         title: 'Design review',
         description: 'Bring a screen or a flow. We go through it together and you leave with a list.',
         lengthMinutes: 45,
+        // The event page paints its panel and month from these (Phase 5).
+        location: { kind: 'conferencing' },
+        timeZone: TIME_ZONE,
       },
       {
         slug: 'intro',
         title: 'Intro call',
         description: null,
         lengthMinutes: 15,
+        location: { kind: 'conferencing' },
+        timeZone: TIME_ZONE,
       },
     ],
   };

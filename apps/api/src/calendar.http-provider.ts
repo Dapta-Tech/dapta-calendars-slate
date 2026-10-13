@@ -48,6 +48,8 @@ const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calend
  * the three a very full calendar has been seen to survive intact, and keeps a
  * 60-day read to five requests: the backend's rate limit is per second (see
  * BUSY_REQUESTS_PER_SECOND), so every window is a second of a visitor's wait.
+ * Deployments set it with CALENDAR_BUSY_WINDOW_DAYS; a backend that answers a
+ * free/busy query (whole for any span) can raise it and be read in one request.
  */
 const BUSY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -315,7 +317,7 @@ export interface ExternalCalendarOptions {
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
-  /** Longest span of one busy read, in ms. Defaults to a week. */
+  /** Longest span of one busy read, in ms. Defaults to BUSY_WINDOW_MS (two weeks). */
   busyWindowMs?: number;
   /** Injectable for tests; defaults to real time. */
   clock?: Clock;

@@ -11,10 +11,12 @@ import {
 import type { BookingView } from '@slate/types';
 import { getManageView, getAvailability, getProfile, getRescheduleAvailability } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
+import { manageMode } from '@/lib/manage-mode';
 import { ManageActions } from './manage-actions';
 import { BookingStage, BookingSummary } from '@/components/booking-page-parts';
 import { BrandedShell } from '@/components/branded-shell';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { brandingShown } from '@/lib/growth';
 
 // Token-gated personal page: never indexed, and the title stays generic so no
 // booking detail leaks into link previews or crawlers.
@@ -67,7 +69,9 @@ async function ManageLinkInvalid() {
           </section>
         </BookingStage>
       </main>
-      <MadeWithBadge locale={locale} />
+      {/* A stale or wrong token opens no booking, so there is no account whose
+          choice to hide the branding could apply: the default holds. */}
+      <MadeWithBadge locale={locale} show />
     </BrandedShell>
   );
 }
@@ -148,12 +152,13 @@ export default async function ManagePage({
     hostBranding(booking),
   ]);
 
-  // Granular gate: an accepted booking is manageable only while it's in the
-  // future (can't reschedule/cancel a meeting that already happened). An
-  // unreadable instant is not "in the future": with no time to compare, the
-  // page says so rather than offering actions it cannot reason about.
+  // Granular gate (see `manageMode`): an accepted booking still ahead can be
+  // moved or cancelled; a request still waiting on the host can be withdrawn;
+  // nothing else can change. An unreadable instant is not "in the future": with
+  // no time to compare, the page says so rather than offering actions it cannot
+  // reason about.
   const isPast = startUtc !== null && new Date(startUtc).getTime() <= now.getTime();
-  const canManage = booking.status === 'accepted' && startUtc !== null && !isPast;
+  const mode = manageMode(booking.status, startUtc, now.getTime());
 
   const hour12 = !locale.toLowerCase().startsWith('es');
   const summary = (
@@ -180,9 +185,10 @@ export default async function ManagePage({
   return (
     <BrandedShell brandColor={branding.brandColor} style={branding.style} className="bp-viewport">
       <main className="w-full py-10 md:px-6 md:py-12">
-        {canManage ? (
+        {mode !== 'none' ? (
           <ManageActions
             uid={uid}
+            canReschedule={mode === 'full'}
             token={token}
             slots={avail?.slots ?? []}
             timeZone={tz}
@@ -201,7 +207,7 @@ export default async function ManagePage({
           </BookingStage>
         )}
       </main>
-      <MadeWithBadge locale={locale} accountCode={booking.reschedule?.accountCode} />
+      <MadeWithBadge locale={locale} accountCode={booking.reschedule?.accountCode} show={brandingShown(booking)} />
     </BrandedShell>
   );
 }

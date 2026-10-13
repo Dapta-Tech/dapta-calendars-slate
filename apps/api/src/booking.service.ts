@@ -6,6 +6,7 @@ import {
   createTeamBooking,
   enqueueWebhookDeliveries,
   getAccountByCode,
+  getBrandingSwitchByCode,
   getAvailability,
   getPublicProfile,
   getBookingRescheduleAvailability,
@@ -41,7 +42,9 @@ import {
   type TeamProfile,
 } from '@slate/types';
 import { z } from 'zod';
-import { DB, ENV } from './tokens';
+import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
+import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
+import { EntitlementGate } from './entitlement-gate';
 
 export type ServiceError = { error: string; message: string; status: number };
 
@@ -140,7 +143,23 @@ export class BookingService {
     // lifecycle simply enqueues no CRM row, which is exactly what those specs
     // (and a bare fork) already expect.
     @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
+    // Whether a public page carries the Dapta branding reads the cached Dapta
+    // AI verdict through these. Optional and last for the same reason as the
+    // CRM above: absent, it is the OSS default (no upstream, `open`).
+    @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
+    @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // The app's ONE gate (ENTITLEMENT_GATE), shared with every other service so
+    // one refresh per account holds app-wide. Absent (a direct construction),
+    // the service builds its own from the two values above.
+    @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
   ) {}
+
+  private _gate?: EntitlementGate;
+  /** The cached-verdict reader. Public paths use `showBranding`, which never waits on the upstream. */
+  private get gate(): EntitlementGate {
+    this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    return this._gate;
+  }
 
   private manageUrl(uid: string, token: string): string {
     return `${this.env.PUBLIC_APP_URL}/manage/${uid}?token=${token}`;
@@ -148,7 +167,17 @@ export class BookingService {
 
   async profile(accountCode: string, handle: string): Promise<PublicProfile | null> {
     const p = await getPublicProfile(this.db, accountCode, handle);
-    return (p as PublicProfile | undefined) ?? null;
+    if (!p) return null;
+    return { ...(p as PublicProfile), showBranding: await this.showBrandingByCode(accountCode) };
+  }
+
+  /**
+   * Whether the account's public pages carry the Dapta branding, from the
+   * cached verdict (`EntitlementGate.showBranding`): never a call upstream on
+   * this path, at most a refresh started on the side.
+   */
+  private async showBrandingByCode(accountCode: string): Promise<boolean> {
+    return this.gate.showBrandingFor(await getBrandingSwitchByCode(this.db, accountCode));
   }
 
   /**
@@ -521,7 +550,7 @@ export class BookingService {
     );
     // Event context so the manage page can fetch availability and offer a real
     // slot picker for reschedule (instead of a free-form datetime — G7).
-    const ctx = await this.db.get<RescheduleContextRow>(
+    const ctx = await this.db.get<RescheduleContextRow & { host_name: string | null }>(
       // COALESCE → the CANONICAL public code (vanity ?? short) so the manage
       // page's reschedule link never resurrects a legacy alias.
       //
@@ -533,7 +562,7 @@ export class BookingService {
       // rather than `bk.team_id`: the EVENT TYPE decides which public route
       // serves it, and it is the event type the picker has to resolve.
       sql`SELECT COALESCE(a.vanity_slug, a.code) AS code, m.handle AS handle, et.slug AS slug,
-                 et.team_id AS team_id, tm.slug AS team_slug
+                 et.team_id AS team_id, tm.slug AS team_slug, m.display_name AS host_name
           FROM booking bk
           JOIN account a ON a.id = bk.account_id
           JOIN event_type et ON et.id = bk.event_type_id
@@ -547,7 +576,10 @@ export class BookingService {
       title: b.title,
       startUtc: new Date(Number(b.start_ms)).toISOString(),
       endUtc: new Date(Number(b.end_ms)).toISOString(),
-      host: { name: null, handle: ctx?.handle ?? null },
+      // The host's name, as the create response gives it. It was a constant
+      // null here, so the manage page fell back to the attendee's own name and
+      // told the visitor they were meeting themselves.
+      host: { name: ctx?.host_name ?? null, handle: ctx?.handle ?? null },
       attendee: {
         name: attendee?.name ?? '',
         email: attendee?.email ?? '',
@@ -557,6 +589,7 @@ export class BookingService {
       locationKind: isLocationKind(details?.location_kind) ? details.location_kind : null,
       meetingUrl: ref?.meeting_url ?? null,
       reschedule: rescheduleContextOf(ctx),
+      showBranding: await this.gate.showBranding(b.account_id),
     };
   }
 
@@ -788,7 +821,9 @@ export class BookingService {
   // --- Teams --------------------------------------------------------------
 
   async teamProfile(accountCode: string, teamSlug: string): Promise<TeamProfile | null> {
-    return (await getTeamProfile(this.db, accountCode, teamSlug)) as TeamProfile | null;
+    const t = await getTeamProfile(this.db, accountCode, teamSlug);
+    if (!t) return null;
+    return { ...(t as TeamProfile), showBranding: await this.showBrandingByCode(accountCode) };
   }
 
   async teamAvailability(

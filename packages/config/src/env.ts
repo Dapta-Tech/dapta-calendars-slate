@@ -16,6 +16,15 @@ const boolish = z
   .transform((v) => v === 'true' || v === '1' || v === 'yes')
   .pipe(z.boolean());
 
+/**
+ * An optional secret where an empty value means unset. Deploy tooling often
+ * renders a missing secret as `NAME=` rather than leaving it out, and a
+ * minimum length would otherwise refuse that empty string and stop the app
+ * from booting, when the documented meaning of "not set" is "feature off".
+ */
+const optionalSecret = (minLength: number) =>
+  z.preprocess((v) => (v === '' ? undefined : v), z.string().min(minLength).optional());
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -48,7 +57,7 @@ export const serverEnvSchema = z.object({
   // Stable non-secret service id and server-only HMAC secret. The secret is
   // loaded from the deployment secret manager and is never transmitted.
   EMAIL_HTTP_CLIENT_ID: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/).optional(),
-  EMAIL_HTTP_SIGNING_SECRET: z.string().min(32).optional(),
+  EMAIL_HTTP_SIGNING_SECRET: optionalSecret(32),
   // DEPRECATED: pre-HMAC static service key. Still read (never-break-env-vars)
   // as a Bearer fallback on the transactional wire; migrate to the pair above.
   EMAIL_HTTP_API_KEY: z.string().optional(),
@@ -159,6 +168,14 @@ export const serverEnvSchema = z.object({
    * replica gets a share (two replicas: 2 each). Default 4, for one replica.
    */
   CALENDAR_BUSY_REQUESTS_PER_SECOND: z.coerce.number().int().positive().default(4),
+  /**
+   * The longest span, in days, of one busy request to the calendar backend. A
+   * longer read is split into windows this long. Default 14, safe for a backend
+   * that lists events (a long listing can come back short on a full calendar).
+   * Raise it only when the backend answers a free/busy query, which is whole for
+   * any span; then a 60-day read is one request per connection.
+   */
+  CALENDAR_BUSY_WINDOW_DAYS: z.coerce.number().int().min(1).max(90).default(14),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
@@ -219,11 +236,33 @@ export const serverEnvSchema = z.object({
   // and can be rotated at will. 1 = one load balancer (the common deploy);
   // 2 = a CDN in front of that load balancer; 0 = no proxy, use the socket.
   RATE_LIMIT_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+  // A secret shared with the web app (both read INTERNAL_API_SECRET). The web
+  // calls the API server side on a visitor's behalf, so without it every
+  // visitor of every booking page arrives from the web server's address and
+  // shares one bucket. With it set on both, the web sends the visitor's address
+  // beside the secret and the limiter keys on that address. Unset = off. A
+  // forwarded address without the matching secret is ignored, so nobody else
+  // who can reach the API can mint fresh buckets.
+  INTERNAL_API_SECRET: optionalSecret(32),
 
   // One log line per request (method, route template, status, duration, request
   // id, error code, account). JSON when NODE_ENV=production, a human line
   // otherwise. Never carries query strings, bodies, headers or client addresses.
   REQUEST_LOG_ENABLED: boolish.default('true'),
+
+  // --- Growth loop in booking emails ---
+  // The signup destination the invitee's email footer links to ("Made with ...
+  // Create your free calendar"), the API-side twin of the web's
+  // NEXT_PUBLIC_SIGNUP_URL, which is also read here so one value set for both
+  // apps is enough. Unset (a bare fork): the email names no product at all.
+  // Not `.url()` on purpose: a malformed value must never stop the API booting;
+  // `buildSignupUrl` drops anything that is not http(s).
+  SIGNUP_URL: z.string().optional(),
+  NEXT_PUBLIC_SIGNUP_URL: z.string().optional(),
+  // Turns the footer line off even with a destination (same spellings as the
+  // web's NEXT_PUBLIC_HIDE_BADGE, which is read as the fallback).
+  HIDE_BADGE: z.string().optional(),
+  NEXT_PUBLIC_HIDE_BADGE: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

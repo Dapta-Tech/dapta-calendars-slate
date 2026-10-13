@@ -72,6 +72,61 @@ jobs:
         env:
           DATABASE_URL: postgres://slate:slate@localhost:5432/slate
 
+  e2e:
+    name: Browser suite (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [sqlite, postgres]
+    services:
+      postgres:
+        # Started on the Postgres leg only: an empty image skips the service, so
+        # the SQLite leg does not wait on a database it never opens.
+        image: ${{ matrix.engine == 'postgres' && 'postgres:16' || '' }}
+        env:
+          POSTGRES_USER: slate
+          POSTGRES_PASSWORD: slate
+          POSTGRES_DB: slate_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U slate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Empty on the SQLite leg: the suite then makes a fresh SQLite file.
+      E2E_DATABASE_URL: ${{ matrix.engine == 'postgres' && 'postgres://slate:slate@localhost:5432/slate_e2e' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm --filter @slate/web exec playwright install --with-deps chromium
+      # The real web build and API process, a stand-in calendar backend, both
+      # canvases (1440 and 360), then the server checks. See apps/web/e2e.
+      - run: pnpm --filter @slate/web e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.engine }}
+          path: |
+            apps/web/e2e/.report
+            apps/web/e2e/.results
+            apps/web/e2e/.results-logs
+            .data/e2e.db
+            .data/e2e.db-wal
+            .data/e2e.db-shm
+          # Every one of these lives under a dot-directory, which the action
+          # skips by default: without this a failing run uploaded nothing.
+          include-hidden-files: true
+          retention-days: 7
+
   publish-gate:
     name: Publish gate (secret scan)
     runs-on: ubuntu-latest

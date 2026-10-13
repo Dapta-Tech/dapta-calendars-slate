@@ -39,17 +39,19 @@ export function resolveAvatarUrl(
 }
 
 /**
- * The same photo, narrowed to what an open-graph card can actually fetch.
+ * The photo the host's connected calendar carries, as the studio offers it to
+ * remove or restore. The same order the public page uses (`getPublicProfile`):
+ * the destination calendar first, the account the host actually schedules
+ * from, then any other connection that has one.
  *
- * A crawler renders the card from a URL it requests itself, so an inline
- * `data:` image — perfectly valid on the page — is not a card image. This is
- * the one place the two surfaces legitimately differ, which is why it lives
- * beside the resolver rather than as a regex copied into each `generateMetadata`.
+ * Read from the host's own connections rather than from the public profile on
+ * purpose: once the host removes the photo, the public profile stops carrying
+ * it, and the studio still has to show what "Use it again" would bring back.
  */
-export function resolveOgImages(
-  explicit: string | null | undefined,
-  connected: string | null | undefined,
-): string[] | undefined {
-  const avatar = resolveAvatarUrl(explicit, connected);
-  return avatar && HTTP_URL.test(avatar) ? [avatar] : undefined;
+export function connectedPhotoOf(
+  connections: ReadonlyArray<{ isDestination: boolean; avatarUrl?: string | null }>,
+): string | null {
+  const withPhoto = connections.filter((c) => resolveAvatarUrl(null, c.avatarUrl));
+  const pick = withPhoto.find((c) => c.isDestination) ?? withPhoto[0];
+  return pick ? resolveAvatarUrl(null, pick.avatarUrl) : null;
 }

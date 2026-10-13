@@ -11,7 +11,8 @@
     "lint": "eslint app components lib && node scripts/build-icons.mjs --check",
     "icons": "node scripts/build-icons.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@slate/crm": "workspace:*",
@@ -26,6 +27,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@slate/config": "workspace:*",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.10.2",

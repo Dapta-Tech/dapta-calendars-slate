@@ -28,6 +28,8 @@ export interface BookingMessages {
     noTimesNow: string;
     /** External calendar unreachable (public-safe). */
     timesUnavailable: string;
+    /** Said after "Try again" asked and the times still did not answer. */
+    timesStillUnavailable: string;
     calendarUnavailableTitle: string;
     calendarUnavailableBody: string;
     book: string;
@@ -105,6 +107,8 @@ export interface BookingMessages {
     today: string;
     /** The day column before any day is chosen. */
     pickADay: string;
+    /** Announced (not shown) while the month's times are still being read. */
+    readingTimes: string;
     /** A chosen day that turns out to have nothing bookable on it. */
     noTimesOnDay: string;
     /** Heading over the day column: "Times on Mon, Sep 14". */
@@ -133,6 +137,15 @@ export interface BookingMessages {
     addToCalendar: string;
     /** The unit beside a duration set as a figure on the profile ("30 min"). */
     minutesUnit: string;
+    /** The zone picker's sticky group labels: the zone the times are shown in,
+     *  the visitor's own zone when it differs, then every zone. */
+    zoneCurrent: string;
+    zoneLocal: string;
+    zoneAll: string;
+    /** The event panel's time zone fact: the HOST's zone, said as theirs. */
+    hostTimeZone: string;
+    /** The quiet link under a short day's times: "Next day with times: Tue, Oct 13". */
+    nextTimes: string;
   };
   manage: {
     title: string;
@@ -152,6 +165,10 @@ export interface BookingMessages {
     statusCancelled: string;
     statusRejected: string;
     cancelThis: string;
+    /** The pending-request variants: the host has not confirmed it yet. */
+    cancelThisRequest: string;
+    cancelRequest: string;
+    requestCancelled: string;
     noOpenTimes: string;
     joinMeeting: string;
     /** Appended to the join link for screen readers. It opens in a new tab, and
@@ -169,11 +186,20 @@ export interface BookingMessages {
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
-    ctaQuestion: string;
-    ctaAction: string;
+    /** The one short line above the free-calendar button. It names the product
+     *  once; the "Made with" badge below is the only other mention. */
+    ctaLine: string;
+    /** The button under a confirmation and at the foot of a profile. */
+    ctaButton: string;
+    /** Screen-reader suffix: the button opens a new tab. */
+    ctaOpensNewTab: string;
     /** SEO/OG meta descriptions for the public pages (host/event data only). */
     seoProfile: string;
     seoEvent: string;
+    /** An event page's title, as its link preview says it. */
+    seoEventTitle: string;
+    /** The button drawn on a link preview card. */
+    shareCardCta: string;
   };
   /** Public landing pages — the host profile and the team entry page (#141). */
   landing: {
@@ -916,6 +942,22 @@ export interface BookingMessages {
       save: string;
       saving: string;
     };
+    /** Settings → General: the account's Dapta branding switch (included with Dapta AI). */
+    brandingSetting: {
+      title: string;
+      hint: string;
+      switchLabel: string;
+      /** Not entitled: the sentence, linked to the Dapta AI app when the deployment names it. */
+      included: string;
+      /** Off, but the subscription lapsed: the stored choice shows greyed. */
+      lapsed: string;
+      membersReadOnly: string;
+      chipShowing: string;
+      chipHidden: string;
+      chipShowingAgain: string;
+      saved: string;
+      saveFailed: string;
+    };
     notifications: {
       title: string;
       subtitle: string;
@@ -1057,6 +1099,35 @@ export interface BookingMessages {
       connectedToast: string;
       disconnectedToast: string;
     };
+    /** The workspace brand kit screen. */
+    brandKit: {
+      title: string;
+      statement: string;
+      statusSet: string;
+      statusUnset: string;
+      logo: string;
+      logoHint: string;
+      accent: string;
+      accentHint: string;
+      canvas: string;
+      canvasHint: string;
+      font: string;
+      corners: string;
+      buttons: string;
+      cardStyle: string;
+      shapeHint: string;
+      keepPageOwn: string;
+      save: string;
+      saving: string;
+      saved: string;
+      saveFailed: string;
+      readOnly: string;
+      preview: string;
+      previewHint: string;
+      howItWorks: string;
+      howItWorksBody: string;
+      updatedOn: string;
+    };
     bookingPageHeader: {
       title: string;
       subtitle: string;
@@ -1100,9 +1171,38 @@ export interface BookingMessages {
        *  account has one — so the host knows where the face on their page comes
        *  from, and that uploading their own replaces it. */
       photoFromConnectedAccount: string;
+      /** The host removed the connected account's photo from their page. */
+      connectedPhotoHidden: string;
+      removeConnectedPhoto: string;
+      useConnectedPhoto: string;
       coverImage: string;
       custom: string;
       customizeAppearance: string;
+      /** One click to the look a new host is born with (ink on paper, the
+       *  minimal set). Previewed first, applied on Save, revertible once. */
+      newLook: string;
+      newLookHint: string;
+      /** Said while the new look is in the preview but not saved yet. */
+      newLookPreviewing: string;
+      /** "New look applied on Oct 12, 2026." with the Revert beside it. */
+      newLookApplied: string;
+      /** The brand kit's twin of `newLookApplied`. */
+      kitApplied: string;
+      revertLook: string;
+      revertingLook: string;
+      lookReverted: string;
+      revertFailed: string;
+      /** The two studio tabs: the host's own page, and the workspace kit. */
+      tabYourPage: string;
+      tabBrandKit: string;
+      /** Snapshot the workspace kit into this page. */
+      applyKit: string;
+      applyingKit: string;
+      applyKitHint: string;
+      kitAppliedToast: string;
+      applyKitFailed: string;
+      /** Shown instead of Apply kit while the studio has unsaved edits. */
+      applyKitSaveFirst: string;
       axisTemplate: string;
       axisCardStyle: string;
       axisCorners: string;
@@ -1127,6 +1227,11 @@ export interface BookingMessages {
       sendVisitorsTo: string;
       chooseEvent: string;
       pickDefaultEvent: string;
+      /** What the host's link does, said as a fact under the landing switch. */
+      linkOpensEvent: string;
+      linkOpensProfile: string;
+      /** The opt-out from "one event type opens it directly". */
+      alwaysShowProfile: string;
       eventHidden: string;
       eventShown: string;
       couldNotUpdateVisibility: string;
@@ -1250,6 +1355,7 @@ export const en: BookingMessages = {
     noSlots: 'No available times in this range.',
     noTimesNow: 'No times are available right now. Please check back soon.',
     timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
+    timesStillUnavailable: 'Times are still unavailable. Please try again in a few minutes.',
     calendarUnavailableTitle: 'This time could not be confirmed',
     calendarUnavailableBody:
       'We could not confirm this time right now. Please try again in a few minutes.',
@@ -1298,6 +1404,7 @@ export const en: BookingMessages = {
     nextMonth: 'Next month',
     today: 'Today',
     pickADay: 'Pick a day to see the times available.',
+    readingTimes: 'Finding the times available this month.',
     noTimesOnDay: 'No times available on this day.',
     timesOn: 'Times on {day}',
     timeFormat: 'Time format',
@@ -1314,6 +1421,11 @@ export const en: BookingMessages = {
     who: 'With',
     addToCalendar: 'Add to calendar',
     minutesUnit: 'min',
+    zoneCurrent: 'Showing times in',
+    zoneLocal: 'Your time zone',
+    zoneAll: 'All time zones',
+    hostTimeZone: "{zone}, the host's time",
+    nextTimes: 'Next day with times: {day}',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -1359,6 +1471,9 @@ export const en: BookingMessages = {
     statusCancelled: 'cancelled',
     statusRejected: 'rejected',
     cancelThis: 'Cancel this booking',
+    cancelThisRequest: 'Cancel this request',
+    cancelRequest: 'Cancel request',
+    requestCancelled: 'Your request has been cancelled.',
     noOpenTimes: 'No open times in the next 3 weeks.',
     joinMeeting: 'Join the meeting',
     joinMeetingOpensNewTab: ' (opens in a new tab)',
@@ -1369,10 +1484,13 @@ export const en: BookingMessages = {
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
-    ctaQuestion: 'Want your own booking page?',
-    ctaAction: 'Get Dapta Calendars free',
+    ctaLine: 'Dapta Calendars is free for anyone.',
+    ctaButton: 'Create your free calendar',
+    ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
-    seoEvent: 'Book {event} with {name} — {minutes} min, online scheduling.',
+    seoEvent: '{minutes} min with {name}. Pick a time that works for you.',
+    seoEventTitle: '{event} with {name}',
+    shareCardCta: 'Book a time',
   },
   landing: {
     timesIn: 'Times in {timeZone}',
@@ -1978,6 +2096,19 @@ export const en: BookingMessages = {
       save: 'Save',
       saving: 'Saving…',
     },
+    brandingSetting: {
+      title: 'Dapta branding',
+      hint: 'The "Made with Dapta Calendars" badge and the free-calendar invitation on your public pages.',
+      switchLabel: 'Show Dapta branding on my pages',
+      included: 'Included with your Dapta AI subscription',
+      lapsed: 'Your Dapta AI subscription ended, the branding is showing again',
+      membersReadOnly: 'Only owners and admins can change this.',
+      chipShowing: 'Showing',
+      chipHidden: 'Hidden',
+      chipShowingAgain: 'Showing again',
+      saved: 'Saved.',
+      saveFailed: 'Could not save. Try again.',
+    },
     notifications: {
       title: 'Notifications',
       subtitle: 'Choose which booking emails go out and edit their templates.',
@@ -2144,6 +2275,34 @@ export const en: BookingMessages = {
       connectedToast: 'HubSpot connected.',
       disconnectedToast: 'HubSpot disconnected.',
     },
+    brandKit: {
+      title: 'Brand kit',
+      statement: 'One look for every page in your workspace.',
+      statusSet: 'Saved',
+      statusUnset: 'Not set yet',
+      logo: 'Logo',
+      logoHint: 'Shown at the top of the event panel and over the profile cover, as uploaded: use a version that reads on your canvas.',
+      accent: 'Accent',
+      accentHint: 'Buttons, the selected day and time, links.',
+      canvas: 'Canvas',
+      canvasHint: 'The ground the page paints on.',
+      font: 'Font',
+      corners: 'Corners',
+      buttons: 'Buttons',
+      cardStyle: 'Card style',
+      shapeHint: 'Layout, density and how times are listed stay each page\'s own.',
+      keepPageOwn: 'Keep each page\'s own',
+      save: 'Save kit',
+      saving: 'Saving…',
+      saved: 'Brand kit saved.',
+      saveFailed: 'Could not save the brand kit.',
+      readOnly: 'Only an admin or owner can change the brand kit.',
+      preview: 'Preview',
+      previewHint: 'A booking page wearing this kit.',
+      howItWorks: 'How it reaches a page',
+      howItWorksBody: 'A host applies the kit from their booking page studio; it is copied onto their page and can be reverted once. Editing the kit later never changes a page by itself. Team pages wear the kit directly.',
+      updatedOn: 'Updated {date}',
+    },
     bookingPageHeader: {
       title: 'Booking Page',
       subtitle: 'Style your public page. Preview updates live — what you see is what visitors get.',
@@ -2179,10 +2338,30 @@ export const en: BookingMessages = {
         'Low contrast: {ratio}:1 against your page background. Links and buttons may be hard to read. Your color is used exactly as picked.',
       photoAvatar: 'Photo / avatar',
       photoFromConnectedAccount:
-        'Your page is showing the photo from your connected calendar account. Upload one here to use your own instead.',
+        'Your page shows the photo from your connected calendar. Upload one to use your own.',
+      connectedPhotoHidden: 'The photo from your connected calendar is off. Your page shows your initials.',
+      removeConnectedPhoto: 'Remove',
+      useConnectedPhoto: 'Use it again',
       coverImage: 'Cover image',
       custom: 'Custom',
       customizeAppearance: 'Customize appearance',
+      newLook: 'Use the new look',
+      newLookHint: 'Ink on paper and the minimal set, the look new pages start with. You see it here first.',
+      newLookPreviewing: 'Previewing the new look. Save to put it on your page; you can revert it after.',
+      newLookApplied: 'New look applied on {date}.',
+      kitApplied: 'Brand kit applied on {date}.',
+      revertLook: 'Revert',
+      revertingLook: 'Reverting…',
+      lookReverted: 'Your previous look is back.',
+      revertFailed: 'Could not revert. Try again.',
+      tabYourPage: 'Your page',
+      tabBrandKit: 'Brand kit',
+      applyKit: 'Apply brand kit',
+      applyingKit: 'Applying…',
+      applyKitHint: "Your workspace's logo, colours, font and shape, copied onto this page. You can revert it once.",
+      kitAppliedToast: 'Brand kit applied to your page.',
+      applyKitFailed: 'Could not apply the brand kit. Try again.',
+      applyKitSaveFirst: 'Save or reset your changes first, then apply the kit.',
       axisTemplate: 'Template',
       axisCardStyle: 'Card style',
       axisCorners: 'Corners',
@@ -2204,6 +2383,9 @@ export const en: BookingMessages = {
       sendVisitorsTo: 'Send visitors directly to',
       chooseEvent: 'Choose an event…',
       pickDefaultEvent: 'Pick a default event, or keep the landing page on.',
+      linkOpensEvent: 'Your link opens {event} directly.',
+      linkOpensProfile: 'Your link opens your profile.',
+      alwaysShowProfile: 'Always show my profile, even with one event type',
       eventHidden: 'Event hidden.',
       eventShown: 'Event shown.',
       couldNotUpdateVisibility: 'Could not update visibility.',
@@ -2294,6 +2476,7 @@ export const es: BookingMessages = {
     noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
     timesUnavailable:
       'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
+    timesStillUnavailable: 'Los horarios siguen sin estar disponibles. Inténtalo de nuevo en unos minutos.',
     calendarUnavailableTitle: 'No se pudo confirmar este horario',
     calendarUnavailableBody:
       'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',
@@ -2341,6 +2524,7 @@ export const es: BookingMessages = {
     nextMonth: 'Mes siguiente',
     today: 'Hoy',
     pickADay: 'Elige un día para ver los horarios disponibles.',
+    readingTimes: 'Buscando los horarios disponibles de este mes.',
     noTimesOnDay: 'No hay horarios disponibles este día.',
     timesOn: 'Horarios del {day}',
     timeFormat: 'Formato de hora',
@@ -2357,6 +2541,11 @@ export const es: BookingMessages = {
     who: 'Con',
     addToCalendar: 'Añadir al calendario',
     minutesUnit: 'min',
+    zoneCurrent: 'Horarios mostrados en',
+    zoneLocal: 'Tu zona horaria',
+    zoneAll: 'Todas las zonas horarias',
+    hostTimeZone: '{zone}, hora del anfitrión',
+    nextTimes: 'Siguiente día con horarios: {day}',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -2402,6 +2591,9 @@ export const es: BookingMessages = {
     statusCancelled: 'cancelada',
     statusRejected: 'rechazada',
     cancelThis: 'Cancelar esta reserva',
+    cancelThisRequest: 'Cancelar esta solicitud',
+    cancelRequest: 'Cancelar solicitud',
+    requestCancelled: 'Tu solicitud fue cancelada.',
     noOpenTimes: 'No hay horarios disponibles en las próximas 3 semanas.',
     joinMeeting: 'Unirse a la reunión',
     joinMeetingOpensNewTab: ' (se abre en una pestaña nueva)',
@@ -2412,10 +2604,13 @@ export const es: BookingMessages = {
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
-    ctaQuestion: '¿Quieres tu propia página de reservas?',
-    ctaAction: 'Consigue Dapta Calendars gratis',
+    ctaLine: 'Dapta Calendars es gratis para todos.',
+    ctaButton: 'Crea tu calendario gratis',
+    ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
-    seoEvent: 'Reserva {event} con {name} — {minutes} min, agenda en línea.',
+    seoEvent: '{minutes} min con {name}. Elige la hora que te funcione.',
+    seoEventTitle: '{event} con {name}',
+    shareCardCta: 'Reserva una hora',
   },
   landing: {
     timesIn: 'Horarios en {timeZone}',
@@ -3023,6 +3218,19 @@ export const es: BookingMessages = {
       save: 'Guardar',
       saving: 'Guardando…',
     },
+    brandingSetting: {
+      title: 'Marca de Dapta',
+      hint: 'La insignia "Hecho con Dapta Calendars" y la invitación a crear un calendario gratis en tus páginas públicas.',
+      switchLabel: 'Mostrar la marca de Dapta en mis páginas',
+      included: 'Incluido con tu suscripción de Dapta AI',
+      lapsed: 'Tu suscripción de Dapta AI terminó, la marca se muestra de nuevo',
+      membersReadOnly: 'Solo los propietarios y administradores pueden cambiar esto.',
+      chipShowing: 'Visible',
+      chipHidden: 'Oculta',
+      chipShowingAgain: 'Visible de nuevo',
+      saved: 'Guardado.',
+      saveFailed: 'No se pudo guardar. Inténtalo de nuevo.',
+    },
     notifications: {
       title: 'Notificaciones',
       subtitle: 'Elige qué correos de reservas se envían y edita sus plantillas.',
@@ -3189,6 +3397,34 @@ export const es: BookingMessages = {
       connectedToast: 'HubSpot conectado.',
       disconnectedToast: 'HubSpot desconectado.',
     },
+    brandKit: {
+      title: 'Kit de marca',
+      statement: 'Un solo estilo para todas las páginas de tu espacio.',
+      statusSet: 'Guardado',
+      statusUnset: 'Sin definir',
+      logo: 'Logo',
+      logoHint: 'Se muestra arriba del panel del evento y sobre la portada del perfil, tal como la subes: usa una versión que se lea sobre tu fondo.',
+      accent: 'Color de acento',
+      accentHint: 'Botones, el día y la hora elegidos, enlaces.',
+      canvas: 'Fondo',
+      canvasHint: 'El fondo sobre el que se pinta la página.',
+      font: 'Fuente',
+      corners: 'Esquinas',
+      buttons: 'Botones',
+      cardStyle: 'Estilo de tarjeta',
+      shapeHint: 'La plantilla, la densidad y cómo se listan los horarios siguen siendo de cada página.',
+      keepPageOwn: 'Mantener el de cada página',
+      save: 'Guardar kit',
+      saving: 'Guardando…',
+      saved: 'Kit de marca guardado.',
+      saveFailed: 'No se pudo guardar el kit de marca.',
+      readOnly: 'Solo un administrador o propietario puede cambiar el kit de marca.',
+      preview: 'Vista previa',
+      previewHint: 'Una página de reservas con este kit.',
+      howItWorks: 'Cómo llega a una página',
+      howItWorksBody: 'Cada anfitrión aplica el kit desde el estudio de su página de reservas; se copia en su página y se puede revertir una vez. Editar el kit después nunca cambia una página por sí solo. Las páginas de equipo usan el kit directamente.',
+      updatedOn: 'Actualizado el {date}',
+    },
     bookingPageHeader: {
       title: 'Página de reservas',
       subtitle: 'Personaliza tu página pública. La vista previa se actualiza en vivo — lo que ves es lo que reciben los visitantes.',
@@ -3224,10 +3460,30 @@ export const es: BookingMessages = {
         'Contraste bajo: {ratio}:1 sobre el fondo de tu página. Los enlaces y botones pueden ser difíciles de leer. Tu color se usa tal como lo elegiste.',
       photoAvatar: 'Foto / avatar',
       photoFromConnectedAccount:
-        'Tu página está mostrando la foto de la cuenta de calendario que conectaste. Sube una aquí para usar la tuya.',
+        'Tu página muestra la foto de tu calendario conectado. Sube una para usar la tuya.',
+      connectedPhotoHidden: 'La foto de tu calendario conectado está desactivada. Tu página muestra tus iniciales.',
+      removeConnectedPhoto: 'Quitar',
+      useConnectedPhoto: 'Usarla de nuevo',
       coverImage: 'Imagen de portada',
       custom: 'Personalizado',
       customizeAppearance: 'Personalizar apariencia',
+      newLook: 'Usar el nuevo estilo',
+      newLookHint: 'Tinta sobre papel y el conjunto mínimo, el estilo con el que empiezan las páginas nuevas. Lo ves aquí primero.',
+      newLookPreviewing: 'Vista previa del nuevo estilo. Guarda para ponerlo en tu página; después puedes revertirlo.',
+      newLookApplied: 'Nuevo estilo aplicado el {date}.',
+      kitApplied: 'Kit de marca aplicado el {date}.',
+      revertLook: 'Revertir',
+      revertingLook: 'Revirtiendo…',
+      lookReverted: 'Tu estilo anterior está de vuelta.',
+      revertFailed: 'No se pudo revertir. Inténtalo de nuevo.',
+      tabYourPage: 'Tu página',
+      tabBrandKit: 'Kit de marca',
+      applyKit: 'Aplicar kit de marca',
+      applyingKit: 'Aplicando…',
+      applyKitHint: 'El logo, los colores, la fuente y la forma de tu espacio de trabajo, copiados en esta página. Puedes revertirlo una vez.',
+      kitAppliedToast: 'Kit de marca aplicado a tu página.',
+      applyKitFailed: 'No se pudo aplicar el kit de marca. Inténtalo de nuevo.',
+      applyKitSaveFirst: 'Guarda o descarta tus cambios antes de aplicar el kit.',
       axisTemplate: 'Plantilla',
       axisCardStyle: 'Estilo de tarjeta',
       axisCorners: 'Esquinas',
@@ -3249,6 +3505,9 @@ export const es: BookingMessages = {
       sendVisitorsTo: 'Enviar a los visitantes directamente a',
       chooseEvent: 'Elige un evento…',
       pickDefaultEvent: 'Elige un evento predeterminado o deja activa la página de inicio.',
+      linkOpensEvent: 'Tu enlace abre {event} directamente.',
+      linkOpensProfile: 'Tu enlace abre tu perfil.',
+      alwaysShowProfile: 'Mostrar siempre mi perfil, aunque tenga un solo tipo de evento',
       eventHidden: 'Evento oculto.',
       eventShown: 'Evento visible.',
       couldNotUpdateVisibility: 'No se pudo actualizar la visibilidad.',

@@ -1,9 +1,9 @@
 'use client';
 
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   buildMonthGrid,
-  monogram,
+  initials,
   shiftMonth,
   t,
   type BookingMessages,
@@ -54,7 +54,7 @@ function ClockIcon() {
   );
 }
 
-function GlobeIcon() {
+export function GlobeIcon() {
   return (
     <Icon>
       <circle cx="12" cy="12" r="9" />
@@ -127,40 +127,64 @@ export function ChevronIcon({ direction }: { direction: 'left' | 'right' }) {
  *
  * The panel shares the viewport with the calendar, so an unbounded `<p>` here is
  * a panel of unbounded height: a host who pastes an agenda pushes the duration,
- * the location and the time zone off the fold. Six lines is enough to read what
- * the meeting is (three on a phone, where the panel is a header); the rest is one
- * click away.
+ * the location and the time zone off the fold. Four lines are enough to read
+ * what the meeting is; the rest is one click away.
  *
- * The full text is always in the DOM: the clamp is `-webkit-line-clamp`, which
- * hides overflow visually and leaves it to a screen reader and to the page's own
- * indexing. `whitespace-pre-line` survives so the host's own line breaks do.
- *
- * The toggle renders unconditionally rather than measuring: a measurement would
- * have to run after layout, after webfonts and on every resize, and getting it
- * wrong strands text behind a control that is not there.
+ * "Show more" appears only when the text actually runs past four lines. It is
+ * measured after layout (and again whenever the panel changes width, which is
+ * also when webfonts land), and it starts ABSENT, so the server's HTML and the
+ * first client render agree and a short description never carries a control
+ * that opens nothing. The full text is always in the DOM: the clamp is
+ * `-webkit-line-clamp`, which hides overflow visually and leaves it to a screen
+ * reader and to the page's own indexing. `white-space: pre-line` keeps the
+ * host's own line breaks.
  */
 function EventDescription({ m, description }: { m: BookingMessages; description: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
   const descriptionId = useId();
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el || expanded) return;
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, description]);
   return (
     <div className="bp-description">
-      <p id={descriptionId} className="bp-description-text" data-expanded={expanded ? 'true' : undefined}>
+      <p
+        ref={textRef}
+        id={descriptionId}
+        className="bp-description-text"
+        data-expanded={expanded ? 'true' : undefined}
+      >
         {description}
       </p>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={descriptionId}
-        onClick={() => setExpanded((v) => !v)}
-        className="bp-link"
-      >
-        {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
-      </button>
+      {overflows || expanded ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={descriptionId}
+          onClick={() => setExpanded((v) => !v)}
+          className="bp-link"
+        >
+          {expanded ? m.bookingPage.descriptionLess : m.bookingPage.descriptionMore}
+        </button>
+      ) : null}
     </div>
   );
 }
 
-/** The host's photo, or the monogram tile the profile page and the studio draw. */
+/**
+ * The host's photo, or their monogram: two initials ("RC" for Riley Chen) in
+ * the accent as ink on a tint of it, shaped by the `corners` axis (a square, a
+ * softened square or a disc). The profile page, the event panel and the studio
+ * all draw this one.
+ */
 export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUrl?: string | null }) {
   return avatarUrl ? (
     // Intrinsic size given so the row does not reflow when the image lands. Not
@@ -178,7 +202,7 @@ export function HostAvatar({ hostName, avatarUrl }: { hostName: string; avatarUr
     />
   ) : (
     <div aria-hidden className="bp-avatar bp-avatar-monogram">
-      {monogram(hostName)}
+      {initials(hostName)}
     </div>
   );
 }
@@ -203,6 +227,7 @@ export function EventPanel({
   locationLabel,
   methodLabel,
   timeZoneLabel,
+  logoUrl,
 }: {
   m: BookingMessages;
   hostName: string;
@@ -215,8 +240,12 @@ export function EventPanel({
   locationLabel?: string | null;
   /** Team scheduling method; personal events pass nothing. */
   methodLabel?: string | null;
-  /** The zone the times are shown in, as a person reads it. */
+  /** The HOST's zone, as a person reads it: a fact about them, not a setting.
+   *  The visitor's own zone is the control beside the times. */
   timeZoneLabel: string;
+  /** The workspace logo (brand kit), at the head of the panel. Absent draws
+   *  nothing, so a page without a kit renders as it did before. */
+  logoUrl?: string | null;
 }) {
   return (
     <section aria-label={m.bookingPage.detailsRegion} className="bp-event">
@@ -255,7 +284,7 @@ export function EventPanel({
           <dt className="sr-only">{m.booking.timezone}</dt>
           <dd>
             <GlobeIcon />
-            <span className="bp-fact-text">{timeZoneLabel}</span>
+            <span className="bp-fact-text">{t(m.bookingPage.hostTimeZone, { zone: timeZoneLabel })}</span>
           </dd>
         </div>
 
@@ -268,6 +297,12 @@ export function EventPanel({
       </dl>
 
       {description ? <EventDescription m={m} description={description} /> : null}
+      {/* LAST in the DOM and first on screen (`order` in globals.css): a slot
+          ahead of the description would shift React's `useId` for every page,
+          logo or not, and the pins prove a page without a kit does not move.
+          It is decorative (the host's name is the next line), so the reading
+          order loses nothing. */}
+      {logoUrl ? <img src={logoUrl} alt="" referrerPolicy="no-referrer" className="bp-logo" /> : null}
     </section>
   );
 }
@@ -457,6 +492,12 @@ export function SlotChip({
  * It is a `.bp-day` group, which is what gives the `dayGroup` axis something to
  * draw: `flat` leaves the times on the page, `boxed` frames them.
  */
+/**
+ * Placeholder rows while a month's times are read: about what a working day
+ * offers, so the column already stands at the height it will settle at.
+ */
+const PENDING_SLOT_ROWS = 6;
+
 export function TimesColumn({
   m,
   dayTitle,
@@ -468,6 +509,8 @@ export function TimesColumn({
   onHour12Change,
   timeZoneControl,
   titleRef,
+  next,
+  pending = false,
 }: {
   m: BookingMessages;
   /** "Monday, March 2", or null before any day is chosen. */
@@ -475,6 +518,12 @@ export function TimesColumn({
   slots: DisplaySlot[];
   /** Shown instead of the times when there are none. */
   emptyText: string;
+  /**
+   * The month's times are still being read. The column keeps its shape with
+   * quiet placeholder rows the size of a time, so nothing below it moves when
+   * the real ones arrive, and says nothing it does not know yet.
+   */
+  pending?: boolean;
   onPick?: (slot: DisplaySlot) => void;
   /** The phone's way back to the month. Hidden from the two-pane width up. */
   onBack?: () => void;
@@ -482,9 +531,15 @@ export function TimesColumn({
   onHour12Change: (hour12: boolean) => void;
   timeZoneControl: ReactNode;
   titleRef?: React.Ref<HTMLHeadingElement>;
+  /**
+   * The next day with times, when there is one. The list ends with a quiet way
+   * to it, so a day with two times is a short list that says where to look
+   * next, never a column of empty space or filler.
+   */
+  next?: { heading: string; onGo: () => void } | null;
 }) {
   return (
-    <section aria-label={m.bookingPage.timesRegion} className="bp-day bp-times">
+    <section aria-label={m.bookingPage.timesRegion} aria-busy={pending || undefined} className="bp-day bp-times">
       <div className="bp-day-head">
         {onBack ? <BackButton label={m.bookingPage.backToCalendar} onClick={onBack} className="bp-back-phone" /> : null}
         <h2 ref={titleRef} tabIndex={-1} className="bp-day-title">
@@ -493,7 +548,16 @@ export function TimesColumn({
         <HourFormatToggle m={m} hour12={hour12} onChange={onHour12Change} />
       </div>
       <div className="bp-times-tools">{timeZoneControl}</div>
-      {slots.length ? (
+      {pending ? (
+        <div className="bp-slots" data-pending="true">
+          <span className="sr-only" role="status">
+            {m.bookingPage.readingTimes}
+          </span>
+          {Array.from({ length: PENDING_SLOT_ROWS }).map((_, i) => (
+            <span key={i} aria-hidden="true" className="bp-slot bp-slot-placeholder" />
+          ))}
+        </div>
+      ) : slots.length ? (
         <div className="bp-slots">
           {slots.map((s) => (
             <SlotChip key={s.startUtc} m={m} slot={s} onPick={onPick} />
@@ -502,6 +566,12 @@ export function TimesColumn({
       ) : (
         <p className="bp-muted">{emptyText}</p>
       )}
+      {next ? (
+        <button type="button" onClick={next.onGo} className="bp-next-day">
+          <span>{t(m.bookingPage.nextTimes, { day: next.heading })}</span>
+          <ChevronIcon direction="right" />
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -647,6 +717,44 @@ export function BookingSummary({
   );
 }
 
+// --- The free-calendar call to action ----------------------------------------
+
+/**
+ * What this page runs on, and a real way to get one: one short line, then one
+ * button. The SAME block under a confirmation, at the foot of a profile and at
+ * the foot of a team landing, below the content it must not compete with and
+ * never inside the booking's own card. The button takes the host's accent and
+ * the `buttons` axis, sized to its words rather than to the column: the page's
+ * own primary (`bp-btn`) on the profile and the team landing, and the outline
+ * variant (`quiet`) under a confirmation, whose one primary is "Add to
+ * calendar" (R30: one primary per screen). The line names the product once;
+ * the "Made with" badge under it is the only other mention on the page.
+ *
+ * Rendered only when the deployment configures a signup destination
+ * (`signupHref`); the callers pass nothing otherwise and the page is exactly
+ * what it was.
+ */
+export function GrowthCta({
+  m,
+  href,
+  quiet = false,
+}: {
+  m: BookingMessages;
+  href: string;
+  /** The outline variant, for a screen that already has its primary. */
+  quiet?: boolean;
+}) {
+  return (
+    <aside aria-label={m.growth.ctaButton} className="bp-growth">
+      <p className="bp-muted bp-growth-line">{m.growth.ctaLine}</p>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={`${quiet ? 'bp-btn-outline' : 'bp-btn'} bp-growth-btn`}>
+        {m.growth.ctaButton}
+        <span className="sr-only"> {m.growth.ctaOpensNewTab}</span>
+      </a>
+    </aside>
+  );
+}
+
 // --- The confirmation -----------------------------------------------------------
 
 /**
@@ -681,10 +789,11 @@ export function BookingConfirmation({
   /** "A confirmation was sent to …", already localised; null drops the line. */
   sentTo: string | null;
   actions: ReactNode;
+  /** Rendered below the card (the free-calendar call to action). */
   footer?: ReactNode;
   titleRef?: React.Ref<HTMLHeadingElement>;
 }) {
-  return (
+  const card = (
     <section className="bp-card bp-confirmation" aria-labelledby="bp-confirmation-title">
       <div aria-hidden className="bp-confirmation-mark" data-pending={pending ? 'true' : undefined}>
         {pending ? <ClockIcon /> : <CheckIcon />}
@@ -733,8 +842,18 @@ export function BookingConfirmation({
       </dl>
 
       <div className="bp-confirmation-actions">{actions}</div>
-      {footer}
     </section>
+  );
+  // Below the card, not in it: the booking's card says what happened and what
+  // to do with it; what this page runs on comes after. A fragment, so a page
+  // with no footer renders exactly as it did.
+  return footer ? (
+    <>
+      {card}
+      {footer}
+    </>
+  ) : (
+    card
   );
 }
 
@@ -763,6 +882,8 @@ export function MonthCalendar({
   onMonthChange,
   onSelectDay,
   onCursorDay,
+  pending = false,
+  onNextMonthIntent,
 }: {
   m: BookingMessages;
   monthKey: string;
@@ -783,9 +904,19 @@ export function MonthCalendar({
    * tell the two apart.
    */
   onCursorDay?: (dayKey: string) => void;
+  /**
+   * The month's times are still being read. Its days are drawn, today onward
+   * in a quiet "not yet known" state, never marked bookable or not, and they
+   * settle in place when the times arrive: same cells, same size.
+   */
+  pending?: boolean;
+  /** The visitor pointed at or focused "next": a hint to read that month now. */
+  onNextMonthIntent?: () => void;
 }) {
   const grid: CalendarMonth = useMemo(
-    () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn }),
+    // Six weeks, always: the frame sizes to its content, so every month has to
+    // be the same height or the page would move between months.
+    () => buildMonthGrid(monthKey, { availableDayKeys, todayKey, locale, weekStartsOn, minWeeks: 6 }),
     [monthKey, availableDayKeys, todayKey, locale, weekStartsOn],
   );
   const canGoBack = monthKey > minMonthKey;
@@ -889,6 +1020,8 @@ export function MonthCalendar({
             className="bp-icon-btn"
             disabled={!canGoForward}
             aria-label={m.bookingPage.nextMonth}
+            onPointerEnter={canGoForward ? onNextMonthIntent : undefined}
+            onFocus={canGoForward ? onNextMonthIntent : undefined}
             onClick={() => onMonthChange(shiftMonth(monthKey, 1))}
           >
             <ChevronIcon direction="right" />
@@ -908,6 +1041,7 @@ export function MonthCalendar({
         className="bp-cal-grid"
         role="grid"
         aria-label={grid.label}
+        aria-busy={pending || undefined}
         onKeyDown={onGridKeyDown}
       >
         <div role="row" className="bp-cal-week">
@@ -920,7 +1054,13 @@ export function MonthCalendar({
         {grid.weeks.map((week) => (
           <div role="row" className="bp-cal-week" key={week[0]!.dayKey}>
             {week.map((day) => {
-              const state = !day.inMonth ? 'outside' : day.hasSlots ? 'available' : 'empty';
+              const state = !day.inMonth
+                ? 'outside'
+                : day.hasSlots
+                  ? 'available'
+                  : pending && day.dayKey >= todayKey
+                    ? 'pending'
+                    : 'empty';
               const canPick = state === 'available';
               const isSelected = canPick && day.dayKey === selectedDayKey;
               return (

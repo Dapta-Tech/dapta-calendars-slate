@@ -41,3 +41,29 @@ export async function saveGeneralAction(_prev: ActionResult | null, form: FormDa
     return { ok: false, message: e instanceof Error ? e.message : 'Failed' };
   }
 }
+
+export type BrandingResult =
+  | { ok: true; branding: { hideBranding: boolean; canHide: boolean; showing: boolean } }
+  | { ok: false };
+
+/**
+ * Store the account's choice to hide the Dapta branding. The API refuses to
+ * turn it OFF without a paying Dapta AI subscription (403), and the switch is
+ * disabled in that state anyway; turning it back ON is always allowed.
+ */
+export async function saveBrandingAction(hideBranding: boolean): Promise<BrandingResult> {
+  try {
+    const res = await hostFetch(`/v1/account/branding`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hideBranding }),
+    });
+    if (!res.ok) return { ok: false };
+    const branding = (await res.json()) as { hideBranding: boolean; canHide: boolean; showing: boolean };
+    revalidatePath('/admin/settings/general');
+    return { ok: true, branding };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false };
+  }
+}

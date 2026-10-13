@@ -29,6 +29,9 @@ export const account = sqliteTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: integer('entitlement_checked_at'),
+  // The account's choice to hide the Dapta branding on its public pages (0/1).
+  // Honoured only while the verdict above reads 'paid': see showDaptaBranding.
+  hideBranding: integer('hide_branding').notNull().default(0),
   // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
   // by Forms' question bank. Written once, alongside the claim below.
   // Postgres `jsonb` ↔ SQLite `text` JSON, per the dual-dialect parity rule.
@@ -83,6 +86,9 @@ export const member = sqliteTable('member', {
   brandColor: text('brand_color'),
   layout: text('layout'),
   bookingPageStyle: text('booking_page_style'),
+  // The look before the last apply (0021): one step of undo, never rendered.
+  brandBackup: text('brand_backup'),
+  brandAppliedAt: integer('brand_applied_at'),
   timeZone: text('time_zone').notNull().default('UTC'),
   weekStart: text('week_start').notNull().default('sunday'),
   locale: text('locale'),
@@ -107,6 +113,15 @@ export const availability = sqliteTable('availability', {
   startTime: text('start_time').notNull(),
   endTime: text('end_time').notNull(),
   date: text('date'),
+});
+
+// The workspace brand kit (0022): one row per account; snapshotted into a
+// member's branding on "Apply kit", rendered directly by team pages.
+export const accountBranding = sqliteTable('account_branding', {
+  accountId: text('account_id').primaryKey(),
+  config: text('config').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
 });
 
 export const team = sqliteTable('team', {
@@ -521,4 +536,5 @@ export const sqliteSchema = {
   notificationSetting,
   accountIntegration,
   oneOffLink,
+  accountBranding,
 };

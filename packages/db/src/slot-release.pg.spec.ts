@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
-import { getAvailability } from './repository';
+import { createBooking, getAvailability } from './repository';
 import { releaseSlot, reserveSlot } from './parity';
 import { createEventType } from './crud';
 
@@ -122,5 +122,33 @@ describePg('releaseSlot (real Postgres, #135)', () => {
 
     await expect(releaseSlot(db, held.uid)).resolves.toBeUndefined();
     expect(await slots()).toContain(startUtc);
+  });
+
+  it('a booking consumes a hold only at the time it holds (bound on bigint columns)', async () => {
+    const startUtc = (await slots())[0]!;
+    const startMs = new Date(startUtc).getTime();
+    const held = await hold(startMs);
+    const book = (at: number) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle,
+        slug,
+        startMs: at,
+        attendee: { name: 'Sam', email: `sam-${tag}-${at}@example.com`, timeZone: 'America/New_York' },
+        reservationUid: held.uid,
+      });
+    const left = async () =>
+      Number(
+        (await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE uid = ${held.uid}`))
+          ?.n ?? 0,
+      );
+
+    const elsewhere = await book(startMs + 30 * 60_000);
+    expect(elsewhere.ok).toBe(false);
+    if (!elsewhere.ok) expect(elsewhere.reason).toBe('RESERVATION_EXPIRED');
+    expect(await left()).toBe(1);
+
+    expect((await book(startMs)).ok).toBe(true);
+    expect(await left()).toBe(0);
   });
 });

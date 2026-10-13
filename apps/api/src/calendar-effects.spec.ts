@@ -107,7 +107,10 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
 
     expect(provider.created).toHaveLength(1);
     expect(provider.created[0]!.connectionRef).toBe(CAL_REF);
-    expect(provider.created[0]!.attendeeEmails).toEqual(['sam@example.com']);
+    // The host first, as organizer, then the guest (a host's verdict: the event
+    // has to show who it is with, host then guest).
+    expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
+    expect(provider.created[0]!.organizerEmail).toBe('alex@example.com');
     expect(provider.created[0]!.requestConferenceLink).toBe(false); // no location kind on the booking
 
     const refs = await db.all<{ external_event_id: string; meeting_url: string }>(
@@ -117,6 +120,80 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
     );
     expect(refs).toHaveLength(1);
     expect(refs[0]!.external_event_id).toBe('evt-1');
+  });
+
+  describe('the organizer is in the guest list, first and once', () => {
+    it('on a personal booking, and the reschedule keeps it', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      for (const body of [provider.created[0]!, provider.updated[0]!]) {
+        expect(body.attendeeEmails[0]).toBe(body.organizerEmail);
+        expect(body.attendeeEmails.filter((e) => e.toLowerCase() === 'alex@example.com')).toHaveLength(1);
+        expect(body.attendeeEmails).toContain('sam@example.com');
+      }
+    });
+
+    it('once, even when the guest books with the host address in other case', async () => {
+      const provider = new RecordingCalendarProvider();
+      const uid = await bookFirstSlot();
+      await db.run(sql`UPDATE booking_attendee SET email = 'ALEX@example.com'
+                       WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`);
+      await (new CalendarEffects(provider, db) as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com']);
+    });
+
+    it("on a team booking: first on the organizer's event, and never on a co-host's copy", async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      // A collective booking: the primary host plus a co-host in booking_host,
+      // each with their own destination calendar.
+      const jordan = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee'`))!.id;
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      for (const m of [memberId, jordan]) {
+        await db.run(sql`INSERT INTO booking_host (id, booking_id, member_id, created_at) VALUES (${randomUUID()}, ${bookingId}, ${m}, ${Date.now()})`);
+      }
+      await db.run(
+        sql`INSERT INTO connected_calendar
+              (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${jordan}, ${'google'}, ${'cal-dest-2'}, ${null}, ${1}, ${1}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created.map((c) => c.connectionRef)).toEqual([CAL_REF, 'cal-dest-2']);
+      // The organizer's own event: organizer first, then the guest, then the co-host.
+      expect(provider.created[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
+      // The co-host's copy: the list it always had. Listing the organizer there
+      // would invite them to a second copy of an event they already own.
+      expect(provider.created[1]!.attendeeEmails).toEqual(['sam@example.com', 'jordan@example.com']);
+      // The reschedule keeps the same split.
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      const byRef = Object.fromEntries(provider.updated.map((u) => [u.connectionRef, u.attendeeEmails]));
+      expect(byRef[CAL_REF]).toEqual(['alex@example.com', 'sam@example.com', 'jordan@example.com']);
+      expect(byRef['cal-dest-2']).toEqual(['sam@example.com', 'jordan@example.com']);
+      // The room is still requested on the organizer's destination only.
+      expect(provider.created.map((c) => !!c.requestConferenceLink)).toEqual([false, false]);
+    });
+
+    it('stays on their event after they switch destination calendar, on the reschedule', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      // The host makes another of their calendars the destination; the event
+      // already written stays on the old one, which is still theirs.
+      await db.run(sql`UPDATE connected_calendar SET is_destination = 0 WHERE external_id = ${CAL_REF}`);
+      await db.run(
+        sql`INSERT INTO connected_calendar
+              (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${memberId}, ${'google'}, ${'cal-dest-new'}, ${null}, ${1}, ${1}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      expect(provider.updated.map((u) => u.connectionRef)).toEqual([CAL_REF]);
+      expect(provider.updated[0]!.attendeeEmails).toEqual(['alex@example.com', 'sam@example.com']);
+    });
   });
 
   it('DH1: a retried/concurrent write is idempotent — no duplicate external event', async () => {

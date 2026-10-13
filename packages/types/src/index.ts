@@ -431,6 +431,26 @@ export const bookingPageStyleSchema = z.object({
   landingEnabled: z.boolean().default(true),
   defaultEventSlug: z.string().nullable().optional(),
   bio: z.string().max(2000).nullable().optional(),
+  /**
+   * The workspace logo, snapshotted from the brand kit on "Apply kit". Drawn in
+   * the event panel's header and over the profile's cover; absent draws
+   * nothing, so a host who never applied a kit renders as before. Same inline
+   * image ceiling as the avatar and the cover.
+   */
+  logoUrl: z.string().url().max(1_500_000).nullable().optional(),
+  /**
+   * Always open the profile, even when the host has a single event type (whose
+   * link otherwise goes straight to that event). Written only by the studio's
+   * "Always show my profile"; absent means the automatic behaviour.
+   */
+  showProfile: z.boolean().optional(),
+  /**
+   * The host removed the photo their connected calendar account carries, so
+   * their page draws the monogram instead of that fallback. Written only by the
+   * studio's "Remove" beside that photo; absent means the fallback is used. Has
+   * no effect on a photo the host uploaded, which always wins.
+   */
+  hideConnectedPhoto: z.boolean().optional(),
 });
 export type BookingPageStyle = z.infer<typeof bookingPageStyleSchema>;
 
@@ -491,6 +511,82 @@ export const brandingSchema = z.object({
   style: bookingPageStyleSchema.partial().optional(),
 });
 export type Branding = z.infer<typeof brandingSchema>;
+
+/**
+ * The studio's save: the branding, plus an optional marker that this save
+ * applies a whole look ("Use the new look"). With the marker the API keeps what
+ * is stored now as a one-step backup before writing, so the host can revert it.
+ * The marker is never stored on the branding itself.
+ */
+/**
+ * The workspace brand kit (`/v1/brand-kit`): a logo, the accent and canvas,
+ * and the four shape axes a brand decides. Every field is optional; an absent
+ * one means the kit does not set that axis and a page keeps its own.
+ *
+ * A host's page never reads the kit live. "Apply kit" SNAPSHOTS it into the
+ * host's own stored branding (`withBrandKit` below), keeping the previous look
+ * as a one-step backup, so a kit edit never moves a live page. Team pages
+ * store no branding of their own and render the kit directly.
+ */
+export const brandKitSchema = z
+  .object({
+    logoUrl: z.string().url().max(MAX_INLINE_IMAGE_CHARS).nullable().optional(),
+    accent: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .nullable()
+      .optional(),
+    theme: z.enum(['light', 'dark']).optional(),
+    font: z.enum(['sans', 'rounded', 'serif']).optional(),
+    corners: z.enum(['sharp', 'soft', 'round']).optional(),
+    buttons: z.enum(['rounded', 'pill', 'square']).optional(),
+    cardStyle: z.enum(['outline', 'elevated', 'filled']).optional(),
+  })
+  .strict();
+export type BrandKit = z.infer<typeof brandKitSchema>;
+
+/** The kit's style keys, in the order they are written into a page's style. */
+export const BRAND_KIT_STYLE_KEYS = ['theme', 'font', 'corners', 'buttons', 'cardStyle', 'logoUrl'] as const;
+
+const kitSets = (v: unknown) => v !== undefined && v !== null && v !== '';
+
+/** Whether a kit sets anything at all (an empty kit is no kit). */
+export function hasBrandKit(kit: BrandKit | null | undefined): kit is BrandKit {
+  if (!kit) return false;
+  return kitSets(kit.accent) || BRAND_KIT_STYLE_KEYS.some((k) => kitSets(kit[k]));
+}
+
+/**
+ * A page's stored branding with the kit laid over it: the one merge "Apply
+ * kit" writes into a host's branding and a team page renders. Only what the
+ * kit sets is overwritten; an axis the kit leaves out keeps the page's own
+ * value, and a kit with no logo removes nothing. Here rather than in
+ * `@slate/shared` because `@slate/db` applies it and stays free of that
+ * package; the web app reads it from here too, so there is one merge.
+ */
+export function withBrandKit(
+  current: { brandColor: string | null; style: Record<string, unknown> | null },
+  kit: BrandKit | null | undefined,
+): { brandColor: string | null; style: Record<string, unknown> | null } {
+  if (!hasBrandKit(kit)) return current;
+  const style: Record<string, unknown> = { ...(current.style ?? {}) };
+  let touched = false;
+  for (const key of BRAND_KIT_STYLE_KEYS) {
+    if (kitSets(kit[key])) {
+      style[key] = kit[key];
+      touched = true;
+    }
+  }
+  return {
+    brandColor: kitSets(kit.accent) ? (kit.accent as string) : current.brandColor,
+    style: touched ? style : current.style,
+  };
+}
+
+export const brandingWriteSchema = brandingSchema.extend({
+  backupAs: z.enum(['new-look']).optional(),
+});
+export type BrandingWrite = z.infer<typeof brandingWriteSchema>;
 
 // --- Reschedule / cancel --------------------------------------------------
 
@@ -626,6 +722,12 @@ export const bookingViewSchema = z.object({
   /** Event context for the manage page's availability-backed reschedule picker —
    *  team or personal, so the page asks the route that can SEE the event type. */
   reschedule: rescheduleContextSchema.optional(),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
 });
 export type BookingView = z.infer<typeof bookingViewSchema>;
 
@@ -646,12 +748,27 @@ export const publicProfileSchema = z.object({
     layout: z.string().nullable(),
     style: bookingPageStyleSchema.partial().nullable(),
   }),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
   eventTypes: z.array(
     z.object({
       slug: z.string(),
       title: z.string(),
       description: z.string().nullable(),
       lengthMinutes: z.number().int().positive(),
+      /**
+       * Where the meeting happens, and the zone its times are shown in by
+       * default. The event page paints its panel and its month from these
+       * before any availability is read, so the first paint waits on no
+       * calendar. Optional on the wire so an older API still parses; the page
+       * falls back to no location and the host's own zone.
+       */
+      location: eventLocationSchema.nullable().optional(),
+      timeZone: z.string().optional(),
     }),
   ),
 });
@@ -674,12 +791,39 @@ export const teamProfileSchema = z.object({
       description: z.string().nullable(),
       lengthMinutes: z.number().int().positive(),
       schedulingType: z.enum(schedulingType).nullable(),
+      /** Where the meeting happens; see `publicProfileSchema`. Optional on the wire. */
+      location: eventLocationSchema.nullable().optional(),
     }),
   ),
+  /** The workspace brand kit, which a team page renders directly (a team
+   *  stores no branding of its own). Optional on the wire so an older API
+   *  still parses; absent and null both mean the defaults. */
+  brand: brandKitSchema.nullable().optional(),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
 });
 export type TeamProfile = z.infer<typeof teamProfileSchema>;
 
 // --- Account / identity ---------------------------------------------------
+
+/**
+ * Settings view of the account's Dapta branding switch (GET /v1/account/branding).
+ *  - `hideBranding`: the stored choice, kept even while it is not honoured;
+ *  - `canHide`: the account may turn the branding off now (a paying Dapta AI
+ *    customer, or a deployment with `PREMIUM_FEATURES=open`);
+ *  - `showing`: what the public pages carry right now.
+ * Off but lapsed is `hideBranding && !canHide`.
+ */
+export const brandingSettingViewSchema = z.object({
+  hideBranding: z.boolean(),
+  canHide: z.boolean(),
+  showing: z.boolean(),
+});
+export type BrandingSettingView = z.infer<typeof brandingSettingViewSchema>;
 
 export const handleAvailableResponseSchema = z.object({
   handle: z.string(),

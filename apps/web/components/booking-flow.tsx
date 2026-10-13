@@ -9,6 +9,8 @@ import {
   getMessages,
   readableZone,
   isReservedFieldName,
+  monthKeyOf,
+  shiftMonth,
   t,
   validateBookingFieldValue,
   weekStartsOnFor,
@@ -21,6 +23,7 @@ import {
   ChoosingFrame,
   ChosenTime,
   EventPanel,
+  GrowthCta,
   MonthCalendar,
   TimesColumn,
   type BookingStep,
@@ -32,27 +35,42 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
 import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { classifyBookingFailure } from '@/lib/booking-failure';
-import { type BookResult } from '@/lib/api';
+import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
-import { TimeZoneSelect } from '@/components/ui/timezone-select';
+import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
+import { horizonMonthKey } from '@/lib/availability-window';
+import { useProgressiveSlots, type ProgressiveAvailability } from '@/lib/use-progressive-slots';
 
 interface Props {
   accountCode: string;
   /** Member handle (personal) or team slug (team). */
   ownerSlug: string;
   slug: string;
-  slots: Slot[];
+  /**
+   * Every time the page offers, when the caller has them all up front: the
+   * studio's preview and the one-off link page. The public event pages pass
+   * `availability` instead, and the island reads the times a month at a time.
+   */
+  slots?: Slot[];
+  /**
+   * The month on screen's read, already in flight from the server, and where
+   * to read the rest from (see `useProgressiveSlots`). The page paints before
+   * it answers: the month is drawn, its days "not yet known", and they settle
+   * when the times arrive.
+   */
+  availability?: ProgressiveAvailability;
   /**
    * Why `slots` is empty, when it's a config error (API reason code). Public
    * pages map every code to GENERIC copy — internals are never named here;
    * the actionable detail lives on the admin surfaces.
    */
   emptyReason?: string;
-  bookingFields: BookingField[];
+  /** The intake questions; with `availability` they arrive with the first read. */
+  bookingFields?: BookingField[];
   initialTimeZone: string;
   mode?: 'personal' | 'team';
   /** Visitor locale ('en' | 'es') for EN/ES copy. */
@@ -68,6 +86,8 @@ interface Props {
   /** Host display name, or the team name on a team event. */
   hostName: string;
   avatarUrl?: string | null;
+  /** The workspace logo from the brand kit, or nothing. */
+  logoUrl?: string | null;
   /** Raw location — the label comes from `formatLocation`, the icon from the kind. */
   location?: { kind: string; detail?: string | null } | null;
   /** Team scheduling method label; personal events pass nothing. */
@@ -98,6 +118,12 @@ interface Props {
    * the token travels to the server actions and is turned into a header there.
    */
   oneOffToken?: string;
+  /**
+   * The page's `showBranding` from the API (see `signupHref`): false for an
+   * account that turned the Dapta branding off while it is a paying Dapta AI
+   * customer, and the confirmation then carries no free-calendar block.
+   */
+  showBranding: boolean;
 }
 
 interface Hold {
@@ -130,8 +156,9 @@ export function BookingFlow({
   ownerSlug,
   slug,
   slots,
+  availability,
   emptyReason,
-  bookingFields,
+  bookingFields = [],
   initialTimeZone,
   mode = 'personal',
   locale = 'en',
@@ -140,22 +167,26 @@ export function BookingFlow({
   description,
   hostName,
   avatarUrl,
+  logoUrl,
   location,
   methodLabel,
   nowUtc,
   embed = false,
   oneOffToken,
+  showBranding,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
   const bp = messages.bookingPage;
   const pm = messages.phonePicker;
+  const progress = useProgressiveSlots({ staticSlots: slots, availability, nowUtc });
+  const fields = progress.bookingFields ?? bookingFields;
   // Reserved names (name/email/notes) are fixed attendee fields this form
   // always asks by itself — a legacy custom question reusing one would ask
   // the attendee twice (QA3 fix 3).
   const visibleFields = useMemo(
-    () => bookingFields.filter((f) => !isReservedFieldName(f.name)),
-    [bookingFields],
+    () => fields.filter((f) => !isReservedFieldName(f.name)),
+    [fields],
   );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
   /**
@@ -276,11 +307,119 @@ export function BookingFlow({
     selectedDay,
     setPickedDay,
     dayColumn,
-  } = useBookingMonth({ slots, timeZone, locale, hour12, nowUtc });
+    nextDay,
+    goToDay,
+  } = useBookingMonth({
+    slots: progress.slots,
+    timeZone,
+    locale,
+    hour12,
+    nowUtc,
+    // Read a month at a time, the page cannot tell where the times end until
+    // it has them all, so the visitor may walk to the booking horizon.
+    lastMonthKey: progress.progressive ? horizonMonthKey(timeZone, progress.horizonMs) : undefined,
+  });
+  const { ensureMonth, isKnown } = progress;
+  /** Whether the month on screen has been read: its days settle when it has. */
+  const monthKnown = isKnown(month, timeZone);
+
+  // "Next day with times" only names a day the page can vouch for: every month
+  // from the chosen day's to that day's has been read, so no earlier day with
+  // times can still be waiting on a read.
+  const nextKnownDay = useMemo(() => {
+    if (!nextDay || !selectedDay) return null;
+    for (let m = monthKeyOf(selectedDay); m <= monthKeyOf(nextDay.dayKey); m = shiftMonth(m, 1)) {
+      if (!isKnown(m, timeZone)) return null;
+    }
+    return nextDay;
+  }, [nextDay, selectedDay, isKnown, timeZone]);
+
+  // The month on screen is read the moment it is on screen (a no-op for the
+  // first one, which the server already started, and for any month in hand).
+  useEffect(() => {
+    void ensureMonth(month, timeZone);
+  }, [ensureMonth, month, timeZone]);
+
+  // Once it has settled, the next month is read before the visitor asks, so
+  // "next" lands on days that are already known.
+  useEffect(() => {
+    if (monthKnown && month < maxMonth) void ensureMonth(shiftMonth(month, 1), timeZone);
+  }, [ensureMonth, monthKnown, month, maxMonth, timeZone]);
+
+  // A host whose times start in a later month: with nothing found yet, keep
+  // reading forward, so the page can open on the month the times start in, as
+  // it did when it read everything at once.
+  const nothingYet =
+    progress.progressive && progress.slots.length === 0 && !progress.everythingKnown && !progress.unavailable;
+  useEffect(() => {
+    if (!nothingYet) return;
+    for (let m = minMonth; m <= maxMonth; m = shiftMonth(m, 1)) {
+      if (!isKnown(m, timeZone)) {
+        void ensureMonth(m, timeZone);
+        return;
+      }
+    }
+  }, [nothingYet, ensureMonth, isKnown, minMonth, maxMonth, timeZone]);
   const locationLabel = formatLocation(location ?? null, messages);
   const weekStartsOn = weekStartsOnFor(locale);
 
+  // Which pick is current, read when a hold answers: a hold that lands after
+  // the visitor went back, picked again (the same time included) or left the
+  // page belongs to nothing on screen. A counter, not the time, so going back
+  // and re-picking the same time is still a new pick. Refs, because the
+  // answer arrives in a closure of an older render.
+  const pickSeq = useRef(0);
+  // The hold request of the latest pick, while it is out, and the last
+  // release nobody waited for (from `retry()`, or of a hold that answered for
+  // a pick already left). The next pick waits for both before asking for its
+  // own hold: Next runs a page's server actions one at a time, so without the
+  // wait a re-pick of the same time could be queued ahead of the release of
+  // its older hold and be refused as still held.
+  const pendingReserve = useRef<Promise<unknown> | null>(null);
+  const pendingRelease = useRef<Promise<void> | null>(null);
+  function releaseLater(uid: string) {
+    const release = Promise.resolve(releaseAction(uid)).catch(() => {});
+    pendingRelease.current = release;
+    void release.finally(() => {
+      if (pendingRelease.current === release) pendingRelease.current = null;
+    });
+  }
+  // Leaving the booking flow inside the app ends the pick, and gives back the
+  // hold it stood on. (Closing the tab runs no cleanup; that hold lapses on
+  // its own after ten minutes.)
+  const holdRef = useRef(hold);
+  useEffect(() => {
+    holdRef.current = hold;
+  }, [hold]);
+  useEffect(
+    () => () => {
+      pickSeq.current += 1;
+      if (holdRef.current) releaseLater(holdRef.current.uid);
+    },
+    [],
+  );
+
+  // The hold the form carried when it was submitted (null: none).
+  const submittedHold = useRef<string | null>(null);
+  // A booking that lands ends the pick. A booker quick enough to confirm
+  // before the hold answered booked without it: Next runs a page's server
+  // actions one at a time, so the hold lands while the booking waits, and the
+  // form had already gone without it. That hold, stored or still on its way,
+  // is given back instead of counting against the host's cap of ten live
+  // holds for ten minutes. A hold the form did carry was consumed by the
+  // booking and is left alone.
+  useEffect(() => {
+    if (!bookedUid) return;
+    pickSeq.current += 1;
+    if (!hold) return;
+    // One the form did not carry is given back; one it carried was consumed
+    // and is only forgotten.
+    if (hold.uid !== submittedHold.current) releaseLater(hold.uid);
+    setHold(null);
+  }, [bookedUid, hold]);
+
   async function pick(slot: DisplaySlot) {
+    const seq = ++pickSeq.current;
     setDir('forward');
     setSelected(slot.startUtc);
     // The last attempt's error stays dismissed: picking a slot used to clear
@@ -291,19 +430,34 @@ export function BookingFlow({
     // Moving to another time orphans the hold on this one — give it back (#135).
     // AWAITED, unlike the one in `retry()`: `reserveSlot` re-checks the engine
     // before holding, so a release still in flight would make re-picking the
-    // slot you just left answer INVALID_SLOT.
-    if (hold) await releaseAction(hold.uid);
+    // slot you just left answer INVALID_SLOT. Forgotten BEFORE the release
+    // round trip, not after: the form for the new time renders at once, and
+    // the booking consumes whatever hold the form carries, so it must never
+    // carry the hold on the time being left.
+    const previous = hold;
     setHold(null);
+    if (previous) await Promise.resolve(releaseAction(previous.uid)).catch(() => {});
+    if (pendingReserve.current) await Promise.resolve(pendingReserve.current).catch(() => {});
+    if (pendingRelease.current) await pendingRelease.current;
+    if (pickSeq.current !== seq) return; // moved on during the wait
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.
     if (mode !== 'personal') return;
     // Group events (capacity > 1) fill seats on ONE booking; a per-person hold
     // would blank the whole slot, so skip the hold for group slots.
     if ((slot.capacity ?? 1) > 1) return;
-    const r = await reserveAction(
-      { accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc },
-      oneOffToken,
-    );
+    const reserving = reserveAction({ accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc }, oneOffToken);
+    pendingReserve.current = reserving;
+    const r = await reserving;
+    if (pendingReserve.current === reserving) pendingReserve.current = null;
+    if (pickSeq.current !== seq) {
+      // The visitor left this pick while it was being held. Give the hold
+      // straight back (its error, if any, is about nothing on screen): kept,
+      // it would hide the time from everyone for ten minutes, or ride the form
+      // for another time into a 410.
+      if (r.ok && r.reservationUid) releaseLater(r.reservationUid);
+      return;
+    }
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
@@ -319,13 +473,57 @@ export function BookingFlow({
    * whether or not the hold was still there, and the booker is already gone.
    */
   function retry() {
+    pickSeq.current += 1;
     setDir('back');
     setSelected(null);
-    if (hold) void releaseAction(hold.uid);
+    if (hold) releaseLater(hold.uid);
     setHold(null);
     setHoldError(null);
     setDismissedResult(result);
   }
+
+  // "Try again" on a month that did not answer: busy while it asks, and on an
+  // answer the calendar comes back with focus on its first open day, so focus
+  // does not fall to the page when the button it was on goes away.
+  // The button stays focusable while it asks (aria-disabled, not disabled: a
+  // disabled control drops focus to the page). A press that still finds
+  // nothing says so in the status line, so the outcome is announced.
+  const [askingAgain, setAskingAgain] = useState(false);
+  const [askFailed, setAskFailed] = useState(false);
+  const refocus = useRef(false);
+  async function askAgain() {
+    if (askingAgain) return;
+    setAskingAgain(true);
+    refocus.current = true;
+    try {
+      await ensureMonth(month, timeZone);
+    } finally {
+      setAskingAgain(false);
+    }
+  }
+  // "Still unavailable" holds until the times answer, so a press never first
+  // announces the old sentence as if it were its outcome.
+  useEffect(() => {
+    if (!progress.unavailable) setAskFailed(false);
+  }, [progress.unavailable]);
+  useEffect(() => {
+    if (!refocus.current || askingAgain) return;
+    refocus.current = false;
+    if (progress.unavailable) {
+      setAskFailed(true);
+      return;
+    }
+    // Only when focus fell with the button: a visitor who moved on during the
+    // read keeps their place.
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    // The grid's tab stop (its roving cursor), else its first open day.
+    const grid = stageRef.current?.querySelector('[role="grid"]');
+    (
+      grid?.querySelector<HTMLButtonElement>('button[tabindex="0"]') ??
+      grid?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    )?.focus();
+  }, [askingAgain, progress.unavailable]);
 
   /**
    * Duplicate-booking guard (#69): the booker is blocked on their ADDRESS, not
@@ -387,8 +585,7 @@ export function BookingFlow({
   if (result?.ok && result.booking) {
     const b = result.booking;
     const isPending = b.status === 'pending';
-    const g = getMessages(locale).growth;
-    const ctaHref = signupHref('confirmation', accountCode);
+    const ctaHref = signupHref('confirmation', accountCode, showBranding);
     /**
      * This branch is shared by the personal and the team path, and it must
      * never be able to THROW: an unparseable instant raises `RangeError:
@@ -464,16 +661,11 @@ export function BookingFlow({
           </>
         }
         footer={
-          // Growth loop (R11): a quiet secondary line, a link and never a second
-          // primary CTA (R30), gated by the same open-core badge switch.
-          ctaHref ? (
-            <p className="bp-muted bp-small bp-confirmation-cta">
-              {g.ctaQuestion}{' '}
-              <a href={ctaHref} target="_blank" rel="noopener noreferrer" className="bp-link">
-                {g.ctaAction}
-              </a>
-            </p>
-          ) : null
+          // Growth loop (R11), below the card: the same block the profile and
+          // the team landing end with, as the OUTLINE variant here, since "Add
+          // to calendar" is this screen's one primary (R30). Gated by the
+          // open-core badge switch.
+          ctaHref ? <GrowthCta m={messages} href={ctaHref} quiet /> : null
         }
       />,
     );
@@ -544,30 +736,30 @@ export function BookingFlow({
   }
 
   // Every slot the page holds is empty for one of three reasons, and the copy
-  // has always distinguished them.
+  // has always distinguished them. A read that did not answer is the first.
+  const reason = progress.unavailable ? 'CALENDAR_UNAVAILABLE' : (progress.emptyReason ?? emptyReason);
   const emptyCopy =
-    emptyReason === 'CALENDAR_UNAVAILABLE'
-      ? m.timesUnavailable
-      : emptyReason
+    reason === 'CALENDAR_UNAVAILABLE'
+      ? askFailed
+        ? m.timesStillUnavailable
+        : m.timesUnavailable
+      : reason
         ? m.noTimesNow
         : m.noSlots;
+  // The sentence replaces the calendar only once the page KNOWS there is
+  // nothing: every month read, or a reason that holds for all of them. Until
+  // then the month stays drawn with its days not yet known.
+  const nothingToOffer =
+    days.length === 0 && (progress.everythingKnown || progress.unavailable || !!progress.emptyReason);
 
   const timeZoneControl = (
     // Themed combobox, not the native <select>: the OS popup for ~400 zones is
     // un-brandable and covers the screen (QA2 fix 1). Quiet here, a line of
     // text with a chevron, because it is a setting most visitors never touch;
-    // on a phone its list opens over a dimmed page.
+    // on a phone its list rises as a sheet over a dimmed page. Drawn by the
+    // `bp-*` contract (`ZonePicker`), never by the admin's `Select`.
     <div className="bp-tz">
-      <TimeZoneSelect
-        id="tz"
-        value={timeZone}
-        onChange={setTimeZone}
-        locale={locale}
-        ariaLabel={m.timezone}
-        className="bp-tz-trigger"
-        panelClassName="bp-tz-panel"
-        backdrop
-      />
+      <ZonePicker id="tz" value={timeZone} onChange={setTimeZone} locale={locale} ariaLabel={m.timezone} />
     </div>
   );
 
@@ -582,7 +774,10 @@ export function BookingFlow({
       location={location}
       locationLabel={locationLabel}
       methodLabel={methodLabel}
-      timeZoneLabel={timeZoneLabel}
+      // The HOST's zone, which the page opened in: a fact about them that does
+      // not move when the visitor reads the times in their own zone.
+      timeZoneLabel={readableZone(initialTimeZone)}
+      logoUrl={logoUrl}
     />
   );
 
@@ -625,6 +820,7 @@ export function BookingFlow({
               // to cause) instead of round-tripping a guaranteed 400.
               onSubmit={(e) => {
                 if (!validateAll()) e.preventDefault();
+                else submittedHold.current = hold?.uid ?? null;
               }}
               className="bp-form"
             >
@@ -787,11 +983,28 @@ export function BookingFlow({
     <ChoosingFrame
       panel={panel}
       empty={
-        days.length === 0 ? (
+        nothingToOffer ? (
           // No calendar at all when the page has no times to put in one: an
           // empty month of greyed-out days is a worse answer than the sentence
-          // that says why.
-          <p className="bp-muted bp-empty">{emptyCopy}</p>
+          // that says why. When the reason is that nothing answered, the
+          // visitor can ask again: the page retries on its own for half a
+          // minute, and this is the way past that, short of reloading.
+          <>
+            <p role="status" className="bp-muted bp-empty">
+              {emptyCopy}
+            </p>
+            {progress.unavailable ? (
+              <button
+                type="button"
+                onClick={askAgain}
+                aria-disabled={askingAgain || undefined}
+                aria-busy={askingAgain || undefined}
+                className="bp-btn-outline"
+              >
+                {m.retry}
+              </button>
+            ) : null}
+          </>
         ) : undefined
       }
       month={
@@ -805,6 +1018,9 @@ export function BookingFlow({
           weekStartsOn={weekStartsOn}
           minMonthKey={minMonth}
           maxMonthKey={maxMonth}
+          pending={!monthKnown}
+          // Pointing at "next" is reason enough to read it.
+          onNextMonthIntent={() => ensureMonth(shiftMonth(month, 1), timeZone)}
           onMonthChange={(next) => {
             setNavMonth(next);
             // Drop the explicit pick so the new month falls back to its own
@@ -823,12 +1039,14 @@ export function BookingFlow({
           dayTitle={dayColumn ? t(bp.timesOn, { day: dayColumn.heading }) : null}
           slots={dayColumn?.slots ?? []}
           emptyText={selectedDay ? bp.noTimesOnDay : bp.pickADay}
+          pending={!monthKnown}
           onPick={pick}
           onBack={backToCalendar}
           hour12={hour12}
           onHour12Change={setHour12}
           timeZoneControl={timeZoneControl}
           titleRef={timesTitleRef}
+          next={nextKnownDay ? { heading: nextKnownDay.heading, onGo: () => goToDay(nextKnownDay.dayKey) } : null}
         />
       }
     />,

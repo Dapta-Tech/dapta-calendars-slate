@@ -1,13 +1,16 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
-import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
+import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
+import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { brandingShown } from '@/lib/growth';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -69,17 +72,12 @@ export default async function TeamBookingPage({
   const messages = getMessages(locale);
   const now = new Date();
   const from = now.toISOString();
-  // The month calendar's window, matching the personal route. `teamAvailability()`
-  // now clamps to this same bound server-side (#136) — it used to pass the range
-  // through, which made this number the whole bound on an unauthenticated path.
-  // Which slots a team event offers is unchanged (#127 owns that question).
-  const to = new Date(now.getTime() + MAX_AVAILABILITY_WINDOW_MS).toISOString();
 
-  const [team, availability] = await Promise.all([
-    getTeamProfile(accountCode, teamSlug),
-    getTeamAvailability({ accountCode, teamSlug, slug, from, to }),
-  ]);
-  if (!team || !availability) notFound();
+  // The page paints from the team's public listing alone, exactly as the
+  // personal route does; the visible month's availability streams in below.
+  const team = await getTeamProfile(accountCode, teamSlug);
+  const listing = team?.eventTypes.find((e) => e.slug === slug);
+  if (!team || !listing) notFound();
 
   // Canonical-code guard (short-links §4): alias URLs 308 to the canonical code.
   const code = team!.account.code;
@@ -88,12 +86,28 @@ export default async function TeamBookingPage({
     permanentRedirect(withSearchParams(`/${code}/team/${teamSlug}/${slug}`, query));
   }
 
-  const listing = team.eventTypes.find((e) => e.slug === slug);
+  const kit = teamBranding(team.brand);
+  // A team event's times are shown in the team's zone, as the availability
+  // read answers them. The visible month is read without being awaited; see
+  // the personal route. Which slots a team event offers is unchanged (#127).
+  const timeZone = team.team.timeZone;
+  const span = firstWindow(timeZone, now.getTime());
+  const visible = {
+    from: new Date(span.fromMs).toISOString(),
+    to: new Date(span.toMs).toISOString(),
+  };
+  const initial: Promise<AvailabilityChunk> = getTeamAvailability({ accountCode, teamSlug, slug, ...visible }).then(
+    toChunk,
+    () => ({ ok: false }) as const,
+  );
 
   return (
     <BrandedShell
-      brandColor={accentOverride}
-      style={mergeEmbedStyle(null, styleOverrides)}
+      // A team stores no branding: it wears the workspace brand kit directly,
+      // and the defaults when there is none (`teamBranding` is then null/null,
+      // what this passed before there was a kit).
+      brandColor={accentOverride ?? kit.brandColor}
+      style={mergeEmbedStyle(kit.style, styleOverrides)}
       className={embed ? EMBED_ROOT_CLASS : 'bp-viewport'}
     >
       {/* No link back to the team page, for the same reason the personal event
@@ -111,25 +125,29 @@ export default async function TeamBookingPage({
           ownerSlug={teamSlug}
           slug={slug}
           mode="team"
-          slots={availability.slots}
-          emptyReason={availability.emptyReason}
-          bookingFields={availability.eventType.bookingFields}
-          initialTimeZone={availability.timeZone}
+          availability={{
+            initial,
+            window: visible,
+            source: { kind: 'team', accountCode: code, owner: teamSlug, slug },
+          }}
+          initialTimeZone={timeZone}
           locale={locale}
-          eventTitle={availability.eventType.title}
-          lengthMinutes={availability.eventType.lengthMinutes}
-          description={listing?.description ?? null}
+          eventTitle={listing.title}
+          lengthMinutes={listing.lengthMinutes}
+          description={listing.description ?? null}
           // The team is the host here: its name and logo are what an invitee
           // is booking with, and B1's initial tile covers a team with no logo.
           hostName={team.team.name}
           avatarUrl={team.team.logoUrl}
-          location={availability.eventType.location}
-          methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
+          logoUrl={logoOf(kit.style)}
+          location={listing.location ?? null}
+          methodLabel={schedulingMethodLabel(messages, listing.schedulingType)}
           nowUtc={from}
           embed={embed}
+          showBranding={brandingShown(team)}
         />
       </main>
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+      <MadeWithBadge locale={locale} accountCode={accountCode} show={brandingShown(team)} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );

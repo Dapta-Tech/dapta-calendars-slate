@@ -134,3 +134,62 @@ describe('BookingNotifier', () => {
     expect(sent[0]!.text).toContain('<script>');
   });
 });
+
+describe('BookingNotifier: the footer line and the invite', () => {
+  const booking = {
+    accountId: 'acc_1',
+    uid: 'bk_footer_1',
+    title: 'Intro call',
+    startUtc: '2026-08-01T14:00:00.000Z',
+    endUtc: '2026-08-01T14:30:00.000Z',
+    host: { name: 'Riley Chen', email: 'riley@example.com' },
+    attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'UTC' },
+    manageUrl: 'https://calendar.example.test/manage/bk_footer_1?token=t',
+    audience: 'attendee' as const,
+  };
+  const capture = () => {
+    const sent: Array<{ html?: string; headers?: Record<string, string>; attachments?: Array<{ content: unknown }> }> = [];
+    const provider = {
+      send: (m: (typeof sent)[number]) => {
+        sent.push(m);
+        return Promise.resolve({ delivered: false, driver: 'log-only' as const });
+      },
+    };
+    return { sent, provider };
+  };
+
+  it('a deployment with a signup destination: the invitee reads it once, and keeps the invite', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/' }).sendConfirmation(booking);
+    const m = sent[0]!;
+    expect(m.html!.match(/Dapta Calendars/g)).toHaveLength(1);
+    expect(m.html).toContain('https://signup.example.test/');
+    expect(m.headers?.['X-Booking-Uid']).toBe('bk_footer_1');
+    expect(String(m.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
+  });
+
+  it('an account that hid the branding while paying: no product line, the rest of the mail unchanged', async () => {
+    const shown = capture();
+    const hidden = capture();
+    const notifier = (p: unknown) => new BookingNotifier(p as never, { signupUrl: 'https://signup.example.test/' });
+    await notifier(shown.provider).sendConfirmation({ ...booking, showBranding: true });
+    await notifier(hidden.provider).sendConfirmation({ ...booking, showBranding: false });
+    expect(hidden.sent[0]!.html).not.toContain('Dapta Calendars');
+    expect(hidden.sent[0]!.html).not.toContain('https://signup.example.test/');
+    // Branding on renders exactly what a notification without the field renders.
+    const absent = capture();
+    await notifier(absent.provider).sendConfirmation(booking);
+    expect(shown.sent[0]!.html).toBe(absent.sent[0]!.html);
+    // Hiding removes the line and nothing else.
+    const line = /<div style="margin:0 0 6px;">.*?<\/div>/;
+    expect(shown.sent[0]!.html!.replace(line, '')).toBe(hidden.sent[0]!.html);
+    expect(String(hidden.sent[0]!.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
+  });
+
+  it('a bare fork (no destination): no product in the email at all', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never).sendConfirmation(booking);
+    expect(sent[0]!.html).not.toContain('Dapta Calendars');
+    expect(String(sent[0]!.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
+  });
+});

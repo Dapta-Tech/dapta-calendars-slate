@@ -11,6 +11,7 @@ import {
   NotFoundException,
   Param,
   Patch,
+  Put,
   Post,
   Optional,
   Query,
@@ -19,7 +20,8 @@ import {
 import {
   apiScope,
   attributionClaimSchema,
-  brandingSchema,
+  brandingWriteSchema,
+  brandKitSchema,
   integrationConnectSchema,
   onboardingQualificationSchema,
   onboardingSetupSchema,
@@ -213,6 +215,29 @@ export class HostController {
     return { ok: true };
   }
 
+  // --- Dapta branding on the public pages (included with the Dapta AI subscription).
+  // Everyone in the account reads it (members see the switch read-only); only
+  // owners and admins change it.
+  @Get('account/branding')
+  async brandingStatus(@Req() req: ReqLike) {
+    return this.admin.brandingStatus(await this.auth.resolveHost(req));
+  }
+
+  @Patch('account/branding')
+  async setBranding(@Req() req: ReqLike, @Body() body: { hideBranding?: unknown }) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (typeof body?.hideBranding !== 'boolean')
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'hideBranding (boolean) required' });
+    const out = await this.admin.setBranding(p, body.hideBranding);
+    if (!out.ok)
+      throw new ForbiddenException({
+        error: 'DAPTA_SUBSCRIPTION_REQUIRED',
+        message: 'Hiding the branding is included with your Dapta AI subscription.',
+      });
+    return out.branding;
+  }
+
   // --- Vanity account slug (premium — included with the Dapta AI subscription).
   @Get('account/vanity')
   async vanityStatus(@Req() req: ReqLike) {
@@ -255,18 +280,68 @@ export class HostController {
     return { ok: true };
   }
 
+  /** The studio's look state: whether an applied look can be reverted. */
+  @Get('booking-page')
+  async bookingPageState(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return { backup: await this.admin.brandBackupState(p) };
+  }
+
   @Patch('booking-page')
   async updateBranding(@Req() req: ReqLike, @Body() body: unknown) {
     const p = await this.auth.resolveHost(req);
     try {
-      const patch = brandingSchema.parse(body);
-      await this.admin.updateBranding(p, patch);
+      const { backupAs, ...patch } = brandingWriteSchema.parse(body);
+      await this.admin.updateBranding(p, patch, backupAs);
       return { ok: true };
     } catch (err) {
       if (err instanceof ZodError)
         throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
       throw err;
     }
+  }
+
+  /**
+   * The workspace brand kit. Every member reads it (their studio offers "Apply
+   * kit"); only an admin or owner replaces it, since it is workspace-wide.
+   */
+  @Get('brand-kit')
+  async getBrandKit(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    return this.admin.brandKit(p);
+  }
+
+  @Put('brand-kit')
+  async putBrandKit(@Req() req: ReqLike, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    try {
+      return await this.admin.saveBrandKit(p, brandKitSchema.parse(body));
+    } catch (err) {
+      if (err instanceof ZodError)
+        throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
+      throw err;
+    }
+  }
+
+  /** Snapshot the kit into the caller's own booking page, keeping a backup. */
+  @Post('booking-page/apply-kit')
+  @HttpCode(200)
+  async applyBrandKit(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    const applied = await this.admin.applyBrandKitToMe(p);
+    if (!applied) throw new NotFoundException({ error: 'NO_BRAND_KIT', message: 'This workspace has no brand kit yet.' });
+    return { ok: true };
+  }
+
+  /** Undo the last applied look on the host's own page, once. */
+  @Post('booking-page/revert')
+  @HttpCode(200)
+  async revertBranding(@Req() req: ReqLike) {
+    const p = await this.auth.resolveHost(req);
+    const reverted = await this.admin.revertBranding(p);
+    if (!reverted) throw new NotFoundException({ error: 'NOTHING_TO_REVERT', message: 'There is no applied look to revert.' });
+    return { ok: true };
   }
 
   // Host bookings (R29 on-behalf; singular attendee shape).

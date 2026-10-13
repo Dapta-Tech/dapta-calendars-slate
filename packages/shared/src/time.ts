@@ -15,6 +15,20 @@ export function detectTimeZone(): string {
   }
 }
 
+/**
+ * A zone's offset as people read it beside the zone's name, e.g. "GMT-5", at
+ * `at` (now by default; offsets move at DST). The one formatter both time zone
+ * pickers use. An invalid zone answers an empty string rather than throwing.
+ */
+export function zoneOffsetLabel(timeZone: string, at: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(at);
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /** Offset (minutes, east-of-UTC positive) of `instant` in `timeZone`. */
 export function zoneOffsetMinutes(instant: Date, timeZone: string): number {
   const dtf = new Intl.DateTimeFormat('en-US', {

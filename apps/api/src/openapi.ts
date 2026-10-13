@@ -1171,7 +1171,12 @@ export const openapiSpec = {
             },
             reservationUid: {
               type: 'string',
-              description: 'Consume a held reservation (slot hold).',
+              description:
+                'Consume a held reservation (slot hold) from POST /v1/reservations. It must ' +
+                'be the hold on this event (handle + slug) at this startUtc; any other, or ' +
+                'one past its ten minutes, answers 410 RESERVATION_EXPIRED. A matching hold ' +
+                'stands in for the offered-time check: the time was checked (hours, interval, ' +
+                'minimum notice) when the hold was granted.',
             },
             // No `idempotencyKey` (#104): this route is unauthenticated and the
             // server drops the field. Retry dedupe is an API-key feature — the
@@ -1183,7 +1188,8 @@ export const openapiSpec = {
           '409': { description: 'SLOT_TAKEN | DUPLICATE_BOOKING' },
           '410': {
             description:
-              'RESERVATION_EXPIRED, or ONE_OFF_GONE when a presented one-off invite link ' +
+              'RESERVATION_EXPIRED (the reservationUid names no live hold on this event at ' +
+              'this startUtc), or ONE_OFF_GONE when a presented one-off invite link ' +
               'is already spent or revoked.',
           },
           '404': {

@@ -30,6 +30,7 @@ import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } fro
 import { sql, type Db } from './client';
 import {
   bookingStartOutOfRange,
+  busyReadSpan,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -58,6 +59,9 @@ import {
   type OneOffLinkRecord,
 } from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
+import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
+import { getAccountBranding } from './account-branding';
+import type { BrandKit } from '@slate/types';
 import { canonicalPublicCode } from './short-links';
 import { checkWebhookUrl } from './webhook-url';
 import { enqueueOutbox } from './outbox';
@@ -172,21 +176,87 @@ export async function reserveSlot(
   const offered = avail?.slots.some((s) => new Date(s.startUtc).getTime() === args.startMs) ?? false;
   if (!offered) return { ok: false, reason: 'INVALID_SLOT' };
 
-  // Per-page hold cap (rate limit).
-  const active = await db.get<{ n: number }>(
-    sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE member_id = ${member.id} AND release_at_ms > ${now}`,
-  );
-  if (Number(active?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return { ok: false, reason: 'RATE_LIMITED' };
-
   const uid = randomUUID();
   const releaseAtMs = now + (args.holdMs ?? DEFAULT_HOLD_MS);
-  await db.run(
-    sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
-          slot_end_ms, uid, release_at_ms, is_seat, created_at)
-        VALUES (${randomUUID()}, ${account.id}, ${eventType.id}, ${member.id}, ${args.startMs},
-          ${endMs}, ${uid}, ${releaseAtMs}, 0, ${now})`,
-  );
+  const placed = await insertHoldGuarded(db, {
+    accountId: account.id,
+    eventTypeId: eventType.id,
+    memberId: member.id,
+    startMs: args.startMs,
+    endMs,
+    uid,
+    releaseAtMs,
+    now,
+  });
+  if (placed !== 'ok') return { ok: false, reason: placed };
   return { ok: true, uid, releaseAtMs };
+}
+
+/**
+ * The hold write, serialised per host. The availability read above is a
+ * snapshot: twenty visitors who pick the same time at once all see it free, and
+ * a plain check-then-insert let every one of them hold it (the QA battery saw 18
+ * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-page cap be
+ * overrun the same way. Each loser then filled in the form and was refused only
+ * at the last step.
+ *
+ * So the overlap and the cap are checked again INSIDE a transaction that holds
+ * the host's row: SQLite's synchronous transaction runs alone in this process
+ * and, begun IMMEDIATE, alone across processes sharing the file too; Postgres
+ * takes `SELECT ... FOR UPDATE` on the member, the same lock the brand backup
+ * write uses. The overlap test is the one `loadReservationBusy` applies, so a
+ * time this refuses is a time the next availability read would not offer.
+ *
+ * @internal Exported for the cross-process spec; callers use `reserveSlot`.
+ */
+export async function insertHoldGuarded(
+  db: Db,
+  h: {
+    accountId: string;
+    eventTypeId: string;
+    memberId: string;
+    startMs: number;
+    endMs: number;
+    uid: string;
+    releaseAtMs: number;
+    now: number;
+  },
+): Promise<'ok' | 'INVALID_SLOT' | 'RATE_LIMITED'> {
+  const overlap = sql`SELECT 1 AS hit FROM slot_reservation
+      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}
+        AND slot_start_ms < ${h.endMs} AND slot_end_ms > ${h.startMs} LIMIT 1`;
+  const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
+      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}`;
+  const insert = sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
+        slot_end_ms, uid, release_at_ms, is_seat, created_at)
+      VALUES (${randomUUID()}, ${h.accountId}, ${h.eventTypeId}, ${h.memberId}, ${h.startMs},
+        ${h.endMs}, ${h.uid}, ${h.releaseAtMs}, 0, ${h.now})`;
+
+  if (db.dialect === 'sqlite') {
+    const native = db.sqlite!;
+    // IMMEDIATE: a second API process on the same file waits for this write
+    // lock and then reads the hold, so it answers INVALID_SLOT. A deferred
+    // transaction would read first, then fail to upgrade with SQLITE_BUSY.
+    return native.txn(
+      () => {
+        if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
+        const n = native.drizzle.get<{ n: number }>(active);
+        if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
+        native.drizzle.run(insert);
+        return 'ok' as const;
+      },
+      { immediate: true },
+    );
+  }
+  return db.pg!.drizzle.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM member WHERE id = ${h.memberId} FOR UPDATE`);
+    const hit = (await tx.execute(overlap)) as unknown as unknown[];
+    if (hit.length > 0) return 'INVALID_SLOT' as const;
+    const rows = (await tx.execute(active)) as unknown as Array<{ n: number | string }>;
+    if (Number(rows[0]?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
+    await tx.execute(insert);
+    return 'ok' as const;
+  });
 }
 
 // --- Identity / multi-tenant ----------------------------------------------
@@ -301,26 +371,11 @@ export async function checkHandleAvailable(
 
 // --- Branding / studio persistence ----------------------------------------
 
-export interface BrandingPatch {
-  displayName?: string | null;
-  avatarUrl?: string | null;
-  coverUrl?: string | null;
-  brandColor?: string | null;
-  layout?: string | null;
-  style?: Record<string, unknown>;
-}
+export type { BrandingPatch } from './branding-sql';
 
 export async function updateBranding(db: Db, memberId: string, patch: BrandingPatch): Promise<boolean> {
-  const sets: ReturnType<typeof sql>[] = [];
-  if ('displayName' in patch) sets.push(sql`display_name = ${patch.displayName ?? null}`);
-  if ('avatarUrl' in patch) sets.push(sql`avatar_url = ${patch.avatarUrl ?? null}`);
-  if ('coverUrl' in patch) sets.push(sql`cover_url = ${patch.coverUrl ?? null}`);
-  if ('brandColor' in patch) sets.push(sql`brand_color = ${patch.brandColor ?? null}`);
-  if ('layout' in patch) sets.push(sql`layout = ${patch.layout ?? null}`);
-  if ('style' in patch) sets.push(sql`booking_page_style = ${jsonParam(db, patch.style ?? null)}`);
-  if (sets.length === 0) return true;
-  const assignments = sets.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
-  await db.run(sql`UPDATE member SET ${assignments} WHERE id = ${memberId}`);
+  const stmt = brandingUpdateSql(db, memberId, patch);
+  if (stmt) await db.run(stmt);
   return true;
 }
 
@@ -366,7 +421,10 @@ export interface TeamProfileView {
     description: string | null;
     lengthMinutes: number;
     schedulingType: string | null;
+    location: ReturnType<typeof parseEventLocation>;
   }>;
+  /** The workspace brand kit, rendered directly by team pages; null = none. */
+  brand: BrandKit | null;
 }
 
 async function getTeamBySlug(db: Db, accountId: string, teamSlug: string) {
@@ -396,8 +454,9 @@ export async function getTeamProfile(
     description: string | null;
     length_minutes: number;
     scheduling_type: string | null;
+    locations: unknown;
   }>(
-    sql`SELECT slug, title, description, length_minutes, scheduling_type FROM event_type
+    sql`SELECT slug, title, description, length_minutes, scheduling_type, locations FROM event_type
         WHERE account_id = ${account.id} AND team_id = ${team.id} AND hidden = 0
         ORDER BY length_minutes ASC`,
   );
@@ -416,7 +475,9 @@ export async function getTeamProfile(
       description: r.description,
       lengthMinutes: r.length_minutes,
       schedulingType: r.scheduling_type,
+      location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
     })),
+    brand: (await getAccountBranding(db, account.id))?.config ?? null,
   };
 }
 
@@ -541,15 +602,17 @@ async function hostFreeSlotMs(
   // (never offer times we couldn't conflict-check) and reports why.
   let busy: Interval[] = [];
   if (!opts.rulesOnly) {
+    // Past both edges by a slot and its buffers; see `busyReadSpan`.
+    const read = busyReadSpan(fromMs, toMs, et);
     let externalBusy: Interval[];
     try {
-      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, fromMs, toMs);
+      externalBusy = await loadExternalBusy(db, opts.calendar, host.member_id, read.fromMs, read.toMs);
     } catch {
       return { free: new Set(), reason: 'CALENDAR_UNAVAILABLE' };
     }
     busy = [
-      ...(await loadBusyForHost(db, host.member_id, fromMs, toMs, undefined, opts.excludeBookingId)),
-      ...(await loadReservationBusy(db, host.member_id, fromMs, toMs, now.getTime())),
+      ...(await loadBusyForHost(db, host.member_id, read.fromMs, read.toMs, undefined, opts.excludeBookingId)),
+      ...(await loadReservationBusy(db, host.member_id, read.fromMs, read.toMs, now.getTime())),
       ...externalBusy,
     ];
   }
@@ -1852,6 +1915,9 @@ export interface ConnectionView {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /** The connected account's photo, when the backend reported one. Only the
+   *  host's own list carries it (the studio offers to remove or restore it). */
+  avatarUrl: string | null;
 }
 
 export async function listConnections(db: Db, memberId: string): Promise<ConnectionView[]> {
@@ -1865,9 +1931,10 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     last_check_at: number | null;
     last_check_ok: number | null;
     last_check_detail: string | null;
+    avatar_url: string | null;
   }>(
     sql`SELECT id, provider, external_id, primary_email, is_destination, check_conflicts,
-               last_check_at, last_check_ok, last_check_detail
+               last_check_at, last_check_ok, last_check_detail, avatar_url
         FROM connected_calendar WHERE member_id = ${memberId}`,
   );
   return rows.map((r) => ({
@@ -1880,6 +1947,7 @@ export async function listConnections(db: Db, memberId: string): Promise<Connect
     lastCheckAt: r.last_check_at == null ? null : Number(r.last_check_at),
     lastCheckOk: r.last_check_ok == null ? null : !!r.last_check_ok,
     lastCheckDetail: r.last_check_detail,
+    avatarUrl: r.avatar_url,
   }));
 }
 

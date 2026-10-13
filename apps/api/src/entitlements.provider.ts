@@ -21,18 +21,29 @@ export interface EntitlementKeys {
   externalOrgId?: string | null;
 }
 
+/**
+ * The upstream's answer. `unknown` means it could not say (a timeout, a 5xx, a
+ * body it could not read): it is NEVER a lapse. The caller keeps the verdict it
+ * already had and asks again after a short backoff, so an outage upstream never
+ * shows a paying host's branding again or tells them their subscription ended.
+ */
+export type EntitlementAnswer = 'paid' | 'free' | 'unknown';
+
 export interface EntitlementsProvider {
   /** True when a real upstream is wired; false = OSS default. */
   readonly enabled: boolean;
-  /** Live verdict from the source of truth. Never cache here — the caller does. */
-  isPaidCustomer(keys: EntitlementKeys): Promise<boolean>;
+  /**
+   * Live answer from the source of truth. Never cache here: the caller does.
+   * Should not throw (a failure is `unknown`); the caller guards it anyway.
+   */
+  verdict(keys: EntitlementKeys): Promise<EntitlementAnswer>;
 }
 
 /** OSS default: no upstream. `PREMIUM_FEATURES=open` (default) makes the gate moot. */
 export class DisabledEntitlementsProvider implements EntitlementsProvider {
   readonly enabled = false;
-  isPaidCustomer(): Promise<boolean> {
-    return Promise.resolve(false);
+  verdict(): Promise<EntitlementAnswer> {
+    return Promise.resolve('free');
   }
 }
 
@@ -45,9 +56,9 @@ const PAYING_STATUS_IDS = new Set([2, 5, 6]);
 /**
  * Generic HTTP adapter for the upstream entitlement service. Contract:
  *   GET {base}/account/search/admin?owner_email=… with `x-api-key` service
- *   auth → [{ account_status_id, … }]. Diagnostic by design: any failure or
- *   ambiguity returns `false` (the claim can be retried; nothing user-facing
- *   breaks) — never throws.
+ *   auth → [{ account_status_id, … }]. Never throws: a timeout, a network
+ *   error, a non-2xx status or a body it cannot read is `unknown`, which the
+ *   caller never treats as a lapse. Only a readable answer is `paid` or `free`.
  */
 export class HttpEntitlementsProvider implements EntitlementsProvider {
   readonly enabled = true;
@@ -57,8 +68,9 @@ export class HttpEntitlementsProvider implements EntitlementsProvider {
     private readonly timeoutMs = 10_000,
   ) {}
 
-  async isPaidCustomer(keys: EntitlementKeys): Promise<boolean> {
-    if (!keys.ownerEmail) return false;
+  async verdict(keys: EntitlementKeys): Promise<EntitlementAnswer> {
+    // No owner to look up: this account cannot be a paying customer.
+    if (!keys.ownerEmail) return 'free';
     try {
       const url = new URL(`${this.baseUrl.replace(/\/$/, '')}/account/search/admin`);
       url.searchParams.set('owner_email', keys.ownerEmail);
@@ -66,18 +78,21 @@ export class HttpEntitlementsProvider implements EntitlementsProvider {
         headers: { 'x-api-key': this.apiKey },
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-      if (!res.ok) return false;
+      if (!res.ok) return 'unknown';
       const body = (await res.json().catch(() => null)) as unknown;
       const rows = Array.isArray(body)
         ? body
         : Array.isArray((body as { data?: unknown[] })?.data)
           ? (body as { data: unknown[] }).data
-          : [];
+          : null;
+      if (!rows) return 'unknown';
       return rows.some(
         (r) => PAYING_STATUS_IDS.has(Number((r as { account_status_id?: unknown }).account_status_id)),
-      );
+      )
+        ? 'paid'
+        : 'free';
     } catch {
-      return false;
+      return 'unknown';
     }
   }
 }

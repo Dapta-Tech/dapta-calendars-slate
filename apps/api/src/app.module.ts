@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
 import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
+import { badgeHidden, buildSignupUrl } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
   AUTH_PROVIDER,
@@ -28,6 +29,7 @@ import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
 import { resolveEntitlementsProvider } from './entitlements.provider';
+import { entitlementGateProvider } from './entitlement-gate';
 import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
@@ -81,8 +83,16 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
     },
     {
       provide: NOTIFIER,
-      useFactory: (email: EmailProvider) => new BookingNotifier(email),
-      inject: [EMAIL],
+      // The invitee's footer line ("Made with ... Create your free calendar")
+      // follows the same open-core switch as the page's badge: no destination,
+      // or the hide flag, and the email names no product.
+      useFactory: (email: EmailProvider, env: ServerEnv) =>
+        new BookingNotifier(email, {
+          signupUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
+            ? null
+            : buildSignupUrl({ baseUrl: env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL, medium: 'email' }),
+        }),
+      inject: [EMAIL, ENV],
     },
     // CalendarProvider selected by CALENDAR_PROVIDER: the OSS default is
     // `disabled` (no external calendar); a private overlay ships the `external`
@@ -113,6 +123,10 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       useFactory: (env: ServerEnv) => env.PREMIUM_FEATURES,
       inject: [ENV],
     },
+    // ONE cached-verdict gate for the whole app: the public pages, the emails
+    // and Settings share its in-flight map and failure backoff, so a burst
+    // anywhere makes one upstream call per account.
+    entitlementGateProvider,
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,

@@ -17,6 +17,7 @@ export function useBookingMonth({
   locale,
   hour12,
   nowUtc,
+  lastMonthKey,
 }: {
   slots: Slot[];
   timeZone: string;
@@ -24,6 +25,12 @@ export function useBookingMonth({
   hour12: boolean;
   /** The instant "today" is read from; see `BookingFlow`'s `nowUtc`. */
   nowUtc: string;
+  /**
+   * The last month the visitor may go to, when the page cannot read it off the
+   * times because it does not have them all yet (the event page reads a month
+   * at a time). Omitted, it is the month of the last time the page holds.
+   */
+  lastMonthKey?: string;
 }) {
   /**
    * The month the visitor has navigated to, or `null` for "wherever the times
@@ -61,14 +68,14 @@ export function useBookingMonth({
       // the last day the page actually has a slot for. A visitor is never sent
       // to a month this page has no answer for.
       minMonth: min,
-      maxMonth: monthKeyOf(last < today ? today : last),
+      maxMonth: lastMonthKey ?? monthKeyOf(last < today ? today : last),
       // Open on the month the times actually start in. A host fully booked
       // this month, or whose availability begins next month, would otherwise
       // open on a grid of greyed-out days with nothing saying that "next" is
       // the answer.
       firstMonth: monthKeyOf(first) < min ? min : monthKeyOf(first),
     };
-  }, [days, timeZone, nowUtc]);
+  }, [days, timeZone, nowUtc, lastMonthKey]);
 
   /**
    * The month on screen: the visitor's navigation, clamped into the bounds the
@@ -93,6 +100,22 @@ export function useBookingMonth({
 
   const dayColumn = selectedDay ? (dayMap.get(selectedDay) ?? null) : null;
 
+  /**
+   * The first day after the one on screen that has times, in any month. A
+   * short day ends its list with a quiet way to it rather than with empty
+   * space (or filler) under three chips.
+   */
+  const nextDay = useMemo(() => {
+    if (!selectedDay) return null;
+    return days.find((d) => d.dayKey > selectedDay) ?? null;
+  }, [days, selectedDay]);
+
+  /** Show a given day: its month, and that day's times. */
+  const goToDay = (dayKey: string) => {
+    setNavMonth(monthKeyOf(dayKey));
+    setPickedDay(dayKey);
+  };
+
   return {
     days,
     availableDayKeys,
@@ -104,5 +127,7 @@ export function useBookingMonth({
     selectedDay,
     setPickedDay,
     dayColumn,
+    nextDay,
+    goToDay,
   };
 }

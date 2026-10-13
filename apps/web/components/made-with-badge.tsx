@@ -6,18 +6,22 @@ import { BrandMark, IS_DAPTA_BRAND } from '@/components/brand/brand';
  * "Made with Dapta Calendars": the growth-loop attribution on every public
  * surface (R11). A discreet centered footer pill: semantic tokens only, so it
  * follows dark/light and any host branding without competing with it. Renders
- * only when the deployment configures NEXT_PUBLIC_SIGNUP_URL, and never when
+ * only when the deployment configures NEXT_PUBLIC_SIGNUP_URL, never when
  * NEXT_PUBLIC_HIDE_BADGE is set (open-core: forks aren't forced to carry
- * Dapta branding).
+ * Dapta branding), and never on the page of an account that turned the
+ * branding off while it is a paying Dapta AI customer (`show`).
  */
 export function MadeWithBadge({
   locale = 'en',
   accountCode,
+  show,
 }: {
   locale?: string;
   accountCode?: string | null;
+  /** The page's `showBranding` (see `signupHref`). False renders nothing. */
+  show: boolean;
 }) {
-  const href = signupHref('badge', accountCode);
+  const href = signupHref('badge', accountCode, show);
   if (!href) return null;
   const m = getMessages(locale).growth;
   return (

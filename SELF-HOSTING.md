@@ -156,6 +156,7 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BACKEND_MODULE` | — | optional; absolute path to a private backend module | no |
 | `CALENDAR_HTTP_TIMEOUT_MS` | `30000` | — | no |
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
+| `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
 
 ### Email / notifications
@@ -340,7 +341,8 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
 | `RATE_LIMIT_CAPACITY` | `60` | burst | no |
 | `RATE_LIMIT_REFILL_PER_SEC` | `1` | sustained refill | no |
-| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `1` | reverse proxies in front of the API that append to `X-Forwarded-For` (1 = one load balancer, 2 = CDN + load balancer, 0 = exposed directly). The limiter keys on the entry this many from the right | no |
+| `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `1` | reverse proxies in front of the API that append to `X-Forwarded-For` (1 = one load balancer, 2 = CDN + load balancer, 0 = exposed directly). The limiter keys on the entry this many from the right. Set it on the web app too when `INTERNAL_API_SECRET` is set: the web reads the visitor's address the same way | no |
+| `INTERNAL_API_SECRET` | unset | **API and web, same value** (min 32 chars). The booking pages call the API from the web server, so without it every visitor shares the web server's rate-limit bucket and a busy page answers visitors with 429s. With it set on both, the web sends the visitor's address beside the secret and the limiter counts each visitor. The API trusts a forwarded address only beside the matching secret and an IP literal; anything else is keyed as before, and a wrong secret is only counted in the log (one line a minute, no addresses). The web sends it only to the API named by the server-side `API_URL`, so set `API_URL` on the web explicitly to a private or in-cluster address; with `API_URL` unset (the `NEXT_PUBLIC_API_URL` fallback, a public host) the web never sends it and logs a warning at startup. An empty value counts as unset. Set it whenever the web app reaches the API through your reverse proxy or a private network | **yes** |
 | `REQUEST_LOG_ENABLED` | `true` | one line per request (method, route template, status, duration, request id, error code, account); JSON when `NODE_ENV=production`. Never logs query strings, bodies, headers or client addresses | no |
 
 > Secrets must come from your platform's secret manager / environment, **never** a

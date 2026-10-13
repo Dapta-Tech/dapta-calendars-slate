@@ -4,10 +4,14 @@ import { getMessages, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
+import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { ProfileView } from '@/components/profile-view';
-import { resolveAvatarUrl, resolveOgImages } from '@/lib/avatar';
+import { resolveAvatarUrl } from '@/lib/avatar';
+import { landingTarget, wantsProfile } from '@/lib/landing';
+import { brandingShown, signupHref } from '@/lib/growth';
+import { GrowthCta } from '@/components/booking-page-parts';
 import {
   EMBED_ROOT_CLASS,
   isEmbedRequest,
@@ -18,7 +22,9 @@ import {
 } from '@/lib/embed';
 
 // Per-page SEO/OG from host data (R11 audit). getProfile is request-cached, so
-// this shares the page's fetch. Only public profile fields are used.
+// this shares the page's fetch. Only public profile fields are used. The image
+// is `opengraph-image.tsx` beside this file (the host's own card), so no
+// `images` here: an explicit list would replace it.
 export async function generateMetadata({
   params,
   searchParams,
@@ -33,13 +39,14 @@ export async function generateMetadata({
   const name = profile.member.displayName ?? profile.member.handle;
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
   const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
-  const title = `${name} — ${profile.account.name}`;
-  const images = resolveOgImages(profile.member.avatarUrl, profile.member.connectedAvatarUrl);
+  // The card's headline is the name; the account rides along only when it says
+  // something the name does not.
+  const title = profile.account.name && profile.account.name !== name ? `${name} · ${profile.account.name}` : name;
   return {
     title,
     description,
-    openGraph: { title, description, type: 'profile', images },
-    twitter: { card: 'summary', title, description, images },
+    openGraph: { title, description, type: 'profile' },
+    twitter: { card: 'summary_large_image', title, description },
     // An embedded URL is this same page with different chrome — never a second
     // indexable copy of it.
     ...(isEmbedRequest(query) ? { robots: { index: false, follow: false } } : {}),
@@ -70,15 +77,18 @@ export default async function ProfilePage({
 
   const m = profile.member;
 
-  // R25 optional landing (G6): when the host disabled the landing page and set a
-  // default event, jump straight to that event's booking page.
-  const landing = m.style as { landingEnabled?: boolean; defaultEventSlug?: string | null } | null;
-  const defaultSlug = landing?.defaultEventSlug;
-  if (landing?.landingEnabled === false && defaultSlug && profile.eventTypes.some((e) => e.slug === defaultSlug)) {
-    // Carries the query, so a host who embedded their landing link and then
-    // turned the landing page off still serves an embed rather than a
-    // full-chrome event page inside the frame.
-    redirect(withSearchParams(`/${code}/${handle}/${defaultSlug}`, query));
+  // Where the link goes (lib/landing.ts, the studio says the same thing): the
+  // event the host chose, or their only event, else this profile. `?landing=1`
+  // always shows the profile.
+  const target = landingTarget({
+    style: m.style as Record<string, unknown> | null,
+    eventSlugs: profile.eventTypes.map((e) => e.slug),
+    forceProfile: wantsProfile(query),
+  });
+  if (target.kind === 'event') {
+    // Carries the query, so an embedded landing link still serves an embed
+    // rather than a full-chrome event page inside the frame.
+    redirect(withSearchParams(`/${code}/${handle}/${target.slug}`, query));
   }
   // The style the shell below renders with, derived ONCE: the canvas and every
   // axis come out of it, and the embed's overrides are already merged in.
@@ -94,6 +104,9 @@ export default async function ProfilePage({
     return i === -1 ? order.length + 1 : i;
   };
   const eventTypes = [...profile.eventTypes].sort((a, b) => rank(a.slug) - rank(b.slug));
+  // A host's verdict: a way to make your own page, at the foot of theirs.
+  const branding = brandingShown(profile);
+  const profileCta = signupHref('profile', code, branding);
 
   return (
     <BrandedShell
@@ -116,9 +129,11 @@ export default async function ProfilePage({
           // page in a 700px box.
           hrefFor={(slug) => withSearchParams(`/${code}/${handle}/${slug}`, query)}
           emptyText={msg.landing.noEvents}
+          logoUrl={logoOf(m.style)}
+          footer={profileCta ? <GrowthCta m={msg} href={profileCta} /> : null}
         />
       </main>
-      <MadeWithBadge locale={locale} accountCode={accountCode} />
+      <MadeWithBadge locale={locale} accountCode={accountCode} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );

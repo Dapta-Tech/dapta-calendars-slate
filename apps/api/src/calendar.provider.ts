@@ -47,12 +47,19 @@ export interface CalendarBackend {
   conferencingLabel?: string | null;
   /**
    * The longest span this backend answers completely in one busy read, in ms.
-   * A backend that pages its event listing leaves this unset and gets the
-   * provider's default; one that answers free/busy whole may say so and be
-   * read in one request.
+   * A backend that pages its event listing leaves this unset and gets
+   * CALENDAR_BUSY_WINDOW_DAYS; one that answers free/busy whole may say so and
+   * be read in one request. An overlay knows its own wire, so its value wins.
    */
   busyWindowMs?: number;
 }
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** CALENDAR_BUSY_WINDOW_DAYS as the provider's busy window, in ms. */
+export function busyWindowMsFrom(env: ServerEnv): number {
+  return env.CALENDAR_BUSY_WINDOW_DAYS * DAY_MS;
+}
+
 export type CalendarBackendFactory = (env: ServerEnv) => CalendarBackend | Promise<CalendarBackend>;
 
 const OVERLAY_HINT =
@@ -78,6 +85,7 @@ export function createCalendarProvider(env: ServerEnv): CalendarProvider {
           baseUrl: env.CALENDAR_API_BASE_URL,
           tokenSource: new StaticTokenSource(env.CALENDAR_API_TOKEN),
           wire: new GenericRestWire(),
+          busyWindowMs: busyWindowMsFrom(env),
           timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
           busyRequestsPerSecond: env.CALENDAR_BUSY_REQUESTS_PER_SECOND,
           conferencingLabel: env.CALENDAR_CONFERENCING_LABEL ?? null,
@@ -111,7 +119,7 @@ export async function createCalendarProviderAsync(env: ServerEnv): Promise<Calen
       tokenSource: backend.tokenSource,
       wire: backend.wire,
       startConnect: backend.startConnect,
-      busyWindowMs: backend.busyWindowMs,
+      busyWindowMs: backend.busyWindowMs ?? busyWindowMsFrom(env),
       timeoutMs: env.CALENDAR_HTTP_TIMEOUT_MS,
       busyRequestsPerSecond: env.CALENDAR_BUSY_REQUESTS_PER_SECOND,
       conferencingLabel: backend.conferencingLabel ?? env.CALENDAR_CONFERENCING_LABEL ?? null,

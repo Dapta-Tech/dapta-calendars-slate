@@ -437,10 +437,14 @@
                      (no zoom on focus on a phone) is 52px tall
      cta             the primary button's height on the booking page, 54px
      progress        the phone's step track
-     frame           the two-pane frame's width cap (and the split template's),
-                     its floor height (so a five-week month and a six-week one
-                     do not move the page, and a 1440 x 900 screen is framed, not
-                     stranded: R30 §9), and its two side columns
+     frame           the two-pane frame's width cap (and the split template's)
+                     and its two side columns. It has no floor height: the frame
+                     is as tall as what it holds, and the month always draws six
+                     weeks so moving between months does not move the page
+     logo            the brand kit's logo: a wordmark's height and widest run
+     zone            the time zone list: its popover width and list height from
+                     the two-pane width up, the sheet's ceiling on a phone, and
+                     the one shadow a popover over the page casts
    ============================================================================ */
 .branded-surface {
   --bp-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -451,8 +455,13 @@
   --bp-progress-h: 4px;
   --bp-frame-max: 72rem;
   --bp-frame-max-split: 80rem;
-  --bp-frame-min-h: 42rem;
   --bp-event-col: 20rem;
   --bp-times-col: 17rem;
   --bp-pane-pad: calc(var(--bp-pad, 1.25rem) + var(--sp-inline));
+  --bp-zone-w: 22rem;
+  --bp-zone-list-h: 20rem;
+  --bp-sheet-max-h: 75dvh;
+  --bp-logo-h: 2rem;
+  --bp-logo-max-w: 10rem;
+  --bp-popover-shadow: 0 0.75rem 2rem -0.75rem color-mix(in srgb, var(--foreground) 28%, transparent);
 }

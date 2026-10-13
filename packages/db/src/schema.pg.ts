@@ -30,6 +30,9 @@ export const account = pgTable('account', {
   // IAM is the source of truth — this is never a Calendars-side billing state.
   daptaEntitlement: text('dapta_entitlement'),
   entitlementCheckedAt: bigint('entitlement_checked_at', { mode: 'number' }),
+  // The account's choice to hide the Dapta branding on its public pages (0/1).
+  // Honoured only while the verdict above reads 'paid': see showDaptaBranding.
+  hideBranding: integer('hide_branding').notNull().default(0),
   // Onboarding gate 1 (ADR 0002): the workspace's qualification answers, keyed
   // by Forms' question bank. Written once, alongside the claim below.
   onboarding: jsonb('onboarding'),
@@ -82,6 +85,9 @@ export const member = pgTable('member', {
   brandColor: text('brand_color'),
   layout: text('layout'),
   bookingPageStyle: jsonb('booking_page_style'),
+  // The look before the last apply (0022): one step of undo, never rendered.
+  brandBackup: jsonb('brand_backup'),
+  brandAppliedAt: bigint('brand_applied_at', { mode: 'number' }),
   timeZone: text('time_zone').notNull().default('UTC'),
   weekStart: text('week_start').notNull().default('sunday'),
   locale: text('locale'),
@@ -106,6 +112,15 @@ export const availability = pgTable('availability', {
   startTime: text('start_time').notNull(),
   endTime: text('end_time').notNull(),
   date: text('date'),
+});
+
+// The workspace brand kit (0023): one row per account; snapshotted into a
+// member's branding on "Apply kit", rendered directly by team pages.
+export const accountBranding = pgTable('account_branding', {
+  accountId: text('account_id').primaryKey(),
+  config: jsonb('config').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
 export const team = pgTable('team', {
@@ -558,4 +573,5 @@ export const pgSchema = {
   notificationSetting,
   accountIntegration,
   oneOffLink,
+  accountBranding,
 };

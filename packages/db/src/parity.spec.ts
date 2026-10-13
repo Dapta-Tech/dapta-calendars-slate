@@ -19,6 +19,7 @@ import {
   getTeamProfile,
   listBookings,
   listConnections,
+  releaseSlot,
   rescheduleBooking,
   reserveSlot,
   resolveBooking,
@@ -244,6 +245,69 @@ describe('parity (SQLite in-memory)', () => {
     });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe('RESERVATION_EXPIRED');
+  });
+
+  it('a hold books only the time it holds: never another time, on or off the grid', async () => {
+    const { sql } = await import('drizzle-orm');
+    const startMs = await firstSlotMs(db);
+    const held = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs });
+    if (!held.ok) throw new Error('setup: hold refused');
+    const book = (at: number) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startMs: at,
+        attendee: { name: 'Sam', email: `sam-${at}@example.com`, timeZone: 'America/New_York' },
+        answers: { company: 'Acme' },
+        reservationUid: held.uid,
+      });
+    // A hold skips the offered-slot check, so a hold matched by uid alone once
+    // booked an instant no page offers (off the grid, outside the hours).
+    for (const at of [startMs + 17 * 60_000, startMs + 30 * 60_000, startMs + 12 * 3_600_000]) {
+      const out = await book(at);
+      expect(out.ok, new Date(at).toISOString()).toBe(false);
+      if (!out.ok) expect(out.reason).toBe('RESERVATION_EXPIRED');
+      const n = await db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking b JOIN member m ON m.id = b.host_member_id
+            WHERE m.handle = 'alex-rivera' AND b.start_ms = ${at}`,
+      );
+      expect(Number(n?.n)).toBe(0);
+    }
+    // The time it holds books, and the booking consumes the hold.
+    expect((await book(startMs)).ok).toBe(true);
+    const left = await db.get<{ n: number | string }>(
+      sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE uid = ${held.uid}`,
+    );
+    expect(Number(left?.n)).toBe(0);
+  });
+
+  it('a hold books only the event it holds (a personal event has one host), at that very time', async () => {
+    const { sql } = await import('drizzle-orm');
+    const alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    const other = await createEventType(db, accountId, alexId, { slug: 'other-call', title: 'Other Call', lengthMinutes: 30 });
+    expect(other.ok).toBe(true);
+    const startMs = await firstSlotMs(db);
+    const held = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs });
+    if (!held.ok) throw new Error('setup: hold refused');
+    const attendee = { name: 'Sam', email: 'sam-other@example.com', timeZone: 'America/New_York' };
+    // Same host, same time, another event.
+    const otherEvent = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'other-call',
+      startMs,
+      attendee,
+      reservationUid: held.uid,
+    });
+    expect(otherEvent.ok).toBe(false);
+    if (!otherEvent.ok) expect(otherEvent.reason).toBe('RESERVATION_EXPIRED');
+    // A refused booking leaves the hold where it was, for the time it holds.
+    const left = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE uid = ${held.uid}`);
+    expect(Number(left?.n)).toBe(1);
+    // Give it back: a hold left standing counts against the host's cap of ten
+    // for every later test in this file.
+    await releaseSlot(db, held.uid);
   });
 
   it('M5 — reserveSlot rejects an instant that is not a real bookable slot', async () => {

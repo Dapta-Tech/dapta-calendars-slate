@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { t, type BookingMessages } from '@slate/shared';
 import { ChevronIcon, HostAvatar } from '@/components/booking-page-parts';
@@ -34,6 +35,8 @@ export function ProfileView({
   events,
   hrefFor,
   emptyText,
+  logoUrl,
+  footer,
 }: {
   m: BookingMessages;
   /** The heading: the host's name, or the team's. */
@@ -49,14 +52,28 @@ export function ProfileView({
   hrefFor: (slug: string) => string;
   /** The sentence shown instead of an empty list. */
   emptyText: string;
+  /** The workspace logo (brand kit), drawn over the cover, or alone at the top
+   *  when there is no cover. Absent: the page renders as it did before a kit. */
+  logoUrl?: string | null;
+  /** At the foot of the profile (the free-calendar call to action). */
+  footer?: ReactNode;
 }) {
   return (
     <div className="bp-profile">
-      {coverUrl ? (
+      {/* A cover only when there is one. No image used to draw a band tinted
+          with the accent, which a host read as a stray bar with nothing in it.
+          The kit's logo sits over a real cover; with no cover it stands alone
+          at the top, still with no band. Decorative: the name is the line under it. */}
+      {coverUrl && logoUrl ? (
+        <div className="bp-cover-wrap">
+          <img src={coverUrl} alt="" className="bp-cover bp-cover-image" />
+          <img src={logoUrl} alt="" referrerPolicy="no-referrer" className="bp-logo bp-cover-logo" />
+        </div>
+      ) : coverUrl ? (
         <img src={coverUrl} alt="" className="bp-cover bp-cover-image" />
-      ) : (
-        <div aria-hidden className="bp-cover" />
-      )}
+      ) : logoUrl ? (
+        <img src={logoUrl} alt="" referrerPolicy="no-referrer" className="bp-logo bp-profile-logo" />
+      ) : null}
       <header className="bp-profile-head">
         <div className="bp-profile-avatar">
           <HostAvatar hostName={monogramName ?? name} avatarUrl={avatarUrl} />
@@ -97,6 +114,7 @@ export function ProfileView({
       ) : (
         <p className="bp-muted bp-profile-empty">{emptyText}</p>
       )}
+      {footer}
     </div>
   );
 }

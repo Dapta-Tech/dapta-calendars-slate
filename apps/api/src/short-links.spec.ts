@@ -13,9 +13,9 @@ class StubEntitlements implements EntitlementsProvider {
   readonly enabled = true;
   calls = 0;
   constructor(private readonly paid: boolean) {}
-  isPaidCustomer(): Promise<boolean> {
+  verdict(): Promise<'paid' | 'free'> {
     this.calls++;
-    return Promise.resolve(this.paid);
+    return Promise.resolve(this.paid ? 'paid' : 'free');
   }
 }
 

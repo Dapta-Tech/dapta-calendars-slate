@@ -30,6 +30,13 @@
  *   - On PATCH (a reschedule) return `meetingUrl` only if the room actually
  *     changed. Returning `null` is the right answer for a backend that keeps the
  *     same room across a move: a null NEVER overwrites the stored URL.
+ *
+ * GUESTS (both POST and PATCH). On the organizer's own calendar,
+ * `attendeeEmails` lists the ORGANIZER FIRST (`organizerEmail`, the owner of the
+ * calendar being written), then the invitee(s), then any co-hosts, each address
+ * once: add them all as attendees, in that order, so the event shows its host.
+ * On a co-host's copy the organizer is not in the list. Do not send an
+ * invitation to the address that owns the calendar you are writing to.
  *   DELETE /v1/connections/:ref/events/:externalEventId  → 204
  *   GET    /v1/connections/:ref/calendars                → { calendars: [{id,name,primaryEmail?,avatarUrl?,isPrimary?}] }
  *   GET    /v1/connections/:ref                          → { ok, detail }
@@ -59,6 +66,12 @@ function enc(ref: string): string {
   return encodeURIComponent(ref);
 }
 
+/** A 200 whose body is not the contract's shape. Not retried: the same backend
+ *  gives the same answer, and the read must fail closed now. */
+export class CalendarBodyError extends Error {
+  override readonly name = 'CalendarBodyError';
+}
+
 function asRecord(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
 }
@@ -77,16 +90,33 @@ export class GenericRestWire implements CalendarWire {
       },
     };
   }
+  /**
+   * FAILS CLOSED. An answer this cannot read throws, and the availability read
+   * withholds the month with `CALENDAR_UNAVAILABLE`. It used to return `[]` for
+   * a body with no `busy` list and drop entries it could not read, and an empty
+   * list means "free all month": a backend answering 200 with the wrong shape
+   * had every busy time offered to visitors. The private overlay's parser
+   * already refuses these; this is the same rule on the public wire. The error
+   * names the defect only, never the body.
+   */
   parseBusy(raw: unknown): BusyInterval[] {
-    const busy = asRecord(raw)['busy'];
-    if (!Array.isArray(busy)) return [];
-    return busy
-      .map((b) => asRecord(b))
-      .filter((b) => typeof b['startUtc'] === 'string' && typeof b['endUtc'] === 'string')
-      .map((b) => ({
-        startUtc: String(b['startUtc']),
-        endUtc: String(b['endUtc']),
-      }));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new CalendarBodyError('not an object');
+    const busy = (raw as Record<string, unknown>)['busy'];
+    if (!Array.isArray(busy)) throw new CalendarBodyError('no busy list');
+    return busy.map((entry) => {
+      const b = asRecord(entry);
+      const startUtc = b['startUtc'];
+      const endUtc = b['endUtc'];
+      if (typeof startUtc !== 'string' || typeof endUtc !== 'string')
+        throw new CalendarBodyError('busy entry without times');
+      const startMs = Date.parse(startUtc);
+      const endMs = Date.parse(endUtc);
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) throw new CalendarBodyError('busy entry with unreadable times');
+      // Reversed is malformed. Zero-length is not: it blocks no time, and
+      // refusing it would withhold a healthy calendar's month.
+      if (endMs < startMs) throw new CalendarBodyError('busy entry that ends before it starts');
+      return { startUtc, endUtc };
+    });
   }
 
   createEvent(input: CreateEventInput): WireRequest {

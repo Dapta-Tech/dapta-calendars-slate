@@ -143,7 +143,9 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(m.text).toContain('Booked <b>Intro Call</b>'); // custom body → plain-text part
     // HTML is the branded booking layout (not the raw template body): the event
     // title is rendered into the card, and any markup is escaped — never injected.
-    expect(m.html).toContain('Dapta Calendars');
+    // (The product is no longer named here: that footer line needs a signup
+    // destination, and this deployment has none.)
+    expect(m.html).toContain('Manage your booking');
     expect(m.html).toContain('Intro Call');
     expect(m.html).not.toContain('<b>Intro Call</b>');
     expect(m.to).toEqual(['sam@example.com']); // attendee side only

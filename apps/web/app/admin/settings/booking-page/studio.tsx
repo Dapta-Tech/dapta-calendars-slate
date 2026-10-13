@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import {
   ALL_BOOKING_THEMES,
   DEFAULT_ACCENT,
+  NEW_HOST_ACCENT,
+  NEW_HOST_THEME,
   THEME_PRESETS,
   accentCanvasContrast,
   accentLabelContrast,
@@ -25,10 +27,13 @@ import { cn } from '@/lib/cn';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
 import { bookingCanvasOf } from '@/lib/booking-canvas';
 import { resolveAvatarUrl } from '@/lib/avatar';
+import { describeLanding, landingTarget } from '@/lib/landing';
 import { readImageFile, type ImageErrorCode } from '@/lib/image-file';
 import { BookingPreview, PreviewFrame, ProfilePreview } from '@/components/booking-preview';
 import {
+  applyKitAction,
   checkHandleAction,
+  revertLookAction,
   saveStudioAction,
   toggleEventHiddenAction,
   type SaveResult,
@@ -109,6 +114,8 @@ export interface StudioInit {
   /** Where "included with your Dapta AI subscription" links (deploy-config
    *  destination, same switch as the growth badge; null = plain text). */
   subscriptionUrl: string | null;
+  /** Whether the public pages carry the Dapta branding now (the profile's `showBranding`). */
+  showBranding: boolean;
   displayName: string;
   handle: string;
   bio: string;
@@ -117,10 +124,14 @@ export interface StudioInit {
    *  value — the field holds the host's own choice and saving must not turn a
    *  synced URL into a stored one. */
   connectedAvatarUrl: string;
+  /** The host removed that photo from their page: the monogram shows instead. */
+  hideConnectedPhoto?: boolean;
   coverUrl: string;
   accent: string;
   axes: Axes;
   landingEnabled: boolean;
+  /** "Always show my profile", the opt-out from one event opening directly. */
+  showProfile?: boolean;
   defaultEventSlug: string | null;
   eventTypes: EventTypeLite[];
   /** The account's name, the quiet line above the host's on their profile. */
@@ -135,6 +146,12 @@ export interface StudioInit {
   locale: string;
   /** Screen-reader suffix for the link that opens the public page (A2, #112). */
   opensNewTab: string;
+  /** The look the host can take back once (the new look, or a brand kit). */
+  lookBackup?: { source: 'new-look' | 'kit'; appliedAt: number } | null;
+  /** The workspace logo this page carries (snapshotted by "Apply brand kit"). */
+  logoUrl?: string;
+  /** Whether the workspace has a brand kit to apply. */
+  hasBrandKit?: boolean;
 }
 
 type HandleState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -146,15 +163,22 @@ export function Studio(init: StudioInit) {
   const [vanity, setVanity] = useState(init.vanity.vanitySlug ?? '');
   const [bio, setBio] = useState(init.bio);
   const [avatarUrl, setAvatarUrl] = useState(init.avatarUrl);
+  const [hideConnectedPhoto, setHideConnectedPhoto] = useState(init.hideConnectedPhoto ?? false);
   // What the PUBLIC page will draw, through the same helper it uses. The input
   // above stays bound to `avatarUrl`; only the preview resolves the fallback,
   // so a preview showing a letter while the live page shows a face cannot
   // happen and an empty field still saves as empty.
-  const previewAvatarUrl = resolveAvatarUrl(avatarUrl, init.connectedAvatarUrl) ?? '';
+  const previewAvatarUrl =
+    resolveAvatarUrl(avatarUrl, hideConnectedPhoto ? null : init.connectedAvatarUrl) ?? '';
+  // The connected photo exists and the host's own field is empty: the one case
+  // where the studio offers to remove it from the page (or bring it back).
+  const connectedPhoto = resolveAvatarUrl(null, init.connectedAvatarUrl);
+  const offersConnectedPhoto = !avatarUrl.trim() && connectedPhoto !== null;
   const [coverUrl, setCoverUrl] = useState(init.coverUrl);
   const [accent, setAccent] = useState(init.accent);
   const [axes, setAxes] = useState<Axes>(init.axes);
   const [landingEnabled, setLandingEnabled] = useState(init.landingEnabled);
+  const [showProfile, setShowProfile] = useState(init.showProfile ?? false);
   const [defaultEventSlug, setDefaultEventSlug] = useState(init.defaultEventSlug ?? '');
   // Slug order: saved order first, then any events not yet in it.
   const [eventOrder, setEventOrder] = useState<string[]>(() => {
@@ -164,6 +188,10 @@ export function Studio(init: StudioInit) {
   });
   const [embedOpen, setEmbedOpen] = useState(false);
   const [eventPending, startEvent] = useTransition();
+  /** The host clicked "Use the new look" and has not saved yet. */
+  const [adoptingNewLook, setAdoptingNewLook] = useState(false);
+  const [reverting, startRevert] = useTransition();
+  const [applyingKit, startApplyKit] = useTransition();
 
   /**
    * The host's public landing path, derived once so the copyable link and the
@@ -203,13 +231,17 @@ export function Studio(init: StudioInit) {
   const [pending, start] = useTransition();
 
   const snapshot = useMemo(
-    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder }),
-    [displayName, handle, vanity, bio, avatarUrl, coverUrl, accent, axes, landingEnabled, defaultEventSlug, eventOrder],
+    () => JSON.stringify({ displayName, handle, vanity, bio, avatarUrl, hideConnectedPhoto, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder }),
+    [displayName, handle, vanity, bio, avatarUrl, hideConnectedPhoto, coverUrl, accent, axes, landingEnabled, showProfile, defaultEventSlug, eventOrder],
   );
   const initialSnapshot = useRef(snapshot);
   const isDirty = snapshot !== initialSnapshot.current;
 
   const activeTheme = useMemo(() => matchTheme(axes), [axes]);
+  const linkTarget = landingTarget({
+    style: { landingEnabled, defaultEventSlug: defaultEventSlug || null, ...(showProfile ? { showProfile: true } : {}) },
+    eventSlugs: init.eventTypes.map((e) => e.slug),
+  });
   // The canvas the INVITEE will see, read through the same resolver the public
   // shell uses. Never the admin's own `data-theme`: a host previewing their page
   // is looking at a stranger's screen, not their own (ADR 0004).
@@ -253,6 +285,39 @@ export function Studio(init: StudioInit) {
   const applyTheme = (t: keyof typeof THEME_PRESETS) =>
     setAxes((a) => ({ ...THEME_PRESETS[t], theme: a.theme }));
   const setAxis = (k: keyof Axes, v: string) => setAxes((a) => ({ ...a, [k]: v as never }));
+  // The look a host is born with since PR #193: ink on paper, the minimal set.
+  // A host who already has it has nothing to adopt.
+  const isNewLook =
+    accent.toLowerCase() === NEW_HOST_ACCENT && activeTheme === 'minimal' && axes.theme === NEW_HOST_THEME;
+  const adoptNewLook = () => {
+    setAccent(NEW_HOST_ACCENT);
+    setAxes({ ...THEME_PRESETS.minimal, theme: NEW_HOST_THEME });
+    setAdoptingNewLook(true);
+  };
+  // Applying writes the kit onto what is STORED, so unsaved edits here would
+  // either be lost or silently overwrite the kit; the control asks for a save
+  // first instead.
+  const applyKit = () =>
+    startApplyKit(async () => {
+      const r = await applyKitAction();
+      if (r.ok) {
+        toast.success(m.kitAppliedToast);
+        router.refresh();
+      } else {
+        toast.error(m.applyKitFailed);
+      }
+    });
+  const revertLook = () =>
+    startRevert(async () => {
+      const r = await revertLookAction();
+      if (r.ok) {
+        toast.success(m.lookReverted);
+        // The page remounts the studio from what is stored now (see its key).
+        router.refresh();
+      } else {
+        toast.error(m.revertFailed);
+      }
+    });
   const handleBlocksSave = handleState === 'taken' || handleState === 'invalid' || handleState === 'checking';
 
   const reset = () => {
@@ -260,11 +325,14 @@ export function Studio(init: StudioInit) {
     setHandle(init.handle);
     setBio(init.bio);
     setAvatarUrl(init.avatarUrl);
+    setHideConnectedPhoto(init.hideConnectedPhoto ?? false);
     setCoverUrl(init.coverUrl);
     setAccent(init.accent);
     setAxes(init.axes);
     setLandingEnabled(init.landingEnabled);
+    setShowProfile(init.showProfile ?? false);
     setDefaultEventSlug(init.defaultEventSlug ?? '');
+    setAdoptingNewLook(false);
     setEventOrder(() => {
       const all = init.manageableEvents.map((e) => e.slug);
       const ordered = init.eventOrder.filter((s) => all.includes(s));
@@ -291,7 +359,25 @@ export function Studio(init: StudioInit) {
         // host moves their page to the other ground. That trap is what the
         // amendment removed, and writing the pick is what keeps it removed.
         brandColor: accent,
-        style: { ...axes, bio: bio.trim() || null, landingEnabled, defaultEventSlug: defaultEventSlug || null, eventOrder },
+        style: {
+          ...axes,
+          bio: bio.trim() || null,
+          landingEnabled,
+          defaultEventSlug: defaultEventSlug || null,
+          eventOrder,
+          // The kit's logo rides through a save untouched; the studio does not
+          // edit it (the brand kit does), and dropping it here would remove it.
+          ...(init.logoUrl ? { logoUrl: init.logoUrl } : {}),
+          // Written only when ticked: absent is the automatic behaviour.
+          ...(showProfile ? { showProfile: true } : {}),
+          // Same rule: written only when the host removed the connected photo.
+          ...(hideConnectedPhoto ? { hideConnectedPhoto: true } : {}),
+        },
+        // Applying the new look keeps what is stored now as a one-step backup,
+        // so it can be reverted. Only when the look on screen still IS the new
+        // look: a host who clicked it and then reshaped the axes is saving
+        // their own look, which is an ordinary save.
+        ...(adoptingNewLook && isNewLook ? { backupAs: 'new-look' as const } : {}),
       };
 
       let r: SaveResult;
@@ -313,6 +399,8 @@ export function Studio(init: StudioInit) {
         setSaved('ok');
         setSaveMsg(null);
         initialSnapshot.current = snapshot;
+        if (payload.backupAs) router.refresh();
+        setAdoptingNewLook(false);
       } else {
         setSaved('err');
         setSaveMsg(r.message ?? m.saveFailed);
@@ -524,8 +612,30 @@ export function Studio(init: StudioInit) {
                   and a host who never opens this field would otherwise have no
                   idea where the face on their page came from — or that leaving
                   this empty is what keeps it. */}
-              {!avatarUrl.trim() && previewAvatarUrl ? (
-                <p className="text-xs text-muted-foreground">{m.photoFromConnectedAccount}</p>
+              {offersConnectedPhoto ? (
+                <div className="flex flex-wrap items-center gap-inline">
+                  {hideConnectedPhoto ? null : (
+                    <img
+                      src={connectedPhoto ?? undefined}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                    />
+                  )}
+                  <p role="status" className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    {hideConnectedPhoto ? m.connectedPhotoHidden : m.photoFromConnectedAccount}
+                  </p>
+                  {/* Never touches the field above: removing the synced photo is
+                      a switch on the page, and an upload still wins over both. */}
+                  <Button
+                    variant="ghost"
+                    size="lg"
+                    className="text-xs"
+                    onClick={() => setHideConnectedPhoto((h) => !h)}
+                  >
+                    {hideConnectedPhoto ? m.useConnectedPhoto : m.removeConnectedPhoto}
+                  </Button>
+                </div>
               ) : null}
             </Field>
             <Field label={m.coverImage}>
@@ -535,6 +645,53 @@ export function Studio(init: StudioInit) {
 
           {/* APPEARANCE */}
           <Section title={m.appearance}>
+            {/* The look new pages start with, one click away for a host who has
+                their own, previewed before it is saved and revertible once. */}
+            <div className="mb-field flex flex-col gap-tight border-b border-border pb-field">
+              {init.lookBackup ? (
+                <div className="flex flex-wrap items-center justify-between gap-inline">
+                  <span className="text-sm" suppressHydrationWarning>
+                    {t(init.lookBackup.source === 'kit' ? m.kitApplied : m.newLookApplied, {
+                      date: new Intl.DateTimeFormat(init.locale, { dateStyle: 'medium' }).format(
+                        new Date(init.lookBackup.appliedAt),
+                      ),
+                    })}
+                  </span>
+                  <Button variant="outline" size="lg" onClick={revertLook} disabled={reverting || pending}>
+                    {reverting ? m.revertingLook : m.revertLook}
+                  </Button>
+                </div>
+              ) : null}
+              {init.hasBrandKit ? (
+                <div className="flex flex-col gap-tight">
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={applyKit}
+                    disabled={applyingKit || pending || isDirty}
+                    className="self-start"
+                  >
+                    {applyingKit ? m.applyingKit : m.applyKit}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {isDirty ? m.applyKitSaveFirst : m.applyKitHint}
+                  </span>
+                </div>
+              ) : null}
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={adoptNewLook}
+                disabled={isNewLook}
+                aria-pressed={isNewLook}
+                className="self-start"
+              >
+                {m.newLook}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {adoptingNewLook && isNewLook && isDirty ? m.newLookPreviewing : m.newLookHint}
+              </span>
+            </div>
             <div className="mb-field flex flex-wrap gap-inline">
               {ALL_BOOKING_THEMES.map((themeName) => (
                 <Button
@@ -673,6 +830,19 @@ export function Studio(init: StudioInit) {
                 />
                 {m.showLandingPage}
               </label>
+              {/* What the link does, from the same decision the public route
+                  makes (lib/landing.ts), so the host is told what visitors get. */}
+              {landingEnabled && init.eventTypes.length === 1 ? (
+                <label className="flex min-h-control cursor-pointer items-center gap-inline text-sm">
+                  <Checkbox checked={showProfile} onChange={(e) => setShowProfile(e.target.checked)} />
+                  {m.alwaysShowProfile}
+                </label>
+              ) : null}
+              {landingEnabled ? (
+                <p data-testid="studio-link-opens" className="text-xs text-muted-foreground">
+                  {describeLanding(linkTarget, init.eventTypes, m)}
+                </p>
+              ) : null}
               {!landingEnabled ? (
                 // A <div>, not a <label>: the picker's trigger is a <button>.
                 <div className="flex flex-col gap-tight text-sm">
@@ -743,12 +913,15 @@ export function Studio(init: StudioInit) {
           <PreviewFrame accent={accent} axes={axes} device={device} wide={surface === 'booking'}>
               {surface === 'profile' ? (
                 <ProfilePreview
+                  accountCode={init.accountCode || null}
+                  showBranding={init.showBranding}
                   locale={init.locale}
                   displayName={displayName}
                   accountName={init.accountName ?? null}
                   bio={bio}
                   avatarUrl={previewAvatarUrl}
                   coverUrl={coverUrl}
+                  logoUrl={init.logoUrl || null}
                   // In the order the host set in the Meetings panel, unlisted last,
                   // exactly as the public page sorts them.
                   events={[...init.eventTypes].sort((a, b) => {
@@ -766,6 +939,7 @@ export function Studio(init: StudioInit) {
                   eventTitle={m.introCall}
                   locale={init.locale}
                   device={device}
+                  logoUrl={init.logoUrl || null}
                 />
               )}
           </PreviewFrame>

@@ -2,11 +2,14 @@
  * Server-side API client. The web app talks to the Slate API over HTTP (never
  * imports @slate/db or the engine directly) so the deployment stays decoupled.
  */
+import type { BrandKit } from '@slate/types';
 import { cache } from 'react';
 import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
+import { visitorHeaders } from '@/lib/visitor';
 import type {
   AvailabilityResponse,
   BookingView,
+  EventLocationDto,
   OneOffLinkTargetView,
   PublicProfile,
 } from '@slate/types';
@@ -18,13 +21,25 @@ import type {
 const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /**
+ * Every call in this file is made on behalf of a visitor (profile, availability,
+ * holds, bookings, manage), so each one carries the visitor's address for the
+ * API's rate limiter (see `visitorHeaders`). Admin calls live in admin-api.ts.
+ */
+async function visitorFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), ...(await visitorHeaders()) },
+  });
+}
+
+/**
  * `oneOffToken` is optional and changes nothing when absent (#110). Present, it
  * rides as a header so the API can answer for the ONE hidden event that token
  * opens — see `ONE_OFF_HEADER` at the foot of this file for why a header and
  * not a query parameter.
  */
 async function getJson<T>(path: string, oneOffToken?: string): Promise<T | null> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await visitorFetch(`${API_URL}${path}`, {
     cache: 'no-store',
     headers: oneOffHeaders(oneOffToken),
   });
@@ -44,7 +59,19 @@ export const getProfile = cache(
 export interface TeamProfile {
   account: { code: string; name: string };
   team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
-  eventTypes: Array<{ slug: string; title: string; description: string | null; lengthMinutes: number }>;
+  eventTypes: Array<{
+    slug: string;
+    title: string;
+    description: string | null;
+    lengthMinutes: number;
+    schedulingType?: string | null;
+    /** Optional on the wire: an older API does not send it. */
+    location?: EventLocationDto | null;
+  }>;
+  /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
+  brand?: BrandKit | null;
+  /** Whether the team's pages carry the Dapta branding (absent: they do). */
+  showBranding?: boolean;
 }
 
 // cache(): generateMetadata and the page share one team-profile fetch per request.
@@ -107,7 +134,7 @@ export async function postTeamBooking(
   body: unknown,
   oneOffToken?: string,
 ): Promise<BookResult> {
-  const res = await fetch(
+  const res = await visitorFetch(
     `${API_URL}/v1/public/teams/${encodeURIComponent(accountCode)}/${encodeURIComponent(teamSlug)}/bookings`,
     {
       method: 'POST',
@@ -145,7 +172,7 @@ export async function getRescheduleAvailability(params: {
   // supported for links already in the wild (emails, calendar invites); this is
   // a new server-to-server call, so it can keep the token out of access logs
   // and Referer from the start.
-  const res = await fetch(
+  const res = await visitorFetch(
     `${API_URL}/v1/bookings/${encodeURIComponent(params.uid)}/availability?${qs.toString()}`,
     { headers: { 'x-manage-token': params.token }, cache: 'no-store' },
   );
@@ -203,7 +230,7 @@ export async function postReservation(
   },
   oneOffToken?: string,
 ): Promise<ReserveResult> {
-  const res = await fetch(`${API_URL}/v1/reservations`, {
+  const res = await visitorFetch(`${API_URL}/v1/reservations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...oneOffHeaders(oneOffToken) },
     body: JSON.stringify(body),
@@ -231,7 +258,7 @@ export async function postReservation(
  */
 export async function postReservationRelease(reservationUid: string): Promise<void> {
   try {
-    await fetch(`${API_URL}/v1/reservations/release`, {
+    await visitorFetch(`${API_URL}/v1/reservations/release`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ reservationUid }),
@@ -270,7 +297,7 @@ export type ManageViewResult =
  * it still describes a real booking; only the REQUEST outcomes branch here.
  */
 export async function getManageView(uid: string, token: string): Promise<ManageViewResult> {
-  const res = await fetch(
+  const res = await visitorFetch(
     `${API_URL}/v1/bookings/${encodeURIComponent(uid)}?token=${encodeURIComponent(token)}`,
     { cache: 'no-store' },
   );
@@ -289,7 +316,7 @@ export async function postManage(
   action: 'cancel' | 'reschedule',
   body: Record<string, unknown>,
 ): Promise<{ ok: boolean; message?: string; manageUrl?: string }> {
-  const res = await fetch(
+  const res = await visitorFetch(
     `${API_URL}/v1/bookings/${encodeURIComponent(uid)}/${action}?token=${encodeURIComponent(token)}`,
     {
       method: 'POST',
@@ -310,7 +337,7 @@ export async function postManage(
 }
 
 export async function postBooking(body: unknown, oneOffToken?: string): Promise<BookResult> {
-  const res = await fetch(`${API_URL}/v1/bookings`, {
+  const res = await visitorFetch(`${API_URL}/v1/bookings`, {
     method: 'POST',
     // The token is a HEADER, never part of `body` — it is a credential, and the
     // body is re-validated against `createBookingSchema`, which would drop it.
@@ -365,7 +392,7 @@ export type OneOffLinkResult =
   | { ok: false; reason: 'gone' | 'not-found' };
 
 export async function getOneOffLink(token: string): Promise<OneOffLinkResult> {
-  const res = await fetch(`${API_URL}/v1/public/one-off/${encodeURIComponent(token)}`, {
+  const res = await visitorFetch(`${API_URL}/v1/public/one-off/${encodeURIComponent(token)}`, {
     cache: 'no-store',
   });
   if (res.status === 410) return { ok: false, reason: 'gone' };

@@ -395,6 +395,11 @@ body {
 .branded-surface .bp-btn-outline:hover {
   border-color: var(--accent);
 }
+/* Busy (aria-disabled keeps it focusable, so :disabled never applies). */
+.branded-surface .bp-btn-outline[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: progress;
+}
 /* template: banded shows a cover band; split widens the canvas */
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;
@@ -505,34 +510,58 @@ body {
   transform: scale(0.97);
 }
 /* Nothing to book — visibly a date, not a control. `disabled` already takes it
-   out of the tab order; this takes it out of the eye's. */
+   out of the tab order; this takes it out of the eye's. Dimmed by COLOUR, not
+   opacity, so today's dot on an empty day keeps its full strength. */
 .branded-surface .bp-cal-day[data-state='empty'] {
-  color: var(--muted-foreground);
-  opacity: 0.45;
+  color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
   cursor: default;
 }
 .branded-surface .bp-cal-day[data-state='outside'] {
-  color: var(--muted-foreground);
-  opacity: 0.25;
+  color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
   cursor: default;
 }
-/* Today: a dot under the number, so "today" and "selected" can both be true at
-   once and still be told apart. */
+/* Not yet known: the month's times are still being read. The day stands where
+   it will settle, the same cell at the same size, with a soft fill instead of a
+   verdict, so nothing moves when it becomes bookable or not (R22: a skeleton,
+   never a spinner). The breathing stops under reduced motion (the global rule
+   above). */
+.branded-surface .bp-cal-day[data-state='pending'] {
+  color: var(--muted-foreground);
+  background: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+  animation: bp-quiet 1.6s var(--ease-standard, ease) infinite alternate;
+}
+@keyframes bp-quiet {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+/* Today: the number in full ink and a dot in the host's accent under it, so it
+   reads as today on either canvas, bookable or not, and "today" and "selected"
+   can both be true at once and still be told apart. */
+.branded-surface .bp-cal-day[data-today='true'] {
+  color: var(--foreground);
+  font-weight: 700;
+}
 .branded-surface .bp-cal-day[data-today='true']::after {
   content: '';
   position: absolute;
   bottom: 0.3rem;
   left: 50%;
   transform: translateX(-50%);
-  width: 0.25rem;
-  height: 0.25rem;
+  width: 0.3125rem;
+  height: 0.3125rem;
   border-radius: 9999px;
-  background: currentColor;
+  background: var(--primary-ink, var(--accent));
 }
 /* Selected day — the same two treatments the slotSelect axis gives a chip. */
 .branded-surface .bp-cal-day[data-selected='true'],
 .branded-surface.sel-soft .bp-cal-day[data-selected='true'] {
-  background: var(--accent-soft, var(--muted));
+  background: var(--accent-wash, var(--muted));
   border-color: var(--accent, var(--primary));
   box-shadow: inset 0 0 0 1px var(--accent, var(--primary));
   color: var(--foreground);
@@ -544,6 +573,11 @@ body {
   color: var(--accent-contrast);
   box-shadow: none;
   font-weight: 700;
+}
+/* On a solid selection the dot takes the label colour, or an accent dot would
+   vanish into the accent fill. */
+.branded-surface.sel-solid .bp-cal-day[data-selected='true']::after {
+  background: var(--accent-contrast);
 }
 /* Month arrows + the 12h/24h toggle: same rim and target as everything else. */
 .branded-surface .bp-icon-btn {
@@ -690,9 +724,6 @@ body {
     font-size: 1.25rem;
     line-height: 1.625rem;
   }
-  .branded-surface .bp-description-text {
-    -webkit-line-clamp: 3;
-  }
 }
 @keyframes bp-step-forward {
   from {
@@ -720,11 +751,13 @@ body {
   .branded-surface .bp-back.bp-back-phone {
     display: none;
   }
+  /* No floor height: the frame is as tall as what it holds. The month always
+     draws six weeks, so moving between months does not move the page, and a
+     day with two times leaves no stranded column under them (R30 item 9). */
   .branded-surface .bp-frame {
     display: grid;
     grid-template-columns: var(--bp-event-col) minmax(0, 1fr);
     gap: 0;
-    min-height: var(--bp-frame-min-h);
     padding: 0;
   }
   .branded-surface .bp-pane-event {
@@ -751,6 +784,33 @@ body {
   }
 }
 
+/* The workspace logo (brand kit). Sized as a wordmark: a fixed height, the
+   width it needs up to a ceiling, never stretched. In the event panel it heads
+   the panel; on the profile it sits on the cover's top edge. */
+.branded-surface .bp-logo {
+  display: block;
+  width: auto;
+  height: var(--bp-logo-h);
+  max-width: var(--bp-logo-max-w);
+  object-fit: contain;
+  object-position: left center;
+}
+.branded-surface .bp-event > .bp-logo {
+  order: -1;
+}
+.branded-surface .bp-cover-wrap {
+  position: relative;
+}
+.branded-surface .bp-cover-logo {
+  position: absolute;
+  top: var(--sp-card);
+  left: var(--sp-card);
+  padding: var(--sp-tight) var(--sp-inline);
+  box-sizing: content-box;
+  border-radius: var(--bp-radius-sm);
+  background: var(--background);
+}
+
 /* The event panel. */
 .branded-surface .bp-event {
   display: flex;
@@ -769,14 +829,21 @@ body {
   border-radius: 9999px;
   object-fit: cover;
 }
+/* The monogram is a mark, not a placeholder: the accent as ink on a tint of
+   itself, its shape from the `corners` axis (`--bp-avatar-radius`). The ink is
+   the accent pulled a third of the way to the page's own text colour, so a pale
+   accent still reads on its tint on either canvas while keeping its hue. */
 .branded-surface .bp-avatar-monogram {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--bp-radius);
-  background: var(--accent);
-  color: var(--accent-contrast);
+  border-radius: var(--bp-avatar-radius, 50%);
+  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--accent) 66%, var(--foreground));
+  font-size: 0.9375rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 .branded-surface .bp-host-name {
   min-width: 0;
@@ -822,7 +889,7 @@ body {
 .branded-surface .bp-description-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 4;
   overflow: hidden;
   white-space: pre-line;
   font-size: 0.875rem;
@@ -933,29 +1000,235 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* A time's place, held while the month is read: a slot chip's box with nothing
+   in it, so the column already stands at the height the times will fill. */
+.branded-surface .bp-slot-placeholder {
+  border-color: transparent;
+  background: var(--muted);
+  animation: bp-quiet 1.6s var(--ease-standard, ease) infinite alternate;
+}
 
 /* The quiet controls beside the times: the zone as a line of text with a
-   chevron, and the 12h/24h pair. */
+   chevron (`ZonePicker`), and the 12h/24h pair. */
 .branded-surface .bp-tz {
   min-width: 0;
   flex: 1 1 auto;
 }
-.branded-surface .bp-tz-trigger {
-  width: auto;
-  max-width: 100%;
-  justify-content: flex-start;
-  padding-inline: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted-foreground);
+.branded-surface .bp-zone {
+  position: relative;
 }
-.branded-surface .bp-tz-trigger:hover {
-  border-color: transparent;
+.branded-surface .bp-zone-trigger {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  transition: color 120ms var(--bp-ease);
+}
+.branded-surface .bp-zone-trigger:hover,
+.branded-surface .bp-zone-trigger[aria-expanded='true'] {
   color: var(--foreground);
 }
-.branded-surface .bp-tz-panel {
-  right: auto;
-  width: min(20rem, calc(100cqi - 2rem));
+.branded-surface .bp-zone-chevron,
+.branded-surface .bp-zone-mark svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.branded-surface .bp-zone-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branded-surface .bp-zone-offset {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+.branded-surface .bp-zone-chevron {
+  width: 0.875rem;
+  height: 0.875rem;
+  transition: transform 120ms var(--bp-ease);
+}
+.branded-surface .bp-zone-chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+/* The list: a popover under the trigger from the two-pane width up, its right
+   edge on the times column's so it never leaves the frame. */
+.branded-surface .bp-zone-panel {
+  position: absolute;
+  top: calc(100% + var(--sp-tight));
+  right: 0;
+  z-index: 50;
+  display: flex;
+  width: min(var(--bp-zone-w), calc(100cqi - 2 * var(--sp-page-x)));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--bp-radius-sm);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--bp-popover-shadow);
+}
+.branded-surface .bp-zone-search {
+  padding: var(--sp-inline);
+  border-bottom: 1px solid var(--border);
+}
+.branded-surface .bp-zone-search .bp-input {
+  padding-block: var(--sp-inline);
+}
+/* The field has focus the moment the list opens, so a second ring around it
+   would be the loudest thing in the panel; its edge turning the accent is the
+   focus indicator here, the same edge every field on the page draws. */
+.branded-surface .bp-zone-search .bp-input:focus-visible {
+  outline: none;
+}
+/* Scrolls inside itself, with the themed scrollbar only (R30 item 1): a thin
+   thumb in the page's own muted ink on a transparent track, both engines. */
+.branded-surface .bp-zone-list {
+  max-height: var(--bp-zone-list-h);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block-end: var(--sp-tight);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) transparent;
+}
+.branded-surface .bp-zone-list::-webkit-scrollbar {
+  width: 8px;
+}
+.branded-surface .bp-zone-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.branded-surface .bp-zone-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  background-clip: padding-box;
+}
+/* Group labels stick while their rows scroll (R30 item 3). */
+.branded-surface .bp-zone-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--sp-inline) var(--sp-field) var(--sp-tight);
+  background: var(--card);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-zone-row {
+  display: flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-inline);
+  margin-inline: var(--sp-tight);
+  padding-inline: var(--sp-inline) var(--sp-field);
+  border-radius: var(--bp-radius-sm);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+/* The keyboard cursor and the pointer: a raised fill, never the accent. */
+.branded-surface .bp-zone-row[data-active='true'] {
+  background: var(--muted);
+}
+/* The selected zone is marked by ink: a check and weight, not a slab. */
+.branded-surface .bp-zone-row[aria-selected='true'] {
+  font-weight: 600;
+}
+.branded-surface .bp-zone-mark {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--primary-ink, var(--foreground));
+}
+.branded-surface .bp-zone-mark svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 2.25;
+}
+.branded-surface .bp-zone-row-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branded-surface .bp-zone-row-offset {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-zone-empty {
+  padding: var(--sp-field);
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+.branded-surface .bp-zone-backdrop {
+  display: none;
+}
+/* On a phone the same control rises as a sheet over a dimmed page: the list
+   gets the height a thumb needs, and a tap outside closes it. */
+@container bp (max-width: 47.999rem) {
+  .branded-surface .bp-zone-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    display: block;
+    background: color-mix(in srgb, var(--foreground) 32%, transparent);
+  }
+  .branded-surface .bp-zone-panel {
+    position: fixed;
+    inset: auto 0 0 0;
+    top: auto;
+    width: auto;
+    max-height: var(--bp-sheet-max-h);
+    border-width: 1px 0 0;
+    border-radius: var(--bp-radius) var(--bp-radius) 0 0;
+    box-shadow: none;
+    animation: bp-sheet-up var(--bp-step-ms) var(--bp-ease) backwards;
+  }
+  .branded-surface .bp-zone-search {
+    padding: var(--sp-field) var(--sp-field) var(--sp-inline);
+  }
+  .branded-surface .bp-zone-list {
+    max-height: none;
+    flex: 1 1 auto;
+    padding-block-end: max(var(--sp-field), env(safe-area-inset-bottom));
+  }
+}
+@keyframes bp-sheet-up {
+  from {
+    transform: translateY(1.5rem);
+    opacity: 0;
+  }
+}
+/* The quiet way to the next day with times, under a short list. */
+.branded-surface .bp-next-day {
+  display: inline-flex;
+  min-height: var(--sp-control-h);
+  align-items: center;
+  gap: var(--sp-tight);
+  align-self: flex-start;
+  border-radius: var(--bp-btn-radius);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: color 120ms var(--bp-ease);
+}
+.branded-surface .bp-next-day:hover {
+  color: var(--foreground);
 }
 .branded-surface .bp-segmented {
   display: inline-flex;
@@ -967,6 +1240,8 @@ body {
 .branded-surface .bp-segment {
   min-height: var(--sp-control-h);
   padding-inline: var(--sp-field);
+  /* "12 h" is two words in Spanish and must stay one line (R30 item 4). */
+  white-space: nowrap;
   border-radius: var(--bp-btn-radius);
   font-weight: 500;
   color: var(--muted-foreground);
@@ -1149,8 +1424,36 @@ body {
   flex-direction: column;
   gap: var(--sp-inline);
 }
-.branded-surface .bp-confirmation-cta {
+/* What this page runs on, and a way to get one (`GrowthCta`): centred under
+   the content, one short line then a button sized to its words on the 44px
+   step. The same block on the confirmation, the profile and the team landing;
+   colour and radius come from `bp-btn` (or `bp-btn-outline` on the
+   confirmation, whose primary is "Add to calendar") and the axes. */
+.branded-surface .bp-growth {
+  display: flex;
+  max-width: 32rem;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-field);
+  margin-inline: auto;
+  margin-top: var(--sp-section);
   text-align: center;
+}
+.branded-surface .bp-growth-line {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.branded-surface .bp-growth-btn {
+  min-height: var(--sp-control-h);
+  padding-inline: var(--sp-group);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 120ms var(--bp-ease);
+}
+/* Instant feedback (R22), the same hover the step CTAs use. */
+.branded-surface .bp-btn.bp-growth-btn:hover {
+  background: var(--accent-hover);
 }
 @container bp (min-width: 48rem) {
   .branded-surface .bp-confirmation-actions {
@@ -1187,10 +1490,14 @@ body {
   width: 100%;
   height: 5rem;
   border-radius: var(--bp-radius);
-  background: var(--accent-wash);
+  background: var(--muted);
 }
 .branded-surface .bp-cover-image {
   object-fit: cover;
+}
+/* The kit's logo with no cover under it: no band, aligned with the head. */
+.branded-surface .bp-profile-logo {
+  margin-inline: var(--sp-card);
 }
 .branded-surface .bp-profile-head {
   display: flex;
@@ -1202,8 +1509,13 @@ body {
 /* The avatar sits on the cover's lower edge, ringed in the page's own ground so
    it reads as in front of the cover rather than cut out of it. */
 .branded-surface .bp-profile-avatar {
-  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
   margin-bottom: var(--sp-inline);
+}
+/* Only a real cover image is overlapped: with no cover there is no band (a
+   host's verdict: a tinted strip with nothing in it reads as a stray bar). */
+.branded-surface .bp-cover + .bp-profile-head .bp-profile-avatar,
+.branded-surface .bp-cover-wrap + .bp-profile-head .bp-profile-avatar {
+  margin-top: calc(-1 * var(--sp-section) - var(--sp-tight));
 }
 .branded-surface .bp-profile-avatar .bp-avatar {
   width: 4.5rem;
@@ -1351,16 +1663,6 @@ body {
    out-specify the page-wide ones without `!important` and without touching
    them. Only reachable under `?embed=1`; a page opened directly never carries
    the class. */
-
-/* No floor inside a frame. The two-pane frame has a minimum height on a real
-   page (a five-week month and a six-week one do not move the page, and a big
-   screen is framed rather than stranded); inside an auto-resizing iframe that
-   floor is height the host page pays for, and it would make the height
-   reporter post the floor instead of the content. The frame grows with what
-   it holds. */
-.branded-surface.dc-embed .bp-frame {
-  min-height: 0;
-}
 
 /* The badge keeps its place in the embed (#67 — a host's own site is the
    growth loop's best placement), but not 3rem of dead space under it: inside a

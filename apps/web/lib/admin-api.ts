@@ -11,6 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
+import type { BrandKit } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -210,6 +211,9 @@ export const adminApi = {
   onboardingEarly: () => req<{ enqueued: boolean }>('POST', '/v1/me/onboarding/early'),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
+  // Dapta branding on the public pages (included with the Dapta AI subscription).
+  brandingStatus: () =>
+    req<{ hideBranding: boolean; canHide: boolean; showing: boolean }>('GET', '/v1/account/branding'),
   // Vanity account slug (premium — included with the Dapta AI subscription).
   vanityStatus: () =>
     req<{ vanitySlug: string | null; shortCode: string; canClaim: boolean }>(
@@ -338,6 +342,16 @@ export const adminApi = {
   // Branding
   profile: (code: string, handle: string) => req<Profile>('GET', `/v1/profiles/${code}/${handle}`),
   updateBranding: (b: unknown) => req('PATCH', '/v1/booking-page', b),
+  /** Whether an applied look can be reverted, what applied it and when. */
+  bookingPageState: () =>
+    req<{ backup: { source: 'new-look' | 'kit'; appliedAt: number } | null }>('GET', '/v1/booking-page'),
+  revertBranding: () => req<{ ok: boolean }>('POST', '/v1/booking-page/revert'),
+  /** The workspace brand kit (every member reads it; admins write it). */
+  getBrandKit: () => req<{ config: BrandKit | null; updatedAt: number | null }>('GET', '/v1/brand-kit'),
+  putBrandKit: (kit: BrandKit) =>
+    req<{ config: BrandKit; updatedAt: number }>('PUT', '/v1/brand-kit', kit),
+  /** Snapshot the kit into the caller's own booking page. */
+  applyBrandKit: () => req<{ ok: boolean }>('POST', '/v1/booking-page/apply-kit'),
 };
 
 export interface EventType {
@@ -412,6 +426,8 @@ export interface Connection {
   lastCheckAt: number | null;
   lastCheckOk: boolean | null;
   lastCheckDetail: string | null;
+  /** The connected account's photo; absent on an older API. */
+  avatarUrl?: string | null;
   /**
    * Display name for the conferencing this deployment mints, injected at
    * runtime (ADR 0008). Null on a bare fork ⇒ the editor shows generic wording.
@@ -496,4 +512,6 @@ export interface Profile {
     style: Record<string, unknown> | null;
   };
   eventTypes: Array<{ slug: string; title: string; lengthMinutes: number }>;
+  /** Whether the public pages carry the Dapta branding now (absent: they do). */
+  showBranding?: boolean;
 }

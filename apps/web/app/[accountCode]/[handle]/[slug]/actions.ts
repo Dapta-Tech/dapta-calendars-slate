@@ -74,6 +74,13 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
   // and the API re-validates it against the event being booked.
   const oneOffTokenField = formData.get('oneOffToken');
   const oneOffToken = oneOffTokenField ? String(oneOffTokenField) : undefined;
+  // The hold the page placed when the visitor picked this time. The booking
+  // write consumes it; dropped here (as it was), the hold outlived the booking
+  // for its whole ten minutes: a time the visitor then moved off or cancelled
+  // stayed hidden from everyone, and every booking counted against the host's
+  // cap of ten live holds, so a busy page refused new visitors' holds.
+  const reservationField = formData.get('reservationUid');
+  const reservationUid = reservationField ? String(reservationField) : undefined;
   const attendee = {
     name: String(formData.get('name') ?? ''),
     email: String(formData.get('email') ?? ''),
@@ -97,6 +104,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     startUtc,
     attendee,
     answers: answersObj,
+    reservationUid,
   });
   if (!parsed.success) {
     return { ok: false, status: 400, error: 'BAD_REQUEST', message: parsed.error.issues[0]?.message };

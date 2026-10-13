@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { getPublicProfile } from './repository';
-import { createConnection, setConnectionAvatar } from './parity';
+import { createConnection, listConnections, setConnectionAvatar, updateBranding } from './parity';
 
 /**
  * The avatar fallback against a REAL Postgres. Its SQLite twin
@@ -72,6 +72,18 @@ describePg('connected-account avatar (real Postgres)', () => {
 
     // Once the destination reports one, it wins — the ordering is the point.
     await setConnectionAvatar(db, accountId, memberId, 'pg-conn-B', 'https://cdn.example.test/dest.jpg');
+    profile = await getPublicProfile(db, accountCode, handle);
+    expect(profile!.member.connectedAvatarUrl).toBe('https://cdn.example.test/dest.jpg');
+  });
+
+  it('withholds the photo once the host removed it, and still lists it for the host', async () => {
+    await updateBranding(db, memberId, { style: { hideConnectedPhoto: true } });
+    let profile = await getPublicProfile(db, accountCode, handle);
+    expect(profile!.member.connectedAvatarUrl).toBeNull();
+    const mine = await listConnections(db, memberId);
+    expect(mine.find((c) => c.isDestination)?.avatarUrl).toBe('https://cdn.example.test/dest.jpg');
+    // "Use it again": the key goes, the photo comes back.
+    await updateBranding(db, memberId, { style: {} });
     profile = await getPublicProfile(db, accountCode, handle);
     expect(profile!.member.connectedAvatarUrl).toBe('https://cdn.example.test/dest.jpg');
   });

@@ -1,6 +1,6 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
-import { renderBrandedHtml, type Audience, type EmailKind } from './email-layout';
+import { renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
 import {
   renderTemplate,
   templateVars,
@@ -8,6 +8,7 @@ import {
   type RenderedEmail,
   type TemplateLocale,
   formatWhen,
+  inviteeManageUrl,
 } from './templates';
 
 /** Everything a booking notification needs to render, provider-agnostic. */
@@ -59,6 +60,13 @@ export interface BookingNotification {
   templateLocale?: string | null;
   /** True while the booking awaits host confirmation (drives {{pending_note}}). */
   pending?: boolean;
+  /**
+   * Whether this account's mail carries the Dapta branding (the invitee's
+   * "Made with" line), as the API decided it with `showDaptaBranding`. Filled at
+   * DELIVERY time like `meetingUrl`, so a row queued weeks ahead follows a lapse.
+   * Only `false` hides the line; absent (old rows, forks) keeps it.
+   */
+  showBranding?: boolean;
   /** Public book-again URL for this event type (drives {{booking_link}}). */
   bookingLink?: string | null;
   /**
@@ -83,7 +91,14 @@ export interface BookingNotification {
  * per-side notification settings can silence one without the other.
  */
 export class BookingNotifier {
-  constructor(private readonly email: EmailProvider) {}
+  /**
+   * `growth.signupUrl`: the deployment's signup destination for the invitee's
+   * footer line. Absent (a bare fork, every existing caller): no line.
+   */
+  constructor(
+    private readonly email: EmailProvider,
+    private readonly growth: EmailGrowth = {},
+  ) {}
 
   /** Recipient set for the notification's audience, deduped, empties dropped. */
   private recipients(n: BookingNotification): string[] {
@@ -115,7 +130,8 @@ export class BookingNotifier {
     const locale: TemplateLocale = n.templateLocale === 'es' ? 'es' : 'en';
     const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
     const vars = templateVars(n, locale);
-    const html = renderBrandedHtml(kind, vars, locale, audience);
+    const growth = n.showBranding === false ? { ...this.growth, signupUrl: null } : this.growth;
+    const html = renderBrandedHtml(kind, vars, locale, audience, growth);
     if (n.template) {
       const base = renderTemplate(n.template, vars);
       return { subject: base.subject, text: base.text, html };
@@ -136,7 +152,7 @@ export class BookingNotifier {
         `When: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -170,7 +186,7 @@ export class BookingNotifier {
         `When: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -233,7 +249,7 @@ export class BookingNotifier {
         n.host.name ? `Host: ${n.host.name}` : '',
         `This is pending confirmation${n.host.name ? ` by ${n.host.name}` : ''}. ` +
           `You'll get another email once it's confirmed.`,
-        n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Cancel this request: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -287,7 +303,7 @@ export class BookingNotifier {
         `Now: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
