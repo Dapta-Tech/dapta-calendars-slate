@@ -463,13 +463,45 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     expect(vi.getTimerCount()).toBe(0);
     const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
     expect(button.textContent).toBe(getMessages('en').booking.retry);
+    expect(el.querySelector('.bp-empty')!.getAttribute('role')).toBe('status');
+    // Busy while it asks: one press, one read.
+    let answer!: () => void;
+    fetchMock.mockImplementationOnce(
+      (url: string) =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+          void url;
+        }),
+    );
     up = true;
+    button.focus();
     await act(async () => button.click());
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    await act(async () => {
+      answer();
+    });
     await act(async () => {});
     // The visible month once more (then the next one, as it settles).
     expect(sameWindow(reads()[RETRY_DELAYS_MS.length]!, FIRST)).toBe(true);
     expect(el.querySelector('.bp-empty')).toBeNull();
     expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+    // Focus lands on the calendar, not on the page the button left.
+    expect((document.activeElement as HTMLElement | null)?.dataset.day).toMatch(/^2026-03-/);
+  });
+
+  it('a visible month that failed, then answered with a reason, says the reason, not "unavailable"', async () => {
+    let failed = false;
+    fetchMock.mockImplementation(async () =>
+      failed ? { ok: true, json: async () => ({ ok: true, slots: [], emptyReason: 'NO_AVAILABILITY' }) } : failing(),
+    );
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    failed = true;
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.noTimesNow);
+    expect(el.querySelector('.bp-empty + button')).toBeNull();
   });
 
   it('no "Try again" when the page knows there is nothing to offer', async () => {

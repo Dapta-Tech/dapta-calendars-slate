@@ -337,13 +337,13 @@ export function BookingFlow({
   // The month on screen is read the moment it is on screen (a no-op for the
   // first one, which the server already started, and for any month in hand).
   useEffect(() => {
-    ensureMonth(month, timeZone);
+    void ensureMonth(month, timeZone);
   }, [ensureMonth, month, timeZone]);
 
   // Once it has settled, the next month is read before the visitor asks, so
   // "next" lands on days that are already known.
   useEffect(() => {
-    if (monthKnown && month < maxMonth) ensureMonth(shiftMonth(month, 1), timeZone);
+    if (monthKnown && month < maxMonth) void ensureMonth(shiftMonth(month, 1), timeZone);
   }, [ensureMonth, monthKnown, month, maxMonth, timeZone]);
 
   // A host whose times start in a later month: with nothing found yet, keep
@@ -355,7 +355,7 @@ export function BookingFlow({
     if (!nothingYet) return;
     for (let m = minMonth; m <= maxMonth; m = shiftMonth(m, 1)) {
       if (!isKnown(m, timeZone)) {
-        ensureMonth(m, timeZone);
+        void ensureMonth(m, timeZone);
         return;
       }
     }
@@ -472,6 +472,31 @@ export function BookingFlow({
     setHoldError(null);
     setDismissedResult(result);
   }
+
+  // "Try again" on a month that did not answer: busy while it asks, and on an
+  // answer the calendar comes back with focus on its first open day, so focus
+  // does not fall to the page when the button it was on goes away.
+  const [askingAgain, setAskingAgain] = useState(false);
+  const refocus = useRef(false);
+  async function askAgain() {
+    setAskingAgain(true);
+    refocus.current = true;
+    try {
+      await ensureMonth(month, timeZone);
+    } finally {
+      setAskingAgain(false);
+    }
+  }
+  useEffect(() => {
+    if (!refocus.current || askingAgain || progress.unavailable) return;
+    refocus.current = false;
+    // The grid's tab stop (its roving cursor), else its first open day.
+    const grid = stageRef.current?.querySelector('[role="grid"]');
+    (
+      grid?.querySelector<HTMLButtonElement>('button[tabindex="0"]') ??
+      grid?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    )?.focus();
+  }, [askingAgain, progress.unavailable]);
 
   /**
    * Duplicate-booking guard (#69): the booker is blocked on their ADDRESS, not
@@ -936,9 +961,17 @@ export function BookingFlow({
           // visitor can ask again: the page retries on its own for half a
           // minute, and this is the way past that, short of reloading.
           <>
-            <p className="bp-muted bp-empty">{emptyCopy}</p>
+            <p role="status" className="bp-muted bp-empty">
+              {emptyCopy}
+            </p>
             {progress.unavailable ? (
-              <button type="button" onClick={() => ensureMonth(month, timeZone)} className="bp-btn-outline">
+              <button
+                type="button"
+                onClick={askAgain}
+                disabled={askingAgain}
+                aria-busy={askingAgain || undefined}
+                className="bp-btn-outline"
+              >
                 {m.retry}
               </button>
             ) : null}

@@ -115,8 +115,10 @@ export function useProgressiveSlots({
   // behind that claims a failed month is still being read.
   const inflight = useRef<Span[]>([]);
   const alive = useRef(true);
-  // The retry waiting for each window, at most one: a window's retries are one
+  // The retry waiting for each span, at most one: a span's retries are one
   // chain however many reads of it fail (a visit, the month effect re-running).
+  // Keyed by the exact span, so a read shaped differently (another time zone's
+  // month) is its own chain; each chain is still bounded.
   const waiting = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(() => {
     alive.current = true;
@@ -128,14 +130,27 @@ export function useProgressiveSlots({
     };
   }, []);
 
+  // What a retry reads when its timer fires, kept current after each render:
+  // a retry asks with what the page knows THEN, and with the current source
+  // and loader, not the ones of the render that scheduled it.
+  const knownNow = useRef<Span[]>(state.known);
+  const fetchNow = useRef<(want: Span, known: Span[], attempt: number) => Promise<void>>(async () => {});
+
   // A window that did not answer is asked again on its own, after a backoff
   // and a bounded number of times. Without it nothing asked again unless the
   // visitor moved: a failed visible month left the "times unavailable" sentence
   // in place of the calendar for good, and a failed month on screen stayed
-  // unsettled. Assigned after every render, and the timer reads its refs when
-  // it fires, so a retry asks with what the page knows THEN and with the
-  // current source and loader, not the ones of the render that scheduled it.
-  const retryLater = useRef<(span: Span, attempt: number) => void>(() => {});
+  // unsettled. It reads only refs, so it is made once.
+  const retryLater = useRef((span: Span, attempt: number) => {
+    const key = `${span.fromMs}:${span.toMs}`;
+    const delay = retryDelay(attempt);
+    if (delay === undefined || waiting.current.has(key)) return;
+    const timer = setTimeout(() => {
+      waiting.current.delete(key);
+      if (alive.current) void fetchNow.current(span, knownNow.current, attempt + 1);
+    }, delay);
+    waiting.current.set(key, timer);
+  });
   const apply = useCallback((span: Span, chunk: AvailabilityChunk, attempt = 0) => {
     inflight.current = inflight.current.filter((s) => s.fromMs !== span.fromMs || s.toMs !== span.toMs);
     if (!alive.current) return;
@@ -151,8 +166,17 @@ export function useProgressiveSlots({
         return s.known.length === 0 ? { ...s, unavailable: true } : s;
       }
       // A configuration reason (no schedule, no hours) holds for every window.
+      // It is an answer, so it also takes back an earlier "unavailable": a
+      // visible month that failed and then answered on a retry says the real
+      // reason, not that the times are temporarily unavailable.
       if (chunk.emptyReason) {
-        return { ...s, emptyReason: chunk.emptyReason, known: [whole], bookingFields: s.bookingFields ?? chunk.bookingFields };
+        return {
+          ...s,
+          emptyReason: chunk.emptyReason,
+          known: [whole],
+          unavailable: false,
+          bookingFields: s.bookingFields ?? chunk.bookingFields,
+        };
       }
       return {
         slots: mergeSlots(s.slots, chunk.slots),
@@ -180,44 +204,38 @@ export function useProgressiveSlots({
   }, [initial, initialFrom, initialTo, apply]);
 
   const source = availability?.source;
-  /** Read the pieces of `want` neither known nor in flight; `attempt` counts retries. */
+  /**
+   * Read the pieces of `want` neither known nor in flight; `attempt` counts
+   * retries. Settles once those reads have answered (and been applied).
+   */
   const fetchMissing = useCallback(
-    (want: Span, known: Span[], attempt = 0) => {
+    async (want: Span, known: Span[], attempt = 0) => {
       if (!source) return;
       const have = inflight.current.reduce(addSpan, known);
+      const reads: Promise<void>[] = [];
       for (const gap of missingSpans(have, want)) {
         inflight.current = [...inflight.current, gap];
-        void loader(source, gap).then((chunk) => apply(gap, chunk, attempt));
+        reads.push(loader(source, gap).then((chunk) => apply(gap, chunk, attempt)));
       }
+      await Promise.all(reads);
     },
     [source, loader, apply],
   );
-  const read = useCallback((want: Span) => fetchMissing(want, state.known), [fetchMissing, state.known]);
-
-  const knownNow = useRef(state.known);
-  const fetchNow = useRef(fetchMissing);
   useEffect(() => {
     knownNow.current = state.known;
     fetchNow.current = fetchMissing;
-    retryLater.current = (span, attempt) => {
-      const key = `${span.fromMs}:${span.toMs}`;
-      const delay = retryDelay(attempt);
-      if (delay === undefined || waiting.current.has(key)) return;
-      const timer = setTimeout(() => {
-        waiting.current.delete(key);
-        if (alive.current) fetchNow.current(span, knownNow.current, attempt + 1);
-      }, delay);
-      waiting.current.set(key, timer);
-    };
-  });
+  }, [state.known, fetchMissing]);
 
-  /** Read whatever of `monthKey` (in `timeZone`) the page does not have yet. */
+  /**
+   * Read whatever of `monthKey` (in `timeZone`) the page does not have yet.
+   * Settles when those reads have answered; nothing to read settles at once.
+   */
   const ensureMonth = useCallback(
-    (monthKey: string, timeZone: string) => {
+    (monthKey: string, timeZone: string): Promise<void> => {
       const w = monthWindow(monthKey, timeZone, nowMs, horizonMs);
-      if (w) read(w);
+      return w ? fetchMissing(w, state.known) : Promise.resolve();
     },
-    [read, nowMs, horizonMs],
+    [fetchMissing, state.known, nowMs, horizonMs],
   );
 
   /** True when every bookable instant of `monthKey` has been read. */
