@@ -25,6 +25,14 @@ export interface ProgressiveAvailability {
   source: AvailabilitySource;
 }
 
+/**
+ * How long to wait before asking again for a window that did not answer, one
+ * entry per retry: a blip clears within seconds, and an outage is asked five
+ * times over half a minute rather than hammered. After the last, the window
+ * stays "not yet known" until the visitor goes to it again.
+ */
+export const RETRY_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000];
+
 /** Fetches one later window; injectable so specs can watch the order. */
 export type WindowLoader = (source: AvailabilitySource, span: Span) => Promise<AvailabilityChunk>;
 
@@ -64,9 +72,10 @@ function mergeSlots(a: Slot[], b: Slot[]): Slot[] {
  * the page starts knowing nothing, receives the visible month, then reads the
  * next month as soon as the one on screen settles, and any other month when the
  * visitor goes to it (or points at the arrow that goes there). A month whose
- * read failed stays "not yet known" and is asked again the next time the
- * visitor comes to it, so a page never claims a month has no times when it
- * simply does not know.
+ * read failed stays "not yet known", is asked again on its own after a short
+ * backoff (`RETRY_DELAYS_MS`), and again whenever the visitor comes to it, so a
+ * page never claims a month has no times when it simply does not know, and a
+ * passing failure does not strand the visitor.
  */
 export function useProgressiveSlots({
   staticSlots,
@@ -90,24 +99,40 @@ export function useProgressiveSlots({
     unavailable: false,
   }));
   // Spans asked for and not yet answered, so two quick moves never read one
-  // window twice. A ref: it gates fetching and is never rendered.
+  // window twice. A ref: it gates fetching and is never rendered. Each read is
+  // its own entry, never merged with a neighbour: an answer removes exactly the
+  // span it answers, so two adjacent reads in flight cannot leave a merged span
+  // behind that claims a failed month is still being read.
   const inflight = useRef<Span[]>([]);
   const alive = useRef(true);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     alive.current = true;
+    const pending = timers.current;
     return () => {
       alive.current = false;
+      for (const t of pending) clearTimeout(t);
+      pending.clear();
     };
   }, []);
 
-  const apply = useCallback((span: Span, chunk: AvailabilityChunk) => {
+  // A window that did not answer is asked again on its own, after a backoff
+  // and a bounded number of times. Without it nothing asked again unless the
+  // visitor moved: a failed visible month left the "times unavailable" sentence
+  // in place of the calendar for good, and a failed month on screen stayed
+  // unsettled. Assigned after every render, so a retry that fires later reads
+  // what the page knows THEN, with the current source and loader.
+  const retryLater = useRef<(span: Span, attempt: number) => void>(() => {});
+  const apply = useCallback((span: Span, chunk: AvailabilityChunk, attempt = 0) => {
     inflight.current = inflight.current.filter((s) => s.fromMs !== span.fromMs || s.toMs !== span.toMs);
     if (!alive.current) return;
+    if (!chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE') retryLater.current(span, attempt);
     setState((s) => {
       // A window that could not be read is not a window with no times. Only
       // when nothing at all has been read does the page say so; once any
       // window has answered (even with no times), the failed one just stays
-      // "not yet known" and is asked again when the visitor goes to it.
+      // "not yet known". Either way it is asked again (`retryLater` above), and
+      // the first window that answers takes the sentence back.
       if (!chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE') {
         return s.known.length === 0 ? { ...s, unavailable: true } : s;
       }
@@ -133,7 +158,7 @@ export function useProgressiveSlots({
   useEffect(() => {
     if (!initial || !initialFrom || !initialTo) return;
     const span = { fromMs: Date.parse(initialFrom), toMs: Date.parse(initialTo) };
-    inflight.current = addSpan(inflight.current, span);
+    inflight.current = [...inflight.current, span];
     initial.then(
       (chunk) => apply(span, chunk),
       () => apply(span, { ok: false }),
@@ -141,17 +166,33 @@ export function useProgressiveSlots({
   }, [initial, initialFrom, initialTo, apply]);
 
   const source = availability?.source;
-  const read = useCallback(
-    (want: Span) => {
+  /** Read the pieces of `want` neither known nor in flight; `attempt` counts retries. */
+  const fetchMissing = useCallback(
+    (want: Span, known: Span[], attempt = 0) => {
       if (!source) return;
-      const have = inflight.current.reduce(addSpan, state.known);
+      const have = inflight.current.reduce(addSpan, known);
       for (const gap of missingSpans(have, want)) {
-        inflight.current = addSpan(inflight.current, gap);
-        void loader(source, gap).then((chunk) => apply(gap, chunk));
+        inflight.current = [...inflight.current, gap];
+        void loader(source, gap).then((chunk) => apply(gap, chunk, attempt));
       }
     },
-    [source, state.known, loader, apply],
+    [source, loader, apply],
   );
+  const read = useCallback((want: Span) => fetchMissing(want, state.known), [fetchMissing, state.known]);
+
+  const knownNow = useRef(state.known);
+  useEffect(() => {
+    knownNow.current = state.known;
+    retryLater.current = (span, attempt) => {
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) return;
+      const timer = setTimeout(() => {
+        timers.current.delete(timer);
+        if (alive.current) fetchMissing(span, knownNow.current, attempt + 1);
+      }, delay);
+      timers.current.add(timer);
+    };
+  });
 
   /** Read whatever of `monthKey` (in `timeZone`) the page does not have yet. */
   const ensureMonth = useCallback(

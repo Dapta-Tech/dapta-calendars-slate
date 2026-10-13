@@ -24,6 +24,7 @@ vi.mock('@/app/[accountCode]/[handle]/[slug]/actions', () => ({
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import type { AvailabilityChunk } from '@/lib/availability-source';
+import { RETRY_DELAYS_MS } from '@/lib/use-progressive-slots';
 import { BASE_STYLE, NOW, TIME_ZONE, availability } from '@/app/[accountCode]/__fixtures__/public-surface';
 
 const fixture = availability();
@@ -317,5 +318,117 @@ describe('a month that cannot be read is never shown as a month with no times', 
       '2026-04-01T04:00:00.000Z',
       '2026-05-01T04:00:00.000Z',
     ]);
+  });
+});
+
+/**
+ * A read that fails once must not strand the visitor. The visible month used to
+ * fail into the "times unavailable" sentence and never ask again (nothing did
+ * unless the visitor moved, and with the sentence in place of the calendar
+ * there was nowhere to move), so a passing API error ended the page.
+ */
+describe('a failed read is asked again on its own, a bounded number of times', () => {
+  /** A March day the fixture offers times on. */
+  const MARCH_DAY = '2026-03-02';
+  const failing = () => ({ ok: false, json: async () => ({ ok: false }) });
+  const sameWindow = (r: { from: string; to: string }, w: { from: string; to: string }) =>
+    Date.parse(r.from) === Date.parse(w.from) && Date.parse(r.to) === Date.parse(w.to);
+  /** Let a retry's timer fire, then its read land and render. */
+  async function wait(ms: number) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+    await act(async () => {});
+  }
+
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it('the visible month failing comes back: asked again after a second, the calendar returns', async () => {
+    answerLaterMonths((from) => (Date.parse(from) < Date.parse(FIRST.to) ? MARCH : []));
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesUnavailable);
+    expect(reads()).toEqual([]);
+
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(sameWindow(reads()[0]!, FIRST)).toBe(true);
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(monthLabel(el)).toBe('March 2026');
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it('an outage is asked five more times, backing off, then left alone with the sentence', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const [i, delay] of RETRY_DELAYS_MS.entries()) {
+      await wait(delay - 1);
+      expect(reads(), `before retry ${i + 1}`).toHaveLength(i);
+      await wait(1);
+      expect(reads(), `retry ${i + 1}`).toHaveLength(i + 1);
+    }
+    await wait(5 * 60_000);
+    expect(reads()).toHaveLength(RETRY_DELAYS_MS.length);
+    expect(reads().every((r) => sameWindow(r, FIRST))).toBe(true);
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesUnavailable);
+  });
+
+  it('is retried even when the next month was read beside it (no merged span claims it is still in flight)', async () => {
+    let failMarch = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      const q = new URL(url, 'http://localhost').searchParams;
+      const march = Date.parse(q.get('from')!) < Date.parse(FIRST.to);
+      if (march && failMarch) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: march ? MARCH : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    // April is asked for while March is still in flight: adjacent windows.
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Next month"]')!.focus());
+    await land(first, { ok: false });
+    failMarch = false;
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(reads().some((r) => sameWindow(r, FIRST))).toBe(true);
+    expect(monthLabel(el)).toBe('March 2026');
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it('a later month that failed on screen settles on its own', async () => {
+    let failApril = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      const april = new URL(url, 'http://localhost').searchParams.get('from') === '2026-04-01T04:00:00.000Z';
+      if (april && failApril) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: april ? APRIL : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: true, slots: MARCH });
+    await act(async () => {});
+    // The visitor goes to April while its read is failing: it stays unsettled.
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Next month"]')!.click());
+    await act(async () => {});
+    expect(monthLabel(el)).toBe('April 2026');
+    expect(day(el, '2026-04-06').dataset.state).not.toBe('available');
+    failApril = false;
+    await wait(RETRY_DELAYS_MS[1]!);
+    expect(day(el, '2026-04-06').dataset.state).toBe('available');
+  });
+
+  it('a page that goes away cancels what it was waiting to ask', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    await mount(first.promise);
+    await land(first, { ok: false });
+    act(() => root?.unmount());
+    root = null;
+    await wait(60_000);
+    expect(reads()).toEqual([]);
   });
 });
