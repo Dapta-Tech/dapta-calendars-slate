@@ -374,9 +374,13 @@ export function BookingFlow({
     // Moving to another time orphans the hold on this one — give it back (#135).
     // AWAITED, unlike the one in `retry()`: `reserveSlot` re-checks the engine
     // before holding, so a release still in flight would make re-picking the
-    // slot you just left answer INVALID_SLOT.
-    if (hold) await releaseAction(hold.uid);
+    // slot you just left answer INVALID_SLOT. Forgotten BEFORE the release
+    // round trip, not after: the form for the new time renders at once, and
+    // the booking consumes whatever hold the form carries, so it must never
+    // carry the hold on the time being left.
+    const previous = hold;
     setHold(null);
+    if (previous) await releaseAction(previous.uid);
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.
     if (mode !== 'personal') return;

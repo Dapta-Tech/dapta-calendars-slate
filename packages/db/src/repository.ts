@@ -972,9 +972,18 @@ export async function createBooking(
 
   // Hold validation at consume: a reservation that is missing or expired → 410.
   // (The two-layer expiry: app-level release_at check here + the DB sweep.)
+  //
+  // The hold must be for THIS host, event and time. A booking that presents a
+  // hold skips the offered-slot check above (the hold was granted on an offered
+  // time), so a hold matched by uid alone let any live hold book any time on
+  // any event, hours and notice ignored. One for another time answers the same
+  // 410 as a missing one: the booker picks a time again.
   if (args.reservationUid) {
     const hold = await db.get<{ release_at_ms: number }>(
-      sql`SELECT release_at_ms FROM slot_reservation WHERE uid = ${args.reservationUid} LIMIT 1`,
+      sql`SELECT release_at_ms FROM slot_reservation
+          WHERE uid = ${args.reservationUid} AND member_id = ${member.id}
+                AND event_type_id = ${eventType.id} AND slot_start_ms = ${args.startMs}
+          LIMIT 1`,
     );
     if (!hold) return { ok: false, reason: 'RESERVATION_EXPIRED' };
     if (Number(hold.release_at_ms) <= Date.now()) {
