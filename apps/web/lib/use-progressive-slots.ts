@@ -115,13 +115,15 @@ export function useProgressiveSlots({
   // behind that claims a failed month is still being read.
   const inflight = useRef<Span[]>([]);
   const alive = useRef(true);
-  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  // The retry waiting for each window, at most one: a window's retries are one
+  // chain however many reads of it fail (a visit, the month effect re-running).
+  const waiting = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(() => {
     alive.current = true;
-    const pending = timers.current;
+    const pending = waiting.current;
     return () => {
       alive.current = false;
-      for (const t of pending) clearTimeout(t);
+      for (const t of pending.values()) clearTimeout(t);
       pending.clear();
     };
   }, []);
@@ -198,13 +200,14 @@ export function useProgressiveSlots({
     knownNow.current = state.known;
     fetchNow.current = fetchMissing;
     retryLater.current = (span, attempt) => {
+      const key = `${span.fromMs}:${span.toMs}`;
       const delay = retryDelay(attempt);
-      if (delay === undefined) return;
+      if (delay === undefined || waiting.current.has(key)) return;
       const timer = setTimeout(() => {
-        timers.current.delete(timer);
+        waiting.current.delete(key);
         if (alive.current) fetchNow.current(span, knownNow.current, attempt + 1);
       }, delay);
-      timers.current.add(timer);
+      waiting.current.set(key, timer);
     };
   });
 

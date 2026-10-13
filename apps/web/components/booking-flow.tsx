@@ -887,8 +887,17 @@ export function BookingFlow({
         nothingToOffer ? (
           // No calendar at all when the page has no times to put in one: an
           // empty month of greyed-out days is a worse answer than the sentence
-          // that says why.
-          <p className="bp-muted bp-empty">{emptyCopy}</p>
+          // that says why. When the reason is that nothing answered, the
+          // visitor can ask again: the page retries on its own for half a
+          // minute, and this is the way past that, short of reloading.
+          <>
+            <p className="bp-muted bp-empty">{emptyCopy}</p>
+            {progress.unavailable ? (
+              <button type="button" onClick={() => ensureMonth(month, timeZone)} className="bp-btn-outline">
+                {m.retry}
+              </button>
+            ) : null}
+          </>
         ) : undefined
       }
       month={

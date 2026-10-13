@@ -448,6 +448,52 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     expect(day(el, '2026-04-06').dataset.state).toBe('available');
   });
 
+  it('past the last retry, "Try again" asks once more and the calendar returns', async () => {
+    let up = false;
+    fetchMock.mockImplementation(async (url: string) => {
+      const from = new URL(url, 'http://localhost').searchParams.get('from')!;
+      if (!up) return failing();
+      return { ok: true, json: async () => ({ ok: true, slots: Date.parse(from) < Date.parse(FIRST.to) ? MARCH : [] }) };
+    });
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    expect(reads()).toHaveLength(RETRY_DELAYS_MS.length);
+    expect(vi.getTimerCount()).toBe(0);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    expect(button.textContent).toBe(getMessages('en').booking.retry);
+    up = true;
+    await act(async () => button.click());
+    await act(async () => {});
+    // The visible month once more (then the next one, as it settles).
+    expect(sameWindow(reads()[RETRY_DELAYS_MS.length]!, FIRST)).toBe(true);
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it('no "Try again" when the page knows there is nothing to offer', async () => {
+    answerLaterMonths();
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: true, slots: [], emptyReason: 'NO_AVAILABILITY' });
+    expect(el.querySelector('.bp-empty')).not.toBeNull();
+    expect(el.querySelector('.bp-empty + button')).toBeNull();
+  });
+
+  it('one window has one retry waiting, however many of its reads fail', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    expect(vi.getTimerCount()).toBe(1);
+    // The visitor asks for the same month by hand while its retry waits.
+    await act(async () => el.querySelector<HTMLButtonElement>('.bp-empty + button')!.click());
+    await act(async () => {});
+    expect(reads()).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
   it('a page that goes away cancels what it was waiting to ask', async () => {
     fetchMock.mockImplementation(async () => failing());
     const first = deferred();
