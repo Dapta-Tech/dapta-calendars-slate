@@ -118,8 +118,15 @@ describe('a hold expires after ten minutes', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     const t0 = Date.now();
     const page = { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call' };
+    // A time a day out, never the first one offered now. The seeded event asks
+    // two hours' notice, so the first time offered at t0 can start less than
+    // two hours and ten minutes away; at 10:01 it is inside the notice and no
+    // longer offered, held or not. Whether it is depends on the minute the
+    // suite runs (it failed at 13:24 UTC and passed at 13:01), so the test
+    // reads past the notice and only the hold decides what is offered.
+    const fromMs = t0 + 86_400_000;
     const read = async () => {
-      const a = await getAvailability(db, { ...page, fromMs: t0, toMs: t0 + 10 * 86_400_000 });
+      const a = await getAvailability(db, { ...page, fromMs, toMs: fromMs + 10 * 86_400_000 });
       return (a?.slots ?? []).map((s) => new Date(s.startUtc).getTime());
     };
     const [start] = await read();
