@@ -7,15 +7,19 @@
  *
  *   DATABASE_URL=... pnpm --filter @slate/api exec tsx src/cli/e2e-seed.ts
  *
- * Idempotent: a host that already has a connection is left alone. Refuses to
- * run under NODE_ENV=production.
+ * Idempotent: a host that already has a connection is left alone. Refuses any
+ * database that is not a SQLite file, a Postgres database named *_e2e, or a
+ * Postgres server on loopback (`e2e-guard.ts`). NODE_ENV cannot be the guard:
+ * the suite's launcher always sets it to development.
  */
 import { randomUUID } from 'node:crypto';
 import { createDb, sql } from '@slate/db';
+import { e2eDatabaseAllowed } from './e2e-guard';
 
 async function main(): Promise<void> {
-  if (process.env.NODE_ENV === 'production') {
-    console.error('[e2e-seed] refusing to run under NODE_ENV=production.');
+  const target = e2eDatabaseAllowed(process.env.DATABASE_URL ?? '');
+  if (!target.ok) {
+    console.error(`[e2e-seed] refusing: ${target.reason}.`);
     process.exit(1);
   }
   const db = await createDb(process.env.DATABASE_URL ?? '');
