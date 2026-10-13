@@ -54,6 +54,8 @@ const fetchWindow: WindowLoader = async (source, span) => {
   }
 };
 
+const spanKey = (s: Span) => `${s.fromMs}:${s.toMs}`;
+
 interface State {
   /** Every time read so far, in start order, once each. */
   slots: Slot[];
@@ -114,6 +116,9 @@ export function useProgressiveSlots({
   // span it answers, so two adjacent reads in flight cannot leave a merged span
   // behind that claims a failed month is still being read.
   const inflight = useRef<Span[]>([]);
+  // Each read in flight, by span, settling once it has been applied, so a
+  // caller asking for a window already being read can wait for that read.
+  const inflightDone = useRef(new Map<string, Promise<void>>());
   const alive = useRef(true);
   // The retry waiting for each span, at most one: a span's retries are one
   // chain however many reads of it fail (a visit, the month effect re-running).
@@ -142,7 +147,7 @@ export function useProgressiveSlots({
   // in place of the calendar for good, and a failed month on screen stayed
   // unsettled. It reads only refs, so it is made once.
   const retryLater = useRef((span: Span, attempt: number) => {
-    const key = `${span.fromMs}:${span.toMs}`;
+    const key = spanKey(span);
     const delay = retryDelay(attempt);
     if (delay === undefined || waiting.current.has(key)) return;
     const timer = setTimeout(() => {
@@ -153,6 +158,7 @@ export function useProgressiveSlots({
   });
   const apply = useCallback((span: Span, chunk: AvailabilityChunk, attempt = 0) => {
     inflight.current = inflight.current.filter((s) => s.fromMs !== span.fromMs || s.toMs !== span.toMs);
+    inflightDone.current.delete(spanKey(span));
     if (!alive.current) return;
     const failed = !chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE';
     if (failed && !(!chunk.ok && chunk.final)) retryLater.current(span, attempt);
@@ -197,25 +203,34 @@ export function useProgressiveSlots({
     if (!initial || !initialFrom || !initialTo) return;
     const span = { fromMs: Date.parse(initialFrom), toMs: Date.parse(initialTo) };
     inflight.current = [...inflight.current, span];
-    initial.then(
-      (chunk) => apply(span, chunk),
-      () => apply(span, { ok: false }),
+    inflightDone.current.set(
+      spanKey(span),
+      initial.then(
+        (chunk) => apply(span, chunk),
+        () => apply(span, { ok: false }),
+      ),
     );
   }, [initial, initialFrom, initialTo, apply]);
 
   const source = availability?.source;
   /**
    * Read the pieces of `want` neither known nor in flight; `attempt` counts
-   * retries. Settles once those reads have answered (and been applied).
+   * retries. Settles once every read of `want` has answered and been applied,
+   * the ones already in flight included.
    */
   const fetchMissing = useCallback(
     async (want: Span, known: Span[], attempt = 0) => {
       if (!source) return;
+      const reads = inflight.current
+        .filter((s) => s.fromMs < want.toMs && s.toMs > want.fromMs)
+        .map((s) => inflightDone.current.get(spanKey(s)))
+        .filter((p): p is Promise<void> => !!p);
       const have = inflight.current.reduce(addSpan, known);
-      const reads: Promise<void>[] = [];
       for (const gap of missingSpans(have, want)) {
         inflight.current = [...inflight.current, gap];
-        reads.push(loader(source, gap).then((chunk) => apply(gap, chunk, attempt)));
+        const done = loader(source, gap).then((chunk) => apply(gap, chunk, attempt));
+        inflightDone.current.set(spanKey(gap), done);
+        reads.push(done);
       }
       await Promise.all(reads);
     },

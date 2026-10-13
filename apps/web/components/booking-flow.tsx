@@ -384,9 +384,16 @@ export function BookingFlow({
       if (pendingRelease.current === release) pendingRelease.current = null;
     });
   }
+  // Leaving the page ends the pick, and gives back the hold it stood on (a
+  // hold a booking consumed is already gone; releasing it changes nothing).
+  const holdRef = useRef(hold);
+  useEffect(() => {
+    holdRef.current = hold;
+  }, [hold]);
   useEffect(
     () => () => {
       pickSeq.current += 1;
+      if (holdRef.current) releaseLater(holdRef.current.uid);
     },
     [],
   );
@@ -404,7 +411,7 @@ export function BookingFlow({
     if (!bookedUid) return;
     pickSeq.current += 1;
     if (hold && hold.uid !== submittedHold.current) {
-      void releaseAction(hold.uid);
+      releaseLater(hold.uid);
       setHold(null);
     }
   }, [bookedUid, hold]);
@@ -476,10 +483,16 @@ export function BookingFlow({
   // "Try again" on a month that did not answer: busy while it asks, and on an
   // answer the calendar comes back with focus on its first open day, so focus
   // does not fall to the page when the button it was on goes away.
+  // The button stays focusable while it asks (aria-disabled, not disabled: a
+  // disabled control drops focus to the page). A press that still finds
+  // nothing says so in the status line, so the outcome is announced.
   const [askingAgain, setAskingAgain] = useState(false);
+  const [askFailed, setAskFailed] = useState(false);
   const refocus = useRef(false);
   async function askAgain() {
+    if (askingAgain) return;
     setAskingAgain(true);
+    setAskFailed(false);
     refocus.current = true;
     try {
       await ensureMonth(month, timeZone);
@@ -488,8 +501,12 @@ export function BookingFlow({
     }
   }
   useEffect(() => {
-    if (!refocus.current || askingAgain || progress.unavailable) return;
+    if (!refocus.current || askingAgain) return;
     refocus.current = false;
+    if (progress.unavailable) {
+      setAskFailed(true);
+      return;
+    }
     // The grid's tab stop (its roving cursor), else its first open day.
     const grid = stageRef.current?.querySelector('[role="grid"]');
     (
@@ -713,7 +730,9 @@ export function BookingFlow({
   const reason = progress.unavailable ? 'CALENDAR_UNAVAILABLE' : (progress.emptyReason ?? emptyReason);
   const emptyCopy =
     reason === 'CALENDAR_UNAVAILABLE'
-      ? m.timesUnavailable
+      ? askFailed
+        ? m.timesStillUnavailable
+        : m.timesUnavailable
       : reason
         ? m.noTimesNow
         : m.noSlots;
@@ -968,7 +987,7 @@ export function BookingFlow({
               <button
                 type="button"
                 onClick={askAgain}
-                disabled={askingAgain}
+                aria-disabled={askingAgain || undefined}
                 aria-busy={askingAgain || undefined}
                 className="bp-btn-outline"
               >

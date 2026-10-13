@@ -28,6 +28,8 @@ export interface BookingMessages {
     noTimesNow: string;
     /** External calendar unreachable (public-safe). */
     timesUnavailable: string;
+    /** Said after "Try again" asked and the times still did not answer. */
+    timesStillUnavailable: string;
     calendarUnavailableTitle: string;
     calendarUnavailableBody: string;
     book: string;
@@ -1353,6 +1355,7 @@ export const en: BookingMessages = {
     noSlots: 'No available times in this range.',
     noTimesNow: 'No times are available right now. Please check back soon.',
     timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
+    timesStillUnavailable: 'Times are still unavailable. Please try again in a few minutes.',
     calendarUnavailableTitle: 'This time could not be confirmed',
     calendarUnavailableBody:
       'We could not confirm this time right now. Please try again in a few minutes.',
@@ -2473,6 +2476,7 @@ export const es: BookingMessages = {
     noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
     timesUnavailable:
       'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
+    timesStillUnavailable: 'Los horarios siguen sin estar disponibles. Inténtalo de nuevo en unos minutos.',
     calendarUnavailableTitle: 'No se pudo confirmar este horario',
     calendarUnavailableBody:
       'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',

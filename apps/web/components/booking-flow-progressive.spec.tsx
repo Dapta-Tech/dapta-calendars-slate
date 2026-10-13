@@ -476,8 +476,14 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     up = true;
     button.focus();
     await act(async () => button.click());
-    expect(button.disabled).toBe(true);
+    // Busy, and still focusable (aria-disabled, not disabled).
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.getAttribute('aria-busy')).toBe('true');
+    // A second press while it asks reads nothing more.
+    const before = reads().length;
+    await act(async () => button.click());
+    expect(reads()).toHaveLength(before);
     await act(async () => {
       answer();
     });
@@ -488,6 +494,53 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     expect(day(el, MARCH_DAY).dataset.state).toBe('available');
     // Focus lands on the calendar, not on the page the button left.
     expect((document.activeElement as HTMLElement | null)?.dataset.day).toMatch(/^2026-03-/);
+  });
+
+  it('a press that still finds nothing says so, keeps focus on the button, and can be pressed again', async () => {
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    button.focus();
+    await act(async () => button.click());
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').booking.timesStillUnavailable);
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute('aria-disabled')).toBeNull();
+    const before = reads().length;
+    await act(async () => button.click());
+    await act(async () => {});
+    expect(reads()).toHaveLength(before + 1);
+  });
+
+  it('"Try again" pressed while a retry is already out waits for that read', async () => {
+    let answer!: () => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+        }),
+    );
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    // The automatic retry goes out and has not answered.
+    await act(async () => {
+      vi.advanceTimersByTime(RETRY_DELAYS_MS[0]!);
+    });
+    expect(reads()).toHaveLength(1);
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    await act(async () => button.click());
+    // No second read of the same month, and busy until the one out answers.
+    expect(reads()).toHaveLength(1);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    await act(async () => {
+      answer();
+    });
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')).toBeNull();
   });
 
   it('a visible month that failed, then answered with a reason, says the reason, not "unavailable"', async () => {

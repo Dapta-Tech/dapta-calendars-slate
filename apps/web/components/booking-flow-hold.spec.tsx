@@ -198,6 +198,17 @@ describe('the booking form carries only the hold on the time it shows', () => {
     expect(formHold(el)).toBe('res_a2');
   });
 
+  it('leaving the page gives back the hold it stood on', async () => {
+    const el = await mount();
+    actions.reserveAction.mockResolvedValueOnce(held('res_left'));
+    await act(async () => slots(el)[0]!.click());
+    expect(formHold(el)).toBe('res_left');
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => {});
+    expect(actions.releaseAction).toHaveBeenCalledWith('res_left');
+  });
+
   it('a hold that answers after the page is gone is given back', async () => {
     const el = await mount();
     const reserve = deferred<ReturnType<typeof held>>();
