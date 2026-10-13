@@ -15,9 +15,11 @@ Node 20, no dependencies.
 ## Where the scripts may point
 
 `load-availability.mjs`, `hold-race.mjs` and `rate-limit-probe.mjs` refuse an
-`--api` that does not resolve to loopback unless `--i-know-this-is-not-prod` is
-passed, and always refuse a host on `--deny-hosts <host,...>` (or a subdomain of
-one). Keep your production hosts in that list, in your own shell, not in this
+`--api` whose host is not literally loopback (`localhost`, `127.x`, `::1`)
+unless `--i-know-this-is-not-prod` is passed, and always refuse a host on
+`--deny-hosts <host,...>` (or a subdomain of one). No DNS answer counts as
+loopback: `fetch` resolves the name again, so a rebinding host could pass a
+lookup and then reach a remote API. Keep your production hosts in that list, in your own shell, not in this
 repository: nothing here names a host. `apps/api/src/qa-scripts.spec.ts` holds
 the scripts to it.
 

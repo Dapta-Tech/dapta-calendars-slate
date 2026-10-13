@@ -18,9 +18,15 @@ interface Run {
   stdout: string;
 }
 
-function run(script: string, args: string[], opts: { onStart?: (child: ChildProcess) => void } = {}): Promise<Run> {
+function run(
+  script: string,
+  args: string[],
+  opts: { onStart?: (child: ChildProcess) => void; nodeArgs?: string[] } = {},
+): Promise<Run> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [`${QA}${script}`, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [...(opts.nodeArgs ?? []), `${QA}${script}`, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     child.stdout!.on('data', (d) => (stdout += d));
@@ -88,6 +94,41 @@ describe('the QA scripts refuse a target nobody meant', () => {
     ]);
     expect(out.stderr).toContain('going ahead because --i-know-this-is-not-prod');
     expect(out.code).not.toBe(2);
+  });
+
+  it('a name is never taken for loopback, even when DNS answers 127.0.0.1 (rebinding)', async () => {
+    // Every lookup in the script's process answers loopback, as a rebinding
+    // host would for the check; fetch would resolve the name again later and
+    // could reach a remote API. Only a literal loopback host is accepted.
+    const rebinding =
+      "import dns from 'node:dns'; import dnsp from 'node:dns/promises'; import { syncBuiltinESMExports } from 'node:module';" +
+      "dnsp.lookup = async (_h, o) => (o && o.all ? [{ address: '127.0.0.1', family: 4 }] : { address: '127.0.0.1', family: 4 });" +
+      "dns.lookup = (_h, o, cb) => { const done = typeof o === 'function' ? o : cb; const all = typeof o === 'object' && o && o.all;" +
+      "  process.nextTick(() => (all ? done(null, [{ address: '127.0.0.1', family: 4 }]) : done(null, '127.0.0.1', 4))); };" +
+      'syncBuiltinESMExports();';
+    const nodeArgs = ['--import', `data:text/javascript,${encodeURIComponent(rebinding)}`];
+    const hook = await run(
+      'webhook-check.mjs',
+      ['--api', 'http://rebind.example.test:4411', '--public', 'https://tunnel.example.test', '--host-email', 'alex@example.com', ...PAGE],
+      { nodeArgs },
+    );
+    expect(hook.code).toBe(2);
+    expect(hook.stderr).toContain('only runs against a local API');
+    const race = await run('hold-race.mjs', ['--api', 'http://rebind.example.test:4411', ...PAGE], { nodeArgs });
+    expect(race.code).toBe(2);
+    expect(race.stderr).toContain('not loopback');
+  });
+
+  it('literal loopback hosts are accepted without the flag', async () => {
+    // The stand-in refuses everything, so getting past the guard shows as the
+    // script's own failure (exit 1), never the guard's exit 2.
+    const api = await standIn((_req, _body, res) => json(res, 500, {}));
+    const port = new URL(api).port;
+    for (const host of ['127.0.0.1', 'localhost']) {
+      const out = await run('rate-limit-probe.mjs', ['--api', `http://${host}:${port}`, ...PAGE, '--max', '1']);
+      expect(out.code, host).toBe(1);
+      expect(out.stderr, host).not.toContain('refusing');
+    }
   });
 
   it('webhook-check.mjs runs against a local API only, with no override', async () => {

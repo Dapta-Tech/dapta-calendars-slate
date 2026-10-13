@@ -1,8 +1,10 @@
 // What every QA script that sends traffic checks before its first request.
 //
-//  - `--api` must resolve to a loopback address (localhost, 127.0.0.0/8, ::1),
-//    unless the caller passes `--i-know-this-is-not-prod`, which allows a
-//    non-loopback development deployment.
+//  - `--api` must NAME loopback literally (localhost, 127.0.0.0/8, ::1), unless
+//    the caller passes `--i-know-this-is-not-prod`, which allows a non-loopback
+//    development deployment. No DNS lookup decides it: `fetch` resolves the
+//    name again, so a rebinding host could answer 127.0.0.1 to the check and a
+//    remote address to the request. Any other name is not loopback.
 //  - `--deny-hosts a,b` is a comma-separated list of hosts the script must
 //    never touch (a production API, for one). A denied host, or any subdomain
 //    of it, is refused even with the flag above. The list is an argument on
@@ -10,7 +12,6 @@
 //
 // Scripts that must never leave the machine (webhook-check) call
 // `requireLoopback` instead, which has no override.
-import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 export const NOT_PROD_FLAG = 'i-know-this-is-not-prod';
@@ -40,17 +41,15 @@ function isLoopbackAddress(address) {
   return false;
 }
 
-/** True when every address the API's host resolves to is loopback. */
-export async function resolvesToLoopback(api) {
-  const host = new URL(api).hostname.replace(/^\[|\]$/g, '');
-  if (host === 'localhost') return true;
-  if (isIP(host)) return isLoopbackAddress(host);
+/** True only when the API's host is literally loopback: `localhost`, 127.x or ::1. Never a lookup. */
+export function isLoopbackTarget(api) {
+  let host;
   try {
-    const addresses = await lookup(host, { all: true });
-    return addresses.length > 0 && addresses.every((a) => isLoopbackAddress(a.address));
+    host = new URL(api).hostname.replace(/^\[|\]$/g, '').toLowerCase();
   } catch {
     return false;
   }
+  return host === 'localhost' || isLoopbackAddress(host);
 }
 
 function denied(api, denyHosts) {
@@ -74,7 +73,7 @@ export async function guardTarget(args) {
     console.error(`refusing --api ${api}: it is on --deny-hosts (${hit})`);
     process.exit(2);
   }
-  if (await resolvesToLoopback(api)) return;
+  if (isLoopbackTarget(api)) return;
   if (args[NOT_PROD_FLAG] === true) {
     console.error(`--api ${api} is not loopback; going ahead because --${NOT_PROD_FLAG} was passed`);
     return;
@@ -88,7 +87,7 @@ export async function guardTarget(args) {
 
 /** For scripts that must only ever talk to an API on this machine. No override. */
 export async function requireLoopback(api, what = '--api') {
-  if (await resolvesToLoopback(api)) return;
+  if (isLoopbackTarget(api)) return;
   console.error(`refusing ${what} ${api}: this script only runs against a local API (loopback)`);
   process.exit(2);
 }

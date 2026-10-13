@@ -12,8 +12,8 @@
 // receivers are reached through a public https tunnel to --port; pass its URL
 // as --public. Webhooks are created through the host API of --api, which must
 // be a LOCAL instance on the local auth provider (x-slate-email), never a
-// shared deployment: the script refuses an --api that does not resolve to
-// loopback, with no override.
+// shared deployment: the script refuses an --api whose host is not literally
+// loopback (localhost, 127.x, ::1), with no override.
 //
 // It creates ONE booking (so each subscriber gets one booking.created) and
 // cancels it as the host at the end, along with the two webhooks, whatever
