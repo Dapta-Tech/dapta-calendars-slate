@@ -57,12 +57,16 @@ export function isPublicAddress(ip: string): boolean {
   if (kind === 4) {
     const o = ip.split('.').map(Number);
     if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-    const [a, b] = o as [number, number, number, number];
+    const [a, b, c] = o as [number, number, number, number];
     if (a === 127 || a === 10 || a === 0) return false; // loopback, private, "this host"
     if (a === 172 && b >= 16 && b <= 31) return false; // 172.16.0.0/12
     if (a === 192 && b === 168) return false; // 192.168.0.0/16
     if (a === 169 && b === 254) return false; // link-local, cloud metadata
     if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT
+    if (a === 192 && b === 0 && (c === 0 || c === 2)) return false; // 192.0.0.0/24 protocol, 192.0.2.0/24 documentation
+    if (a === 192 && b === 88 && c === 99) return false; // 6to4 relay anycast
+    if (a === 198 && (b === 18 || b === 19)) return false; // 198.18.0.0/15 benchmarking
+    if ((a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113)) return false; // documentation
     if (a >= 224) return false; // multicast and reserved
     return true;
   }
@@ -80,6 +84,9 @@ export function isPublicAddress(ip: string): boolean {
     if (g[0] === 0x64 && g[1] === 0xff9b && zero(2, 6)) return v4(g[6]!, g[7]!); // 64:ff9b::/96, NAT64
     if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return false; // 64:ff9b:1::/48, local NAT64
     if (g[0] === 0x2002) return v4(g[1]!, g[2]!); // 2002::/16, 6to4
+    if (g[0] === 0x2001 && g[1] === 0) return false; // 2001::/32, Teredo (tunnels to an IPv4 host)
+    if (g[0] === 0x2001 && g[1] === 0xdb8) return false; // 2001:db8::/32, documentation
+    if (g[0] === 0x100 && zero(1, 4)) return false; // 100::/64, discard-only
     if ((g[0]! & 0xff00) === 0xff00) return false; // ff00::/8, multicast
     if ((g[0]! & 0xffc0) === 0xfe80) return false; // fe80::/10, link-local
     if ((g[0]! & 0xffc0) === 0xfec0) return false; // fec0::/10, site-local (deprecated)

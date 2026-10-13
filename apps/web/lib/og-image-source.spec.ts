@@ -166,4 +166,21 @@ describe('isPublicAddress', () => {
       expect(isPublicAddress(ip), ip).toBe(false);
     }
   });
+
+  it('refuses the special-purpose ranges no image is served from', () => {
+    for (const ip of [
+      '192.0.0.8',
+      '192.0.2.1',
+      '192.88.99.1',
+      '198.18.0.1',
+      '198.19.255.255',
+      '198.51.100.7',
+      '203.0.113.9',
+      '2001:0:4136:e378:8000:63bf:3fff:fdd2', // Teredo
+      '2001:db8::1',
+      '100::1',
+    ]) {
+      expect(isPublicAddress(ip), ip).toBe(false);
+    }
+  });
 });
