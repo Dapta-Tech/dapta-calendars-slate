@@ -363,7 +363,13 @@ export function BookingFlow({
   const locationLabel = formatLocation(location ?? null, messages);
   const weekStartsOn = weekStartsOnFor(locale);
 
+  // The time the visitor is on now, read when a hold answers: a hold that
+  // lands after they went back or picked another time belongs to nothing on
+  // screen. A ref, because the answer arrives in a closure of an older render.
+  const pickedRef = useRef<string | null>(null);
+
   async function pick(slot: DisplaySlot) {
+    pickedRef.current = slot.startUtc;
     setDir('forward');
     setSelected(slot.startUtc);
     // The last attempt's error stays dismissed: picking a slot used to clear
@@ -381,6 +387,7 @@ export function BookingFlow({
     const previous = hold;
     setHold(null);
     if (previous) await releaseAction(previous.uid);
+    if (pickedRef.current !== slot.startUtc) return; // moved on during the release
     // Team events resolve their host set at booking time (round-robin picks one,
     // collective/fixed assign the required hosts) — no per-host hold here.
     if (mode !== 'personal') return;
@@ -391,6 +398,13 @@ export function BookingFlow({
       { accountCode, handle: ownerSlug, slug, startUtc: slot.startUtc },
       oneOffToken,
     );
+    if (pickedRef.current !== slot.startUtc) {
+      // The visitor left this time while it was being held. Give the hold
+      // straight back: kept, it would hide the time from everyone for ten
+      // minutes, or ride the form for another time into a 410.
+      if (r.ok && r.reservationUid) void releaseAction(r.reservationUid);
+      return;
+    }
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
     else setHoldError(r.message ?? 'Could not hold this time.');
   }
@@ -406,6 +420,7 @@ export function BookingFlow({
    * whether or not the hold was still there, and the booker is already gone.
    */
   function retry() {
+    pickedRef.current = null;
     setDir('back');
     setSelected(null);
     if (hold) void releaseAction(hold.uid);
