@@ -96,11 +96,74 @@ describe('the connection itself is pinned (DNS rebinding)', () => {
   });
 });
 
+describe('a literal address in the URL (no lookup ever runs for it)', () => {
+  // A socket handed an IP connects to it without calling `lookup`, so the
+  // pinned lookup cannot refuse these: the literal is classified before the
+  // transport is called, or the card requests a private service.
+  const inward = [
+    'https://127.0.0.1:8443/a.png',
+    'https://2130706433/a.png', // 127.0.0.1, as the URL parser reads it
+    'https://10.0.0.5/a.png',
+    'https://10.255.255.255/a.png',
+    'https://169.254.169.254/latest/meta-data/a.png',
+    'https://192.168.1.1/a.png',
+    'https://[::1]/a.png',
+    'https://[::ffff:127.0.0.1]/a.png',
+    'https://[::ffff:10.0.0.5]/a.png',
+    'https://[::ffff:169.254.169.254]/a.png',
+    'https://[fe80::1]/a.png',
+    'https://[fd00::5]/a.png',
+    'https://[64:ff9b::a00:5]/a.png', // NAT64 for 10.0.0.5
+    'https://[::7f00:1]/a.png', // IPv4-compatible 127.0.0.1
+  ];
+  for (const raw of inward) {
+    it(`refuses ${raw} before any request`, async () => {
+      const transport = vi.fn<ImageTransport>(respond('image/png'));
+      await expect(cardImageDataUri(raw, { ...publicDns, transport })).resolves.toBeNull();
+      expect(transport).not.toHaveBeenCalled();
+    });
+  }
+
+  it('still draws from a public literal, IPv4 or IPv6', async () => {
+    for (const raw of ['https://93.184.216.34/a.png', 'https://[2606:2800:220:1::1]/a.png']) {
+      const transport = vi.fn<ImageTransport>(respond('image/png'));
+      await expect(cardImageDataUri(raw, { ...publicDns, transport }), raw).resolves.toMatch(/^data:image\/png;base64,/);
+      expect(transport, raw).toHaveBeenCalledTimes(1);
+    }
+  });
+});
+
 describe('isPublicAddress', () => {
   it('classifies the ranges a card must never reach', () => {
     for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254', '100.64.0.1', '::1', 'fe80::1', 'fd00::1']) {
       expect(isPublicAddress(ip), ip).toBe(false);
     }
     for (const ip of ['93.184.216.34', '2606:2800:220:1::1']) expect(isPublicAddress(ip), ip).toBe(true);
+  });
+
+  it('judges an IPv6 address that carries an IPv4 one by that IPv4 address, in every spelling', () => {
+    for (const ip of [
+      '::ffff:127.0.0.1',
+      '::ffff:7f00:1',
+      '0:0:0:0:0:ffff:a00:5',
+      '::ffff:0:a00:5', // IPv4-translated
+      '::127.0.0.1',
+      '::7f00:1',
+      '::',
+      '64:ff9b::10.0.0.5',
+      '64:ff9b::a9fe:a9fe', // NAT64 for 169.254.169.254
+      '2002:a00:5::1', // 6to4 for 10.0.0.5
+    ]) {
+      expect(isPublicAddress(ip), ip).toBe(false);
+    }
+    for (const ip of ['::ffff:93.184.216.34', '::ffff:5db8:d822', '64:ff9b::5db8:d822', '2002:5db8:d822::1']) {
+      expect(isPublicAddress(ip), ip).toBe(true);
+    }
+  });
+
+  it('refuses multicast, site-local, local-use NAT64, a zone id on link-local, and what is not an address', () => {
+    for (const ip of ['ff02::1', 'fec0::1', '64:ff9b:1::a', 'fe80::1%eth0', 'not-an-ip', '1.2.3', '256.0.0.1']) {
+      expect(isPublicAddress(ip), ip).toBe(false);
+    }
   });
 });
