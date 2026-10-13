@@ -11,30 +11,39 @@ import { E2E, HOST, parseIcs, standInBusy, standInCalls, visitorEmail, waitForCa
 const PAGE = `/${HOST.accountCode}/${HOST.handle}/${HOST.slug}`;
 
 /**
- * The first day the month offers, then its first time. Returns the time's label.
+ * The first day the month offers, then its first or its last time. Returns the
+ * time's label.
  *
- * Only ever the FIRST time. How many times that day still has is not something
- * a test can count on: it is today or the next weekday depending on the hour
- * the suite runs (the host asks two hours' notice), and every earlier test in
- * both canvases books or holds times on it. The reschedule once took the third
- * time, and at 13:03 UTC the mobile run found only two left.
+ * Never "the third time", or any count past one. How many times that day
+ * still has is not something a test can count on: it is today or the next
+ * weekday depending on the hour the suite runs (the host asks two hours'
+ * notice), and every earlier test in both canvases books or holds times on
+ * it. The reschedule once took the third, and at 13:03 UTC the mobile run
+ * found only two left. The first and the last exist whenever the day has any.
  */
-async function pickFirstTime(page: Page): Promise<string> {
+async function pickTime(page: Page, which: 'first' | 'last' = 'first'): Promise<string> {
   const day = page.getByRole('grid').getByRole('button', { disabled: false }).first();
   await day.click();
-  const first = page
+  const times = page
     .getByRole('region', { name: /choose a time|elige una hora/i })
-    .getByRole('button', { name: /^\d{1,2}:\d{2}( [AP]M)?$/ })
-    .first();
-  await expect(first).toBeVisible();
-  const label = (await first.textContent())!.trim();
-  await first.click();
+    .getByRole('button', { name: /^\d{1,2}:\d{2}( [AP]M)?$/ });
+  await expect(times.first()).toBeVisible();
+  const chosen = which === 'first' ? times.first() : times.last();
+  const label = (await chosen.textContent())!.trim();
+  await chosen.click();
   return label;
 }
 
-/** An instant as the manage page labels it: the visitor's clock (the browser's zone), 12-hour. */
+/**
+ * The zone the manage page reads times in: the booking's, which is the zone
+ * the booking page opened in, the host's. The browser runs in the same one
+ * (`timezoneId` in playwright.config.ts), so it is also the visitor's clock.
+ */
+const ZONE = 'America/New_York';
+
+/** An instant as the manage page labels it: 12-hour, in `ZONE`. */
 const timeLabel = (iso: string) =>
-  new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
+  new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ZONE })
     .format(new Date(iso))
     .replace(/\s/g, ' ');
 
@@ -70,7 +79,7 @@ test.describe('one booking, end to end', () => {
 
   test('book: day, time, details, confirmation', async ({ page }) => {
     await page.goto(PAGE);
-    await pickFirstTime(page);
+    await pickTime(page);
     await fillDetails(page, email);
     await page.getByRole('button', { name: /confirm booking/i }).click();
     const done = page.getByRole('region', { name: /booking confirmed/i });
@@ -133,8 +142,10 @@ test.describe('one booking, end to end', () => {
     await page.goto(manageUrl);
     const creates = (await standInCalls('createEvent')).length;
     // Any time the manage page offers is a real move: the booking's own time is
-    // taken, so it is never among them.
-    const label = await pickFirstTime(page);
+    // taken, so it is never among them. The LAST of the first open day: the
+    // first sits closest to the two-hour notice line, and a run that crosses
+    // it between loading the page and moving would be refused for the notice.
+    const label = await pickTime(page, 'last');
     await page.getByRole('button', { name: /reschedule|confirm|move/i }).last().click();
     await expect(page.getByRole('main')).toContainText(/rescheduled|moved|new time|updated/i);
     // A move rotates the manage link (older emails stop opening it); the page
