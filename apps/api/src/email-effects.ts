@@ -439,6 +439,9 @@ export class EmailEffects {
       : (settings.get(side.key) ?? defaultNotificationSetting(side.key));
     return {
       ...this.toNotification(ctx, extra),
+      // The manage link is the invitee's tokenised link to THEIR booking; the
+      // host's copy is never handed it, so no host mail can carry it.
+      ...(side.audience === 'host' ? { manageUrl: null } : {}),
       audience: side.audience,
       template: resolveTemplate(side.key, setting, ctx.hostLocale),
       templateLocale: ctx.hostLocale,

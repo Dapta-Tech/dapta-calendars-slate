@@ -106,9 +106,59 @@ describe('what the lifecycle emails promise', () => {
       // it withdrew the very request the host was asked to accept.
       expect(m.html).not.toMatch(/sent your request|Enviamos tu solicitud|Cancel request|Cancelar solicitud/);
       expect(m.html).not.toContain(base.manageUrl!);
-      expect(m.html).toContain(locale === 'es' ? 'Nueva solicitud de reunión' : 'New meeting request');
+      expect(m.html).toContain(locale === 'es' ? 'Por confirmar' : 'Needs your OK');
+      expect(m.html).toContain(locale === 'es' ? 'pidió esta hora' : 'asked for this time');
       expect(m.text).toMatch(/confirm|confirma/i);
     }
+  });
+
+  it("no host copy of ANY kind carries the invitee's manage link, with or without a template", async () => {
+    // The manage link reschedules or cancels the INVITEE's booking. A host copy
+    // used to offer it as Reschedule and Cancel buttons; it must not appear in
+    // the host's HTML or text even if a caller still hands it over.
+    const all = ['confirmation', 'pending', 'declined', 'cancellation', 'reschedule', 'reminder', 'follow_up'] as const;
+    const hostKey: Record<(typeof all)[number], EmailTemplateKey> = {
+      confirmation: 'host_booked',
+      pending: 'host_booked',
+      declined: 'host_declined',
+      cancellation: 'host_cancelled',
+      reschedule: 'host_rescheduled',
+      reminder: 'host_reminder',
+      follow_up: 'follow_up',
+    };
+    for (const locale of ['en', 'es'] as const) {
+      for (const withTemplate of [true, false]) {
+        for (const kind of all) {
+          const rec = new Recorder();
+          const notifier = new BookingNotifier(rec);
+          const n: BookingNotification & { reminderLeadMinutes?: number } = {
+            ...base,
+            templateLocale: locale,
+            audience: 'host',
+            template: withTemplate ? resolveTemplate(hostKey[kind], null, locale) : null,
+            pending: kind === 'pending',
+            reminderLeadMinutes: 60,
+          };
+          const send = {
+            confirmation: () => notifier.sendConfirmation(n),
+            pending: () => notifier.sendPendingRequest(n),
+            declined: () => notifier.sendDeclined(n),
+            cancellation: () => notifier.sendCancellation(n),
+            reschedule: () => notifier.sendReschedule({ ...n, previousStartUtc: '2026-08-02T15:00:00.000Z' }),
+            reminder: () => notifier.sendReminder(n),
+            follow_up: () => notifier.sendFollowUp(n),
+          }[kind];
+          await send();
+          const m = rec.sent[0]!;
+          const label = `${kind} ${locale} ${withTemplate ? 'template' : 'legacy'}`;
+          expect(String(m.html), label).not.toContain(base.manageUrl!);
+          expect(String(m.text), label).not.toContain(base.manageUrl!);
+          expect(String(m.html), label).not.toMatch(/Manage your booking|Gestionar tu reserva|Manage your request/);
+        }
+      }
+    }
+    // The invitee's copy still has it.
+    expect((await render('confirmation', 'en', 'attendee')).html).toContain(base.manageUrl!);
   });
 
   it('Spanish emails speak Spanish', async () => {
@@ -117,7 +167,7 @@ describe('what the lifecycle emails promise', () => {
     expect(m.html).not.toContain('When');
   });
 
-  it('no email carries a signup line on this build (the footer CTA ships with #203)', async () => {
+  it('with no signup destination, no email carries a signup line', async () => {
     for (const kind of KINDS) {
       const m = await render(kind, 'en', 'attendee');
       expect(m.html, kind).not.toMatch(/utm_medium=email|signup/i);

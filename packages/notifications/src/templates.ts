@@ -209,6 +209,16 @@ export function formVars(
 }
 
 /**
+ * The invitee's tokenised manage link, for the invitee's copy only. The link
+ * reschedules or cancels THE INVITEE's booking, so a host copy never carries
+ * it: not as a button, not as a template variable, not as a text line. A host
+ * manages bookings from their own bookings page.
+ */
+export function inviteeManageUrl(n: Pick<BookingNotification, 'audience' | 'manageUrl'>): string {
+  return n.audience === 'host' ? '' : (n.manageUrl ?? '');
+}
+
+/**
  * Build the variable map for one notification. Times are formatted in the
  * ATTENDEE's time zone for both sides (v1 — the booking's reference zone).
  * `{{form.*}}` entries come from the answers snapshotted onto the notification.
@@ -235,9 +245,9 @@ export function templateVars(
     end_time: formatWhen(n.endUtc, tz, locale),
     location: n.location ?? '',
     meeting_url: n.meetingUrl ?? '',
-    manage_url: n.manageUrl ?? '',
-    cancel_link: n.manageUrl ?? '',
-    reschedule_link: n.manageUrl ?? '',
+    manage_url: inviteeManageUrl(n),
+    cancel_link: inviteeManageUrl(n),
+    reschedule_link: inviteeManageUrl(n),
     cancellation_reason: n.cancellationReason ?? '',
     previous_start_time: n.previousStartUtc ? formatWhen(n.previousStartUtc, tz, locale) : '',
     reminder_lead: formatLead(n.reminderLeadMinutes, locale),

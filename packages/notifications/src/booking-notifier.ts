@@ -8,6 +8,7 @@ import {
   type RenderedEmail,
   type TemplateLocale,
   formatWhen,
+  inviteeManageUrl,
 } from './templates';
 
 /** Everything a booking notification needs to render, provider-agnostic. */
@@ -143,7 +144,7 @@ export class BookingNotifier {
         `When: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -177,7 +178,7 @@ export class BookingNotifier {
         `When: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -240,7 +241,7 @@ export class BookingNotifier {
         n.host.name ? `Host: ${n.host.name}` : '',
         `This is pending confirmation${n.host.name ? ` by ${n.host.name}` : ''}. ` +
           `You'll get another email once it's confirmed.`,
-        n.manageUrl ? `Cancel this request: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Cancel this request: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({
@@ -294,7 +295,7 @@ export class BookingNotifier {
         `Now: ${when}`,
         n.host.name ? `Host: ${n.host.name}` : '',
         n.location ? `Where: ${n.location}` : '',
-        n.manageUrl ? `Manage your booking: ${n.manageUrl}` : '',
+        inviteeManageUrl(n) ? `Manage your booking: ${inviteeManageUrl(n)}` : '',
       ],
     }));
     return this.email.send({

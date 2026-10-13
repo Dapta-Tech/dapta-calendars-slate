@@ -116,9 +116,13 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): 
   const es = ES(locale);
   const host = v.host_name || (es ? 'el anfitrión' : 'the host');
   const who = audience === 'host' ? v.attendee_name || (es ? 'un invitado' : 'a guest') : host;
-  const manage = v.manage_url
-    ? { label: es ? 'Gestionar tu reserva' : 'Manage your booking', href: v.manage_url }
-    : null;
+  // The manage link is the INVITEE's tokenised link: Reschedule and Cancel act
+  // on their booking. A host copy never offers it; hosts manage bookings from
+  // their own bookings page.
+  const manage =
+    audience !== 'host' && v.manage_url
+      ? { label: es ? 'Gestionar tu reserva' : 'Manage your booking', href: v.manage_url }
+      : null;
   const again = v.booking_link
     ? { label: es ? 'Reservar otra hora' : 'Book another time', href: v.booking_link }
     : null;
