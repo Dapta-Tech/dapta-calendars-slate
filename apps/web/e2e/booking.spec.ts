@@ -29,7 +29,8 @@ async function pickTime(page: Page, which: 'first' | 'last' = 'first'): Promise<
     .getByRole('button', { name: /^\d{1,2}:\d{2}( [AP]M)?$/ });
   await expect(times.first()).toBeVisible();
   const chosen = which === 'first' ? times.first() : times.last();
-  const label = (await chosen.textContent())!.trim();
+  // One spelling of the space before AM/PM, whichever the page renders.
+  const label = (await chosen.textContent())!.trim().replace(/\s/g, ' ');
   await chosen.click();
   return label;
 }
