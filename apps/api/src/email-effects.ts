@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   enqueueOutbox,
   deletePendingOutbox,
@@ -24,7 +24,9 @@ import {
 import { formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { CalendarProvider } from '@slate/calendar';
-import { CALENDAR, DB, EMAIL, ENV, NOTIFIER } from './tokens';
+import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
+import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
+import { EntitlementGate } from './entitlement-gate';
 
 /**
  * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
@@ -176,7 +178,23 @@ export class EmailEffects {
     // what decides if a conferencing booking's mail is worth delaying. The PORT
     // interface only (invariant 7) — no adapter, no vendor.
     @Inject(CALENDAR) private readonly calendar?: CalendarProvider,
+    // Whether the invitee's mail carries the Dapta branding reads the cached
+    // Dapta AI verdict through these, exactly as the public pages do. Optional
+    // and last so positional constructions keep working: absent, it is the OSS
+    // default (no upstream, `open`).
+    @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
+    @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // The app's ONE gate (ENTITLEMENT_GATE), shared with every other service so
+    // one refresh per account holds app-wide. Absent (a direct construction),
+    // the service builds its own from the two values above.
+    @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
   ) {}
+
+  private _gate?: EntitlementGate;
+  private get gate(): EntitlementGate {
+    this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    return this._gate;
+  }
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
   // fire-and-forget with `void`; tests may await to assert the enqueued row.
@@ -498,10 +516,12 @@ export class EmailEffects {
    * flipped OFF after scheduling must still silence them (skip = success, the
    * row is marked done — not an error to retry).
    *
-   * The conferencing link is RESOLVED here too, and it is the only value that
-   * is (ADR 0007). Everything else stays exactly as it was snapshotted at
-   * enqueue; the link cannot be, because the calendar row that mints it drains
-   * later. `attempts` is how many times this row has already failed — it is
+   * The conferencing link is RESOLVED here too (ADR 0007), and so is whether
+   * the mail carries the Dapta branding (`showBranding`, from the cached
+   * verdict). Everything else stays exactly as it was snapshotted at enqueue;
+   * the link cannot be, because the calendar row that mints it drains later,
+   * and the branding follows a lapse that can land while a row waits.
+   * `attempts` is how many times this row has already failed; it is
    * what bounds the wait described on `ConferencingLinkPendingError`.
    */
   async deliver(
@@ -622,6 +642,11 @@ export class EmailEffects {
         );
       }
     }
+    // The branding is the second value read at delivery: a row can sit for
+    // weeks, and a lapsed subscription must bring the "Made with" line back
+    // the same way it brings the badge back. Cache only, never a wait on the
+    // upstream (`EntitlementGate.showBranding`).
+    n.showBranding = await this.gate.showBranding(n.accountId);
     switch (kind) {
       case 'confirmation':
         await this.notifier.sendConfirmation(n);

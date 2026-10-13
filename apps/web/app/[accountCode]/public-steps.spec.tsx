@@ -65,7 +65,7 @@ afterAll(() => {
   }
 });
 
-async function mount(theme: (typeof CANVASES)[number]) {
+async function mount(theme: (typeof CANVASES)[number], showBranding = true) {
   const a = availability();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -89,6 +89,7 @@ async function mount(theme: (typeof CANVASES)[number]) {
             avatarUrl={null}
             location={a.eventType.location}
             nowUtc={NOW}
+            showBranding={showBranding}
           />
         </main>
       </BrandedShell>,
@@ -128,28 +129,54 @@ describe('the details step renders byte for byte', () => {
   }
 });
 
+/** Book the first time and land on the confirmation. */
+async function confirm(el: HTMLElement) {
+  await pickFirstTime(el);
+  actions.bookAction.mockResolvedValue({
+    ok: true,
+    booking: booking({ startUtc: '2026-03-02T14:30:00.000Z', endUtc: '2026-03-02T15:15:00.000Z' }),
+  });
+  await act(async () => {
+    type(el, 'input[name="name"]', 'Sam Visitor');
+    type(el, 'input[name="email"]', 'sam@example.com');
+    type(el, 'input[name="answer_company"]', 'Example Co');
+  });
+  await act(async () => {
+    el.querySelector<HTMLFormElement>('form')!.requestSubmit();
+  });
+  expect(actions.bookAction).toHaveBeenCalledTimes(1);
+  expect(el.querySelector('input[name="name"]')).toBeNull();
+}
+
 describe('the confirmation renders byte for byte', () => {
   for (const theme of CANVASES) {
     it(theme, async () => {
       const el = await mount(theme);
-      await pickFirstTime(el);
-      actions.bookAction.mockResolvedValue({
-        ok: true,
-        booking: booking({ startUtc: '2026-03-02T14:30:00.000Z', endUtc: '2026-03-02T15:15:00.000Z' }),
-      });
-      await act(async () => {
-        type(el, 'input[name="name"]', 'Sam Visitor');
-        type(el, 'input[name="email"]', 'sam@example.com');
-        type(el, 'input[name="answer_company"]', 'Example Co');
-      });
-      await act(async () => {
-        el.querySelector<HTMLFormElement>('form')!.requestSubmit();
-      });
-      expect(actions.bookAction).toHaveBeenCalledTimes(1);
-      expect(el.querySelector('input[name="name"]')).toBeNull();
+      await confirm(el);
       await expect(pretty(el.innerHTML)).toMatchFileSnapshot(`${SNAP}/confirmation-${theme}.html`);
     });
   }
+});
+
+describe('the confirmation of an account that turned the Dapta branding off', () => {
+  it('carries no free-calendar block, and keeps everything else', async () => {
+    const on = await mount('light');
+    await confirm(on);
+    const withBranding = on.innerHTML;
+    expect(on.querySelector('.bp-growth')).not.toBeNull();
+    act(() => root?.unmount());
+    container?.remove();
+    vi.clearAllMocks();
+
+    const off = await mount('light', false);
+    await confirm(off);
+    expect(off.querySelector('.bp-growth')).toBeNull();
+    expect(off.innerHTML).not.toContain('example.com/signup');
+    // The only difference is the block itself: the card and its actions stay.
+    const block = /<aside[^>]*class="bp-growth"[^>]*>[\s\S]*?<\/aside>/;
+    expect(withBranding).toMatch(block);
+    expect(off.innerHTML).toBe(withBranding.replace(block, ''));
+  });
 });
 
 describe('the month: moving is not choosing', () => {

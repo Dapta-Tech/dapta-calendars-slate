@@ -21,7 +21,8 @@ import { cardFonts } from '@/lib/og-fonts';
  *
  * The product is named small, and only on a Dapta build (`IS_DAPTA_BRAND`): a
  * fork's card carries the host and nothing else, the same open-core rule as the
- * "Made with" badge.
+ * "Made with" badge. Like the badge, an account that turned the Dapta branding
+ * off while paying gets no product name either (the routes pass null).
  */
 export const OG_SIZE = { width: 1200, height: 630 } as const;
 

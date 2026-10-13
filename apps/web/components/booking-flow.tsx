@@ -118,6 +118,12 @@ interface Props {
    * the token travels to the server actions and is turned into a header there.
    */
   oneOffToken?: string;
+  /**
+   * The page's `showBranding` from the API (see `signupHref`): false for an
+   * account that turned the Dapta branding off while it is a paying Dapta AI
+   * customer, and the confirmation then carries no free-calendar block.
+   */
+  showBranding: boolean;
 }
 
 interface Hold {
@@ -167,6 +173,7 @@ export function BookingFlow({
   nowUtc,
   embed = false,
   oneOffToken,
+  showBranding,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
@@ -463,7 +470,7 @@ export function BookingFlow({
   if (result?.ok && result.booking) {
     const b = result.booking;
     const isPending = b.status === 'pending';
-    const ctaHref = signupHref('confirmation', accountCode);
+    const ctaHref = signupHref('confirmation', accountCode, showBranding);
     /**
      * This branch is shared by the personal and the team path, and it must
      * never be able to THROW: an unparseable instant raises `RangeError:

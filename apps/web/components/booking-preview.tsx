@@ -79,6 +79,9 @@ export function previewFlowProps({
   logoUrl?: string | null;
 }) {
   return {
+    // The preview is inert and never reaches the confirmation; the profile
+    // preview below is where the branding switch shows.
+    showBranding: true,
     accountCode: 'preview',
     ownerSlug: 'preview',
     slug: 'preview',
@@ -232,9 +235,12 @@ export function ProfilePreview({
   events,
   logoUrl = null,
   accountCode = null,
+  showBranding = true,
 }: {
   /** The account's public code, for the call to action's link (as the profile). */
   accountCode?: string | null;
+  /** What the public pages carry right now (`showing` from the branding settings). */
+  showBranding?: boolean;
   locale: string;
   displayName: string;
   accountName: string | null;
@@ -246,7 +252,7 @@ export function ProfilePreview({
 }) {
   const m = getMessages(locale);
   // The same link the public profile carries, campaign tags included.
-  const cta = signupHref('profile', accountCode);
+  const cta = signupHref('profile', accountCode, showBranding);
   return (
     <div aria-hidden="true" inert>
       <ProfileView

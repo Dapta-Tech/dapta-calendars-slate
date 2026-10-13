@@ -14,6 +14,7 @@ import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { brandingShown } from '@/lib/growth';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import {
   EMBED_ROOT_CLASS,
@@ -188,8 +189,10 @@ export default async function OneOffBookingPage({
         </main>
         {/* No account code: a spent link does not tell us whose it was, and
             attributing the growth signal to the wrong workspace is worse than
-            not attributing it. */}
-        <MadeWithBadge locale={locale} />
+            not attributing it. For the same reason it cannot honour an
+            account's choice to hide the branding: with no account behind the
+            page, the default (shown) holds. */}
+        <MadeWithBadge locale={locale} show />
         {embed ? <EmbedResizeReporter /> : null}
       </BrandedShell>
     );
@@ -254,9 +257,10 @@ export default async function OneOffBookingPage({
             nowUtc={from}
             embed={embed}
             oneOffToken={token}
+            showBranding={brandingShown(team)}
           />
         </main>
-        <MadeWithBadge locale={locale} accountCode={target.accountCode} />
+        <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(team)} />
         {embed ? <EmbedResizeReporter /> : null}
       </BrandedShell>
     );
@@ -306,9 +310,10 @@ export default async function OneOffBookingPage({
           nowUtc={from}
           embed={embed}
           oneOffToken={token}
+          showBranding={brandingShown(profile)}
         />
       </main>
-      <MadeWithBadge locale={locale} accountCode={target.accountCode} />
+      <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
     </BrandedShell>
   );

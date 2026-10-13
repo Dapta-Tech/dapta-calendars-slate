@@ -211,6 +211,9 @@ export const adminApi = {
   onboardingEarly: () => req<{ enqueued: boolean }>('POST', '/v1/me/onboarding/early'),
   // One-time browser-timezone catch-up (see AdminService.syncClientTimeZone).
   syncTimeZone: (timeZone: string) => req<{ ok: boolean }>('POST', '/v1/me/timezone-sync', { timeZone }),
+  // Dapta branding on the public pages (included with the Dapta AI subscription).
+  brandingStatus: () =>
+    req<{ hideBranding: boolean; canHide: boolean; showing: boolean }>('GET', '/v1/account/branding'),
   // Vanity account slug (premium — included with the Dapta AI subscription).
   vanityStatus: () =>
     req<{ vanitySlug: string | null; shortCode: string; canClaim: boolean }>(
@@ -509,4 +512,6 @@ export interface Profile {
     style: Record<string, unknown> | null;
   };
   eventTypes: Array<{ slug: string; title: string; lengthMinutes: number }>;
+  /** Whether the public pages carry the Dapta branding now (absent: they do). */
+  showBranding?: boolean;
 }

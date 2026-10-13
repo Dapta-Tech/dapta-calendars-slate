@@ -168,6 +168,24 @@ describe('BookingNotifier: the footer line and the invite', () => {
     expect(String(m.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
   });
 
+  it('an account that hid the branding while paying: no product line, the rest of the mail unchanged', async () => {
+    const shown = capture();
+    const hidden = capture();
+    const notifier = (p: unknown) => new BookingNotifier(p as never, { signupUrl: 'https://signup.example.test/' });
+    await notifier(shown.provider).sendConfirmation({ ...booking, showBranding: true });
+    await notifier(hidden.provider).sendConfirmation({ ...booking, showBranding: false });
+    expect(hidden.sent[0]!.html).not.toContain('Dapta Calendars');
+    expect(hidden.sent[0]!.html).not.toContain('https://signup.example.test/');
+    // Branding on renders exactly what a notification without the field renders.
+    const absent = capture();
+    await notifier(absent.provider).sendConfirmation(booking);
+    expect(shown.sent[0]!.html).toBe(absent.sent[0]!.html);
+    // Hiding removes the line and nothing else.
+    const line = /<div style="margin:0 0 6px;">.*?<\/div>/;
+    expect(shown.sent[0]!.html!.replace(line, '')).toBe(hidden.sent[0]!.html);
+    expect(String(hidden.sent[0]!.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
+  });
+
   it('a bare fork (no destination): no product in the email at all', async () => {
     const { sent, provider } = capture();
     await new BookingNotifier(provider as never).sendConfirmation(booking);

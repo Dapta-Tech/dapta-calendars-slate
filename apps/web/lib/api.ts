@@ -70,6 +70,8 @@ export interface TeamProfile {
   }>;
   /** The workspace brand kit, worn directly by a team page. Absent on an older API. */
   brand?: BrandKit | null;
+  /** Whether the team's pages carry the Dapta branding (absent: they do). */
+  showBranding?: boolean;
 }
 
 // cache(): generateMetadata and the page share one team-profile fetch per request.

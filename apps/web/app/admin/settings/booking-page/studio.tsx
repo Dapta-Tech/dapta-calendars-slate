@@ -114,6 +114,8 @@ export interface StudioInit {
   /** Where "included with your Dapta AI subscription" links (deploy-config
    *  destination, same switch as the growth badge; null = plain text). */
   subscriptionUrl: string | null;
+  /** Whether the public pages carry the Dapta branding now (the profile's `showBranding`). */
+  showBranding: boolean;
   displayName: string;
   handle: string;
   bio: string;
@@ -912,6 +914,7 @@ export function Studio(init: StudioInit) {
               {surface === 'profile' ? (
                 <ProfilePreview
                   accountCode={init.accountCode || null}
+                  showBranding={init.showBranding}
                   locale={init.locale}
                   displayName={displayName}
                   accountName={init.accountName ?? null}

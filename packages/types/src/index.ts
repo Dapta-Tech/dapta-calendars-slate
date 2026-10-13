@@ -722,6 +722,12 @@ export const bookingViewSchema = z.object({
   /** Event context for the manage page's availability-backed reschedule picker —
    *  team or personal, so the page asks the route that can SEE the event type. */
   reschedule: rescheduleContextSchema.optional(),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
 });
 export type BookingView = z.infer<typeof bookingViewSchema>;
 
@@ -742,6 +748,12 @@ export const publicProfileSchema = z.object({
     layout: z.string().nullable(),
     style: bookingPageStyleSchema.partial().nullable(),
   }),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
   eventTypes: z.array(
     z.object({
       slug: z.string(),
@@ -787,10 +799,31 @@ export const teamProfileSchema = z.object({
    *  stores no branding of its own). Optional on the wire so an older API
    *  still parses; absent and null both mean the defaults. */
   brand: brandKitSchema.nullable().optional(),
+  /**
+   * Whether this page carries the Dapta branding, as the API decided it with
+   * `showDaptaBranding` (@slate/shared). Optional on the wire so an older API
+   * still parses; absent reads as true, the default.
+   */
+  showBranding: z.boolean().optional(),
 });
 export type TeamProfile = z.infer<typeof teamProfileSchema>;
 
 // --- Account / identity ---------------------------------------------------
+
+/**
+ * Settings view of the account's Dapta branding switch (GET /v1/account/branding).
+ *  - `hideBranding`: the stored choice, kept even while it is not honoured;
+ *  - `canHide`: the account may turn the branding off now (a paying Dapta AI
+ *    customer, or a deployment with `PREMIUM_FEATURES=open`);
+ *  - `showing`: what the public pages carry right now.
+ * Off but lapsed is `hideBranding && !canHide`.
+ */
+export const brandingSettingViewSchema = z.object({
+  hideBranding: z.boolean(),
+  canHide: z.boolean(),
+  showing: z.boolean(),
+});
+export type BrandingSettingView = z.infer<typeof brandingSettingViewSchema>;
 
 export const handleAvailableResponseSchema = z.object({
   handle: z.string(),

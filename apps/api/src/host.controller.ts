@@ -215,6 +215,29 @@ export class HostController {
     return { ok: true };
   }
 
+  // --- Dapta branding on the public pages (included with the Dapta AI subscription).
+  // Everyone in the account reads it (members see the switch read-only); only
+  // owners and admins change it.
+  @Get('account/branding')
+  async brandingStatus(@Req() req: ReqLike) {
+    return this.admin.brandingStatus(await this.auth.resolveHost(req));
+  }
+
+  @Patch('account/branding')
+  async setBranding(@Req() req: ReqLike, @Body() body: { hideBranding?: unknown }) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    if (typeof body?.hideBranding !== 'boolean')
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'hideBranding (boolean) required' });
+    const out = await this.admin.setBranding(p, body.hideBranding);
+    if (!out.ok)
+      throw new ForbiddenException({
+        error: 'DAPTA_SUBSCRIPTION_REQUIRED',
+        message: 'Hiding the branding is included with your Dapta AI subscription.',
+      });
+    return out.branding;
+  }
+
   // --- Vanity account slug (premium — included with the Dapta AI subscription).
   @Get('account/vanity')
   async vanityStatus(@Req() req: ReqLike) {
