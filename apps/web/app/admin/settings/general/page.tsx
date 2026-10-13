@@ -4,6 +4,7 @@ import { getLocale } from '@/lib/locale';
 import { LanguageSwitcher } from '@/components/language-switcher';
 import { GeneralForm } from './general-form';
 import { BrandingSetting } from './branding-setting';
+import { BRANDING_UNREAD } from './branding-unread';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,7 @@ export default async function GeneralSettings() {
   const me = await adminApi.me();
   const [profile, branding] = await Promise.all([
     me?.handle ? adminApi.profile(me.accountCode, me.handle) : null,
-    adminApi.brandingStatus(),
+    adminApi.brandingStatus().catch(() => BRANDING_UNREAD),
   ]);
   const locale = await getLocale();
   const m = getMessages(locale).admin;

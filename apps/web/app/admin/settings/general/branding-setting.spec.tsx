@@ -87,10 +87,11 @@ describe('BrandingSetting', () => {
     expect(chip.getAttribute('data-status')).toBe('confirmed');
   });
 
-  it('off but lapsed: the stored choice shows greyed, with the sentence that the branding is back', () => {
+  it('off but lapsed: the stored choice shows, with the sentence that the branding is back', () => {
     const { sw, chip, el } = mount(LAPSED);
     expect(sw.getAttribute('aria-checked')).toBe('false');
-    expect(sw.disabled).toBe(true);
+    // Turning it back on never needs the subscription, so the switch is usable.
+    expect(sw.disabled).toBe(false);
     expect(chip.textContent).toBe(en.chipShowingAgain);
     expect(chip.getAttribute('data-status')).toBe('pending');
     expect(el.querySelector('[data-testid="branding-lapsed"]')!.textContent).toBe(
@@ -137,6 +138,23 @@ describe('BrandingSetting', () => {
     expect(actions.saveBrandingAction).toHaveBeenCalledWith(true);
     expect(sw.getAttribute('aria-checked')).toBe('false');
     expect(chip.textContent).toBe(en.chipHidden);
+  });
+
+  it('off but lapsed: an owner turns it back on, and the switch then rests as not paying', async () => {
+    actions.saveBrandingAction.mockResolvedValue({ ok: true, branding: NOT_PAYING });
+    const { sw, chip, el } = mount(LAPSED);
+    await act(async () => sw.click());
+    expect(actions.saveBrandingAction).toHaveBeenCalledWith(false);
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect(chip.textContent).toBe(en.chipShowing);
+    // Back on and not paying: turning it off again needs the subscription.
+    expect(sw.disabled).toBe(true);
+    expect(el.querySelector('[data-testid="branding-included"]')).not.toBeNull();
+  });
+
+  it('off but lapsed, for a member: still read-only', () => {
+    const { sw } = mount(LAPSED, { canEdit: false });
+    expect(sw.disabled).toBe(true);
   });
 
   it('a refused save leaves the switch where it was', async () => {

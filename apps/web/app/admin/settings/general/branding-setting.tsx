@@ -32,9 +32,10 @@ const CHIP: Record<BrandingMode, BookingChipStatus> = { on: 'cancelled', off: 'c
  *
  *  - on (the default): the switch is on; a paying account can turn it off.
  *  - off (entitled): the switch is off, and the pages carry no Dapta branding.
- *  - off but lapsed: the switch shows the stored choice (off) greyed, with the
+ *  - off but lapsed: the switch shows the stored choice (off), with the
  *    sentence that the subscription ended and the branding is showing again.
- *    The choice is kept, so re-subscribing brings it back untouched.
+ *    The choice is kept, so re-subscribing brings it back untouched; an owner
+ *    can still turn the branding back on, which never needs the subscription.
  *
  * Not entitled, the switch is disabled with "Included with your Dapta AI
  * subscription", linked to the Dapta AI app when the deployment names it
@@ -57,8 +58,9 @@ export function BrandingSetting({
   const { success, error } = useToast();
   const mode = brandingMode(state);
   const chipLabel = mode === 'on' ? m.chipShowing : mode === 'off' ? m.chipHidden : m.chipShowingAgain;
-  // Turning the branding off needs the subscription; a lapsed choice stays greyed.
-  const enabled = canEdit && state.canHide && !pending;
+  // Only turning the branding OFF needs the subscription. Turning it back ON
+  // never does, so a lapsed choice (stored off, not paying) stays usable.
+  const enabled = canEdit && !pending && (state.canHide || state.hideBranding);
 
   const note =
     mode === 'lapsed' ? (
