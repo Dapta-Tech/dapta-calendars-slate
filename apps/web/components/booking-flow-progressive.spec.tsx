@@ -515,6 +515,34 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     expect(reads()).toHaveLength(before + 1);
   });
 
+  it('a visitor who moved focus elsewhere during the read keeps it when the calendar returns', async () => {
+    let answer!: () => void;
+    fetchMock.mockImplementation(async () => failing());
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false });
+    for (const delay of RETRY_DELAYS_MS) await wait(delay);
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ ok: true, json: async () => ({ ok: true, slots: MARCH }) });
+        }),
+    );
+    const button = el.querySelector<HTMLButtonElement>('.bp-empty + button')!;
+    button.focus();
+    await act(async () => button.click());
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    await act(async () => {
+      answer();
+    });
+    await act(async () => {});
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
   it('"Try again" pressed while a retry is already out waits for that read', async () => {
     let answer!: () => void;
     fetchMock.mockImplementation(

@@ -395,6 +395,11 @@ body {
 .branded-surface .bp-btn-outline:hover {
   border-color: var(--accent);
 }
+/* Busy (aria-disabled keeps it focusable, so :disabled never applies). */
+.branded-surface .bp-btn-outline[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: progress;
+}
 /* template: banded shows a cover band; split widens the canvas */
 .branded-surface.tpl-banded .bp-cover {
   height: 7rem;

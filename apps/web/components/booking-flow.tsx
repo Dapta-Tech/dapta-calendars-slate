@@ -384,8 +384,9 @@ export function BookingFlow({
       if (pendingRelease.current === release) pendingRelease.current = null;
     });
   }
-  // Leaving the page ends the pick, and gives back the hold it stood on (a
-  // hold a booking consumed is already gone; releasing it changes nothing).
+  // Leaving the booking flow inside the app ends the pick, and gives back the
+  // hold it stood on. (Closing the tab runs no cleanup; that hold lapses on
+  // its own after ten minutes.)
   const holdRef = useRef(hold);
   useEffect(() => {
     holdRef.current = hold;
@@ -410,10 +411,11 @@ export function BookingFlow({
   useEffect(() => {
     if (!bookedUid) return;
     pickSeq.current += 1;
-    if (hold && hold.uid !== submittedHold.current) {
-      releaseLater(hold.uid);
-      setHold(null);
-    }
+    if (!hold) return;
+    // One the form did not carry is given back; one it carried was consumed
+    // and is only forgotten.
+    if (hold.uid !== submittedHold.current) releaseLater(hold.uid);
+    setHold(null);
   }, [bookedUid, hold]);
 
   async function pick(slot: DisplaySlot) {
@@ -434,7 +436,7 @@ export function BookingFlow({
     // carry the hold on the time being left.
     const previous = hold;
     setHold(null);
-    if (previous) await releaseAction(previous.uid);
+    if (previous) await Promise.resolve(releaseAction(previous.uid)).catch(() => {});
     if (pendingReserve.current) await Promise.resolve(pendingReserve.current).catch(() => {});
     if (pendingRelease.current) await pendingRelease.current;
     if (pickSeq.current !== seq) return; // moved on during the wait
@@ -492,7 +494,6 @@ export function BookingFlow({
   async function askAgain() {
     if (askingAgain) return;
     setAskingAgain(true);
-    setAskFailed(false);
     refocus.current = true;
     try {
       await ensureMonth(month, timeZone);
@@ -500,6 +501,11 @@ export function BookingFlow({
       setAskingAgain(false);
     }
   }
+  // "Still unavailable" holds until the times answer, so a press never first
+  // announces the old sentence as if it were its outcome.
+  useEffect(() => {
+    if (!progress.unavailable) setAskFailed(false);
+  }, [progress.unavailable]);
   useEffect(() => {
     if (!refocus.current || askingAgain) return;
     refocus.current = false;
@@ -507,6 +513,10 @@ export function BookingFlow({
       setAskFailed(true);
       return;
     }
+    // Only when focus fell with the button: a visitor who moved on during the
+    // read keeps their place.
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
     // The grid's tab stop (its roving cursor), else its first open day.
     const grid = stageRef.current?.querySelector('[role="grid"]');
     (

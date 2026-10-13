@@ -228,7 +228,10 @@ export function useProgressiveSlots({
       const have = inflight.current.reduce(addSpan, known);
       for (const gap of missingSpans(have, want)) {
         inflight.current = [...inflight.current, gap];
-        const done = loader(source, gap).then((chunk) => apply(gap, chunk, attempt));
+        const done = loader(source, gap).then(
+          (chunk) => apply(gap, chunk, attempt),
+          () => apply(gap, { ok: false }, attempt),
+        );
         inflightDone.current.set(spanKey(gap), done);
         reads.push(done);
       }
