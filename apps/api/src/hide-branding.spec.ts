@@ -7,11 +7,12 @@ import { loadServerEnv } from '@slate/config/env';
 import { ENTITLEMENT_TTL_MS } from '@slate/shared';
 import { CalendarEffects } from './calendar-effects';
 import { EmailEffects } from './email-effects';
+import { EntitlementGate } from './entitlement-gate';
 import { AdminService } from './admin.service';
 import { BookingService } from './booking.service';
 import { HostController } from './host.controller';
 import type { AuthService, HostPrincipal } from './auth.service';
-import type { EntitlementsProvider } from './entitlements.provider';
+import type { EntitlementAnswer, EntitlementsProvider } from './entitlements.provider';
 
 /**
  * A paying Dapta AI customer can turn the Dapta branding off on their public
@@ -29,10 +30,14 @@ const ENV = loadServerEnv({ NODE_ENV: 'test' } as NodeJS.ProcessEnv);
 class Upstream implements EntitlementsProvider {
   readonly enabled = true;
   calls = 0;
+  /** An outage: the adapter's `unknown`, or a provider that breaks its contract and throws. */
+  failing: null | 'unknown' | 'throw' = null;
   constructor(public paid: boolean) {}
-  isPaidCustomer(): Promise<boolean> {
+  verdict(): Promise<EntitlementAnswer> {
     this.calls++;
-    return Promise.resolve(this.paid);
+    if (this.failing === 'throw') return Promise.reject(new Error('upstream exploded'));
+    if (this.failing === 'unknown') return Promise.resolve('unknown');
+    return Promise.resolve(this.paid ? 'paid' : 'free');
   }
 }
 
@@ -57,6 +62,10 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
   let member: HostPrincipal;
   let upstream: Upstream;
 
+  // One gate per mode, shared by every service in a test, as the app shares
+  // its one ENTITLEMENT_GATE.
+  let gates: Partial<Record<'open' | 'locked', EntitlementGate>>;
+  const gateFor = (mode: 'open' | 'locked') => (gates[mode] ??= new EntitlementGate(db, upstream, mode));
   const admin = (mode: 'open' | 'locked' = 'locked') =>
     new AdminService(
       db,
@@ -64,6 +73,9 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
       new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
       upstream,
       mode,
+      undefined,
+      undefined,
+      gateFor(mode),
     );
   const booking = (mode: 'open' | 'locked' = 'locked') =>
     new BookingService(
@@ -74,6 +86,7 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
       undefined,
       upstream,
       mode,
+      gateFor(mode),
     );
   const profileShows = async (svc: BookingService) => (await svc.profile('acme', 'alex-rivera'))!.showBranding;
 
@@ -89,6 +102,7 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
     owner = { accountId, memberId: alex, role: 'owner' };
     member = { accountId, memberId: jordan, role: 'member' };
     upstream = new Upstream(true);
+    gates = {};
   });
 
   afterEach(() => {
@@ -241,6 +255,81 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
     expect(String(log.mock.calls[1]![0])).toContain('free -> paid');
   });
 
+  it("an upstream that cannot answer never shows a paying host's branding again, nor says it lapsed", async () => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    await admin().setBranding(owner, true); // paid at T0
+    const svc = booking();
+    const settings = admin();
+
+    // The upstream goes down (a timeout or a 5xx: the adapter's `unknown`).
+    upstream.failing = 'unknown';
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS);
+    const calls = upstream.calls;
+    expect(await profileShows(svc)).toBe(false);
+    await settle();
+    expect(upstream.calls).toBe(calls + 1);
+    // The previous verdict stands: the page stays clean, Settings says "off"
+    // (not lapsed), and nothing flipped.
+    expect(await profileShows(svc)).toBe(false);
+    expect(await settings.brandingStatus(owner)).toEqual({ hideBranding: true, canHide: true, showing: false });
+    expect(log).not.toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]![0])).toContain(accountId);
+    expect(String(warn.mock.calls[0]![0])).not.toMatch(/@/);
+
+    // It backs off instead of asking on every visit: nothing for the first minute.
+    for (let i = 0; i < 5; i++) await profileShows(svc);
+    await settings.brandingStatus(owner);
+    await settle();
+    expect(upstream.calls).toBe(calls + 1);
+    // Then one more try, and the wait doubles.
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS + 60_000);
+    await profileShows(svc);
+    await settle();
+    expect(upstream.calls).toBe(calls + 2);
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS + 60_000 + 119_999);
+    await profileShows(svc);
+    await settle();
+    expect(upstream.calls).toBe(calls + 2);
+
+    // The upstream recovers with a real lapse: that one counts.
+    upstream.failing = null;
+    upstream.paid = false;
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS + 180_000);
+    await profileShows(svc);
+    await settle();
+    expect(await profileShows(svc)).toBe(true);
+    expect(String(log.mock.calls[0]![0])).toContain('paid -> free');
+  });
+
+  it('a provider that throws: the pages show the branding, Settings still answers, and it backs off', async () => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    await admin().setBranding(owner, true);
+    const svc = booking();
+    upstream.failing = 'throw';
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS);
+    const calls = upstream.calls;
+    expect(await profileShows(svc)).toBe(false); // this visit rendered from the cache
+    await settle();
+    // Fail closed on the public side, until an answer lands.
+    expect(await profileShows(svc)).toBe(true);
+    // Settings answers (no 500) and does not call it a lapse.
+    const status = await admin().brandingStatus(owner);
+    expect(status.canHide).toBe(true);
+    expect(status.hideBranding).toBe(true);
+    // One call, not one per visit.
+    for (let i = 0; i < 5; i++) await profileShows(svc);
+    await settle();
+    expect(upstream.calls).toBe(calls + 1);
+
+    // A good answer clears it.
+    upstream.failing = null;
+    vi.setSystemTime(T0 + ENTITLEMENT_TTL_MS + 60_000);
+    await profileShows(svc);
+    await settle();
+    expect(await profileShows(svc)).toBe(false);
+  });
+
   it("the invitee's email follows the same switch, decided when the mail is sent", async () => {
     const sent: string[] = [];
     const provider = {
@@ -257,6 +346,7 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
       undefined,
       upstream,
       'locked',
+      gateFor('locked'),
     );
     // A queued row as the enqueue side snapshots it, here with a stale
     // `showBranding: false`: delivery reads the account, never the snapshot.

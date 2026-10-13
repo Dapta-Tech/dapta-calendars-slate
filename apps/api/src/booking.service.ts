@@ -42,7 +42,7 @@ import {
   type TeamProfile,
 } from '@slate/types';
 import { z } from 'zod';
-import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
+import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 
@@ -148,12 +148,16 @@ export class BookingService {
     // CRM above: absent, it is the OSS default (no upstream, `open`).
     @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
     @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // The app's ONE gate (ENTITLEMENT_GATE), shared with every other service so
+    // one refresh per account holds app-wide. Absent (a direct construction),
+    // the service builds its own from the two values above.
+    @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
   ) {}
 
   private _gate?: EntitlementGate;
   /** The cached-verdict reader. Public paths use `showBranding`, which never waits on the upstream. */
   private get gate(): EntitlementGate {
-    this._gate ??= new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
     return this._gate;
   }
 

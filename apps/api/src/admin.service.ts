@@ -88,7 +88,7 @@ import {
   type IntegrationStatusView,
   type BrandingSettingView,
 } from '@slate/types';
-import { getMessages, showDaptaBranding } from '@slate/shared';
+import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
 import { CalendarEffects } from './calendar-effects';
@@ -97,7 +97,7 @@ import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
-import { DB, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
+import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
 
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
@@ -121,6 +121,10 @@ export class AdminService {
     // lifecycle simply enqueues no CRM row, which is exactly what those specs
     // (and a bare fork) already expect.
     @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
+    // The app's ONE gate (ENTITLEMENT_GATE), shared with every other service so
+    // one refresh per account holds app-wide. Absent (a direct construction),
+    // the service builds its own from `entitlements` and `premiumMode`.
+    @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
   ) {}
 
   async me(p: HostPrincipal) {
@@ -976,7 +980,7 @@ export class AdminService {
 
   private _gate?: EntitlementGate;
   private get gate(): EntitlementGate {
-    this._gate ??= new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
     return this._gate;
   }
 
@@ -1012,16 +1016,13 @@ export class AdminService {
    */
   async brandingStatus(p: HostPrincipal): Promise<BrandingSettingView> {
     const canHide = await this.isEntitled(p.accountId);
+    // Read after the inline refresh, so `showing` is exactly what the public
+    // pages decide from the same gate (an upstream outage included).
     const row = await getBrandingSwitch(this.db, p.accountId);
-    const hideBranding = row?.hideBranding ?? false;
     return {
-      hideBranding,
+      hideBranding: row?.hideBranding ?? false,
       canHide,
-      showing: showDaptaBranding({
-        hideBranding,
-        entitlement: canHide ? 'paid' : 'free',
-        premiumMode: this.premiumMode,
-      }),
+      showing: this.gate.showBrandingFor(row),
     };
   }
 

@@ -24,7 +24,7 @@ import {
 import { formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { CalendarProvider } from '@slate/calendar';
-import { CALENDAR, DB, EMAIL, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
+import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 
@@ -184,11 +184,15 @@ export class EmailEffects {
     // default (no upstream, `open`).
     @Optional() @Inject(ENTITLEMENTS) private readonly entitlements: EntitlementsProvider = new DisabledEntitlementsProvider(),
     @Optional() @Inject(PREMIUM_MODE) private readonly premiumMode: 'open' | 'locked' = 'open',
+    // The app's ONE gate (ENTITLEMENT_GATE), shared with every other service so
+    // one refresh per account holds app-wide. Absent (a direct construction),
+    // the service builds its own from the two values above.
+    @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
   ) {}
 
   private _gate?: EntitlementGate;
   private get gate(): EntitlementGate {
-    this._gate ??= new EntitlementGate(this.db, this.entitlements, this.premiumMode);
+    this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
     return this._gate;
   }
 

@@ -2,6 +2,12 @@ import { Logger } from '@nestjs/common';
 import { cacheEntitlement, getBrandingSwitch, sql, type BrandingSwitchRow, type Db } from '@slate/db';
 import { entitlementIsStale, showDaptaBranding, type PremiumMode } from '@slate/shared';
 import type { EntitlementsProvider } from './entitlements.provider';
+import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, PREMIUM_MODE } from './tokens';
+
+/** The first wait after an upstream that could not answer; it doubles per failure. */
+export const ENTITLEMENT_FAILURE_BACKOFF_MS = 60_000;
+/** The longest wait between two tries while the upstream keeps failing. */
+export const ENTITLEMENT_FAILURE_BACKOFF_MAX_MS = 30 * 60_000;
 
 /**
  * The cached Dapta AI entitlement verdict, read two ways.
@@ -23,12 +29,23 @@ import type { EntitlementsProvider } from './entitlements.provider';
  *    next visit. A page nobody visits shows nothing to anyone.
  *
  * One refresh per account at a time (`inflight`), so a burst of visits makes
- * one upstream call. A failed refresh is the provider's `false`, cached like
- * any answer, which errs toward showing the branding.
+ * one upstream call. The app registers ONE gate (`ENTITLEMENT_GATE`) and every
+ * service shares it, so that rule holds across the public pages, the emails and
+ * Settings.
+ *
+ * When the upstream cannot answer (`unknown`: a timeout, a 5xx), nothing is
+ * cached and nothing flips: the previous verdict stands, so a paying host keeps
+ * the branding off and Settings never says their subscription ended. The gate
+ * asks again after a short backoff (1 min, doubling, at most 30 min) instead of
+ * on every visit. A provider that THROWS breaks its contract: the same backoff
+ * applies, the public pages show the branding until an answer lands (fail
+ * closed), and Settings still answers.
  */
 export class EntitlementGate {
   private readonly log = new Logger('Entitlements');
-  private readonly inflight = new Map<string, Promise<boolean>>();
+  private readonly inflight = new Map<string, Promise<'paid' | 'free' | null>>();
+  /** Accounts whose last ask failed: when to ask again, and whether it threw. */
+  private readonly failures = new Map<string, { count: number; retryAt: number; threw: boolean }>();
 
   constructor(
     private readonly db: Db,
@@ -42,10 +59,8 @@ export class EntitlementGate {
     if (this.premiumMode === 'open') return true;
     const row = await getBrandingSwitch(this.db, accountId);
     if (!row) return false;
-    if (!entitlementIsStale(row.entitlementCheckedAt, this.now()) || !this.provider.enabled) {
-      return row.entitlement === 'paid';
-    }
-    return this.refresh(row);
+    if (!this.shouldAsk(row)) return row.entitlement === 'paid';
+    return (await this.refresh(row)) === 'paid';
   }
 
   /** Public path: does this account's page carry the Dapta branding? Never blocks upstream. */
@@ -60,14 +75,11 @@ export class EntitlementGate {
     if (!row) return true;
     // Only an account that asked to hide the branding has a verdict worth
     // keeping fresh from the public side; everyone else shows it regardless.
-    if (
-      row.hideBranding &&
-      this.premiumMode === 'locked' &&
-      this.provider.enabled &&
-      entitlementIsStale(row.entitlementCheckedAt, this.now())
-    ) {
+    if (row.hideBranding && this.premiumMode === 'locked' && this.shouldAsk(row)) {
       void this.refresh(row).catch(() => undefined);
     }
+    // A provider that threw: show the branding until an answer lands.
+    if (row.hideBranding && this.premiumMode === 'locked' && this.failures.get(row.accountId)?.threw) return true;
     return showDaptaBranding({
       hideBranding: row.hideBranding,
       entitlement: row.entitlement,
@@ -75,34 +87,75 @@ export class EntitlementGate {
     });
   }
 
-  /** Ask the upstream once per account at a time, cache the answer, log a flip. */
-  private refresh(row: BrandingSwitchRow): Promise<boolean> {
+  /** Is the cached verdict worth asking about now: stale, wired, and not backing off? */
+  private shouldAsk(row: BrandingSwitchRow): boolean {
+    if (!this.provider.enabled || !entitlementIsStale(row.entitlementCheckedAt, this.now())) return false;
+    const failed = this.failures.get(row.accountId);
+    return !failed || this.now() >= failed.retryAt;
+  }
+
+  /**
+   * Ask the upstream once per account at a time, cache the answer, log a flip.
+   * Resolves to the verdict that now stands: the new one, or, when the
+   * upstream fails or throws, the one already cached. Only a database error
+   * rejects.
+   */
+  private refresh(row: BrandingSwitchRow): Promise<'paid' | 'free' | null> {
     const running = this.inflight.get(row.accountId);
     if (running) return running;
-    const job = (async () => {
-      const acc = await this.db.get<{ external_id: string | null }>(
-        sql`SELECT external_id FROM account WHERE id = ${row.accountId} LIMIT 1`,
-      );
-      // Keyed by the account owner's email (the upstream resolves customers by
-      // owner email) plus the org id.
-      const owner = await this.db.get<{ email: string | null }>(
-        sql`SELECT email FROM member
-            WHERE account_id = ${row.accountId} AND role = 'owner' AND status = 'active'
-            ORDER BY created_at ASC LIMIT 1`,
-      );
-      const paid = await this.provider.isPaidCustomer({
-        ownerEmail: owner?.email,
-        externalOrgId: acc?.external_id ?? null,
-      });
-      const verdict = paid ? 'paid' : 'free';
-      await cacheEntitlement(this.db, row.accountId, verdict);
-      if (row.entitlement && row.entitlement !== verdict) {
-        // The account id only: never the owner's email.
-        this.log.log(`entitlement verdict flipped ${row.entitlement} -> ${verdict} account=${row.accountId}`);
-      }
-      return paid;
-    })().finally(() => this.inflight.delete(row.accountId));
+    const job = this.ask(row).finally(() => this.inflight.delete(row.accountId));
     this.inflight.set(row.accountId, job);
     return job;
   }
+
+  private async ask(row: BrandingSwitchRow): Promise<'paid' | 'free' | null> {
+    let answer: 'paid' | 'free' | 'unknown';
+    let threw = false;
+    try {
+      answer = await this.verdictFor(row.accountId);
+    } catch {
+      answer = 'unknown';
+      threw = true;
+    }
+    if (answer === 'unknown') {
+      const count = (this.failures.get(row.accountId)?.count ?? 0) + 1;
+      const wait = Math.min(ENTITLEMENT_FAILURE_BACKOFF_MS * 2 ** (count - 1), ENTITLEMENT_FAILURE_BACKOFF_MAX_MS);
+      this.failures.set(row.accountId, { count, retryAt: this.now() + wait, threw });
+      // The account id only: never the owner's email, never the error text.
+      this.log.warn(
+        `entitlement check ${threw ? 'threw' : 'could not answer'}, keeping ${row.entitlement ?? 'no verdict'}, retry in ${Math.round(wait / 1000)}s account=${row.accountId}`,
+      );
+      return row.entitlement;
+    }
+    this.failures.delete(row.accountId);
+    await cacheEntitlement(this.db, row.accountId, answer);
+    if (row.entitlement && row.entitlement !== answer) {
+      // The account id only: never the owner's email.
+      this.log.log(`entitlement verdict flipped ${row.entitlement} -> ${answer} account=${row.accountId}`);
+    }
+    return answer;
+  }
+
+  /** The upstream's answer for one account, keyed as the upstream resolves customers. */
+  private async verdictFor(accountId: string): Promise<'paid' | 'free' | 'unknown'> {
+    const acc = await this.db.get<{ external_id: string | null }>(
+      sql`SELECT external_id FROM account WHERE id = ${accountId} LIMIT 1`,
+    );
+    // Keyed by the account owner's email (the upstream resolves customers by
+    // owner email) plus the org id.
+    const owner = await this.db.get<{ email: string | null }>(
+      sql`SELECT email FROM member
+          WHERE account_id = ${accountId} AND role = 'owner' AND status = 'active'
+          ORDER BY created_at ASC LIMIT 1`,
+    );
+    return this.provider.verdict({ ownerEmail: owner?.email, externalOrgId: acc?.external_id ?? null });
+  }
 }
+
+/** The app registers exactly one gate; every service injects it (`ENTITLEMENT_GATE`). */
+export const entitlementGateProvider = {
+  provide: ENTITLEMENT_GATE,
+  useFactory: (db: Db, provider: EntitlementsProvider, premiumMode: PremiumMode) =>
+    new EntitlementGate(db, provider, premiumMode),
+  inject: [DB, ENTITLEMENTS, PREMIUM_MODE],
+};

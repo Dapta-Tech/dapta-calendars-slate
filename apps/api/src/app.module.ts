@@ -29,6 +29,7 @@ import { OutboxWorker } from './outbox.worker';
 import { RateLimitGuard, createRateLimiter } from './rate-limit';
 import { createCalendarProviderAsync } from './calendar.provider';
 import { resolveEntitlementsProvider } from './entitlements.provider';
+import { entitlementGateProvider } from './entitlement-gate';
 import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
 import type { Db } from '@slate/db';
@@ -122,6 +123,10 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       useFactory: (env: ServerEnv) => env.PREMIUM_FEATURES,
       inject: [ENV],
     },
+    // ONE cached-verdict gate for the whole app: the public pages, the emails
+    // and Settings share its in-flight map and failure backoff, so a burst
+    // anywhere makes one upstream call per account.
+    entitlementGateProvider,
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     {
       provide: AUTH_PROVIDER,
