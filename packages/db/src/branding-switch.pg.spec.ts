@@ -6,7 +6,7 @@ import { cacheEntitlement } from './short-links';
 import { getBrandingSwitch, getBrandingSwitchByCode, setHideBranding } from './branding-switch';
 
 /**
- * The branding switch against a REAL Postgres: migration 0022's column, its
+ * The branding switch against a REAL Postgres: migration 0024's column, its
  * default for an account inserted without it, and the BIGINT verdict time read
  * back as a number. Every fixture is created here and unique per run (see
  * onboarding.pg.spec.ts for why a shared database rules out `seed()`).
