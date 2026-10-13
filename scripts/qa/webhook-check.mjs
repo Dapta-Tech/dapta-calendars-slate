@@ -12,25 +12,28 @@
 // receivers are reached through a public https tunnel to --port; pass its URL
 // as --public. Webhooks are created through the host API of --api, which must
 // be a LOCAL instance on the local auth provider (x-slate-email), never a
-// shared deployment.
+// shared deployment: the script refuses an --api that does not resolve to
+// loopback, with no override.
 //
-//   cloudflared tunnel --url http://127.0.0.1:4520     # prints https://<x>.trycloudflare.com
+// It creates ONE booking (so each subscriber gets one booking.created) and
+// cancels it as the host at the end, along with the two webhooks, whatever
+// happened in between.
+//
+//   <any https tunnel> to http://127.0.0.1:4520        # prints https://<tunnel>
 //   node scripts/qa/webhook-check.mjs --api http://localhost:4411 \
-//     --public https://<x>.trycloudflare.com --host-email alex@example.com \
+//     --public https://<tunnel> --host-email alex@example.com \
 //     --page acme/alex-rivera/intro-call [--watch 90]
 import { createServer } from 'node:http';
+import { parseArgs, requireLoopback } from './target-guard.mjs';
 
-const args = Object.fromEntries(
-  process.argv
-    .slice(2)
-    .reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
-);
+const args = parseArgs(process.argv.slice(2));
 for (const k of ['api', 'public', 'host-email', 'page'])
   if (!args[k]) {
     console.error(`missing --${k}`);
     process.exit(2);
   }
 const api = args.api.replace(/\/$/, '');
+await requireLoopback(api);
 const pub = args.public.replace(/\/$/, '');
 const port = Number(args.port ?? 4520);
 const watchS = Number(args.watch ?? 90);
@@ -49,6 +52,7 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(port, '127.0.0.1', r));
 
 const created = [];
+let bookedUid = null;
 async function webhook(path) {
   const r = await fetch(`${api}/v1/webhooks`, {
     method: 'POST',
@@ -83,6 +87,9 @@ try {
     }),
   });
   if (b.status !== 201) throw new Error(`booking -> ${b.status} ${await b.text()}`);
+  const booked = await b.json().catch(() => ({}));
+  bookedUid = booked.uid ?? booked.booking?.uid ?? null;
+  if (!bookedUid) console.log('WARN: the booking answered without a uid; cancel it by hand');
   console.log(`booked ${startUtc}; watching deliveries for ${watchS}s`);
   await new Promise((r) => setTimeout(r, watchS * 1000));
 
@@ -100,6 +107,15 @@ try {
     failed = true;
   }
 } finally {
+  if (bookedUid) {
+    const c = await fetch(`${api}/v1/host/bookings/${encodeURIComponent(bookedUid)}/cancel`, {
+      method: 'POST',
+      headers: asHost,
+      body: JSON.stringify({ reason: 'webhook-check cleanup' }),
+    }).catch((err) => ({ ok: false, status: String(err) }));
+    console.log(c.ok ? `cancelled the check's booking ${bookedUid}` : `WARN: could not cancel ${bookedUid} (${c.status}); cancel it by hand`);
+    if (!c.ok) failed = true;
+  }
   for (const id of created.filter(Boolean)) await fetch(`${api}/v1/webhooks/${id}`, { method: 'DELETE', headers: asHost });
   server.close();
 }

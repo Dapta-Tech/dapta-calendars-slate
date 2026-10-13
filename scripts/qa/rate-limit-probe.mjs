@@ -5,19 +5,22 @@
 // buy a fresh bucket.
 //
 //   node scripts/qa/rate-limit-probe.mjs --api https://api.example.test \
-//     --page <accountCode>/<handle> [--max 120] [--pause 70]
+//     --page <accountCode>/<handle> [--max 120] [--pause 70] \
+//     [--i-know-this-is-not-prod] [--deny-hosts <host,...>]
 //
 // Reads the public profile route only (no calendar read, no write). Stops at
 // the first 5xx. --pause waits for the bucket to refill between the two parts.
-const args = Object.fromEntries(
-  process.argv
-    .slice(2)
-    .reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
-);
+//
+// Refuses a non-loopback --api unless --i-know-this-is-not-prod is passed, and
+// always refuses a host on --deny-hosts <host,...> (scripts/qa/target-guard.mjs).
+import { guardTarget, parseArgs } from './target-guard.mjs';
+
+const args = parseArgs(process.argv.slice(2));
 if (!args.api || !args.page) {
   console.error('usage: --api <base url> --page <accountCode>/<handle> [--max 120]');
   process.exit(2);
 }
+await guardTarget(args);
 const [accountCode, handle] = args.page.split('/');
 const url = `${args.api.replace(/\/$/, '')}/v1/profiles/${encodeURIComponent(accountCode)}/${encodeURIComponent(handle)}`;
 const max = Number(args.max ?? 120);

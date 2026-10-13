@@ -13,18 +13,22 @@
 //
 //   node scripts/qa/hold-race.mjs --api https://api.example.test \
 //     --page <accountCode>/<handle>/<slug> [--visitors 20] [--days-out 3] \
-//     [--busy busy.json] [--probes 5]
+//     [--busy busy.json] [--probes 5] [--i-know-this-is-not-prod] [--deny-hosts <host,...>]
+//
+// Refuses a non-loopback --api unless --i-know-this-is-not-prod is passed, and
+// always refuses a host on --deny-hosts <host,...> (scripts/qa/target-guard.mjs).
+//
+// Interrupted (Ctrl-C, SIGTERM), it gives back every hold it won before it
+// exits: the page caps live holds, and a dead run must not fill that cap for
+// ten minutes.
 //
 // busy.json: { "busy": [{ "startUtc": "...", "endUtc": "..." }] }, the host's
 // busy times exported from their calendar (the same shape the calendar contract
 // answers with).
 import { readFileSync } from 'node:fs';
+import { guardTarget, parseArgs } from './target-guard.mjs';
 
-const args = Object.fromEntries(
-  process.argv
-    .slice(2)
-    .reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
-);
+const args = parseArgs(process.argv.slice(2));
 if (!args.api || !args.page) {
   console.error('usage: --api <base url> --page <accountCode>/<handle>/<slug> [--visitors 20] [--busy busy.json]');
   process.exit(2);
@@ -36,6 +40,7 @@ const daysOut = Number(args['days-out'] ?? 3);
 const probes = Number(args.probes ?? 5);
 const headers = { 'content-type': 'application/json', 'user-agent': 'calendars-qa-holds/1.0' };
 const won = [];
+await guardTarget(args);
 
 async function availability(fromMs, toMs) {
   const qs = new URLSearchParams({
@@ -65,6 +70,17 @@ async function releaseAll() {
   for (const reservationUid of won.splice(0)) {
     await fetch(`${api}/v1/reservations/release`, { method: 'POST', headers, body: JSON.stringify({ reservationUid }) });
   }
+}
+
+// Ctrl-C or a kill mid-race: give every won hold back, then exit.
+let interrupted = false;
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    if (interrupted) process.exit(130);
+    interrupted = true;
+    console.error(`${signal}: releasing ${won.length} hold(s) before exiting`);
+    releaseAll().finally(() => process.exit(130));
+  });
 }
 
 const tally = (rows) =>

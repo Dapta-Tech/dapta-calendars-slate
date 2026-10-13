@@ -7,7 +7,11 @@
 //
 //   node scripts/qa/load-availability.mjs --api https://api.example.test \
 //     --page <accountCode>/<handle>/<slug> [--levels 1,5,10,20] [--reads 30] \
-//     [--window month|<days>] [--pause 70] [--out results.json]
+//     [--window month|<days>] [--pause 70] [--out results.json] \
+//     [--i-know-this-is-not-prod] [--deny-hosts <host,...>]
+//
+// Refuses a non-loopback --api unless --i-know-this-is-not-prod is passed, and
+// always refuses a host on --deny-hosts <host,...> (scripts/qa/target-guard.mjs).
 //
 // --window month  reads what the month grid shows: from now to the end of the
 //                 sixth week of the current month's grid (the default).
@@ -17,16 +21,14 @@
 // Run by hand, against a development deployment only: every read reaches the
 // host's real calendar through the deployment's calendar backend.
 import { writeFileSync } from 'node:fs';
+import { guardTarget, parseArgs } from './target-guard.mjs';
 
-const args = Object.fromEntries(
-  process.argv
-    .slice(2)
-    .reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []),
-);
+const args = parseArgs(process.argv.slice(2));
 if (!args.api || !args.page) {
   console.error('usage: --api <base url> --page <accountCode>/<handle>/<slug> [--levels 1,5,10,20] [--reads 30]');
   process.exit(2);
 }
+await guardTarget(args);
 const [accountCode, handle, slug] = args.page.split('/');
 const levels = (args.levels ?? '1,5,10,20').split(',').map(Number);
 const reads = Number(args.reads ?? 30);
