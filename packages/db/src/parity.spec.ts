@@ -278,6 +278,31 @@ describe('parity (SQLite in-memory)', () => {
     expect(Number(left?.n)).toBe(0);
   });
 
+  it('a hold books only the event it holds (a personal event has one host), at that very time', async () => {
+    const { sql } = await import('drizzle-orm');
+    const alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    const other = await createEventType(db, accountId, alexId, { slug: 'other-call', title: 'Other Call', lengthMinutes: 30 });
+    expect(other.ok).toBe(true);
+    const startMs = await firstSlotMs(db);
+    const held = await reserveSlot(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', startMs });
+    if (!held.ok) throw new Error('setup: hold refused');
+    const attendee = { name: 'Sam', email: 'sam-other@example.com', timeZone: 'America/New_York' };
+    // Same host, same time, another event.
+    const otherEvent = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'other-call',
+      startMs,
+      attendee,
+      reservationUid: held.uid,
+    });
+    expect(otherEvent.ok).toBe(false);
+    if (!otherEvent.ok) expect(otherEvent.reason).toBe('RESERVATION_EXPIRED');
+    // A refused booking leaves the hold where it was, for the time it holds.
+    const left = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE uid = ${held.uid}`);
+    expect(Number(left?.n)).toBe(1);
+  });
+
   it('M5 — reserveSlot rejects an instant that is not a real bookable slot', async () => {
     // 03:17 on the first offered day is never an offered slot (outside 9–17 and
     // off the 30-min grid) → INVALID_SLOT, so holds can't blank out availability.
