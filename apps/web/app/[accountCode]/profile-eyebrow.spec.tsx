@@ -4,7 +4,8 @@
  * "Riley Chen") and nothing when it repeats it: a one-person workspace is often
  * named after its owner, and the page read "Riley" over "Riley". The rule lives
  * in `ProfileView`, so the person profile, the team landing and the studio
- * preview (`preview-parity.spec.tsx`) all apply it.
+ * preview (`preview-parity.spec.tsx`) all apply it; the two routes title the
+ * tab by it too.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -26,8 +27,8 @@ vi.mock('next/navigation', () => ({
   },
 }));
 
-import ProfilePage from './[handle]/page';
-import TeamPage from './team/[teamSlug]/page';
+import ProfilePage, { generateMetadata as profileMetadata } from './[handle]/page';
+import TeamPage, { generateMetadata as teamMetadata } from './team/[teamSlug]/page';
 import { profileEyebrow } from '@/components/profile-view';
 import { ACCOUNT, BASE_STYLE, TIME_ZONE, profile } from './__fixtures__/public-surface';
 
@@ -81,6 +82,19 @@ describe('the person profile', () => {
     expect(eyebrowOf(html)).toBeNull();
     expect(html).toContain('<h1 class="bp-profile-name">Riley Chen</h1>');
   });
+
+  it('titles the tab by the same rule', async () => {
+    const meta = () =>
+      profileMetadata({
+        params: Promise.resolve({ accountCode: ACCOUNT.code, handle: 'riley-chen' }),
+        searchParams: Promise.resolve({}),
+      });
+    const p = profile(BASE_STYLE);
+    api.getProfile.mockResolvedValue(p);
+    expect((await meta()).title).toBe('Riley Chen · Northwind Studio');
+    api.getProfile.mockResolvedValue({ ...p, account: { ...p.account, name: ' riley  chen ' } });
+    expect((await meta()).title).toBe('Riley Chen');
+  });
 });
 
 describe('the team landing', () => {
@@ -105,5 +119,17 @@ describe('the team landing', () => {
     const html = await render(page());
     expect(eyebrowOf(html)).toBeNull();
     expect(html).toContain('<h1 class="bp-profile-name">Northwind Studio</h1>');
+  });
+
+  it('titles the tab by the same rule', async () => {
+    const meta = () =>
+      teamMetadata({
+        params: Promise.resolve({ accountCode: ACCOUNT.code, teamSlug: 'studio' }),
+        searchParams: Promise.resolve({}),
+      });
+    api.getTeamProfile.mockResolvedValue(team('Studio Team'));
+    expect((await meta()).title).toBe('Studio Team · Northwind Studio');
+    api.getTeamProfile.mockResolvedValue(team('NORTHWIND STUDIO'));
+    expect((await meta()).title).toBe('NORTHWIND STUDIO');
   });
 });
