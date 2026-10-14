@@ -218,16 +218,44 @@ export function inviteeManageUrl(n: Pick<BookingNotification, 'audience' | 'mana
   return n.audience === 'host' ? '' : (n.manageUrl ?? '');
 }
 
+/** Whether the runtime can format in `tz` (the check `@slate/shared` makes). */
+function readableTimeZone(tz: string | null | undefined): tz is string {
+  if (!tz) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The zone a message's times are written in: the reader's own. The host's copy
+ * reads in the host's zone and the invitee's copy in the invitee's, so neither
+ * side has to convert a time stated in the other's. Co-hosts share the host
+ * side's one message, so they read the organizer's zone. A host copy whose
+ * payload carries no readable host zone (queued before it was carried, built by
+ * a fork, or a corrupt stored value) and a legacy message with no audience keep
+ * the attendee's zone.
+ */
+export function recipientTimeZone(
+  n: Pick<BookingNotification, 'audience' | 'host' | 'attendee'>,
+): string {
+  if (n.audience === 'host' && readableTimeZone(n.host.timeZone)) return n.host.timeZone;
+  return n.attendee.timeZone ?? 'UTC';
+}
+
 /**
  * Build the variable map for one notification. Times are formatted in the
- * ATTENDEE's time zone for both sides (v1 — the booking's reference zone).
- * `{{form.*}}` entries come from the answers snapshotted onto the notification.
+ * reader's zone (`recipientTimeZone`), subject included, since the subject
+ * renders from these same variables. `{{form.*}}` entries come from the answers
+ * snapshotted onto the notification.
  */
 export function templateVars(
   n: BookingNotification & { reminderLeadMinutes?: number },
   locale: TemplateLocale = 'en',
 ): TemplateVarMap {
-  const tz = n.attendee.timeZone ?? 'UTC';
+  const tz = recipientTimeZone(n);
   const pendingNote = n.pending
     ? locale === 'es'
       ? 'Esta solicitud está pendiente de tu confirmación.'

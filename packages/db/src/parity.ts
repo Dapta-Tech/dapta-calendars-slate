@@ -1649,7 +1649,12 @@ export interface BookingNotificationContext {
   location: string | null;
   /** The kind snapshotted on the booking; null on pre-kind rows. */
   locationKind: string | null;
-  host: { name: string | null; email: string | null };
+  /**
+   * `timeZone` is the host member's own zone (`member.time_zone`, the one the
+   * host's bookings page reads), so the host's copy of an email states the time
+   * the way the host reads it. Null on a host-less booking.
+   */
+  host: { name: string | null; email: string | null; timeZone: string | null };
   attendee: { name: string; email: string; timeZone: string };
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
   coHosts: Array<{ name: string | null; email: string | null }>;
@@ -1707,6 +1712,7 @@ export async function loadBookingNotificationContext(
     host_member_id: string | null;
     host_name: string | null;
     host_email: string | null;
+    host_tz: string | null;
     att_name: string | null;
     att_email: string | null;
     att_tz: string | null;
@@ -1719,7 +1725,7 @@ export async function loadBookingNotificationContext(
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
-               m.locale AS host_locale, m.handle AS host_handle,
+               m.time_zone AS host_tz, m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
@@ -1751,7 +1757,7 @@ export async function loadBookingNotificationContext(
     status: row.status,
     location: row.location,
     locationKind: row.location_kind,
-    host: { name: row.host_name, email: row.host_email },
+    host: { name: row.host_name, email: row.host_email, timeZone: row.host_tz },
     attendee: {
       name: row.att_name ?? '',
       email: row.att_email,

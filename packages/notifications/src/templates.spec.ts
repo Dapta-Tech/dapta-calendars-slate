@@ -263,3 +263,98 @@ describe('BookingNotifier — audience + template rendering', () => {
     expect(m.text).toContain('Manage your booking:');
   });
 });
+
+/**
+ * The production case behind this: a host in Bogota received "New booking: ... Thu,
+ * Oct 29, 12:00 PM MST" because the host copy was formatted in the invitee's
+ * zone (America/Phoenix). Each side now reads the time in its own zone.
+ */
+describe('each side reads the time in its own zone', () => {
+  let email: RecordingEmailProvider;
+  let notifier: BookingNotifier;
+  beforeEach(() => {
+    email = new RecordingEmailProvider();
+    notifier = new BookingNotifier(email);
+  });
+  const crossZone: BookingNotification = {
+    ...base,
+    coHosts: [],
+    startUtc: '2026-10-29T19:00:00.000Z',
+    endUtc: '2026-10-29T19:30:00.000Z',
+    host: { name: 'Alex Rivera', email: 'alex@example.com', timeZone: 'America/Bogota' },
+    attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/Phoenix' },
+  };
+  const HOST_TIME = /Thu, Oct 29, 2:00\sPM GMT-5/u;
+  const GUEST_TIME = /Thu, Oct 29, 12:00\sPM MST/u;
+
+  it("the host copy states the host's time in the subject, the text and the HTML", async () => {
+    await notifier.sendConfirmation({ ...crossZone, audience: 'host', template: defaultTemplate('host_booked') });
+    const m = email.sent[0]!;
+    expect(m.subject).toMatch(/^New booking: Intro Call/);
+    for (const part of [m.subject, m.text, String(m.html)]) {
+      expect(part).toMatch(HOST_TIME);
+      expect(part).not.toMatch(GUEST_TIME);
+    }
+  });
+
+  it("the invitee copy keeps the invitee's time", async () => {
+    await notifier.sendConfirmation({ ...crossZone, audience: 'attendee', template: defaultTemplate('attendee_confirmation') });
+    const m = email.sent[0]!;
+    for (const part of [m.subject, m.text, String(m.html)]) {
+      expect(part).toMatch(GUEST_TIME);
+      expect(part).not.toMatch(HOST_TIME);
+    }
+  });
+
+  it("a reschedule's previous time is in the reader's zone too, template or not", async () => {
+    for (const template of [defaultTemplate('host_rescheduled'), null]) {
+      email.sent.length = 0;
+      await notifier.sendReschedule({
+        ...crossZone,
+        audience: 'host',
+        template,
+        previousStartUtc: '2026-10-28T19:00:00.000Z',
+      });
+      const m = email.sent[0]!;
+      expect(m.subject, String(!!template)).toMatch(HOST_TIME);
+      expect(m.text, String(!!template)).toMatch(/Was: Wed, Oct 28, 2:00\sPM GMT-5/u);
+    }
+  });
+
+  it('Spanish host copies use the host zone as well', async () => {
+    await notifier.sendCancellation({
+      ...crossZone,
+      audience: 'host',
+      templateLocale: 'es',
+      template: defaultTemplate('host_cancelled', 'es'),
+    });
+    expect(email.sent[0]!.subject).toMatch(/jue, 29 oct, 14:00 GMT-5/u);
+  });
+
+  it("a host copy with no host zone keeps the invitee's zone", async () => {
+    await notifier.sendConfirmation({
+      ...crossZone,
+      host: { name: 'Alex Rivera', email: 'alex@example.com' },
+      audience: 'host',
+      template: defaultTemplate('host_booked'),
+    });
+    expect(email.sent[0]!.subject).toMatch(GUEST_TIME);
+  });
+
+  it("an unreadable stored host zone falls back to the invitee's zone, never a raw instant", async () => {
+    await notifier.sendConfirmation({
+      ...crossZone,
+      host: { name: 'Alex Rivera', email: 'alex@example.com', timeZone: 'Not/AZone' },
+      audience: 'host',
+      template: defaultTemplate('host_booked'),
+    });
+    expect(email.sent[0]!.subject).toMatch(GUEST_TIME);
+    expect(email.sent[0]!.subject).not.toContain('2026-10-29T');
+  });
+
+  it("a legacy message with no audience keeps the invitee's zone for everyone", async () => {
+    await notifier.sendConfirmation(crossZone);
+    expect(email.sent[0]!.subject).toMatch(GUEST_TIME);
+    expect(templateVars(crossZone).start_time).toMatch(GUEST_TIME);
+  });
+});

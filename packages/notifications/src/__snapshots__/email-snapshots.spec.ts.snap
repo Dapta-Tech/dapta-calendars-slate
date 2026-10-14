@@ -255,7 +255,7 @@ exports[`lifecycle emails (en) > to the host > cancellation 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest was cancelled. Reason: Plans changed</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 10:00 AM GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
       </table>
       
       
@@ -285,10 +285,10 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "Cancelled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "subject": "Cancelled: Intro Call — Mon, Aug 3, 10:00 AM GMT-5",
   "text": "Hi Alex Rivera,
 
-The booking "Intro Call" (Mon, Aug 3, 11:00 AM EDT) with Sam Guest has been cancelled.
+The booking "Intro Call" (Mon, Aug 3, 10:00 AM GMT-5) with Sam Guest has been cancelled.
 Reason: Plans changed",
   "to": [
     "alex@example.com",
@@ -309,7 +309,7 @@ exports[`lifecycle emails (en) > to the host > confirmation 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest is confirmed. The calendar invite is attached.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 10:00 AM GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
       </table>
       
       
@@ -339,11 +339,11 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "New booking: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "subject": "New booking: Intro Call — Mon, Aug 3, 10:00 AM GMT-5",
   "text": "Hi Alex Rivera,
 
 Sam Guest (sam@example.com) booked "Intro Call".
-When: Mon, Aug 3, 11:00 AM EDT
+When: Mon, Aug 3, 10:00 AM GMT-5
 Where: Online meeting
 Join the meeting: https://meet.example.test/room-1",
   "to": [
@@ -362,7 +362,7 @@ exports[`lifecycle emails (en) > to the host > pending 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Sam Guest asked for this time. Confirm or decline it from your bookings.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 10:00 AM GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
       </table>
       
       
@@ -373,11 +373,11 @@ exports[`lifecycle emails (en) > to the host > pending 1`] = `
   </table>
 </div>",
   "ics": null,
-  "subject": "New booking: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "subject": "New booking: Intro Call — Mon, Aug 3, 10:00 AM GMT-5",
   "text": "Hi Alex Rivera,
 
 Sam Guest (sam@example.com) booked "Intro Call".
-When: Mon, Aug 3, 11:00 AM EDT
+When: Mon, Aug 3, 10:00 AM GMT-5
 Where: Online meeting
 Join the meeting: https://meet.example.test/room-1
 This request is pending your confirmation.",
@@ -397,7 +397,7 @@ exports[`lifecycle emails (en) > to the host > reminder 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">A reminder about your meeting with Sam Guest.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 10:00 AM GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
       </table>
       
       
@@ -408,11 +408,11 @@ exports[`lifecycle emails (en) > to the host > reminder 1`] = `
   </table>
 </div>",
   "ics": null,
-  "subject": "Reminder: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "subject": "Reminder: Intro Call — Mon, Aug 3, 10:00 AM GMT-5",
   "text": "Hi Alex Rivera,
 
 Reminder: "Intro Call" with Sam Guest starts in 1 hour(s).
-When: Mon, Aug 3, 11:00 AM EDT
+When: Mon, Aug 3, 10:00 AM GMT-5
 Where: Online meeting
 Join the meeting: https://meet.example.test/room-1",
   "to": [
@@ -434,7 +434,7 @@ exports[`lifecycle emails (en) > to the host > reschedule 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Your meeting with Sam Guest has a new time. The updated invite is attached.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 11:00 AM EDT</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Was</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">Sun, Aug 2, 11:00 AM EDT</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">When</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Mon, Aug 3, 10:00 AM GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Was</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">Sun, Aug 2, 10:00 AM GMT-5</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Guest</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Where</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Join the meeting</a></td></tr>
       </table>
       
       
@@ -464,12 +464,12 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "Rescheduled: Intro Call — Mon, Aug 3, 11:00 AM EDT",
+  "subject": "Rescheduled: Intro Call — Mon, Aug 3, 10:00 AM GMT-5",
   "text": "Hi Alex Rivera,
 
 The booking "Intro Call" with Sam Guest has been rescheduled.
-Was: Sun, Aug 2, 11:00 AM EDT
-Now: Mon, Aug 3, 11:00 AM EDT
+Was: Sun, Aug 2, 10:00 AM GMT-5
+Now: Mon, Aug 3, 10:00 AM GMT-5
 Where: Online meeting
 Join the meeting: https://meet.example.test/room-1",
   "to": [
@@ -733,7 +733,7 @@ exports[`lifecycle emails (es) > to the host > cancellation 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest fue cancelada. Motivo: Plans changed</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 10:00 GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
       </table>
       
       
@@ -763,10 +763,10 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "Cancelada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "subject": "Cancelada: Intro Call — lun, 3 ago, 10:00 GMT-5",
   "text": "Hola Alex Rivera,
 
-La reserva "Intro Call" (lun, 3 ago, 11:00 GMT-4) con Sam Guest ha sido cancelada.
+La reserva "Intro Call" (lun, 3 ago, 10:00 GMT-5) con Sam Guest ha sido cancelada.
 Motivo: Plans changed",
   "to": [
     "alex@example.com",
@@ -787,7 +787,7 @@ exports[`lifecycle emails (es) > to the host > confirmation 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest quedó confirmada. La invitación de calendario va adjunta.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 10:00 GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
       </table>
       
       
@@ -817,11 +817,11 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 10:00 GMT-5",
   "text": "Hola Alex Rivera,
 
 Sam Guest (sam@example.com) reservó "Intro Call".
-Cuándo: lun, 3 ago, 11:00 GMT-4
+Cuándo: lun, 3 ago, 10:00 GMT-5
 Dónde: Online meeting
 Unirse a la reunión: https://meet.example.test/room-1",
   "to": [
@@ -840,7 +840,7 @@ exports[`lifecycle emails (es) > to the host > pending 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Sam Guest pidió esta hora. Confírmala o recházala desde tus reservas.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 10:00 GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting</td></tr>
       </table>
       
       
@@ -851,11 +851,11 @@ exports[`lifecycle emails (es) > to the host > pending 1`] = `
   </table>
 </div>",
   "ics": null,
-  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "subject": "Nueva reserva: Intro Call — lun, 3 ago, 10:00 GMT-5",
   "text": "Hola Alex Rivera,
 
 Sam Guest (sam@example.com) reservó "Intro Call".
-Cuándo: lun, 3 ago, 11:00 GMT-4
+Cuándo: lun, 3 ago, 10:00 GMT-5
 Dónde: Online meeting
 Unirse a la reunión: https://meet.example.test/room-1
 Esta solicitud está pendiente de tu confirmación.",
@@ -875,7 +875,7 @@ exports[`lifecycle emails (es) > to the host > reminder 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Un recordatorio de tu reunión con Sam Guest.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 10:00 GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
       </table>
       
       
@@ -886,11 +886,11 @@ exports[`lifecycle emails (es) > to the host > reminder 1`] = `
   </table>
 </div>",
   "ics": null,
-  "subject": "Recordatorio: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "subject": "Recordatorio: Intro Call — lun, 3 ago, 10:00 GMT-5",
   "text": "Hola Alex Rivera,
 
 Recordatorio: "Intro Call" con Sam Guest comienza en 1 hora(s).
-Cuándo: lun, 3 ago, 11:00 GMT-4
+Cuándo: lun, 3 ago, 10:00 GMT-5
 Dónde: Online meeting
 Unirse a la reunión: https://meet.example.test/room-1",
   "to": [
@@ -912,7 +912,7 @@ exports[`lifecycle emails (es) > to the host > reschedule 1`] = `
       <div style="color:#1a1a1c;font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">Intro Call</div>
       <div style="color:#45454c;font-size:15px;line-height:22px;margin:0 0 20px;">Tu reunión con Sam Guest tiene una nueva hora. La invitación actualizada va adjunta.</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e6e6e8;border-bottom:1px solid #e6e6e8;">
-        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 11:00 GMT-4</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Antes</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">dom, 2 ago, 11:00 GMT-4</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
+        <tr><td style="padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Cuándo</td><td style="padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">lun, 3 ago, 10:00 GMT-5</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Antes</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;"><span style="color:#67676f;text-decoration:line-through;">dom, 2 ago, 10:00 GMT-5</span></td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Invitado</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Sam Guest</td></tr><tr><td style="border-top:1px solid #e6e6e8;padding:12px 16px 12px 0;width:72px;vertical-align:top;font-size:13px;line-height:20px;color:#67676f;">Dónde</td><td style="border-top:1px solid #e6e6e8;padding:12px 0;vertical-align:top;font-size:15px;line-height:20px;color:#1a1a1c;font-weight:500;">Online meeting<br><a href="https://meet.example.test/room-1" style="color:#1a1a1c;text-decoration:underline;">Unirse a la reunión</a></td></tr>
       </table>
       
       
@@ -942,12 +942,12 @@ ATTENDEE;CN=Sam Guest;RSVP=TRUE:mailto:sam@example.com
 END:VEVENT
 END:VCALENDAR
 ",
-  "subject": "Reprogramada: Intro Call — lun, 3 ago, 11:00 GMT-4",
+  "subject": "Reprogramada: Intro Call — lun, 3 ago, 10:00 GMT-5",
   "text": "Hola Alex Rivera,
 
 La reserva "Intro Call" con Sam Guest ha sido reprogramada.
-Antes: dom, 2 ago, 11:00 GMT-4
-Ahora: lun, 3 ago, 11:00 GMT-4
+Antes: dom, 2 ago, 10:00 GMT-5
+Ahora: lun, 3 ago, 10:00 GMT-5
 Dónde: Online meeting
 Unirse a la reunión: https://meet.example.test/room-1",
   "to": [

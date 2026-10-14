@@ -13,7 +13,7 @@ import {
   type Db,
 } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
-import { BookingNotifier } from '@slate/notifications';
+import { BookingNotifier, formatWhen } from '@slate/notifications';
 import type { EmailMessage, EmailProvider, EmailResult } from '@slate/notifications';
 import { loadServerEnv } from '@slate/config/env';
 import { CalendarEffects } from './calendar-effects';
@@ -53,6 +53,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
   let booking: BookingService;
   let admin: AdminService;
   let worker: OutboxWorker;
+  let emailEffects: EmailEffects;
   let accountId: string;
   let memberId: string;
   let principal: { accountId: string; memberId: string; role: 'owner' };
@@ -82,7 +83,7 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
 
     email = new RecordingEmailProvider();
     const notifier = new BookingNotifier(email);
-    const emailEffects = new EmailEffects(notifier, db);
+    emailEffects = new EmailEffects(notifier, db);
     const calendar = new CalendarEffects(new DisabledCalendarProvider(), db);
     booking = new BookingService(db, ENV, calendar, emailEffects);
     admin = new AdminService(db, calendar, emailEffects);
@@ -290,5 +291,105 @@ describe('booking lifecycle notifications (B2-B6, end-to-end via the outbox)', (
     await booking.reschedule(uid, { newStartUtc: target, byHost: true, idempotencyKey: 'RK' });
     await drain();
     expect(email.sent.filter((m) => m.subject.startsWith('Rescheduled:'))).toHaveLength(2);
+  });
+
+  /**
+   * The production case: a host in Bogota confirmed a request from an invitee in
+   * Phoenix, and the host's "New booking" mail stated the time in MST. Each
+   * side's copy now reads in that side's own zone, subject included.
+   */
+  describe("each side's copy reads in that side's zone", () => {
+    const toOf = (m: EmailMessage) => (Array.isArray(m.to) ? m.to : [m.to]);
+
+    it('request, confirmation and cancellation: the host in theirs, the invitee in theirs', async () => {
+      await db.run(sql`UPDATE member SET time_zone = 'America/Bogota' WHERE id = ${memberId}`);
+      const slug = await pendingEvent();
+      const startUtc = await firstSlotUtc(slug);
+      const res = await booking.book({
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug,
+        startUtc,
+        attendee: { name: 'Test', email: 'test@example.com', timeZone: 'America/Phoenix' },
+      });
+      if ('error' in res) throw new Error(`book failed: ${res.error}`);
+      await drain();
+      expect((await admin.confirm(principal, res.uid)).ok).toBe(true);
+      await drain();
+      expect((await admin.hostCancel(principal, res.uid, 'moved')).ok).toBe(true);
+      await drain();
+
+      const hostWhen = formatWhen(startUtc, 'America/Bogota');
+      const guestWhen = formatWhen(startUtc, 'America/Phoenix');
+      expect(hostWhen).not.toBe(guestWhen);
+      const hostMail = email.sent.filter((m) => toOf(m).includes('alex@dapta.test'));
+      const guestMail = email.sent.filter((m) => toOf(m).includes('test@example.com'));
+      // Request + confirmation + cancellation, one copy per side each.
+      expect(hostMail).toHaveLength(3);
+      expect(guestMail).toHaveLength(3);
+      for (const m of hostMail) {
+        for (const part of [m.subject, m.text, String(m.html)]) {
+          expect(part, m.subject).toContain(hostWhen);
+          expect(part, m.subject).not.toContain(guestWhen);
+        }
+      }
+      for (const m of guestMail) {
+        for (const part of [m.subject, m.text, String(m.html)]) {
+          expect(part, m.subject).toContain(guestWhen);
+          expect(part, m.subject).not.toContain(hostWhen);
+        }
+      }
+    });
+
+    it("the host's zone is snapshotted on the row, and a row queued before it was carried reads it at delivery", async () => {
+      await db.run(sql`UPDATE member SET time_zone = 'America/Bogota' WHERE id = ${memberId}`);
+      const uid = await bookAccepted();
+      await settle();
+      const hostRow = (await listOutbox(db, { kind: 'email', bookingUid: uid })).find(
+        (r) => r.action === 'confirmation' && (JSON.parse(r.payload!) as { audience?: string }).audience === 'host',
+      )!;
+      const payload = JSON.parse(hostRow.payload!) as { host: { timeZone?: string | null }; startUtc: string };
+      expect(payload.host.timeZone).toBe('America/Bogota');
+
+      // The same row as it was written before the payload carried the zone.
+      delete payload.host.timeZone;
+      email.sent.length = 0;
+      await emailEffects.deliver('confirmation', JSON.stringify(payload), accountId);
+      expect(email.sent).toHaveLength(1);
+      expect(email.sent[0]!.subject).toContain(formatWhen(payload.startUtc, 'America/Bogota'));
+      expect(email.sent[0]!.subject).not.toContain(formatWhen(payload.startUtc, 'America/New_York'));
+    });
+
+    it('the delivery read never crosses accounts, and never overrides a snapshot that carries null', async () => {
+      await db.run(sql`UPDATE member SET time_zone = 'America/Bogota' WHERE id = ${memberId}`);
+      const uid = await bookAccepted();
+      await settle();
+      const hostRow = (await listOutbox(db, { kind: 'email', bookingUid: uid })).find(
+        (r) => r.action === 'confirmation' && (JSON.parse(r.payload!) as { audience?: string }).audience === 'host',
+      )!;
+      const payload = JSON.parse(hostRow.payload!) as {
+        accountId: string;
+        host: { timeZone?: string | null };
+        startUtc: string;
+      };
+      const inviteeWhen = formatWhen(payload.startUtc, 'America/New_York');
+
+      // A legacy row whose account is not the booking's: the booking's host
+      // zone is not read for it.
+      const foreign = { ...payload, accountId: '00000000-0000-4000-8000-000000000000', host: { ...payload.host } };
+      delete foreign.host.timeZone;
+      email.sent.length = 0;
+      await emailEffects.deliver('confirmation', JSON.stringify(foreign), foreign.accountId);
+      expect(email.sent).toHaveLength(1);
+      expect(email.sent[0]!.subject).toContain(inviteeWhen);
+
+      // A row queued since the zone was carried, with no zone to carry: kept as
+      // snapshotted rather than re-read.
+      const snapshottedNull = { ...payload, host: { ...payload.host, timeZone: null } };
+      email.sent.length = 0;
+      await emailEffects.deliver('confirmation', JSON.stringify(snapshottedNull), accountId);
+      expect(email.sent).toHaveLength(1);
+      expect(email.sent[0]!.subject).toContain(inviteeWhen);
+    });
   });
 });
