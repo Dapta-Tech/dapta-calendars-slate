@@ -217,6 +217,47 @@ describe('the studio profile preview renders what the public profile renders', (
       });
     }
   }
+
+  // A workspace named after its host: the public page says the name once, so
+  // the studio's picture of it must too, or the host is shown a line the page
+  // never draws.
+  it('an account named after the host: neither draws the line over the name', () => {
+    const pub = parse(
+      renderToStaticMarkup(
+        <BrandedShell brandColor={ACCENT} style={BASE as Record<string, string>}>
+          <ProfileView
+            m={getMessages('en')}
+            name="Riley Chen"
+            context="riley chen"
+            bio={null}
+            avatarUrl={null}
+            coverUrl={null}
+            events={EVENTS}
+            hrefFor={(slug) => `/northwind/riley-chen/${slug}`}
+            emptyText={getMessages('en').landing.noEvents}
+          />
+        </BrandedShell>,
+      ),
+    );
+    const pre = parse(
+      renderToStaticMarkup(
+        <PreviewFrame accent={ACCENT} axes={BASE as never} device="mobile" wide={false}>
+          <ProfilePreview
+            locale="en"
+            displayName="Riley Chen"
+            accountName="riley chen"
+            bio=""
+            avatarUrl=""
+            coverUrl=""
+            events={EVENTS}
+          />
+        </PreviewFrame>,
+      ),
+    );
+    expect(view(pre)).toBe(view(pub));
+    expect(pub.querySelector('.bp-profile-head .bp-small')).toBeNull();
+    expect(pub.querySelector('.bp-profile-name')!.textContent).toBe('Riley Chen');
+  });
 });
 
 /**

@@ -1479,6 +1479,12 @@ body {
  * duration as a figure, so the durations read as a column. The `cardStyle` axis
  * frames the list once; the `template` axis sets the cover's height (`banded`
  * makes it taller: `.tpl-banded .bp-cover`, earlier in this file).
+ *
+ * One vertical axis: who they are (avatar, name, bio), the free-calendar block
+ * and the "Made with" badge are all centred on the column. Only the list keeps
+ * its rows left-aligned, because a list is read down its left edge and its
+ * durations line up on the right. A left-aligned head over a centred foot read
+ * as a page that came apart (a host's verdict).
  * ------------------------------------------------------------------------ */
 .branded-surface .bp-profile {
   display: flex;
@@ -1495,20 +1501,28 @@ body {
 .branded-surface .bp-cover-image {
   object-fit: cover;
 }
-/* The kit's logo with no cover under it: no band, aligned with the head. */
+/* The kit's logo with no cover under it: no band, on the head's axis. As a
+   flex item it would stretch to the column and `contain` would park the mark
+   at the left edge, so it takes its own width and centres. */
 .branded-surface .bp-profile-logo {
-  margin-inline: var(--sp-card);
+  align-self: center;
+  object-position: center;
 }
 .branded-surface .bp-profile-head {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--sp-tight);
   padding-inline: var(--sp-card);
+  text-align: center;
 }
 /* The avatar sits on the cover's lower edge, ringed in the page's own ground so
-   it reads as in front of the cover rather than cut out of it. */
+   it reads as in front of the cover rather than cut out of it. Positioned so it
+   also paints in front of a cover that carries the kit's logo: that cover's
+   wrapper is positioned (for the logo), and a positioned box paints over an
+   in-flow one whatever their order. */
 .branded-surface .bp-profile-avatar {
+  position: relative;
   margin-bottom: var(--sp-inline);
 }
 /* Only a real cover image is overlapped: with no cover there is no band (a
@@ -1522,6 +1536,12 @@ body {
   height: 4.5rem;
   box-shadow: 0 0 0 4px var(--background);
   font-size: 1.5rem;
+}
+/* The monogram's tint is see-through, so over a cover the image showed through
+   the tile. Laid on the page's own ground it is the same colour everywhere else
+   and solid where it overlaps the cover. */
+.branded-surface .bp-profile-avatar .bp-avatar-monogram {
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--background);
 }
 .branded-surface .bp-profile-name {
   font-family: var(--bp-font-display);
@@ -1601,8 +1621,10 @@ body {
   display: inline-flex;
   color: var(--muted-foreground);
 }
+/* Said in place of the list, so it sits on the head's axis. */
 .branded-surface .bp-profile-empty {
   padding-inline: var(--sp-card);
+  text-align: center;
 }
 
 /* ---------------------------------------------------------------------------

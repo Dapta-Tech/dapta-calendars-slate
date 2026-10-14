@@ -7,7 +7,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
-import { ProfileView } from '@/components/profile-view';
+import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { GrowthCta } from '@/components/booking-page-parts';
 import { brandingShown, signupHref } from '@/lib/growth';
 import {
@@ -31,7 +31,11 @@ export async function generateMetadata({
   const query = await searchParams;
   const team = await getTeamProfile(accountCode, teamSlug);
   if (!team) return {};
-  const title = `${team.team.name} — ${team.account.name}`;
+  // The workspace rides along only when it says something the team's name does
+  // not (`profileEyebrow`, the rule for the line over the name on the page), and
+  // with the separator the person profile's title uses.
+  const account = profileEyebrow(team.account.name, team.team.name);
+  const title = account ? `${team.team.name} · ${account}` : team.team.name;
   const description = t(getMessages(await publicLocale()).growth.seoProfile, {
     name: team.team.name,
   });
