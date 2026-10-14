@@ -289,6 +289,9 @@ importers:
 
   packages/notifications:
     dependencies:
+      '@slate/shared':
+        specifier: workspace:*
+        version: link:../shared
       nodemailer:
         specifier: ^6.9.16
         version: 6.10.1

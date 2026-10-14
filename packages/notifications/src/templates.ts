@@ -13,6 +13,7 @@
  * "Where: {{location}}" vanishes when there is no location, and
  * "{{pending_note}}" only appears for approval-required bookings.
  */
+import { isValidTimeZone } from '@slate/shared';
 import type { BookingNotification } from './booking-notifier';
 import { escapeHtml } from './util';
 
@@ -218,17 +219,6 @@ export function inviteeManageUrl(n: Pick<BookingNotification, 'audience' | 'mana
   return n.audience === 'host' ? '' : (n.manageUrl ?? '');
 }
 
-/** Whether the runtime can format in `tz` (the check `@slate/shared` makes). */
-function readableTimeZone(tz: string | null | undefined): tz is string {
-  if (!tz) return false;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The zone a message's times are written in: the reader's own. The host's copy
  * reads in the host's zone and the invitee's copy in the invitee's, so neither
@@ -241,7 +231,7 @@ function readableTimeZone(tz: string | null | undefined): tz is string {
 export function recipientTimeZone(
   n: Pick<BookingNotification, 'audience' | 'host' | 'attendee'>,
 ): string {
-  if (n.audience === 'host' && readableTimeZone(n.host.timeZone)) return n.host.timeZone;
+  if (n.audience === 'host' && isValidTimeZone(n.host.timeZone)) return n.host.timeZone;
   return n.attendee.timeZone ?? 'UTC';
 }
 
