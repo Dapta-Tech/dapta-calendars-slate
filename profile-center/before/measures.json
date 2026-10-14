@@ -1,0 +1,200 @@
+{
+  "person-repeat-dark-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Jordan",
+    "name": 86.5,
+    "nameText": "Jordan",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "person-repeat-dark-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Jordan",
+    "name": 470.5,
+    "nameText": "Jordan",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "person-repeat-dark-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Jordan",
+    "name": 750.5,
+    "nameText": "Jordan",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  },
+  "person-rich-dark-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Acme Inc.",
+    "name": 114,
+    "nameText": "Jordan Lee",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "person-rich-dark-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Acme Inc.",
+    "name": 498,
+    "nameText": "Jordan Lee",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "person-rich-dark-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Acme Inc.",
+    "name": 778,
+    "nameText": "Jordan Lee",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  },
+  "team-dark-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Acme Inc.",
+    "name": 75,
+    "nameText": "Sales",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "team-dark-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Acme Inc.",
+    "name": 459,
+    "nameText": "Sales",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "team-dark-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Acme Inc.",
+    "name": 739,
+    "nameText": "Sales",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  },
+  "person-repeat-light-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Jordan",
+    "name": 86.5,
+    "nameText": "Jordan",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "person-repeat-light-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Jordan",
+    "name": 470.5,
+    "nameText": "Jordan",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "person-repeat-light-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Jordan",
+    "name": 750.5,
+    "nameText": "Jordan",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  },
+  "person-rich-light-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Acme Inc.",
+    "name": 114,
+    "nameText": "Jordan Lee",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "person-rich-light-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Acme Inc.",
+    "name": 498,
+    "nameText": "Jordan Lee",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "person-rich-light-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Acme Inc.",
+    "name": 778,
+    "nameText": "Jordan Lee",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  },
+  "team-light-360": {
+    "viewportCenter": 180,
+    "main": 180,
+    "avatar": 76,
+    "eyebrow": "Acme Inc.",
+    "name": 75,
+    "nameText": "Sales",
+    "list": 180,
+    "ctaButton": 180,
+    "badge": 180
+  },
+  "team-light-1440": {
+    "viewportCenter": 720,
+    "main": 720,
+    "avatar": 460,
+    "eyebrow": "Acme Inc.",
+    "name": 459,
+    "nameText": "Sales",
+    "list": 720,
+    "ctaButton": 720,
+    "badge": 720
+  },
+  "team-light-2000": {
+    "viewportCenter": 1000,
+    "main": 1000,
+    "avatar": 740,
+    "eyebrow": "Acme Inc.",
+    "name": 739,
+    "nameText": "Sales",
+    "list": 1000,
+    "ctaButton": 1000,
+    "badge": 1000
+  }
+}
