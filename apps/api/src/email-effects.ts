@@ -523,7 +523,9 @@ export class EmailEffects {
    * the mail carries the Dapta branding (`showBranding`, from the cached
    * verdict). Everything else stays exactly as it was snapshotted at enqueue;
    * the link cannot be, because the calendar row that mints it drains later,
-   * and the branding follows a lapse that can land while a row waits.
+   * and the branding follows a lapse that can land while a row waits. A host
+   * row queued before the payload carried the host's zone also reads that zone
+   * here, on every attempt, because its snapshot lacks it.
    * `attempts` is how many times this row has already failed; it is
    * what bounds the wait described on `ConferencingLinkPendingError`.
    */
@@ -611,6 +613,17 @@ export class EmailEffects {
           `skip queued reminder (${n.audience ?? 'legacy combined'}) for ${n.uid} — disabled by account settings`,
         );
         return;
+      }
+    }
+    // Compatibility backfill, not a delivery-time variable: a host-side row
+    // queued before the payload carried the host's zone (a reminder can sit for
+    // weeks) has no snapshot of it, so it reads it here, on every attempt, and
+    // the host copy is written in the host's zone rather than the invitee's.
+    // Rows queued since carry it (null included) and stay as snapshotted.
+    if (n.audience === 'host' && n.uid && n.host && n.host.timeZone === undefined) {
+      const current = await loadBookingNotificationContext(this.db, n.uid);
+      if (current && current.accountId === n.accountId) {
+        n.host = { ...n.host, timeZone: current.host.timeZone };
       }
     }
     // --- ADR 0007: the ONE variable resolved at delivery time ----------------

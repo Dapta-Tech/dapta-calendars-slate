@@ -9,6 +9,7 @@ import {
   type TemplateLocale,
   formatWhen,
   inviteeManageUrl,
+  recipientTimeZone,
 } from './templates';
 
 /** Everything a booking notification needs to render, provider-agnostic. */
@@ -18,7 +19,13 @@ export interface BookingNotification {
   title: string;
   startUtc: string;
   endUtc: string;
-  host: { name?: string | null; email?: string | null };
+  /**
+   * `timeZone` is the host's own zone, which the host's copy is written in (see
+   * `recipientTimeZone`). Absent on forks that build notifications directly,
+   * and on rows queued before it was carried (the API fills those in at
+   * delivery). Without it the notifier falls back to the attendee's zone.
+   */
+  host: { name?: string | null; email?: string | null; timeZone?: string | null };
   /** Additional assigned hosts (collective / fixed_round_robin) — also notified. */
   coHosts?: Array<{ name?: string | null; email?: string | null }>;
   attendee: { name: string; email: string; timeZone?: string | null };
@@ -142,7 +149,7 @@ export class BookingNotifier {
   }
 
   sendConfirmation(n: BookingNotification): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const rendered = this.copy(n, 'confirmation', () => ({
       subject: `Confirmed: ${n.title} — ${when}`,
       lines: [
@@ -173,7 +180,7 @@ export class BookingNotifier {
    * `reminderLeadMinutes` so the copy can say "starts in X".
    */
   sendReminder(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const lead = n.reminderLeadMinutes;
     const inWord =
       lead == null ? 'soon' : lead % 1440 === 0 ? `in ${lead / 1440} day(s)` : lead % 60 === 0 ? `in ${lead / 60} hour(s)` : `in ${lead} minutes`;
@@ -208,7 +215,7 @@ export class BookingNotifier {
    * happened; this is a courtesy note with a book-again link.
    */
   sendFollowUp(n: BookingNotification & { reminderLeadMinutes?: number }): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const rendered = this.copy(n, 'follow_up', () => ({
       subject: `Thanks for meeting — ${n.title}`,
       lines: [
@@ -238,7 +245,7 @@ export class BookingNotifier {
    * .ics), so their calendar isn't populated with an event the host may decline.
    */
   sendPendingRequest(n: BookingNotification): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const rendered = this.copy(n, 'pending', () => ({
       subject: `Request received: ${n.title} — ${when}`,
       lines: [
@@ -267,7 +274,7 @@ export class BookingNotifier {
 
   /** B3: the host declined a pending request — tell the attendee it's off. */
   sendDeclined(n: BookingNotification): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const rendered = this.copy(n, 'declined', () => ({
       subject: `Not accepted: ${n.title} — ${when}`,
       lines: [
@@ -291,8 +298,8 @@ export class BookingNotifier {
   }
 
   sendReschedule(n: BookingNotification): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
-    const prev = n.previousStartUtc ? formatWhen(n.previousStartUtc, n.attendee.timeZone ?? 'UTC') : null;
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
+    const prev = n.previousStartUtc ? formatWhen(n.previousStartUtc, recipientTimeZone(n)) : null;
     const rendered = this.copy(n, 'reschedule', () => ({
       subject: `Rescheduled: ${n.title} — ${when}`,
       lines: [
@@ -321,7 +328,7 @@ export class BookingNotifier {
   }
 
   sendCancellation(n: BookingNotification): Promise<EmailResult> {
-    const when = formatWhen(n.startUtc, n.attendee.timeZone ?? 'UTC');
+    const when = formatWhen(n.startUtc, recipientTimeZone(n));
     const rendered = this.copy(n, 'cancellation', () => ({
       subject: `Cancelled: ${n.title} — ${when}`,
       lines: [
