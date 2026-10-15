@@ -7,7 +7,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
-import { ProfileView } from '@/components/profile-view';
+import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { landingTarget, wantsProfile } from '@/lib/landing';
 import { brandingShown, signupHref } from '@/lib/growth';
@@ -40,8 +40,10 @@ export async function generateMetadata({
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
   const description = bio || t(getMessages(await publicLocale()).growth.seoProfile, { name });
   // The card's headline is the name; the account rides along only when it says
-  // something the name does not.
-  const title = profile.account.name && profile.account.name !== name ? `${name} · ${profile.account.name}` : name;
+  // something the name does not, by the same rule as the line over the name on
+  // the page (`profileEyebrow`), so the tab never says a name twice either.
+  const account = profileEyebrow(profile.account.name, name);
+  const title = account ? `${name} · ${account}` : name;
   return {
     title,
     description,

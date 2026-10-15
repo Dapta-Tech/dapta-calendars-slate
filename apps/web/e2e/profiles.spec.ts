@@ -39,6 +39,38 @@ test('a host with several events shows a profile listing each', async ({ page })
   await expect(page.getByRole('heading', { level: 1, name: 'Quick Chat' })).toBeVisible();
 });
 
+/**
+ * A host's verdict: a left-aligned head over a centred call to action and badge
+ * read as a page that came apart. Who they are, the free-calendar block and the
+ * badge share the column's axis, and the column sits in the middle of the
+ * window, on the person profile and the team landing alike.
+ */
+for (const path of ['/acme/jordan-lee', '/acme/team/sales']) {
+  test(`${path}: the head, the call to action and the badge share one axis`, async ({ page }) => {
+    await page.goto(path);
+    await expect(page.locator('.bp-event-list')).toBeVisible();
+    const centres = await page.evaluate(() => {
+      const centre = (selector: string) => {
+        const r = document.querySelector(selector)!.getBoundingClientRect();
+        return r.left + r.width / 2;
+      };
+      return {
+        window: document.documentElement.clientWidth / 2,
+        column: centre('main'),
+        avatar: centre('.bp-profile-avatar .bp-avatar'),
+        name: centre('.bp-profile-name'),
+        cta: centre('.bp-growth-btn'),
+        badge: centre('.bp-embed-footer a'),
+      };
+    });
+    const { window: middle, column, ...onAxis } = centres;
+    expect(Math.abs(column - middle)).toBeLessThanOrEqual(1);
+    for (const [part, x] of Object.entries(onAxis)) {
+      expect(Math.abs(x - column), `${part} at ${x}, column at ${column}`).toBeLessThanOrEqual(1);
+    }
+  });
+}
+
 test('an event that needs the host: pending until confirmed, then written', async ({ page, request }) => {
   const email = visitorEmail('pending');
   await page.goto('/acme/jordan-lee/by-request');

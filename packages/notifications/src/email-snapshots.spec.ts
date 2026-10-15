@@ -27,7 +27,9 @@ const base: BookingNotification = {
   title: 'Intro Call',
   startUtc: '2026-08-03T15:00:00.000Z',
   endUtc: '2026-08-03T15:30:00.000Z',
-  host: { name: 'Alex Rivera', email: 'alex@example.com' },
+  // The two sides live in different zones, so every host snapshot pins the
+  // host's time and every invitee snapshot the invitee's.
+  host: { name: 'Alex Rivera', email: 'alex@example.com', timeZone: 'America/Bogota' },
   attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
   location: 'Online meeting',
   locationKind: 'conferencing',

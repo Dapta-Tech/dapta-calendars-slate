@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@slate/shared": "workspace:*",
     "nodemailer": "^6.9.16"
   },
   "devDependencies": {

@@ -24,6 +24,25 @@ export interface ProfileEvent {
   lengthMinutes: number;
 }
 
+/** A name as a reader compares it: case, accents and spacing do not count. */
+function comparable(name: string): string {
+  return name.normalize('NFKD').replace(/\p{M}/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * The quiet line over the heading, or nothing when it would only say the
+ * heading again. It is the account's (workspace's) name: a company's
+ * ("Northwind Studio" over "Riley Chen") says who the host works for, but a
+ * one-person workspace is often named after its owner, and "Riley" over
+ * "Riley" reads as a stutter. The same holds for a team named like its
+ * workspace.
+ */
+export function profileEyebrow(context: string | null | undefined, name: string): string | null {
+  const line = context?.trim();
+  if (!line) return null;
+  return comparable(line) === comparable(name) ? null : line;
+}
+
 export function ProfileView({
   m,
   name,
@@ -41,7 +60,8 @@ export function ProfileView({
   m: BookingMessages;
   /** The heading: the host's name, or the team's. */
   name: string;
-  /** The quiet line above it: the account's name. */
+  /** The quiet line above it: the account's name. Dropped when it only
+   *  repeats `name` (`profileEyebrow`). */
   context?: string | null;
   bio?: string | null;
   avatarUrl?: string | null;
@@ -58,6 +78,7 @@ export function ProfileView({
   /** At the foot of the profile (the free-calendar call to action). */
   footer?: ReactNode;
 }) {
+  const eyebrow = profileEyebrow(context, name);
   return (
     <div className="bp-profile">
       {/* A cover only when there is one. No image used to draw a band tinted
@@ -78,7 +99,7 @@ export function ProfileView({
         <div className="bp-profile-avatar">
           <HostAvatar hostName={monogramName ?? name} avatarUrl={avatarUrl} />
         </div>
-        {context ? <p className="bp-muted bp-small">{context}</p> : null}
+        {eyebrow ? <p className="bp-muted bp-small">{eyebrow}</p> : null}
         <h1 className="bp-profile-name">{name}</h1>
         {bio ? <p className="bp-profile-bio">{bio}</p> : null}
       </header>
