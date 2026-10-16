@@ -61,6 +61,12 @@ describe('safeReturnTo: only a dashboard page of this app', () => {
     '/admin/../api/auth/logout',
     '/admin/%2e%2e/api/auth/logout',
     '/admin/%2E%2E/%2E%2E/evil.com',
+    // ...including when the slashes are encoded, so the parser keeps the
+    // traversal inside one segment but a decoding proxy would not.
+    '/admin/%2e%2e%2fapi%2fauth%2flogout',
+    '/admin/..%2fapi%2fauth%2flogout',
+    '/admin/..%252fapi%252fauth%252flogout',
+    '/admin/bookings/..%2F..%2Fapi',
   ])('rejects %j', (raw) => {
     expect(safeReturnTo(raw)).toBeNull();
   });

@@ -86,15 +86,22 @@ export function safeReturnTo(raw: unknown): string | null {
   }
 
   let url: URL;
+  let decodedUrl: URL;
   try {
     url = new URL(raw, BASE);
+    decodedUrl = new URL(layer, BASE);
   } catch {
     return null;
   }
-  if (url.origin !== BASE) return null;
   // Read AFTER the parse, so `/admin/../api` and `/admin/%2e%2e/api` are judged
-  // by where they actually go.
-  if (url.pathname !== '/admin' && !url.pathname.startsWith('/admin/')) return null;
+  // by where they actually go. And judged on the fully decoded layer as well:
+  // the parser keeps `%2F` inside one segment, so `/admin/..%2fapi` stays under
+  // /admin as written, but a proxy that decodes it before normalizing would
+  // land on /api.
+  for (const u of [url, decodedUrl]) {
+    if (u.origin !== BASE) return null;
+    if (u.pathname !== '/admin' && !u.pathname.startsWith('/admin/')) return null;
+  }
   if (url.searchParams.has(FLIGHT_PARAM)) url.searchParams.delete(FLIGHT_PARAM);
   return `${url.pathname}${url.search}`;
 }
