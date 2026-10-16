@@ -6,6 +6,7 @@
 export * from './email.port';
 export * from './factory';
 export * from './booking-notifier';
+export * from './booking-details';
 export * from './templates';
 export * from './ics';
 export { LogOnlyEmailProvider } from './adapters/log-only';

@@ -11,7 +11,11 @@ import { resolveTemplate, type EmailTemplateKey } from './templates';
  * are fixed, so the snapshots are stable.
  *
  * Rendered the way the API renders them: with the default template of the
- * kind and side, in the locale the API passes (the HOST's, today).
+ * kind and side, in the locale the API passes for that side. The fixture
+ * carries everything the host's copy shows about who is asking (phone, notes,
+ * other guests, the form's answers) and the host's dashboard link, so every
+ * host snapshot pins that block and every invitee snapshot pins its absence.
+ * The deployment's support address is an invented one (`MAIL_SUPPORT_EMAIL`).
  */
 class Recorder implements EmailProvider {
   readonly sent: EmailMessage[] = [];
@@ -30,7 +34,21 @@ const base: BookingNotification = {
   // The two sides live in different zones, so every host snapshot pins the
   // host's time and every invitee snapshot the invitee's.
   host: { name: 'Alex Rivera', email: 'alex@example.com', timeZone: 'America/Bogota' },
-  attendee: { name: 'Sam Guest', email: 'sam@example.com', timeZone: 'America/New_York' },
+  attendee: {
+    name: 'Sam Guest',
+    email: 'sam@example.com',
+    timeZone: 'America/New_York',
+    phone: '+1 602 555 0143',
+    notes: 'I will join from my phone.',
+  },
+  guests: [{ name: 'Ana Ruiz', email: 'ana@example.com' }, { email: 'bo@example.com' }],
+  answers: [
+    { label: 'Company', value: 'Example Co', type: 'text' },
+    { label: 'What would you like to cover?', value: 'Hiring plan.\nAnd the budget.', type: 'textarea' },
+    { label: 'Topics', value: ['Hiring', 'Budget'], type: 'select' },
+    { label: 'I agree to be recorded', value: true, type: 'checkbox' },
+  ],
+  dashboardUrl: 'https://app.example.com/admin/bookings#booking-bk-snapshot',
   location: 'Online meeting',
   locationKind: 'conferencing',
   meetingUrl: 'https://meet.example.test/room-1',
@@ -50,9 +68,16 @@ const KEYS: Record<Kind, Record<'attendee' | 'host', EmailTemplateKey>> = {
   reminder: { attendee: 'attendee_reminder', host: 'host_reminder' },
 };
 
-async function render(kind: Kind, locale: 'en' | 'es', audience: 'attendee' | 'host'): Promise<EmailMessage> {
+const SUPPORT = 'help@example.com';
+
+async function render(
+  kind: Kind,
+  locale: 'en' | 'es',
+  audience: 'attendee' | 'host',
+  growth: { supportEmail?: string | null } = { supportEmail: SUPPORT },
+): Promise<EmailMessage> {
   const rec = new Recorder();
-  const notifier = new BookingNotifier(rec);
+  const notifier = new BookingNotifier(rec, growth);
   const template = resolveTemplate(KEYS[kind][audience], null, locale);
   const n: BookingNotification = { ...base, templateLocale: locale, audience, template, pending: kind === 'pending' };
   if (kind === 'confirmation') await notifier.sendConfirmation(n);
@@ -69,16 +94,11 @@ describe.each(['en', 'es'] as const)('lifecycle emails (%s)', (locale) => {
     it.each(KINDS)('%s', async (kind) => {
       const m = await render(kind, locale, audience);
       const attachment = m.attachments?.[0];
-      // The deployment's support address is product config, not what these
-      // snapshots pin; it stays out of the public repo's fixtures.
-      const html = String(m.html).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?=["<])/g, (a) =>
-        a.endsWith('@example.com') ? a : '<support address>',
-      );
       expect({
         to: m.to,
         subject: m.subject,
         text: m.text,
-        html,
+        html: m.html,
         attachment: attachment ? { filename: attachment.filename, contentType: attachment.contentType } : null,
         ics: attachment ? String(attachment.content) : null,
       }).toMatchSnapshot();
