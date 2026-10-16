@@ -115,6 +115,8 @@ describe('booking.locale and the notification context', () => {
     ).toMatchObject({ ok: true });
 
     const ctx = (await loadBookingNotificationContext(db, uid))!;
+    // The invitee is the one who booked, never one of the extra attendees.
+    expect(ctx.attendee.email).toBe('Sam@Example.com');
     expect(ctx.attendeeLocale).toBe('es');
     expect(ctx.attendee).toMatchObject({
       phone: '+1 602 555 0143',

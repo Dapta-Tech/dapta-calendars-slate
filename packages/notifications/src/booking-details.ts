@@ -49,6 +49,15 @@ export const MAX_ANSWER_CHARS = 1000;
 export const MAX_ANSWERS = 20;
 /** A question's label, as the event type's schema bounds it. */
 export const MAX_LABEL_CHARS = 200;
+/**
+ * The most characters all the answers (notes included) may run together.
+ * Escaping can grow a value several times over in the HTML, and the button
+ * comes after the answers, so it is the block as a whole that has to stay
+ * well under a client's clipping size, not each answer alone.
+ */
+export const MAX_ANSWERS_TOTAL_CHARS = 6000;
+/** The most items one multi-select answer keeps. */
+export const MAX_ANSWER_ITEMS = 50;
 
 /** C0 controls other than tab and newline: nothing a person typed on purpose. */
 // eslint-disable-next-line no-control-regex
@@ -87,7 +96,8 @@ function normalizeAnswer(raw: unknown): BookingAnswerValue | null {
     const items = raw
       .filter((x): x is string | number => typeof x === 'string' || typeof x === 'number')
       .map((x) => clip(cleanLine(String(x))))
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, MAX_ANSWER_ITEMS);
     return items.length > 0 ? items : null;
   }
   return null;
@@ -210,12 +220,20 @@ export function bookingDetails(n: BookingDetailsSource, locale: TemplateLocale):
   const c = bookingDetailsCopy(locale);
   const answers: DetailLine[] = [];
   // Bounded again here: a payload is not always ours (an older row, a fork).
+  // Each answer is cut to its own limit and to what is left of the block's.
+  let left = MAX_ANSWERS_TOTAL_CHARS;
+  const take = (text: string): string => {
+    if (left <= 0) return '';
+    const value = clip(text, Math.min(MAX_ANSWER_CHARS, left));
+    left -= value.length;
+    return value;
+  };
   for (const a of (n.answers ?? []).slice(0, MAX_ANSWERS)) {
-    const value = clip(readableAnswer(a, locale));
+    const value = take(readableAnswer(a, locale));
     if (value) answers.push({ label: clip(cleanLine(a.label), MAX_LABEL_CHARS), value });
   }
-  const notes = cleanBlock(String(n.attendee.notes ?? ''));
-  if (notes) answers.push({ label: c.notes, value: clip(notes) });
+  const notes = take(cleanBlock(String(n.attendee.notes ?? '')));
+  if (notes) answers.push({ label: c.notes, value: notes });
   return {
     guest: {
       name: cleanLine(n.attendee.name),

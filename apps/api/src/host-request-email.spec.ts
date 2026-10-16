@@ -3,6 +3,7 @@ import {
   createDb,
   createEventType,
   getAvailability,
+  getTeamAvailability,
   listOutbox,
   migrate,
   seed,
@@ -257,6 +258,37 @@ describe("the host's request email, end to end through the outbox", () => {
     expect(m.subject).toBe('We got your request for An interview with Felipe');
     expect(m.text).toMatch(/^Hi Test Visitor,/);
     expect(m.html).toContain('Pending');
+  });
+
+  it("the team page's language is the booking's too, and only en or es is kept", async () => {
+    const team = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-demo',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const stored: Array<{ locale: string | null; language: string | null }> = [];
+    for (const [i, locale] of ['es', 'fr'].entries()) {
+      // The team route forwards its body as it arrived: `locale` is unvalidated.
+      const out = await booking.teamBook('acme', 'sales', {
+        slug: 'team-demo',
+        startUtc: team!.slots[i]!,
+        attendee: { name: 'Team Visitor', email: `team-${i}@example.com`, timeZone: 'UTC' },
+        locale,
+      });
+      if ('error' in out) throw new Error(`team book failed: ${out.error}`);
+      stored.push(
+        (await db.get<{ locale: string | null; language: string | null }>(
+          sql`SELECT b.locale, a.language FROM booking b
+              JOIN booking_attendee a ON a.booking_id = b.id WHERE b.uid = ${out.uid}`,
+        ))!,
+      );
+    }
+    expect(stored).toEqual([
+      { locale: 'es', language: null },
+      { locale: null, language: null },
+    ]);
   });
 
   it('the confirmed booking and the move carry the block too, with no button', async () => {

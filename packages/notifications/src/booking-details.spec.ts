@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ANSWERS,
+  MAX_ANSWERS_TOTAL_CHARS,
   MAX_ANSWER_CHARS,
+  MAX_ANSWER_ITEMS,
   MAX_LABEL_CHARS,
   bookingDetails,
   bookingDetailsText,
@@ -95,6 +97,29 @@ describe('collectBookingAnswers', () => {
     expect(answers).toHaveLength(1);
     expect(String(answers[0]!.value)).toHaveLength(MAX_ANSWER_CHARS + 1);
     expect(String(answers[0]!.value).endsWith('…')).toBe(true);
+  });
+});
+
+describe('the block as a whole stays bounded', () => {
+  it('cuts the answers to a total, so escaping cannot push the button past a clip', () => {
+    const answers = Array.from({ length: MAX_ANSWERS }, (_, i) => ({
+      label: `Q${i}`,
+      value: '<'.repeat(MAX_ANSWER_CHARS),
+    }));
+    const d = bookingDetails(
+      { attendee: { name: 'Sam', email: 'sam@example.com', notes: 'n'.repeat(500) }, answers },
+      'en',
+    );
+    const total = d.answers.reduce((sum, a) => sum + a.value.length, 0);
+    expect(total).toBeLessThanOrEqual(MAX_ANSWERS_TOTAL_CHARS + d.answers.length);
+    expect(d.answers.length).toBeLessThan(MAX_ANSWERS);
+  });
+
+  it('keeps a bounded number of items in a multi-select', () => {
+    const [a] = collectBookingAnswers([{ name: 'tags', label: 'Tags', type: 'select' }], {
+      tags: Array.from({ length: MAX_ANSWER_ITEMS + 30 }, (_, i) => `t${i}`),
+    });
+    expect(a!.value).toHaveLength(MAX_ANSWER_ITEMS);
   });
 });
 

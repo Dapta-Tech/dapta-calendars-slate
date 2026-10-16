@@ -74,6 +74,9 @@ describePg('booking.locale and the notification context (real Postgres)', () => 
     await addGuestsToBooking(db, { accountId, uid, guests: [{ email: `bo-${run}@example.com` }] });
 
     const ctx = (await loadBookingNotificationContext(db, uid))!;
+    // The invitee is the one who booked, never one of the extra attendees
+    // written with them (a bare LIMIT 1 over the join used to pick either).
+    expect(ctx.attendee.email).toBe(`sam-${run}@example.com`);
     expect(ctx.attendeeLocale).toBe('es');
     expect(ctx.attendee).toMatchObject({ phone: '+1 602 555 0143', notes: 'Joining from my phone' });
     expect(ctx.guests.map((g) => g.email).sort()).toEqual([`ana-${run}@example.com`, `bo-${run}@example.com`]);

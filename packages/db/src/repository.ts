@@ -1138,13 +1138,16 @@ export async function createBooking(
       ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
       ${args.attendee.language ?? null}, ${now})`;
+  // Extra attendees are written a millisecond apart, after the invitee, so
+  // "the first attendee row" names the one who booked without relying on the
+  // database's physical row order (see loadBookingNotificationContext).
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
-    (attendee) => sql`
+    (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
         ${normalizeAttendeeEmail(attendee.email)},
         ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
-        ${attendee.language ?? null}, ${now})`,
+        ${attendee.language ?? null}, ${now + 1 + i})`,
   );
 
   const record: BookingRecord = {
