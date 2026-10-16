@@ -161,8 +161,13 @@ export default async function ManagePage({
   const mode = manageMode(booking.status, startUtc, now.getTime());
 
   const hour12 = !locale.toLowerCase().startsWith('es');
+  // Keyed (F9): this element is made here and handed to the client island,
+  // which places it beside its own children. Arriving from the server it is
+  // not one React has seen written in place, so without a key React warned
+  // on every manage page that a child in a list had none.
   const summary = (
     <BookingSummary
+      key="summary"
       m={messages}
       eyebrow={m.title}
       title={booking.title}
