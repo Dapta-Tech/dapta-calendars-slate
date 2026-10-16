@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildMonthGrid, groupSlotsByDay, isNavItemActive, monthKeyOf, shiftMonth } from './booking';
+import {
+  adminBookingPath,
+  bookingAnchorId,
+  buildMonthGrid,
+  groupSlotsByDay,
+  isNavItemActive,
+  monthKeyOf,
+  shiftMonth,
+} from './booking';
 import {
   formatSlotTime,
   isValidTimeZone,
@@ -319,5 +327,15 @@ describe('timezone validation (QA fix 1)', () => {
     expect(safeTimeZone('America/Bogota')).toBe('America/Bogota');
     expect(safeTimeZone('UT}fg')).toBe('UTC');
     expect(safeTimeZone(null)).toBe('UTC');
+  });
+});
+
+describe('the dashboard link to one booking (F11)', () => {
+  it("points at the bookings list, at the row the list names with the booking's uid", () => {
+    const uid = '6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
+    expect(adminBookingPath(uid)).toBe(`/admin/bookings#${bookingAnchorId(uid)}`);
+    expect(bookingAnchorId(uid)).toBe(`booking-${uid}`);
+    // A uid is never anything else, but a link is no place to find out.
+    expect(adminBookingPath('a b#c')).toBe('/admin/bookings#booking-a%20b%23c');
   });
 });

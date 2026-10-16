@@ -101,24 +101,25 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
   // cap of ten live holds, so a busy page refused new visitors' holds.
   const reservationField = formData.get('reservationUid');
   const reservationUid = reservationField ? String(reservationField) : undefined;
-  // The page's language (F6): the invitee's emails are written in it. Only the
-  // two the product speaks; anything else is left out, and the API then keeps
-  // the invitee's mail in the host's language, as before.
-  const languageField = String(formData.get('language') ?? '');
-  const language = languageField === 'es' || languageField === 'en' ? languageField : undefined;
+  // The page's language (F6): the invitee's emails are written in it. Sent as
+  // the booking's `locale`, not as `attendee.language`, which is a contact
+  // property the CRM write-out reads. Only the two the product speaks;
+  // anything else is left out, and the invitee's mail then follows the host's
+  // language, as before.
+  const localeField = String(formData.get('language') ?? '');
+  const locale = localeField === 'es' || localeField === 'en' ? localeField : undefined;
   const attendee = {
     name: String(formData.get('name') ?? ''),
     email: String(formData.get('email') ?? ''),
     timeZone: String(formData.get('timeZone') ?? 'UTC'),
     notes: formData.get('notes') ? String(formData.get('notes')) : undefined,
-    ...(language ? { language } : {}),
   };
 
   if (kind === 'team') {
     return postTeamBooking(
       accountCode,
       ownerSlug,
-      { slug, startUtc, attendee, answers: answersObj },
+      { slug, startUtc, attendee, answers: answersObj, ...(locale ? { locale } : {}) },
       oneOffToken,
     );
   }
@@ -130,6 +131,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     startUtc,
     attendee,
     answers: answersObj,
+    locale,
     reservationUid,
   });
   if (!parsed.success) {

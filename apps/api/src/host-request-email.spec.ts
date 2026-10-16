@@ -7,6 +7,7 @@ import {
   migrate,
   seed,
   sql,
+  upsertNotificationSetting,
   type Db,
 } from '@slate/db';
 import { DisabledCalendarProvider } from '@slate/calendar';
@@ -92,33 +93,47 @@ describe("the host's request email, end to end through the outbox", () => {
     worker = new OutboxWorker(db, ENV, calendar, emailEffects, new DaptaSyncEffects(ENV));
   });
 
-  async function request(language?: 'en' | 'es'): Promise<string> {
+  /** The first `n` times the event offers, as the page would book them. */
+  async function times(slug: string): Promise<string[]> {
     const a = await getAvailability(db, {
       accountCode: 'acme',
       handle: 'alex-rivera',
-      slug: 'interview',
+      slug,
       fromMs: Date.now(),
       toMs: Date.now() + 14 * 86_400_000,
     });
+    return a!.slots.map((s) => s.startUtc);
+  }
+
+  /**
+   * A request, as the booking page sends it: the page's language as `locale`.
+   * `language` stands for an API caller's explicit `attendee.language`.
+   */
+  async function request(
+    opts: { locale?: 'en' | 'es'; language?: 'en' | 'es' } = {},
+  ): Promise<string> {
     const out = await booking.book({
       accountCode: 'acme',
       handle: 'alex-rivera',
       slug: 'interview',
-      startUtc: a!.slots[0]!.startUtc,
+      startUtc: (await times('interview'))[0]!,
       attendee: {
         name: 'Test Visitor',
         email: 'visitor@example.com',
         timeZone: 'America/Phoenix',
         notes: 'I will join from my phone.',
-        ...(language ? { language } : {}),
+        ...(opts.language ? { language: opts.language } : {}),
       },
-      // Stored in a different order than the host asked the questions.
+      ...(opts.locale ? { locale: opts.locale } : {}),
+      // Stored in a different order than the host asked the questions, plus a
+      // key no question names, which must not reach the host's mail.
       answers: {
         recording: true,
         company: 'Example Co',
         topics: ['Hiring', 'Budget'],
         skipped: '',
         phone: '+1 602 555 0143',
+        'Action required: verify your payout at': 'https://evil.example/verify',
       },
     });
     if ('error' in out) throw new Error(`book failed: ${out.error}`);
@@ -133,7 +148,7 @@ describe("the host's request email, end to end through the outbox", () => {
   const visitorMail = () => email.sent.find((m) => to(m).includes('visitor@example.com'))!;
 
   it('tells the host who is asking, every answer in question order, and where to act', async () => {
-    const uid = await request('es');
+    const uid = await request({ locale: 'es' });
     const m = hostMail();
     expect(m.subject).toMatch(/^New booking: An interview with Felipe/);
     // The host reads the time on the host's clock (#214), in the host's language.
@@ -154,13 +169,14 @@ describe("the host's request email, end to end through the outbox", () => {
       ].join('\n'),
     );
     expect(text).not.toContain('Anything else?');
+    expect(`${text}\n${m.html}`).not.toContain('evil.example');
     const dashboard = `https://calendar.example.com/admin/bookings#booking-${uid}`;
     expect(text).toContain(`Confirm or decline: ${dashboard}`);
     expect(m.html).toContain(`href="${dashboard}"`);
   });
 
   it("writes the visitor's copy in the language they booked in, without the host's view", async () => {
-    await request('es');
+    await request({ locale: 'es' });
     const m = visitorMail();
     expect(m.subject).toMatch(/^Solicitud recibida: /);
     expect(m.html).toContain('Pendiente');
@@ -187,14 +203,14 @@ describe("the host's request email, end to end through the outbox", () => {
 
   it('an English visitor on a Spanish host page gets English mail; the host keeps Spanish', async () => {
     await db.run(sql`UPDATE member SET locale = 'es' WHERE id = ${memberId}`);
-    await request('en');
+    await request({ locale: 'en' });
     expect(visitorMail().subject).toMatch(/^Request received: /);
     expect(hostMail().subject).toMatch(/^Nueva reserva: /);
     expect(hostMail().text).toContain('Sus respuestas\nWhich topics? Hiring, Budget');
   });
 
   it("snapshots the host's view on the host's row only", async () => {
-    await request('es');
+    await request({ locale: 'es' });
     const rows = (await listOutbox(db, { kind: 'email' })).filter((r) => r.action === 'pending');
     const payloads = rows.map((r) => JSON.parse(r.payload ?? '{}') as BookingNotification);
     const host = payloads.find((p) => p.audience === 'host')!;
@@ -214,5 +230,64 @@ describe("the host's request email, end to end through the outbox", () => {
     expect(visitor.guests).toBeUndefined();
     expect(visitor.dashboardUrl).toBeUndefined();
     expect(visitor.attendee).not.toHaveProperty('notes');
+  });
+
+  it("an API caller's explicit attendee.language decides, and wins over the page's", async () => {
+    await request({ language: 'es', locale: 'en' });
+    expect(visitorMail().subject).toMatch(/^Solicitud recibida: /);
+  });
+
+  it("the page's language is the booking's, never the contact's (the CRM reads that one)", async () => {
+    const uid = await request({ locale: 'es' });
+    const row = await db.get<{ locale: string | null; language: string | null }>(
+      sql`SELECT b.locale, a.language FROM booking b
+          JOIN booking_attendee a ON a.booking_id = b.id WHERE b.uid = ${uid}`,
+    );
+    expect(row).toEqual({ locale: 'es', language: null });
+  });
+
+  it("copy the host wrote keeps the host's language whole, as before", async () => {
+    // One language per custom text: the host's. A Spanish frame around an
+    // English custom subject would mix the two.
+    await upsertNotificationSetting(db, accountId, 'attendee_pending', {
+      subject: 'We got your request for {{event_title}}',
+    });
+    await request({ locale: 'es' });
+    const m = visitorMail();
+    expect(m.subject).toBe('We got your request for An interview with Felipe');
+    expect(m.text).toMatch(/^Hi Test Visitor,/);
+    expect(m.html).toContain('Pending');
+  });
+
+  it('the confirmed booking and the move carry the block too, with no button', async () => {
+    await db.run(sql`UPDATE event_type SET requires_confirmation = 0 WHERE slug = 'interview'`);
+    const [first, second] = await times('interview');
+    const out = await booking.book({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'interview',
+      startUtc: first!,
+      attendee: { name: 'Test Visitor', email: 'visitor@example.com', timeZone: 'America/Phoenix' },
+      locale: 'es',
+      answers: { company: 'Example Co' },
+    });
+    if ('error' in out) throw new Error(`book failed: ${out.error}`);
+    expect(out.status).toBe('accepted');
+    const token = new URL(out.manageUrl!).searchParams.get('token')!;
+    const moved = await booking.reschedule(out.uid, { newStartUtc: second!, token });
+    if ('error' in moved) throw new Error(`reschedule failed: ${moved.error}`);
+    await settle();
+    await worker.drainOnce(Date.now());
+    const hostCopies = email.sent.filter((m) => to(m).includes('host@example.com'));
+    const confirmed = hostCopies.find((m) => m.subject.startsWith('New booking:'))!;
+    const rescheduled = hostCopies.find((m) => m.subject.startsWith('Rescheduled:'))!;
+    for (const m of [confirmed, rescheduled]) {
+      expect(m.text, m.subject).toContain('Their answers\nCompany: Example Co');
+      expect(m.html, m.subject).not.toContain('admin/bookings');
+    }
+    // The visitor's own copies, in Spanish, and without the host's view.
+    const visitorCopies = email.sent.filter((m) => to(m).includes('visitor@example.com'));
+    expect(visitorCopies.map((m) => m.subject.split(':')[0]).sort()).toEqual(['Confirmada', 'Reprogramada']);
+    for (const m of visitorCopies) expect(m.text, m.subject).not.toContain('Example Co');
   });
 });

@@ -23,7 +23,7 @@ import {
   type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { formatBookingLocation, getMessages } from '@slate/shared';
+import { adminBookingPath, formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { CalendarProvider } from '@slate/calendar';
 import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
@@ -466,7 +466,15 @@ export class EmailEffects {
     // language they booked in; a booking that never recorded one (every booking
     // before `booking.locale`, an API write naming none) keeps the host's, which
     // is what it always got. The host's copies always keep the host's.
-    const locale = side.audience === 'attendee' ? (ctx.attendeeLocale ?? ctx.hostLocale) : ctx.hostLocale;
+    //
+    // Copy the host wrote themselves (an account template, an event reminder's
+    // text) is in ONE language, the host's, and is sent as written. A message
+    // around it in the visitor's language would mix the two (an English subject
+    // with Spanish dates over a Spanish body), so such a copy keeps the host's
+    // language whole, exactly as it did before.
+    const customCopy = setting != null && (setting.subject != null || setting.body != null);
+    const locale =
+      side.audience === 'attendee' && !customCopy ? (ctx.attendeeLocale ?? ctx.hostLocale) : ctx.hostLocale;
     return {
       ...this.toNotification(ctx, extra, locale),
       // The manage link is the invitee's tokenised link to THEIR booking; the
@@ -506,7 +514,7 @@ export class EmailEffects {
     return {
       ...details,
       dashboardUrl: this.env
-        ? `${this.env.PUBLIC_APP_URL.replace(/\/+$/, '')}/admin/bookings#booking-${encodeURIComponent(ctx.uid)}`
+        ? `${this.env.PUBLIC_APP_URL.replace(/\/+$/, '')}${adminBookingPath(ctx.uid)}`
         : null,
     };
   }

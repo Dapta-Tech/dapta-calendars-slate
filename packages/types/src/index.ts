@@ -381,6 +381,13 @@ export const createBookingSchema = z.object({
   attendee: attendeeSchema,
   /** Answers to the event type's custom intake fields. */
   answers: intakeAnswersSchema.optional(),
+  /**
+   * The language of the page the visitor booked on. The invitee's emails are
+   * written in it (an explicit `attendee.language` wins); it is not a contact
+   * property, so it does not touch what `attendee.language` feeds. Optional:
+   * absent, the invitee's mail follows the host's language, as before.
+   */
+  locale: z.enum(['en', 'es']).optional(),
   /** Consume a held reservation (slot hold) if one exists. */
   reservationUid: z.string().max(200).optional(),
   // NO `idempotencyKey` here, deliberately (#104). This schema is what the

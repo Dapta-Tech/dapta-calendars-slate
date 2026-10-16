@@ -426,9 +426,9 @@ export class BookingService {
         attendee: input.attendee,
         additionalAttendees: context?.additionalAttendees,
         answers: input.answers,
-        // F6: the booking page sends its own language as `attendee.language`,
-        // and an API caller's explicit one means the same thing.
-        locale: context && 'locale' in context ? context.locale : input.attendee.language,
+        // F6: an explicit `attendee.language` is the invitee's own choice; the
+        // booking page sends the language it speaks to them as `locale`.
+        locale: context && 'locale' in context ? context.locale : (input.attendee.language ?? input.locale),
         metadata: context?.metadata,
         reservationUid: input.reservationUid,
         idempotencyKey: context?.idempotencyKey
@@ -923,6 +923,8 @@ export class BookingService {
       additionalAttendees?: Array<BookingView['attendee']>;
       answers?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
+      /** The booking page's language, as `book()` reads `locale`; unvalidated here. */
+      locale?: unknown;
     },
     /**
      * Caller-supplied context, NEVER request body. `PublicController` passes
@@ -957,7 +959,10 @@ export class BookingService {
         answers: body.answers,
         // The team page sends its language the way the personal one does. The
         // body is unvalidated here, so the repository keeps only `en`/`es`.
-        locale: context && 'locale' in context ? context.locale : languageOf(body.attendee),
+        locale:
+          context && 'locale' in context
+            ? context.locale
+            : (languageOf(body.attendee) ?? (typeof body.locale === 'string' ? body.locale : undefined)),
         metadata: body.metadata,
         idempotencyKey: context?.idempotencyKey
           ? contextIdempotencyKeySchema.parse(context.idempotencyKey)

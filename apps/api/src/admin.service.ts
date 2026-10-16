@@ -70,6 +70,8 @@ import {
 import {
   ACCOUNT_TEMPLATE_KEYS,
   TEMPLATE_VARIABLES,
+  bookingDetails,
+  bookingDetailsText,
   defaultEnabledFor,
   defaultTemplate,
   renderTemplate,
@@ -1149,8 +1151,27 @@ export class AdminService {
       reminderLeadMinutes: 60,
     };
     const rendered = renderTemplate(template, templateVars(sample, locale));
+    // The host's copy of a request, a booking and a move adds who is asking and
+    // what they answered under the template's body, whatever it says. That part
+    // is not editable, but the preview shows it (with a sample), so the preview
+    // still reads as the mail will.
+    const withDetails = key === 'host_booked' || key === 'host_rescheduled';
+    const text = withDetails
+      ? `${rendered.text}\n\n${bookingDetailsText(
+          bookingDetails(
+            {
+              attendee: { ...sample.attendee, phone: '+1 555 0100' },
+              answers: [{ label: locale === 'es' ? 'Empresa' : 'Company', value: 'Acme' }],
+            },
+            locale,
+          ),
+          locale,
+          key === 'host_booked' ? 'https://example.com/admin/bookings' : null,
+        )}`
+      : rendered.text;
     return {
       ...rendered,
+      text,
       unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
     };
   }

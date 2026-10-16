@@ -215,3 +215,22 @@ export function buildMonthGrid(
     weeks,
   };
 }
+
+/**
+ * The dashboard's own link to one booking: the bookings list, scrolled to that
+ * booking's row. The host's request email opens it as its "Confirm or decline"
+ * button (F11), and the list names each row with `bookingAnchorId`. One
+ * definition for the API that writes the link and the web that answers it, so
+ * the two cannot drift. It only opens a page: nothing changes on a GET.
+ */
+export const ADMIN_BOOKINGS_PATH = '/admin/bookings';
+
+/** The id of a booking's row on the dashboard's bookings list. */
+export function bookingAnchorId(uid: string): string {
+  return `booking-${uid}`;
+}
+
+/** The dashboard path to one booking (relative: prefix the app's public URL). */
+export function adminBookingPath(uid: string): string {
+  return `${ADMIN_BOOKINGS_PATH}#${bookingAnchorId(encodeURIComponent(uid))}`;
+}

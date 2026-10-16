@@ -74,22 +74,25 @@ describe('bookAction hands the hold to the booking that consumes it', () => {
   });
 });
 
-describe("bookAction sends the page's language as the visitor's (F6)", () => {
-  const attendeeOf = (call: unknown[] | undefined, at: number) =>
-    ((call as unknown[])[at] as { attendee: Record<string, unknown> }).attendee;
+describe("bookAction sends the page's language as the booking's (F6)", () => {
+  const bodyOf = (call: unknown[] | undefined, at: number) =>
+    (call as unknown[])[at] as { locale?: string; attendee: Record<string, unknown> };
 
-  it('on a personal and a team booking', async () => {
+  it('on a personal and a team booking, as `locale`, never as a contact property', async () => {
     await bookAction(null, form({ language: 'es' }));
-    expect(attendeeOf(api.postBooking.mock.calls[0], 0)['language']).toBe('es');
+    expect(bodyOf(api.postBooking.mock.calls[0], 0).locale).toBe('es');
     await bookAction(null, form({ kind: 'team', ownerSlug: 'sales', slug: 'team-demo', language: 'en' }));
-    expect(attendeeOf(api.postTeamBooking.mock.calls[0], 2)['language']).toBe('en');
+    expect(bodyOf(api.postTeamBooking.mock.calls[0], 2).locale).toBe('en');
+    // `attendee.language` feeds the CRM write-out; the page leaves it alone.
+    expect(bodyOf(api.postBooking.mock.calls[0], 0).attendee).not.toHaveProperty('language');
+    expect(bodyOf(api.postTeamBooking.mock.calls[0], 2).attendee).not.toHaveProperty('language');
   });
 
   it('leaves out anything but en and es, so the API keeps the host language', async () => {
     await bookAction(null, form({ language: 'fr' }));
     await bookAction(null, form({}));
     for (const call of api.postBooking.mock.calls) {
-      expect(attendeeOf(call, 0)).not.toHaveProperty('language');
+      expect(bodyOf(call, 0).locale).toBeUndefined();
     }
   });
 });
