@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
+  getManageView: vi.fn(),
   postBooking: vi.fn(async () => ({ ok: true, status: 201 })),
   postTeamBooking: vi.fn(async () => ({ ok: true, status: 201 })),
   postReservation: vi.fn(),
@@ -15,7 +16,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/api', () => api);
 
-import { bookAction } from './actions';
+import { bookAction, meetingLinkAction } from './actions';
 
 const HOLD = '6f1c2b7e-1d2a-4c3b-9e8f-0a1b2c3d4e5f';
 
@@ -70,5 +71,54 @@ describe('bookAction hands the hold to the booking that consumes it', () => {
     expect(api.postBooking).not.toHaveBeenCalled();
     const body = (api.postTeamBooking.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
     expect(body['reservationUid']).toBeUndefined();
+  });
+});
+
+describe("bookAction sends the page's language as the visitor's (F6)", () => {
+  const attendeeOf = (call: unknown[] | undefined, at: number) =>
+    ((call as unknown[])[at] as { attendee: Record<string, unknown> }).attendee;
+
+  it('on a personal and a team booking', async () => {
+    await bookAction(null, form({ language: 'es' }));
+    expect(attendeeOf(api.postBooking.mock.calls[0], 0)['language']).toBe('es');
+    await bookAction(null, form({ kind: 'team', ownerSlug: 'sales', slug: 'team-demo', language: 'en' }));
+    expect(attendeeOf(api.postTeamBooking.mock.calls[0], 2)['language']).toBe('en');
+  });
+
+  it('leaves out anything but en and es, so the API keeps the host language', async () => {
+    await bookAction(null, form({ language: 'fr' }));
+    await bookAction(null, form({}));
+    for (const call of api.postBooking.mock.calls) {
+      expect(attendeeOf(call, 0)).not.toHaveProperty('language');
+    }
+  });
+});
+
+describe('meetingLinkAction answers the join link and nothing else (F5)', () => {
+  it('the link once the booking has one', async () => {
+    api.getManageView.mockResolvedValueOnce({
+      ok: true,
+      booking: { uid: 'bk', meetingUrl: 'https://meet.example.test/evt_1', attendee: { email: 'x@example.test' } },
+    });
+    await expect(meetingLinkAction('bk', 'tok')).resolves.toBe('https://meet.example.test/evt_1');
+    expect(api.getManageView).toHaveBeenCalledWith('bk', 'tok');
+  });
+
+  it('null while there is none, for a dead link, an error, or anything not http(s)', async () => {
+    api.getManageView.mockResolvedValueOnce({ ok: true, booking: { uid: 'bk', meetingUrl: null } });
+    await expect(meetingLinkAction('bk', 'tok')).resolves.toBeNull();
+    api.getManageView.mockResolvedValueOnce({ ok: false, reason: 'invalid-link' });
+    await expect(meetingLinkAction('bk', 'tok')).resolves.toBeNull();
+    api.getManageView.mockRejectedValueOnce(new Error('API down'));
+    await expect(meetingLinkAction('bk', 'tok')).resolves.toBeNull();
+    api.getManageView.mockResolvedValueOnce({ ok: true, booking: { uid: 'bk', meetingUrl: 'javascript:alert(1)' } });
+    await expect(meetingLinkAction('bk', 'tok')).resolves.toBeNull();
+  });
+
+  it('asks nothing for an empty or oversized credential', async () => {
+    api.getManageView.mockClear();
+    await expect(meetingLinkAction('', 'tok')).resolves.toBeNull();
+    await expect(meetingLinkAction('bk', 'x'.repeat(600))).resolves.toBeNull();
+    expect(api.getManageView).not.toHaveBeenCalled();
   });
 });

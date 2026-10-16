@@ -97,9 +97,13 @@ function Section({
       ) : (
         <ul className="flex flex-col gap-inline">
           {rows.map((b) => (
+            // `id` is the booking's deep link (`#booking-<uid>`): the host's
+            // request email opens the list here, and the row the link names
+            // is ringed so it reads as the one the mail was about (F11).
             <li
               key={b.uid}
-              className={`flex items-center justify-between rounded-md border border-border bg-card p-card ${
+              id={`booking-${b.uid}`}
+              className={`flex items-center justify-between rounded-md border border-border bg-card p-card target:ring-2 target:ring-ring ${
                 muted ? 'opacity-70' : ''
               }`}
             >
