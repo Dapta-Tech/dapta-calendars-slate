@@ -1,0 +1,25 @@
+Subject: Nueva reserva: An interview with Felipe — mar, 20 oct, 14:00 GMT-5
+To: host@example.com
+
+Hola Felipe Host,
+
+Test Visitor (visitor@example.com) reservó "An interview with Felipe".
+Cuándo: mar, 20 oct, 14:00 GMT-5
+Dónde: Reunión en línea
+Esta solicitud está pendiente de tu confirmación.
+
+Datos del invitado
+Nombre: Test Visitor
+Correo: visitor@example.com
+Teléfono: +1 602 555 0143
+Otros invitados: Ana Ruiz (ana@example.com), bo@example.com
+
+Sus respuestas
+Company: Example Co
+What would you like to talk about? The hiring plan for Q1.
+  Also the budget.
+Which topics? Hiring, Budget
+I agree to be recorded: Sí
+Notas: I will join from my phone.
+
+Confirmar o rechazar: https://calendar.example.com/admin/bookings#booking-6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10

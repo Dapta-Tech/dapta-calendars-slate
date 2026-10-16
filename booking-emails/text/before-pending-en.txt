@@ -1,0 +1,9 @@
+Subject: New booking: An interview with Felipe — Tue, Oct 20, 2:00 PM GMT-5
+To: host@example.com
+
+Hi Felipe Host,
+
+Test Visitor (visitor@example.com) booked "An interview with Felipe".
+When: Tue, Oct 20, 2:00 PM GMT-5
+Where: Online meeting
+This request is pending your confirmation.

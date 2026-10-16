@@ -1,0 +1,9 @@
+Subject: Nueva reserva: An interview with Felipe — mar, 20 oct, 14:00 GMT-5
+To: host@example.com
+
+Hola Felipe Host,
+
+Test Visitor (visitor@example.com) reservó "An interview with Felipe".
+Cuándo: mar, 20 oct, 14:00 GMT-5
+Dónde: Reunión en línea
+Esta solicitud está pendiente de tu confirmación.

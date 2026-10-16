@@ -1,0 +1,25 @@
+Subject: New booking: An interview with Felipe — Tue, Oct 20, 2:00 PM GMT-5
+To: host@example.com
+
+Hi Felipe Host,
+
+Test Visitor (visitor@example.com) booked "An interview with Felipe".
+When: Tue, Oct 20, 2:00 PM GMT-5
+Where: Online meeting
+This request is pending your confirmation.
+
+Guest details
+Name: Test Visitor
+Email: visitor@example.com
+Phone: +1 602 555 0143
+Other guests: Ana Ruiz (ana@example.com), bo@example.com
+
+Their answers
+Company: Example Co
+What would you like to talk about? The hiring plan for Q1.
+  Also the budget.
+Which topics? Hiring, Budget
+I agree to be recorded: Yes
+Notes: I will join from my phone.
+
+Confirm or decline: https://calendar.example.com/admin/bookings#booking-6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10
