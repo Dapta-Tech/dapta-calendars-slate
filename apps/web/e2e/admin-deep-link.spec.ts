@@ -101,7 +101,8 @@ test("another workspace's booking is not found, and nothing of it shows", async 
   await signIn(page, stranger);
 
   await expect(page).toHaveURL(new RegExp(`${emailLink(uid)}$`));
-  await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
+  // Inside the dashboard, with the way back to the list.
+  await expect(page.getByText('Booking not found')).toBeVisible();
   await expect(page.getByText('By Request')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Decline', exact: true })).toHaveCount(0);
 
