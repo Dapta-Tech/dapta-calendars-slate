@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { BookingView } from '@slate/types';
+import { manageTokenOf } from './manage-token';
 
 /**
  * F5: the join link of an online meeting that was booked a moment ago.
@@ -18,15 +19,6 @@ import type { BookingView } from '@slate/types';
  */
 export const LATE_LINK_DELAYS_MS = [1_500, 2_500, 4_000, 6_000, 8_000, 10_000, 12_000] as const;
 
-/** The manage token in a (possibly relative) manage URL, or null. */
-export function manageTokenOf(manageUrl: string | null | undefined): string | null {
-  if (!manageUrl) return null;
-  try {
-    return new URL(manageUrl, 'http://localhost').searchParams.get('token');
-  } catch {
-    return null;
-  }
-}
 
 /**
  * What the hook reads of a booking. `locationKind` is a plain string: the

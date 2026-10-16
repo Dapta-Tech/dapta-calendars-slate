@@ -8,7 +8,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { BookingView } from '@slate/types';
-import { awaitsMeetingLink, manageTokenOf, useLateMeetingLink } from './use-late-meeting-link';
+import { manageTokenOf } from './manage-token';
+import { awaitsMeetingLink, useLateMeetingLink } from './use-late-meeting-link';
 
 const confirmedOnline = {
   uid: 'bk_1',
