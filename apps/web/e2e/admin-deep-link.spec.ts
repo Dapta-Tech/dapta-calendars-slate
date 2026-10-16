@@ -90,10 +90,15 @@ test('a link from an older email (the uid in the fragment) still opens its booki
 test("another workspace's booking is not found, and nothing of it shows", async ({ page, request, context }) => {
   const uid = await requestBooking(request, 'foreign');
 
-  // A brand-new workspace of its own; its onboarding is not what this checks.
+  // A brand-new workspace of its own, made by one call first: the dev login
+  // makes a workspace on a person's first request, and the dashboard's first
+  // render asks several things at once, which on Postgres can race that.
+  // Its onboarding is not what this checks.
+  const stranger = visitorEmail('stranger');
+  expect((await request.get(`${E2E.api}/v1/me`, { headers: { 'x-slate-email': stranger } })).ok()).toBe(true);
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);
   await page.goto(emailLink(uid));
-  await signIn(page, visitorEmail('stranger'));
+  await signIn(page, stranger);
 
   await expect(page).toHaveURL(new RegExp(`${emailLink(uid)}$`));
   await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();

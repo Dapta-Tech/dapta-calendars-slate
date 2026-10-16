@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RETURN_TO_PARAM } from '@/lib/return-to';
 import { signInAction } from './actions';
 
 /** Local dev login: email → session (sent as x-slate-email). A successful
@@ -21,7 +22,7 @@ export function LoginForm({
   const [state, action, pending] = useActionState(signInAction, null);
   return (
     <form action={action} className="flex flex-col gap-3">
-      {next ? <input type="hidden" name="next" value={next} /> : null}
+      {next ? <input type="hidden" name={RETURN_TO_PARAM} value={next} /> : null}
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted-foreground">{m.emailLabel}</span>
         <Input
