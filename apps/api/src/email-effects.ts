@@ -15,13 +15,15 @@ import {
 } from '@slate/db';
 import {
   BookingNotifier,
+  HOST_DETAIL_KINDS,
+  collectBookingAnswers,
   defaultEnabledFor,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { formatBookingLocation, getMessages } from '@slate/shared';
+import { adminBookingPath, formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { CalendarProvider } from '@slate/calendar';
 import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
@@ -145,8 +147,13 @@ export function emailKeyFor(kind: EmailKind, audience: 'attendee' | 'host'): Ema
  *   - Each lifecycle event fans out per side (attendee / host); a side whose
  *     toggle is OFF is not enqueued at all (no misleading delivery-log rows).
  *   - The payload snapshots the resolved template (per-account custom or
- *     shipped default in the host's locale) at enqueue time, so a later
- *     template edit never rewrites queued mail.
+ *     shipped default) at enqueue time, so a later template edit never
+ *     rewrites queued mail. Each side reads in its own language: the
+ *     invitee's copies in the one they booked in (`booking.locale`), the
+ *     host's in the host's; a booking with no recorded language keeps the
+ *     invitee's copies in the host's, as before.
+ *   - The host's side also snapshots who the booking is from and what they
+ *     answered, and the dashboard link the host acts from.
  *   - Reminders and the follow-up are the exception: they come from the EVENT
  *     TYPE (#68), one outbox row per enabled reminder per side, and are ALSO
  *     gated at deliver time by that reminder's own id (long-lived rows — a
@@ -455,14 +462,27 @@ export class EmailEffects {
         ? { subject: reminder.subject, body: reminder.body }
         : null
       : (settings.get(side.key) ?? defaultNotificationSetting(side.key));
+    // F6: each side reads in its own language. The invitee's copies follow the
+    // language they booked in; a booking that never recorded one (every booking
+    // before `booking.locale`, an API write naming none) keeps the host's, which
+    // is what it always got. The host's copies always keep the host's.
+    //
+    // Copy the host wrote themselves (an account template, an event reminder's
+    // text) is in ONE language, the host's, and is sent as written. A message
+    // around it in the visitor's language would mix the two (an English subject
+    // with Spanish dates over a Spanish body), so such a copy keeps the host's
+    // language whole, exactly as it did before.
+    const customCopy = setting != null && (setting.subject != null || setting.body != null);
+    const locale =
+      side.audience === 'attendee' && !customCopy ? (ctx.attendeeLocale ?? ctx.hostLocale) : ctx.hostLocale;
     return {
-      ...this.toNotification(ctx, extra),
+      ...this.toNotification(ctx, extra, locale),
       // The manage link is the invitee's tokenised link to THEIR booking; the
       // host's copy is never handed it, so no host mail can carry it.
-      ...(side.audience === 'host' ? { manageUrl: null } : {}),
+      ...(side.audience === 'host' ? { manageUrl: null, ...this.hostSide(ctx, kind) } : {}),
       audience: side.audience,
-      template: resolveTemplate(side.key, setting, ctx.hostLocale),
-      templateLocale: ctx.hostLocale,
+      template: resolveTemplate(side.key, setting, locale),
+      templateLocale: locale,
       pending: kind === 'pending',
       // `{{form.*}}` is reminder copy only (CONTEXT.md): the account-wide
       // transactional templates cannot know one event type's questions.
@@ -470,9 +490,40 @@ export class EmailEffects {
     };
   }
 
+  /**
+   * What only the host's copy carries, snapshotted with the rest (ADR 0007):
+   * the dashboard link the host acts from and, on the kinds whose host copy
+   * shows it (the request, the confirmed booking, the move), who the booking
+   * is from and what they answered, so the host can decide from the mail
+   * itself. The invitee's payload never holds the other guests' addresses or
+   * the answers.
+   *
+   * The link is the bookings page behind the host's login, deep-linked to this
+   * booking. It never confirms or declines anything by itself: a mail scanner
+   * prefetching it lands on a login or a list, and nothing changes.
+   */
+  private hostSide(ctx: BookingNotificationContext, kind: EmailKind): Partial<BookingNotification> {
+    // Only the kinds whose host copy shows the block snapshot it.
+    const details = HOST_DETAIL_KINDS.has(kind)
+      ? {
+          attendee: { ...ctx.attendee },
+          guests: ctx.guests,
+          answers: collectBookingAnswers(ctx.bookingFields, ctx.formAnswers),
+        }
+      : {};
+    return {
+      ...details,
+      dashboardUrl: this.env
+        ? `${this.env.PUBLIC_APP_URL.replace(/\/+$/, '')}${adminBookingPath(ctx.uid)}`
+        : null,
+    };
+  }
+
   private toNotification(
     ctx: BookingNotificationContext,
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
+    // The language this copy is written in, which the Where is worded in too.
+    locale: string | null = ctx.hostLocale,
   ): BookingNotification {
     return {
       accountId: ctx.accountId,
@@ -482,7 +533,9 @@ export class EmailEffects {
       endUtc: ctx.endUtc,
       host: ctx.host,
       coHosts: ctx.coHosts,
-      attendee: ctx.attendee,
+      // Who the mail is about. The phone and notes stay out of the shared
+      // snapshot: only the host's copy shows them (`hostSide`).
+      attendee: { name: ctx.attendee.name, email: ctx.attendee.email, timeZone: ctx.attendee.timeZone },
       // The Where as one human string, rendered from the booking's snapshotted
       // KIND. Deliberately GENERIC for conferencing: the platform name is a
       // host-facing affordance read from the calendar port in the event-type
@@ -492,7 +545,7 @@ export class EmailEffects {
       location: formatBookingLocation(
         ctx.locationKind,
         ctx.location,
-        getMessages(ctx.hostLocale ?? 'en'),
+        getMessages(locale ?? 'en'),
       ),
       // Snapshotted so DELIVERY can tell whether this booking is even supposed
       // to have a link, and therefore whether waiting for one is warranted.

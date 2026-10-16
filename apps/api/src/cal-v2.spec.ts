@@ -231,6 +231,56 @@ describe("Cal-compatible v2 R1 contract", () => {
     expect(Number(count?.count)).toBe(3);
   });
 
+  it("records the invitee's mail language only when the caller named one (F6)", async () => {
+    // The schema fills "en" when `language` is left out. That default keeps
+    // its old place (the stored attendee language, the response), but it is
+    // nobody's choice, so it must not move the invitee's mail out of the
+    // host's language the way an explicit language does.
+    const locales: Array<string | null> = [];
+    const attendeeLanguages: Array<string | null> = [];
+    for (const [i, language] of [undefined, "es"].entries()) {
+      const response = await controller.book(
+        request,
+        CAL_V2_BOOKINGS_VERSION,
+        `locale-${i}`,
+        {
+          eventTypeId: introEventTypeId,
+          start: (await slots().then((r) => Object.values(r.data).flat()))[i]!.start,
+          attendee: {
+            name: "Locale Customer",
+            email: `locale-${i}@example.com`,
+            timeZone: "America/Bogota",
+            ...(language ? { language } : {}),
+          },
+          bookingFieldsResponses: { company: "Example" },
+        },
+      );
+      const row = await db.get<{ locale: string | null; language: string | null }>(
+        sql`SELECT b.locale, a.language FROM booking b
+            JOIN booking_attendee a ON a.booking_id = b.id WHERE b.uid = ${response.data.uid}`,
+      );
+      locales.push(row!.locale);
+      attendeeLanguages.push(row!.language);
+    }
+    expect(locales).toEqual([null, "es"]);
+    expect(attendeeLanguages).toEqual(["en", "es"]);
+
+    const team = await controller.book(request, CAL_V2_BOOKINGS_VERSION, "locale-team", {
+      eventTypeId: teamEventTypeId,
+      start: await firstStart(teamEventTypeId),
+      attendee: {
+        name: "Team Locale",
+        email: "team-locale@example.com",
+        timeZone: "America/Bogota",
+        language: "es",
+      },
+    });
+    const teamRow = await db.get<{ locale: string | null }>(
+      sql`SELECT locale FROM booking WHERE uid = ${team.data.uid}`,
+    );
+    expect(teamRow!.locale).toBe("es");
+  });
+
   it("creates a team booking by ID and returns the assigned host", async () => {
     const response = await controller.book(
       request,

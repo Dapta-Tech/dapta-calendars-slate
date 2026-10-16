@@ -20,6 +20,7 @@
  * stylesheet; `email-layout.spec.ts` holds them to that file.
  */
 import type { TemplateVarMap } from './templates';
+import { bookingDetailsCopy, type BookingDetails } from './booking-details';
 
 export type EmailKind =
   | 'confirmation'
@@ -39,6 +40,23 @@ type Vars = TemplateVarMap;
 export interface EmailGrowth {
   /** The signup destination, UTM-tagged. Null or absent: no "Made with" line. */
   signupUrl?: string | null;
+  /**
+   * The deployment's support address (`MAIL_SUPPORT_EMAIL`), for the "Need
+   * help?" line. Null, absent or not an address: no line, so a fork never
+   * sends its readers to someone else's support desk.
+   */
+  supportEmail?: string | null;
+}
+
+/**
+ * What only the HOST's copy carries: who the booking is from and what they
+ * answered (`bookingDetails`), and, on a request, where to confirm or decline
+ * it. Absent on every invitee copy.
+ */
+export interface HostCopy {
+  details?: BookingDetails | null;
+  /** The dashboard link behind the request's one button; empty = no button. */
+  actionUrl?: string | null;
 }
 
 export const EMAIL_COLORS = {
@@ -65,10 +83,26 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Escaped, with the value's own line breaks kept as `<br>`. */
+function escLines(s: string): string {
+  return esc(s).replace(/\r?\n/g, '<br>');
+}
+
 /** A safe href: only http(s)/mailto; anything else collapses to '#'. */
 function safeHref(url: string): string {
   const u = String(url ?? '').trim();
   return /^(https?:|mailto:)/i.test(u) ? esc(u) : '#';
+}
+
+/**
+ * The support address when it is one: a bare `local@domain.tld`, nothing that
+ * could add a header or a second recipient to the `mailto:` it becomes. Null
+ * for anything else, which the footer then leaves out. Exported so the API can
+ * say at boot that a configured value will not be used.
+ */
+export function mailSupportAddress(value: string | null | undefined): string | null {
+  const v = String(value ?? '').trim();
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(v) ? v : null;
 }
 
 /** The one primary action: an ink cell around the link (bulletproof). */
@@ -112,7 +146,7 @@ interface KindCopy {
 }
 
 /** Status, intro and the one action per kind, EN and ES. */
-function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): KindCopy {
+function content(kind: EmailKind, v: Vars, locale: string, audience: Audience, hostCopy: HostCopy): KindCopy {
   const es = ES(locale);
   const host = v.host_name || (es ? 'el anfitrión' : 'the host');
   const who = audience === 'host' ? v.attendee_name || (es ? 'un invitado' : 'a guest') : host;
@@ -162,8 +196,11 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): 
       // invitee's words ("We've sent your request to <you>") and the invitee's
       // "Cancel request" button over the invitee's own manage link, so the one
       // button in the host's mail withdrew the request they were asked to
-      // accept. Confirming or declining happens in the host's bookings, not
-      // through an invitee link, so the host copy carries no button.
+      // accept. Its one button now opens the booking in the host's own
+      // dashboard, behind their login, where confirming or declining is a
+      // deliberate click. Never a link that confirms or declines by itself:
+      // mail scanners open every link in a message, and a GET that changed a
+      // booking would let one do it.
       if (audience === 'host')
         return {
           status: es ? 'Por confirmar' : 'Needs your OK',
@@ -171,7 +208,9 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): 
           intro: es
             ? `${who} pidió esta hora. Confírmala o recházala desde tus reservas.`
             : `${who} asked for this time. Confirm or decline it from your bookings.`,
-          action: null,
+          action: hostCopy.actionUrl
+            ? { label: bookingDetailsCopy(es ? 'es' : 'en').act, href: hostCopy.actionUrl }
+            : null,
           note: '',
         };
       return {
@@ -226,6 +265,29 @@ function content(kind: EmailKind, v: Vars, locale: string, audience: Audience): 
   }
 }
 
+/**
+ * Who the booking is from and what they answered, under the facts: each answer
+ * as its question (the host's words) over the answer (the visitor's), because
+ * a question is a sentence and does not fit the facts' label column.
+ */
+function answersSection(details: BookingDetails, locale: string): string {
+  if (details.answers.length === 0) return '';
+  const heading = bookingDetailsCopy(ES(locale) ? 'es' : 'en').answers;
+  const rows = details.answers
+    .map(
+      (a, i) =>
+        `<tr><td style="${i === 0 ? '' : `border-top:1px solid ${C.border};`}padding:12px 0;vertical-align:top;">` +
+        `<div style="font-size:13px;line-height:20px;color:${C.faint};">${esc(a.label)}</div>` +
+        `<div style="font-size:15px;line-height:22px;color:${C.ink};font-weight:500;">${escLines(a.value)}</div>` +
+        `</td></tr>`,
+    )
+    .join('');
+  return (
+    `<div style="font-size:13px;line-height:18px;font-weight:600;color:${C.ink};margin:24px 0 4px;">${esc(heading)}</div>` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${C.border};border-bottom:1px solid ${C.border};">${rows}</table>`
+  );
+}
+
 /** Render the full HTML email for a booking notification. */
 export function renderBrandedHtml(
   kind: EmailKind,
@@ -233,11 +295,27 @@ export function renderBrandedHtml(
   locale: string,
   audience: Audience = 'attendee',
   growth: EmailGrowth = {},
+  host: HostCopy = {},
 ): string {
   const es = ES(locale);
-  const c = content(kind, vars, locale, audience);
+  // Host-only by construction: an invitee copy is never handed these.
+  const hostCopy: HostCopy = audience === 'host' ? host : {};
+  const details = hostCopy.details ?? null;
+  const c = content(kind, vars, locale, audience, hostCopy);
   const withLabel = audience === 'host' ? (es ? 'Invitado' : 'Guest') : es ? 'Con' : 'With';
-  const withValue = audience === 'host' ? vars.attendee_name : vars.host_name;
+  // On a host copy with details, the guest is the person in full: the name,
+  // then how to reach them. Everywhere else it stays the name.
+  const quiet = (s: string) => `<span style="color:${C.muted};font-weight:400;">${esc(s)}</span>`;
+  const withValue = details
+    ? [
+        esc(details.guest.name || vars.attendee_name),
+        details.guest.email ? quiet(details.guest.email) : '',
+        details.guest.phone ? quiet(details.guest.phone) : '',
+      ]
+        .filter(Boolean)
+        .join('<br>')
+    : esc(audience === 'host' ? vars.attendee_name : vars.host_name);
+  const others = details ? details.others.map(esc).join('<br>') : '';
 
   // The meeting is still ahead on these kinds, so its link is part of WHERE:
   // a link in the facts, not a second button competing with the one action.
@@ -255,7 +333,8 @@ export function renderBrandedHtml(
   const rows: Array<[string, string]> = [
     [es ? 'Cuándo' : 'When', esc(vars.start_time)],
     [es ? 'Antes' : 'Was', before],
-    [withLabel, esc(withValue)],
+    [withLabel, withValue],
+    [bookingDetailsCopy(es ? 'es' : 'en').others, others],
     [es ? 'Dónde' : 'Where', where],
   ];
   const facts = rows
@@ -272,6 +351,12 @@ export function renderBrandedHtml(
     : '';
   const auto = es ? 'Este es un mensaje automático.' : 'This is an automated message.';
   const help = es ? '¿Necesitas ayuda?' : 'Need help?';
+  // The deployment's own support desk, or no line at all: never a hard-coded
+  // address, which a fork would otherwise send its readers to.
+  const support = mailSupportAddress(growth.supportEmail);
+  const helpLine = support
+    ? ` ${help} <a href="${safeHref(`mailto:${support}`)}" style="color:${C.faint};">${esc(support)}</a>`
+    : '';
 
   return `<div style="margin:0;padding:32px 12px;background:${C.ground};font-family:${FONT};">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
@@ -282,11 +367,11 @@ export function renderBrandedHtml(
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${C.border};border-bottom:1px solid ${C.border};">
         ${facts}
       </table>
-      ${c.action ? button(c.action.label, c.action.href) : ''}
+      ${details ? answersSection(details, locale) : ''}${c.action ? button(c.action.label, c.action.href) : ''}
       ${c.note ? `<div style="color:${C.faint};font-size:13px;line-height:20px;margin-top:16px;">${esc(c.note)}</div>` : ''}
     </td></tr>
     <tr><td style="padding:20px 8px 4px;color:${C.faint};font-size:12px;line-height:18px;text-align:center;">
-      ${madeWith}<div>${auto} ${help} <a href="mailto:support@daptatech.com" style="color:${C.faint};">support@daptatech.com</a></div>
+      ${madeWith}<div>${auto}${helpLine}</div>
     </td></tr>
   </table>
 </div>`;

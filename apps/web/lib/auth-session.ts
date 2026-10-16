@@ -1,10 +1,12 @@
 import 'server-only';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getMessages } from '@slate/shared';
 import { getLocale } from './locale';
+import { safeReturnTo, withReturnTo } from './return-to';
 import { SESSION_COOKIE } from './session';
+import { PATH_HEADER, QUERY_HEADER } from './theme';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -357,6 +359,24 @@ async function sessionCookieIsWritable(): Promise<boolean> {
 }
 
 /**
+ * The page this request is for, as a return target for the login, or null.
+ *
+ * The middleware stamps every page request with its own path and query
+ * (`PATH_HEADER` / `QUERY_HEADER`) because the App Router hands a layout no
+ * path; a Server Action's POST carries the path of the page it was posted
+ * from. Read through `safeReturnTo`, so only a dashboard page ever comes back.
+ * Null outside a request, or when the headers are not there.
+ */
+export async function currentReturnTo(): Promise<string | null> {
+  try {
+    const head = await headers();
+    return safeReturnTo(`${head.get(PATH_HEADER) ?? ''}${head.get(QUERY_HEADER) ?? ''}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sign out and land locally: clear the cookie, revoke upstream best-effort,
  * redirect. Never returns.
  *
@@ -364,15 +384,28 @@ async function sessionCookieIsWritable(): Promise<boolean> {
  * `clearSession()` is the first thing it does and the revoke needs the id the
  * cookie carried. The IdP logout URL is never followed — see
  * `revokeUpstreamSession` — so this can never end the platform session.
+ *
+ * `returnTo` is where the next sign-in should land: the page a dead session
+ * was found on, so a host who opened a booking from an email gets back to it.
+ * The sign-out button passes none, on purpose: leaving is not a place to
+ * return to.
  */
-export async function signOutAndRedirect(session: Session | null): Promise<never> {
+export async function signOutAndRedirect(
+  session: Session | null,
+  returnTo: string | null = null,
+): Promise<never> {
   try {
     await clearSession();
   } catch {
     /* cookies are immutable during render — the redirect still fires */
   }
   await revokeUpstreamSession(session);
-  redirect(authProvider() === 'workos' ? '/login?signedout=1' : '/login');
+  redirect(withReturnTo(authProvider() === 'workos' ? '/login?signedout=1' : '/login', returnTo));
+}
+
+/** `signOutAndRedirect` for a session found dead mid-request: the login returns here. */
+export async function signOutKeepingPlace(session: Session | null): Promise<never> {
+  return signOutAndRedirect(session, await currentReturnTo());
 }
 
 /**
@@ -397,7 +430,11 @@ export async function signOutAndRedirect(session: Session | null): Promise<never
 export async function refreshOrSignOut(): Promise<void> {
   const session = await getSession();
   if (session?.provider === 'workos') {
-    if (!(await sessionCookieIsWritable())) redirect('/api/auth/refresh');
+    // The page travels with the hand-off, so a refreshed session lands back on
+    // it rather than on /admin.
+    if (!(await sessionCookieIsWritable())) {
+      redirect(withReturnTo('/api/auth/refresh', await currentReturnTo()));
+    }
     const refreshed = await refreshUpstreamSession(session);
     if (refreshed.outcome === 'refreshed') {
       await setSession(refreshed.session);
@@ -411,7 +448,7 @@ export async function refreshOrSignOut(): Promise<void> {
       throw new SessionUnavailableError(await sessionUnavailableMessage());
     }
   }
-  await signOutAndRedirect(session);
+  await signOutKeepingPlace(session);
 }
 
 /**
@@ -451,7 +488,7 @@ export async function hostFetch(path: string, init?: RequestInit): Promise<Respo
     // rather than a redirect into /api/auth/logout, because an action
     // `redirect()` into a route handler soft-navigates and strands the URL bar
     // there.
-    await signOutAndRedirect(await getSession());
+    await signOutKeepingPlace(await getSession());
   }
 
   return res;

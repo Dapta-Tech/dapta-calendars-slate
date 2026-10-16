@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { unstable_rethrow } from 'next/navigation';
+import { ADMIN_BOOKINGS_PATH, adminBookingPath } from '@slate/shared';
 import { hostFetch } from '@/lib/auth-session';
 
 export type ActionResult = { ok: boolean; message?: string };
@@ -18,7 +19,10 @@ async function post(uid: string, action: 'confirm' | 'decline' | 'cancel'): Prom
       const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
       return { ok: false, message: j.message ?? j.error ?? `Could not ${action} the booking.` };
     }
-    revalidatePath('/admin/bookings');
+    // The list and the booking's own page both show it; the one the host is on
+    // re-renders with the new status at once.
+    revalidatePath(ADMIN_BOOKINGS_PATH);
+    revalidatePath(adminBookingPath(uid));
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through

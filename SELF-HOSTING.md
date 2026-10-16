@@ -122,7 +122,7 @@ set** boots on the zero-infra path.
 | `NODE_ENV` | `development` | set `production` for any real deploy | no |
 | `DATABASE_URL` | `file:./.data/dev.db` | always in production (a `postgres://` URL) | **yes** (contains DB password) |
 | `API_PORT` | `4000` | — | no |
-| `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links) | no |
+| `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links, and the host's "Confirm or decline" button, which opens `/admin/bookings` there) | no |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | production; **build-time** for web | no |
 
 ### Auth (dashboard only — public booking pages are always open)
@@ -166,6 +166,7 @@ mint a token for an address at that domain you do not control.
 | `EMAIL_PROVIDER` | `log-only` | set `smtp` or `http` to actually send | no |
 | `MAIL_FROM_EMAIL` | `bookings@example.com` | production | no |
 | `MAIL_FROM_NAME` | `Calendars` | — | no |
+| `MAIL_SUPPORT_EMAIL` | unset | optional; the address booking emails name in their footer ("Need help? support@example.com"). Unset ⇒ no support line, so a fork never sends its readers to another deployment's support desk. Anything that is not a bare address is ignored | no |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` | — | when `EMAIL_PROVIDER=smtp` | `SMTP_PASS` **yes** |
 | `EMAIL_HTTP_ENDPOINT` | — | when `EMAIL_PROVIDER=http` | no |
 | `EMAIL_HTTP_PROFILE` | `generic` | `transactional-v1` opts into the managed contract | no |

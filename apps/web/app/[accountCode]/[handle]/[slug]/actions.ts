@@ -2,6 +2,7 @@
 
 import { createBookingSchema } from '@slate/types';
 import {
+  getManageView,
   postBooking,
   postTeamBooking,
   postReservation,
@@ -50,6 +51,25 @@ export async function releaseAction(reservationUid: string): Promise<void> {
 }
 
 /**
+ * Server Action: the join link of a booking the visitor has just made, once the
+ * calendar write-out has minted it (F5), or null while there is none. Asked
+ * with the visitor's own manage credential, through the same token-gated read
+ * the manage page uses, and it answers the link alone: nothing else about the
+ * booking leaves here. A server action for the reason `reserveAction` is one.
+ */
+export async function meetingLinkAction(uid: string, token: string): Promise<string | null> {
+  if (typeof uid !== 'string' || typeof token !== 'string') return null;
+  if (!uid || !token || uid.length > 200 || token.length > 512) return null;
+  try {
+    const view = await getManageView(uid, token);
+    const url = view.ok ? view.booking.meetingUrl : null;
+    return typeof url === 'string' && /^https?:\/\/\S+$/i.test(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Server Action: re-validate on the server (never trust the client), then POST
  * to the API. Handles both personal and team (round-robin) bookings via `kind`.
  */
@@ -81,6 +101,13 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
   // cap of ten live holds, so a busy page refused new visitors' holds.
   const reservationField = formData.get('reservationUid');
   const reservationUid = reservationField ? String(reservationField) : undefined;
+  // The page's language (F6): the invitee's emails are written in it. Sent as
+  // the booking's `locale`, not as `attendee.language`, which is a contact
+  // property the CRM write-out reads. Only the two the product speaks;
+  // anything else is left out, and the invitee's mail then follows the host's
+  // language, as before.
+  const localeField = String(formData.get('language') ?? '');
+  const locale = localeField === 'es' || localeField === 'en' ? localeField : undefined;
   const attendee = {
     name: String(formData.get('name') ?? ''),
     email: String(formData.get('email') ?? ''),
@@ -92,7 +119,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     return postTeamBooking(
       accountCode,
       ownerSlug,
-      { slug, startUtc, attendee, answers: answersObj },
+      { slug, startUtc, attendee, answers: answersObj, ...(locale ? { locale } : {}) },
       oneOffToken,
     );
   }
@@ -104,6 +131,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     startUtc,
     attendee,
     answers: answersObj,
+    locale,
     reservationUid,
   });
   if (!parsed.success) {

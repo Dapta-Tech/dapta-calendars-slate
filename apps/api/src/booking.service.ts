@@ -90,6 +90,17 @@ export const ONE_OFF_GONE_MESSAGE =
   'This invite link has already been used. Ask the organizer for a new one.';
 const ONE_OFF_NOT_FOUND_MESSAGE = 'Not found.';
 
+/**
+ * The `language` an UNVALIDATED attendee object carries, if it is a string. The
+ * team route forwards its body as it arrived, so this is a read, not a trust:
+ * the repository keeps only `en`/`es` (`bookingLocale`) and drops the rest.
+ */
+function languageOf(attendee: unknown): string | undefined {
+  if (!attendee || typeof attendee !== 'object') return undefined;
+  const language = (attendee as { language?: unknown }).language;
+  return typeof language === 'string' ? language : undefined;
+}
+
 /** The manage view's event-context projection — see `manageView`. */
 interface RescheduleContextRow {
   code: string;
@@ -394,6 +405,14 @@ export class BookingService {
        * strings — the same reasoning `manageToken()` applies one route over.
        */
       oneOffToken?: string;
+      /**
+       * The language the invitee booked in, when the CALLER knows it and the
+       * payload cannot say (`booking.locale`, which the invitee's emails are
+       * written in). The v2 surface passes it because it fills a default
+       * `attendee.language` that nobody chose; `null` records none. Absent,
+       * the payload's own `attendee.language` is the invitee's choice.
+       */
+      locale?: 'en' | 'es' | null;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -407,6 +426,9 @@ export class BookingService {
         attendee: input.attendee,
         additionalAttendees: context?.additionalAttendees,
         answers: input.answers,
+        // F6: an explicit `attendee.language` is the invitee's own choice; the
+        // booking page sends the language it speaks to them as `locale`.
+        locale: context && 'locale' in context ? context.locale : (input.attendee.language ?? input.locale),
         metadata: context?.metadata,
         reservationUid: input.reservationUid,
         idempotencyKey: context?.idempotencyKey
@@ -901,6 +923,8 @@ export class BookingService {
       additionalAttendees?: Array<BookingView['attendee']>;
       answers?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
+      /** The booking page's language, as `book()` reads `locale`; unvalidated here. */
+      locale?: unknown;
     },
     /**
      * Caller-supplied context, NEVER request body. `PublicController` passes
@@ -915,7 +939,13 @@ export class BookingService {
      * from the personal payload would keep the hazard alive on one route and
      * invite the next edit to that controller to reopen it.
      */
-    context?: { apiKeyWrite?: boolean; idempotencyKey?: string; oneOffToken?: string },
+    context?: {
+      apiKeyWrite?: boolean;
+      idempotencyKey?: string;
+      oneOffToken?: string;
+      /** The invitee's language when the caller knows it; see `book()`. */
+      locale?: 'en' | 'es' | null;
+    },
   ): Promise<(BookingView & { hostMemberId: string }) | ServiceError> {
     const out = await createTeamBooking(
       this.db,
@@ -927,6 +957,12 @@ export class BookingService {
         attendee: body.attendee,
         additionalAttendees: body.additionalAttendees,
         answers: body.answers,
+        // The team page sends its language the way the personal one does. The
+        // body is unvalidated here, so the repository keeps only `en`/`es`.
+        locale:
+          context && 'locale' in context
+            ? context.locale
+            : (languageOf(body.attendee) ?? (typeof body.locale === 'string' ? body.locale : undefined)),
         metadata: body.metadata,
         idempotencyKey: context?.idempotencyKey
           ? contextIdempotencyKeySchema.parse(context.idempotencyKey)

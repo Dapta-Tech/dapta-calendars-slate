@@ -6,7 +6,8 @@ import { adminApi, ApiError } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
 import { ToastProvider } from '@/components/toast';
 import { TimeZoneSync } from '@/components/timezone-sync';
-import { getSession } from '@/lib/auth-session';
+import { currentReturnTo, getSession } from '@/lib/auth-session';
+import { withReturnTo } from '@/lib/return-to';
 import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
 import { getLocale } from '@/lib/locale';
 import { getProductTheme } from '@/lib/theme.server';
@@ -19,11 +20,15 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // resolves. A 401 (no/invalid session — e.g. after logout in AUTH_LOCAL_STRICT
   // mode, or an expired token) → /login. This is the global guard that makes
   // logout real; a non-401 error (API down) surfaces to the error boundary.
+  //
+  // The page asked for travels with the redirect as the login's return target,
+  // so a host who opened a booking from an email lands back on it after signing
+  // in. (The client's own 401 path does the same, see `signOutKeepingPlace`.)
   let me: Awaited<ReturnType<typeof adminApi.me>>;
   try {
     me = await adminApi.me();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) redirect('/login');
+    if (e instanceof ApiError && e.status === 401) redirect(withReturnTo('/login', await currentReturnTo()));
     throw e;
   }
 

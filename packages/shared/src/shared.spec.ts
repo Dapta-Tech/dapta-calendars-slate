@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildMonthGrid, groupSlotsByDay, isNavItemActive, monthKeyOf, shiftMonth } from './booking';
+import {
+  adminBookingPath,
+  buildMonthGrid,
+  groupSlotsByDay,
+  isNavItemActive,
+  legacyBookingHashUid,
+  monthKeyOf,
+  shiftMonth,
+} from './booking';
 import {
   formatSlotTime,
   isValidTimeZone,
@@ -319,5 +327,44 @@ describe('timezone validation (QA fix 1)', () => {
     expect(safeTimeZone('America/Bogota')).toBe('America/Bogota');
     expect(safeTimeZone('UT}fg')).toBe('UTC');
     expect(safeTimeZone(null)).toBe('UTC');
+  });
+});
+
+describe('the dashboard link to one booking (F11)', () => {
+  const uid = '6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
+
+  it('names the booking in the path, where the server (and the sign-in) can see it', () => {
+    expect(adminBookingPath(uid)).toBe(`/admin/bookings/${uid}`);
+    expect(adminBookingPath(uid)).not.toContain('#');
+    // A uid is never anything else, but a link is no place to find out: the
+    // segment stays one segment, and nothing in it can end the path early.
+    expect(adminBookingPath('a b#c')).toBe('/admin/bookings/a%20b%23c');
+    expect(adminBookingPath('../../api/auth/logout')).toBe('/admin/bookings/..%2F..%2Fapi%2Fauth%2Flogout');
+    expect(adminBookingPath('x?next=//evil.example')).toBe('/admin/bookings/x%3Fnext%3D%2F%2Fevil.example');
+  });
+
+  it('reads the uid out of the link an older email carried, so it still opens its booking', () => {
+    expect(legacyBookingHashUid(`#booking-${uid}`)).toBe(uid);
+    // Those links encoded the uid; reading one back decodes it the same way.
+    expect(legacyBookingHashUid(`#booking-${encodeURIComponent(uid)}`)).toBe(uid);
+    // And the round trip lands on the new link for the same booking.
+    expect(adminBookingPath(legacyBookingHashUid(`#booking-${uid}`)!)).toBe(adminBookingPath(uid));
+  });
+
+  it('ignores any fragment that is not a booking uid', () => {
+    for (const hash of [
+      '',
+      '#',
+      '#booking-',
+      `booking-${uid}`,
+      '#other-thing',
+      '#booking-a%20b%23c',
+      '#booking-..%2F..%2Fapi',
+      '#booking-%2F%2Fevil.example',
+      '#booking-%E0%A4%A',
+      `#booking-${'a'.repeat(65)}`,
+    ]) {
+      expect(legacyBookingHashUid(hash), hash).toBeNull();
+    }
   });
 });

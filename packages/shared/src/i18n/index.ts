@@ -664,6 +664,9 @@ export interface BookingMessages {
       createdTitle: string;
       createdNote: string;
       backToBookings: string;
+      /** A booking's own page, for a uid this workspace does not have (the same for one that does not exist). */
+      notFoundTitle: string;
+      notFoundBody: string;
       newSubtitle: string;
       createEventFirst: string;
       slotTaken: string;
@@ -1851,6 +1854,8 @@ export const en: BookingMessages = {
       createdTitle: 'Booking created',
       createdNote: 'The attendee has been notified.',
       backToBookings: 'Back to bookings',
+      notFoundTitle: 'Booking not found',
+      notFoundBody: 'There is no booking at this link in this workspace.',
       newSubtitle: 'Book on behalf of an attendee — from an open slot or any time.',
       createEventFirst: 'Create an event first.',
       noHandleNotice: 'You haven’t set your public handle yet — your booking page isn’t published. Manual bookings below still work.',
@@ -2975,6 +2980,8 @@ export const es: BookingMessages = {
       createdTitle: 'Reserva creada',
       createdNote: 'Se ha notificado al invitado.',
       backToBookings: 'Volver a reservas',
+      notFoundTitle: 'Reserva no encontrada',
+      notFoundBody: 'No hay ninguna reserva en este enlace dentro de este espacio.',
       newSubtitle: 'Reserva en nombre de un invitado — desde un horario libre o cualquier hora.',
       createEventFirst: 'Primero crea un evento.',
       noHandleNotice: 'Aún no has definido tu identificador público — tu página de reservas no está publicada. Las reservas manuales de abajo sí funcionan.',
