@@ -8,6 +8,7 @@ import {
 } from '@/lib/auth-session';
 import { getLocale } from '@/lib/locale';
 import { requestOrigin } from '@/lib/request-origin';
+import { RETURN_TO_PARAM, safeReturnTo, withReturnTo } from '@/lib/return-to';
 
 /**
  * Session refresh for the one context that cannot write cookies itself: a 401
@@ -25,10 +26,13 @@ import { requestOrigin } from '@/lib/request-origin';
  *    had nothing wrong with it because a deploy happened to land on a token
  *    expiry, which is the whole reason this branch exists.
  *
- * No `next` parameter, on purpose: a redirect target taken from the query is an
- * open-redirect surface on the auth path, and /admin is where the pre-refresh
- * flow already landed. Server actions never come through here — they refresh
- * inline, so the URL bar stays where the person left it.
+ * `?next=` is the page the render was for, so a refreshed session lands back
+ * on it (a booking opened from an email) rather than on /admin. A redirect
+ * target taken from the query is an open-redirect surface on the auth path, so
+ * it is read through `safeReturnTo`: only a dashboard path of this app, else
+ * /admin as before. It rides on to the sign-out too, so the login that follows
+ * returns there. Server actions never come through here: they refresh inline,
+ * so the URL bar stays where the person left it.
  *
  * A note on the shape: this is a state-mutating GET with no CSRF token, so a
  * forced top-level navigation can trigger it (the session cookie is
@@ -39,7 +43,10 @@ import { requestOrigin } from '@/lib/request-origin';
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const origin = requestOrigin(req);
-  const signOut = NextResponse.redirect(new URL('/api/auth/logout?reason=expired', origin));
+  const next = safeReturnTo(new URL(req.url).searchParams.get(RETURN_TO_PARAM));
+  const signOut = NextResponse.redirect(
+    new URL(withReturnTo('/api/auth/logout?reason=expired', next), origin),
+  );
   const session = await getSession();
 
   // ONE refresh per expiry, never a loop — the ceiling `hostFetch` gets from
@@ -62,7 +69,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // A terminal page rather than a redirect anywhere: /admin would 401 and come
   // straight back here, and /login under the workos provider auto-redirects
   // into the very identity service that has just failed to answer.
-  if (refreshed.outcome === 'unavailable') return unavailable();
+  if (refreshed.outcome === 'unavailable') return unavailable(next ?? '/admin');
   if (refreshed.outcome === 'expired') return signOut;
   // The SAME predicate as the guard above, and that is what makes termination
   // structural rather than a matter of the identity service's configuration:
@@ -73,14 +80,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (accessTokenExpired(refreshed.session.accessToken)) return signOut;
 
   await setSession(refreshed.session);
-  return NextResponse.redirect(new URL('/admin', origin));
+  return NextResponse.redirect(new URL(next ?? '/admin', origin));
 }
 
 const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /**
  * The retryable landing: a `503` carrying the i18n copy (EN + ES), a link back
- * to /admin, and a way out.
+ * to the page (`retryHref`, a `safeReturnTo` path or /admin), and a way out.
  *
  * The retry is the person's own deliberate act rather than a redirect that
  * would bounce straight off the same unreachable service — there is no
@@ -100,7 +107,7 @@ const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => `&#${c.ch
  * standalone copy rather than a read of `@slate/shared`'s tokens.css, which is
  * a stylesheet this response cannot link; it will not follow a reskin.
  */
-async function unavailable(): Promise<NextResponse> {
+async function unavailable(retryHref: string): Promise<NextResponse> {
   const locale = await getLocale();
   const m = getMessages(locale).admin.session;
   const html = [
@@ -129,7 +136,7 @@ async function unavailable(): Promise<NextResponse> {
     `<h1>${escapeHtml(m.unavailableTitle)}</h1>`,
     `<p>${escapeHtml(m.unavailableBody)}</p>`,
     '<nav>',
-    `<a href="/admin">${escapeHtml(m.retry)}</a>`,
+    `<a href="${escapeHtml(retryHref)}">${escapeHtml(m.retry)}</a>`,
     `<a class="secondary" href="/api/auth/logout">${escapeHtml(m.signOut)}</a>`,
     '</nav>',
     '</main></body></html>',

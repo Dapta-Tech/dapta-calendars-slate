@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE } from '@slate/shared';
 import { setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
+import { RETURN_TO_COOKIE, safeReturnTo, withReturnTo } from '@/lib/return-to';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 
@@ -21,6 +22,12 @@ const OAUTH_STATE_COOKIE = 'slate_oauth_state';
  *
  * The raw JWT never persists in the URL: we immediately 302 to /admin, so the
  * `session` param never lands in browser history for the final page.
+ *
+ * The 302 goes to the dashboard page the login was started for when there is
+ * one (the return-target cookie /api/auth/login set, read through
+ * `safeReturnTo` again, since a cookie is the browser's to change), else to
+ * /admin. The cookie is spent either way, and a failed callback hands the
+ * target to the error card so its retry keeps it.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
@@ -30,10 +37,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const jar = await cookies();
   const started = jar.get(OAUTH_STATE_COOKIE)?.value;
   jar.delete(OAUTH_STATE_COOKIE);
-  if (!started) return NextResponse.redirect(new URL('/login?error=state', origin));
+  const next = safeReturnTo(jar.get(RETURN_TO_COOKIE)?.value);
+  jar.delete(RETURN_TO_COOKIE);
+  const failed = (error: string) =>
+    NextResponse.redirect(new URL(withReturnTo(`/login?error=${error}`, next), origin));
+  if (!started) return failed('state');
 
   const encoded = url.searchParams.get('session');
-  if (!encoded) return NextResponse.redirect(new URL('/login?error=callback', origin));
+  if (!encoded) return failed('callback');
 
   let tokens: { access_token?: string; refresh_token?: string; session_id?: string } | null = null;
   try {
@@ -45,9 +56,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch {
     tokens = null;
   }
-  if (!tokens?.access_token) {
-    return NextResponse.redirect(new URL('/login?error=callback', origin));
-  }
+  if (!tokens?.access_token) return failed('callback');
 
   // The blob's `session_id` is the identity service's OWN row id, not the
   // upstream provider's. The only place the upstream id exists is a claim inside
@@ -70,7 +79,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // minutes, so a returning owner's click stamps nothing.
   await claimParkedAttribution(tokens.access_token);
 
-  return NextResponse.redirect(new URL('/admin', origin));
+  return NextResponse.redirect(new URL(next ?? '/admin', origin));
 }
 
 /**

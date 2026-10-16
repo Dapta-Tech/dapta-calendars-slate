@@ -63,4 +63,25 @@ describe('GET /api/auth/logout', () => {
     expect(clearSession).toHaveBeenCalled();
     expect(res.headers.get('location')).toBe('https://calendars.example.com/login?signedout=1');
   });
+  it('hands a dashboard page on to the login, so signing back in returns there', async () => {
+    getSession.mockResolvedValue(workosSession);
+    const page = '/admin/bookings/6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
+
+    const res = await GET(req(`/api/auth/logout?reason=expired&next=${encodeURIComponent(page)}`));
+
+    expect(res.headers.get('location')).toBe(
+      `https://calendars.example.com/login?signedout=1&next=${encodeURIComponent(page)}`,
+    );
+  });
+
+  it.each(['//evil.example', 'https://evil.example', '/\\evil.example', '/api/auth/login'])(
+    'drops a target that is not a dashboard page (%s)',
+    async (target) => {
+      getSession.mockResolvedValue(workosSession);
+
+      const res = await GET(req(`/api/auth/logout?next=${encodeURIComponent(target)}`));
+
+      expect(res.headers.get('location')).toBe('https://calendars.example.com/login?signedout=1');
+    },
+  );
 });

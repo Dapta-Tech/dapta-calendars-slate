@@ -217,20 +217,43 @@ export function buildMonthGrid(
 }
 
 /**
- * The dashboard's own link to one booking: the bookings list, scrolled to that
- * booking's row. The host's request email opens it as its "Confirm or decline"
- * button (F11), and the list names each row with `bookingAnchorId`. One
- * definition for the API that writes the link and the web that answers it, so
- * the two cannot drift. It only opens a page: nothing changes on a GET.
+ * The dashboard's own link to one booking. The host's request email opens it as
+ * its "Confirm or decline" button (F11). One definition for the API that writes
+ * the link and the web that answers it, so the two cannot drift. It only opens
+ * a page: nothing changes on a GET, so a mail scanner that follows it changes
+ * nothing.
+ *
+ * The uid is a PATH segment, not a fragment. A fragment never reaches the
+ * server, so it could not survive the sign-in a logged-out host goes through
+ * first, and it could only point at a row the list happened to render. A path
+ * is the server's to answer: the page loads that one booking, whatever the list
+ * holds.
  */
 export const ADMIN_BOOKINGS_PATH = '/admin/bookings';
 
-/** The id of a booking's row on the dashboard's bookings list. */
-export function bookingAnchorId(uid: string): string {
-  return `booking-${uid}`;
-}
-
 /** The dashboard path to one booking (relative: prefix the app's public URL). */
 export function adminBookingPath(uid: string): string {
-  return `${ADMIN_BOOKINGS_PATH}#${bookingAnchorId(encodeURIComponent(uid))}`;
+  return `${ADMIN_BOOKINGS_PATH}/${encodeURIComponent(uid)}`;
+}
+
+/**
+ * The booking a link from an older email named, or null. Those links put the
+ * uid in the fragment (`/admin/bookings#booking-<uid>`, encoded); the bookings
+ * list reads its own `location.hash` through this and moves to
+ * `adminBookingPath`, so a mail already sent still opens its booking.
+ *
+ * Only the shape a uid can have is accepted (letters, digits, hyphens): the
+ * result is put back into a URL, and a fragment is whatever the address bar
+ * says.
+ */
+export function legacyBookingHashUid(hash: string): string | null {
+  const match = /^#booking-(.+)$/.exec(hash);
+  if (!match) return null;
+  let uid: string;
+  try {
+    uid = decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+  return /^[A-Za-z0-9-]{1,64}$/.test(uid) ? uid : null;
 }
