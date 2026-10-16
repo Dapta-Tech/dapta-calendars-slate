@@ -85,12 +85,14 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       provide: NOTIFIER,
       // The invitee's footer line ("Made with ... Create your free calendar")
       // follows the same open-core switch as the page's badge: no destination,
-      // or the hide flag, and the email names no product.
+      // or the hide flag, and the email names no product. The "Need help?"
+      // line names the deployment's own support address, or nothing (F10).
       useFactory: (email: EmailProvider, env: ServerEnv) =>
         new BookingNotifier(email, {
           signupUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
             ? null
             : buildSignupUrl({ baseUrl: env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL, medium: 'email' }),
+          supportEmail: env.MAIL_SUPPORT_EMAIL ?? null,
         }),
       inject: [EMAIL, ENV],
     },
