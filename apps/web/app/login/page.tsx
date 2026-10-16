@@ -5,6 +5,7 @@ import { getLocale } from '@/lib/locale';
 import { authProvider } from '@/lib/auth-session';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { firstParam, safeReturnTo, withReturnTo } from '@/lib/return-to';
 import { LoginForm } from './login-form';
 
 // Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
@@ -15,16 +16,20 @@ export const metadata = { title: `Sign in — ${productName}` };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; signedout?: string }>;
+  searchParams: Promise<{ error?: string; signedout?: string; next?: string | string[] }>;
 }) {
   const m = getMessages(await getLocale()).admin.login;
   const workos = authProvider() === 'workos';
-  const { error, signedout } = await searchParams;
+  const { error, signedout, next: rawNext } = await searchParams;
+  // Where the sign-in returns to: the dashboard page that sent the person here
+  // (a booking opened from an email). Only ever a dashboard path of this app;
+  // anything else reads as none, and the sign-in lands on /admin as before.
+  const next = safeReturnTo(firstParam(rawNext));
 
   // Dapta builds: no intermediate sign-in card — go straight to the hosted
   // login. The card only renders as an ERROR landing (?error=) so a failed
   // callback doesn't loop root -> /api/auth/login -> /login -> ...
-  if (workos && !error && !signedout) redirect('/api/auth/login');
+  if (workos && !error && !signedout) redirect(withReturnTo('/api/auth/login', next));
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-10">
@@ -60,13 +65,13 @@ export default async function LoginPage({
           // actually ask. The bare /login auto-redirect above stays promptless,
           // keeping the silent SSO for arrivals from the platform.
           <Link
-            href="/api/auth/login?prompt=login"
+            href={withReturnTo('/api/auth/login?prompt=login', next)}
             className={cn(buttonVariants({ size: 'lg' }), 'w-full')}
           >
             {m.workosCta}
           </Link>
         ) : (
-          <LoginForm messages={m} />
+          <LoginForm messages={m} next={next} />
         )}
       </div>
 

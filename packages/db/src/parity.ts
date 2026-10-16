@@ -1924,14 +1924,7 @@ export async function listBookings(
   }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   // Fetch one extra row to know whether a further page exists.
-  const rows = await db.all<{
-    uid: string;
-    status: string;
-    title: string;
-    start_ms: number;
-    end_ms: number;
-    host_member_id: string | null;
-  }>(
+  const rows = await db.all<BookingListRow>(
     sql`SELECT uid, status, title, start_ms, end_ms, host_member_id FROM booking
         WHERE ${where} ORDER BY start_ms DESC, uid DESC LIMIT ${limit + 1}`,
   );
@@ -1939,15 +1932,48 @@ export async function listBookings(
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map((r) => ({
-      uid: r.uid,
-      status: r.status,
-      title: r.title,
-      startUtc: new Date(Number(r.start_ms)).toISOString(),
-      endUtc: new Date(Number(r.end_ms)).toISOString(),
-      hostMemberId: r.host_member_id,
-    })),
+    items: page.map(toBookingListItem),
     nextCursor: hasMore && last ? encodeBookingCursor(Number(last.start_ms), last.uid) : null,
+  };
+}
+
+/**
+ * One booking, in the list's shape, by uid INSIDE the account, or null when the
+ * uid is not this account's (unknown or another tenant's read the same, so the
+ * answer never says which). The dashboard's page for one booking reads this,
+ * so it opens whatever the list's page size left out.
+ *
+ * Scoped like the host's confirm, decline and cancel (account, not member): a
+ * co-host receives the same request email and acts on the same booking.
+ */
+export async function getHostBooking(
+  db: Db,
+  args: { accountId: string; uid: string },
+): Promise<BookingListItem | null> {
+  const row = await db.get<BookingListRow>(
+    sql`SELECT uid, status, title, start_ms, end_ms, host_member_id FROM booking
+        WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
+  );
+  return row ? toBookingListItem(row) : null;
+}
+
+interface BookingListRow {
+  uid: string;
+  status: string;
+  title: string;
+  start_ms: number;
+  end_ms: number;
+  host_member_id: string | null;
+}
+
+function toBookingListItem(r: BookingListRow): BookingListItem {
+  return {
+    uid: r.uid,
+    status: r.status,
+    title: r.title,
+    startUtc: new Date(Number(r.start_ms)).toISOString(),
+    endUtc: new Date(Number(r.end_ms)).toISOString(),
+    hostMemberId: r.host_member_id,
   };
 }
 

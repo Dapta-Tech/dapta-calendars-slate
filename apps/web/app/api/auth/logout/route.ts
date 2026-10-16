@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { clearSession, getSession, revokeUpstreamSession } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
+import { RETURN_TO_PARAM, withReturnTo } from '@/lib/return-to';
 
 /**
  * Logout: revoke upstream best-effort (see `revokeUpstreamSession`), ALWAYS
@@ -20,7 +21,9 @@ import { requestOrigin } from '@/lib/request-origin';
  * has no id to send.
  *
  * `?reason=expired` marks the session-expiry arrival from `admin-api.ts` and
- * changes nothing here; it stays for observability.
+ * changes nothing here; it stays for observability. A `?next=` dashboard page
+ * (the one the expired session was found on) is handed on to the login, read
+ * through `safeReturnTo`, so signing back in returns there.
  *
  * The sign-out button does NOT come through here: `signOutAction` and
  * `hostFetch` revoke + clear inline, because an action `redirect()` into a
@@ -33,5 +36,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const session = await getSession();
   await clearSession();
   await revokeUpstreamSession(session);
-  return NextResponse.redirect(new URL('/login?signedout=1', origin));
+  const next = new URL(req.url).searchParams.get(RETURN_TO_PARAM);
+  return NextResponse.redirect(new URL(withReturnTo('/login?signedout=1', next), origin));
 }

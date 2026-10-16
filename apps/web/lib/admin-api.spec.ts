@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 const getSession = vi.fn();
 const refreshOrSignOut = vi.fn();
-const signOutAndRedirect = vi.fn((_session: unknown): never => {
+const signOutKeepingPlace = vi.fn((_session: unknown): never => {
   throw new Error('NEXT_REDIRECT:/login?signedout=1');
 });
 // Hoisted, because the mock factory runs while `./admin-api` is being imported
@@ -28,7 +28,7 @@ const { SessionUnavailableError } = vi.hoisted(() => ({
 vi.mock('./auth-session', () => ({
   getSession: () => getSession(),
   refreshOrSignOut: () => refreshOrSignOut(),
-  signOutAndRedirect: (session: unknown) => signOutAndRedirect(session),
+  signOutKeepingPlace: (session: unknown) => signOutKeepingPlace(session),
   SessionUnavailableError,
 }));
 
@@ -77,7 +77,7 @@ describe('adminApi 401 handling', () => {
     await expect(adminApi.me()).rejects.toThrow('NEXT_REDIRECT:/login?signedout=1');
 
     expect(refreshOrSignOut).toHaveBeenCalledTimes(1); // one refresh, never a loop
-    expect(signOutAndRedirect).toHaveBeenCalledWith(fresh);
+    expect(signOutKeepingPlace).toHaveBeenCalledWith(fresh);
   });
 
   // #114. A 401 that meets an unreachable identity service is NOT a sign-out.
@@ -95,7 +95,7 @@ describe('adminApi 401 handling', () => {
     });
 
     // Never a sign-out, and never a second attempt on a service that just failed.
-    expect(signOutAndRedirect).not.toHaveBeenCalled();
+    expect(signOutKeepingPlace).not.toHaveBeenCalled();
     expect(refreshOrSignOut).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

@@ -26,7 +26,7 @@ import {
   getSession,
   refreshOrSignOut,
   SessionUnavailableError,
-  signOutAndRedirect,
+  signOutKeepingPlace,
 } from './auth-session';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
@@ -116,7 +116,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
       // session still in the jar. It self-heals on the next visit — /admin →
       // /api/auth/refresh → the freshness guard → the logout ROUTE, which can
       // clear it — at the cost of two hops. There is no render-context fix.
-      await signOutAndRedirect(await getSession());
+      await signOutKeepingPlace(await getSession());
     }
   }
   if (!res.ok) {
@@ -280,6 +280,8 @@ export const adminApi = {
   // Bookings (host)
   listBookings: (q = '') =>
     req<{ items: BookingItem[] }>('GET', `/v1/host/bookings${q ? `?${q}` : ''}`),
+  /** One booking by uid, in the list's shape; a 404 when it is not this account's. */
+  getBooking: (uid: string) => req<BookingItem>('GET', `/v1/host/bookings/${encodeURIComponent(uid)}`),
 
   // Connections
   listConnections: () => req<Connection[]>('GET', '/v1/connections'),

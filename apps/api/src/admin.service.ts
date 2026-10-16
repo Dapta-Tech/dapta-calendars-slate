@@ -30,6 +30,7 @@ import {
   ensureDefaultSchedule,
   enqueueWebhookDeliveries,
   getAvailability,
+  getHostBooking,
   getMe,
   getSchedule,
   listApiKeys,
@@ -269,6 +270,16 @@ export class AdminService {
       status: q.status,
       limit: q.limit,
     });
+  }
+
+  /**
+   * One booking by uid, for the dashboard's page for it (the host's request
+   * email links there). Null when the uid is not this account's: the caller
+   * answers 404 either way, so another tenant's booking is never told apart
+   * from one that does not exist.
+   */
+  getBooking(p: HostPrincipal, uid: string) {
+    return getHostBooking(this.db, { accountId: p.accountId, uid });
   }
 
   async hostCreate(

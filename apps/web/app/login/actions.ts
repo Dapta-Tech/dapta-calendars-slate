@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { setSession, getSession, signOutAndRedirect } from '@/lib/auth-session';
+import { RETURN_TO_PARAM, safeReturnTo } from '@/lib/return-to';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -10,6 +11,10 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * email. `admin-api.ts` sends it as `x-slate-email`; the API's local stub
  * resolves (or JIT-creates) that member's own account. Returns a field error
  * instead of throwing so the form can show it.
+ *
+ * Lands on the page the sign-in was sent from (the form's hidden `next`, read
+ * through `safeReturnTo` again here, because a form field is the browser's to
+ * change), else on /admin.
  */
 export async function signInAction(
   _prev: { error?: string } | null,
@@ -18,7 +23,7 @@ export async function signInAction(
   const email = String(form.get('email') ?? '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return { error: 'invalid' };
   await setSession({ provider: 'local', email });
-  redirect('/admin');
+  redirect(safeReturnTo(form.get(RETURN_TO_PARAM)) ?? '/admin');
 }
 
 /**

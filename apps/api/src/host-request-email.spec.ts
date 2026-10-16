@@ -171,7 +171,8 @@ describe("the host's request email, end to end through the outbox", () => {
     );
     expect(text).not.toContain('Anything else?');
     expect(`${text}\n${m.html}`).not.toContain('evil.example');
-    const dashboard = `https://calendar.example.com/admin/bookings#booking-${uid}`;
+    // The booking in the path, where the sign-in can carry it (not a fragment).
+    const dashboard = `https://calendar.example.com/admin/bookings/${uid}`;
     expect(text).toContain(`Confirm or decline: ${dashboard}`);
     expect(m.html).toContain(`href="${dashboard}"`);
   });
@@ -222,9 +223,7 @@ describe("the host's request email, end to end through the outbox", () => {
       'I agree to be recorded',
       'Best number',
     ]);
-    expect(host.dashboardUrl).toMatch(
-      /^https:\/\/calendar\.example\.com\/admin\/bookings#booking-/,
-    );
+    expect(host.dashboardUrl).toBe(`https://calendar.example.com/admin/bookings/${host.uid}`);
     expect(host.templateLocale).toBe('en');
     expect(visitor.templateLocale).toBe('es');
     expect(visitor.answers).toBeUndefined();
