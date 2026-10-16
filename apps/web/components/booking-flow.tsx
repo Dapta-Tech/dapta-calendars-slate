@@ -33,7 +33,12 @@ import {
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 import type { BookingField } from '@slate/types';
-import { bookAction, releaseAction, reserveAction } from '@/app/[accountCode]/[handle]/[slug]/actions';
+import {
+  bookAction,
+  meetingLinkAction,
+  releaseAction,
+  reserveAction,
+} from '@/app/[accountCode]/[handle]/[slug]/actions';
 import { classifyBookingFailure } from '@/lib/booking-failure';
 import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
@@ -42,8 +47,16 @@ import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
+import { useLateMeetingLink } from '@/lib/use-late-meeting-link';
 import { horizonMonthKey } from '@/lib/availability-window';
 import { useProgressiveSlots, type ProgressiveAvailability } from '@/lib/use-progressive-slots';
+
+/**
+ * Asks the booking just made for its join link (F5). Module-level so the
+ * polling hook sees one function for the page's whole life, and the action is
+ * only touched when there is a link to wait for.
+ */
+const askMeetingLink = (uid: string, token: string) => meetingLinkAction(uid, token);
 
 interface Props {
   accountCode: string;
@@ -248,6 +261,14 @@ export function BookingFlow({
    */
   const announcedUid = useRef<string | null>(null);
   const booked = result?.ok && result.booking ? result.booking : null;
+  // F5: an online meeting's room is minted after the booking answers, so the
+  // calendar file below picks the link up once it exists. The create response
+  // names no location kind; the page's own is the one the booking snapshotted,
+  // as the confirmation below reads it too.
+  const lateMeetingUrl = useLateMeetingLink(
+    booked ? { ...booked, locationKind: booked.locationKind ?? location?.kind ?? null } : null,
+    askMeetingLink,
+  );
   const bookedUid = booked?.uid ?? null;
   const bookedStart = booked?.startUtc ?? null;
   useEffect(() => {
@@ -611,7 +632,8 @@ export function BookingFlow({
         : t(m.confirmationSentTo, { email: attendeeEmail })
       : null;
     // The file a calendar opens: the join link as its location when there is
-    // one (it is what a calendar should open), else the human location.
+    // one (it is what a calendar should open), else the human location. The
+    // link usually arrives after the booking does (`useLateMeetingLink`).
     const calendarHref =
       startOk && endOk
         ? calendarFileHref({
@@ -620,7 +642,7 @@ export function BookingFlow({
             startUtc: b.startUtc,
             endUtc: b.endUtc,
             location: bookedLocation,
-            url: b.meetingUrl,
+            url: b.meetingUrl ?? lateMeetingUrl,
             stamp: nowUtc,
           })
         : null;
@@ -830,6 +852,13 @@ export function BookingFlow({
               <input type="hidden" name="slug" value={slug} />
               <input type="hidden" name="startUtc" value={selected} />
               <input type="hidden" name="timeZone" value={timeZone} />
+              {/* The language this page speaks to the visitor, which their
+                  emails are then written in (F6); the host's keep the host's. */}
+              <input
+                type="hidden"
+                name="language"
+                value={locale.toLowerCase().startsWith('es') ? 'es' : 'en'}
+              />
               {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
               {/* The one-off token (#110). A hidden field so the token reaches
                   the server action without this island holding an API base URL;

@@ -181,9 +181,33 @@ test.describe('one booking, end to end', () => {
     await waitForCall('deleteEvent', (c) => c.path.endsWith(`/events/${eventId}`));
   });
 
-  // Follow-up, not fixed in this PR: the confirmation screen builds its
-  // calendar file from the create response, and the room is minted afterwards
-  // by the outbox, so an online meeting's file carries no join link. The
-  // emails wait for it (ADR 0007) and the manage page heals; this file does not.
-  test.fixme('the calendar file of an online meeting carries the join link', async () => {});
+  // F5: the confirmation screen builds its calendar file from the create
+  // response, and the room is minted afterwards by the outbox, so the screen
+  // asks for the link until it exists and the file picks it up.
+  test('the calendar file of an online meeting carries the join link', async ({ page, request }) => {
+    await page.goto(PAGE);
+    await pickTime(page);
+    await fillDetails(page, visitorEmail('ics-link'));
+    await page.getByRole('button', { name: /confirm booking/i }).click();
+    const done = page.getByRole('region', { name: /booking confirmed/i });
+    await expect(done).toBeVisible();
+    const file = done.getByRole('link', { name: /add to calendar/i });
+    const ics = async () => {
+      const href = (await file.getAttribute('href')) ?? '';
+      return parseIcs(decodeURIComponent(href.slice(href.indexOf(',') + 1)));
+    };
+    await expect.poll(async () => (await ics())['URL'] ?? '', { timeout: 30_000 }).toMatch(
+      /^https:\/\/meet\.example\.test\/evt_/,
+    );
+    const event = await ics();
+    // The link is what a calendar opens, so it is the LOCATION too.
+    expect(event['LOCATION']).toBe(event['URL']);
+    // Give the time back, so the next canvas finds the day as this one did.
+    const manage = new URL((await done.getByRole('link', { name: /manage your booking/i }).getAttribute('href'))!);
+    const cancelled = await request.post(
+      `${E2E.api}/v1/bookings/${manage.pathname.split('/').pop()}/cancel?token=${manage.searchParams.get('token')}`,
+      { data: { reason: 'e2e cleanup' } },
+    );
+    expect(cancelled.ok()).toBe(true);
+  });
 });

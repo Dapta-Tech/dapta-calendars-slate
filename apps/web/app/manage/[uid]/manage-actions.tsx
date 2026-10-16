@@ -20,16 +20,9 @@ import {
   type BookingStep,
 } from '@/components/booking-page-parts';
 import { useBookingMonth } from '@/lib/use-booking-month';
+import { manageTokenOf } from '@/lib/manage-token';
 import { cancelAction, rescheduleAction } from './actions';
 
-/** Pull the token out of a (possibly absolute) manageUrl, base-safe. */
-function tokenFromUrl(url: string): string | null {
-  try {
-    return new URL(url, 'http://slate.local').searchParams.get('token');
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The manage page's two actions, reschedule and cancel, on the event page's
@@ -102,7 +95,7 @@ export function ManageActions({
     if (!rsRes) return;
     if (rsRes.ok) {
       // Adopt the fresh token (state + URL) so subsequent actions use it.
-      const next = rsRes.manageUrl ? tokenFromUrl(rsRes.manageUrl) : null;
+      const next = manageTokenOf(rsRes.manageUrl);
       if (next && next !== token) {
         setToken(next);
         setNewStartUtc('');

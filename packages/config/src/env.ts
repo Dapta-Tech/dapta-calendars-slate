@@ -39,6 +39,13 @@ export const serverEnvSchema = z.object({
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),
   MAIL_FROM_EMAIL: z.string().default('bookings@example.com'),
   MAIL_FROM_NAME: z.string().default('Calendars'),
+  // The support address booking emails name in their footer ("Need help?
+  // <address>"). UNSET (a bare fork) prints no such line: an email must never
+  // send a fork's readers to someone else's support desk. Not `.email()` on
+  // purpose, and an empty value counts as unset: a malformed value must never
+  // stop the API booting; the renderer drops anything that is not a bare
+  // address.
+  MAIL_SUPPORT_EMAIL: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
 
   // SMTP adapter
   SMTP_HOST: z.string().optional(),

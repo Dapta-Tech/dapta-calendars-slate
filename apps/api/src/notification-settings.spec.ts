@@ -488,4 +488,18 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(reset.subject).toBeNull();
     expect(reset.body).toBeNull();
   });
+
+  it("the host's preview shows the block the real mail adds under the template", async () => {
+    // Who is asking and what they answered is appended to the host's copy of a
+    // request and a move whatever the template says; the preview says so too.
+    const request = await admin.previewNotificationTemplate(principal, 'host_booked', { body: 'Custom body' });
+    expect(request.text).toMatch(/^Custom body\n\nGuest details\n/);
+    expect(request.text).toContain('Their answers\nCompany: Acme');
+    expect(request.text).toContain('Confirm or decline: https://example.com/admin/bookings');
+    const moved = await admin.previewNotificationTemplate(principal, 'host_rescheduled', { body: 'Moved' });
+    expect(moved.text).toContain('Guest details');
+    expect(moved.text).not.toContain('Confirm or decline');
+    const invitee = await admin.previewNotificationTemplate(principal, 'attendee_confirmation', { body: 'Hi' });
+    expect(invitee.text).toBe('Hi');
+  });
 });

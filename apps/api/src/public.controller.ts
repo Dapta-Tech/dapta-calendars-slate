@@ -283,7 +283,8 @@ export class PublicController {
   async teamBook(
     @Param('accountCode') accountCode: string,
     @Param('teamSlug') teamSlug: string,
-    @Body() body: { slug: string; startUtc: string; attendee: never; answers?: Record<string, unknown> },
+    @Body()
+    body: { slug: string; startUtc: string; attendee: never; answers?: Record<string, unknown>; locale?: unknown },
     @Headers(ONE_OFF_HEADER) token?: string,
   ) {
     // Forward an EXPLICIT pick, never the raw body. Nest hands this handler the
@@ -305,6 +306,8 @@ export class PublicController {
           startUtc: body?.startUtc,
           attendee: body?.attendee,
           answers: body?.answers,
+          // The page's language: only ever `en`/`es` is stored (F6).
+          locale: body?.locale,
         },
         // CONTEXT, from the header — never `body`. A one-off token read off the
         // raw body here would join `metadata` and `idempotencyKey` in the list

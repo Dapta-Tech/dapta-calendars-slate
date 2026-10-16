@@ -743,6 +743,15 @@ export class CalV2Service {
       email,
       timeZone: input.attendee.timeZone,
     }));
+    // The language the invitee's emails are written in (`booking.locale`, F6)
+    // is recorded only when the CALLER named one. The schema fills "en" when
+    // it is left out, and that default stays exactly where it was (the stored
+    // attendee language, the response, the request hash); it just never
+    // decides the invitee's mail, which keeps following the host's language.
+    const bookerLocale =
+      (raw as { attendee?: { language?: unknown } } | undefined)?.attendee?.language !== undefined
+        ? (input.attendee.language as "en" | "es")
+        : null;
 
     const outcome =
       resolved.kind === "team"
@@ -761,7 +770,7 @@ export class CalV2Service {
             // and the holder of the idempotency key (#104). Both passed as
             // CONTEXT, never on the body: the public controller forwards an
             // unvalidated `@Body()` into that same parameter.
-            { apiKeyWrite: true, idempotencyKey: storedKey },
+            { apiKeyWrite: true, idempotencyKey: storedKey, locale: bookerLocale },
           )
         : await this.bookings.book(
             {
@@ -787,6 +796,7 @@ export class CalV2Service {
               metadata: internalMetadata,
               apiKeyWrite: true,
               idempotencyKey: storedKey,
+              locale: bookerLocale,
             },
           );
 

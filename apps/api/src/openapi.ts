@@ -1169,6 +1169,13 @@ export const openapiSpec = {
               additionalProperties: true,
               description: "Answers to the event type's custom intake fields (required ones enforced).",
             },
+            locale: {
+              type: 'string',
+              enum: ['en', 'es'],
+              description:
+                "The language of the page the visitor booked on: the invitee's emails are " +
+                "written in it (attendee.language, when given, wins). Absent: the host's language.",
+            },
             reservationUid: {
               type: 'string',
               description:
