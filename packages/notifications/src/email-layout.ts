@@ -96,9 +96,11 @@ function safeHref(url: string): string {
 
 /**
  * The support address when it is one: a bare `local@domain.tld`, nothing that
- * could add a header or a second recipient to the `mailto:` it becomes.
+ * could add a header or a second recipient to the `mailto:` it becomes. Null
+ * for anything else, which the footer then leaves out. Exported so the API can
+ * say at boot that a configured value will not be used.
  */
-function supportAddress(value: string | null | undefined): string | null {
+export function mailSupportAddress(value: string | null | undefined): string | null {
   const v = String(value ?? '').trim();
   return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(v) ? v : null;
 }
@@ -351,7 +353,7 @@ export function renderBrandedHtml(
   const help = es ? '¿Necesitas ayuda?' : 'Need help?';
   // The deployment's own support desk, or no line at all: never a hard-coded
   // address, which a fork would otherwise send its readers to.
-  const support = supportAddress(growth.supportEmail);
+  const support = mailSupportAddress(growth.supportEmail);
   const helpLine = support
     ? ` ${help} <a href="${safeHref(`mailto:${support}`)}" style="color:${C.faint};">${esc(support)}</a>`
     : '';

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_ANSWERS,
   MAX_ANSWER_CHARS,
+  MAX_LABEL_CHARS,
   bookingDetails,
   bookingDetailsText,
   collectBookingAnswers,
@@ -61,12 +63,25 @@ describe('collectBookingAnswers', () => {
     expect(answers).toEqual([]);
   });
 
-  it('keeps an answer to a question the host has since removed, under its stored name', () => {
-    const answers = collectBookingAnswers(questions, { company: 'Example Co', budget: '10k' });
-    expect(answers.map((a) => [a.label, a.value])).toEqual([
-      ['Company', 'Example Co'],
-      ['budget', '10k'],
-    ]);
+  it('lists only what the event type asks: a key no question names is not an answer', () => {
+    // The public route stores `answers` as sent, so a caller could otherwise
+    // put their own words in the host's mail dressed as the host's question.
+    const answers = collectBookingAnswers(questions, {
+      company: 'Example Co',
+      'Action required: verify your payout at': 'https://evil.example/verify',
+    });
+    expect(answers.map((a) => [a.label, a.value])).toEqual([['Company', 'Example Co']]);
+  });
+
+  it('bounds how many answers and how long a label one message carries', () => {
+    const many = Array.from({ length: MAX_ANSWERS + 5 }, (_, i) => ({
+      name: `q${i}`,
+      label: i === 0 ? 'L'.repeat(MAX_LABEL_CHARS + 40) : `Q${i}`,
+      type: 'text',
+    }));
+    const answers = collectBookingAnswers(many, Object.fromEntries(many.map((q) => [q.name, 'x'])));
+    expect(answers).toHaveLength(MAX_ANSWERS);
+    expect(answers[0]!.label).toHaveLength(MAX_LABEL_CHARS + 1);
   });
 
   it('never reads inherited properties as answers', () => {

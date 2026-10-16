@@ -38,10 +38,17 @@ export interface BookingQuestion {
   type?: string | null;
 }
 
-/** The longest one answer may run in a message; the rest is cut. */
-export const MAX_ANSWER_CHARS = 2000;
+/**
+ * The longest one answer may run in a message; the rest is cut. With
+ * `MAX_ANSWERS` it bounds the block well under the size at which a mail
+ * client clips a message (and with it the button), however long an answer
+ * the visitor typed: a host who needs every word has the booking.
+ */
+export const MAX_ANSWER_CHARS = 1000;
 /** The most answers one message lists. */
-export const MAX_ANSWERS = 50;
+export const MAX_ANSWERS = 20;
+/** A question's label, as the event type's schema bounds it. */
+export const MAX_LABEL_CHARS = 200;
 
 /** C0 controls other than tab and newline: nothing a person typed on purpose. */
 // eslint-disable-next-line no-control-regex
@@ -60,8 +67,8 @@ function cleanLine(value: string | null | undefined): string {
     .trim();
 }
 
-function clip(value: string): string {
-  return value.length > MAX_ANSWER_CHARS ? `${value.slice(0, MAX_ANSWER_CHARS)}…` : value;
+function clip(value: string, max = MAX_ANSWER_CHARS): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
 /**
@@ -87,34 +94,31 @@ function normalizeAnswer(raw: unknown): BookingAnswerValue | null {
 }
 
 /**
- * The booking's answers in the event type's question order, labelled as the
- * host wrote the questions, empty ones dropped. An answer to a question the
- * host has since removed is still the visitor's answer: it follows, under the
- * name it was stored with. The fixed fields (name, email, notes) are not
- * questions; the block shows them from the attendee.
+ * The booking's answers to the event type's questions, in the event type's
+ * order, labelled as the host wrote the questions, empty ones dropped.
+ *
+ * ONLY the questions the event type asks. `booking.responses` holds whatever
+ * keys a caller sent (the public route stores them as they came), so a key no
+ * question names is not an answer: listed under its own name, it would put the
+ * sender's words in the host's mail styled as the host's own question. The
+ * fixed fields (name, email, notes) are not questions either; the block shows
+ * them from the attendee.
  */
 export function collectBookingAnswers(
   questions: readonly BookingQuestion[],
   responses: Record<string, unknown> | null | undefined,
 ): BookingAnswer[] {
   const out: BookingAnswer[] = [];
-  const asked = new Set<string>();
   const answers = responses ?? {};
   const own = (key: string) => (Object.hasOwn(answers, key) ? answers[key] : undefined);
   for (const q of questions) {
-    asked.add(q.name);
+    if (out.length >= MAX_ANSWERS) break;
     if (isReservedFieldName(q.name)) continue;
     const value = normalizeAnswer(own(q.name));
     if (value === null) continue;
-    out.push({ label: cleanLine(q.label) || q.name, value, type: q.type ?? null });
+    out.push({ label: clip(cleanLine(q.label) || q.name, MAX_LABEL_CHARS), value, type: q.type ?? null });
   }
-  for (const key of Object.keys(answers)) {
-    if (asked.has(key) || isReservedFieldName(key)) continue;
-    const value = normalizeAnswer(answers[key]);
-    if (value === null) continue;
-    out.push({ label: cleanLine(key), value, type: null });
-  }
-  return out.slice(0, MAX_ANSWERS);
+  return out;
 }
 
 const COPY = {
@@ -205,9 +209,10 @@ export interface BookingDetailsSource {
 export function bookingDetails(n: BookingDetailsSource, locale: TemplateLocale): BookingDetails {
   const c = bookingDetailsCopy(locale);
   const answers: DetailLine[] = [];
-  for (const a of n.answers ?? []) {
-    const value = readableAnswer(a, locale);
-    if (value) answers.push({ label: cleanLine(a.label), value });
+  // Bounded again here: a payload is not always ours (an older row, a fork).
+  for (const a of (n.answers ?? []).slice(0, MAX_ANSWERS)) {
+    const value = clip(readableAnswer(a, locale));
+    if (value) answers.push({ label: clip(cleanLine(a.label), MAX_LABEL_CHARS), value });
   }
   const notes = cleanBlock(String(n.attendee.notes ?? ''));
   if (notes) answers.push({ label: c.notes, value: clip(notes) });
@@ -217,7 +222,10 @@ export function bookingDetails(n: BookingDetailsSource, locale: TemplateLocale):
       email: cleanLine(n.attendee.email),
       phone: cleanLine(n.attendee.phone),
     },
-    others: (n.guests ?? []).filter((g) => cleanLine(g.email)).map(guestDisplay),
+    others: (n.guests ?? [])
+      .filter((g) => cleanLine(g.email))
+      .slice(0, MAX_ANSWERS)
+      .map(guestDisplay),
     answers,
   };
 }
