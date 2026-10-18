@@ -1,30 +1,19 @@
 import Link from 'next/link';
-import { getMessages, t, type BookingMessages, safeTimeZone } from '@slate/shared';
+import { getMessages, t, safeTimeZone } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
 import { CancelAction, PendingActions } from './booking-actions';
+import {
+  BookingStatusPill,
+  bookingSection,
+  formatBookingStart,
+  type BookingRowData as Row,
+  type BookingsMessages,
+} from './booking-parts';
+import { LegacyBookingLink } from './legacy-booking-link';
 
 export const dynamic = 'force-dynamic';
-
-type BookingsMessages = BookingMessages['admin']['bookings'];
-type Row = { uid: string; status: string; title: string; startUtc: string };
-
-/** Localized label for a raw booking status string. */
-function statusLabel(status: string, m: BookingsMessages): string {
-  switch (status) {
-    case 'accepted':
-      return m.statusAccepted;
-    case 'pending':
-      return m.statusPending;
-    case 'cancelled':
-      return m.statusCancelled;
-    case 'rejected':
-      return m.statusRejected;
-    default:
-      return status;
-  }
-}
 
 export default async function BookingsPage() {
   const [{ items }, me] = await Promise.all([
@@ -35,14 +24,15 @@ export default async function BookingsPage() {
   const tz = safeTimeZone(me?.timeZone);
   const m = getMessages(await getLocale()).admin.bookings;
   const now = Date.now();
-  const pending = items.filter((b) => b.status === 'pending');
-  const upcoming = items.filter((b) => b.status === 'accepted' && new Date(b.startUtc).getTime() > now);
-  const past = items.filter(
-    (b) => b.status !== 'pending' && !(b.status === 'accepted' && new Date(b.startUtc).getTime() > now),
-  );
+  const pending = items.filter((b) => bookingSection(b, now) === 'pending');
+  const upcoming = items.filter((b) => bookingSection(b, now) === 'upcoming');
+  const past = items.filter((b) => bookingSection(b, now) === 'past');
 
   return (
     <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
+      {/* An email sent before the booking had its own page linked here with
+          the uid in the fragment: this moves it to that page. */}
+      <LegacyBookingLink />
       <PageHeader
         title={m.title}
         action={
@@ -105,46 +95,12 @@ function Section({
             >
               <span className="flex flex-col">
                 <span className="font-medium">{b.title}</span>
-                <span className="text-sm text-muted-foreground">
-                  {new Intl.DateTimeFormat('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    timeZone,
-                    timeZoneName: 'short',
-                  }).format(new Date(b.startUtc))}
-                </span>
+                <span className="text-sm text-muted-foreground">{formatBookingStart(b.startUtc, timeZone)}</span>
               </span>
               <div className="flex items-center gap-field">
                 {action === 'pending' ? <PendingActions uid={b.uid} m={m} /> : null}
                 {action === 'cancel' ? <CancelAction uid={b.uid} m={m} /> : null}
-                {/* A status pill, NOT a button — a solid background paired with
-                    a foreground text color is reserved for real actions
-                    (Accept/Cancel above use exactly that fill). A same-styled
-                    "accepted" pill next to a real Cancel button reads as a
-                    second, broken button — that was the reported "Accept
-                    doesn't work" bug: there was no pending booking to show real
-                    Accept/Decline controls, only this pill on an
-                    already-accepted booking, styled like one. A soft tint fill
-                    (10 percent background opacity, colored text) keeps the
-                    status legible and color-coded while being visually
-                    unmistakable as non-interactive (same convention as the
-                    member and role pills elsewhere in admin). */}
-                <span
-                  className={`rounded-sm px-inline py-tight text-xs font-medium ${
-                    b.status === 'accepted'
-                      ? 'bg-primary/10 text-primary'
-                      : b.status === 'pending'
-                        ? 'bg-secondary/10 text-secondary'
-                        : b.status === 'cancelled' || b.status === 'rejected'
-                          ? 'bg-destructive/10 text-destructive'
-                          : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {statusLabel(b.status, m)}
-                </span>
+                <BookingStatusPill status={b.status} m={m} />
               </div>
             </li>
           ))}

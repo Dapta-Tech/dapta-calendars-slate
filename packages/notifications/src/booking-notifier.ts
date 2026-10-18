@@ -2,6 +2,12 @@ import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
 import { renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
 import {
+  bookingDetails,
+  bookingDetailsText,
+  type BookingAnswer,
+  type BookingGuest,
+} from './booking-details';
+import {
   renderTemplate,
   templateVars,
   type EmailTemplate,
@@ -28,7 +34,39 @@ export interface BookingNotification {
   host: { name?: string | null; email?: string | null; timeZone?: string | null };
   /** Additional assigned hosts (collective / fixed_round_robin) — also notified. */
   coHosts?: Array<{ name?: string | null; email?: string | null }>;
-  attendee: { name: string; email: string; timeZone?: string | null };
+  /**
+   * `phone` and `notes` are what the invitee gave beside their name and email;
+   * only the host's copy shows them (`bookingDetails`). Absent on rows queued
+   * before they were carried, which then show name and email only.
+   */
+  attendee: {
+    name: string;
+    email: string;
+    timeZone?: string | null;
+    phone?: string | null;
+    notes?: string | null;
+  };
+  /**
+   * Everyone else the booking invites (extra attendees, added guests), for the
+   * host's copy. Snapshotted at enqueue like the rest. Absent = none listed.
+   */
+  guests?: BookingGuest[] | null;
+  /**
+   * The booking form's answers, in the event type's question order and
+   * labelled as the host wrote the questions (`collectBookingAnswers`),
+   * snapshotted at enqueue. The host's copy of the request, the confirmed
+   * booking and the move lists them; no invitee copy does. Not `formAnswers`,
+   * which is the raw record behind the `{{form.*}}` template namespace.
+   */
+  answers?: BookingAnswer[] | null;
+  /**
+   * Where the HOST acts on this booking: the dashboard's bookings page,
+   * deep-linked to it. Behind the host's login, and a plain page load there
+   * changes nothing, so a mail scanner that follows it cannot confirm or
+   * decline anything (no state-changing link is ever put in an email). The
+   * host's request carries it as its one button. Never on an invitee copy.
+   */
+  dashboardUrl?: string | null;
   location?: string | null;
   /**
    * The conferencing link. Filled at DELIVERY time, never at enqueue — it is
@@ -87,6 +125,30 @@ export interface BookingNotification {
 }
 
 /**
+ * The kinds whose HOST copy says who the booking is from and what they
+ * answered: the request (decide on it), the confirmed booking (prepare for it)
+ * and the move. A cancellation, a decline or a reminder is about a booking the
+ * host already read about. Exported so the enqueue side snapshots the block
+ * for exactly these kinds.
+ */
+export const HOST_DETAIL_KINDS: ReadonlySet<string> = new Set<EmailKind>([
+  'pending',
+  'confirmation',
+  'reschedule',
+]);
+
+/**
+ * The host's dashboard link for this booking, for the host's copy only, and
+ * only an http(s) one. Mirror of `inviteeManageUrl`: each side gets its own
+ * way in and never the other's.
+ */
+export function hostDashboardUrl(n: Pick<BookingNotification, 'audience' | 'dashboardUrl'>): string {
+  if (n.audience !== 'host') return '';
+  const url = (n.dashboardUrl ?? '').trim();
+  return /^https?:\/\/\S+$/i.test(url) ? url : '';
+}
+
+/**
  * Renders and sends booking emails through the EmailProvider port, each with an
  * .ics invite where appropriate (SEQUENCE 0/1/2 for confirm/reschedule/cancel;
  * stable UID). The app only ever calls these methods; the transport is whatever
@@ -100,7 +162,9 @@ export interface BookingNotification {
 export class BookingNotifier {
   /**
    * `growth.signupUrl`: the deployment's signup destination for the invitee's
-   * footer line. Absent (a bare fork, every existing caller): no line.
+   * footer line. `growth.supportEmail`: the deployment's support address for
+   * the "Need help?" footer line. Absent (a bare fork, every existing caller):
+   * neither line.
    */
   constructor(
     private readonly email: EmailProvider,
@@ -138,14 +202,23 @@ export class BookingNotifier {
     const audience: Audience = n.audience === 'host' ? 'host' : 'attendee';
     const vars = templateVars(n, locale);
     const growth = n.showBranding === false ? { ...this.growth, signupUrl: null } : this.growth;
-    const html = renderBrandedHtml(kind, vars, locale, audience, growth);
+    // Who the booking is from and what they answered: on the host's copy of
+    // the request, the confirmed booking and the move, whatever its template
+    // says, so a host who edited the template still sees it.
+    const details = audience === 'host' && HOST_DETAIL_KINDS.has(kind) ? bookingDetails(n, locale) : null;
+    // The host's request is the one host copy with something to do.
+    const actionUrl = kind === 'pending' ? hostDashboardUrl(n) : '';
+    const html = renderBrandedHtml(kind, vars, locale, audience, growth, { details, actionUrl });
+    const withDetails = (text: string) =>
+      details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text;
     if (n.template) {
       const base = renderTemplate(n.template, vars);
-      return { subject: base.subject, text: base.text, html };
+      return { subject: base.subject, text: withDetails(base.text), html };
     }
     const { subject, lines } = legacy();
     const kept = lines.filter(Boolean);
-    return { subject, text: kept.join('\n'), html };
+    // A subject is a header: a line break in a title must not end it early.
+    return { subject: subject.replace(/[\r\n]+/g, ' '), text: withDetails(kept.join('\n')), html };
   }
 
   sendConfirmation(n: BookingNotification): Promise<EmailResult> {

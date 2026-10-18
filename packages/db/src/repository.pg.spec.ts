@@ -4,7 +4,7 @@ import { isExclusionViolation } from '@slate/engine';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
-import { createBooking, getAvailability, getMember, getAccountByCode } from './repository';
+import { createBooking, getAvailability, getAccountByCode } from './repository';
 import {
   addGuestsToBooking,
   claimApiIdempotency,
@@ -21,6 +21,12 @@ const describePg = isPg ? describe : describe.skip;
 
 describePg('repository (real Postgres — the tested truth)', () => {
   let db: Db;
+  /**
+   * F8: one tag per run, so this file can run again on the database it ran on
+   * (a local Postgres, a re-run job). The first run's rows stay where they
+   * are; every fixture below is named, timed or hosted so they never meet.
+   */
+  const run = randomUUID().slice(0, 8);
 
   beforeAll(async () => {
     db = await createDb(url);
@@ -53,7 +59,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       startMs,
       attendee: {
         name: 'Sam',
-        email: 'sam@example.com',
+        email: `sam-${run}@example.com`,
         timeZone: 'America/New_York',
       },
       answers: { company: 'Acme' },
@@ -64,7 +70,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       ...args,
       attendee: {
         name: 'Pat',
-        email: 'pat@example.com',
+        email: `pat-${run}@example.com`,
         timeZone: 'America/New_York',
       },
     });
@@ -76,8 +82,13 @@ describePg('repository (real Postgres — the tested truth)', () => {
     // Bypass the app-level check entirely and insert two overlapping accepted
     // bookings for the same host directly — the DB constraint must reject the
     // second with a 23P01 exclusion_violation. This is the hard guarantee.
+    //
+    // The host is this run's own (the constraint keys on `host_member_id`,
+    // which carries no foreign key): on the seeded host, a second run met the
+    // first run's row with its FIRST insert and failed before the guarantee
+    // was ever asked.
     const account = await getAccountByCode(db, 'acme');
-    const member = await getMember(db, account!.id, 'alex-rivera');
+    const host = `pg-host-${run}`;
     const start = Date.UTC(2030, 0, 1, 15, 0, 0); // far future, no clash
     const end = start + 30 * 60_000;
     const now = Date.now();
@@ -85,7 +96,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
     const rawInsert = (id: string, uid: string, s: number, e: number) =>
       db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms,
         status, created_at, updated_at)
-        VALUES (${id}, ${account!.id}, ${uid}, ${member!.id}, ${'Direct'}, ${s}, ${e},
+        VALUES (${id}, ${account!.id}, ${uid}, ${host}, ${'Direct'}, ${s}, ${e},
         'accepted', ${now}, ${now})`);
 
     await rawInsert(randomUUID(), randomUUID(), start, end);
@@ -106,7 +117,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
     // requiresConfirmation booking holds the slot at the DB level too, so a
     // concurrent second pending for the same host/interval must be rejected.
     const account = await getAccountByCode(db, 'acme');
-    const member = await getMember(db, account!.id, 'alex-rivera');
+    const host = `pg-host-pending-${run}`; // this run's own host, as above
     const start = Date.UTC(2031, 5, 1, 15, 0, 0); // far future, distinct window
     const end = start + 30 * 60_000;
     const now = Date.now();
@@ -114,7 +125,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
     const rawInsertPending = (id: string, uid: string, s: number, e: number) =>
       db.run(sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms,
         status, created_at, updated_at)
-        VALUES (${id}, ${account!.id}, ${uid}, ${member!.id}, ${'Direct'}, ${s}, ${e},
+        VALUES (${id}, ${account!.id}, ${uid}, ${host}, ${'Direct'}, ${s}, ${e},
         'pending', ${now}, ${now})`);
 
     await rawInsertPending(randomUUID(), randomUUID(), start, end);
@@ -146,7 +157,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       startMs: starts[0]!,
       attendee: {
         name: 'Pilot',
-        email: 'pilot-pg@example.com',
+        email: `pilot-pg-${run}@example.com`,
         timeZone: 'UTC',
       },
       answers: { company: 'Dapta' },
@@ -159,7 +170,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
       await addGuestsToBooking(db, {
         accountId: account!.id,
         uid: created.booking.uid,
-        guests: [{ email: 'guest-pg@example.com', name: 'Guest' }, { email: 'GUEST-PG@example.com' }],
+        guests: [{ email: `guest-pg-${run}@example.com`, name: 'Guest' }, { email: `GUEST-PG-${run}@example.com` }],
       }),
     ).toEqual({ ok: true, added: 1 });
 
@@ -167,7 +178,9 @@ describePg('repository (real Postgres — the tested truth)', () => {
       accountId: account!.id,
       uid: created.booking.uid,
       newStartMs: starts[1]!,
-      idempotencyKey: 'idem-key',
+      // Stored on the new row under a GLOBAL unique index, so a fixed key made
+      // a second run's reschedule collide with the first run's booking.
+      idempotencyKey: `idem-key-${run}`,
       reason: 'Postgres parity',
     });
     expect(moved).toMatchObject({ ok: true, uid: expect.any(String) });

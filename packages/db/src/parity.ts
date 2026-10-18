@@ -29,6 +29,7 @@ import type { CalendarProvider } from '@slate/calendar';
 import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } from './crypto';
 import { sql, type Db } from './client';
 import {
+  bookingLocale,
   bookingStartOutOfRange,
   busyReadSpan,
   getAccountByCode,
@@ -847,6 +848,8 @@ export async function createTeamBooking(
       phone?: string;
     }>;
     answers?: Record<string, unknown>;
+    /** The language the invitee booked in; see `CreateBookingArgs.locale`. */
+    locale?: string | null;
     metadata?: Record<string, unknown>;
     idempotencyKey?: string;
     /**
@@ -1011,10 +1014,11 @@ export async function createTeamBooking(
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
+      ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
       ${now}, ${now})`;
   const insertAttendee = sql`
@@ -1022,12 +1026,15 @@ export async function createTeamBooking(
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
       ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null}, ${now})`;
+  // Extra attendees are written a millisecond apart, after the invitee, so
+  // "the first attendee row" names the one who booked without relying on the
+  // database's physical row order (see loadBookingNotificationContext).
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
-    (attendee) => sql`
+    (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
         ${normalizeAttendeeEmail(attendee.email)},
-        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now})`,
+        ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${now + 1 + i})`,
   );
   // Multi-host bookings (collective / fixed_round_robin) record every assigned
   // host so write-out + notifications fan out. Round-robin's single host is
@@ -1655,11 +1662,34 @@ export interface BookingNotificationContext {
    * the way the host reads it. Null on a host-less booking.
    */
   host: { name: string | null; email: string | null; timeZone: string | null };
-  attendee: { name: string; email: string; timeZone: string };
+  /**
+   * The invitee. `phone` and `notes` are what they gave beside their name and
+   * email (null when they gave none); the host's copy shows them.
+   */
+  attendee: { name: string; email: string; timeZone: string; phone: string | null; notes: string | null };
+  /**
+   * Everyone else the booking invites besides the invitee, for the host's copy:
+   * the extra attendees an API caller named and the guests added afterwards.
+   * Deduped by email, the invitee's own address excluded. Not the `guests`
+   * intake question: that one is an answer, and reads as one.
+   */
+  guests: Array<{ name: string | null; email: string }>;
   /** Extra assigned hosts (collective / fixed_round_robin) beyond the organizer. */
   coHosts: Array<{ name: string | null; email: string | null }>;
   /** Host member's UI locale — picks the default-template language (EN/ES). */
   hostLocale: string | null;
+  /**
+   * The language the invitee booked in (`booking.locale`), or null when it was
+   * never recorded. The invitee's copies are written in it; null keeps them in
+   * `hostLocale`, which is what every booking taken before it got.
+   */
+  attendeeLocale: 'en' | 'es' | null;
+  /**
+   * The event type's questions, as the host wrote them and in their order, so
+   * the host's copy can label each answer. Empty when the booking has no event
+   * type or the event asks nothing.
+   */
+  bookingFields: Array<{ name: string; label: string; type: string }>;
   /** Public book-again path parts ({{booking_link}}) — null when unresolvable. */
   bookAgain: { accountCode: string; handle: string; slug: string } | null;
   /**
@@ -1679,6 +1709,24 @@ export interface BookingNotificationContext {
    * is the renderer's business, not the storage layer's.
    */
   formAnswers: Record<string, unknown>;
+}
+
+/** `event_type.booking_fields` as the questions it names; any entry without a
+ *  string name is skipped, a missing label falls back to the name. */
+function asQuestionList(raw: unknown): Array<{ name: string; label: string; type: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ name: string; label: string; type: string }> = [];
+  for (const f of raw as unknown[]) {
+    if (!f || typeof f !== 'object') continue;
+    const { name, label, type } = f as Record<string, unknown>;
+    if (typeof name !== 'string' || !name) continue;
+    out.push({
+      name,
+      label: typeof label === 'string' && label.trim() ? label : name,
+      type: typeof type === 'string' ? type : 'text',
+    });
+  }
+  return out;
 }
 
 /** `booking.responses` as a plain own-property record; anything else (null, an
@@ -1713,9 +1761,9 @@ export async function loadBookingNotificationContext(
     host_name: string | null;
     host_email: string | null;
     host_tz: string | null;
-    att_name: string | null;
-    att_email: string | null;
-    att_tz: string | null;
+    booking_metadata: unknown;
+    booking_locale: string | null;
+    event_fields: unknown;
     host_locale: string | null;
     host_handle: string | null;
     account_code: string | null;
@@ -1728,15 +1776,39 @@ export async function loadBookingNotificationContext(
                m.time_zone AS host_tz, m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
-               a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
+               et.booking_fields AS event_fields, b.locale AS booking_locale,
+               b.metadata AS booking_metadata
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         LEFT JOIN account acc ON acc.id = b.account_id
         LEFT JOIN event_type et ON et.id = b.event_type_id
-        LEFT JOIN booking_attendee a ON a.booking_id = b.id
         WHERE b.uid = ${uid} LIMIT 1`,
   );
-  if (!row || !row.att_email) return null;
+  if (!row) return null;
+  // The invitee is the attendee who BOOKED. A booking can carry more attendee
+  // rows (an API caller's extra attendees, written in the same transaction),
+  // and the bare `LEFT JOIN ... LIMIT 1` this replaced returned whichever row
+  // the database met first: on Postgres, now and then a guest, who then got
+  // the invitee's mail. So: the attendee the v2 caller named, when it named
+  // one, else the first row written (ties in insertion order).
+  const insertionOrder = db.dialect === 'postgres' ? sql`ctid ASC` : sql`rowid ASC`;
+  const attendeeRows = await db.all<{
+    id: string;
+    name: string | null;
+    email: string | null;
+    time_zone: string | null;
+    phone: string | null;
+    notes: string | null;
+  }>(
+    sql`SELECT id, name, email, time_zone, phone, notes FROM booking_attendee
+        WHERE booking_id = ${row.id} ORDER BY created_at ASC, ${insertionOrder}`,
+  );
+  const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(row.booking_metadata, {})
+    ._primaryAttendee?.email;
+  const namedKey = typeof named === 'string' ? named.trim().toLowerCase() : null;
+  const invitee =
+    (namedKey && attendeeRows.find((a) => a.email?.trim().toLowerCase() === namedKey)) || attendeeRows[0];
+  if (!invitee?.email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.
   const coHostRows = await db.all<{
@@ -1748,6 +1820,21 @@ export async function loadBookingNotificationContext(
         FROM booking_host bh LEFT JOIN member m ON m.id = bh.member_id
         WHERE bh.booking_id = ${row.id} AND bh.member_id <> ${row.host_member_id ?? ''}`,
   );
+  // Everyone else the booking invites: the other attendee rows (an API caller's
+  // extra attendees) and the guests added afterwards. One list for the host,
+  // deduped by email, without the invitee's own address.
+  const addedGuests = await db.all<{ name: string | null; email: string | null }>(
+    sql`SELECT name, email FROM booking_guest WHERE booking_id = ${row.id} ORDER BY created_at ASC`,
+  );
+  const others = [...attendeeRows.filter((a) => a.id !== invitee.id), ...addedGuests];
+  const seen = new Set<string>([invitee.email.trim().toLowerCase()]);
+  const guests: Array<{ name: string | null; email: string }> = [];
+  for (const g of others) {
+    const key = g.email?.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    guests.push({ name: g.name, email: g.email!.trim() });
+  }
   return {
     accountId: row.account_id,
     uid: row.uid,
@@ -1759,12 +1846,17 @@ export async function loadBookingNotificationContext(
     locationKind: row.location_kind,
     host: { name: row.host_name, email: row.host_email, timeZone: row.host_tz },
     attendee: {
-      name: row.att_name ?? '',
-      email: row.att_email,
-      timeZone: row.att_tz ?? 'UTC',
+      name: invitee.name ?? '',
+      email: invitee.email,
+      timeZone: invitee.time_zone ?? 'UTC',
+      phone: invitee.phone?.trim() || null,
+      notes: invitee.notes?.trim() ? invitee.notes : null,
     },
+    guests,
     coHosts: coHostRows.map((h) => ({ name: h.name, email: h.email })),
     hostLocale: row.host_locale,
+    attendeeLocale: bookingLocale(row.booking_locale),
+    bookingFields: asQuestionList(parseJsonColumn<unknown>(row.event_fields, null)),
     reminders: effectiveReminders(parseEventReminders(row.event_reminders)),
     formAnswers: asAnswerRecord(parseJsonColumn<unknown>(row.responses, null)),
     bookAgain:
@@ -1832,14 +1924,7 @@ export async function listBookings(
   }
   const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
   // Fetch one extra row to know whether a further page exists.
-  const rows = await db.all<{
-    uid: string;
-    status: string;
-    title: string;
-    start_ms: number;
-    end_ms: number;
-    host_member_id: string | null;
-  }>(
+  const rows = await db.all<BookingListRow>(
     sql`SELECT uid, status, title, start_ms, end_ms, host_member_id FROM booking
         WHERE ${where} ORDER BY start_ms DESC, uid DESC LIMIT ${limit + 1}`,
   );
@@ -1847,15 +1932,48 @@ export async function listBookings(
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: page.map((r) => ({
-      uid: r.uid,
-      status: r.status,
-      title: r.title,
-      startUtc: new Date(Number(r.start_ms)).toISOString(),
-      endUtc: new Date(Number(r.end_ms)).toISOString(),
-      hostMemberId: r.host_member_id,
-    })),
+    items: page.map(toBookingListItem),
     nextCursor: hasMore && last ? encodeBookingCursor(Number(last.start_ms), last.uid) : null,
+  };
+}
+
+/**
+ * One booking, in the list's shape, by uid INSIDE the account, or null when the
+ * uid is not this account's (unknown or another tenant's read the same, so the
+ * answer never says which). The dashboard's page for one booking reads this,
+ * so it opens whatever the list's page size left out.
+ *
+ * Scoped like the host's confirm, decline and cancel (account, not member): a
+ * co-host receives the same request email and acts on the same booking.
+ */
+export async function getHostBooking(
+  db: Db,
+  args: { accountId: string; uid: string },
+): Promise<BookingListItem | null> {
+  const row = await db.get<BookingListRow>(
+    sql`SELECT uid, status, title, start_ms, end_ms, host_member_id FROM booking
+        WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
+  );
+  return row ? toBookingListItem(row) : null;
+}
+
+interface BookingListRow {
+  uid: string;
+  status: string;
+  title: string;
+  start_ms: number;
+  end_ms: number;
+  host_member_id: string | null;
+}
+
+function toBookingListItem(r: BookingListRow): BookingListItem {
+  return {
+    uid: r.uid,
+    status: r.status,
+    title: r.title,
+    startUtc: new Date(Number(r.start_ms)).toISOString(),
+    endUtc: new Date(Number(r.end_ms)).toISOString(),
+    hostMemberId: r.host_member_id,
   };
 }
 

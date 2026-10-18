@@ -1,6 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { createDb } from '@slate/db';
-import { createEmailProvider, BookingNotifier, type EmailProvider } from '@slate/notifications';
+import {
+  createEmailProvider,
+  BookingNotifier,
+  mailSupportAddress,
+  type EmailProvider,
+} from '@slate/notifications';
 import { badgeHidden, buildSignupUrl } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
@@ -85,13 +90,24 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       provide: NOTIFIER,
       // The invitee's footer line ("Made with ... Create your free calendar")
       // follows the same open-core switch as the page's badge: no destination,
-      // or the hide flag, and the email names no product.
-      useFactory: (email: EmailProvider, env: ServerEnv) =>
-        new BookingNotifier(email, {
+      // or the hide flag, and the email names no product. The "Need help?"
+      // line names the deployment's own support address, or nothing (F10).
+      useFactory: (email: EmailProvider, env: ServerEnv) => {
+        const supportEmail = mailSupportAddress(env.MAIL_SUPPORT_EMAIL);
+        // Never a reason to refuse to boot, but never silent either: a set
+        // value that is not a bare address would otherwise just vanish.
+        if (env.MAIL_SUPPORT_EMAIL && !supportEmail) {
+          new Logger('Notifications').warn(
+            'MAIL_SUPPORT_EMAIL is not a bare email address; booking emails carry no support line.',
+          );
+        }
+        return new BookingNotifier(email, {
           signupUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
             ? null
             : buildSignupUrl({ baseUrl: env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL, medium: 'email' }),
-        }),
+          supportEmail,
+        });
+      },
       inject: [EMAIL, ENV],
     },
     // CalendarProvider selected by CALENDAR_PROVIDER: the OSS default is

@@ -391,6 +391,8 @@ interface RescheduleSource {
   location: string | null;
   meeting_url: string | null;
   attendee_time_zone: string | null;
+  /** The language the invitee booked in; carried to the new row, NULL included. */
+  locale: string | null;
   responses: unknown;
   metadata: unknown;
   recurring_event_id: string | null;
@@ -444,7 +446,7 @@ export async function rescheduleBookingV2(
 
   const source = await db.get<RescheduleSource>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, team_id, title,
-               start_ms, end_ms, status, location, meeting_url, attendee_time_zone,
+               start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
                responses, metadata, recurring_event_id
         FROM booking
         WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
@@ -544,7 +546,7 @@ export async function rescheduleBookingV2(
     WHERE id = ${source.id}`;
   const insertNew = sql`INSERT INTO booking
     (id, account_id, uid, event_type_id, host_member_id, team_id, title,
-     start_ms, end_ms, status, location, meeting_url, attendee_time_zone,
+     start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
      responses, metadata, cancellation_reason, cancelled_by, rescheduled,
      from_reschedule, rescheduled_from_uid, rescheduled_to_uid,
      rescheduling_reason, rescheduled_by_email, recurring_event_id,
@@ -552,7 +554,7 @@ export async function rescheduleBookingV2(
     VALUES (${newId}, ${source.account_id}, ${newUid}, ${source.event_type_id},
       ${source.host_member_id}, ${source.team_id}, ${source.title},
       ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location},
-      ${source.meeting_url}, ${source.attendee_time_zone}, ${responsesExpr},
+      ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null}, ${responsesExpr},
       ${metadataExpr}, NULL, NULL, 1, ${previousStartUtc}, ${source.uid}, NULL,
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
       ${source.recurring_event_id},

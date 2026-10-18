@@ -208,4 +208,48 @@ describe('GET /api/auth/refresh', () => {
 
     expect(res.headers.get('location')).toBe('https://calendars.example.com/admin');
   });
+  // The page the render was for travels through here, so a refreshed session
+  // lands back on it (a booking opened from an email), and a dead one carries
+  // it on to the login. Only a dashboard path is ever honoured.
+  describe('the return target', () => {
+    const PAGE = '/admin/bookings/6f1c2a9e-1b7d-4c55-9a0e-3d2f8b7c4e10';
+    const withNext = (v: string) => `/api/auth/refresh?next=${encodeURIComponent(v)}`;
+
+    it('returns a refreshed session to the page it was for', async () => {
+      refreshUpstreamSession.mockResolvedValue(refreshed(freshSession));
+
+      const res = await GET(req(withNext(PAGE)));
+
+      expect(res.headers.get('location')).toBe(`https://calendars.example.com${PAGE}`);
+    });
+
+    it('hands the page on to the logout, so the next sign-in returns there', async () => {
+      refreshUpstreamSession.mockResolvedValue(EXPIRED);
+
+      const res = await GET(req(withNext(PAGE)));
+
+      expect(res.headers.get('location')).toBe(`${LOGOUT}&next=${encodeURIComponent(PAGE)}`);
+    });
+
+    it('points the retry of the unavailable page back at the page', async () => {
+      refreshUpstreamSession.mockResolvedValue(UNAVAILABLE);
+
+      const html = await (await GET(req(withNext(PAGE)))).text();
+
+      expect(html).toContain(`href="${PAGE}"`);
+    });
+
+    it.each(['//evil.example', 'https://evil.example/admin', '/\\evil.example', '/%2F%2Fevil.example', '/login'])(
+      'ignores a target that is not a dashboard page (%s)',
+      async (target) => {
+        refreshUpstreamSession.mockResolvedValue(refreshed(freshSession));
+        expect((await GET(req(withNext(target)))).headers.get('location')).toBe(
+          'https://calendars.example.com/admin',
+        );
+
+        refreshUpstreamSession.mockResolvedValue(EXPIRED);
+        expect((await GET(req(withNext(target)))).headers.get('location')).toBe(LOGOUT);
+      },
+    );
+  });
 });

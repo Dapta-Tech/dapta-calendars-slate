@@ -177,6 +177,13 @@ export interface CreateBookingArgs {
   }>;
   /** Answers to the event type's custom intake fields. */
   answers?: Record<string, unknown>;
+  /**
+   * The language the invitee booked in, stored as `booking.locale` (see
+   * `bookingLocale`); the invitee's emails are written in it. Pass it only when
+   * it is KNOWN: absent or unrecognised stores NULL, and NULL keeps the
+   * invitee's mail in the host's language, as every booking before it.
+   */
+  locale?: string | null;
   /** Public API metadata. Internal keys are added by the repository. */
   metadata?: Record<string, unknown>;
   /** A held reservation to consume (deleted on success). */
@@ -206,6 +213,18 @@ export interface CreateBookingArgs {
    * not mean.
    */
   oneOffToken?: string;
+}
+
+/**
+ * The stored form of `booking.locale`: `en` or `es`, from a bare tag or a
+ * regional one (`es-MX`), else null. Null is "not known", which keeps the
+ * invitee's mail in the host's language, so anything this layer cannot read
+ * degrades to exactly what every booking did before the column existed.
+ */
+export function bookingLocale(value: unknown): 'en' | 'es' | null {
+  if (typeof value !== 'string') return null;
+  const tag = value.trim().toLowerCase().split(/[-_]/)[0];
+  return tag === 'en' || tag === 'es' ? tag : null;
 }
 
 /**
@@ -1105,11 +1124,12 @@ export async function createBooking(
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null));
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location, location_kind,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, idempotency_key,
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key,
       created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
+      ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
       ${now}, ${now})`;
   const insertAttendee = sql`
@@ -1118,13 +1138,16 @@ export async function createBooking(
       ${normalizeAttendeeEmail(args.attendee.email)},
       ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
       ${args.attendee.language ?? null}, ${now})`;
+  // Extra attendees are written a millisecond apart, after the invitee, so
+  // "the first attendee row" names the one who booked without relying on the
+  // database's physical row order (see loadBookingNotificationContext).
   const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
-    (attendee) => sql`
+    (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
         ${normalizeAttendeeEmail(attendee.email)},
         ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
-        ${attendee.language ?? null}, ${now})`,
+        ${attendee.language ?? null}, ${now + 1 + i})`,
   );
 
   const record: BookingRecord = {

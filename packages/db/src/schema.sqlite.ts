@@ -231,6 +231,15 @@ export const booking = sqliteTable('booking', {
   locationKind: text('location_kind'),
   meetingUrl: text('meeting_url'),
   attendeeTimeZone: text('attendee_time_zone'),
+  /**
+   * The language the invitee booked in (`en` | `es`): the invitee's emails are
+   * written in it, the host's keep the host's own. Recorded only when known (the
+   * booking page's language, an API caller's explicit `attendee.language`);
+   * NULL, every booking before this column and every write naming none, keeps
+   * the invitee's mail in the host's language. Deliberately NOT
+   * `booking_attendee.language`, which the v2 surface fills with a default.
+   */
+  locale: text('locale'),
   responses: text('responses'),
   metadata: text('metadata'),
   cancellationReason: text('cancellation_reason'),

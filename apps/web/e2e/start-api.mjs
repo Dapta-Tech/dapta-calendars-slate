@@ -35,6 +35,10 @@ const childEnv = {
   CALENDAR_API_BASE_URL: `http://127.0.0.1:${env('E2E_CALENDAR_PORT', '4519')}`,
   CALENDAR_API_TOKEN: 'e2e-token',
   EMAIL_PROVIDER: 'log-only',
+  // A browser with no session is signed out, as it is in production, rather
+  // than resolved to the first seeded host: the admin deep-link spec signs in
+  // through the real login. Every other call here names its host.
+  AUTH_LOCAL_STRICT: 'true',
   REQUEST_LOG_ENABLED: 'true',
   RATE_LIMIT_ENABLED: 'true',
   RATE_LIMIT_TRUSTED_PROXY_HOPS: '1',

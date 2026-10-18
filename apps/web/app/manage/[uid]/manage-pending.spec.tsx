@@ -6,6 +6,7 @@
  * booking can no longer be changed", although the API accepts the cancel.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { BookingView } from '@slate/types';
 
@@ -29,6 +30,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('./actions', () => ({ cancelAction: vi.fn(), rescheduleAction: vi.fn() }));
 
 import ManagePage from './page';
+import { ManageActions } from './manage-actions';
 import { manageMode } from '@/lib/manage-mode';
 import { NOW, booking, profile } from '../../[accountCode]/__fixtures__/public-surface';
 
@@ -86,5 +88,40 @@ describe('manageMode', () => {
     expect(manageMode('pending', null, now)).toBe('none');
     expect(manageMode('cancelled', ahead, now)).toBe('none');
     expect(manageMode('rejected', ahead, now)).toBe('none');
+  });
+});
+
+/** The first element of `type` in a rendered tree (props only, nothing runs). */
+function findElement(node: ReactNode, type: unknown): ReactElement<Record<string, unknown>> | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findElement(child, type);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (!isValidElement<Record<string, unknown>>(node)) return null;
+  if (node.type === type) return node;
+  return findElement(node.props.children as ReactNode, type);
+}
+
+describe('the booking summary handed to the manage island (F9)', () => {
+  it('carries a key, so React does not warn that a child in a list has none', async () => {
+    // Made on the server and placed by the client island beside its own
+    // children: React's dev build warned about it on every manage page.
+    for (const status of ['accepted', 'pending'] as const) {
+      api.getProfile.mockResolvedValue(profile({ theme: 'light' }));
+      api.getManageView.mockResolvedValue({ ok: true, booking: booking({ status }) });
+      api.getAvailability.mockResolvedValue({ slots: [] });
+      const tree = await ManagePage({
+        params: Promise.resolve({ uid: 'bk_keyed_0001' }),
+        searchParams: Promise.resolve({ token: 'tok_keyed' }),
+      });
+      const island = findElement(tree, ManageActions);
+      expect(island, status).not.toBeNull();
+      const summary = island!.props.summary as ReactElement;
+      expect(isValidElement(summary), status).toBe(true);
+      expect(summary.key, status).toBe('summary');
+    }
   });
 });
