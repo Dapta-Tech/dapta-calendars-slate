@@ -205,12 +205,14 @@ export const CAMPAIGN_VALUE_MAX = 100;
  * compatibility folding: letters (modifier letters too, except the colon
  * lookalikes among them), combining marks, digits in any script, the space,
  * currency signs, pictographs (emoji), dash punctuation, typographic quotes,
- * `¡`, `¿`, `·`, and `._&#%+/'"()!,*|~:`. An ALLOWLIST, so a character nobody
- * thought of (a lookalike slash, a backslash, a semicolon, `@`) is refused by
- * construction rather than by one more rule.
+ * `¡`, `¿`, `·`, and `._&#%+/'"()[]{}!,*|~:`. An ALLOWLIST, so a character
+ * nobody thought of (a backslash, a semicolon, `@`, most lookalikes) is
+ * refused by construction rather than by one more rule. A letter that merely
+ * looks like punctuation (a CJK stroke shaped like a slash) is a letter and
+ * passes; it does not make a working address or URL.
  */
 const CAMPAIGN_CHARS =
-  /^(?:(?![ːˑ꞉꞊])[\p{L}\p{M}\p{Nd}\p{Sc}\p{Extended_Pictographic}\p{Pd} ._&#%+/'"()!,*|~:‘’“”¡¿·])+$/u;
+  /^(?:(?![\u02D0\u02D1\uA789\uA78A])[\p{L}\p{M}\p{Nd}\p{Sc}\p{Extended_Pictographic}\p{Pd} ._&#%+/'"()[\]{}!,*|~:\u2018\u2019\u201C\u201D\u00A1\u00BF\u00B7])+$/u;
 
 /** A slash with something other than a space or a slash on both sides: a path step. */
 const TIGHT_SLASH = /(?<=[^\s/])\/(?=[^\s/])/g;
@@ -231,21 +233,24 @@ const TIGHT_SLASH = /(?<=[^\s/])\/(?=[^\s/])/g;
  * `a:b:c`; "q3: launch" is kept); `//`, a leading `/`, or two slashes that
  * each join non-spaces (a path; "google / cpc / brand" is kept); a dotted name before a
  * slash (a host and its path); an HTML numeric entity (`&#64`, with or without
- * its `;`); a phone number (nine or more digits with anything but letters
- * between them, or led by `+`, anywhere in the value); a `%u` escape; anything
- * past `CAMPAIGN_VALUE_MAX`.
+ * its `;`); a phone number (9 to 15 digits, the longest a phone number can be,
+ * with anything but letters between them or led by `+`, anywhere in the
+ * value, once dates are set aside); a `%u` escape; anything past
+ * `CAMPAIGN_VALUE_MAX`.
  *
  * Kept, on purpose: an unbroken run of digits, which cannot be told from a
  * numeric campaign id (an ad platform's `{campaignid}`). That includes a phone
- * whose `+` was not URL-encoded: the query parser turns it into a space. The
- * other side of the phone rule: a date-coded name such as `launch_20261018_01`
- * reads as grouped digits and is withheld.
+ * whose `+` was not URL-encoded: the query parser turns it into a space. Also
+ * kept: date-coded names (`launch_20261018_01`, an email tool's
+ * `campaign_2019_04_18_05_14`), because a year-month-day group is read as a
+ * date before digits are counted, and joined ids longer than 15 digits.
  *
  * The value has been decoded once already, so an escape that still decodes is
  * an encoding left over: it is decoded and the result checked again, once (a
- * value encoded three times is refused). An escaped ASCII character counts
- * even inside a run that is not valid UTF-8 as a whole. A `%` that is not an
- * encoding ("20%descuento") is a literal percent and stays.
+ * value encoded three times is refused), and the decoded label is what is
+ * sent. An escaped ASCII character counts even inside a run that is not valid
+ * UTF-8 as a whole. A `%` that is not an encoding ("20%descuento") is a
+ * literal percent and stays.
  */
 export function analyticsCampaignValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -279,12 +284,18 @@ function campaignLabel(v: string, depth: number): string | null {
   return v;
 }
 
-/** Nine or more digits with anything but letters between them, or led by `+`, anywhere. */
+/** A year-month-day group, joined or separated: a date, not part of a phone number. */
+const DATE = /(?:19|20)\d{2}[-_./ ]?(?:0[1-9]|1[0-2])[-_./ ]?(?:0[1-9]|[12]\d|3[01])/g;
+
+/**
+ * 9 to 15 digits (E.164's longest) with anything but letters between them, or
+ * led by `+`, anywhere in the value once dates are set aside.
+ */
 function looksLikePhone(v: string): boolean {
-  for (const m of v.matchAll(/\+?\p{Nd}[^\p{L}]*\p{Nd}/gu)) {
+  for (const m of v.replace(DATE, ' ').matchAll(/\+?\p{Nd}[^\p{L}]*\p{Nd}/gu)) {
     const run = m[0];
     const digits = run.match(/\p{Nd}/gu)?.length ?? 0;
-    if (digits >= 9 && (run.startsWith('+') || /[^\p{Nd}]/u.test(run))) return true;
+    if (digits >= 9 && digits <= 15 && (run.startsWith('+') || /[^\p{Nd}]/u.test(run))) return true;
   }
   return false;
 }

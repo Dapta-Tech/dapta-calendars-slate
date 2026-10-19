@@ -136,6 +136,12 @@ describe('analyticsCampaignValue', () => {
       'google / cpc / brand',
       '24/7 support',
       '"launch"',
+      '[search] brand es',
+      '{campaignid}',
+      'launch_20261018_01',
+      'email_campaign_2019_04_18_05_14',
+      '2026-10-18-01',
+      '12345678901_98765432101',
     ]) {
       expect([v, analyticsCampaignValue(v)]).toEqual([v, v]);
     }
@@ -147,6 +153,8 @@ describe('analyticsCampaignValue', () => {
     expect(analyticsCampaignValue('ana%40example.com')).toBeNull();
     expect(analyticsCampaignValue('ana%2540example.com')).toBeNull();
     expect(analyticsCampaignValue('20%descuento%40x')).toBeNull();
+    // Three levels: decoded once, still encoded, refused.
+    expect(analyticsCampaignValue('summer%2520sale')).toBeNull();
   });
 
   it("passes the growth loop's own tags through the parser unchanged", () => {
