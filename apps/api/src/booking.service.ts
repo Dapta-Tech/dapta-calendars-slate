@@ -273,8 +273,9 @@ export class BookingService {
         }),
       },
       // Subtract the host's real connected-calendar busy times (no-op on the
-      // OSS default disabled provider).
-      this.calendar.provider,
+      // OSS default disabled provider). A DISPLAY read: through the short busy
+      // cache (ADR 0009). The hold and the booking re-read the calendar fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -313,6 +314,7 @@ export class BookingService {
       },
       // A time busy in the host's connected calendar is refused at the hold,
       // not only at booking (no-op on the OSS default disabled provider).
+      // FRESH, never the display cache (ADR 0009): a failed read refuses.
       this.calendar.provider,
     );
     if (!held.ok) {
@@ -439,6 +441,7 @@ export class BookingService {
         oneOffToken: context?.oneOffToken,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
+      // FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
 
@@ -508,6 +511,8 @@ export class BookingService {
         void this.email.enqueueReminders(b.uid, { manageUrl });
         void this.email.enqueueFollowUps(b.uid, { manageUrl });
       } else if (b.status === 'pending') {
+        // A request holds its time too: no cached read may still offer it here.
+        this.calendar.onBookingChanged(b.uid);
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
       // Durable webhook delivery: enqueue one outbox row per subscriber; the
@@ -645,7 +650,8 @@ export class BookingService {
         toMs,
         displayTimeZone: q.timeZone,
       },
-      this.calendar.provider,
+      // A display read (the picker); the reschedule itself reads fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -712,6 +718,7 @@ export class BookingService {
       void this.email.enqueueReminders(newUid, { manageUrl });
       void this.email.enqueueFollowUps(newUid, { manageUrl });
     } else {
+      this.calendar.onBookingChanged(newUid);
       void this.email.enqueuePending(newUid, { manageUrl });
     }
     this.fireWebhook(newUid, 'booking.rescheduled', {
@@ -746,8 +753,8 @@ export class BookingService {
           ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
           : undefined,
       },
-      // Fail-closed external conflict check on the target slot — the same
-      // policy as create (no-op when the provider is disabled).
+      // Fail-closed external conflict check on the target slot, the same
+      // policy as create (no-op when the provider is disabled). FRESH (ADR 0009).
       this.calendar.provider,
     );
     if (!out.ok) return this.mapMutation(out.reason);
@@ -890,7 +897,8 @@ export class BookingService {
           slug: q.slug,
         }),
       },
-      this.calendar.provider,
+      // A display read; the team booking re-checks every host fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -970,6 +978,7 @@ export class BookingService {
         apiKeyWrite: context?.apiKeyWrite,
         oneOffToken: context?.oneOffToken,
       },
+      // Every candidate host is checked FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
     if (!out.ok) {

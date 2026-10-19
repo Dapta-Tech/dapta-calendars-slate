@@ -1596,11 +1596,39 @@ export async function addAttendeeToBooking(
   return { ok: true };
 }
 
-/** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(db: Db, uid: string, accountId?: string): Promise<MutationOutcome> {
+/**
+ * Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE).
+ *
+ * With `calendar`, the host's connected calendar is read for the booking's
+ * time first, the same fail-closed check create and reschedule run: a request
+ * can wait days for its answer, and the host's calendar may have filled that
+ * time meanwhile. Busy there answers `SLOT_TAKEN`; a calendar that cannot be
+ * read answers `CALENDAR_UNAVAILABLE` (nothing is confirmed, try again). The
+ * request itself was never written to the calendar (only an accepted booking
+ * is), so it cannot conflict with itself. Omitted, only the local guard runs,
+ * exactly as before.
+ */
+export async function confirmBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+  calendar?: CalendarProvider,
+): Promise<MutationOutcome> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
+  if (b.host_member_id) {
+    const startMs = Number(b.start_ms);
+    const endMs = Number(b.end_ms);
+    try {
+      const busy = await loadExternalBusy(db, calendar, b.host_member_id, startMs, endMs, b.event_type_id);
+      if (busy.some((x) => x.start.getTime() < endMs && x.end.getTime() > startMs)) {
+        return { ok: false, reason: 'SLOT_TAKEN' };
+      }
+    } catch {
+      return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
+    }
+  }
   const now = Date.now();
   const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
     AND status = 'accepted' AND id <> ${b.id}

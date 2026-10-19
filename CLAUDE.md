@@ -187,6 +187,12 @@ DB layer, run this before you push.
     `NEXT_PUBLIC_*` is client-exposed). `.env` is gitignored; only `.env.example`
     (placeholders) is committed. `scripts/publish-gate.sh` runs in CI — do not add
     real hosts, tokens, credentialed URLs, or internal-infra names anywhere.
+11. **Display reads may be cached; decisions read the calendar fresh** ([ADR
+    0009](docs/adr/0009-display-reads-may-be-cached-decisions-read-fresh.md)).
+    `CalendarEffects.displayProvider` (a short per-connection busy cache with a
+    bounded stale-on-error) feeds only what a page SHOWS. Every hold, booking,
+    reschedule and confirmation passes `CalendarEffects.provider`, which always
+    reads fresh and fails closed. Never hand the display provider to a write path.
 
 ## Review gates a PR must pass
 

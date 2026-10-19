@@ -1,4 +1,5 @@
 import { Logger, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { createDb } from '@slate/db';
 import {
   createEmailProvider,
@@ -46,6 +47,7 @@ import { AdminCrudController } from './admin-crud.controller';
 import { CalV2Controller, CalV2RequestIdInterceptor } from './cal-v2.controller';
 import { CalV2Service } from './cal-v2.service';
 import { CalV2PilotService } from './cal-v2-pilot.service';
+import { CalendarRetryAfterInterceptor } from './retry-after';
 
 @Module({
   controllers: [
@@ -157,6 +159,8 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
       inject: [ENV],
     },
     RateLimitGuard,
+    // `Retry-After` on every write refused because a calendar could not be read.
+    { provide: APP_INTERCEPTOR, useClass: CalendarRetryAfterInterceptor },
     BookingService,
     CalV2Service,
     CalV2PilotService,

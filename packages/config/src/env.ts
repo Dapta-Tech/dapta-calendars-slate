@@ -183,6 +183,22 @@ export const serverEnvSchema = z.object({
    * any span; then a 60-day read is one request per connection.
    */
   CALENDAR_BUSY_WINDOW_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+  /**
+   * The display cache of busy reads (ADR 0009). Only reads that SHOW
+   * availability use it; holds, bookings, reschedules and confirmations always
+   * read the calendar fresh. TTL: how long one read answers every visitor of
+   * the same calendar (0 turns the cache off and every page view reads the
+   * calendar, as before). MAX_STALE: how old the last good read may be and
+   * still stand in when a fresh read fails; older, the times are withheld.
+   * MAX_ENTRIES: windows held per process, least recently used out first.
+   * READ_TIMEOUT: how long a page waits on a slow calendar before answering
+   * from the last good read, or saying the calendar cannot be read right now.
+   * All optional; the defaults suit one or many replicas.
+   */
+  CALENDAR_BUSY_CACHE_TTL_MS: z.coerce.number().int().min(0).max(600_000).default(30_000),
+  CALENDAR_BUSY_CACHE_MAX_STALE_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  CALENDAR_BUSY_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).max(100_000).default(1000),
+  CALENDAR_BUSY_READ_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(10_000),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows

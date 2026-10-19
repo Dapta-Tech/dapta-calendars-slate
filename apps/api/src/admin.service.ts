@@ -307,7 +307,8 @@ export class AdminService {
         answers: body.answers,
         onBehalf: true,
       },
-      // Fail-closed external conflict check at create time (no-op when disabled).
+      // Fail-closed external conflict check at create time (no-op when
+      // disabled). FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
@@ -331,6 +332,7 @@ export class AdminService {
         void this.email.enqueueReminders(b.uid, { manageUrl });
         void this.email.enqueueFollowUps(b.uid, { manageUrl });
       } else if (b.status === 'pending') {
+        this.calendar.onBookingChanged(b.uid);
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.created', {
@@ -367,7 +369,10 @@ export class AdminService {
   }
 
   async confirm(p: HostPrincipal, uid: string) {
-    const out = await confirmBooking(this.db, uid, p.accountId);
+    // The confirmation is the moment the request becomes a meeting, so the
+    // host's calendar is read FRESH for its time (ADR 0009): busy there refuses
+    // it, and a calendar that cannot be read refuses it too (retry later).
+    const out = await confirmBooking(this.db, uid, p.accountId, this.calendar.provider);
     if (out.ok) {
       // pending→accepted: NOW write the event to the host's calendar and send
       // the attendee the confirmation (they already hold the manage link from
@@ -388,6 +393,7 @@ export class AdminService {
   async decline(p: HostPrincipal, uid: string, reason?: string) {
     const out = await declineBooking(this.db, uid, reason, p.accountId);
     if (out.ok) {
+      this.calendar.onBookingChanged(uid);
       // B3: tell the attendee their pending request was declined (previously
       // nobody was notified — they'd show up to a meeting that never was).
       void this.email.enqueueDeclined(uid, { reason: reason ?? null });
@@ -1069,7 +1075,8 @@ export class AdminService {
     const result = await getAvailability(
       this.db,
       { accountCode, memberId: p.memberId, slug: q.slug, fromMs, toMs, displayTimeZone: q.timeZone },
-      this.calendar.provider,
+      // A display read (the new-booking screen); the booking reads fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return {

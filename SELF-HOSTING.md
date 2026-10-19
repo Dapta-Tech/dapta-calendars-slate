@@ -158,6 +158,19 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
+| `CALENDAR_BUSY_CACHE_TTL_MS` | `30000` | optional; how long one busy read answers every visitor of the same calendar on the booking, team and manage pages (0 turns the cache off). Holds, bookings, reschedules and confirmations always read the calendar fresh (ADR 0009) | no |
+| `CALENDAR_BUSY_CACHE_MAX_STALE_MS` | `300000` | optional; when a fresh read fails or is slow, how old the last good read may be and still stand in. Older, the page says the calendar can't be read right now and offers nothing | no |
+| `CALENDAR_BUSY_CACHE_MAX_ENTRIES` | `1000` | optional; read windows held per API process, least recently used out first | no |
+| `CALENDAR_BUSY_READ_TIMEOUT_MS` | `10000` | optional; how long a page waits on a slow calendar before answering from the last good read (or saying it can't be read). The read keeps going and fills the cache for the next visitor | no |
+
+The busy cache is per API process. A booking clears the cached reads of its
+hosts on the process that took it; other replicas catch up within the TTL. It
+only ever feeds what a page shows: every write re-reads the calendar for the
+exact time and refuses (`SLOT_TAKEN`, or `CALENDAR_UNAVAILABLE` with
+`Retry-After` when the calendar cannot be read) rather than trust a cached
+answer. When a read is served stale or fails, the API logs one line per
+connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
+...`), naming the connection by a short hash, never its ref.
 
 ### Email / notifications
 
