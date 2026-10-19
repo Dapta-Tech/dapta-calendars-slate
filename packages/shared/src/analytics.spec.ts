@@ -24,6 +24,11 @@ describe('resolveAnalyticsConfig', () => {
     expect(resolveAnalyticsConfig({ provider: 'none', key: 'phc_test' })).toBeNull();
   });
 
+  it('refuses a read credential in the place of the write-only key, since the key is published', () => {
+    expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'phx_personal_read_key' })).toBeNull();
+    expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'PHX_upper' })).toBeNull();
+  });
+
   it('is off for a provider this repo does not ship', () => {
     expect(resolveAnalyticsConfig({ provider: 'acme', key: 'k' })).toBeNull();
   });
@@ -98,6 +103,12 @@ describe('referrerDomain', () => {
   it('keeps only the host, never the path or query', () => {
     expect(referrerDomain('https://ChatGPT.com/c/abc?q=my+email@x.com')).toBe('chatgpt.com');
     expect(referrerDomain('http://localhost:3000/x')).toBe('localhost');
+  });
+
+  it('never mistakes the user part of an authority for the domain', () => {
+    expect(referrerDomain('https://alice@example.com/x')).toBe('example.com');
+    expect(referrerDomain('https://a.b@corp.com@evil.test/')).toBe('evil.test');
+    expect(referrerDomain('https://site.test:8443/p')).toBe('site.test');
   });
 
   it('is null for anything that is not an http(s) URL', () => {

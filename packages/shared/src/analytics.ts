@@ -89,6 +89,13 @@ export type AnalyticsProviderName = (typeof ANALYTICS_PROVIDERS)[number];
 /** The vendor's own public ingestion host, used when none is configured. */
 export const POSTHOG_DEFAULT_HOST = 'https://us.i.posthog.com';
 
+/**
+ * Key prefixes that name a READ credential (PostHog's personal API keys). The
+ * ingestion key reaches every public page by design, so a read key pasted into
+ * its place would be published; it is refused instead, and analytics stays off.
+ */
+const READ_KEY_PREFIXES = ['phx_'];
+
 /** A usable analytics configuration. `null` everywhere means "off". */
 export interface AnalyticsConfig {
   provider: Exclude<AnalyticsProviderName, 'none'>;
@@ -121,6 +128,7 @@ export function resolveAnalyticsConfig(env: {
   const provider = clean(env.provider)?.toLowerCase();
   const key = clean(env.key);
   if (provider !== 'posthog' || !key) return null;
+  if (READ_KEY_PREFIXES.some((p) => key.toLowerCase().startsWith(p))) return null;
   const host = (clean(env.host) ?? POSTHOG_DEFAULT_HOST).replace(/\/+$/, '');
   if (!/^https?:\/\/[^/?#\s]+(\/[^?#\s]*)?$/i.test(host)) return null;
   return { provider, key, host };
@@ -195,6 +203,7 @@ export function sanitizeLandingDistinctId(raw: string | readonly string[] | null
  * can carry anything the referring page put there.
  */
 export function referrerDomain(referer: string | null | undefined): string | null {
-  const m = /^https?:\/\/([^/?#:]+)/i.exec((referer ?? '').trim());
+  // The authority's user part (`user@`) is not the domain and can be a person.
+  const m = /^https?:\/\/(?:[^/?#]*@)?([^/?#:@]+)/i.exec((referer ?? '').trim());
   return m?.[1] ? m[1].toLowerCase() : null;
 }
