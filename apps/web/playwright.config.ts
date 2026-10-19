@@ -104,6 +104,9 @@ export default defineConfig({
         // Runtime, like on a deployment: the address MCP & API shows when the
         // API reports MCP on (mcp-page.spec.ts). The suite's API serves it.
         MCP_PUBLIC_URL: `${E2E.api}/mcp`,
+        // Runtime, like on a deployment: the rail's Docs item, per language.
+        DOCS_URL: E2E.docsUrl,
+        DOCS_URL_ES: E2E.docsUrlEs,
         ...ANALYTICS_ENV,
       },
     },

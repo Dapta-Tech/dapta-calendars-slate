@@ -33,6 +33,9 @@ export const E2E = {
   /** The stand-in analytics host (scripts/qa/stand-in-analytics.mjs). */
   analytics: `http://127.0.0.1:${analyticsPort}`,
   signupUrl: 'https://signup.example.test/start',
+  /** The deployment's docs, per language: the rail's Docs item (rail-mcp.spec.ts). */
+  docsUrl: 'https://docs.example.test/',
+  docsUrlEs: 'https://docs.example.test/es/',
   /** Where start-api.mjs tees each API's stdout, for the log assertions. */
   logDir: resolve(__dirname, '.results-logs'),
 };
