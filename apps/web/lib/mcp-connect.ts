@@ -120,18 +120,24 @@ export interface ToolInfo {
   publicOk: boolean;
 }
 
-/** The ten launch tools (plan section 3). */
+/** Every MCP tool, in the server's catalog order (`apps/api/src/mcp/tools.ts`). */
 export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'find_available_slots', kind: 'read', scope: 'availability:read', publicOk: true },
+  { name: 'find_team_slots', kind: 'read', scope: 'availability:read', publicOk: true },
+  { name: 'hold_slot', kind: 'write', scope: 'bookings:write', publicOk: true },
   { name: 'book_meeting', kind: 'write', scope: null, publicOk: true },
+  { name: 'book_team_meeting', kind: 'write', scope: 'bookings:write', publicOk: true },
   { name: 'whoami', kind: 'read', scope: null, publicOk: false },
   { name: 'list_my_accounts', kind: 'read', scope: null, publicOk: false },
   { name: 'list_event_types', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'get_booking_page_link', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'list_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },
+  { name: 'list_pending_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'get_booking', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'create_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
   { name: 'reschedule_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
+  { name: 'confirm_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
+  { name: 'decline_booking', kind: 'destructive', scope: 'bookings:write', publicOk: false },
   { name: 'cancel_booking', kind: 'destructive', scope: 'bookings:cancel', publicOk: false },
 ];
 

@@ -16,7 +16,7 @@ without a custom integration.
 
 | Door | How | What it can do |
 |---|---|---|
-| No credential | Just call it | `find_available_slots` and `book_meeting` on a **public** booking page |
+| No credential | Just call it | `find_available_slots`, `hold_slot` and `book_meeting` on a **public** booking page; `find_team_slots` and `book_team_meeting` on a **public** team page |
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
 | OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
 
@@ -34,21 +34,27 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | Tool | Needs | Kind | What it does |
 |---|---|---|---|
 | `find_available_slots` | public page link, or `availability:read` (by `event_type_id`) | read | Open times for one event, grouped by local date, each with its offset in the `time_zone` you ask for plus UTC. Range capped at 31 days. |
-| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. |
+| `find_team_slots` | public team link, or `availability:read` (by `event_type_id`) | read | The same for one team event, plus the team, its scheduling method (round-robin, collective, fixed round-robin) and host count. A team page that offers one event is enough. |
+| `hold_slot` | public page link, or `bookings:write` (by `event_type_id`) | write | Holds one offered slot for about 10 minutes and returns an opaque `hold_id`. One-host events only. |
+| `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. Takes an optional `hold_id`. |
+| `book_team_meeting` | public team link, or `bookings:write` (by `event_type_id`) | write, emails the invitee | Books a team event; the host is picked at booking time and returned. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
 | `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. |
+| `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes and intake answers sit inside `invitee_supplied`. |
-| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. |
+| `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
 | `reschedule_booking` | `bookings:write` | write, emails the invitee | Moves a booking to a new offered slot. The booking gets a **new uid**. |
+| `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
+| `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
 (plus a short text summary). Not exposed over MCP: webhooks, API keys, team
-administration, event-type edits, confirm or decline.
+administration, event-type edits.
 
 Every tool that acts on the caller's account (all but `book_meeting` and
 `list_my_accounts`) takes an optional `account_id`. A key or a sign-in that
@@ -68,13 +74,60 @@ and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
 - Only start times returned by `find_available_slots` can be booked. A taken time
   is `SLOT_TAKEN`, a time that was never offered is `INVALID_SLOT`; both tell the
   agent to fetch slots again.
-- `create_booking`, `book_meeting` and `reschedule_booking` take a required
-  `idempotency_key`. Retrying the same action with the same key returns the same
-  booking; reusing a key for a different action is `IDEMPOTENCY_KEY_REUSED`.
-  `book_meeting` scopes the key to the caller, so anonymous callers cannot replay
-  each other's bookings.
+- Every write except `cancel_booking` takes a required `idempotency_key`
+  (`cancel_booking` takes an optional one, and cancelling twice is harmless).
+  Retrying the same action with the same key returns the same result; reusing a
+  key for a different action is `IDEMPOTENCY_KEY_REUSED`. The public-page tools
+  scope the key to the caller, so anonymous callers cannot replay each other's
+  bookings.
 - Intake questions are listed by `find_available_slots` and `list_event_types`;
   answers go in `answers`.
+
+### Holds: no race between finding and booking
+
+`hold_slot` places the same soft hold the booking page takes when a visitor picks
+a time: for about 10 minutes the time is offered to nobody else, and the booking
+tools refuse it to anyone but the holder (`SLOT_TAKEN`). Book it with
+`book_meeting` or `create_booking`, passing the `hold_id` and the same `start`;
+the booking consumes the hold. An unused hold simply expires.
+
+- **Bound to its caller.** A hold made with one API key or OAuth connection is
+  usable only by that key or connection; an anonymous hold only from the same
+  client address. Anyone else gets `HOLD_NOT_FOUND`, the same answer as an
+  unknown id, so a `hold_id` is useless to anyone who did not make it. The
+  booking core's reservation uid (a bearer handle on the public REST routes)
+  never leaves the server.
+- **Same caps as the booking page.** At most 10 open holds per host, a fresh
+  calendar check, and only offered times can be held (`INVALID_SLOT` otherwise,
+  `TOO_MANY_HOLDS` when the page is full).
+- **Expiry.** `expires_at` (in your `time_zone`) and `expires_at_utc` say when it
+  lapses. Booking with an expired hold books nothing and answers `HOLD_EXPIRED`.
+  A hold for another event or time is `HOLD_MISMATCH`.
+- **One-host events only.** A team event picks its host when it is booked, so
+  call `book_team_meeting` directly.
+
+### Requests that wait for the host
+
+Event types that require confirmation create **pending** bookings.
+`list_pending_bookings` lists them; `confirm_booking` and `decline_booking` are
+the machine version of the host's Confirm and Decline buttons, with the same
+rules: only the key's own workspace and event-type allowlist, the host's calendar
+read fresh before a confirmation (a time that filled up meanwhile is `SLOT_TAKEN`
+and nothing is confirmed), and the same emails, calendar writes and webhooks.
+Deciding twice is safe: a booking already in the target state answers with
+`already_applied: true` and nothing is sent again. A booking that is not pending
+(accepted, cancelled, declined) answers `NOT_PENDING`; cancelling an accepted
+booking still needs `cancel_booking` and its own scope.
+
+### Teams
+
+`find_team_slots` offers a time when the event's scheduling method can staff it:
+round-robin when **any** host is free, collective when **every** host is, fixed
+round-robin when every fixed host and at least one other is. `book_team_meeting`
+checks each candidate host again at booking time (bookings and connected
+calendars), picks one fairly (round-robin: highest priority, then the lowest load for
+its weight, then the least recently booked) and returns `assigned_hosts`. A time no host can take any more
+is `SLOT_TAKEN`.
 
 ### Untrusted text
 
@@ -364,7 +417,9 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 `pnpm run build:packages && cd apps/api && pnpm e2e:mcp` boots the API the way the
 production image does (tsx with `tsconfig.runtime.json`) on a throwaway SQLite
 file and drives it with the official client: tool list, slots, book, reschedule,
-cancel, an anonymous public booking, a legacy `initialize` handshake.
+cancel, an anonymous public booking, a legacy `initialize` handshake, a hold
+booked with its `hold_id` (and refused to a second key), pending requests
+confirmed (twice) and declined, and a round-robin team booking.
 
 `pnpm e2e:mcp-login` does the same with an external authorization server: a
 stand-in server (RS256 keys made by the script, its metadata and JWKS on a
