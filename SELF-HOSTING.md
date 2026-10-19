@@ -404,7 +404,7 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `INTERNAL_API_SECRET` | unset | **API and web, same value** (min 32 chars). The booking pages call the API from the web server, so without it every visitor shares the web server's rate-limit bucket and a busy page answers visitors with 429s. With it set on both, the web sends the visitor's address beside the secret and the limiter counts each visitor. The API trusts a forwarded address only beside the matching secret and an IP literal; anything else is keyed as before, and a wrong secret is only counted in the log (one line a minute, no addresses). The web sends it only to the API named by the server-side `API_URL`, so set `API_URL` on the web explicitly to a private or in-cluster address; with `API_URL` unset (the `NEXT_PUBLIC_API_URL` fallback, a public host) the web never sends it and logs a warning at startup. An empty value counts as unset. Set it whenever the web app reaches the API through your reverse proxy or a private network | **yes** |
 | `REQUEST_LOG_ENABLED` | `true` | one line per request (method, route template, status, duration, request id, error code, account); JSON when `NODE_ENV=production`. Never logs query strings, bodies, headers or client addresses | no |
 | `MCP_ENABLED` | `true` | serve the MCP endpoint `POST /mcp` (see [docs/MCP.md](docs/MCP.md)); `false` answers 404 | no |
-| `MCP_PUBLIC_URL` | unset | the address shown to people connecting an agent. Display only: never used to validate a request | no |
+| `MCP_PUBLIC_URL` | unset | the address shown to people connecting an agent. With OAuth off it is display only. With `OAUTH_ENABLED=true` it is **required** and is the resource every access token is issued for (its audience): set it to exactly the URL people paste, path included | no |
 | `MCP_ALLOWED_ORIGINS` | unset | comma-separated browser origins allowed to call `/mcp`. A request with any other `Origin` header gets 403; clients that send none (every non-browser MCP client) are unaffected. A browser-hosted client must also be in `CORS_ORIGINS` | no |
 | `MCP_ALLOWED_HOSTS` | unset | comma-separated hostnames `/mcp` answers to (DNS-rebinding guard). Unset = no Host check | no |
 | `MCP_RATE_LIMIT_CAPACITY` | `30` | tool-call burst per API key (per client address when anonymous). Per process, so N replicas allow up to N times this | no |
@@ -412,6 +412,46 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for `book_meeting`, `create_booking`, `reschedule_booking`, `cancel_booking` | no |
 | `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `0.2` | sustained refill for write tools | no |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` | how long one tool call may run before the caller gets a timeout error | no |
+
+### OAuth for the MCP endpoint (optional)
+
+Off by default; API keys and the public tools need none of this. On, the API is
+its own OAuth 2.1 authorization server for `/mcp`, so Claude, ChatGPT, Cursor
+and VS Code connect with a sign-in and a consent screen (see
+[docs/MCP.md](docs/MCP.md#oauth-connect-claude-chatgpt-cursor-or-vs-code-with-a-sign-in)).
+The API refuses to boot with `OAUTH_ENABLED=true` and any required value missing.
+
+| Var | Default | Notes | Secret? |
+|---|---|---|---|
+| `OAUTH_ENABLED` | `false` | serve the authorization server under `/oauth` and its metadata under `/.well-known/` | no |
+| `OAUTH_ISSUER` | unset | **required when on.** The public origin that serves `/oauth/*` and `/.well-known/oauth-authorization-server` (scheme and host only, `https`). It is the `iss` of every token and authorization response: never change it once apps are connected | no |
+| `OAUTH_SIGNING_JWK` | unset | **required when on.** The access-token signing key: one EC P-256 private JWK (ES256) as a JSON string. Every replica uses the same key and verifies tokens offline. Rotating it signs every connected app out of its current access token; refresh tokens keep working, so clients recover on their own | **yes** |
+| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `3600` | access-token lifetime (60 to 86400). After a Disconnect, an access token already handed out keeps working at most this long | no |
+| `OAUTH_GRANT_TTL_DAYS` | `90` | absolute lifetime of a connection; refreshing never extends it | no |
+| `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` | a rotated refresh token presented again within this window rotates again (a client retry after a lost response); later, reuse revokes the whole connection. `0` = strict | no |
+| `OAUTH_CIMD_ENABLED` | `true` | accept clients identified by a Client ID Metadata Document (an https `client_id` this server fetches) | no |
+| `OAUTH_DCR_ENABLED` | `true` | accept Dynamic Client Registration at `/oauth/register`, restricted to a fixed redirect allowlist | no |
+| `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset | comma-separated exact redirect URIs added to that allowlist | no |
+
+Make the key once and store it in your secret manager:
+
+```bash
+node -e "const {generateKeyPairSync}=require('node:crypto');console.log(JSON.stringify(generateKeyPairSync('ec',{namedCurve:'P-256'}).privateKey.export({format:'jwk'})))"
+```
+
+Routing: the browser and the apps reach these paths on the API, so route them to
+the API from whatever host `OAUTH_ISSUER` and `MCP_PUBLIC_URL` name:
+`/oauth/*`, `/.well-known/oauth-authorization-server`,
+`/.well-known/oauth-protected-resource*` and `/mcp`. The web app needs nothing
+new: its consent page lives at `/auth/consent` (keep that path on the web) and
+uses `PUBLIC_APP_URL`. The person signs in through your normal `AUTH_PROVIDER`;
+nothing is registered with any identity vendor. Only owners and admins can
+approve a connection.
+
+Storage is one additive table, `oauth_record` (migration `0026_oauth_record.sql`
+on Postgres, `0025_oauth_record.sql` on SQLite): a new table, no change to
+existing ones. It stays empty while OAuth is off; expired rows are purged in
+the background.
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every
@@ -423,6 +463,9 @@ Terminate TLS at your proxy and route two hostnames:
 
 - `calendars.example.com` → the **web** app (port `3000`)
 - `calendars-api.example.com` → the **API** (port `4000`, health at `/health`)
+
+With OAuth on, also route the OAuth paths to the API (see "OAuth for the MCP
+endpoint"), and keep forwarding `X-Forwarded-Proto` so its cookies are Secure.
 
 Behind a proxy, derive the request origin from `X-Forwarded-*` headers (the app
 does this) — set `PUBLIC_APP_URL` to the public web URL and build the web image with
