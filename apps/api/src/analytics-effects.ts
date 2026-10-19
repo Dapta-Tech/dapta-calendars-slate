@@ -4,6 +4,7 @@ import { enqueueOutbox, sql, type Db } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import {
   ANALYTICS_PRODUCT,
+  analyticsCampaignValue,
   analyticsEventName,
   isInternalEmail,
   parseInternalEmailPatterns,
@@ -181,16 +182,26 @@ export class AnalyticsEffects {
       const who = await this.identity(principal.accountId, principal.memberId, 'attribution_captured');
       if (!who) return;
       const source: AnalyticsProps = {};
+      // A tag that is an address, a URL or a query is withheld, not sent (see
+      // `analyticsCampaignValue`); the event says one was, so the gap is visible.
+      let withheld = false;
       for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const) {
-        const value = attribution[key];
-        if (typeof value === 'string' && value) source[key] = value;
+        const raw = attribution[key];
+        if (typeof raw !== 'string' || !raw) continue;
+        const value = analyticsCampaignValue(raw);
+        if (value) source[key] = value;
+        else withheld = true;
       }
       const domain = referrerDomain(attribution.referer);
       if (domain) source.referrer_domain = domain;
       await this.enqueueCapture(
         'attribution_captured',
         who,
-        { ...source, has_click_id: Boolean(attribution.gclid || attribution.fbclid) },
+        {
+          ...source,
+          has_click_id: Boolean(attribution.gclid || attribution.fbclid),
+          ...(withheld ? { utm_withheld: true } : {}),
+        },
         now,
       );
       if (Object.keys(source).length > 0) await this.enqueueAccount(who, source, now);

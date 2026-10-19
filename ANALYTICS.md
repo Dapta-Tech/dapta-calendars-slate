@@ -79,7 +79,7 @@ the deployment prunes it.
 | Event | When | Properties |
 |---|---|---|
 | `calendars_signup_completed` | A login creates a member, or adopts an invite | `role`, `is_first_member`, `from_invite`; sets person `email`, `is_internal`. A first member also sets the account's `is_internal` and `created_at` |
-| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`. The same tags (without the flag) are set on the account |
+| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`, and `utm_withheld: true` when a tag was withheld. The same tags (without the flags) are set on the account. A tag that looks like an address, a URL or a query (`@`, `://`, `www.`, `?`, `&`, `=`, `#`, or their percent-encoded forms) or runs past 100 characters is withheld, never cleaned |
 | `calendars_template_chosen` | The wizard creates the first event type from a template | `template` |
 | `calendars_calendar_connected` | A new calendar connection is stored | `provider`, `method` (`connect_flow` or `manual`) |
 | `calendars_hours_set` | A schedule is created with availability rules, or saved with rules that changed (a rename is not) | `rule_count`, `created` |

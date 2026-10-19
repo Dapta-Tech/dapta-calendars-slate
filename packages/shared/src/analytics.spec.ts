@@ -4,6 +4,7 @@ import {
   BROWSER_ANALYTICS_EVENTS,
   POSTHOG_DEFAULT_HOST,
   SERVER_ANALYTICS_EVENTS,
+  analyticsCampaignValue,
   analyticsEventName,
   isInternalEmail,
   parseInternalEmailPatterns,
@@ -96,6 +97,33 @@ describe('sanitizeLandingDistinctId', () => {
     expect(sanitizeLandingDistinctId('')).toBeNull();
     expect(sanitizeLandingDistinctId(undefined)).toBeNull();
     expect(sanitizeLandingDistinctId('a'.repeat(201))).toBeNull();
+  });
+});
+
+describe('analyticsCampaignValue', () => {
+  it('keeps a campaign label', () => {
+    expect(analyticsCampaignValue(' made-with-dapta ')).toBe('made-with-dapta');
+    expect(analyticsCampaignValue('q3 launch')).toBe('q3 launch');
+    expect(analyticsCampaignValue('1234567890')).toBe('1234567890');
+    expect(analyticsCampaignValue('chatgpt.com')).toBe('chatgpt.com');
+  });
+
+  it('withholds an address, a URL, a query and their encoded forms', () => {
+    for (const v of [
+      'ana@example.com',
+      'ana%40example.com',
+      'ana%2540example.com',
+      'https://example.com/x?email=ana',
+      'www.example.com/x',
+      'a=1&b=2',
+      'page?x',
+      'tag#frag',
+      'x'.repeat(101),
+      '   ',
+    ]) {
+      expect(analyticsCampaignValue(v)).toBeNull();
+    }
+    expect(analyticsCampaignValue(undefined)).toBeNull();
   });
 });
 

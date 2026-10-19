@@ -195,6 +195,31 @@ export function sanitizeLandingDistinctId(raw: string | readonly string[] | null
   return /^[A-Za-z0-9$:._-]+$/.test(trimmed) ? trimmed : null;
 }
 
+/* ----------------------------------------------------- campaign values */
+
+/** The longest campaign tag sent. Campaign names are labels, never prose. */
+export const CAMPAIGN_VALUE_MAX = 100;
+
+/**
+ * A campaign tag fit to send to analytics, or null.
+ *
+ * Campaign tags are whatever a link builder typed after `utm_*=`, and the only
+ * check upstream is a length cap. A tag can therefore carry an email address
+ * (`utm_content=ana@example.com`), a whole URL with its own query, or a query
+ * fragment, none of which is a campaign label. Those are withheld rather than
+ * cleaned: a guessed repair would be a value nobody chose. Percent-encoded
+ * forms are refused too, so a doubly encoded address does not slip through.
+ */
+export function analyticsCampaignValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > CAMPAIGN_VALUE_MAX) return null;
+  if (/[@?&=#]|:\/\/|^www\./i.test(v)) return null;
+  // `%25` is an encoded percent: a value encoded twice hides any of the above.
+  if (/%(40|3f|26|3d|23|3a|25)/i.test(v)) return null;
+  return v;
+}
+
 /* ----------------------------------------------------------- referrers */
 
 /**
