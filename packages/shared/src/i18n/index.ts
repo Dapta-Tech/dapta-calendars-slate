@@ -222,6 +222,13 @@ export interface BookingMessages {
     notFoundTitle: string;
     notFoundBody: string;
     notFoundHome: string;
+    /** The root page of a fork running the local sign-in (Dapta's build sends
+     *  `/` straight to the app): what this is, and the seeded demo page. */
+    devLandingTitle: string;
+    devLandingBody: string;
+    devLandingCta: string;
+    /** Before the demo page's path, which renders as code after it. */
+    devLandingTry: string;
   };
   /**
    * Location kind labels — WHERE a meeting happens. Shared by the public
@@ -308,6 +315,10 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      /** A dashboard page for something this workspace does not have (a deleted
+       *  event type, team or schedule, or a mistyped address). */
+      notFoundTitle: string;
+      notFoundBody: string;
       /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
        *  new tab. The icon says it visually; this says it out loud. */
       opensNewTab: string;
@@ -1518,8 +1529,13 @@ export const en: BookingMessages = {
     description:
       '{product} gives you a booking page to share with one link. People pick a time in their own time zone, in English or Spanish. Open source.',
     notFoundTitle: 'Page not found',
-    notFoundBody: 'This booking page does not exist. Check the link with the person who shared it.',
+    notFoundBody: 'This page does not exist. Check the link with the person who shared it.',
     notFoundHome: 'Go home',
+    devLandingTitle: 'Open-source scheduling',
+    devLandingBody:
+      'A booking platform you clone and run. SQLite by default, deploy anywhere. This dev instance is seeded with a demo booking page.',
+    devLandingCta: 'Open the demo booking page',
+    devLandingTry: 'Try',
   },
   location: {
     whereLabel: 'Where',
@@ -1560,6 +1576,8 @@ export const en: BookingMessages = {
       signOut: 'Sign out',
       viewPublic: 'View public page',
       language: 'Language',
+      notFoundTitle: 'Not found',
+      notFoundBody: 'This workspace has nothing at this address. It may have been deleted.',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
       opensNewTab: 'Opens in a new tab',
@@ -1569,7 +1587,7 @@ export const en: BookingMessages = {
         eyebrow: 'Dapta',
         comingSoon: 'Coming soon',
         opensNewTab: '(opens in a new tab)',
-        forms: 'dForms',
+        forms: 'Forms',
       },
       theme: {
         toLight: 'Switch to light theme',
@@ -2648,8 +2666,13 @@ export const es: BookingMessages = {
     description:
       '{product} te da una página de reservas para compartir con un solo enlace. Cada persona elige una hora en su propia zona horaria, en español o en inglés. Código abierto.',
     notFoundTitle: 'Página no encontrada',
-    notFoundBody: 'Esta página de reservas no existe. Revisa el enlace con quien te lo compartió.',
+    notFoundBody: 'Esta página no existe. Revisa el enlace con quien te lo compartió.',
     notFoundHome: 'Ir al inicio',
+    devLandingTitle: 'Agenda de código abierto',
+    devLandingBody:
+      'Una plataforma de reservas que clonas y ejecutas. SQLite por defecto, despliégala donde quieras. Esta instancia de desarrollo trae una página de reservas de demostración.',
+    devLandingCta: 'Abrir la página demo',
+    devLandingTry: 'Prueba',
   },
   location: {
     whereLabel: 'Dónde',
@@ -2690,6 +2713,8 @@ export const es: BookingMessages = {
       signOut: 'Cerrar sesión',
       viewPublic: 'Ver página pública',
       language: 'Idioma',
+      notFoundTitle: 'No encontrado',
+      notFoundBody: 'Este espacio no tiene nada en esta dirección. Puede que se haya eliminado.',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
       opensNewTab: 'Se abre en una pestaña nueva',
@@ -2699,7 +2724,7 @@ export const es: BookingMessages = {
         eyebrow: 'Dapta',
         comingSoon: 'Próximamente',
         opensNewTab: '(se abre en una pestaña nueva)',
-        forms: 'dForms',
+        forms: 'Forms',
       },
       theme: {
         toLight: 'Cambiar al tema claro',
