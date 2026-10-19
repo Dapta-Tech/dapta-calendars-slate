@@ -3,7 +3,7 @@
  * snippets for each agent, the scope catalog and the tool list.
  *
  * Nothing here reads the environment or the DOM, so the same functions run on the
- * server (the MCP URL is resolved there, at runtime — see `mcp-config.ts`) and in
+ * server (the MCP URL is resolved there, at runtime, see `mcp-config.ts`) and in
  * tests. No host name is hard-coded: every snippet takes the MCP URL as input.
  *
  * KEY HANDLING. No snippet ever contains a key. Every one of them points at the
@@ -27,7 +27,7 @@ export function cursorServerEntry(mcpUrl: string): {
   return { url: mcpUrl, headers: { Authorization: `Bearer \${env:${API_KEY_ENV}}` } };
 }
 
-/** `base64(JSON.stringify(entry))` — the `config` of a Cursor install link. */
+/** `base64(JSON.stringify(entry))`, the `config` of a Cursor install link. */
 export function encodeCursorConfig(entry: object): string {
   return Buffer.from(JSON.stringify(entry), 'utf8').toString('base64');
 }

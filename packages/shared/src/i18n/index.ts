@@ -1035,7 +1035,7 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
-      /** "MCP & API" page — connect-your-agent guide, tool list, key details. */
+      /** "MCP & API" page: connect-your-agent guide, tool list, key details. */
       connectTitle: string;
       connectLead: string;
       tabCursor: string;

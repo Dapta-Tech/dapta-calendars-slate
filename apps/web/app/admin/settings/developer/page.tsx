@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function DeveloperSettings() {
   const [me, locale] = await Promise.all([adminApi.me(), getLocale()]);
-  // MCP & API (API keys + webhooks) is admin/owner-only — the API 403s for a
+  // MCP & API (API keys + webhooks) is admin/owner-only; the API 403s for a
   // plain member, so gate here for a graceful message. The route keeps its old
   // `/developer` path so existing links and bookmarks still land here.
   if (!isAdminRole(me.role)) {

@@ -35,16 +35,21 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
   return (
     <div className="flex flex-col gap-tight">
       {label ? <span className="text-xs text-muted-foreground">{label}</span> : null}
-      <div className="flex flex-col gap-inline rounded-md border border-border bg-muted p-field">
-        <pre className="overflow-x-auto whitespace-pre font-mono text-xs">
+      {/* Copy sits top-right inside the block, so a one-line value takes one line. */}
+      <div className="flex items-start gap-inline rounded-md border border-border bg-muted p-inline pl-field">
+        <pre className="min-w-0 flex-1 self-center overflow-x-auto whitespace-pre font-mono text-xs">
           <code>{value}</code>
         </pre>
-        <div>
-          <Button variant="outline" size="lg" onClick={() => void copy()} aria-label={`${copyLabel} · ${label ?? value.slice(0, 24)}`}>
-            <i aria-hidden className={`pi ${copied ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 12 }} />
-            {copied ? copiedLabel : copyLabel}
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="lg"
+          className="shrink-0"
+          onClick={() => void copy()}
+          aria-label={`${copyLabel} · ${label ?? value.slice(0, 24)}`}
+        >
+          <i aria-hidden className={`pi ${copied ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 12 }} />
+          {copied ? copiedLabel : copyLabel}
+        </Button>
       </div>
     </div>
   );
@@ -177,18 +182,15 @@ export function AgentTools({ messages: m }: { messages: DevMessages }) {
     <section className="mb-section">
       <h2 className="mb-tight text-xl font-semibold">{m.toolsTitle}</h2>
       <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.toolsLead}</p>
-      <ul className="flex flex-col gap-inline">
+      <ul className="grid grid-cols-1 gap-inline md:grid-cols-2">
         {MCP_TOOLS.map((tool) => (
-          <li
-            key={tool.name}
-            className="flex flex-col gap-tight rounded-xl border border-border bg-card p-field"
-          >
-            <div className="flex flex-wrap items-center gap-inline">
-              <code className="font-mono text-sm font-medium">{tool.name}</code>
+          <li key={tool.name} className="flex flex-col gap-tight rounded-xl border border-border bg-card p-field">
+            <div className="flex flex-wrap items-center justify-between gap-x-inline gap-y-tight">
+              <code className="min-w-0 break-all font-mono text-sm font-medium">{tool.name}</code>
               <KindChip kind={tool.kind} m={m} />
             </div>
-            <p className="text-sm text-muted-foreground">{m.toolDescriptions[tool.name] ?? ''}</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">{m.toolDescriptions[tool.name] ?? ''}</p>
+            <p className="text-xs text-foreground">
               {tool.scope ? t(m.toolNeeds, { scope: scopeLabel(m.scopeLabels, tool.scope) }) : tool.publicOk ? m.toolNeedsNoKey : m.toolNeedsAnyKey}
               {tool.scope && tool.publicOk ? ` ${m.toolOrPublic}` : ''}
             </p>
