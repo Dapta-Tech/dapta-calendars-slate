@@ -114,11 +114,13 @@ const VISITOR_PROPERTIES = new Set([
 const CTA_EVENT = 'calendars_cta_clicked';
 
 /**
- * Campaign tags and per-click ids, with the vendor's `$initial_` and
- * `$session_entry_` copies. A host's signup source is the API's (claimed
- * write-once from the first request), so the browser sends none of its own.
+ * Campaign tags, per-click ids and a search engine's keyword, with the
+ * vendor's `$initial_` and `$session_entry_` copies. A host's signup source is
+ * the API's (claimed write-once from the first request), so the browser sends
+ * none of its own. The list is wider than what the pinned library collects
+ * today (`bfcid` is not in it yet), so a release that adds one is covered.
  */
-const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx)$/;
+const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|bfcid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx|ph_keyword|\$search_engine|search_engine)$/;
 
 /**
  * A URL without its query string and fragment: `origin + path`, or the origin
