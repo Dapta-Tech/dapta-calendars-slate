@@ -94,8 +94,10 @@ const CONTROL = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F
 /**
  * Text written by an invitee (a name, a note, an intake answer, a reason).
  * Cleaned and capped so it reads as data: control and invisible characters go,
- * HTML tags go, markdown images vanish (an image URL is an exfiltration path),
- * a markdown link keeps its visible text only, and the result is length-capped.
+ * HTML tags go and so does every leftover `<` or `>` (a tag-stripping regex alone
+ * lets an unclosed `<script` through), markdown images vanish (an image URL is an
+ * exfiltration path), a markdown link keeps its visible text only, and the
+ * result is length-capped.
  */
 export function untrusted(value: unknown, max = 500): string {
   if (value === null || value === undefined) return '';
@@ -106,6 +108,7 @@ export function untrusted(value: unknown, max = 500): string {
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]*>/g, '')
+    .replace(/[<>]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;

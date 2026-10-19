@@ -8,7 +8,7 @@ import { RateLimitGuard } from '../rate-limit';
 import { ENV, RATE_LIMITER } from '../tokens';
 import type { RateLimiter } from '../rate-limit';
 import { OAuthService } from '../oauth/oauth.service';
-import { BASELINE_SCOPES } from '../oauth/oauth.settings';
+import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
 import type { McpCall } from './support';
@@ -50,7 +50,7 @@ const URL_CREDENTIAL_PARAMS = ['key', 'api_key', 'apikey', 'access_token', 'toke
 function csv(value: string | undefined): string[] {
   return (value ?? '')
     .split(',')
-    .map((s) => s.trim().toLowerCase().replace(/\/+$/, ''))
+    .map((s) => trimSlash(s.trim().toLowerCase()))
     .filter(Boolean);
 }
 
@@ -134,7 +134,7 @@ export class McpController {
       return;
     }
     const origin = req.headers.origin;
-    if (origin !== undefined && !this.origins.has(String(origin).toLowerCase().replace(/\/+$/, ''))) {
+    if (origin !== undefined && !this.origins.has(trimSlash(String(origin).toLowerCase()))) {
       rpcError(res, 403, -32000, 'Origin not allowed.');
       return;
     }

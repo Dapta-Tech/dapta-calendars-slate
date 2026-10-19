@@ -89,8 +89,17 @@ export interface OAuthSettings {
   consentUrl: string;
 }
 
-/** A URL without a trailing slash (an origin, or a path). */
-export const trimSlash = (url: string): string => url.replace(/\/+$/, '');
+/**
+ * A URL without its trailing slashes (an origin, or a path). A loop, not
+ * `/\/+$/`: several inputs here come from the client (`resource`, a CIMD
+ * `client_id` or a redirect path, a request `Origin`), and that regex is
+ * quadratic on a long run of slashes (CodeQL js/polynomial-redos).
+ */
+export function trimSlash(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47) end -= 1;
+  return url.slice(0, end);
+}
 
 /** The same resource, written with or without a trailing slash or default port. */
 export function sameResource(a: string, b: string): boolean {

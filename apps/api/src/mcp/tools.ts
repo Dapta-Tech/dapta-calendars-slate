@@ -562,18 +562,22 @@ const bookMeeting: ToolDef = {
       });
       return { ...done, summary: `${done.summary} (replay of an earlier identical call)` };
     }
+    // A credential (API key or OAuth token) makes this an API booking for product
+    // analytics, like the REST machine API. The duplicate guard is untouched:
+    // the booking still goes through the public page's rules.
+    const channel = call.principal ? 'api' : 'booking_page';
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(
             page.accountCode,
             page.owner,
             { slug: page.slug, startUtc, attendee: who, answers: args.answers },
-            { idempotencyKey: storedKey, locale: language },
+            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           )
         : await deps.bookings.book(
             { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers },
             false,
-            { idempotencyKey: storedKey, locale: language },
+            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           );
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;

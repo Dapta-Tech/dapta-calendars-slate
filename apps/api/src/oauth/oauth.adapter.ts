@@ -145,7 +145,19 @@ export function oauthAdapter(db: Db, options: OAuthAdapterOptions): AdapterConst
     }
 
     async destroy(id: string): Promise<void> {
-      await destroyOAuthRecord(db, this.kind, storageId(this.kind, id));
+      const key = storageId(this.kind, id);
+      if (this.kind === 'RefreshToken') {
+        // oidc-provider destroys a refresh token only when it is revoked
+        // (RFC 7009) or replayed after use, and both end the connection. Revoke
+        // the whole grant here, so a sibling issued in the retry-grace window
+        // dies too, without relying on the provider's follow-up revocation.
+        const row = await findOAuthRecord(db, this.kind, key, now());
+        if (row?.grantId) {
+          await revokeOAuthGrant(db, row.grantId);
+          return;
+        }
+      }
+      await destroyOAuthRecord(db, this.kind, key);
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {

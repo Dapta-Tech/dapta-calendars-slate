@@ -23,7 +23,7 @@ import {
 import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
-import { AnalyticsEffects } from './analytics-effects';
+import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -393,6 +393,13 @@ export class BookingService {
        */
       apiKeyWrite?: boolean;
       /**
+       * The channel product analytics records for this booking, when the
+       * caller knows better than `apiKeyWrite` can say. The MCP's keyless-page
+       * tool books like the public route (so the duplicate guard still applies)
+       * but, called with a credential, is an API booking. Analytics only.
+       */
+      analyticsChannel?: BookingChannel;
+      /**
        * Retry-dedupe key. CONTEXT, never the request body (#104): `POST
        * /v1/bookings` is unauthenticated, and a key set there would land in a
        * column the whole deployment shares. Only a controller that has
@@ -526,7 +533,7 @@ export class BookingService {
       void this.analytics?.bookingCreated({
         uid: b.uid,
         inviteeEmail: b.attendee.email,
-        channel: context?.apiKeyWrite ? 'api' : 'booking_page',
+        channel: context?.analyticsChannel ?? (context?.apiKeyWrite ? 'api' : 'booking_page'),
         isTeam: false,
       });
       // Durable webhook delivery: enqueue one outbox row per subscriber; the
@@ -963,6 +970,13 @@ export class BookingService {
      */
     context?: {
       apiKeyWrite?: boolean;
+      /**
+       * The channel product analytics records for this booking, when the
+       * caller knows better than `apiKeyWrite` can say. The MCP's keyless-page
+       * tool books like the public route (so the duplicate guard still applies)
+       * but, called with a credential, is an API booking. Analytics only.
+       */
+      analyticsChannel?: BookingChannel;
       idempotencyKey?: string;
       oneOffToken?: string;
       /** The invitee's language when the caller knows it; see `book()`. */
@@ -1048,7 +1062,7 @@ export class BookingService {
       void this.analytics?.bookingCreated({
         uid: out.uid,
         inviteeEmail: body.attendee?.email,
-        channel: context?.apiKeyWrite ? 'api' : 'booking_page',
+        channel: context?.analyticsChannel ?? (context?.apiKeyWrite ? 'api' : 'booking_page'),
         isTeam: true,
       });
     }
