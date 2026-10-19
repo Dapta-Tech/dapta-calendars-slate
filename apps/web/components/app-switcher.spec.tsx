@@ -10,7 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { getMessages } from '@slate/shared';
 
 const messages = getMessages('en').admin.common.switcher;
-const NAMES = ['NEXT_PUBLIC_PLATFORM_URL', 'NEXT_PUBLIC_FORMS_URL'] as const;
+const NAMES = ['NEXT_PUBLIC_PLATFORM_URL', 'NEXT_PUBLIC_FORMS_URL', 'NEXT_PUBLIC_PRODUCT_NAME'] as const;
 const saved = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
 
 let root: Root | null = null;
@@ -48,10 +48,8 @@ async function openSwitcher(env: Partial<Record<(typeof NAMES)[number], string>>
   return container;
 }
 
-function formsRow(el: HTMLElement): HTMLElement | undefined {
-  return [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((r) =>
-    r.textContent?.includes(messages.forms),
-  );
+function formsRow(el: HTMLElement, name: string = messages.forms): HTMLElement | undefined {
+  return [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((r) => r.textContent?.includes(name));
 }
 
 describe('AppSwitcher', () => {
@@ -85,6 +83,27 @@ describe('AppSwitcher', () => {
     const el = await openSwitcher({ NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test' });
     expect(formsRow(el)?.tagName).toBe('A');
     expect(el.textContent).not.toContain('Dapta AI');
+  });
+
+  it('calls it dForms on Dapta\'s own build, and Forms on a fork', async () => {
+    const dapta = await openSwitcher({
+      NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test',
+      NEXT_PUBLIC_PRODUCT_NAME: 'Dapta Calendars',
+    });
+    expect(formsRow(dapta, 'dForms')?.tagName).toBe('A');
+    act(() => root?.unmount());
+    container?.remove();
+    const fork = await openSwitcher({ NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test' });
+    expect(fork.textContent).not.toContain('dForms');
+    expect(formsRow(fork)?.tagName).toBe('A');
+  });
+
+  it('gives every row a 44px hit target', async () => {
+    const el = await openSwitcher({
+      NEXT_PUBLIC_PLATFORM_URL: 'https://platform.example.test',
+      NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test',
+    });
+    for (const row of el.querySelectorAll('[role="menuitem"]')) expect(row.className).toContain('min-h-control');
   });
 
   it('renders nothing on a build with no suite at all', async () => {

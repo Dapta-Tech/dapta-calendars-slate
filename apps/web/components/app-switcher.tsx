@@ -32,6 +32,13 @@ interface SwitcherMessages {
 const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL || '';
 const FORMS_URL = process.env.NEXT_PUBLIC_FORMS_URL || '';
 
+/**
+ * Forms' own name: "dForms" on Dapta's build, the catalog's neutral "Forms" on a
+ * fork that points the switcher at a forms app of its own. The same split the
+ * Forms app makes for its own name (`IS_DAPTA_BRAND`).
+ */
+const formsName = (catalogName: string) => (IS_DAPTA_BRAND ? 'dForms' : catalogName);
+
 /** A suite URL (platform or Forms) carrying the app-switcher UTM tags. */
 function suiteHref(base: string): string {
   try {
@@ -124,14 +131,14 @@ export function AppSwitcher({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="flex items-center gap-field min-h-control rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               {/* Tiled, as every row is: `dapta-mark.png` is fixed white artwork, so
                   bare on the light popover it was white on white. `bg-brand-ink`
                   is the one ground that does not flip with the theme (the same
                   fix the Forms switcher carries). */}
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink">
-                <img src="/dapta-mark.png" alt="" width={18} height={18} className="h-[18px] w-[18px] object-contain" />
+                <img src="/dapta-mark.png" alt="" width={16} height={16} className="h-4 w-4 object-contain" />
               </span>
               <span className="flex-1 truncate">Dapta AI</span>
               <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
@@ -144,7 +151,7 @@ export function AppSwitcher({
             role="menuitem"
             tabIndex={-1}
             aria-current="true"
-            className="flex items-center gap-field rounded-sm bg-muted px-inline py-inline text-sm font-medium"
+            className="flex items-center gap-field min-h-control rounded-sm bg-muted px-inline py-inline text-sm font-medium"
           >
             {/* The dark tile is for the drawn mark; a fork's letter chip already
                 carries its own fill and sits on the row like the other items. */}
@@ -169,12 +176,12 @@ export function AppSwitcher({
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="flex items-center gap-field min-h-control rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink text-brand-ink-foreground" aria-hidden>
                 <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
               </span>
-              <span className="flex-1 truncate">{m.forms}</span>
+              <span className="flex-1 truncate">{formsName(m.forms)}</span>
               <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
               <span className="sr-only">{m.opensNewTab}</span>
             </a>
@@ -183,12 +190,12 @@ export function AppSwitcher({
               role="menuitem"
               tabIndex={-1}
               aria-disabled="true"
-              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm text-muted-foreground"
+              className="flex items-center gap-field min-h-control rounded-sm px-inline py-inline text-sm text-muted-foreground"
             >
               <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground" aria-hidden>
                 <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
               </span>
-              <span className="flex-1 truncate">{m.forms}</span>
+              <span className="flex-1 truncate">{formsName(m.forms)}</span>
               <span className="rounded-full border border-border px-inline py-tight text-2xs font-medium uppercase tracking-wide">
                 {m.comingSoon}
               </span>
