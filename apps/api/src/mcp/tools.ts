@@ -562,18 +562,23 @@ const bookMeeting: ToolDef = {
       });
       return { ...done, summary: `${done.summary} (replay of an earlier identical call)` };
     }
+    // Booked with this workspace's own credential (API key or OAuth token), it is
+    // an API booking for product analytics, like the REST machine API. A keyless
+    // call, or one with another workspace's credential, books like the public
+    // page it wraps. The duplicate guard is untouched either way.
+    const channel = call.principal?.accountId === accountId ? 'api' : 'booking_page';
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(
             page.accountCode,
             page.owner,
             { slug: page.slug, startUtc, attendee: who, answers: args.answers },
-            { idempotencyKey: storedKey, locale: language },
+            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           )
         : await deps.bookings.book(
             { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers },
             false,
-            { idempotencyKey: storedKey, locale: language },
+            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           );
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;

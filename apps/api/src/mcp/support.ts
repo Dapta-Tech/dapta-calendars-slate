@@ -88,27 +88,75 @@ export const notFound = (what: string): ToolFailure =>
  * way to hide an instruction inside a name or a note.
  */
 const INVISIBLE = new RegExp('[\\u200B-\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF\\u00AD]', 'g');
+/** Unicode tag characters (hidden text a model still reads) and variation selectors. */
+const HIDDEN_ASTRAL = /[\u{E0000}-\u{E007F}]|\p{Variation_Selector}/gu;
 // eslint-disable-next-line no-control-regex
 const CONTROL = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]', 'g');
+
+/** A character that, right after `<`, opens markup: a letter, `!`, `/` or `?`. */
+function opensTag(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 33 || code === 47 || code === 63;
+}
+
+/**
+ * Removes markup in one linear pass, without a regex: a `<` that opens a tag goes
+ * with the tag up to its `>` (or alone when nothing closes it), and a kept `<` is
+ * dropped the moment a tag character would follow it in the output, so nested
+ * input like `<<b>script>` cannot reassemble a tag. A `<` before a digit or a space
+ * stays (`<10`, `a < b`): select options and answers must round-trip.
+ */
+function stripTags(text: string): string {
+  const nextClose = new Int32Array(text.length + 1).fill(-1);
+  for (let k = text.length - 1; k >= 0; k -= 1) nextClose[k] = text.charCodeAt(k) === 62 ? k : nextClose[k + 1]!;
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const code = text.charCodeAt(i);
+    if (code === 60 && opensTag(text.charCodeAt(i + 1))) {
+      const close = nextClose[i + 1]!;
+      i = close === -1 ? i + 1 : close + 1;
+      continue;
+    }
+    if (opensTag(code)) {
+      let end = out.length;
+      while (end > 0 && out.charCodeAt(end - 1) === 60) end -= 1;
+      if (end !== out.length) out = out.slice(0, end);
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
 
 /**
  * Text written by an invitee (a name, a note, an intake answer, a reason).
  * Cleaned and capped so it reads as data: control and invisible characters go,
- * HTML tags go, markdown images vanish (an image URL is an exfiltration path),
- * a markdown link keeps its visible text only, and the result is length-capped.
+ * HTML tags go and so does any leftover `<` that could open one (a tag-stripping
+ * regex alone lets an unclosed `<script` through), while `<10`, `> 50` or
+ * `a < b` survive, because select options and answers must round-trip exactly.
+ * Markdown images vanish (an image URL is an exfiltration path), a markdown link
+ * keeps its visible text only, and the result is length-capped. The input is cut
+ * BEFORE the regexes, so a huge answer cannot make them crawl.
  */
 export function untrusted(value: unknown, max = 500): string {
   if (value === null || value === undefined) return '';
   let text = typeof value === 'string' ? value : JSON.stringify(value);
   text = text
+    .slice(0, max * 4)
     .replace(INVISIBLE, '')
+    .replace(HIDDEN_ASTRAL, '')
     .replace(CONTROL, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  // Tags go after everything that removes characters, so nothing can put a `<`
+  // back next to a letter. Removing a tag can glue `![x]` to `(url)` again, and the
+  // markdown regexes miss nested brackets, so every `](` left is broken apart: no
+  // image or link survives as markdown, whatever the order of removals.
+  text = stripTags(text).replace(/\]\(/g, '] (').replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  // Never cut a surrogate pair in half.
+  const cut = /[\uD800-\uDBFF]/.test(text[max - 2] ?? '') ? max - 2 : max - 1;
+  return `${text.slice(0, cut)}…`;
 }
 
 /** The domain half of an address; the local part is personal data. */

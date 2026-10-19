@@ -64,6 +64,38 @@ describe('oauth adapter', () => {
     expect(revoked).toEqual([]);
   });
 
+  it('destroying a refresh token (RFC 7009 revocation) revokes its grant: a grace-window sibling dies too', async () => {
+    const Adapter = make(10_000);
+    const rt = new Adapter('RefreshToken');
+    const grant = new Adapter('Grant');
+    await grant.upsert('g1', { accountId: 'm1', clientId: 'c1' }, 3600);
+    await rt.upsert('old', { jti: 'old', grantId: 'g1' }, 3600);
+    await rt.consume('old');
+    await rt.upsert('new', { jti: 'new', grantId: 'g1' }, 3600);
+    // Another connection of the same person stays untouched.
+    await grant.upsert('g2', { accountId: 'm1', clientId: 'c2' }, 3600);
+    await rt.upsert('other', { jti: 'other', grantId: 'g2' }, 3600);
+
+    await rt.destroy('new');
+
+    expect(await grant.find('g1')).toBeUndefined();
+    expect(await rt.find('new')).toBeUndefined();
+    expect(await rt.find('old')).toBeUndefined();
+    expect((await rt.find('other'))?.grantId).toBe('g2');
+    expect(await grant.find('g2')).toBeDefined();
+  });
+
+  it('destroying a kind that is not a refresh token removes only that record', async () => {
+    const Adapter = make(0);
+    const grant = new Adapter('Grant');
+    const code = new Adapter('AuthorizationCode');
+    await grant.upsert('g1', { accountId: 'm1', clientId: 'c1' }, 3600);
+    await code.upsert('c1', { jti: 'c1', grantId: 'g1' }, 60);
+    await code.destroy('c1');
+    expect(await code.find('c1')).toBeUndefined();
+    expect(await grant.find('g1')).toBeDefined();
+  });
+
   it('an authorization code never gets a grace', async () => {
     const Adapter = make(10_000);
     const code = new Adapter('AuthorizationCode');
