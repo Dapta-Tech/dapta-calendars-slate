@@ -23,6 +23,7 @@ import {
 import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
+import { AnalyticsEffects } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -163,6 +164,9 @@ export class BookingService {
     // one refresh per account holds app-wide. Absent (a direct construction),
     // the service builds its own from the two values above.
     @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
+    // Product analytics. Optional and last like the others: absent, a booking
+    // records no event, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   private _gate?: EntitlementGate;
@@ -510,6 +514,16 @@ export class BookingService {
       } else if (b.status === 'pending') {
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
+      // A fresh booking only (a replay or a seat on an existing group booking
+      // mints no manage token): about the host who received it, never the
+      // visitor (see AnalyticsEffects). Host-made bookings take their own
+      // route (`HostController.hostCreate`) and say so there.
+      void this.analytics?.bookingCreated({
+        uid: b.uid,
+        inviteeEmail: b.attendee.email,
+        channel: context?.apiKeyWrite ? 'api' : 'booking_page',
+        isTeam: false,
+      });
       // Durable webhook delivery: enqueue one outbox row per subscriber; the
       // OutboxWorker signs + POSTs with retry+backoff (B7/DM1). No-op when the
       // account has no matching webhooks (bare clone-and-run).
@@ -1020,6 +1034,15 @@ export class BookingService {
       status: 'accepted',
       startUtc: body.startUtc,
     });
+    // Fresh bookings only, as on the personal path: a replay mints no token.
+    if (out.manageToken) {
+      void this.analytics?.bookingCreated({
+        uid: out.uid,
+        inviteeEmail: body.attendee?.email,
+        channel: context?.apiKeyWrite ? 'api' : 'booking_page',
+        isTeam: true,
+      });
+    }
     // Read the row back for the fields the create call does not hand out: the
     // title, the resolved end instant, and the organizer's name/handle.
     //

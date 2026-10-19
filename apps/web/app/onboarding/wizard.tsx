@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from 'react';
 import type { BookingMessages } from '@slate/shared';
 import { t } from '@slate/shared';
 import type { OnboardingState } from '@slate/types';
+import { track } from '@/lib/analytics/port';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -155,7 +156,12 @@ function TemplatePicker({
         <Button
           variant="ghost"
           disabled={pending}
-          onClick={() => startT(async () => void (await skipOnboardingAction()))}
+          onClick={() =>
+            startT(async () => {
+              track('template_skipped');
+              await skipOnboardingAction();
+            })
+          }
         >
           {m.skipForNow}
         </Button>

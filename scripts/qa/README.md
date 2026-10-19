@@ -7,6 +7,7 @@ Node 20, no dependencies.
 | Script | What it proves | Where it runs |
 |---|---|---|
 | `stand-in-calendar.mjs` | A deterministic external calendar backend (the vendor-neutral contract in `apps/api/src/calendar.backend.generic.ts`) that records every write. The browser suite uses it. | Local |
+| `stand-in-analytics.mjs` | A product-analytics ingestion host that serves the real vendor library (the web app's pinned `posthog-js` devDependency), decodes its batches and records every browser and server event, so the browser suite runs with analytics on and asserts exactly what would leave. No third party is reached. | Local |
 | `load-availability.mjs` | Availability latency and error rate under 1, 5, 10, 20 concurrent visitors; the 429 share of the public limiter. Stops at the first 5xx. | A development deployment, by hand |
 | `hold-race.mjs` | N visitors racing for one time get exactly one hold; with `--busy`, no time the host's calendar has busy is offered or holdable. Gives back every hold it wins, also on Ctrl-C or SIGTERM; never books. | A development deployment, by hand |
 | `rate-limit-probe.mjs` | The public limiter answers 429 with `Retry-After`, and a spoofed `X-Forwarded-For` does not buy a fresh bucket. Reads the public profile only. | A development deployment, by hand |

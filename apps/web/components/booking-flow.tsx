@@ -45,6 +45,7 @@ import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
+import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
 import { useLateMeetingLink } from '@/lib/use-late-meeting-link';
@@ -282,6 +283,17 @@ export function BookingFlow({
     postBookingScheduled({ uid: bookedUid, startUtc: bookedStart, eventTypeSlug: slug });
   }, [embed, bookedUid, bookedStart, slug]);
 
+  // Product analytics, keyed on the uid for the same reason as the message
+  // above: one booking is one `booking_confirmed`, however often this renders.
+  // Anonymous and PII-free: the status and the mode, nothing about the visitor.
+  const trackedUid = useRef<string | null>(null);
+  const bookedStatus = booked?.status ?? null;
+  useEffect(() => {
+    if (!bookedUid || trackedUid.current === bookedUid) return;
+    trackedUid.current = bookedUid;
+    track('booking_confirmed', { status: bookedStatus, mode });
+  }, [bookedUid, bookedStatus, mode]);
+
   /** Full client-side gate, replacing native validation (noValidate): native
    *  bubbles doubled up with the inline errors and can't be themed. Returns
    *  true when the form may submit. */
@@ -440,6 +452,12 @@ export function BookingFlow({
   }, [bookedUid, hold]);
 
   async function pick(slot: DisplaySlot) {
+    // On the two-pane layout the first open day's times are on screen before
+    // anything is chosen, so a time can be picked with no day ever clicked:
+    // that day is counted here, as preselected, so every time picked follows
+    // a day picked.
+    if (selectedDay) noteDay(selectedDay, false);
+    track('slot_picked', { mode });
     const seq = ++pickSeq.current;
     setDir('forward');
     setSelected(slot.startUtc);
@@ -583,8 +601,21 @@ export function BookingFlow({
 
   const timeZoneLabel = readableZone(timeZone);
 
+  /**
+   * Count a day once, the first time it becomes the visitor's (a click, the
+   * "next day" button, or a time picked on it). `preselected` says it was the
+   * day the page opened on rather than one the visitor went to.
+   */
+  const trackedDay = useRef<string | null>(null);
+  function noteDay(dayKey: string, chosen: boolean) {
+    if (trackedDay.current === dayKey) return;
+    trackedDay.current = dayKey;
+    track('day_picked', { mode, preselected: !chosen });
+  }
+
   /** Choosing a day is the first move forward: on a phone the times take over. */
   function chooseDay(dayKey: string) {
+    noteDay(dayKey, true);
     setPickedDay(dayKey);
     setDir('forward');
     setStep('times');
@@ -842,7 +873,10 @@ export function BookingFlow({
               // to cause) instead of round-tripping a guaranteed 400.
               onSubmit={(e) => {
                 if (!validateAll()) e.preventDefault();
-                else submittedHold.current = hold?.uid ?? null;
+                else {
+                  submittedHold.current = hold?.uid ?? null;
+                  track('booking_submitted', { mode });
+                }
               }}
               className="bp-form"
             >
@@ -1075,7 +1109,17 @@ export function BookingFlow({
           onHour12Change={setHour12}
           timeZoneControl={timeZoneControl}
           titleRef={timesTitleRef}
-          next={nextKnownDay ? { heading: nextKnownDay.heading, onGo: () => goToDay(nextKnownDay.dayKey) } : null}
+          next={
+            nextKnownDay
+              ? {
+                  heading: nextKnownDay.heading,
+                  onGo: () => {
+                    noteDay(nextKnownDay.dayKey, true);
+                    goToDay(nextKnownDay.dayKey);
+                  },
+                }
+              : null
+          }
         />
       }
     />,

@@ -10,16 +10,20 @@ const webPort = port('E2E_WEB_PORT', 3411);
 const apiPort = port('E2E_API_PORT', 4411);
 const limitedApiPort = port('E2E_LIMITED_API_PORT', 4412);
 const calendarPort = port('E2E_CALENDAR_PORT', 4519);
+const analyticsPort = port('E2E_ANALYTICS_PORT', 4520);
 
 export const E2E = {
   webPort,
   apiPort,
   limitedApiPort,
   calendarPort,
+  analyticsPort,
   web: `http://localhost:${webPort}`,
   api: `http://localhost:${apiPort}`,
   limitedApi: `http://localhost:${limitedApiPort}`,
   calendar: `http://127.0.0.1:${calendarPort}`,
+  /** The stand-in analytics host (scripts/qa/stand-in-analytics.mjs). */
+  analytics: `http://127.0.0.1:${analyticsPort}`,
   signupUrl: 'https://signup.example.test/start',
   /** Where start-api.mjs tees each API's stdout, for the log assertions. */
   logDir: resolve(__dirname, '.results-logs'),
@@ -90,6 +94,63 @@ export function parseIcs(text: string): Record<string, string> {
     out[key] = line.slice(i + 1);
   }
   return out;
+}
+
+/**
+ * Product analytics is ON for the whole suite, pointed at the stand-in, so
+ * every flow also proves analytics never gets in its way. The same names reach
+ * the web server (playwright.config.ts) and both APIs (start-api.mjs).
+ */
+export const ANALYTICS_ENV = {
+  PRODUCT_ANALYTICS_PROVIDER: 'posthog',
+  PRODUCT_ANALYTICS_KEY: 'phc_e2e_stand_in',
+  PRODUCT_ANALYTICS_HOST: E2E.analytics,
+  // Jordan stands in for the operator's own staff; Alex is a customer.
+  PRODUCT_ANALYTICS_INTERNAL_EMAILS: 'jordan@example.com',
+};
+
+/**
+ * One event the stand-in analytics host recorded: a browser event as the real
+ * vendor library sent it, or a server event as the API sent it.
+ */
+export interface RecordedAnalytics {
+  source: 'browser' | 'server';
+  /** When the stand-in received it (epoch ms). */
+  at: number;
+  /** Server events: when the event HAPPENED (ISO), which can be well before it arrives. */
+  timestamp?: string;
+  event: string;
+  distinct_id?: string;
+  properties?: Record<string, unknown>;
+  $set?: Record<string, unknown>;
+  $set_once?: Record<string, unknown>;
+}
+
+/** Every request path the stand-in answered, since a moment (epoch ms). */
+export async function analyticsRequests(since = 0): Promise<string[]> {
+  const r = await fetch(`${E2E.analytics}/__qa/requests`);
+  const { requests } = (await r.json()) as { requests: Array<{ path: string; at: number }> };
+  return requests.filter((x) => x.at >= since).map((x) => x.path);
+}
+
+export async function analyticsRecorded(since = 0): Promise<RecordedAnalytics[]> {
+  const r = await fetch(`${E2E.analytics}/__qa/events`);
+  return ((await r.json()) as { events: RecordedAnalytics[] }).events.filter((e) => e.at >= since);
+}
+
+/** Wait until the stand-in has recorded something that matches. */
+export async function waitForAnalytics(
+  pred: (e: RecordedAnalytics) => boolean,
+  since = 0,
+  timeoutMs = 30_000,
+): Promise<RecordedAnalytics> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const hit = (await analyticsRecorded(since)).find(pred);
+    if (hit) return hit;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error('the stand-in analytics host never recorded the expected call');
 }
 
 /** An address this run alone uses, so bookings never trip the duplicate guard. */

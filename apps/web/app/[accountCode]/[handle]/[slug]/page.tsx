@@ -9,6 +9,8 @@ import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
 import { brandingShown } from '@/lib/growth';
@@ -168,6 +170,14 @@ export default async function BookingPage({
           that turned the branding off while paying for Dapta AI has none. */}
       <MadeWithBadge locale={locale} accountCode={accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="event"
+        accountKey={profile.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

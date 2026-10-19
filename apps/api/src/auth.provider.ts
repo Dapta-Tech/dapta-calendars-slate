@@ -43,6 +43,26 @@ export interface HostPrincipal extends ResolvedHost {
   role: AccountRole;
 }
 
+/** A member who just came into being, as the auth providers report it. */
+export interface SignupNotice {
+  accountId: string;
+  memberId: string;
+  role: string;
+  /** The account's first member: a brand-new workspace. */
+  isFirstMember: boolean;
+  /** An invite row was adopted rather than a new member created. */
+  fromInvite: boolean;
+}
+
+/**
+ * Called by an auth provider when a login created (or adopted) a member.
+ *
+ * MUST NOT throw and MUST NOT block: it runs on the login path, where anything
+ * that failed would lock a real person out over telemetry. A plain callback,
+ * so the providers never learn what listens (product analytics, today).
+ */
+export type SignupObserver = (signup: SignupNotice) => void;
+
 export function header(req: ReqLike, name: string): string | undefined {
   const v = req.headers[name];
   return Array.isArray(v) ? v[0] : v;
@@ -93,6 +113,8 @@ export class LocalAuthProvider implements AuthProvider {
   constructor(
     private readonly db: Db,
     private readonly env: Pick<ServerEnv, 'NODE_ENV' | 'DEV_LOGIN_EMAIL' | 'AUTH_LOCAL_STRICT'>,
+    /** Told when a login creates a member. Omitted: nothing observes signups. */
+    private readonly onSignup?: SignupObserver,
   ) {}
 
   async resolveHost(req: ReqLike): Promise<ResolvedHost> {
@@ -166,7 +188,28 @@ export class LocalAuthProvider implements AuthProvider {
           VALUES (${memberId}, ${account.id}, ${email}, ${email}, ${handle}, ${role},
             ${born.brandColor}, ${jsonParam(this.db, born.style)}, ${Date.now()})`,
     );
+    notifySignup(this.onSignup, {
+      accountId: account.id,
+      memberId,
+      role,
+      isFirstMember: role === 'owner',
+      fromInvite: false,
+    });
     return { accountId: account.id, memberId };
+  }
+}
+
+/**
+ * Tell the signup observer, without letting it touch the login. Swallowed here
+ * rather than trusted to each observer: this runs after the member row is
+ * committed, on the request that signs a real person in.
+ */
+export function notifySignup(observer: SignupObserver | undefined, signup: SignupNotice): void {
+  if (!observer) return;
+  try {
+    observer(signup);
+  } catch {
+    /* telemetry must never cost a login */
   }
 }
 
@@ -181,10 +224,10 @@ export class LocalAuthProvider implements AuthProvider {
  * internal-first phase the adapter lives in-repo; it later moves to the private
  * overlay behind this same seam.)
  */
-export function createAuthProvider(env: ServerEnv, db: Db): AuthProvider {
+export function createAuthProvider(env: ServerEnv, db: Db, onSignup?: SignupObserver): AuthProvider {
   switch (env.AUTH_PROVIDER) {
     case 'local':
-      return new LocalAuthProvider(db, env);
+      return new LocalAuthProvider(db, env, onSignup);
     case 'workos':
       if (!env.JWT_SECRET) {
         throw new Error(
@@ -193,7 +236,7 @@ export function createAuthProvider(env: ServerEnv, db: Db): AuthProvider {
             'AUTH_PROVIDER=local for development only.',
         );
       }
-      return new WorkOsAuthProvider(db, env);
+      return new WorkOsAuthProvider(db, env, onSignup);
     default:
       throw new Error(`Unknown AUTH_PROVIDER: ${String((env as ServerEnv).AUTH_PROVIDER)}`);
   }

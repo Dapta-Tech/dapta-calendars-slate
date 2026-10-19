@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
+import { resetAnalytics } from '@/lib/analytics/port';
 import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
 import { AppSwitcher } from '@/components/app-switcher';
 import { BrandMark, PRODUCT_NAME } from '@/components/brand/brand';
@@ -227,7 +228,9 @@ export function AdminShell({
 
   // Sign-out (local provider): a server action clears the session cookie.
   const signOut = (
-    <form action={signOutAction}>
+    // The analytics identity goes with the session: the next person to use
+    // this browser must not be filed as this host.
+    <form action={signOutAction} onSubmit={() => resetAnalytics()}>
       <button
         type="submit"
         title={c.signOut}
