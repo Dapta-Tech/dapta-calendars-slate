@@ -30,10 +30,13 @@ test('sign-in and dashboard follow the browser language when nothing is saved', 
   await expect(page.getByRole('link', { name: 'Reservas' }).first()).toBeVisible();
 
   // A saved choice outranks the browser, and the document follows it at once:
-  // the switch re-renders the root layout, no reload.
+  // the switch re-renders the root layout, no reload. The switcher stays off
+  // until that update lands, in either language: on Next 16.2 the update could
+  // be lost (vercel/next.js#98303), leaving it off with the page in Spanish.
   await page.goto('/admin/settings/general');
   await page.getByRole('button', { name: 'Idioma' }).click();
   await page.getByRole('option', { name: 'English' }).click();
+  await expect(page.getByRole('button', { name: /^(Idioma|Language)$/ })).toBeEnabled();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('link', { name: 'Bookings' }).first()).toBeVisible();
   await page.reload();
