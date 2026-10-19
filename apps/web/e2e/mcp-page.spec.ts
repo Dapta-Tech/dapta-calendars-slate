@@ -14,6 +14,8 @@ import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
  * - A read that fails (429 here) fails closed to the same state.
  */
 const PAGE = '/admin/developers/keys';
+/** The MCP group's page that lists the tools. */
+const DOCS = '/admin/developers/docs';
 const MCP_URL = `${E2E.api}/mcp`;
 const GRANTS = '/v1/oauth/grants';
 const UNAVAILABLE = 'Agent connections are not turned on for this installation.';
@@ -36,11 +38,16 @@ async function expectUnavailable(page: Page): Promise<void> {
   await expect(page.getByText(UNAVAILABLE)).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Connect your agent' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveCount(0);
-  // The tool list describes the endpoint that is off.
-  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toHaveCount(0);
   // No address anywhere on the page, not even in a copy block or a link.
   expect(await page.content()).not.toContain(MCP_URL);
   await expectOtherSections(page);
+  // The tool list (API docs) describes the endpoint that is off: the same
+  // sentence stands in for it, and the API reference stays.
+  await page.goto(DOCS);
+  await expect(page.getByText(UNAVAILABLE)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'API reference' })).toBeVisible();
+  expect(await page.content()).not.toContain(MCP_URL);
 }
 
 test.afterEach(async () => {
@@ -57,8 +64,10 @@ test('MCP on: the steps show the configured address, and that address answers', 
   await expect(page.getByText(MCP_URL, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveAttribute('href', /^cursor:\/\//);
   await expect(page.getByText(UNAVAILABLE)).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
   await expectOtherSections(page);
+  await page.goto(DOCS);
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
+  await expect(page.getByText(UNAVAILABLE)).toHaveCount(0);
 
   // The page only names an address that is really serving MCP.
   const mcp = await request.post(MCP_URL, {
