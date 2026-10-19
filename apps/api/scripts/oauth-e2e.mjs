@@ -250,7 +250,10 @@ try {
     const cimdRedirect = `http://localhost:${cbPort}/callback`;
     await page.goto(authorizeUrl(cimdId, cimdRedirect, p3, READ, 'state-cimd'));
     await page.waitForURL(/\/auth\/consent\?uid=/);
-    const cimdBody = await page.locator('main').innerText();
+    // The consent page fetches the client's metadata document first, so the root
+    // loading skeleton (its own <main>) can still be on screen: wait for the card.
+    await page.getByRole('heading', { name: /wants to use your/ }).waitFor();
+    const cimdBody = await page.locator('main', { hasText: 'wants to use your' }).innerText();
     check(cimdBody.includes('Claude Code') && cimdBody.includes('Identified as claude.ai'), 'CIMD: consent names Claude Code, identified by the claude.ai host');
     const before3 = callbacks.length;
     await page.getByRole('button', { name: 'Allow' }).click();
