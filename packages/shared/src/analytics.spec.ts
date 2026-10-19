@@ -106,20 +106,33 @@ describe('analyticsCampaignValue', () => {
     for (const v of [
       'made-with-dapta',
       'q3 launch',
+      'q3: launch',
       '1234567890',
+      '15551234567',
       'chatgpt.com',
+      'www.google.com',
       'google/cpc',
       'q&a webinar',
       'at&t calendar',
       'video #2',
       '50% off',
-      'www.google.com',
-      '15551234567',
+      '20%descuento',
+      '100%ad',
+      "mother's day",
+      'campaign | audience',
+      'lanzamiento año',
       '2026 10 18',
     ]) {
-      expect(analyticsCampaignValue(v)).toBe(v);
+      expect([v, analyticsCampaignValue(v)]).toEqual([v, v]);
     }
     expect(analyticsCampaignValue('  padded  ')).toBe('padded');
+  });
+
+  it('decodes an encoding left over once, and refuses one left twice', () => {
+    expect(analyticsCampaignValue('summer%20sale')).toBe('summer sale');
+    expect(analyticsCampaignValue('ana%40example.com')).toBeNull();
+    expect(analyticsCampaignValue('ana%2540example.com')).toBeNull();
+    expect(analyticsCampaignValue('20%descuento%40x')).toBeNull();
   });
 
   it("passes the growth loop's own tags through the parser unchanged", () => {
@@ -131,46 +144,58 @@ describe('analyticsCampaignValue', () => {
     }
   });
 
-  it('withholds an address, a handle, a URL, a query, an entity, a phone, and their encoded forms', () => {
-    for (const v of [
+  /** Inputs, each refused by one rule in particular. */
+  const withheld: Record<string, string[]> = {
+    'characters outside the allowlist': [
       'ana@example.com',
       '@dapta_ai',
-      'ana%40example.com',
-      'ana%2540example.com',
-      'https://example.com/x?email=ana',
-      'https:%2f%2fevil.test%2fana',
-      '//evil.test/reset/ana',
-      'linkedin.com/in/ana-smith',
-      'see www.example.com/reset/abc',
-      'HTTPS://EXAMPLE.COM/X',
-      'HTTPS%3A%2F%2FEXAMPLE.COM',
-      'ANA%40EXAMPLE.COM',
-      'a=1&b=2',
-      'a%3d1',
       'page?x',
-      'page%3fx',
-      'host%3a8080',
+      'a=1',
       'tom &amp; jerry',
-      '&#64;handle',
-      '+15551234567',
-      '+57 300 123 4567',
-      '57 300 123 4567',
-      '(555) 123-4567',
-      'tel:+15551234567',
-      'mailto:ana',
-      'example.com:8080/path',
-      'example.com:8080',
-      '%26%2364%3Bhandle',
-      'ana%2Eexample',
+      '\\\\evil.test\\reset',
       'ana\uFF20example.com',
-      'ana\uFE6Bexample.com',
-      'https\uFF1A\uFF0F\uFF0Fevil.test',
-      'x'.repeat(101),
-      '   ',
-    ]) {
-      expect([v, analyticsCampaignValue(v)]).toEqual([v, null]);
-    }
+      'https\u2236\u2215\u2215evil.test',
+      'tel\uA789+15551234567',
+      '+1555\u200B1234567',
+      'ana\u200F',
+      '555\u20131234567',
+      'evil\u3002test/reset',
+    ],
+    'a colon not followed by a space': ['tel:+15551234567', 'mailto:ana', 'example.com:8080', 'brand:search:exact'],
+    'two slashes': ['//evil.test', 'localhost/reset/abc', '/reset/8f3a9c1d2e', '+57/300/123/4567'],
+    'a dotted host before a slash': [
+      'linkedin.com/ana-smith',
+      'LINKEDIN.COM/ANA',
+      'evil.xn--p1ai/ana',
+      'evil.\u0440\u0444/ana',
+      '10.0.0.1/abc',
+      'evil.test./ana',
+      'see www.example.com/abc',
+    ],
+    'an HTML numeric entity': ['ana&#64example.com', '&#64dapta_ai', '&#x40;'],
+    'a phone number': [
+      '+15551234567',
+      'tel+15551234567',
+      'tel +15551234567',
+      '57 300 123 4567',
+      '57_300_123_4567',
+      '(555) 123-4567',
+      'cel 300 123 4567',
+      '300 123 4567 ana',
+      '\u0663\u0660\u0660 \u0661\u0662\u0663 \u0664\u0665\u0666\u0667',
+    ],
+    'an escape': ['ana%u0040example.com', '%26%2364%3Bhandle'],
+    'length or emptiness': ['x'.repeat(101), '   '],
+  };
+  for (const [rule, inputs] of Object.entries(withheld)) {
+    it(`withholds ${rule}`, () => {
+      for (const v of inputs) expect([v, analyticsCampaignValue(v)]).toEqual([v, null]);
+    });
+  }
+
+  it('is null for anything that is not a string', () => {
     expect(analyticsCampaignValue(undefined)).toBeNull();
+    expect(analyticsCampaignValue(42)).toBeNull();
   });
 });
 

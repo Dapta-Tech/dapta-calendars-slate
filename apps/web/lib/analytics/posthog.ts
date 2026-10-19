@@ -119,7 +119,7 @@ const CTA_EVENT = 'calendars_cta_clicked';
  * the API's (claimed write-once from the first request), so the browser sends
  * none of its own.
  */
-const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|bfcid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx|ph_keyword|\$search_engine|search_engine)$/;
+const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx|ph_keyword|\$search_engine|search_engine)$/;
 
 /**
  * A URL without its query string and fragment: `origin + path`, or the origin

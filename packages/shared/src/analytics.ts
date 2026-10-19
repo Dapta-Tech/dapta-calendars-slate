@@ -201,40 +201,77 @@ export function sanitizeLandingDistinctId(raw: string | readonly string[] | null
 export const CAMPAIGN_VALUE_MAX = 100;
 
 /**
+ * The characters a campaign label is made of, checked after Unicode
+ * compatibility folding: letters (not modifier letters, which include colon
+ * lookalikes), combining marks, digits in any script, the space, and a short
+ * list of punctuation. An ALLOWLIST, so a character nobody thought of (a
+ * lookalike colon or slash, an invisible format character, a backslash, a
+ * semicolon) is refused by construction rather than by one more rule.
+ */
+const CAMPAIGN_CHARS = /^[\p{Ll}\p{Lu}\p{Lt}\p{Lo}\p{Mn}\p{Mc}\p{Nd} ._&#%+/'()!,*|~:-]+$/u;
+
+/**
  * A campaign tag fit to send to analytics, or null.
  *
  * Campaign tags are whatever a link builder typed after `utm_*=`, and the only
  * check upstream is a length cap. A tag can therefore carry an email address
- * or a handle (`utm_content=ana@example.com`), a URL (with or without its
- * scheme), a query fragment, an HTML entity or a phone number from a merge
+ * or a handle, a URL, a query, an HTML entity or a phone number from a merge
  * tag, none of which is a campaign label. Those are withheld rather than
- * cleaned: a guessed repair would be a value nobody chose. A phone is caught
- * with a leading `+` or written in groups; one unbroken run of digits is kept,
- * since it cannot be told from a numeric campaign id.
+ * cleaned: a guessed repair would be a value nobody chose.
  *
- * Checked after Unicode compatibility folding (NFKC), so a fullwidth `＠` or
- * `／／` reads as what it looks like; the value sent is the one received. A
- * colon is refused outright: it is how a scheme (`tel:`, `mailto:`), a port
- * or a credential starts, and campaign names do without one. The value has
- * been decoded once already, so any `%XX` still in it means it was encoded
- * twice to hide something, and it is refused. Plain `&` and `#` are allowed:
- * "Q&A webinar" and "Video #2" are real campaign names, and `=`, `?` and `//`
- * already catch the query and URL shapes they would otherwise take part in.
+ * Withheld: any character outside `CAMPAIGN_CHARS` (so `@`, `?`, `=`, `;`,
+ * `\`, lookalikes and invisible characters); a colon not followed by a space
+ * (`tel:`, `mailto:`, a port, `a:b:c`; "q3: launch" is kept); two slashes
+ * anywhere, or a dotted host followed by a slash (a URL or a path); an HTML
+ * numeric entity (`&#64`, with or without its `;`); a phone number (nine or
+ * more digits in groups, or led by `+`, anywhere in the value); an `%u`
+ * escape; anything past `CAMPAIGN_VALUE_MAX`.
+ *
+ * Kept, on purpose: an unbroken run of digits, which cannot be told from a
+ * numeric campaign id (an ad platform's `{campaignid}`). That includes a phone
+ * whose `+` was not URL-encoded: the query parser turns it into a space.
+ *
+ * The value has been decoded once already, so a `%XX` run that still decodes
+ * is an encoding left over: it is decoded and the result checked again, once
+ * (a value encoded three times is refused). A `%` that is not an encoding
+ * ("20%descuento") is a literal percent and stays.
  */
 export function analyticsCampaignValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const v = value.trim();
+  return campaignLabel(value.trim(), 0);
+}
+
+function campaignLabel(v: string, depth: number): string | null {
   if (!v || v.length > CAMPAIGN_VALUE_MAX) return null;
   const folded = v.normalize('NFKC');
-  // An address or handle, a query, a URL: a scheme or `//`, or a host
-  // followed by a path. A bare host (`chatgpt.com`) is a source label.
-  if (/[@?=:]|\/\/|[a-z0-9-]\.[a-z]{2,}\//i.test(folded)) return null;
-  if (/&#?\w+;/.test(folded)) return null;
-  // A query parser turns a literal `+` into a space, so grouped digits count too.
-  const digits = folded.replace(/\D/g, '').length;
-  if (/^\+?[\d ().-]+$/.test(folded) && /[+ ().-]/.test(folded) && digits >= 9) return null;
-  if (/%[0-9a-f]{2}/i.test(folded)) return null;
+  if (/%u[0-9a-f]{4}/i.test(folded)) return null;
+  let decodedSome = false;
+  const decoded = folded.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      const out = decodeURIComponent(run);
+      decodedSome = true;
+      return out;
+    } catch {
+      return run;
+    }
+  });
+  if (decodedSome) return depth === 0 ? campaignLabel(decoded.trim(), 1) : null;
+  if (!CAMPAIGN_CHARS.test(folded)) return null;
+  if (/:(?!\s)|\/\/|\/.*\//.test(folded)) return null;
+  if (/[\p{L}\p{N}-]\.[\p{L}\p{N}-]*\//u.test(folded)) return null;
+  if (/&#x?[0-9a-f]/i.test(folded)) return null;
+  if (looksLikePhone(folded)) return null;
   return v;
+}
+
+/** Nine or more digits that are grouped (or led by `+`), anywhere in the value. */
+function looksLikePhone(v: string): boolean {
+  for (const m of v.matchAll(/\+?\p{Nd}[\p{Nd} ()./_-]*\p{Nd}/gu)) {
+    const run = m[0];
+    const digits = run.match(/\p{Nd}/gu)?.length ?? 0;
+    if (digits >= 9 && (run.startsWith('+') || /[ ()./_-]/.test(run))) return true;
+  }
+  return false;
 }
 
 /* ----------------------------------------------------------- referrers */
