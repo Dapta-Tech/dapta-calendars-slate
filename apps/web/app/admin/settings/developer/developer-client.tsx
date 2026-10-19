@@ -50,13 +50,21 @@ function KeyFacts({ k, m, now, eventTypeTitles }: { k: ApiKeyRow; m: DevMessages
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-field gap-y-tight">
-        <span title={ids.map((id) => eventTypeTitles.get(id) ?? id).join(', ') || undefined}>
-          {ids.length === 0 ? m.keyAllEventTypes : t(m.keyOnlyEventTypes, { count: String(ids.length) })}
-        </span>
-        <span className={state === 'expired' ? 'text-destructive' : undefined}>
-          {expMs === null ? m.keyNoExpiry : t(state === 'expired' ? m.keyExpired : m.keyExpires, { date: day(expMs) })}
-        </span>
-        <span>{last === null ? m.keyNeverUsed : t(m.keyLastUsed, { date: day(last) })}</span>
+        {/* A field the API did not send is left out, not shown as a default: an
+            older API must never make a limited key read "all event types". */}
+        {k.eventTypeIds !== undefined ? (
+          <span title={ids.map((id) => eventTypeTitles.get(id) ?? id).join(', ') || undefined}>
+            {ids.length === 0 ? m.keyAllEventTypes : t(m.keyOnlyEventTypes, { count: String(ids.length) })}
+          </span>
+        ) : null}
+        {k.expiresAt !== undefined ? (
+          <span className={state === 'expired' ? 'text-destructive' : undefined}>
+            {expMs === null ? m.keyNoExpiry : t(state === 'expired' ? m.keyExpired : m.keyExpires, { date: day(expMs) })}
+          </span>
+        ) : null}
+        {k.lastUsedAt !== undefined ? (
+          <span>{last === null ? m.keyNeverUsed : t(m.keyLastUsed, { date: day(last) })}</span>
+        ) : null}
       </div>
     </div>
   );
