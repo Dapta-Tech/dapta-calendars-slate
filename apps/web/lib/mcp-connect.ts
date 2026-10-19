@@ -46,7 +46,10 @@ export function cursorMcpJson(mcpUrl: string): string {
 export function claudeCodeCommand(mcpUrl: string): string {
   return [
     `claude mcp add --transport http ${SERVER_NAME} ${mcpUrl} \\`,
-    `  --header "Authorization: Bearer $${API_KEY_ENV}"`,
+    // Single quotes on purpose: the shell must NOT expand the variable, or Claude
+    // Code would store the plaintext key in its config. It stores the literal
+    // `${VAR}` and resolves it each time the server starts.
+    `  --header 'Authorization: Bearer \${${API_KEY_ENV}}'`,
   ].join('\n');
 }
 

@@ -55,7 +55,10 @@ describe('snippets', () => {
   it('Claude Code uses the http transport and the env var in the header', () => {
     const c = claudeCodeCommand(URL_);
     expect(c).toContain(`claude mcp add --transport http dapta-calendars ${URL_}`);
-    expect(c).toContain(`--header "Authorization: Bearer $${API_KEY_ENV}"`);
+    // Single-quoted so the shell leaves `${VAR}` for Claude Code to resolve; a
+    // double-quoted `$VAR` would be expanded and the key stored in plaintext.
+    expect(c).toContain(`--header 'Authorization: Bearer \${${API_KEY_ENV}}'`);
+    expect(c).not.toContain('"Authorization');
   });
   it('Codex reads the token from the environment', () => {
     const c = codexConfigToml(URL_);
