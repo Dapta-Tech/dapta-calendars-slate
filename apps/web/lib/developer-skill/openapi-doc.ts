@@ -1,8 +1,9 @@
 /**
  * Just enough of an OpenAPI 3 document to write the skill's endpoint reference
- * from it. The document is the API's own `/openapi.json` (hand-curated, and kept
- * in parity with the controllers by the API's tests), fetched when the zip is
- * built, so the skill lists what this installation serves and nothing else.
+ * from it. The document is the API's own `/openapi.json`: hand-curated, focused
+ * on the routes integrations use, and kept in parity with the controllers by
+ * the API's tests. It is fetched when the zip is built, so the skill lists what
+ * this installation's API documents and nothing else.
  *
  * Read defensively: the shape is trusted only as far as `parseOpenApi` checks
  * it, and every optional field below is treated as possibly absent, because a
@@ -26,7 +27,11 @@ export interface OpenApiOperation {
   security?: Array<Record<string, unknown>>;
   parameters?: unknown[];
   requestBody?: { required?: boolean; content?: Record<string, { schema?: Schema; example?: unknown }> };
-  responses?: Record<string, { description?: string } | undefined>;
+  responses?: Record<
+    string,
+    | { description?: string; headers?: Record<string, unknown>; content?: Record<string, { schema?: Schema; example?: unknown }> }
+    | undefined
+  >;
 }
 
 export interface OpenApiDocument {
@@ -34,7 +39,10 @@ export interface OpenApiDocument {
   servers?: unknown;
   security?: Array<Record<string, unknown>>;
   components?: {
-    securitySchemes?: Record<string, { type?: string; scheme?: string } | undefined>;
+    securitySchemes?: Record<
+      string,
+      { type?: string; scheme?: string; bearerFormat?: string; description?: string } | undefined
+    >;
     schemas?: Record<string, Schema | undefined>;
   };
   paths: Record<string, Record<string, unknown>>;
@@ -59,12 +67,31 @@ export function parseOpenApi(value: unknown): OpenApiDocument | null {
   return value as unknown as OpenApiDocument;
 }
 
+/**
+ * An operation with the parameters its path declares for every method merged
+ * in, as OpenAPI defines them: the operation's own wins when both name the
+ * same parameter in the same place.
+ */
+function withPathParameters(doc: OpenApiDocument, item: Record<string, unknown>, op: OpenApiOperation): OpenApiOperation {
+  const shared = Array.isArray(item.parameters) ? item.parameters : [];
+  if (shared.length === 0) return op;
+  const own = op.parameters ?? [];
+  const key = (p: unknown): string | null => {
+    const resolved = isRecord(p) && typeof p.$ref === 'string' ? resolveRef(doc, p.$ref) : p;
+    return isRecord(resolved) && typeof resolved.name === 'string' && typeof resolved.in === 'string'
+      ? `${resolved.in}:${resolved.name}`
+      : null;
+  };
+  const taken = new Set(own.map(key).filter(Boolean));
+  return { ...op, parameters: [...shared.filter((p) => !taken.has(key(p))), ...own] };
+}
+
 /** Every operation, in the document's own order: paths as listed, methods as listed under each. */
 export function listOperations(doc: OpenApiDocument): Operation[] {
   return Object.entries(doc.paths).flatMap(([path, item]) =>
     Object.keys(item)
       .filter((key): key is HttpMethod => (HTTP_METHODS as readonly string[]).includes(key) && isRecord(item[key]))
-      .map((method) => ({ method, path, op: item[method] as OpenApiOperation })),
+      .map((method) => ({ method, path, op: withPathParameters(doc, item, item[method] as OpenApiOperation) })),
   );
 }
 
@@ -72,8 +99,9 @@ export function listOperations(doc: OpenApiDocument): Operation[] {
 export const operationLabel = (method: string, path: string): string => `${method.toUpperCase()} ${path}`;
 
 export function findOperation(doc: OpenApiDocument, method: HttpMethod, path: string): OpenApiOperation | null {
-  const op = doc.paths[path]?.[method];
-  return isRecord(op) ? (op as OpenApiOperation) : null;
+  const item = doc.paths[path];
+  const op = item?.[method];
+  return item && isRecord(op) ? withPathParameters(doc, item, op as OpenApiOperation) : null;
 }
 
 /** A local `#/...` reference, or null. Remote references are not followed. */
@@ -127,4 +155,30 @@ export function authKind(doc: OpenApiDocument, op: OpenApiOperation): AuthKind {
     return s?.type === 'http' && s.scheme?.toLowerCase() === 'bearer';
   });
   return bearer ? 'key' : 'other';
+}
+
+/**
+ * How the document says its API keys begin, when it says so: a bearer scheme's
+ * `bearerFormat` that starts with it (`dcl_ API key`), or a description that
+ * shows one (`Bearer dcl_<prefix>_<secret>`). Null when no scheme carries it.
+ */
+export function documentedKeyPrefix(doc: OpenApiDocument): string | null {
+  for (const scheme of Object.values(doc.components?.securitySchemes ?? {})) {
+    if (scheme?.type !== 'http' || scheme.scheme?.toLowerCase() !== 'bearer') continue;
+    const fromFormat = /^([a-z][a-z0-9]*_)(?:\s|$)/i.exec(scheme.bearerFormat ?? '');
+    const fromText = /Bearer ([a-z][a-z0-9]*_)</i.exec(scheme.description ?? '');
+    const prefix = fromFormat?.[1] ?? fromText?.[1];
+    if (prefix) return prefix;
+  }
+  return null;
+}
+
+/** True when some operation declares `name` as a response header. */
+export function declaresResponseHeader(doc: OpenApiDocument, name: string): boolean {
+  const wanted = name.toLowerCase();
+  return listOperations(doc).some(({ op }) =>
+    Object.values(op.responses ?? {}).some(
+      (r) => isRecord(r?.headers) && Object.keys(r.headers).some((h) => h.toLowerCase() === wanted),
+    ),
+  );
 }

@@ -6,7 +6,7 @@ import { getMessages } from '@slate/shared';
 // The API's real description, the very object it serves at /openapi.json. It
 // has no imports, so the web spec can read it straight from the API's source.
 import { openapiSpec } from '../../../api/src/openapi';
-import { API_KEY_ENV, MCP_TOOLS, SCOPE_CATALOG } from '../mcp-connect';
+import { API_KEY_ENV, KEY_PREFIX, MCP_TOOLS, SCOPE_CATALOG } from '../mcp-connect';
 import { parseOpenApi, type OpenApiDocument } from './openapi-doc';
 import { buildSkillFiles, requiredOnly, SKILL_DIR } from './skill-files';
 
@@ -216,14 +216,89 @@ describe('buildSkillFiles', () => {
     expect(skill).toContain('400 `UNSUPPORTED_API_VERSION`');
     expect(skill).toContain('409 `IDEMPOTENCY_KEY_REUSED`');
     expect(skill).toContain('`Retry-After`');
-    expect(skill).toContain('`X-Request-Id`');
+    expect(skill).toContain('quote `error.requestId`');
     expect(skill).toContain('{ "error": "CODE", "message": "..." }');
     expect(skill).toMatch(/Ask before you cancel/);
+    // The key prefix the document's security scheme gives.
+    expect(skill).toContain('Keys start with `dcl_`.');
   });
 
-  it('explains how to install it in Claude Code, Codex and Cursor', () => {
+  it('says the reference covers the routes the API documents for integrations, not every route', () => {
+    expect(get('SKILL.md')).toContain('lists the routes this installation\'s API documents for integrations');
+    expect(get('reference/endpoints.md')).toContain("The routes this installation's API documents for integrations");
+    for (const [path, md] of markdown) expect(md, path).not.toMatch(/every route (this installation|the API) serves/i);
+  });
+
+  describe('quotes a code, a field or a header only when the document carries it', () => {
+    /** The real document with its error codes, request id and key prefix taken out. */
+    const bare = (): OpenApiDocument => {
+      const doc = JSON.parse(JSON.stringify(openapiSpec));
+      delete doc.components.schemas.ErrorEnvelope.properties.error.properties.code.examples;
+      delete doc.components.schemas.ErrorEnvelope.properties.error.properties.requestId;
+      for (const scheme of Object.values(doc.components.securitySchemes) as Array<Record<string, unknown>>) {
+        delete scheme.bearerFormat;
+        delete scheme.description;
+      }
+      return parseOpenApi(doc)!;
+    };
+
+    it('drops the codes, the request id and the documented prefix when the document lacks them', () => {
+      const skill = build(bare()).get('SKILL.md')!;
+      for (const code of ['UNSUPPORTED_API_VERSION', 'IDEMPOTENCY_KEY_REUSED', 'BOOKING_FIELDS_INVALID']) {
+        expect(skill, code).not.toContain(code);
+      }
+      // The document's own example envelope may still show one; the rule to quote it goes.
+      expect(skill).not.toContain('quote `error.requestId`');
+      // The rules themselves stay, without the promise of a code.
+      expect(skill).toContain('a missing or different value is refused');
+      expect(skill).toContain('take an `Idempotency-Key` header');
+      // With no prefix in the document, the one this product mints.
+      expect(skill).toContain(`Keys start with \`${KEY_PREFIX}\`.`);
+    });
+
+    it('names the X-Request-Id header only when an answer declares it', () => {
+      expect(get('SKILL.md')).not.toContain('X-Request-Id');
+      const doc = JSON.parse(JSON.stringify(openapiSpec));
+      doc.paths['/v2/slots'].get.responses['400'].headers = { 'X-Request-Id': { schema: { type: 'string' } } };
+      expect(build(parseOpenApi(doc)!).get('SKILL.md')).toContain('(also in the `X-Request-Id` header)');
+    });
+  });
+
+  it('tells the agent how to read a booking refusal, as the API words it', () => {
+    const skill = get('SKILL.md');
+    expect(skill).toContain('read its `message`');
+    // validateIntakeAnswers (packages/db) names the field by its label.
+    expect(skill).toContain('by the field\'s `label` (`Missing required field: Company`)');
+    expect(skill).toContain('find that label in `bookingFields` to get the `name` to answer');
+    // Out of range, or a time the event does not offer, arrives under the same code.
+    expect(skill).toContain('the start time is not offered, in the past or too far ahead');
+  });
+
+  it('says which REST routes take which scope where the label does not, from the catalog', () => {
+    const skill = get('SKILL.md');
+    const write = SCOPE_CATALOG.find((s) => s.kind === 'write')!.scope;
+    const cancel = SCOPE_CATALOG.find((s) => s.kind === 'destructive')!.scope;
+    expect(skill).toContain(`\`${write}\` also adds guests: \`POST /v2/bookings/{uid}/guests\`, \`POST /v1/machine/bookings/{uid}/attendees\`.`);
+    expect(skill).toContain(
+      `The REST cancel routes (\`POST /v2/bookings/{uid}/cancel\`, \`POST /v1/machine/bookings/{uid}/cancel\`) take \`${cancel}\` or \`${write}\`.`,
+    );
+    expect(skill).toContain(`The MCP tool \`cancel_booking\` takes only \`${cancel}\`.`);
+    // Every scope the files name is one the catalog has.
+    const known = new Set(SCOPE_CATALOG.map((s) => s.scope));
+    for (const [path, md] of markdown) {
+      for (const [scope] of md.matchAll(/\b[a-z-]+:(read|write|cancel)\b/g)) expect(known.has(scope), `${path}: ${scope}`).toBe(true);
+    }
+  });
+
+  it('explains how to install it in Claude Code, Codex and Cursor, and to update it the same way', () => {
     const install = get('INSTALL.md');
-    expect(install).toContain('unzip dapta-calendars-skill.zip -d ~/.claude/skills/');
+    // `-o`: an update overwrites without asking about every file.
+    expect(install).not.toMatch(/unzip (?!-o )/);
+    expect(install).toContain('unzip -o dapta-calendars-skill.zip -d ~/.claude/skills/');
+    // A second install does not add a second pointer to AGENTS.md.
+    expect(install).toContain("grep -qs 'dapta-calendars/SKILL.md' AGENTS.md || cat >> AGENTS.md <<'EOF'");
+    // The check names the scope the document says the route needs.
+    expect(install).toContain('lacks `event-types:read`');
     expect(install).toContain('~/.claude/skills/dapta-calendars/SKILL.md');
     expect(install).toContain('AGENTS.md');
     expect(install).toContain('.cursor/rules/dapta-calendars.mdc');

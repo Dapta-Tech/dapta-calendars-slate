@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { authKind, derefSchema, fixedHeaderValue, listOperations, parseOpenApi } from './openapi-doc';
+import {
+  authKind,
+  declaresResponseHeader,
+  derefSchema,
+  documentedKeyPrefix,
+  findOperation,
+  fixedHeaderValue,
+  listOperations,
+  operationParameters,
+  parseOpenApi,
+} from './openapi-doc';
 
 const doc = parseOpenApi({
   openapi: '3.1.0',
@@ -54,5 +64,60 @@ describe('references', () => {
     expect(derefSchema(doc, { $ref: '#/components/schemas/A' })).toEqual({ type: 'object', title: 'B' });
     expect(derefSchema(doc, { $ref: '#/components/schemas/Loop' })).toEqual({ $ref: '#/components/schemas/Loop' });
     expect(derefSchema(doc, { $ref: 'https://elsewhere.example.com/x.json' })).toBeNull();
+  });
+});
+
+describe('path-level parameters', () => {
+  const shared = parseOpenApi({
+    openapi: '3.1.0',
+    paths: {
+      '/bookings/{uid}': {
+        parameters: [
+          { name: 'uid', in: 'path', required: true, description: 'from the path' },
+          { name: 'version', in: 'header', required: true },
+        ],
+        get: {},
+        post: { parameters: [{ name: 'uid', in: 'path', required: true, description: 'from the operation' }, { name: 'uid', in: 'query' }] },
+      },
+    },
+  })!;
+  const params = (method: 'get' | 'post') =>
+    operationParameters(shared, findOperation(shared, method, '/bookings/{uid}')!).map((p) => `${p.in}:${p.name}:${p.description ?? ''}`);
+
+  it('applies to every operation under the path', () => {
+    expect(params('get')).toEqual(['path:uid:from the path', 'header:version:']);
+  });
+
+  it('gives way to the operation when it names the same parameter in the same place', () => {
+    expect(params('post')).toEqual(['header:version:', 'path:uid:from the operation', 'query:uid:']);
+    // listOperations hands out the same merge.
+    const post = listOperations(shared).find((o) => o.method === 'post')!;
+    expect(operationParameters(shared, post.op)).toHaveLength(3);
+  });
+});
+
+describe('documentedKeyPrefix', () => {
+  const withScheme = (scheme: Record<string, unknown>) =>
+    parseOpenApi({ openapi: '3.1.0', paths: {}, components: { securitySchemes: { k: { type: 'http', scheme: 'bearer', ...scheme } } } })!;
+
+  it('reads the prefix from the bearer format, or from a description that shows a key', () => {
+    expect(documentedKeyPrefix(withScheme({ bearerFormat: 'dcl_ API key' }))).toBe('dcl_');
+    expect(documentedKeyPrefix(withScheme({ description: 'Authorization: Bearer abc_<prefix>_<secret>.' }))).toBe('abc_');
+  });
+
+  it('is null when no scheme says how a key begins', () => {
+    expect(documentedKeyPrefix(withScheme({ bearerFormat: 'JWT' }))).toBeNull();
+    expect(documentedKeyPrefix(doc)).toBeNull();
+  });
+});
+
+describe('declaresResponseHeader', () => {
+  it('finds a header an answer declares, whatever its case', () => {
+    const declared = parseOpenApi({
+      openapi: '3.1.0',
+      paths: { '/a': { get: { responses: { 200: { description: 'ok', headers: { 'X-Request-Id': { schema: { type: 'string' } } } } } } } },
+    })!;
+    expect(declaresResponseHeader(declared, 'x-request-id')).toBe(true);
+    expect(declaresResponseHeader(doc, 'X-Request-Id')).toBe(false);
   });
 });

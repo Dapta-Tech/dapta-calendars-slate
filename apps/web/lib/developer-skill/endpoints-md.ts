@@ -14,7 +14,8 @@ import {
 
 /**
  * `reference/endpoints.md`: every operation of the OpenAPI document, and only
- * those. Nothing in this file names a route: headings, parameters, bodies and
+ * those. The document covers the routes the API offers integrations, not every
+ * route it serves, and the reference says so. Nothing in this file names a route: headings, parameters, bodies and
  * answers are all read off the document, so the reference cannot list a route
  * the API does not serve, and a route added to the API (and to its document,
  * which the API's parity test demands) shows up here with no change.
@@ -168,7 +169,7 @@ export function endpointsMd(doc: OpenApiDocument, { apiUrl }: { apiUrl: string }
   });
   return `# Endpoints
 
-Every route this installation's API serves: ${operations.length} operations, written from its OpenAPI document (\`openapi.json\` in this folder) when the skill was downloaded. Call nothing that is not listed here.
+The routes this installation's API documents for integrations: ${operations.length} operations, written from its OpenAPI document (\`openapi.json\` in this folder) when the skill was downloaded. The API has other routes too (the dashboard's own, and the MCP server that \`mcp-tools.md\` covers); over REST, call nothing that is not listed here.
 
 Base URL: \`${apiUrl}\`. Paths are relative to it. Bodies are JSON (\`Content-Type: application/json\`). A type in backticks, such as \`Attendee\`, is a schema under \`components.schemas\` in \`openapi.json\`.
 
