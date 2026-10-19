@@ -154,6 +154,42 @@ describe('GET /api/developers/skill', () => {
     }
   });
 
+  it('answers 503 busy, passing the wait on, when the API sheds load', async () => {
+    meAnswers = [() => new Response('{}', { status: 429, headers: { 'retry-after': '7' } })];
+    let res = await GET(req());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'UPSTREAM_BUSY' });
+    expect(res.headers.get('retry-after')).toBe('7');
+
+    // The same for the description, and with no wait given, none is invented.
+    meAnswers = [me('owner')];
+    openapiAnswer = () => new Response('{}', { status: 429 });
+    res = await GET(req());
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBeNull();
+  });
+
+  it('gives each upstream call a deadline', async () => {
+    await GET(req());
+    for (const [url, init] of fetchMock.mock.calls as unknown as Array<[string, RequestInit]>) {
+      expect(init.signal, url).toBeInstanceOf(AbortSignal);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers 502 when the description is bigger than any real one, declared or streamed', async () => {
+    const big = 2 * 1024 * 1024 + 1;
+    openapiAnswer = () => new Response('{}', { status: 200, headers: { 'content-length': String(big) } });
+    let res = await GET(req());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: 'OPENAPI_TOO_LARGE' });
+
+    openapiAnswer = () => new Response(`{"openapi":"3.1.0","paths":{},"pad":"${'x'.repeat(big)}"}`, { status: 200 });
+    res = await GET(req());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: 'OPENAPI_TOO_LARGE' });
+  });
+
   it('refuses to ship a zip that points nowhere when no public API address is configured', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('API_PUBLIC_URL', '');

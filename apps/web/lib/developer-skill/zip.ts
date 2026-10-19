@@ -30,13 +30,32 @@ export function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** MS-DOS date and time fields; the format cannot express anything before 1980. */
-function dosDateTime(date: Date): { time: number; date: number } {
-  const year = Math.max(1980, date.getUTCFullYear());
+/**
+ * MS-DOS date and time fields. They carry no zone and unzip tools read them as
+ * the machine's local time, so they are written in local time too; the format
+ * cannot express anything before 1980.
+ */
+export function dosDateTime(date: Date): { time: number; date: number } {
+  const year = Math.max(1980, date.getFullYear());
   return {
-    time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | Math.floor(date.getUTCSeconds() / 2),
-    date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
   };
+}
+
+/**
+ * A path that stays inside the folder it is unpacked into on every system:
+ * relative, forward slashes only, no `..` step, no drive letter. A backslash
+ * is a separator to Windows tools, so `a\..\b` would climb out there.
+ */
+function safeEntryPath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    !path.startsWith('/') &&
+    !path.includes('\\') &&
+    !/^[A-Za-z]:/.test(path) &&
+    !path.split('/').includes('..')
+  );
 }
 
 export function createZip(entries: ZipEntry[], modified: Date = new Date()): Uint8Array<ArrayBuffer> {
@@ -47,9 +66,7 @@ export function createZip(entries: ZipEntry[], modified: Date = new Date()): Uin
   let offset = 0;
 
   for (const entry of entries) {
-    if (!entry.path || entry.path.startsWith('/') || entry.path.split('/').includes('..')) {
-      throw new Error(`Invalid zip entry path: ${entry.path}`);
-    }
+    if (!safeEntryPath(entry.path)) throw new Error(`Invalid zip entry path: ${entry.path}`);
     const name = Buffer.from(encoder.encode(entry.path));
     const raw = typeof entry.content === 'string' ? encoder.encode(entry.content) : entry.content;
     const deflated = deflateRawSync(raw);
