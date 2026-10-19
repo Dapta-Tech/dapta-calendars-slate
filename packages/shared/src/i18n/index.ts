@@ -253,6 +253,26 @@ export interface BookingMessages {
     noTeamEvents: string;
   };
   /**
+   * The site itself, before any page names itself: the default `<title>` and
+   * description every page inherits, and the page a link that leads nowhere
+   * lands on. `{product}` is the deployment's product name, so a fork that
+   * keeps the neutral default reads just as well as Dapta's own build.
+   */
+  site: {
+    title: string;
+    description: string;
+    notFoundTitle: string;
+    notFoundBody: string;
+    notFoundHome: string;
+    /** The root page of a fork running the local sign-in (Dapta's build sends
+     *  `/` straight to the app): what this is, and the seeded demo page. */
+    devLandingTitle: string;
+    devLandingBody: string;
+    devLandingCta: string;
+    /** Before the demo page's path, which renders as code after it. */
+    devLandingTry: string;
+  };
+  /**
    * Location kind labels — WHERE a meeting happens. Shared by the public
    * booking page, the manage page and the event-type editor so one kind reads
    * the same everywhere. No conferencing vendor is named (R15); the running
@@ -337,6 +357,10 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      /** A dashboard page for something this workspace does not have (a deleted
+       *  event type, team or schedule, or a mistyped address). */
+      notFoundTitle: string;
+      notFoundBody: string;
       /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
        *  new tab. The icon says it visually; this says it out loud. */
       opensNewTab: string;
@@ -1625,6 +1649,19 @@ export const en: BookingMessages = {
     noEvents: 'No bookable events yet.',
     noTeamEvents: 'No bookable team events yet.',
   },
+  site: {
+    title: '{product}: free online scheduling and booking pages',
+    description:
+      '{product} gives you a booking page to share with one link. People pick a time in their own time zone, in English or Spanish. Open source.',
+    notFoundTitle: 'Page not found',
+    notFoundBody: 'This page does not exist. Check the link with the person who shared it.',
+    notFoundHome: 'Go home',
+    devLandingTitle: 'Open-source scheduling',
+    devLandingBody:
+      'A booking platform you clone and run. SQLite by default, deploy anywhere. This dev instance is seeded with a demo booking page.',
+    devLandingCta: 'Open the demo booking page',
+    devLandingTry: 'Try',
+  },
   location: {
     whereLabel: 'Where',
     conferencing: 'Online meeting',
@@ -1664,6 +1701,8 @@ export const en: BookingMessages = {
       signOut: 'Sign out',
       viewPublic: 'View public page',
       language: 'Language',
+      notFoundTitle: 'Not found',
+      notFoundBody: 'This workspace has nothing at this address. It may have been deleted.',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
       opensNewTab: 'Opens in a new tab',
@@ -2850,6 +2889,19 @@ export const es: BookingMessages = {
     noEvents: 'Aún no hay eventos disponibles para reservar.',
     noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
   },
+  site: {
+    title: '{product}: agenda de citas en línea gratis',
+    description:
+      '{product} te da una página de reservas para compartir con un solo enlace. Cada persona elige una hora en su propia zona horaria, en español o en inglés. Código abierto.',
+    notFoundTitle: 'Página no encontrada',
+    notFoundBody: 'Esta página no existe. Revisa el enlace con quien te lo compartió.',
+    notFoundHome: 'Ir al inicio',
+    devLandingTitle: 'Agenda de código abierto',
+    devLandingBody:
+      'Una plataforma de reservas que clonas y ejecutas. SQLite por defecto, despliégala donde quieras. Esta instancia de desarrollo trae una página de reservas de demostración.',
+    devLandingCta: 'Abrir la página demo',
+    devLandingTry: 'Prueba',
+  },
   location: {
     whereLabel: 'Dónde',
     conferencing: 'Reunión en línea',
@@ -2889,6 +2941,8 @@ export const es: BookingMessages = {
       signOut: 'Cerrar sesión',
       viewPublic: 'Ver página pública',
       language: 'Idioma',
+      notFoundTitle: 'No encontrado',
+      notFoundBody: 'Este espacio no tiene nada en esta dirección. Puede que se haya eliminado.',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
       opensNewTab: 'Se abre en una pestaña nueva',

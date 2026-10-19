@@ -15,3 +15,4 @@ export * from './dapta-branding';
 export * from './location';
 export * from './i18n';
 export * from './forwarded';
+export * from './seo';

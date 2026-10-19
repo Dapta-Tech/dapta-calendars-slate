@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { getMessages } from '@slate/shared';
 import { authProvider, getSession } from '@/lib/auth-session';
+import { getLocale } from '@/lib/locale';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 
@@ -25,17 +27,16 @@ export default async function HomePage() {
     redirect(session ? '/admin' : '/api/auth/login');
   }
 
+  // In the document's language, which `<html lang>` already declares.
+  const m = getMessages(await getLocale()).site;
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col items-center justify-center gap-8 px-6 py-16 text-center">
       <div className="flex flex-col items-center gap-3">
         <span className="rounded-md bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground">
           {productName}
         </span>
-        <h1 className="text-4xl font-semibold tracking-tight">Open-source scheduling</h1>
-        <p className="max-w-md text-muted-foreground">
-          A clone-and-run booking platform. SQLite by default, deploy anywhere. This dev instance is
-          seeded with a demo booking page.
-        </p>
+        <h1 className="text-4xl font-semibold tracking-tight">{m.devLandingTitle}</h1>
+        <p className="max-w-md text-muted-foreground">{m.devLandingBody}</p>
       </div>
 
       {/* A2 (#112): was a text link wearing an arrow. The OSS root is the door
@@ -44,11 +45,11 @@ export default async function HomePage() {
           otherwise it belongs to no unit at all. */}
       <Link href="/acme/alex-rivera" className={cn(buttonVariants({ size: 'lg' }), 'px-6')}>
         <i aria-hidden className="pi pi-external-link" style={{ fontSize: 14 }} />
-        Open the demo booking page
+        {m.devLandingCta}
       </Link>
 
       <p className="text-sm text-muted-foreground">
-        Try <code className="rounded-sm bg-muted px-1.5 py-0.5">/acme/alex-rivera/intro-call</code>
+        {m.devLandingTry} <code className="rounded-sm bg-muted px-1.5 py-0.5">/acme/alex-rivera/intro-call</code>
       </p>
     </main>
   );

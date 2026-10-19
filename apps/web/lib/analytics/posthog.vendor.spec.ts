@@ -191,6 +191,24 @@ describe('the PostHog adapter, against the real library', () => {
     b.close();
   }, 20_000);
 
+  it("a host arriving from a search result never sends the search engine's keyword", async () => {
+    const b = browser('https://cal.example.test/admin', 'https://www.bing.com/search?q=ana+calendly+alternative&form=QBLH');
+    const port = connectPosthog(CONFIG, 'host', b.w);
+    port.identify('host@example.test', { email: 'host@example.test' });
+    b.load();
+    port.capture('calendars_link_copied');
+    await wait(FLUSH_MS);
+    const events = await b.sent();
+    expect(events.some((e) => e.event === 'calendars_link_copied')).toBe(true);
+    for (const e of events) {
+      for (const bag of [e.properties, e.$set, e.$set_once]) {
+        expect(Object.keys(bag ?? {}).filter((k) => /ph_keyword|search_engine/.test(k))).toEqual([]);
+      }
+      expect(strings(e).join(' ')).not.toContain('calendly');
+    }
+    b.close();
+  }, 20_000);
+
   it('an audience that mounts after the library loaded never orphans the one already running', async () => {
     const b = browser('https://cal.example.test/admin');
     connectPosthog(CONFIG, 'host', b.w);

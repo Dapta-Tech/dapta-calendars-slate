@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 
 const port = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
 const webPort = port('E2E_WEB_PORT', 3411);
+const noindexWebPort = port('E2E_NOINDEX_WEB_PORT', 3412);
 const apiPort = port('E2E_API_PORT', 4411);
 const limitedApiPort = port('E2E_LIMITED_API_PORT', 4412);
 const calendarPort = port('E2E_CALENDAR_PORT', 4519);
@@ -15,6 +16,7 @@ const analyticsPort = port('E2E_ANALYTICS_PORT', 4520);
 
 export const E2E = {
   webPort,
+  noindexWebPort,
   apiPort,
   limitedApiPort,
   calendarPort,
@@ -23,6 +25,8 @@ export const E2E = {
   web: `http://localhost:${webPort}`,
   /** The web app's API_URL: a pass-through to `api` that can answer 429 on cue (fault-proxy.mjs). */
   proxy: `http://localhost:${proxyPort}`,
+  /** The same production build started as a deployment marked NOINDEX (CI only). */
+  noindexWeb: `http://localhost:${noindexWebPort}`,
   api: `http://localhost:${apiPort}`,
   limitedApi: `http://localhost:${limitedApiPort}`,
   calendar: `http://127.0.0.1:${calendarPort}`,

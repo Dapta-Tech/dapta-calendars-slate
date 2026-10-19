@@ -89,8 +89,11 @@ export function parseTheme(value: string | undefined | null): Theme | null {
  *  `'self'` so a deletion breaks a test rather than a header. The reverse also
  *  holds: every prefix here must be an unclaimable vanity slug
  *  (`RESERVED_PUBLIC_SLUGS` in `@slate/engine`), or an account can serve a
- *  booking page from a path this list calls the product. */
-const PRODUCT_PREFIXES = ['/admin', '/login', '/onboarding', '/api'];
+ *  booking page from a path this list calls the product.
+ *
+ *  `lib/robots.ts` reads it too: what is the product here is exactly what
+ *  `robots.txt` keeps crawlers out of. */
+export const PRODUCT_PREFIXES: readonly string[] = ['/admin', '/login', '/onboarding', '/api'];
 
 /**
  * Product surface, or booking page?

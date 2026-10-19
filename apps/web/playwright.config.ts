@@ -15,7 +15,9 @@ import { ANALYTICS_ENV, E2E } from './e2e/stack';
  * E2E_LIMITED_API_PORT (4412) has a small rate limit for the limiter tests, so
  * the rest of the suite never trips it. The web reaches the main API through a
  * pass-through proxy on E2E_PROXY_PORT (4413) that the busy-state tests can make
- * answer 429.
+ * answer 429. On CI (or `CI=1` locally) the web build is also started a second
+ * time on E2E_NOINDEX_WEB_PORT (3412) as a deployment marked NOINDEX, for
+ * `api-noindex.spec.ts`.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -100,5 +102,21 @@ export default defineConfig({
         ...ANALYTICS_ENV,
       },
     },
+    // The SAME build, started again with NOINDEX set: the switch is runtime
+    // env, so one image must serve a noindexed staging and an indexed
+    // production. Web servers start in order, so the build above is done by
+    // the time this starts. Production build only: two `next dev` servers
+    // cannot share one app directory.
+    ...(process.env.CI
+      ? [
+          {
+            command: `pnpm exec next start -p ${E2E.noindexWebPort}`,
+            url: `${E2E.noindexWeb}/robots.txt`,
+            reuseExistingServer: false,
+            timeout: 120_000,
+            env: { NEXT_PUBLIC_API_URL: E2E.api, API_URL: E2E.api, NOINDEX: '1' },
+          },
+        ]
+      : []),
   ],
 });

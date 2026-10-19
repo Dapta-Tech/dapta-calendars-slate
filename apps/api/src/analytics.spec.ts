@@ -224,6 +224,32 @@ describe('product analytics (API)', () => {
       expect(all[2]!.capture!.properties).toMatchObject({ from_invite: true, is_internal: true });
     });
 
+    it('a campaign tag that is an address, a URL or a query never reaches either payload', async () => {
+      await fx.attributionCaptured(principal, {
+        utm_source: 'newsletter',
+        utm_content: 'ana@example.com',
+        utm_term: 'https://evil.test/x?email=bob@example.com',
+        utm_campaign: 'a=1&b=2',
+      });
+      const [event, account] = await payloads();
+      expect(event!.capture!.properties).toMatchObject({ utm_source: 'newsletter', utm_withheld: true });
+      expect(event!.capture!.properties).not.toHaveProperty('utm_content');
+      expect(account!.update!.properties).toEqual({ utm_source: 'newsletter', utm_withheld: true, account_code: 'acme' });
+      const sent = JSON.stringify(await payloads());
+      expect(sent).not.toContain('ana@example.com');
+      expect(sent).not.toContain('bob@example.com');
+      expect(sent).not.toContain('evil.test');
+      expect(sent).not.toContain('a=1');
+    });
+
+    it('an account whose every tag was withheld says so, rather than read as one with none', async () => {
+      await fx.attributionCaptured(principal, { utm_content: 'ana@example.com', utm_term: 'tel:+15551234567' });
+      const [event, account] = await payloads();
+      expect(event!.capture!.properties).toMatchObject({ utm_withheld: true, has_click_id: false });
+      expect(account!.update!.properties).toEqual({ utm_withheld: true, account_code: 'acme' });
+      expect(JSON.stringify(await payloads())).not.toContain('ana@example.com');
+    });
+
     it('the signup source: campaign tags, the referrer as a domain, click ids as a flag', async () => {
       await fx.attributionCaptured(principal, {
         utm_source: 'chatgpt.com',
@@ -238,6 +264,9 @@ describe('product analytics (API)', () => {
         referrer_domain: 'chatgpt.com',
         has_click_id: true,
       });
+      // Nothing was withheld, so nothing says it was, on either payload.
+      expect(event!.capture!.properties).not.toHaveProperty('utm_withheld');
+      expect(account!.update!.properties).not.toHaveProperty('utm_withheld');
       expect(account!.update!.properties).toMatchObject({ utm_source: 'chatgpt.com', referrer_domain: 'chatgpt.com' });
       const sent = JSON.stringify(await payloads());
       expect(sent).not.toContain('secret-click-id');

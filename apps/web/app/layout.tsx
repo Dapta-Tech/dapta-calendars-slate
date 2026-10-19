@@ -1,8 +1,13 @@
 import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { Figtree } from 'next/font/google';
+import { getMessages, t } from '@slate/shared';
 import './icons.css';
+import { LangStamp } from '@/components/lang-stamp';
 import { ThemeStamp } from '@/components/theme-stamp';
+import { deploymentNoindex } from '@/lib/indexing';
+import { documentLangAnswers, documentLocale } from '@/lib/locale';
+import { PRODUCT_NAME } from '@/lib/product-name';
 import { isPublicDocument, resolveDocumentTheme } from '@/lib/theme.server';
 import './globals.css';
 
@@ -26,12 +31,6 @@ const figtree = Figtree({
   display: 'swap',
 });
 
-// Customer-facing name comes from the deployment (NEXT_PUBLIC_PRODUCT_NAME,
-// inlined at build time) — "Dapta Calendars" in Dapta's builds, "Calendars"
-// for a bare fork. "Slate" is the internal/repo identifier only and must
-// never surface in the UI.
-const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
-
 // Absolute base for OG/twitter URLs (PUBLIC_APP_URL is the deployment's public
 // web origin — already in .env for manage/booking links). Bad value → localhost.
 function appBaseUrl(): URL {
@@ -42,11 +41,22 @@ function appBaseUrl(): URL {
   }
 }
 
-export const metadata: Metadata = {
-  metadataBase: appBaseUrl(),
-  title: `${productName} — open-source scheduling`,
-  description: `${productName} is open-source scheduling. Clone, run, and book — anywhere.`,
-};
+/**
+ * The defaults every page inherits until it names itself: the product's own
+ * title and description, in the document's language, around the name the
+ * deployment set (`PRODUCT_NAME`; "Slate" is the repo's codename and never
+ * surfaces). A deployment marked `NOINDEX` says so here too, and every page
+ * inherits it; a page that sets its own `robots` (an embed) only ever narrows it.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const site = getMessages(await documentLocale()).site;
+  return {
+    metadataBase: appBaseUrl(),
+    title: t(site.title, { product: PRODUCT_NAME }),
+    description: t(site.description, { product: PRODUCT_NAME }),
+    ...(deploymentNoindex() ? { robots: { index: false, follow: false } } : {}),
+  };
+}
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // The document theme, resolved on the SERVER and stamped before the response
@@ -62,7 +72,18 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   //
   // `suppressHydrationWarning` stays: `ThemeToggle` mutates this exact attribute
   // on the client so the flip is a repaint rather than a navigation.
-  const [theme, isPublic] = await Promise.all([resolveDocumentTheme(), isPublicDocument()]);
+  //
+  // `lang` is asked the same way: the admin's language on a product route, the
+  // language the visitor's page renders in on a public one (`documentLocale`),
+  // so a Spanish booking page is a Spanish document to a screen reader and a
+  // search engine, not an English one with Spanish words in it. `LangStamp`
+  // keeps it right across client navigations, as `ThemeStamp` does the theme.
+  const [theme, isPublic, locale, langAnswers] = await Promise.all([
+    resolveDocumentTheme(),
+    isPublicDocument(),
+    documentLocale(),
+    documentLangAnswers(),
+  ]);
 
   // `bp-ground` on a public document gives `<html>` and `<body>` the booking
   // page's palette (tokens.css), so a route's skeleton, error boundary and the
@@ -70,7 +91,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // `ThemeStamp` and `CanvasStamp` keep it right across soft navigations.
   return (
     <html
-      lang="en"
+      lang={locale}
       data-theme={theme}
       className={isPublic ? `${figtree.variable} bp-ground` : figtree.variable}
       suppressHydrationWarning
@@ -81,6 +102,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             crosses between the product and a booking page. This re-derives it
             from the route on the client. */}
         <ThemeStamp />
+        {/* It reads the query, so it sits in its own boundary: a route that is
+            ever prerendered keeps its HTML, and this simply runs in the browser. */}
+        <Suspense fallback={null}>
+          <LangStamp product={langAnswers.product} visitor={langAnswers.visitor} />
+        </Suspense>
         {children}
       </body>
     </html>

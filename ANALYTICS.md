@@ -29,8 +29,9 @@ referrer, every campaign tag on the page's URL, copies of both on the person):
   device and session basics the vendor needs to accept and count an event, the
   page with its query cut, the referring domain, and this app's own properties.
   A future vendor release that starts sending something new sends it nowhere.
-- **Host events** drop every campaign tag and click id (the signup source is
-  the API's, claimed write-once), and the library collects none of its own.
+- **Host events** drop every campaign tag, click id and search keyword (the
+  signup source is the API's, claimed write-once), and the library collects
+  no campaign tags of its own.
 - **Every URL** left in any property, on either audience, loses its query and
   fragment.
 - This is tested against the real library (`apps/web/lib/analytics/posthog.vendor.spec.ts`,
@@ -79,7 +80,7 @@ the deployment prunes it.
 | Event | When | Properties |
 |---|---|---|
 | `calendars_signup_completed` | A login creates a member, or adopts an invite | `role`, `is_first_member`, `from_invite`; sets person `email`, `is_internal`. A first member also sets the account's `is_internal` and `created_at` |
-| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`. The same tags (without the flag) are set on the account |
+| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`, and `utm_withheld: true` when a tag was withheld. The same tags are set on the account, with `utm_withheld` too (without `has_click_id`). A tag that is not a plain label is withheld, never repaired (a value encoded once too many is decoded and checked again, and the decoded label is what is sent): only letters, marks, digits, the space, currency signs, emoji, dashes, typographic quotes, brackets and a short list of punctuation pass (an allowlist, checked after Unicode folding), and an invisible character (outside an emoji), an address or handle, a URL, path or IP address, a colon not followed by a space, an HTML entity, a phone number (led by `+`, in short digit blocks, or in a national format such as `300 1234567`), or an encoding left twice are refused. An unbroken run of digits without `+` is kept (it cannot be told from a campaign id, so a phone whose `+` was not URL-encoded passes), and so are date-coded names (`launch_20261018_01`), slashed dates and joined ids; a name made mostly of short numbers reads as a phone and is withheld. The exact rules live in `analyticsCampaignValue` (`@slate/shared`) |
 | `calendars_template_chosen` | The wizard creates the first event type from a template | `template` |
 | `calendars_calendar_connected` | A new calendar connection is stored | `provider`, `method` (`connect_flow` or `manual`) |
 | `calendars_hours_set` | A schedule is created with availability rules, or saved with rules that changed (a rename is not) | `rule_count`, `created` |
