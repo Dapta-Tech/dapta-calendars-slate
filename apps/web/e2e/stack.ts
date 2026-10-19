@@ -109,27 +109,30 @@ export const ANALYTICS_ENV = {
   PRODUCT_ANALYTICS_INTERNAL_EMAILS: 'jordan@example.com',
 };
 
-/** One thing the stand-in analytics host recorded. */
+/**
+ * One event the stand-in analytics host recorded: a browser event as the real
+ * vendor library sent it, or a server event as the API sent it.
+ */
 export interface RecordedAnalytics {
   source: 'browser' | 'server';
   /** When the stand-in received it (epoch ms). */
   at: number;
   /** Server events: when the event HAPPENED (ISO), which can be well before it arrives. */
   timestamp?: string;
-  type?: 'init' | 'capture' | 'identify' | 'alias' | 'group' | 'reset' | 'dropped';
-  instance?: string;
-  event?: string;
+  event: string;
   distinct_id?: string;
-  distinctId?: string;
   properties?: Record<string, unknown>;
-  config?: Record<string, unknown>;
-  set?: Record<string, unknown> | null;
-  groupType?: string;
-  groupKey?: string;
-  alias?: string;
+  $set?: Record<string, unknown>;
+  $set_once?: Record<string, unknown>;
 }
 
-/** Everything the stand-in recorded, optionally only since a moment (epoch ms). */
+/** Every request path the stand-in answered, since a moment (epoch ms). */
+export async function analyticsRequests(since = 0): Promise<string[]> {
+  const r = await fetch(`${E2E.analytics}/__qa/requests`);
+  const { requests } = (await r.json()) as { requests: Array<{ path: string; at: number }> };
+  return requests.filter((x) => x.at >= since).map((x) => x.path);
+}
+
 export async function analyticsRecorded(since = 0): Promise<RecordedAnalytics[]> {
   const r = await fetch(`${E2E.analytics}/__qa/events`);
   return ((await r.json()) as { events: RecordedAnalytics[] }).events.filter((e) => e.at >= since);

@@ -71,8 +71,13 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
+      // On CI the image is built WITHOUT the analytics variables and started
+      // with them, the way one image serves every environment: a value that
+      // only works when inlined at build time fails the analytics spec here.
       command: process.env.CI
-        ? `pnpm exec next build && pnpm exec next start -p ${E2E.webPort}`
+        ? `env ${Object.keys(ANALYTICS_ENV)
+            .map((k) => `-u ${k}`)
+            .join(' ')} pnpm exec next build && pnpm exec next start -p ${E2E.webPort}`
         : `pnpm exec next dev -p ${E2E.webPort}`,
       url: `${E2E.web}/acme/alex-rivera/intro-call`,
       reuseExistingServer: false,
