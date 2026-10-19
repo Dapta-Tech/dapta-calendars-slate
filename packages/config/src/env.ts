@@ -191,6 +191,22 @@ export const serverEnvSchema = z.object({
    * any span; then a 60-day read is one request per connection.
    */
   CALENDAR_BUSY_WINDOW_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+  /**
+   * The display cache of busy reads (ADR 0009). Only reads that SHOW
+   * availability use it; holds, bookings, reschedules and confirmations always
+   * read the calendar fresh. TTL: how long one read answers every visitor of
+   * the same calendar (0 turns the cache off and every page view reads the
+   * calendar, as before). MAX_STALE: how old the last good read may be and
+   * still stand in when a fresh read fails; older, the times are withheld.
+   * MAX_ENTRIES: windows held per process, least recently used out first.
+   * READ_TIMEOUT: how long a page waits on a slow calendar before answering
+   * from the last good read, or saying the calendar cannot be read right now.
+   * All optional; the defaults suit one or many replicas.
+   */
+  CALENDAR_BUSY_CACHE_TTL_MS: z.coerce.number().int().min(0).max(600_000).default(30_000),
+  CALENDAR_BUSY_CACHE_MAX_STALE_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  CALENDAR_BUSY_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).max(100_000).default(1000),
+  CALENDAR_BUSY_READ_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(10_000),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
@@ -232,6 +248,30 @@ export const serverEnvSchema = z.object({
   OUTBOX_WORKER_ENABLED: boolish.default('true'),
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(5000),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /**
+   * How long a failing delivery keeps being retried, counted from its first
+   * failure: exponential backoff (1 s, 2 s, 4 s ... capped at 15 min, with
+   * jitter), and once a row has spent its attempt budget AND been failing this
+   * long it is marked failed and logged. Default 24 h, so a subscriber, mail
+   * transport or calendar that is down for minutes or hours loses nothing.
+   * 0 restores the old behaviour: give up when the attempt budget is spent.
+   */
+  OUTBOX_RETRY_HORIZON_MS: z.coerce.number().int().min(0).max(30 * 24 * 3_600_000).default(24 * 3_600_000),
+  /**
+   * Deliveries in flight at once, per kind of work (webhooks, emails, calendar
+   * writes, CRM writes, sign-up sync), per process. Each kind drains on its
+   * own; a booking's deliveries go one at a time in the order queued, and a
+   * slow webhook subscriber holds at most one slot per process, so it holds
+   * up only itself.
+   */
+  OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  /**
+   * How long a claimed row belongs to the process that claimed it. Another
+   * replica takes it over only after this, so it must outlast the slowest
+   * delivery (a calendar write can make several backend calls). A replica that
+   * dies mid-delivery has its rows picked up once the lease runs out.
+   */
+  OUTBOX_LEASE_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(300_000),
 
   // CORS: a comma-separated allowlist of origins permitted to call the API from
   // a browser. When UNSET we default to PUBLIC_APP_URL only (the app's own web

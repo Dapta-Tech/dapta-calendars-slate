@@ -10,6 +10,8 @@ import {
   getTeamProfile,
 } from '@/lib/api';
 import { publicLocale } from '@/lib/locale';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
@@ -136,7 +138,11 @@ export default async function OneOffBookingPage({
   // in the header comment for why this path keeps its `*` frame-ancestors.
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
 
-  const resolved = await getOneOffLink(token);
+  const link = await orBusy(getOneOffLink(token));
+  // A busy service (429) is said as such and retried, never the outage page,
+  // and never read as a dead link.
+  if (isBusy(link)) return <BusyPage locale={locale} retryAfterMs={link.retryAfterMs} />;
+  const resolved = link;
 
   // An unknown or malformed token IS a missing route: the same not-found page,
   // with nothing on it that hints this deployment mints invite links. The
@@ -204,17 +210,21 @@ export default async function OneOffBookingPage({
   // header so the API will answer for the hidden event this link opens. Keeping
   // it the same page is what stops a one-off booking drifting from a public one.
   if (target.kind === 'team') {
-    const [team, availability] = await Promise.all([
-      getTeamProfile(target.accountCode, target.teamSlug),
-      getTeamAvailabilityWithOneOff({
-        accountCode: target.accountCode,
-        teamSlug: target.teamSlug,
-        slug: target.slug,
-        from,
-        to,
-        oneOffToken: token,
-      }),
-    ]);
+    const teamRead = await orBusy(
+      Promise.all([
+        getTeamProfile(target.accountCode, target.teamSlug),
+        getTeamAvailabilityWithOneOff({
+          accountCode: target.accountCode,
+          teamSlug: target.teamSlug,
+          slug: target.slug,
+          from,
+          to,
+          oneOffToken: token,
+        }),
+      ]),
+    );
+    if (isBusy(teamRead)) return <BusyPage locale={locale} retryAfterMs={teamRead.retryAfterMs} />;
+    const [team, availability] = teamRead;
     // The link resolved but the event behind it did not answer. Treat it as a
     // missing route rather than a spent link: reporting "already used" for an
     // event that was archived would send the invitee back to the host with the
@@ -260,17 +270,21 @@ export default async function OneOffBookingPage({
     );
   }
 
-  const [profile, availability] = await Promise.all([
-    getProfile(target.accountCode, target.handle),
-    getAvailabilityWithOneOff({
-      accountCode: target.accountCode,
-      handle: target.handle,
-      slug: target.slug,
-      from,
-      to,
-      oneOffToken: token,
-    }),
-  ]);
+  const personalRead = await orBusy(
+    Promise.all([
+      getProfile(target.accountCode, target.handle),
+      getAvailabilityWithOneOff({
+        accountCode: target.accountCode,
+        handle: target.handle,
+        slug: target.slug,
+        from,
+        to,
+        oneOffToken: token,
+      }),
+    ]),
+  );
+  if (isBusy(personalRead)) return <BusyPage locale={locale} retryAfterMs={personalRead.retryAfterMs} />;
+  const [profile, availability] = personalRead;
   if (!profile || !availability) notFound();
 
   const hostName = profile.member.displayName ?? profile.member.handle;

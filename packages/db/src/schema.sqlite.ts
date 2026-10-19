@@ -440,6 +440,14 @@ export const outbox = sqliteTable('outbox', {
   lastError: text('last_error'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+  /** Epoch-ms until which a worker owns the row (0026); NULL = not claimed. */
+  leaseUntil: integer('lease_until'),
+  /** Which claim holds the lease; outcomes are written only by its holder. */
+  leaseToken: text('lease_token'),
+  /** Epoch-ms of the first failed attempt; the retry horizon counts from it. */
+  firstFailedAt: integer('first_failed_at'),
+  /** Rows of one kind sharing it go one at a time, in queue order (0027/0026). */
+  orderKey: text('order_key'),
 });
 
 /**

@@ -11,6 +11,7 @@ import {
   type BookingNotificationContext,
   type EventReminder,
   type NotificationSetting,
+  sql,
   type Db,
 } from '@slate/db';
 import {
@@ -44,7 +45,35 @@ export class OutboxSkipError extends Error {}
  * and tries again, and the row's `last_error` then names the wait so nobody
  * reading the delivery log mistakes it for a transport fault.
  */
-export class ConferencingLinkPendingError extends Error {}
+/**
+ * The least wait between two looks for a conferencing link, so the bounded
+ * wait (CONFERENCING_LINK_WAIT_ATTEMPTS looks) gives the calendar about as
+ * long to mint the room as it had when retries rode the 5 s poll.
+ */
+export const CONFERENCING_LINK_RETRY_MS = 5_000;
+
+export class ConferencingLinkPendingError extends Error {
+  /** The worker waits at least this long before the next look. */
+  readonly retryAfterMs = CONFERENCING_LINK_RETRY_MS;
+}
+
+/**
+ * Mail that only makes sense while the booking is on. Once it is cancelled or
+ * declined, a row of one of these that is still queued (a retry can wait
+ * hours) is skipped rather than sent: a "confirmed" landing after "cancelled"
+ * tells the invitee the opposite of the truth.
+ */
+const LIVE_BOOKING_KINDS = new Set(['confirmation', 'reschedule', 'reminder', 'follow_up']);
+
+/**
+ * One side's mail about one booking goes out in the order it was queued
+ * (confirmed, moved, cancelled), however long a retry waits. The two sides are
+ * ordered apart: an invitee address the mail transport refuses must not hold
+ * up the host's copies.
+ */
+function emailOrderKey(uid: string, audience: 'attendee' | 'host'): string {
+  return `${uid}|${audience}`;
+}
 
 /**
  * How late a conferencing booking's confirmation/reschedule row is first made
@@ -254,6 +283,7 @@ export class EmailEffects {
             kind: 'email',
             action: 'reminder',
             bookingUid: uid,
+            orderKey: emailOrderKey(uid, side.audience),
             accountId: ctx.accountId,
             payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
@@ -333,6 +363,7 @@ export class EmailEffects {
             kind: 'email',
             action: 'follow_up',
             bookingUid: uid,
+            orderKey: emailOrderKey(uid, side.audience),
             accountId: ctx.accountId,
             payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
@@ -397,6 +428,7 @@ export class EmailEffects {
           kind: 'email',
           action: kind,
           bookingUid: uid,
+          orderKey: emailOrderKey(uid, side.audience),
           accountId: ctx.accountId,
           payload: JSON.stringify(n),
           ...(waitsForLink
@@ -606,6 +638,19 @@ export class EmailEffects {
       throw new OutboxSkipError(
         'email outbox row missing account context — skipped (signed transport requires a tenant)',
       );
+    }
+    if (LIVE_BOOKING_KINDS.has(kind) && n.uid) {
+      const live = await this.db.get<{ status: string; start_ms: number | string }>(
+        sql`SELECT status, start_ms FROM booking WHERE uid = ${n.uid} LIMIT 1`,
+      );
+      if (live && (live.status === 'cancelled' || live.status === 'rejected')) {
+        throw new OutboxSkipError(`${kind} for ${n.uid} skipped: the booking is ${live.status}`);
+      }
+      // A reminder is "before the meeting" or nothing: one held back by a
+      // long outage is dropped once the meeting has started.
+      if (live && kind === 'reminder' && Number(live.start_ms) <= Date.now()) {
+        throw new OutboxSkipError(`reminder for ${n.uid} skipped: the meeting has already started`);
+      }
     }
     if ((kind === 'reminder' || kind === 'follow_up') && n.reminderId && n.uid) {
       // A reminder row can sit dormant for 28 days, so the switch is re-read at

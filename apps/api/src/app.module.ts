@@ -1,4 +1,5 @@
 import { Logger, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { createDb } from '@slate/db';
 import {
   createEmailProvider,
@@ -51,6 +52,7 @@ import { CalV2Service } from './cal-v2.service';
 import { CalV2PilotService } from './cal-v2-pilot.service';
 import { McpController } from './mcp/mcp.controller';
 import { McpGateway } from './mcp/mcp.gateway';
+import { CalendarRetryAfterInterceptor } from './retry-after';
 import {
   OAuthHostController,
   OAuthInteractionController,
@@ -198,6 +200,8 @@ import { OAuthService } from './oauth/oauth.service';
       inject: [ENV],
     },
     RateLimitGuard,
+    // `Retry-After` on every write refused because a calendar could not be read.
+    { provide: APP_INTERCEPTOR, useClass: CalendarRetryAfterInterceptor },
     BookingService,
     CalV2Service,
     CalV2PilotService,

@@ -455,7 +455,16 @@ export class HostController {
   async hostConfirm(@Req() req: ReqLike, @Param('uid') uid: string) {
     const p = await this.auth.resolveHost(req);
     const out = await this.admin.confirm(p, uid);
-    if (!out.ok) throw new ConflictException({ error: out.reason, message: 'Cannot confirm.' });
+    if (!out.ok) {
+      // The host reads this in a toast, so it says what happened and what to do.
+      const message =
+        out.reason === 'CALENDAR_UNAVAILABLE'
+          ? 'Your calendar could not be checked right now, so the booking was not confirmed. Try again in a moment.'
+          : out.reason === 'SLOT_TAKEN'
+            ? 'That time is no longer free: another booking or an event on your calendar holds it. Decline the request, or ask the invitee for another time.'
+            : 'Cannot confirm.';
+      throw new ConflictException({ error: out.reason, message });
+    }
     return { uid, status: 'accepted' };
   }
 

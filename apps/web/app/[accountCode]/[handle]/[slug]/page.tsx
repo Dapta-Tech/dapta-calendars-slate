@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
-import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { failedChunk, toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -35,7 +37,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, handle, slug } = await params;
   const query = await searchParams;
-  const profile = await getProfile(accountCode, handle);
+  const profile = await orBusy(getProfile(accountCode, handle));
+  // A busy service renders the busy notice (below); it must not be indexed as the page.
+  if (isBusy(profile)) return { robots: { index: false, follow: false } };
   const event = profile?.eventTypes.find((e) => e.slug === slug);
   if (!profile || !event) return {};
   const name = profile.member.displayName ?? profile.member.handle;
@@ -90,7 +94,11 @@ export default async function BookingPage({
   const now = new Date();
   const from = now.toISOString();
 
-  const profile = await getProfile(accountCode, handle);
+  const read = await orBusy(getProfile(accountCode, handle));
+  // The service was too busy to answer (429): say so and retry, never the
+  // outage page. See `BusyPage`.
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const profile = read;
   // The public listing is the event's existence check: it holds every event
   // the availability route answers for on this URL (hidden ones are reached
   // only through `/booking/{token}`).
@@ -123,7 +131,7 @@ export default async function BookingPage({
   };
   const initial: Promise<AvailabilityChunk> = getAvailability({ accountCode, handle, slug, ...visible }).then(
     toChunk,
-    () => ({ ok: false }) as const,
+    failedChunk,
   );
 
   return (

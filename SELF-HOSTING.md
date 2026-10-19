@@ -158,6 +158,19 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
+| `CALENDAR_BUSY_CACHE_TTL_MS` | `30000` | optional; how long one busy read answers every visitor of the same calendar on the booking, team and manage pages (0 turns the cache off). Holds, bookings, reschedules and confirmations always read the calendar fresh (ADR 0009) | no |
+| `CALENDAR_BUSY_CACHE_MAX_STALE_MS` | `300000` | optional; when a fresh read fails or is slow, how old the last good read may be and still stand in. Older, the page says the calendar can't be read right now and offers nothing | no |
+| `CALENDAR_BUSY_CACHE_MAX_ENTRIES` | `1000` | optional; read windows held per API process, least recently used out first | no |
+| `CALENDAR_BUSY_READ_TIMEOUT_MS` | `10000` | optional; how long a page waits on a slow calendar before answering from the last good read (or saying it can't be read). The read keeps going and fills the cache for the next visitor | no |
+
+The busy cache is per API process. A booking clears the cached reads of its
+hosts on the process that took it; other replicas catch up within the TTL. It
+only ever feeds what a page shows: every write re-reads the calendar for the
+exact time and refuses (`SLOT_TAKEN`, or `CALENDAR_UNAVAILABLE` with
+`Retry-After` when the calendar cannot be read) rather than trust a cached
+answer. When a read is served stale or fails, the API logs one line per
+connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
+...`), naming the connection by a short hash, never its ref.
 
 ### Email / notifications
 
@@ -367,13 +380,13 @@ is byte-identical before and after, so no subscriber needs to be told.
 > be re-pasted from the provider's portal, but a signing secret exists only
 > here. Back the key up the way you back up the database.
 
-> **A key outage drops webhook events, and the drop is permanent.** A refused
-> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
-> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
-> marked `failed` — which is terminal, with no re-drive path. In practice a
-> deployment whose key is removed or corrupted loses every webhook event
-> enqueued in the following ~15 seconds, and restoring the key does **not**
-> replay them. Fix a key problem before it has been wrong for one drain cycle.
+> **A key outage drops webhook events once the retry horizon passes.** A refused
+> delivery is an ordinary outbox failure, so it is retried like any other
+> (exponential backoff from 1 s, capped at 15 min) until it has spent its five
+> attempts AND been failing for `OUTBOX_RETRY_HORIZON_MS` (default 24 h); then
+> the row is marked `failed`, which is terminal, with no re-drive path. Restore
+> the key within the horizon and the queued events go out; after it, they do
+> not.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
@@ -393,9 +406,12 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
-| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox | no |
-| `OUTBOX_POLL_MS` | `5000` | poll interval | no |
-| `OUTBOX_MAX_ATTEMPTS` | `5` | retry ceiling | no |
+| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox. Several API replicas may all run it: rows are claimed with a lease, so none is delivered twice at once | no |
+| `OUTBOX_POLL_MS` | `5000` | poll interval (a retry due sooner wakes the worker on time) | no |
+| `OUTBOX_MAX_ATTEMPTS` | `5` | reserved; every row gets five attempts before the retry horizon may end it | no |
+| `OUTBOX_RETRY_HORIZON_MS` | `86400000` | how long a failing delivery keeps being retried, counted from its first failure (backoff 1 s, 2 s, 4 s ... capped at 15 min, jittered). `0` = give up after the five attempts, the old behaviour | no |
+| `OUTBOX_CONCURRENCY` | `4` | deliveries in flight per kind of work (emails, calendar writes, webhooks, CRM, sign-up sync) per process. A booking's calendar writes, one side's mail about a booking, and one subscriber's events about a booking each go one at a time in the order queued, so a retry never lets a later one overtake it; a slow webhook subscriber holds at most one slot per process | no |
+| `OUTBOX_LEASE_MS` | `300000` | how long a claimed row belongs to the worker that claimed it; a live delivery renews it, a dead replica's rows are taken over when it runs out | no |
 | `CORS_ORIGINS` | `PUBLIC_APP_URL` only | comma-separated allowlist to embed the widget on other domains | no |
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
 | `RATE_LIMIT_CAPACITY` | `60` | burst | no |
@@ -412,6 +428,14 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for `book_meeting`, `create_booking`, `reschedule_booking`, `cancel_booking` | no |
 | `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `0.2` | sustained refill for write tools | no |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` | how long one tool call may run before the caller gets a timeout error | no |
+
+**Webhook deliveries** are POSTed with `X-Slate-Event` (the event name),
+`X-Slate-Signature` (`sha256=` HMAC of the body with the webhook's secret) and
+`X-Slate-Delivery` (the delivery's id). A retry sends the same body, signature
+and delivery id, so a subscriber that already processed an attempt the sender
+saw time out can recognise the retry and ignore it. Each attempt waits at most
+10 s for an answer; a slow subscriber holds up only its own deliveries. When a
+delivery is given up, the webhook's delivery log in the dashboard says so.
 
 ### OAuth for the MCP endpoint (optional)
 
@@ -626,6 +650,16 @@ reference it by `CALENDAR_BACKEND_MODULE`.
   images does not restore that text. Rollback across this migration is
   forward-only; take a snapshot before upgrading if you need a true point-in-time
   revert.
+- **Outbox leases (`postgres/0027`, `sqlite/0026`).** Workers from before this
+  migration claim outbox rows without a lease, so while old and new API pods run
+  side by side they can deliver the same row twice, and an old pod still gives a
+  failing row up after five attempts. Keep the overlap short (or set
+  `OUTBOX_WORKER_ENABLED=false` on the old pods during the rollout). Rows
+  already queued at the upgrade carry no order key and are ordered by their
+  booking (by their subscriber, for a webhook), so for those few rows only, a
+  retry of one can still be overtaken by a row about the same booking queued
+  after the upgrade. Rolling back is safe: the old code ignores the four
+  columns.
 
 ## Troubleshooting
 

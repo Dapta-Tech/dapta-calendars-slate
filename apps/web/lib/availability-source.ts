@@ -1,5 +1,6 @@
 import type { AvailabilityResponse, BookingField, Slot } from '@slate/types';
 import type { Span } from '@/lib/availability-window';
+import { ApiBusyError } from '@/lib/busy';
 
 /**
  * One window of a booking page's availability, as the island receives it.
@@ -24,6 +25,12 @@ export type AvailabilityChunk =
        * pass (the API unreachable, a 5xx, a timeout).
        */
       final?: boolean;
+      /**
+       * The service was too busy to answer (429). The island says so (not
+       * "unavailable") and asks again no sooner than `retryAfterMs`.
+       */
+      busy?: boolean;
+      retryAfterMs?: number;
     };
 
 /** Which event a page reads availability for. Public identifiers only. */
@@ -44,6 +51,11 @@ export function toChunk(r: AvailabilityResponse | null): AvailabilityChunk {
     ...(r.emptyReason ? { emptyReason: r.emptyReason } : {}),
     bookingFields: r.eventType.bookingFields,
   };
+}
+
+/** A read that did not answer, as a chunk: busy (429) when that is why, else a plain failure. */
+export function failedChunk(err: unknown): AvailabilityChunk {
+  return err instanceof ApiBusyError ? { ok: false, busy: true, retryAfterMs: err.retryAfterMs } : { ok: false };
 }
 
 /** Same-origin URL the island reads a later window from (`app/api/availability`). */

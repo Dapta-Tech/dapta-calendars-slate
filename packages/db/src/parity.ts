@@ -46,6 +46,7 @@ import {
   resolveScheduleTimeZone,
   scopedIdempotencyKey,
   type BookingFieldDef,
+  lockMembers,
 } from './repository';
 import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
 import {
@@ -1116,19 +1117,32 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
  */
 async function runGuarded(
   db: Db,
+  /**
+   * Every member the write gives (or keeps) a booking. On Postgres their rows
+   * are locked first, in id order, so two guarded writes over the same member
+   * run one after the other: under READ COMMITTED the overlap checks are plain
+   * reads, and the EXCLUDE covers the organizer only, so a co-host's seat had
+   * no other guard against a concurrent write. SQLite runs one writer at a
+   * time already; IMMEDIATE makes a second process wait rather than fail.
+   */
+  memberIds: string[],
   overlapChecks: Array<ReturnType<typeof sql>>,
   statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
   if (db.dialect === 'sqlite') {
-    return db.sqlite!.txn<boolean>(() => {
-      for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
-      for (const stmt of statements) db.sqlite!.drizzle.run(stmt);
-      return true;
-    });
+    return db.sqlite!.txn<boolean>(
+      () => {
+        for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
+        for (const stmt of statements) db.sqlite!.drizzle.run(stmt);
+        return true;
+      },
+      { immediate: true },
+    );
   }
   const pg = db.pg!.drizzle;
   try {
     return await pg.transaction(async (tx) => {
+      await lockMembers(tx, memberIds);
       for (const check of overlapChecks) {
         const rows = (await tx.execute(check)) as unknown as unknown[];
         if (rows.length > 0) return false;
@@ -1155,6 +1169,7 @@ function insertBookingGuarded(
 ): Promise<boolean> {
   return runGuarded(
     db,
+    hostMemberIds,
     hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
     statements,
   );
@@ -1380,12 +1395,17 @@ export async function rescheduleBooking(
   // stable, no mint-new row), record where it came FROM (the previous start) in
   // `from_reschedule` — the old system's back-pointer analog. `rescheduled=1`
   // flags that it moved at all.
+  // Only while it is still accepted: a cancel, a decline or a v2 move that
+  // landed since the read above leaves nothing to move (GONE), rather than
+  // rewriting the time of a booking that is no longer on.
   const updateSql = sql`UPDATE booking SET start_ms = ${args.newStartMs}, end_ms = ${newEndMs},
     rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
-    updated_at = ${now} WHERE id = ${b.id}`;
+    updated_at = ${now} WHERE id = ${b.id} AND status = 'accepted'
+    RETURNING id`;
 
-  const moved = await runGuardedUpdate(db, overlapChecks, updateSql);
-  if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };
+  const moved = await runGuardedUpdate(db, assignedHostIds, overlapChecks, updateSql);
+  if (moved === 'gone') return { ok: false, reason: 'GONE' };
+  if (moved === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
     uid: b.uid,
@@ -1401,13 +1421,42 @@ export async function rescheduleBooking(
  * LIST of checks because a team booking has a host SET, not a host: a
  * collective move has to answer for each of its co-hosts, and checking them one
  * transaction at a time would leave open the window this guard exists to close.
+ *
+ * `updateSql` must carry its expected state in its WHERE (`status = ...`) and
+ * end in `RETURNING id`. An update that matches no row means the booking
+ * changed state since it was read (cancelled, declined, moved by v2): the
+ * answer is `gone`, never a success the caller would act on. Postgres
+ * re-checks that WHERE against the row as committed, so a concurrent cancel
+ * cannot slip between the check and the write.
  */
-function runGuardedUpdate(
+async function runGuardedUpdate(
   db: Db,
+  memberIds: string[],
   overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
-): Promise<boolean> {
-  return runGuarded(db, overlapChecks, [updateSql]);
+): Promise<'ok' | 'conflict' | 'gone'> {
+  if (db.dialect === 'sqlite') {
+    return db.sqlite!.txn<'ok' | 'conflict' | 'gone'>(
+      () => {
+        for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return 'conflict';
+        return db.sqlite!.drizzle.get(updateSql) ? 'ok' : 'gone';
+      },
+      { immediate: true },
+    );
+  }
+  try {
+    return await db.pg!.drizzle.transaction(async (tx) => {
+      await lockMembers(tx, memberIds);
+      for (const check of overlapChecks) {
+        const rows = (await tx.execute(check)) as unknown as unknown[];
+        if (rows.length > 0) return 'conflict' as const;
+      }
+      const updated = (await tx.execute(updateSql)) as unknown as unknown[];
+      return updated.length > 0 ? ('ok' as const) : ('gone' as const);
+    });
+  } catch {
+    return 'conflict';
+  }
 }
 
 /**
@@ -1596,22 +1645,66 @@ export async function addAttendeeToBooking(
   return { ok: true };
 }
 
-/** Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE). */
-export async function confirmBooking(db: Db, uid: string, accountId?: string): Promise<MutationOutcome> {
+/**
+ * Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE).
+ *
+ * With `calendar`, the connected calendar of every assigned host is read for
+ * the booking's time first, the same fail-closed check create and reschedule run: a request
+ * can wait days for its answer, and the host's calendar may have filled that
+ * time meanwhile. Busy there answers `SLOT_TAKEN`; a calendar that cannot be
+ * read answers `CALENDAR_UNAVAILABLE` (nothing is confirmed, try again). The
+ * request itself was never written to the calendar (only an accepted booking
+ * is), so it cannot conflict with itself. Omitted, only the local guard runs,
+ * exactly as before.
+ */
+export async function confirmBooking(
+  db: Db,
+  uid: string,
+  accountId?: string,
+  calendar?: CalendarProvider,
+): Promise<MutationOutcome> {
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
+  const startMs = Number(b.start_ms);
+  const endMs = Number(b.end_ms);
+  // Everyone the booking assigns: its organizer and any co-host in
+  // `booking_host`, the same set create and reschedule answer for. No path
+  // writes a pending booking with co-hosts today (team bookings are created
+  // accepted), but a confirmation must not be the one place that forgets them.
+  const hostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  for (const hostId of hostIds) {
+    try {
+      const busy = await loadExternalBusy(db, calendar, hostId, startMs, endMs, b.event_type_id);
+      if (busy.some((x) => x.start.getTime() < endMs && x.end.getTime() > startMs)) {
+        return { ok: false, reason: 'SLOT_TAKEN' };
+      }
+    } catch {
+      return { ok: false, reason: 'CALENDAR_UNAVAILABLE' };
+    }
+  }
   const now = Date.now();
-  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
-    AND status = 'accepted' AND id <> ${b.id}
-    AND start_ms < ${b.end_ms} AND end_ms > ${b.start_ms} LIMIT 1`;
+  // An ACCEPTED booking of any assigned host over the same time, held as its
+  // organizer or as a co-host.
+  const overlapChecks = hostIds.map(
+    (hostId) => sql`SELECT b.id FROM booking b
+      WHERE b.status = 'accepted' AND b.id <> ${b.id}
+        AND b.start_ms < ${b.end_ms} AND b.end_ms > ${b.start_ms}
+        AND (b.host_member_id = ${hostId}
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${hostId}))
+      LIMIT 1`,
+  );
   // DH1: guard the transition on the CURRENT status so a concurrent/retried
   // confirm can only move pending→accepted once (defence-in-depth alongside the
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
-    WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, [overlapSql], updateSql);
-  if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
+    WHERE id = ${b.id} AND status = 'pending'
+    RETURNING id`;
+  const confirmed = await runGuardedUpdate(db, hostIds, overlapChecks, updateSql);
+  // Cancelled, declined or confirmed by someone else since the read above:
+  // nothing was confirmed here, so nothing may be announced.
+  if (confirmed === 'gone') return { ok: false, reason: 'GONE' };
+  if (confirmed === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
     uid: b.uid,
@@ -2716,12 +2809,17 @@ export async function enqueueWebhookDeliveries(
 ): Promise<number> {
   const hooks = await loadMatchingWebhooks(db, accountId, event);
   const body = JSON.stringify({ event, data: payload });
+  // The booking the event is about, when it names one: a subscriber's events
+  // about one booking are delivered in order (created before cancelled), and
+  // its events about other bookings are not held behind them.
+  const uid = (payload as { uid?: unknown } | null)?.uid;
   for (const h of hooks) {
     await enqueueOutbox(db, {
       kind: 'webhook',
       action: event,
       accountId,
       webhookId: h.id,
+      bookingUid: typeof uid === 'string' && uid ? uid : null,
       payload: body,
       now,
     });
@@ -2749,12 +2847,14 @@ async function recordWebhookDelivery(
     ok: boolean;
     statusCode: number | null;
     error: string | null;
+    /** Epoch-ms; defaults to now. */
+    at?: number;
   },
 ): Promise<void> {
   await db.run(
     sql`INSERT INTO webhook_delivery (id, webhook_id, account_id, event, ok, status_code, error, created_at)
         VALUES (${randomUUID()}, ${row.webhookId}, ${row.accountId}, ${row.event},
-          ${row.ok ? 1 : 0}, ${row.statusCode}, ${row.error}, ${Date.now()})`,
+          ${row.ok ? 1 : 0}, ${row.statusCode}, ${row.error}, ${row.at ?? Date.now()})`,
   );
   await db.run(
     sql`DELETE FROM webhook_delivery WHERE webhook_id = ${row.webhookId} AND id NOT IN (
@@ -2803,9 +2903,55 @@ export async function listWebhookDeliveries(
   }));
 }
 
+/**
+ * The delivery log's last word on an event the outbox stopped retrying, so the
+ * host sees in the dashboard that this one will not arrive (not only that the
+ * attempts failed). Best effort: a subscriber deleted meanwhile records nothing.
+ */
+export async function recordWebhookGaveUp(
+  db: Db,
+  args: { webhookId: string; body: string; attempts: number },
+): Promise<void> {
+  const hook = await db.get<{ account_id: string }>(
+    sql`SELECT account_id FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  );
+  if (!hook) return;
+  let event = '';
+  try {
+    event = (JSON.parse(args.body) as { event?: string }).event ?? '';
+  } catch {
+    // An unreadable body still gets its line; the event name is just unknown.
+  }
+  // After the attempt it follows, even within the same millisecond: the log
+  // reads newest first, and this line has to be the last word.
+  const last = await db.get<{ at: number | string | null }>(
+    sql`SELECT MAX(created_at) AS at FROM webhook_delivery WHERE webhook_id = ${args.webhookId}`,
+  );
+  await recordWebhookDelivery(db, {
+    webhookId: args.webhookId,
+    accountId: hook.account_id,
+    event,
+    ok: false,
+    statusCode: null,
+    error: `Gave up after ${args.attempts} attempts. This event will not be delivered.`,
+    at: Math.max(Date.now(), Number(last?.at ?? 0) + 1),
+  });
+}
+
 export async function deliverWebhookEvent(
   db: Db,
-  args: { webhookId: string; body: string; key: Buffer | null },
+  args: {
+    webhookId: string;
+    body: string;
+    key: Buffer | null;
+    /**
+     * The delivery's own id (the outbox row id), sent as `X-Slate-Delivery`.
+     * The same on every retry of one event to one subscriber, so a subscriber
+     * that got an attempt the sender saw time out can tell the retry is the
+     * same delivery and ignore it.
+     */
+    deliveryId?: string;
+  },
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const hook = await db.get<
@@ -2844,6 +2990,7 @@ export async function deliverWebhookEvent(
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'X-Slate-Event': event,
+    ...(args.deliveryId ? { 'X-Slate-Delivery': args.deliveryId } : {}),
   };
   // Signing is a delivery precondition, not a best-effort extra: an envelope we
   // cannot open FAILS the attempt (recorded, then rethrown so the outbox retries

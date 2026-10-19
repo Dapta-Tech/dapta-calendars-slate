@@ -22,7 +22,8 @@
  * each of which says why.
  *
  * Deliberately NOT covered: the public booking surfaces. `booking-flow.tsx`,
- * `booking-page-parts.tsx`, `made-with-badge.tsx` and `branded-shell.tsx` live
+ * `booking-page-parts.tsx`, `made-with-badge.tsx`, `branded-shell.tsx` and the
+ * busy notice (`busy-page.tsx`, `service-busy.tsx`) live
  * under `apps/web/components` but render `apps/web/app/[accountCode]`, where the
  * spacing comes from the booking page's own `--bp-pad` / `--bp-gap` axes — the
  * host's settings, not this scale. They are skipped by name below, because the
@@ -116,6 +117,11 @@ const PUBLIC_SURFACES = new Set([
   'apps/web/components/booking-page-parts.tsx',
   'apps/web/components/made-with-badge.tsx',
   'apps/web/components/branded-shell.tsx',
+  // The busy notice that stands in for a whole public page (a 429): the same
+  // frame the public routes give their <main>, so a page and its busy state
+  // sit in one place.
+  'apps/web/components/busy-page.tsx',
+  'apps/web/components/service-busy.tsx',
 ]);
 
 /** Comments are not rendered, so a number in one is not a spacing decision. */

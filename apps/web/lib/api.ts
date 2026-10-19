@@ -6,6 +6,7 @@ import type { BrandKit } from '@slate/types';
 import { cache } from 'react';
 import { bookingViewSchema, oneOffLinkTargetSchema } from '@slate/types';
 import { visitorHeaders } from '@/lib/visitor';
+import { ApiBusyError, retryAfterMsOf } from '@/lib/busy';
 import type {
   AvailabilityResponse,
   BookingView,
@@ -21,15 +22,47 @@ import type {
 const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 /**
+ * A 429 whose `Retry-After` is at most this long is waited out here, once,
+ * before the visitor is told anything: a short burst then costs them a second
+ * instead of a busy screen. Longer waits are handed to the page, which says so
+ * and retries on its own.
+ */
+const SERVER_RETRY_MAX_WAIT_MS = 2_000;
+
+/**
  * Every call in this file is made on behalf of a visitor (profile, availability,
  * holds, bookings, manage), so each one carries the visitor's address for the
  * API's rate limiter (see `visitorHeaders`). Admin calls live in admin-api.ts.
+ *
+ * A 429 is retried ONCE after its `Retry-After` when that is short. Safe for
+ * the POSTs too: the API's limiter refuses before the handler runs, and the
+ * one handler that answers 429 itself (too many live holds) wrote nothing.
  */
 async function visitorFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(url, {
-    ...init,
-    headers: { ...(init.headers as Record<string, string> | undefined), ...(await visitorHeaders()) },
-  });
+  const send = async () =>
+    fetch(url, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), ...(await visitorHeaders()) },
+    });
+  const res = await send();
+  if (res.status !== 429) return res;
+  // Only a 429 that names its wait is waited out: the limiter always sends
+  // Retry-After, while the cap on a host's live holds does not, and asking
+  // that one again in a moment changes nothing.
+  const header = res.headers.get('retry-after');
+  if (!header) return res;
+  const wait = retryAfterMsOf(header);
+  if (wait > SERVER_RETRY_MAX_WAIT_MS) return res;
+  await res.body?.cancel().catch(() => undefined);
+  // A little jitter, so the visitors one burst refused do not all come back together.
+  await new Promise((r) => setTimeout(r, wait + Math.floor(Math.random() * 250)));
+  return send();
+}
+
+/** A 429 that survived the one retry above, as the error the pages render a busy state from. */
+function busyError(res: Response): ApiBusyError {
+  void res.body?.cancel().catch(() => undefined);
+  return new ApiBusyError(retryAfterMsOf(res.headers.get('retry-after')));
 }
 
 /**
@@ -44,6 +77,7 @@ async function getJson<T>(path: string, oneOffToken?: string): Promise<T | null>
     headers: oneOffHeaders(oneOffToken),
   });
   if (res.status === 404) return null;
+  if (res.status === 429) throw busyError(res);
   if (!res.ok) throw new Error(`API ${path} failed: ${res.status}`);
   return (await res.json()) as T;
 }
@@ -146,7 +180,13 @@ export async function postTeamBooking(
   );
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (res.status === 201) return { ok: true, status: 201, booking: toBookingView(json, 'team booking') };
-  return { ok: false, status: res.status, error: (json.error as string) ?? 'ERROR', message: (json.message as string) ?? 'Failed' };
+  return {
+    ok: false,
+    status: res.status,
+    error: (json.error as string) ?? 'ERROR',
+    message: (json.message as string) ?? 'Failed',
+    ...(res.status === 429 ? { retryAfterMs: retryAfterMsOf(res.headers.get('retry-after')) } : {}),
+  };
 }
 
 /**
@@ -181,6 +221,7 @@ export async function getRescheduleAvailability(params: {
   // "no times to offer" and the page renders its empty picker, exactly as it
   // does for an event with nothing free.
   if (res.status === 404) return null;
+  if (res.status === 429) throw busyError(res);
   if (!res.ok) throw new Error(`API reschedule availability failed: ${res.status}`);
   return (await res.json()) as AvailabilityResponse;
 }
@@ -211,6 +252,8 @@ export interface BookResult {
   booking?: BookingView;
   error?: string;
   message?: string;
+  /** On a 429: how long the API asked us to wait, in ms. */
+  retryAfterMs?: number;
 }
 
 export interface ReserveResult {
@@ -218,6 +261,8 @@ export interface ReserveResult {
   status: number;
   reservationUid?: string;
   expiresAt?: string;
+  /** The API's code on a refusal (INVALID_SLOT, CALENDAR_UNAVAILABLE, RATE_LIMITED...). */
+  error?: string;
   message?: string;
 }
 
@@ -245,7 +290,12 @@ export async function postReservation(
       reservationUid: json.reservationUid as string,
       expiresAt: json.expiresAt as string,
     };
-  return { ok: false, status: res.status, message: (json.message as string) ?? 'Could not hold the time.' };
+  return {
+    ok: false,
+    status: res.status,
+    error: typeof json.error === 'string' ? json.error : undefined,
+    message: (json.message as string) ?? 'Could not hold the time.',
+  };
 }
 
 /**
@@ -306,9 +356,23 @@ export async function getManageView(uid: string, token: string): Promise<ManageV
   // 403 = a wrong or already-rotated token; 410 = the booking is gone. Both are
   // a dead LINK rather than a failure, and both have to read as one.
   if (res.status === 403 || res.status === 410) return { ok: false, reason: 'invalid-link' };
+  if (res.status === 429) throw busyError(res);
   if (!res.ok) throw new Error(`API manage view failed: ${res.status}`);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   return { ok: true, booking: toBookingView(json, 'manage view') };
+}
+
+/**
+ * What a manage action answered. `error` is the API's code and `status` its
+ * HTTP status, so the page can say what happened in the visitor's language
+ * rather than echo the API's English `message`.
+ */
+export interface ManageResult {
+  ok: boolean;
+  message?: string;
+  manageUrl?: string;
+  error?: string;
+  status?: number;
 }
 
 export async function postManage(
@@ -316,7 +380,7 @@ export async function postManage(
   token: string,
   action: 'cancel' | 'reschedule',
   body: Record<string, unknown>,
-): Promise<{ ok: boolean; message?: string; manageUrl?: string }> {
+): Promise<ManageResult> {
   const res = await visitorFetch(
     `${API_URL}/v1/bookings/${encodeURIComponent(uid)}/${action}?token=${encodeURIComponent(token)}`,
     {
@@ -333,8 +397,13 @@ export async function postManage(
     const j = (await res.json().catch(() => ({}))) as { manageUrl?: string };
     return { ok: true, manageUrl: j.manageUrl };
   }
-  const j = (await res.json().catch(() => ({}))) as { message?: string };
-  return { ok: false, message: j.message ?? 'Something went wrong.' };
+  const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+  return {
+    ok: false,
+    status: res.status,
+    error: typeof j.error === 'string' ? j.error : undefined,
+    message: j.message ?? 'Something went wrong.',
+  };
 }
 
 export async function postBooking(body: unknown, oneOffToken?: string): Promise<BookResult> {
@@ -353,6 +422,7 @@ export async function postBooking(body: unknown, oneOffToken?: string): Promise<
     status: res.status,
     error: (json.error as string) ?? 'ERROR',
     message: (json.message as string) ?? 'Something went wrong.',
+    ...(res.status === 429 ? { retryAfterMs: retryAfterMsOf(res.headers.get('retry-after')) } : {}),
   };
 }
 
@@ -400,6 +470,7 @@ export const getOneOffLink = cache(async (token: string): Promise<OneOffLinkResu
   });
   if (res.status === 410) return { ok: false, reason: 'gone' };
   if (res.status === 404) return { ok: false, reason: 'not-found' };
+  if (res.status === 429) throw busyError(res);
   if (!res.ok) throw new Error(`API one-off link failed: ${res.status}`);
   const json = (await res.json().catch(() => ({}))) as unknown;
   // PARSED against the shared contract, never asserted into it — a drift here

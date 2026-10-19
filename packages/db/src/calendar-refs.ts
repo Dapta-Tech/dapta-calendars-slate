@@ -127,6 +127,25 @@ export async function loadExternalBusy(
   }));
 }
 
+/**
+ * Every connection ref of every host a booking names: its organizer and any
+ * co-host recorded in `booking_host`. Used to clear a display cache of busy
+ * reads after a booking changes what those calendars hold, so it errs wide
+ * (every calendar the hosts have connected, not only the conflict-checked
+ * ones). Empty for an unknown uid or a booking whose hosts have no calendar.
+ */
+export async function loadBookingHostConnectionRefs(db: Db, uid: string): Promise<string[]> {
+  const rows = await db.all<{ external_id: string }>(
+    sql`SELECT DISTINCT cc.external_id FROM connected_calendar cc
+        WHERE cc.member_id IN (
+          SELECT b.host_member_id FROM booking b WHERE b.uid = ${uid} AND b.host_member_id IS NOT NULL
+          UNION
+          SELECT bh.member_id FROM booking_host bh JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${uid}
+        )`,
+  );
+  return rows.map((r) => r.external_id);
+}
+
 // --- booking_reference (the persisted external event id per booking) --------
 
 /** Everything the port needs to create/delete a booking's remote event. */

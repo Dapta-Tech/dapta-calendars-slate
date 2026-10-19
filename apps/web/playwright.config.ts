@@ -13,9 +13,11 @@ import { ANALYTICS_ENV, E2E } from './e2e/stack';
  * Ports are E2E_WEB_PORT / E2E_API_PORT / E2E_CALENDAR_PORT (3411 / 4411 / 4519)
  * so the suite runs beside a `pnpm dev` on 3000 / 4000. A second API on
  * E2E_LIMITED_API_PORT (4412) has a small rate limit for the limiter tests, so
- * the rest of the suite never trips it. On CI (or `CI=1` locally) the web build
- * is also started a second time on E2E_NOINDEX_WEB_PORT (3412) as a deployment
- * marked NOINDEX, for `api-noindex.spec.ts`.
+ * the rest of the suite never trips it. The web reaches the main API through a
+ * pass-through proxy on E2E_PROXY_PORT (4413) that the busy-state tests can make
+ * answer 429. On CI (or `CI=1` locally) the web build is also started a second
+ * time on E2E_NOINDEX_WEB_PORT (3412) as a deployment marked NOINDEX, for
+ * `api-noindex.spec.ts`.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -73,6 +75,13 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
+      // Between the web and the API: passes everything through, and answers
+      // 429 on cue for the busy-state tests (busy.spec.ts).
+      command: 'node e2e/fault-proxy.mjs',
+      url: `${E2E.proxy}/__qa/health`,
+      reuseExistingServer: false,
+    },
+    {
       // On CI the image is built WITHOUT the analytics variables and started
       // with them, the way one image serves every environment: a value that
       // only works when inlined at build time fails the analytics spec here.
@@ -86,7 +95,9 @@ export default defineConfig({
       timeout: 300_000,
       env: {
         NEXT_PUBLIC_API_URL: E2E.api,
-        API_URL: E2E.api,
+        // The web's server-side API base goes through the fault proxy, which
+        // is transparent unless a test tells it to answer 429.
+        API_URL: E2E.proxy,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
         ...ANALYTICS_ENV,
       },

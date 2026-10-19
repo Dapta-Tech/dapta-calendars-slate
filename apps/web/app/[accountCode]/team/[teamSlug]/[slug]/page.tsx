@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
-import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { failedChunk, toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
@@ -33,7 +35,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, teamSlug, slug } = await params;
   const query = await searchParams;
-  const team = await getTeamProfile(accountCode, teamSlug);
+  const team = await orBusy(getTeamProfile(accountCode, teamSlug));
+  if (isBusy(team)) return { robots: { index: false, follow: false } };
   const event = team?.eventTypes.find((e) => e.slug === slug);
   if (!team || !event) return {};
   // The same title rule as a person's event page, with the team as the host,
@@ -81,7 +84,9 @@ export default async function TeamBookingPage({
 
   // The page paints from the team's public listing alone, exactly as the
   // personal route does; the visible month's availability streams in below.
-  const team = await getTeamProfile(accountCode, teamSlug);
+  const read = await orBusy(getTeamProfile(accountCode, teamSlug));
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const team = read;
   const listing = team?.eventTypes.find((e) => e.slug === slug);
   if (!team || !listing) notFound();
 
@@ -104,7 +109,7 @@ export default async function TeamBookingPage({
   };
   const initial: Promise<AvailabilityChunk> = getTeamAvailability({ accountCode, teamSlug, slug, ...visible }).then(
     toChunk,
-    () => ({ ok: false }) as const,
+    failedChunk,
   );
 
   return (

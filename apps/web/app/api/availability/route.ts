@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
 import { getAvailability, getTeamAvailability } from '@/lib/api';
 import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { ApiBusyError } from '@/lib/busy';
 
 /**
  * One window of a public event's availability, for the booking island.
@@ -31,8 +32,12 @@ function instant(params: URLSearchParams, key: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function json(body: AvailabilityChunk | { error: string }, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { 'cache-control': 'no-store' } });
+function json(
+  body: AvailabilityChunk | { error: string },
+  status = 200,
+  headers: Record<string, string> = {},
+): NextResponse {
+  return NextResponse.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -64,7 +69,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         : await getAvailability({ accountCode, handle: owner, slug, from, to });
     if (!r) return json({ error: 'NOT_FOUND' }, 404);
     return json(toChunk(r));
-  } catch {
+  } catch (err) {
+    // Busy (429) is passed on as busy, with its wait: not an outage, and the
+    // island says so and asks again no sooner than the API asked.
+    if (err instanceof ApiBusyError) {
+      return json({ ok: false, busy: true, retryAfterMs: err.retryAfterMs }, 429, {
+        'retry-after': String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))),
+      });
+    }
     // The API's own failure is not the visitor's business; the island treats
     // any non-200 as "this window did not answer" and asks again later.
     return json({ ok: false }, 502);

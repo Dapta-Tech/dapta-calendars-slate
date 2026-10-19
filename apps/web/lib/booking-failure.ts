@@ -28,6 +28,11 @@ export type BookingFailureKind =
   | 'conflict'
   /** `400` — a required intake answer is missing or malformed. */
   | 'intake'
+  /**
+   * `429`: the service was too busy to take the booking. Nothing was written;
+   * the form stays as it is and Confirm is the retry.
+   */
+  | 'busy'
   /** Anything else: the generic failure card. */
   | 'generic';
 
@@ -62,5 +67,6 @@ export function classifyBookingFailure(
 
   if (result.status === 409 || result.status === 410) return 'conflict';
   if (result.status === 400) return 'intake';
+  if (result.status === 429) return 'busy';
   return 'generic';
 }

@@ -8,6 +8,7 @@ import {
   bookingStartOutOfRange,
   isSlotBookable,
   jsonParam,
+  lockMembers,
   parseJsonColumn,
   scopedIdempotencyKey,
 } from './repository';
@@ -580,7 +581,9 @@ export async function rescheduleBookingV2(
   // here (H1a): a still-pending CRM write-out left pointing at the predecessor
   // would drain against a booking this transaction just cancelled and create a
   // SECOND meeting, at the old time, that nothing ever cancels.
-  const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, updated_at = ${now}
+  // The order key follows too: these rows are ordered by their booking, and the
+  // successor's own write-out must queue behind them, not beside them.
+  const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, order_key = ${newUid}, updated_at = ${now}
     WHERE booking_uid = ${source.uid} AND kind IN ('calendar', 'crm') AND status = 'pending'`;
 
   type TxResult = 'ok' | 'gone' | 'conflict';
@@ -607,6 +610,10 @@ export async function rescheduleBookingV2(
       });
     } else {
       result = await db.pg!.drizzle.transaction(async (tx) => {
+        // The hosts' rows first, then the booking's: the order every other
+        // guarded write takes them in (see `lockMembers`), so a v1 move and a
+        // v2 move of the same booking wait on each other instead of deadlocking.
+        await lockMembers(tx, hostIds);
         const current = (await tx.execute(
           sql`SELECT status FROM booking WHERE id = ${source.id} FOR UPDATE`,
         )) as unknown as Array<{ status: string }>;

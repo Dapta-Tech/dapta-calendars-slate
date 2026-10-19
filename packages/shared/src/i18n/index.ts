@@ -183,6 +183,48 @@ export interface BookingMessages {
     linkInvalidTitle: string;
     linkInvalidBody: string;
   };
+  /**
+   * What a visitor reads when something on our side gets in the way: the
+   * service too busy to answer (a 429), a calendar that cannot be read just
+   * now, a request that did not go through. Short and honest, and each one
+   * says what to do next. Never an internal name, a status code or a vendor.
+   */
+  trouble: {
+    /** A page the service was too busy to serve (429). It retries on its own. */
+    busyTitle: string;
+    busyBody: string;
+    /** The countdown to the automatic retry: "{seconds}" is a whole number. */
+    busyRetrying: string;
+    /** After the automatic retries ran out. */
+    busyStill: string;
+    tryAgain: string;
+    /** The month's times could not be read because the service was busy. */
+    busyTimes: string;
+    /** A hold on the picked time was refused; the booking can still go ahead. */
+    holdBusy: string;
+    holdUnconfirmed: string;
+    holdGone: string;
+    holdFailed: string;
+    /** Shown above Confirm when a booking did not go through; the form is kept. */
+    bookBusy: string;
+    bookFailed: string;
+    /** The manage page's reschedule and cancel outcomes. */
+    actionBusy: string;
+    actionCalendar: string;
+    actionTaken: string;
+    actionUnavailable: string;
+    actionLinkDead: string;
+    actionFailed: string;
+    pickTime: string;
+    /** In place of the manage page's picker when its times could not be read. */
+    manageTimesUnavailable: string;
+    manageTimesBusy: string;
+    /** The public error boundaries: the page itself failed to load. */
+    pageTitle: string;
+    pageBody: string;
+    manageTitle: string;
+    manageBody: string;
+  };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
@@ -1491,11 +1533,11 @@ export const en: BookingMessages = {
     timezone: 'Timezone',
     noSlots: 'No available times in this range.',
     noTimesNow: 'No times are available right now. Please check back soon.',
-    timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
-    timesStillUnavailable: 'Times are still unavailable. Please try again in a few minutes.',
-    calendarUnavailableTitle: 'This time could not be confirmed',
+    timesUnavailable: 'We can’t read this calendar right now. Try again in a moment.',
+    timesStillUnavailable: 'We still can’t read this calendar. Try again in a minute.',
+    calendarUnavailableTitle: 'We couldn’t confirm this time',
     calendarUnavailableBody:
-      'We could not confirm this time right now. Please try again in a few minutes.',
+      'We couldn’t check the host’s calendar just now, so nothing was booked. Try again in a moment.',
     book: 'Book',
     confirm: 'Confirm booking',
     confirming: 'Confirming…',
@@ -1618,6 +1660,33 @@ export const en: BookingMessages = {
     linkInvalidTitle: 'This link is no longer active',
     linkInvalidBody:
       'Manage links change each time a booking is rescheduled, so an older email carries a link that no longer opens. Your booking has not been affected — open the most recent confirmation or reschedule email to manage it.',
+  },
+  trouble: {
+    busyTitle: 'Busy for a moment',
+    busyBody: 'We are getting a lot of requests right now. We will try again in a few seconds.',
+    busyRetrying: 'Trying again in {seconds} s.',
+    busyStill: 'Still busy. Try again in a minute.',
+    tryAgain: 'Try again',
+    busyTimes: 'Lots of people are booking right now. The times will show in a moment.',
+    holdBusy: 'We could not hold this time just now. You can still book it.',
+    holdUnconfirmed: 'We could not check this time with the host’s calendar just now. Try booking it, or pick it again in a moment.',
+    holdGone: 'That time was just taken. Pick another.',
+    holdFailed: 'We could not hold this time. You can still try to book it.',
+    bookBusy: 'Lots of people are booking right now. Your details are still here: press Confirm again in a few seconds.',
+    bookFailed: 'That did not go through. Your details are still here: try again in a moment.',
+    actionBusy: 'Lots of requests right now. Try again in a few seconds.',
+    actionCalendar: 'We could not check the host’s calendar just now, so nothing changed. Try again in a moment.',
+    actionTaken: 'That time was just taken. Pick another.',
+    actionUnavailable: 'That time is no longer available. Pick another.',
+    actionLinkDead: 'This link no longer works. Open the most recent email about this booking.',
+    actionFailed: 'That did not go through. Try again in a moment.',
+    pickTime: 'Pick a new time first.',
+    manageTimesUnavailable: 'We cannot read the host’s calendar right now. Try again in a moment.',
+    manageTimesBusy: 'Lots of requests right now. Try again in a few seconds.',
+    pageTitle: 'This page didn’t load',
+    pageBody: 'Something went wrong on our side. Try again in a moment.',
+    manageTitle: 'We couldn’t load your booking',
+    manageBody: 'Your booking has not changed. Try again in a moment, or open the link in your most recent email.',
   },
   growth: {
     madeWith: 'Made with Dapta Calendars',
@@ -2759,12 +2828,11 @@ export const es: BookingMessages = {
     timezone: 'Zona horaria',
     noSlots: 'No hay horarios disponibles en este rango.',
     noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
-    timesUnavailable:
-      'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
-    timesStillUnavailable: 'Los horarios siguen sin estar disponibles. Inténtalo de nuevo en unos minutos.',
-    calendarUnavailableTitle: 'No se pudo confirmar este horario',
+    timesUnavailable: 'No podemos leer este calendario ahora mismo. Inténtalo de nuevo en un momento.',
+    timesStillUnavailable: 'Aún no podemos leer este calendario. Inténtalo de nuevo en un minuto.',
+    calendarUnavailableTitle: 'No pudimos confirmar este horario',
     calendarUnavailableBody:
-      'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',
+      'No pudimos revisar el calendario del anfitrión ahora mismo, así que no se reservó nada. Inténtalo de nuevo en un momento.',
     book: 'Reservar',
     confirm: 'Confirmar reserva',
     confirming: 'Confirmando…',
@@ -2886,6 +2954,33 @@ export const es: BookingMessages = {
     linkInvalidTitle: 'Este enlace ya no está activo',
     linkInvalidBody:
       'Los enlaces de gestión cambian cada vez que se reprograma una reserva, así que un correo anterior lleva un enlace que ya no abre. Tu reserva no se ha visto afectada: abre el correo de confirmación o de reprogramación más reciente para gestionarla.',
+  },
+  trouble: {
+    busyTitle: 'Un momento, por favor',
+    busyBody: 'Estamos recibiendo muchas solicitudes ahora mismo. Lo intentaremos de nuevo en unos segundos.',
+    busyRetrying: 'Reintentando en {seconds} s.',
+    busyStill: 'Sigue ocupado. Inténtalo de nuevo en un minuto.',
+    tryAgain: 'Reintentar',
+    busyTimes: 'Hay mucha gente reservando ahora mismo. Los horarios aparecerán en un momento.',
+    holdBusy: 'No pudimos apartar este horario ahora mismo. Aún puedes reservarlo.',
+    holdUnconfirmed: 'No pudimos revisar este horario en el calendario del anfitrión. Intenta reservarlo, o vuelve a elegirlo en un momento.',
+    holdGone: 'Ese horario acaba de ocuparse. Elige otro.',
+    holdFailed: 'No pudimos apartar este horario. Aún puedes intentar reservarlo.',
+    bookBusy: 'Hay mucha gente reservando ahora mismo. Tus datos siguen aquí: vuelve a confirmar en unos segundos.',
+    bookFailed: 'No se pudo completar. Tus datos siguen aquí: inténtalo de nuevo en un momento.',
+    actionBusy: 'Hay muchas solicitudes ahora mismo. Inténtalo de nuevo en unos segundos.',
+    actionCalendar: 'No pudimos revisar el calendario del anfitrión ahora mismo, así que nada cambió. Inténtalo de nuevo en un momento.',
+    actionTaken: 'Ese horario acaba de ocuparse. Elige otro.',
+    actionUnavailable: 'Ese horario ya no está disponible. Elige otro.',
+    actionLinkDead: 'Este enlace ya no funciona. Abre el correo más reciente sobre esta reserva.',
+    actionFailed: 'No se pudo completar. Inténtalo de nuevo en un momento.',
+    pickTime: 'Primero elige un horario nuevo.',
+    manageTimesUnavailable: 'No podemos leer el calendario del anfitrión ahora mismo. Inténtalo de nuevo en un momento.',
+    manageTimesBusy: 'Hay muchas solicitudes ahora mismo. Inténtalo de nuevo en unos segundos.',
+    pageTitle: 'Esta página no cargó',
+    pageBody: 'Algo falló de nuestro lado. Inténtalo de nuevo en un momento.',
+    manageTitle: 'No pudimos cargar tu reserva',
+    manageBody: 'Tu reserva no ha cambiado. Inténtalo de nuevo en un momento, o abre el enlace de tu correo más reciente.',
   },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',

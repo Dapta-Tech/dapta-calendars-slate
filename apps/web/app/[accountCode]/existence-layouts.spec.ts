@@ -28,6 +28,7 @@ vi.mock('next/navigation', () => ({
 import HostLayout from './[handle]/layout';
 import TeamLayout from './team/[teamSlug]/layout';
 import OneOffLinkLayout from '../booking/[token]/layout';
+import { ApiBusyError } from '@/lib/busy';
 
 const CHILD = 'page';
 const host = { eventTypes: [{ slug: 'intro-call' }] };
@@ -104,5 +105,31 @@ describe('OneOffLinkLayout', () => {
     expect(await render()).toBe(CHILD);
     api.getOneOffLink.mockResolvedValue({ ok: false, reason: 'gone' });
     expect(await render()).toBe(CHILD);
+  });
+});
+
+describe('a busy API (429) is neither a 404 nor an outage at the layout', () => {
+  // The page below renders the busy notice from the same cached read; the
+  // layout must neither call it missing nor throw it to the error boundary.
+  it('every existence layout lets a busy read through to its page', async () => {
+    request.path = '/acme/alex/intro-call';
+    api.getProfile.mockRejectedValue(new ApiBusyError(3000));
+    expect(
+      await HostLayout({ children: CHILD, params: Promise.resolve({ accountCode: 'acme', handle: 'alex' }) }),
+    ).toBe(CHILD);
+    request.path = '/acme/team/sales/team-demo';
+    api.getTeamProfile.mockRejectedValue(new ApiBusyError(3000));
+    expect(
+      await TeamLayout({ children: CHILD, params: Promise.resolve({ accountCode: 'acme', teamSlug: 'sales' }) }),
+    ).toBe(CHILD);
+    api.getOneOffLink.mockRejectedValue(new ApiBusyError(3000));
+    expect(await OneOffLinkLayout({ children: CHILD, params: Promise.resolve({ token: 'tok' }) })).toBe(CHILD);
+  });
+
+  it('any other failure still reaches the error boundary', async () => {
+    api.getProfile.mockRejectedValue(new Error('API failed: 503'));
+    await expect(
+      HostLayout({ children: CHILD, params: Promise.resolve({ accountCode: 'acme', handle: 'alex' }) }),
+    ).rejects.toThrow('503');
   });
 });

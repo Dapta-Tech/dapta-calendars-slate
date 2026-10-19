@@ -21,6 +21,7 @@ import {
 } from '@/components/booking-page-parts';
 import { useBookingMonth } from '@/lib/use-booking-month';
 import { manageTokenOf } from '@/lib/manage-token';
+import { manageFailureCopy, manageFailureIsRetryable } from '@/lib/manage-failure';
 import { cancelAction, rescheduleAction } from './actions';
 
 
@@ -36,6 +37,7 @@ export function ManageActions({
   canReschedule = true,
   token: initialToken,
   slots,
+  timesNote,
   timeZone,
   locale,
   messages,
@@ -48,6 +50,12 @@ export function ManageActions({
   canReschedule?: boolean;
   token: string;
   slots: Slot[];
+  /**
+   * Why `slots` is empty when it is not because nothing is free: the service
+   * was busy, or the host's calendar could not be read. The picker says so and
+   * offers to ask again instead of claiming there are no open times.
+   */
+  timesNote?: 'busy' | 'unavailable';
   /** The attendee's zone: the times are offered in the clock they booked in. */
   timeZone: string;
   locale: string;
@@ -66,6 +74,10 @@ export function ManageActions({
   const [cancelRes, cancelForm, cancelPending] = useActionState(cancelAction, null);
   const [rsRes, rsForm, rsPending] = useActionState(rescheduleAction, null);
   const [newStartUtc, setNewStartUtc] = useState('');
+  // The failed reschedule the visitor has moved on from (by picking another
+  // time), held by identity: it stays hidden until a new attempt answers.
+  const [seenRs, setSeenRs] = useState<typeof rsRes>(null);
+  const rsFailure = rsRes && !rsRes.ok && rsRes !== seenRs ? rsRes : null;
   // A real reschedule ROTATES the manage token (the one in the URL dies), so we
   // hold the live token in state and adopt the rotated one from the response;
   // otherwise a second cancel/reschedule from this page would 403.
@@ -106,8 +118,10 @@ export function ManageActions({
         params.set('token', next);
         startNav(() => router.replace(`/manage/${uid}?${params.toString()}`));
       }
-    } else {
+    } else if (!manageFailureIsRetryable(rsRes)) {
       // Conflict (slot just taken): refetch availability, drop the stale time.
+      // A busy service or an unreadable calendar keeps the chosen time instead:
+      // pressing Reschedule again is the retry.
       setNewStartUtc('');
       router.refresh();
     }
@@ -156,7 +170,7 @@ export function ManageActions({
       </label>
       {cancelRes && !cancelRes.ok ? (
         <p role="alert" className="bp-error">
-          {cancelRes.message}
+          {manageFailureCopy(cancelRes, messages)}
         </p>
       ) : null}
       <button type="submit" disabled={cancelPending} className="bp-btn-outline bp-cta bp-danger">
@@ -189,6 +203,13 @@ export function ManageActions({
           {m.rescheduled}
         </p>
       ) : null}
+      {/* A move refused because the time went (taken, no longer offered) drops
+          the visitor back to the picker; this says why they are there. */}
+      {rsFailure && !newStartUtc ? (
+        <p role="alert" className="bp-error">
+          {manageFailureCopy(rsFailure, messages)}
+        </p>
+      ) : null}
       {summary}
       {cancel}
     </div>
@@ -212,7 +233,7 @@ export function ManageActions({
                 dayLine={formatDayLong(newStartUtc, timeZone, locale)}
                 timeLine={formatTimeRange(newStartUtc, end, timeZone, locale, hour12)}
                 timeZoneLabel={zone}
-                holdError={rsRes && !rsRes.ok ? rsRes.message : null}
+                holdError={rsFailure ? manageFailureCopy(rsFailure, messages) : null}
                 onBack={() => {
                   setDir('back');
                   setNewStartUtc('');
@@ -241,7 +262,27 @@ export function ManageActions({
     <BookingStage m={messages} step={flowStep} dir={dir} stageRef={stageRef}>
       <ChoosingFrame
         panel={panel}
-        empty={days.length === 0 ? <p className="bp-muted bp-empty">{m.noOpenTimes}</p> : undefined}
+        empty={
+          days.length === 0 ? (
+            timesNote ? (
+              <>
+                <p role="status" className="bp-muted bp-empty">
+                  {timesNote === 'busy' ? messages.trouble.manageTimesBusy : messages.trouble.manageTimesUnavailable}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => startNav(() => router.refresh())}
+                  aria-busy={navPending || undefined}
+                  className="bp-btn-outline"
+                >
+                  {messages.trouble.tryAgain}
+                </button>
+              </>
+            ) : (
+              <p className="bp-muted bp-empty">{m.noOpenTimes}</p>
+            )
+          ) : undefined
+        }
         month={
           <MonthCalendar
             m={messages}
@@ -273,6 +314,7 @@ export function ManageActions({
             emptyText={selectedDay ? bp.noTimesOnDay : bp.pickADay}
             onPick={(slot) => {
               setDir('forward');
+              setSeenRs(rsRes);
               setNewStartUtc(slot.startUtc);
             }}
             onBack={() => {

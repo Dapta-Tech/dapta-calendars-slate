@@ -63,10 +63,10 @@ export function analyticsLabel(value: unknown): string {
 }
 
 /**
- * Attempts per analytics row. Fewer than the outbox default: the worker drains
- * one row at a time, so a vendor that hangs would otherwise hold booking mail
- * and calendar writes behind five tries of every event. A lost event is
- * acceptable here; a late confirmation email is not.
+ * Attempts per analytics row. Fewer than the outbox default, and analytics
+ * rows have no retry horizon (see `NO_RETRY_HORIZON` in outbox.worker.ts): a
+ * lost event is acceptable here, a vendor hammered for a day is not. They
+ * drain in their own lane, so a vendor that hangs holds nothing else up.
  */
 const ANALYTICS_MAX_ATTEMPTS = 3;
 
