@@ -562,10 +562,11 @@ const bookMeeting: ToolDef = {
       });
       return { ...done, summary: `${done.summary} (replay of an earlier identical call)` };
     }
-    // A credential (API key or OAuth token) makes this an API booking for product
-    // analytics, like the REST machine API. The duplicate guard is untouched:
-    // the booking still goes through the public page's rules.
-    const channel = call.principal ? 'api' : 'booking_page';
+    // Booked with this workspace's own credential (API key or OAuth token), it is
+    // an API booking for product analytics, like the REST machine API. A keyless
+    // call, or one with another workspace's credential, books like the public
+    // page it wraps. The duplicate guard is untouched either way.
+    const channel = call.principal?.accountId === accountId ? 'api' : 'booking_page';
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(

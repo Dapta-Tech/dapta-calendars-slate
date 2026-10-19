@@ -386,8 +386,9 @@ export class BookingService {
       metadata?: Record<string, unknown>;
       /**
        * True when the caller is an API key (the machine API or the
-       * v2 compatibility surface). Read ONLY by the duplicate-booking
-       * guard (#69), which exempts host-initiated and API-key writes. It is
+       * v2 compatibility surface). Read by the duplicate-booking guard (#69),
+       * which exempts host-initiated and API-key writes, and as the analytics
+       * channel when `analyticsChannel` is absent. It is
        * separate from `onBehalf` because the compatibility surface is an
        * API-key write that deliberately reports `onBehalf: false`.
        */
@@ -970,12 +971,7 @@ export class BookingService {
      */
     context?: {
       apiKeyWrite?: boolean;
-      /**
-       * The channel product analytics records for this booking, when the
-       * caller knows better than `apiKeyWrite` can say. The MCP's keyless-page
-       * tool books like the public route (so the duplicate guard still applies)
-       * but, called with a credential, is an API booking. Analytics only.
-       */
+      /** Analytics only; see `book()`. */
       analyticsChannel?: BookingChannel;
       idempotencyKey?: string;
       oneOffToken?: string;

@@ -94,21 +94,24 @@ const CONTROL = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F
 /**
  * Text written by an invitee (a name, a note, an intake answer, a reason).
  * Cleaned and capped so it reads as data: control and invisible characters go,
- * HTML tags go and so does every leftover `<` or `>` (a tag-stripping regex alone
- * lets an unclosed `<script` through), markdown images vanish (an image URL is an
- * exfiltration path), a markdown link keeps its visible text only, and the
- * result is length-capped.
+ * HTML tags go and so does any leftover `<` that could open one (a tag-stripping
+ * regex alone lets an unclosed `<script` through), while `<10`, `> 50` or
+ * `a < b` survive, because select options and answers must round-trip exactly.
+ * Markdown images vanish (an image URL is an exfiltration path), a markdown link
+ * keeps its visible text only, and the result is length-capped. The input is cut
+ * BEFORE the regexes, so a huge answer cannot make them crawl.
  */
 export function untrusted(value: unknown, max = 500): string {
   if (value === null || value === undefined) return '';
   let text = typeof value === 'string' ? value : JSON.stringify(value);
   text = text
+    .slice(0, max * 4)
     .replace(INVISIBLE, '')
     .replace(CONTROL, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]*>/g, '')
-    .replace(/[<>]/g, '')
+    .replace(/<(?=[A-Za-z!/?])/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;

@@ -2,15 +2,18 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, idem, structured, type Harness } from './mcp-harness';
+import { bootOAuth, callTool, connect, publicClient, toolResult, type OAuthHarness } from '../oauth/oauth-harness';
 
 /**
  * Which channel product analytics records for a booking made over the MCP. A
- * call that carries a credential (API key or OAuth token) is the `api` channel,
- * like the REST machine API; a keyless `book_meeting` stays `booking_page`, like
- * the public booking route it wraps. Replays record nothing new.
+ * call that carries the page's own workspace credential (API key or OAuth token)
+ * is the `api` channel, like the REST machine API; a keyless `book_meeting`, or
+ * one with another workspace's credential, stays `booking_page`, like the public
+ * booking route it wraps. Replays record nothing new.
  */
 const ALL = ['availability:read', 'bookings:read', 'bookings:write', 'bookings:cancel', 'event-types:read'];
 const PAGE = 'https://calendar.example.test/acme/alex-rivera/intro-call';
+const TEAM_PAGE = 'https://calendar.example.test/acme/team/sales/team-demo';
 type Slots = { days: { slots: { start: string }[] }[] };
 
 const created = vi.spyOn(AnalyticsEffects.prototype, 'bookingCreated');
@@ -25,9 +28,9 @@ afterAll(async () => {
 });
 afterEach(() => created.mockClear());
 
-async function slot(client: Awaited<ReturnType<Harness['connect']>>, nth: number) {
+async function slot(client: Awaited<ReturnType<Harness['connect']>>, nth: number, page = PAGE) {
   const r = structured<Slots>(
-    await client.callTool({ name: 'find_available_slots', arguments: { booking_page_url: PAGE, time_zone: 'UTC' } }),
+    await client.callTool({ name: 'find_available_slots', arguments: { booking_page_url: page, time_zone: 'UTC' } }),
   );
   return r.days.flatMap((d) => d.slots)[nth]!.start;
 }
@@ -62,6 +65,39 @@ describe('booking analytics channel over the MCP', () => {
     expect(channels()).toEqual(['api']);
   });
 
+  it('book_meeting with another workspace\'s key records booking_page', async () => {
+    const c = await h.connect(await h.otherKey(ALL));
+    structured(
+      await c.callTool({
+        name: 'book_meeting',
+        arguments: {
+          booking_page_url: PAGE,
+          start: await slot(c, 33),
+          attendee: { name: 'Foreign', email: 'foreign@example.org', time_zone: 'UTC' },
+          answers: { company: 'c' },
+          idempotency_key: idem('chan-foreign-01'),
+        },
+      }),
+    );
+    expect(channels()).toEqual(['booking_page']);
+  });
+
+  it('book_meeting on a team page with an API key records api', async () => {
+    const c = await h.connect(await h.key(ALL));
+    structured(
+      await c.callTool({
+        name: 'book_meeting',
+        arguments: {
+          booking_page_url: TEAM_PAGE,
+          start: await slot(c, 5, TEAM_PAGE),
+          attendee: { name: 'Team', email: 'team@example.org', time_zone: 'UTC' },
+          idempotency_key: idem('chan-team-00001'),
+        },
+      }),
+    );
+    expect(channels()).toEqual(['api']);
+  });
+
   it('create_booking records api, once, and a replay records nothing', async () => {
     const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
     const c = await h.connect(await h.key(ALL));
@@ -74,6 +110,39 @@ describe('booking analytics channel over the MCP', () => {
     };
     structured(await c.callTool({ name: 'create_booking', arguments: args }));
     structured(await c.callTool({ name: 'create_booking', arguments: args }));
+    expect(channels()).toEqual(['api']);
+  });
+});
+
+describe('booking analytics channel over OAuth', () => {
+  let o: OAuthHarness;
+  beforeAll(async () => {
+    o = await bootOAuth();
+  });
+  afterAll(async () => {
+    await o.close();
+  });
+
+  it('book_meeting with an OAuth token of the page\'s workspace records api', async () => {
+    const token = (await connect(o, await publicClient(o))).access_token;
+    const found = await toolResult<Slots>(await callTool(o, 'find_available_slots', { booking_page_url: PAGE, time_zone: 'UTC' }));
+    const start = found.structuredContent!.days.flatMap((d) => d.slots)[34]!.start;
+    created.mockClear();
+    const booked = await toolResult(
+      await callTool(
+        o,
+        'book_meeting',
+        {
+          booking_page_url: PAGE,
+          start,
+          attendee: { name: 'OAuth', email: 'oauth@example.org', time_zone: 'UTC' },
+          answers: { company: 'c' },
+          idempotency_key: idem('chan-oauth-0001'),
+        },
+        token,
+      ),
+    );
+    expect(booked.isError).toBeFalsy();
     expect(channels()).toEqual(['api']);
   });
 });
