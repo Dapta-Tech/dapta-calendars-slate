@@ -250,7 +250,6 @@ export class HostController {
         error: 'DAPTA_SUBSCRIPTION_REQUIRED',
         message: 'Hiding the branding is included with your Dapta AI subscription.',
       });
-    void this.analytics?.hostEvent('hide_branding_toggled', p, { hidden: body.hideBranding });
     return out.branding;
   }
 
@@ -427,12 +426,16 @@ export class HostController {
         });
       throw new BadRequestException({ error: 'SLOT_TAKEN', message: 'That time is taken.' });
     }
-    void this.analytics?.bookingCreated({
-      uid: out.booking.uid,
-      inviteeEmail: out.booking.attendee?.email,
-      channel: 'host',
-      isTeam: false,
-    });
+    // A fresh booking only: a replay or a seat on an existing group booking
+    // mints no manage token, as on the public path.
+    if (out.manageToken) {
+      void this.analytics?.bookingCreated({
+        uid: out.booking.uid,
+        inviteeEmail: out.booking.attendee?.email,
+        channel: 'host',
+        isTeam: false,
+      });
+    }
     return { uid: out.booking.uid, status: out.booking.status };
   }
 
@@ -586,9 +589,7 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     if (!body?.provider || !body?.externalId)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'provider, externalId required' });
-    const created = await this.admin.createConnection(p, body);
-    void this.analytics?.hostEvent('calendar_connected', p, { provider: body.provider, method: 'manual' });
-    return created;
+    return this.admin.createConnection(p, body);
   }
 
   /**
@@ -611,20 +612,7 @@ export class HostController {
   @HttpCode(200)
   async discoverConnections(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    // Which connections are NEW is only knowable against the list before the
-    // call, read only when analytics is on so nobody else pays for it.
-    const before = this.analytics?.enabled
-      ? new Set((await this.admin.listConnections(p)).map((c) => c.id))
-      : null;
-    const after = await this.admin.discoverConnections(p, body?.provider ?? 'google', body?.email);
-    if (before) {
-      for (const c of after) {
-        if (!before.has(c.id)) {
-          void this.analytics?.hostEvent('calendar_connected', p, { provider: c.provider, method: 'connect_flow' });
-        }
-      }
-    }
-    return after;
+    return this.admin.discoverConnections(p, body?.provider ?? 'google', body?.email);
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */

@@ -139,27 +139,30 @@ export class WorkOsAuthProvider implements AuthProvider {
     // yet. Bind this login's `sub` to it (keeping its granted role) and activate,
     // so invite → first-login lands the user in the role they were granted.
     if (email) {
-      const invited = await this.db.get<{ id: string }>(
-        sql`SELECT id FROM member
+      const invited = await this.db.get<{ id: string; role: string }>(
+        sql`SELECT id, role FROM member
             WHERE account_id = ${accountId} AND external_id IS NULL AND lower(email) = lower(${email})
             ORDER BY created_at ASC LIMIT 1`,
       );
       if (invited) {
-        await this.db.run(
+        // Bound only while still unbound, and the write reports whether THIS
+        // request did it (`RETURNING`, both dialects): the first dashboard load
+        // after a login sends parallel requests, and only one of them adopted.
+        const adopted = await this.db.get<{ id: string }>(
           sql`UPDATE member SET external_id = ${sub}, status = 'active',
                 display_name = COALESCE(display_name, ${displayName})
-              WHERE id = ${invited.id}`,
+              WHERE id = ${invited.id} AND external_id IS NULL
+              RETURNING id`,
         );
-        const adopted = await this.db.get<{ role: string }>(
-          sql`SELECT role FROM member WHERE id = ${invited.id} LIMIT 1`,
-        );
-        notifySignup(this.onSignup, {
-          accountId,
-          memberId: invited.id,
-          role: adopted?.role ?? 'member',
-          isFirstMember: false,
-          fromInvite: true,
-        });
+        if (adopted) {
+          notifySignup(this.onSignup, {
+            accountId,
+            memberId: invited.id,
+            role: invited.role,
+            isFirstMember: false,
+            fromInvite: true,
+          });
+        }
         return invited.id;
       }
     }

@@ -70,6 +70,21 @@ import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertO
 import { DB } from './tokens';
 import { withNewHostBranding } from '@slate/shared';
 
+/**
+ * Whether two rule lists say the same thing, in any order. Only the fields a
+ * host sets are compared; row ids and storage order are not part of the hours.
+ */
+function sameRules(
+  a: ReadonlyArray<{ days: number[] | null; startTime: string; endTime: string; date: string | null }>,
+  b: ReadonlyArray<{ days: number[] | null; startTime: string; endTime: string; date: string | null }> | undefined,
+): boolean {
+  const key = (r: { days: number[] | null; startTime: string; endTime: string; date: string | null }) =>
+    JSON.stringify([r.days ? [...r.days].sort((x, y) => x - y) : null, r.startTime, r.endTime, r.date ?? null]);
+  const left = a.map(key).sort();
+  const right = (b ?? []).map(key).sort();
+  return left.length === right.length && left.every((k, i) => k === right[i]);
+}
+
 function parse<T>(schema: { parse: (v: unknown) => T }, body: unknown): T {
   try {
     return schema.parse(body);
@@ -476,8 +491,9 @@ export class AdminCrudController {
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(scheduleInputSchema.partial(), body);
     const updated = unwrapCrud(await updateSchedule(this.db, p.accountId, id, input));
-    // Hours are set when the save carries rules; a rename or a zone change is not.
-    if (input.rules?.length) {
+    // Hours are set when the rules CHANGE. The dashboard sends the rules with
+    // every save, so a rename or a zone change carries the same ones and is not.
+    if (input.rules?.length && !sameRules(input.rules, existing.rules)) {
       void this.analytics?.hostEvent('hours_set', p, { rule_count: input.rules.length, created: false });
     }
     return updated;

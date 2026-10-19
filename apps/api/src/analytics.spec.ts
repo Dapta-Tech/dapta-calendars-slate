@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createDb, getAvailability, listOutbox, migrate, seed, sql, type Db, type OutboxRow } from '@slate/db';
-import { DisabledCalendarProvider } from '@slate/calendar';
+import { randomUUID } from 'node:crypto';
+import { createDb, createEventType, createTeam, getAvailability, listOutbox, migrate, seed, sql, type Db, type OutboxRow } from '@slate/db';
+import { DisabledCalendarProvider, type CalendarProvider } from '@slate/calendar';
 import { BookingNotifier, NoopEmailProvider } from '@slate/notifications';
 import { ANALYTICS_GROUP_TYPE, POSTHOG_DEFAULT_HOST } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
-import { AnalyticsEffects } from './analytics-effects';
+import { AnalyticsEffects, analyticsLabel } from './analytics-effects';
 import {
   AnalyticsRejectedError,
   PosthogAnalyticsProvider,
@@ -77,6 +78,14 @@ describe('product analytics (API)', () => {
   const rows = async (): Promise<OutboxRow[]> => (await listOutbox(db, { kind: 'analytics' })) as OutboxRow[];
   const payloads = async (): Promise<Payload[]> => (await rows()).map((r) => JSON.parse(r.payload!) as Payload);
   const captures = async () => (await payloads()).filter((p) => p.type === 'capture').map((p) => p.capture!);
+  /**
+   * Events are fire-and-forget, so a count read the moment the first row lands
+   * would miss a wrong second one. Wait for the writes to settle first.
+   */
+  const settled = async () => {
+    await new Promise((r) => setTimeout(r, 60));
+    return captures();
+  };
 
   beforeEach(async () => {
     db = await createDb('file::memory:');
@@ -175,6 +184,18 @@ describe('product analytics (API)', () => {
       expect(String(c!.properties['fields'])).toHaveLength(200);
     });
 
+    it('keeps flat primitives only, and reduces untrusted labels to an identifier or other', async () => {
+      await fx.hostEvent('hours_set', principal, { nested: { a: 1 } as never, ok: 1 });
+      const [c] = await captures();
+      expect(c!.properties).not.toHaveProperty('nested');
+      expect(c!.properties['ok']).toBe(1);
+      expect(analyticsLabel('Google')).toBe('google');
+      expect(analyticsLabel('microsoft-outlook-calendar')).toBe('microsoft-outlook-calendar');
+      expect(analyticsLabel('two words')).toBe('other');
+      expect(analyticsLabel({ evil: true })).toBe('other');
+      expect(analyticsLabel('x'.repeat(41))).toBe('other');
+    });
+
     it('never rejects into the caller', async () => {
       vi.spyOn(db, 'get').mockRejectedValueOnce(new Error('db down'));
       await expect(fx.hostEvent('hours_set', principal)).resolves.toBeUndefined();
@@ -266,6 +287,77 @@ describe('product analytics (API)', () => {
     });
   });
 
+  describe('booking_created, the paths that must not count twice', () => {
+    const service = (fx: AnalyticsEffects) =>
+      new BookingService(
+        db,
+        env(),
+        new CalendarEffects(new DisabledCalendarProvider(), db),
+        new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fx,
+      );
+
+    it('a replayed API booking (same idempotency key) records nothing the second time', async () => {
+      const fx = new AnalyticsEffects(db, recordingProvider(), env(ON));
+      const svc = service(fx);
+      const body = {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startUtc: await getAvailabilityFor(db),
+        attendee: { name: 'Rae', email: 'rae@example.org', timeZone: 'UTC' },
+        answers: { company: 'Rae Co' },
+      };
+      const context = { apiKeyWrite: true, idempotencyKey: 'replay-key-1' };
+      const first = await svc.book(body, true, context);
+      const second = await svc.book(body, true, context);
+      expect('error' in first || 'error' in second).toBe(false);
+      await new Promise((r) => setTimeout(r, 60));
+      const all = await captures();
+      expect(all.map((c) => [c.event, c.properties['channel']])).toEqual([['calendars_booking_created', 'api']]);
+    });
+
+    it('a team booking is about the host it was assigned to', async () => {
+      const fx = new AnalyticsEffects(db, recordingProvider(), env(ON));
+      const svc = service(fx);
+      const team = await createTeam(db, accountId, { name: 'Analytics', slug: 'analytics-team' });
+      if (!team.ok) throw new Error('team create failed');
+      const ev = await createEventType(db, accountId, null, {
+        slug: 'analytics-rr',
+        title: 'Round robin',
+        lengthMinutes: 30,
+        schedulingType: 'round_robin',
+        scheduleId: null,
+        teamId: team.value.id,
+      });
+      if (!ev.ok) throw new Error('event create failed');
+      for (const memberId of [alex, jordan]) {
+        await db.run(
+          sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+              VALUES (${randomUUID()}, ${accountId}, ${ev.value.id}, ${memberId}, 0, NULL, 100, NULL, ${Date.now()})`,
+        );
+      }
+      const from = new Date().toISOString();
+      const to = new Date(Date.now() + 10 * 86_400_000).toISOString();
+      const avail = await svc.teamAvailability('acme', 'analytics-team', 'analytics-rr', from, to);
+      const out = await svc.teamBook('acme', 'analytics-team', {
+        slug: 'analytics-rr',
+        startUtc: avail!.slots[0]!.startUtc,
+        attendee: { name: 'Tia', email: 'tia@example.org', timeZone: 'UTC' },
+      });
+      expect('error' in out).toBe(false);
+      await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
+      const [c] = await captures();
+      const host = (out as { hostMemberId: string }).hostMemberId === alex ? 'alex@example.com' : 'jordan@example.com';
+      expect(c).toMatchObject({ distinctId: host, properties: { channel: 'booking_page', is_team: true } });
+      expect(JSON.stringify(c)).not.toContain('tia@example.org');
+    });
+  });
+
   // --- Delivery: the PostHog adapter and the worker ---------------------
 
   describe('delivery', () => {
@@ -330,6 +422,26 @@ describe('product analytics (API)', () => {
       }
     });
 
+    it('a 408 is retried; a row that cannot be read is skipped once', async () => {
+      const { provider } = posthog(408);
+      const fx = new AnalyticsEffects(db, provider, env(ON));
+      await fx.hostEvent('hours_set', principal);
+      await workerWith(db, fx).drainOnce();
+      expect((await rows())[0]!.status).toBe('pending');
+
+      await db.run(sql`UPDATE outbox SET payload = ${'not json'}, next_attempt_at = 0`);
+      await workerWith(db, fx).drainOnce();
+      const [row] = await rows();
+      expect(row!.status).toBe('skipped');
+      expect(row!.lastError).toMatch(/unreadable/);
+    });
+
+    it('an analytics row gets fewer attempts than the outbox default, so a hung vendor cannot hold mail', async () => {
+      const fx = new AnalyticsEffects(db, recordingProvider(), env(ON));
+      await fx.hostEvent('hours_set', principal);
+      expect((await rows())[0]!.maxAttempts).toBe(3);
+    });
+
     it('a network failure is retried, and the rejection type is the only permanent one', async () => {
       const { provider } = posthog();
       provider.fetchImpl = (async () => {
@@ -366,11 +478,17 @@ describe('product analytics (API)', () => {
       growth = new GrowthService(db);
     });
 
-    const admin = () =>
+    const admin = (calendar: CalendarProvider = new DisabledCalendarProvider()) =>
       new AdminService(
         db,
-        new CalendarEffects(new DisabledCalendarProvider(), db),
+        new CalendarEffects(calendar, db),
         new EmailEffects(new BookingNotifier(new NoopEmailProvider()), db),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fx,
       );
     const host = () =>
       new HostController(admin(), new OnboardingService(db, undefined, growth), auth(), growth, undefined, fx);
@@ -378,8 +496,7 @@ describe('product analytics (API)', () => {
 
     it('choosing a template is the template and the first publish', async () => {
       await host().submitSetup(REQ, { templateId: '30min' });
-      await vi.waitFor(async () => expect(await rows()).toHaveLength(2));
-      const names = (await events()).map(([e]) => e);
+      const names = (await settled()).map((c) => c.event);
       expect(names).toEqual(['calendars_template_chosen', 'calendars_event_type_published']);
       expect((await events())[0]![1]).toMatchObject({ template: '30min' });
     });
@@ -388,8 +505,9 @@ describe('product analytics (API)', () => {
       await db.run(sql`UPDATE account SET created_at = ${Date.now() - 1000}, attribution = NULL WHERE id = ${accountId}`);
       await host().claimAttribution(REQ, { attribution: { utm_source: 'google' } });
       await host().claimAttribution(REQ, { attribution: { utm_source: 'bing' } });
-      await vi.waitFor(async () => expect((await events()).length).toBeGreaterThan(0));
-      const recorded = (await events()).filter(([e]) => e === 'calendars_attribution_captured');
+      const recorded = (await settled())
+        .filter((c) => c.event === 'calendars_attribution_captured')
+        .map((c) => [c.event, c.properties] as const);
       expect(recorded).toHaveLength(1);
       expect(recorded[0]![1]).toMatchObject({ utm_source: 'google' });
     });
@@ -400,37 +518,90 @@ describe('product analytics (API)', () => {
       await crud().createEventType(REQ, { ...base, slug: 'demo-visible' });
       await crud().updateEventType(REQ, (hidden as { id: string }).id, { title: 'Demo, renamed' });
       await crud().updateEventType(REQ, (hidden as { id: string }).id, { hidden: false });
-      await vi.waitFor(async () => expect(await rows()).toHaveLength(2));
-      expect((await events()).map(([e, p]) => [e, p['source']])).toEqual([
+      expect((await settled()).map((c) => [c.event, c.properties['source']])).toEqual([
         ['calendars_event_type_published', 'dashboard'],
         ['calendars_event_type_published', 'dashboard'],
       ]);
     });
 
-    it('hours are set by a save that carries rules, not by a rename', async () => {
-      const created = (await crud().createSchedule(REQ, {
-        name: 'Weekdays',
-        timeZone: 'UTC',
-        rules: [{ days: [1, 2, 3, 4, 5], startTime: '09:00', endTime: '17:00', date: null }],
-      })) as { id: string };
-      await crud().updateSchedule(REQ, created.id, { name: 'Renamed' });
-      await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
-      expect((await events())[0]).toEqual(['calendars_hours_set', expect.objectContaining({ rule_count: 1, created: true })]);
+    it('hours are set when the rules change, not by a rename that resends the same ones', async () => {
+      const rules = [{ days: [1, 2, 3, 4, 5], startTime: '09:00', endTime: '17:00', date: null }];
+      const created = (await crud().createSchedule(REQ, { name: 'Weekdays', timeZone: 'UTC', rules })) as { id: string };
+      // The dashboard sends the rules with every save.
+      await crud().updateSchedule(REQ, created.id, { name: 'Renamed', rules: [{ ...rules[0]!, days: [5, 4, 3, 2, 1] }] });
+      await crud().updateSchedule(REQ, created.id, { rules: [{ ...rules[0]!, endTime: '18:00' }] });
+      expect((await settled()).map((c) => [c.event, c.properties['created']])).toEqual([
+        ['calendars_hours_set', true],
+        ['calendars_hours_set', false],
+      ]);
     });
 
-    it('turning the branding off is recorded with its new state', async () => {
+    it('turning the branding off is recorded with its new state, once', async () => {
       await host().setBranding(REQ, { hideBranding: true });
-      await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
-      expect((await events())[0]).toEqual(['calendars_hide_branding_toggled', expect.objectContaining({ hidden: true })]);
+      // Saving the same state again is not a toggle.
+      await host().setBranding(REQ, { hideBranding: true });
+      await host().setBranding(REQ, { hideBranding: false });
+      expect((await settled()).map((c) => [c.event, c.properties['hidden']])).toEqual([
+        ['calendars_hide_branding_toggled', true],
+        ['calendars_hide_branding_toggled', false],
+      ]);
     });
 
     it('a studio save names the settings that moved, never their values', async () => {
       await host().updateBranding(REQ, { brandColor: '#123456' });
-      await vi.waitFor(async () => expect(await rows()).toHaveLength(1));
-      const [event, props] = (await events())[0]!;
+      const all = await settled();
+      expect(all).toHaveLength(1);
+      const { event, properties: props } = all[0]!;
       expect(event).toBe('calendars_branding_changed');
       expect(props).toMatchObject({ change: 'page_style', fields: 'brandColor' });
       expect(JSON.stringify(props)).not.toContain('#123456');
+    });
+    it('the brand kit, applying it and reverting it are each a branding change', async () => {
+      await host().putBrandKit(REQ, { accent: '#2f6fed', theme: 'light' });
+      await host().applyBrandKit(REQ);
+      await host().revertBranding(REQ);
+      expect((await settled()).map((c) => c.properties['change'])).toEqual(['brand_kit', 'kit_applied', 'reverted']);
+    });
+
+    it('a manual connection is recorded with a label, never free text', async () => {
+      await host().createConnection(REQ, { provider: 'Generic', externalId: 'ext-1' });
+      await host().createConnection(REQ, { provider: 'a provider; DROP TABLE', externalId: 'ext-2' });
+      expect((await settled()).map((c) => [c.properties['provider'], c.properties['method']])).toEqual([
+        ['generic', 'manual'],
+        ['other', 'manual'],
+      ]);
+    });
+
+    it('the connect flow records a connection once, however often the popup polls', async () => {
+      const connector = {
+        enabled: true,
+        name: 'connector',
+        startConnect: async () => ({ token: 't', connectUrl: 'https://connect.example.test' }),
+        discoverConnections: async () => [
+          { connectionRef: 'conn-A', provider: 'google', primaryEmail: 'alex@example.com', connected: true },
+        ],
+        listCalendars: async () => [],
+      } as unknown as CalendarProvider;
+      const ctrl = new HostController(admin(connector), new OnboardingService(db, undefined, growth), auth(), growth, undefined, fx);
+      await ctrl.discoverConnections(REQ, { provider: 'google' });
+      await ctrl.discoverConnections(REQ, { provider: 'google' });
+      expect((await settled()).map((c) => [c.event, c.properties['provider'], c.properties['method']])).toEqual([
+        ['calendars_calendar_connected', 'google', 'connect_flow'],
+      ]);
+    });
+
+    it('a host-made booking is channel host', async () => {
+      const startUtc = await getAvailabilityFor(db);
+      await host().hostCreate(REQ, {
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startUtc,
+        attendee: { name: 'Hal', email: 'hal@example.org', timeZone: 'UTC' },
+        answers: { company: 'Hal Co' },
+      } as never);
+      const all = await settled();
+      expect(all.map((c) => [c.event, c.properties['channel']])).toEqual([['calendars_booking_created', 'host']]);
+      expect(JSON.stringify(all)).not.toContain('hal@example.org');
     });
   });
 
@@ -466,6 +637,29 @@ describe('product analytics (API)', () => {
       );
       await provider.resolveHost(bearer(mint({ account_id: 'ext_b', sub: 'guest', email: 'guest@x.io' })));
       expect(seen[1]).toMatchObject({ memberId: 'invited-1', role: 'admin', fromInvite: true, isFirstMember: false });
+    });
+
+    it('parallel first logins report one signup: only the request whose insert won', async () => {
+      const seen: SignupNotice[] = [];
+      const provider = new WorkOsAuthProvider(db, { JWT_SECRET: SECRET }, (s) => void seen.push(s));
+      const token = mint({ account_id: 'ext_par', sub: 'ext_par_u', email: 'par@x.io' });
+      await Promise.all([1, 2, 3, 4].map(() => provider.resolveHost(bearer(token))));
+      expect(seen).toHaveLength(1);
+    });
+
+    it('parallel first logins of an invitee report one adoption', async () => {
+      const seen: SignupNotice[] = [];
+      const provider = new WorkOsAuthProvider(db, { JWT_SECRET: SECRET }, (s) => void seen.push(s));
+      await provider.resolveHost(bearer(mint({ account_id: 'ext_inv', sub: 'owner', email: 'owner@x.io' })));
+      const acct = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE external_id = 'ext_inv'`))!.id;
+      await db.run(
+        sql`INSERT INTO member (id, account_id, email, role, status, created_at)
+            VALUES ('invited-par', ${acct}, 'guest@x.io', 'member', 'invited', ${Date.now()})`,
+      );
+      const token = mint({ account_id: 'ext_inv', sub: 'guest', email: 'guest@x.io' });
+      const ids = await Promise.all([1, 2, 3].map(() => provider.resolveHost(bearer(token))));
+      expect(new Set(ids.map((p) => p.memberId))).toEqual(new Set(['invited-par']));
+      expect(seen.filter((s) => s.fromInvite)).toHaveLength(1);
     });
 
     it('a throwing observer never costs the login', async () => {

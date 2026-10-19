@@ -55,8 +55,11 @@ export interface AnalyticsProvider {
   updateAccount(update: AnalyticsAccountUpdate): Promise<void>;
 }
 
-/** Give up on a hung vendor rather than hold a worker tick. */
-const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * Give up on a hung vendor quickly. The worker drains one row at a time, so
+ * every second spent here is a second a booking email waits behind it.
+ */
+const REQUEST_TIMEOUT_MS = 3_000;
 
 /**
  * PostHog's public ingestion API: one JSON POST per event to `/capture/`,
@@ -108,14 +111,17 @@ export class PosthogAnalyticsProvider implements AnalyticsProvider {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ api_key: this.config.key, ...body }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        // A redirect would turn the POST into a GET that can only be refused;
+        // a misconfigured host fails as itself instead, and is retried.
+        redirect: 'error',
       });
     } catch (err) {
       // Network level (DNS, TLS, timeout): transient.
       throw new Error(`analytics delivery failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (res.ok) return;
-    // 429 and 5xx mean "try again"; any other 4xx is refused the same way forever.
-    if (res.status === 429 || res.status >= 500) {
+    // 408, 429 and 5xx mean "try again"; any other 4xx is refused the same way forever.
+    if (res.status === 408 || res.status === 429 || res.status >= 500) {
       throw new Error(`analytics delivery failed: HTTP ${res.status}`);
     }
     throw new AnalyticsRejectedError(`analytics provider rejected the event: HTTP ${res.status}`);

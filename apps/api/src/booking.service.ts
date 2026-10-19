@@ -514,12 +514,14 @@ export class BookingService {
       } else if (b.status === 'pending') {
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
-      // A fresh booking only (an idempotent replay has no manage token): about
-      // the host who received it, never the visitor (see AnalyticsEffects).
+      // A fresh booking only (a replay or a seat on an existing group booking
+      // mints no manage token): about the host who received it, never the
+      // visitor (see AnalyticsEffects). Host-made bookings take their own
+      // route (`HostController.hostCreate`) and say so there.
       void this.analytics?.bookingCreated({
         uid: b.uid,
         inviteeEmail: b.attendee.email,
-        channel: context?.apiKeyWrite ? 'api' : onBehalf ? 'host' : 'booking_page',
+        channel: context?.apiKeyWrite ? 'api' : 'booking_page',
         isTeam: false,
       });
       // Durable webhook delivery: enqueue one outbox row per subscriber; the

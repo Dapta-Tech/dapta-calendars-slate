@@ -38,18 +38,39 @@ interface HostIdentity {
 /** Longest string property sent. Properties are labels, never free text. */
 const PROPERTY_MAX = 200;
 
-/** Clamp string values, so no caller can ever ship a paragraph by mistake. */
+/**
+ * Flat primitives only, strings clamped: no caller can ship a paragraph or an
+ * object by mistake, whatever a request body handed it.
+ */
 function bounded(properties: AnalyticsProps): AnalyticsProps {
   const out: AnalyticsProps = {};
   for (const [k, v] of Object.entries(properties)) {
-    out[k] = typeof v === 'string' ? v.slice(0, PROPERTY_MAX) : v;
+    if (typeof v === 'string') out[k] = v.slice(0, PROPERTY_MAX);
+    else if (typeof v === 'number' || typeof v === 'boolean' || v === null) out[k] = v;
   }
   return out;
 }
 
+/**
+ * A short machine label (a provider key, say), or `other`. For values that
+ * arrive from a request body or a backend: an identifier is kept, free text
+ * never is.
+ */
+export function analyticsLabel(value: unknown): string {
+  const label = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[a-z0-9._-]{1,40}$/.test(label) ? label : 'other';
+}
+
+/**
+ * Attempts per analytics row. Fewer than the outbox default: the worker drains
+ * one row at a time, so a vendor that hangs would otherwise hold booking mail
+ * and calendar writes behind five tries of every event. A lost event is
+ * acceptable here; a late confirmation email is not.
+ */
+const ANALYTICS_MAX_ATTEMPTS = 3;
+
 /** How a booking reached the API, for `booking_created`. */
 export type BookingChannel = 'booking_page' | 'host' | 'api';
-
 
 /**
  * Durable PRODUCT ANALYTICS, the API half (mirrors CrmEffects / EmailEffects).
@@ -106,7 +127,7 @@ export class AnalyticsEffects {
   ): Promise<void> {
     if (!this.provider) return;
     try {
-      const who = await this.identity(principal.accountId, principal.memberId);
+      const who = await this.identity(principal.accountId, principal.memberId, event);
       if (!who) return;
       await this.enqueueCapture(event, who, properties, now);
     } catch (err) {
@@ -123,7 +144,7 @@ export class AnalyticsEffects {
   async signup(signup: SignupNotice, now: number = Date.now()): Promise<void> {
     if (!this.provider) return;
     try {
-      const who = await this.identity(signup.accountId, signup.memberId);
+      const who = await this.identity(signup.accountId, signup.memberId, 'signup_completed');
       if (!who) return;
       await this.enqueueCapture(
         'signup_completed',
@@ -157,7 +178,7 @@ export class AnalyticsEffects {
   ): Promise<void> {
     if (!this.provider) return;
     try {
-      const who = await this.identity(principal.accountId, principal.memberId);
+      const who = await this.identity(principal.accountId, principal.memberId, 'attribution_captured');
       if (!who) return;
       const source: AnalyticsProps = {};
       for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const) {
@@ -191,8 +212,13 @@ export class AnalyticsEffects {
       const row = await this.db.get<{ account_id: string; host_member_id: string | null; status: string }>(
         sql`SELECT account_id, host_member_id, status FROM booking WHERE uid = ${booking.uid} LIMIT 1`,
       );
-      if (!row?.host_member_id) return;
-      const who = await this.identity(row.account_id, row.host_member_id);
+      if (!row?.host_member_id) {
+        // Unreadable right after the write (a lagging replica) or a booking
+        // with no single host: said, so an undercount is never silent.
+        this.log.warn(`analytics booking_created dropped: booking ${booking.uid} has no readable host`);
+        return;
+      }
+      const who = await this.identity(row.account_id, row.host_member_id, 'booking_created');
       if (!who) return;
       const invitee = booking.inviteeEmail?.trim() ?? '';
       const member = invitee
@@ -225,8 +251,16 @@ export class AnalyticsEffects {
    */
   async deliver(_action: string, payload: string | null): Promise<void> {
     if (!this.provider) throw new OutboxSkipError('analytics is not configured');
-    if (payload == null) throw new Error('analytics outbox row missing payload');
-    const message = JSON.parse(payload) as AnalyticsOutboxPayload;
+    // A row that cannot be read now never will be: skipped once, not retried.
+    let message: AnalyticsOutboxPayload;
+    try {
+      message = JSON.parse(payload ?? '') as AnalyticsOutboxPayload;
+    } catch {
+      throw new OutboxSkipError('analytics outbox row has an unreadable payload');
+    }
+    if (message?.type !== 'account' && message?.type !== 'capture') {
+      throw new OutboxSkipError('analytics outbox row has an unknown type');
+    }
     try {
       if (message.type === 'account') await this.provider.updateAccount(message.update);
       else await this.provider.capture(message.capture);
@@ -238,13 +272,20 @@ export class AnalyticsEffects {
 
   /* ------------------------------------------------------------ internal */
 
-  private async identity(accountId: string, memberId: string): Promise<HostIdentity | null> {
+  private async identity(accountId: string, memberId: string, event: ServerAnalyticsEvent): Promise<HostIdentity | null> {
     const row = await this.db.get<{ email: string | null; code: string }>(
       sql`SELECT m.email AS email, a.code AS code
             FROM member m JOIN account a ON a.id = m.account_id
            WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
     );
-    if (!row?.email) return null;
+    // A member just written can be unreadable on a lagging replica: dropped,
+    // but said, so an undercount is never silent. No email is a normal state
+    // (an invite not yet answered) and drops quietly.
+    if (!row) {
+      this.log.warn(`analytics ${event} dropped: member ${memberId} not readable`);
+      return null;
+    }
+    if (!row.email) return null;
     return {
       accountId,
       email: row.email,
@@ -306,6 +347,7 @@ export class AnalyticsEffects {
       action,
       accountId,
       payload: JSON.stringify(payload),
+      maxAttempts: ANALYTICS_MAX_ATTEMPTS,
       now,
     });
   }
