@@ -94,4 +94,49 @@ describePg('outbox claims across replicas (real Postgres)', () => {
     const next = await claimDueOutbox(a, at + 3, 10, opts('d'));
     expect(next.map((r) => r.id).sort()).toEqual([ids.k2![1]!, ids.k3![1]!].sort());
   });
+
+  it('webhooks, racing: one head per subscriber, none for a subscriber already in flight', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const [s1, s2, s3] = [`${tag}-s1`, `${tag}-s2`, `${tag}-s3`];
+    const mine = new Set<string>();
+    let t = 200_000;
+    // Three bookings' events each for s1 and s2, one for s3, which is already busy.
+    for (const sub of [s1, s2]) {
+      for (let i = 0; i < 3; i++) {
+        mine.add(
+          await enqueueOutbox(a, { kind: 'webhook', action: 'booking.created', webhookId: sub, bookingUid: `${sub}-b${i}`, payload: '{}', now: t++ }),
+        );
+      }
+    }
+    const busy = await enqueueOutbox(a, { kind: 'webhook', action: 'booking.created', webhookId: s3, bookingUid: `${s3}-b0`, payload: '{}', now: t++ });
+    const queued = await enqueueOutbox(a, { kind: 'webhook', action: 'booking.created', webhookId: s3, bookingUid: `${s3}-b1`, payload: '{}', now: t++ });
+    mine.add(busy).add(queued);
+    const at = t + 10;
+    await a.run(sql`UPDATE outbox SET lease_until = ${at + 60_000}, lease_token = ${'elsewhere'} WHERE id = ${busy}`);
+    const tokens = [`${tag}-a`, `${tag}-b`];
+    try {
+      const [ra, rb] = await Promise.all([
+        claimDueOutbox(a, at, 20, { kinds: ['webhook'], inOrder: true, token: tokens[0] }),
+        claimDueOutbox(b, at, 20, { kinds: ['webhook'], inOrder: true, token: tokens[1] }),
+      ]);
+      const got = [...ra, ...rb].filter((r) => mine.has(r.id));
+      const perSubscriber = (sub: string) => got.filter((r) => r.webhookId === sub).length;
+      // No row twice, s3 untouched while it is busy, and each idle subscriber
+      // at least once and, within one claim, at most once.
+      expect(new Set(got.map((r) => r.id)).size).toBe(got.length);
+      expect(perSubscriber(s3)).toBe(0);
+      expect(perSubscriber(s1)).toBeGreaterThanOrEqual(1);
+      expect(perSubscriber(s2)).toBeGreaterThanOrEqual(1);
+      for (const claim of [ra, rb]) {
+        for (const sub of [s1, s2]) expect(claim.filter((r) => r.webhookId === sub).length).toBeLessThanOrEqual(1);
+      }
+    } finally {
+      // Give back anything of another file's this claim may have leased.
+      await a.run(
+        sql`UPDATE outbox SET lease_until = NULL, lease_token = NULL
+            WHERE lease_token IN (${tokens[0]}, ${tokens[1]}) AND webhook_id NOT IN (${s1}, ${s2}, ${s3})`,
+      );
+      await a.run(sql`DELETE FROM outbox WHERE webhook_id IN (${s1}, ${s2}, ${s3})`);
+    }
+  });
 });
