@@ -256,6 +256,8 @@ describe('product analytics (API)', () => {
         referrer_domain: 'chatgpt.com',
         has_click_id: true,
       });
+      // Nothing was withheld, so nothing says it was.
+      expect(event!.capture!.properties).not.toHaveProperty('utm_withheld');
       expect(account!.update!.properties).toMatchObject({ utm_source: 'chatgpt.com', referrer_domain: 'chatgpt.com' });
       const sent = JSON.stringify(await payloads());
       expect(sent).not.toContain('secret-click-id');

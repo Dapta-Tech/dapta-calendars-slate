@@ -29,8 +29,9 @@ referrer, every campaign tag on the page's URL, copies of both on the person):
   device and session basics the vendor needs to accept and count an event, the
   page with its query cut, the referring domain, and this app's own properties.
   A future vendor release that starts sending something new sends it nowhere.
-- **Host events** drop every campaign tag and click id (the signup source is
-  the API's, claimed write-once), and the library collects none of its own.
+- **Host events** drop every campaign tag, click id and search keyword (the
+  signup source is the API's, claimed write-once), and the library collects
+  no campaign tags of its own.
 - **Every URL** left in any property, on either audience, loses its query and
   fragment.
 - This is tested against the real library (`apps/web/lib/analytics/posthog.vendor.spec.ts`,
@@ -79,7 +80,7 @@ the deployment prunes it.
 | Event | When | Properties |
 |---|---|---|
 | `calendars_signup_completed` | A login creates a member, or adopts an invite | `role`, `is_first_member`, `from_invite`; sets person `email`, `is_internal`. A first member also sets the account's `is_internal` and `created_at` |
-| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`, and `utm_withheld: true` when a tag was withheld. The same tags (without the flags) are set on the account. A tag that looks like an address, a URL or a query (`@`, `://`, `www.`, `?`, `&`, `=`, `#`, or their percent-encoded forms) or runs past 100 characters is withheld, never cleaned |
+| `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`, and `utm_withheld: true` when a tag was withheld. The same tags (without the flags) are set on the account. A tag that looks like an address or handle (`@`), a URL (`//`, or a host followed by a path), a query (`?`, `=`), an HTML entity or a phone number (a leading `+` or grouped digits; one unbroken run of digits is kept, as it cannot be told from a campaign id), checked after Unicode folding and in percent-encoded forms, or that runs past 100 characters, is withheld, never cleaned |
 | `calendars_template_chosen` | The wizard creates the first event type from a template | `template` |
 | `calendars_calendar_connected` | A new calendar connection is stored | `provider`, `method` (`connect_flow` or `manual`) |
 | `calendars_hours_set` | A schedule is created with availability rules, or saved with rules that changed (a rename is not) | `rule_count`, `created` |

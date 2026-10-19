@@ -205,18 +205,33 @@ export const CAMPAIGN_VALUE_MAX = 100;
  *
  * Campaign tags are whatever a link builder typed after `utm_*=`, and the only
  * check upstream is a length cap. A tag can therefore carry an email address
- * (`utm_content=ana@example.com`), a whole URL with its own query, or a query
- * fragment, none of which is a campaign label. Those are withheld rather than
- * cleaned: a guessed repair would be a value nobody chose. Percent-encoded
- * forms are refused too, so a doubly encoded address does not slip through.
+ * or a handle (`utm_content=ana@example.com`), a URL (with or without its
+ * scheme), a query fragment, an HTML entity or a phone number from a merge
+ * tag, none of which is a campaign label. Those are withheld rather than
+ * cleaned: a guessed repair would be a value nobody chose. A phone is caught
+ * with a leading `+` or written in groups; one unbroken run of digits is kept,
+ * since it cannot be told from a numeric campaign id.
+ *
+ * Checked after Unicode compatibility folding (NFKC), so a fullwidth `＠` or
+ * `／／` reads as what it looks like; the value sent is the one received.
+ * Percent-encoded markers are refused too (`%25`, an encoded percent, covers a
+ * value encoded twice). Plain `&` and `#` are allowed: "Q&A webinar" and
+ * "Video #2" are real campaign names, and `=`, `?` and `//` already catch the
+ * query and URL shapes they would otherwise take part in.
  */
 export function analyticsCampaignValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const v = value.trim();
   if (!v || v.length > CAMPAIGN_VALUE_MAX) return null;
-  if (/[@?&=#]|:\/\/|^www\./i.test(v)) return null;
-  // `%25` is an encoded percent: a value encoded twice hides any of the above.
-  if (/%(40|3f|26|3d|23|3a|25)/i.test(v)) return null;
+  const folded = v.normalize('NFKC');
+  // An address or handle, a query, a URL: a scheme or `//`, or a host
+  // followed by a path. A bare host (`chatgpt.com`) is a source label.
+  if (/[@?=]|\/\/|[a-z0-9-]\.[a-z]{2,}\//i.test(folded)) return null;
+  if (/&#?\w+;/.test(folded)) return null;
+  // A query parser turns a literal `+` into a space, so grouped digits count too.
+  const digits = folded.replace(/\D/g, '').length;
+  if (/^\+?[\d ().-]+$/.test(folded) && /[+ ().-]/.test(folded) && digits >= 9) return null;
+  if (/%(40|3f|3d|3a|2f|25)/i.test(folded)) return null;
   return v;
 }
 
@@ -230,5 +245,7 @@ export function analyticsCampaignValue(value: unknown): string | null {
 export function referrerDomain(referer: string | null | undefined): string | null {
   // The authority's user part (`user@`) is not the domain and can be a person.
   const m = /^https?:\/\/(?:[^/?#]*@)?([^/?#:@]+)/i.exec((referer ?? '').trim());
-  return m?.[1] ? m[1].toLowerCase() : null;
+  const host = m?.[1]?.toLowerCase() ?? null;
+  // Only what a browser can send as a host name; anything else is not a domain.
+  return host && /^[a-z0-9.-]+$/.test(host) ? host : null;
 }

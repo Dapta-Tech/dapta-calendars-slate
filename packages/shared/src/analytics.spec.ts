@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { buildSignupUrl, parseAttribution } from './growth';
 import {
   ANALYTICS_EVENT_PREFIX,
   BROWSER_ANALYTICS_EVENTS,
@@ -101,27 +102,67 @@ describe('sanitizeLandingDistinctId', () => {
 });
 
 describe('analyticsCampaignValue', () => {
-  it('keeps a campaign label', () => {
-    expect(analyticsCampaignValue(' made-with-dapta ')).toBe('made-with-dapta');
-    expect(analyticsCampaignValue('q3 launch')).toBe('q3 launch');
-    expect(analyticsCampaignValue('1234567890')).toBe('1234567890');
-    expect(analyticsCampaignValue('chatgpt.com')).toBe('chatgpt.com');
+  it('keeps campaign labels, Dapta-made and ad-tool-made alike', () => {
+    for (const v of [
+      'made-with-dapta',
+      'q3 launch',
+      '1234567890',
+      'chatgpt.com',
+      'google/cpc',
+      'q&a webinar',
+      'at&t calendar',
+      'video #2',
+      '50% off',
+      'www.google.com',
+      '15551234567',
+      '2026 10 18',
+    ]) {
+      expect(analyticsCampaignValue(v)).toBe(v);
+    }
+    expect(analyticsCampaignValue('  padded  ')).toBe('padded');
   });
 
-  it('withholds an address, a URL, a query and their encoded forms', () => {
+  it("passes the growth loop's own tags through the parser unchanged", () => {
+    const url = buildSignupUrl({ baseUrl: 'https://signup.example.test', medium: 'badge', accountCode: 'k7m2qp' })!;
+    const query = Object.fromEntries(new URLSearchParams(url.slice(url.indexOf('?') + 1)));
+    const parsed = parseAttribution({ params: query })!;
+    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'] as const) {
+      expect(analyticsCampaignValue(parsed[key])).toBe(parsed[key]);
+    }
+  });
+
+  it('withholds an address, a handle, a URL, a query, an entity, a phone, and their encoded forms', () => {
     for (const v of [
       'ana@example.com',
+      '@dapta_ai',
       'ana%40example.com',
       'ana%2540example.com',
       'https://example.com/x?email=ana',
-      'www.example.com/x',
+      'https:%2f%2fevil.test%2fana',
+      '//evil.test/reset/ana',
+      'linkedin.com/in/ana-smith',
+      'see www.example.com/reset/abc',
+      'HTTPS://EXAMPLE.COM/X',
+      'HTTPS%3A%2F%2FEXAMPLE.COM',
+      'ANA%40EXAMPLE.COM',
       'a=1&b=2',
+      'a%3d1',
       'page?x',
-      'tag#frag',
+      'page%3fx',
+      'host%3a8080',
+      'tom &amp; jerry',
+      '&#64;handle',
+      '+15551234567',
+      '+57 300 123 4567',
+      '57 300 123 4567',
+      '(555) 123-4567',
+      'ana\uFF20example.com',
+      'ana\uFE6Bexample.com',
+      'https\uFF1A\uFF0F\uFF0Fevil.test',
       'x'.repeat(101),
       '   ',
     ]) {
-      expect(analyticsCampaignValue(v)).toBeNull();
+      expect([v, analyticsCampaignValue(v)]).toEqual([v, null]);
     }
     expect(analyticsCampaignValue(undefined)).toBeNull();
   });
@@ -131,6 +172,11 @@ describe('referrerDomain', () => {
   it('keeps only the host, never the path or query', () => {
     expect(referrerDomain('https://ChatGPT.com/c/abc?q=my+email@x.com')).toBe('chatgpt.com');
     expect(referrerDomain('http://localhost:3000/x')).toBe('localhost');
+  });
+
+  it('is null for a host no browser would send', () => {
+    expect(referrerDomain('https://ana%40example.com/')).toBeNull();
+    expect(referrerDomain('http://[::1]/x')).toBeNull();
   });
 
   it('never mistakes the user part of an authority for the domain', () => {

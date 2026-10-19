@@ -72,6 +72,8 @@ describe('scrubEvent', () => {
       $session_entry_utm_content: 'ana@example.com',
       utm_medium: 'badge',
       gclid: 'CLICK',
+      ph_keyword: 'calendly alternative',
+      $search_engine: 'bing',
       $browser: 'Chrome',
       account_code: 'acme',
       some_new_vendor_property: 'anything',
@@ -102,6 +104,8 @@ describe('scrubEvent', () => {
     expect(out.properties).not.toHaveProperty('gclid');
     expect(out.properties).not.toHaveProperty('utm_medium');
     expect(out.properties).not.toHaveProperty('$session_entry_utm_content');
+    expect(out.properties).not.toHaveProperty('ph_keyword');
+    expect(out.properties).not.toHaveProperty('$search_engine');
     expect(out.$set_once).toEqual({ $initial_current_url: 'https://cal.example.test/acme/ana' });
   });
 
