@@ -1035,6 +1035,62 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
+      /** "MCP & API" page: connect-your-agent guide, tool list, key details. */
+      connectTitle: string;
+      connectLead: string;
+      tabCursor: string;
+      tabClaudeCode: string;
+      tabCodex: string;
+      tabOther: string;
+      tabChat: string;
+      stepKey: string;
+      stepKeyEnv: string;
+      mcpUrlLabel: string;
+      mcpUrlMissing: string;
+      copy: string;
+      copied: string;
+      addToCursor: string;
+      cursorLead: string;
+      cursorKeyNote: string;
+      cursorFileLabel: string;
+      claudeCodeLead: string;
+      codexLead: string;
+      otherLead: string;
+      otherUrl: string;
+      otherHeader: string;
+      chatTitle: string;
+      chatBody: string;
+      toolsTitle: string;
+      toolsLead: string;
+      kindRead: string;
+      kindWrite: string;
+      kindDestructive: string;
+      toolNeedsNoKey: string;
+      toolNeedsAnyKey: string;
+      toolOrPublic: string;
+      toolNeeds: string;
+      toolDescriptions: Record<string, string>;
+      scopeLabels: Record<string, string>;
+      scopesLead: string;
+      eventTypesLabel: string;
+      eventTypesAll: string;
+      eventTypesOnly: string;
+      expiryLabel: string;
+      expiryNever: string;
+      expiryDays: string;
+      keyScopesUnknown: string;
+      keyAllEventTypes: string;
+      keyOnlyEventTypes: string;
+      keyNoExpiry: string;
+      keyExpires: string;
+      keyExpired: string;
+      keyLastUsed: string;
+      keyNeverUsed: string;
+      apiRefTitle: string;
+      apiRefLead: string;
+      apiDocs: string;
+      apiOpenApi: string;
+      apiRefMissing: string;
     };
     /**
      * Integrations tab (H1b / #93) — connect one CRM credential per account.
@@ -1593,7 +1649,7 @@ export const en: BookingMessages = {
       general: 'General',
       bookingPage: 'Booking Page',
       members: 'Members',
-      developer: 'Developer',
+      developer: 'MCP & API',
       notifications: 'Notifications',
       integrations: 'Integrations',
     },
@@ -2213,6 +2269,83 @@ export const en: BookingMessages = {
       revokedToast: 'Key revoked.',
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
+      connectTitle: 'Connect your agent',
+      connectLead:
+        'Run Dapta Calendars from your own AI agent: find a free slot, book, reschedule and cancel without opening this dashboard. Create an API key below, then pick your agent.',
+      tabCursor: 'Cursor',
+      tabClaudeCode: 'Claude Code',
+      tabCodex: 'Codex',
+      tabOther: 'Other agents',
+      tabChat: 'Claude.ai and ChatGPT',
+      stepKey: 'Create an API key below and copy it when it is shown. Give it only the access the agent needs.',
+      stepKeyEnv: 'Set the key in the terminal you start your agent from, so it is never pasted into a config:',
+      mcpUrlLabel: 'MCP address',
+      mcpUrlMissing:
+        'This installation has no public MCP address yet. Ask whoever runs it to set MCP_PUBLIC_URL (or API_PUBLIC_URL), then come back.',
+      copy: 'Copy',
+      copied: 'Copied',
+      addToCursor: 'Add to Cursor',
+      cursorLead: 'One click opens Cursor and asks you to confirm. Then set your key as shown below.',
+      cursorKeyNote:
+        'The link carries the name of the variable, never the key itself. Cursor reads the key from your environment when it starts.',
+      cursorFileLabel: 'Or paste this into .cursor/mcp.json (project) or ~/.cursor/mcp.json (all projects):',
+      claudeCodeLead: 'Run this once in your terminal:',
+      codexLead: 'Add this to ~/.codex/config.toml, or .codex/config.toml in a trusted project:',
+      otherLead: 'Any agent or SDK that speaks MCP over HTTP needs two things.',
+      otherUrl: 'Server address',
+      otherHeader: 'Header on every request',
+      chatTitle: 'Claude.ai and ChatGPT',
+      chatBody:
+        'One-click sign-in for the Claude and ChatGPT apps is coming. Until then, the public booking tools work with no key: an agent can find a time and book on any public booking page. Everything else needs an API key from a terminal-based agent.',
+      toolsTitle: 'What an agent can do',
+      toolsLead: 'A key grants only the tools whose access you tick. Read tools only look; write tools change your calendar; cancelling cannot be undone.',
+      kindRead: 'Read',
+      kindWrite: 'Write',
+      kindDestructive: 'Destructive',
+      toolNeedsNoKey: 'No key needed on a public booking page',
+      toolNeedsAnyKey: 'Works with any key',
+      toolOrPublic: '(or no key on a public booking page)',
+      toolNeeds: 'Needs: {scope}',
+      toolDescriptions: {
+        find_available_slots: 'Find free times for an event type.',
+        book_meeting: 'Book a time on a public booking page and email the invitee.',
+        whoami: 'Show which account and access the key has.',
+        list_event_types: 'List your event types.',
+        get_booking_page_link: 'Get the public booking link for an event type.',
+        list_bookings: 'List bookings with the minimum fields.',
+        get_booking: 'Read one booking, including what the invitee wrote.',
+        create_booking: 'Book a meeting on your behalf. Safe to retry.',
+        reschedule_booking: 'Move a booking to another time. Safe to retry.',
+        cancel_booking: 'Cancel a booking and tell the invitee.',
+      },
+      scopeLabels: {
+        'event-types:read': 'See event types',
+        'availability:read': 'Check free times',
+        'bookings:read': 'Read bookings',
+        'bookings:write': 'Create and reschedule bookings',
+        'bookings:cancel': 'Cancel bookings',
+        'calendars:read': 'See connected calendars',
+      },
+      scopesLead: 'Access this key grants',
+      eventTypesLabel: 'Event types',
+      eventTypesAll: 'All event types',
+      eventTypesOnly: 'Only these event types',
+      expiryLabel: 'Expires',
+      expiryNever: 'Never',
+      expiryDays: 'In {days} days',
+      keyScopesUnknown: 'Access not shown',
+      keyAllEventTypes: 'All event types',
+      keyOnlyEventTypes: 'Only {count} event type(s)',
+      keyNoExpiry: 'No expiry',
+      keyExpires: 'Expires {date}',
+      keyExpired: 'Expired {date}',
+      keyLastUsed: 'Last used {date}',
+      keyNeverUsed: 'Never used',
+      apiRefTitle: 'API reference',
+      apiRefLead: 'Every route a key can call, with a try-it console and the machine-readable spec.',
+      apiDocs: 'API docs',
+      apiOpenApi: 'openapi.json',
+      apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
     },
     integrations: {
       pageLead:
@@ -2715,7 +2848,7 @@ export const es: BookingMessages = {
       general: 'General',
       bookingPage: 'Página de reservas',
       members: 'Miembros',
-      developer: 'Desarrollador',
+      developer: 'MCP y API',
       notifications: 'Notificaciones',
       integrations: 'Integraciones',
     },
@@ -3337,6 +3470,83 @@ export const es: BookingMessages = {
       revokedToast: 'Clave revocada.',
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
+      connectTitle: 'Conecta tu agente',
+      connectLead:
+        'Maneja Dapta Calendars desde tu propio agente de IA: busca un espacio libre, reserva, reagenda y cancela sin abrir este panel. Crea una clave API abajo y elige tu agente.',
+      tabCursor: 'Cursor',
+      tabClaudeCode: 'Claude Code',
+      tabCodex: 'Codex',
+      tabOther: 'Otros agentes',
+      tabChat: 'Claude.ai y ChatGPT',
+      stepKey: 'Crea una clave API abajo y cópiala cuando aparezca. Dale solo el acceso que el agente necesita.',
+      stepKeyEnv: 'Define la clave en la terminal desde la que abres tu agente, así nunca queda pegada en una configuración:',
+      mcpUrlLabel: 'Dirección MCP',
+      mcpUrlMissing:
+        'Esta instalación aún no tiene una dirección MCP pública. Pide a quien la administra que defina MCP_PUBLIC_URL (o API_PUBLIC_URL) y vuelve.',
+      copy: 'Copiar',
+      copied: 'Copiado',
+      addToCursor: 'Añadir a Cursor',
+      cursorLead: 'Un clic abre Cursor y te pide confirmar. Después define tu clave como se muestra abajo.',
+      cursorKeyNote:
+        'El enlace lleva el nombre de la variable, nunca la clave. Cursor lee la clave de tu entorno al iniciar.',
+      cursorFileLabel: 'O pega esto en .cursor/mcp.json (proyecto) o ~/.cursor/mcp.json (todos los proyectos):',
+      claudeCodeLead: 'Ejecuta esto una vez en tu terminal:',
+      codexLead: 'Agrega esto a ~/.codex/config.toml, o a .codex/config.toml en un proyecto de confianza:',
+      otherLead: 'Cualquier agente o SDK que hable MCP por HTTP necesita dos cosas.',
+      otherUrl: 'Dirección del servidor',
+      otherHeader: 'Encabezado en cada solicitud',
+      chatTitle: 'Claude.ai y ChatGPT',
+      chatBody:
+        'Pronto habrá inicio de sesión con un clic para las apps de Claude y ChatGPT. Mientras tanto, las herramientas de reserva pública funcionan sin clave: un agente puede buscar un horario y reservar en cualquier página pública. Todo lo demás necesita una clave API desde un agente de terminal.',
+      toolsTitle: 'Qué puede hacer un agente',
+      toolsLead: 'Una clave solo da las herramientas cuyo acceso marques. Las de lectura solo miran; las de escritura cambian tu agenda; cancelar no se puede deshacer.',
+      kindRead: 'Lectura',
+      kindWrite: 'Escritura',
+      kindDestructive: 'Destructiva',
+      toolNeedsNoKey: 'Sin clave en una página de reservas pública',
+      toolNeedsAnyKey: 'Funciona con cualquier clave',
+      toolOrPublic: '(o sin clave en una página de reservas pública)',
+      toolNeeds: 'Requiere: {scope}',
+      toolDescriptions: {
+        find_available_slots: 'Busca horarios libres de un tipo de evento.',
+        book_meeting: 'Reserva un horario en una página pública y avisa al invitado por correo.',
+        whoami: 'Muestra a qué cuenta y acceso corresponde la clave.',
+        list_event_types: 'Lista tus tipos de evento.',
+        get_booking_page_link: 'Obtiene el enlace público de reservas de un tipo de evento.',
+        list_bookings: 'Lista reservas con los campos mínimos.',
+        get_booking: 'Lee una reserva, incluido lo que escribió el invitado.',
+        create_booking: 'Reserva una reunión en tu nombre. Se puede reintentar sin riesgo.',
+        reschedule_booking: 'Mueve una reserva a otro horario. Se puede reintentar sin riesgo.',
+        cancel_booking: 'Cancela una reserva y avisa al invitado.',
+      },
+      scopeLabels: {
+        'event-types:read': 'Ver tipos de evento',
+        'availability:read': 'Consultar horarios libres',
+        'bookings:read': 'Leer reservas',
+        'bookings:write': 'Crear y reagendar reservas',
+        'bookings:cancel': 'Cancelar reservas',
+        'calendars:read': 'Ver calendarios conectados',
+      },
+      scopesLead: 'Acceso que da esta clave',
+      eventTypesLabel: 'Tipos de evento',
+      eventTypesAll: 'Todos los tipos de evento',
+      eventTypesOnly: 'Solo estos tipos de evento',
+      expiryLabel: 'Vence',
+      expiryNever: 'Nunca',
+      expiryDays: 'En {days} días',
+      keyScopesUnknown: 'Acceso no disponible',
+      keyAllEventTypes: 'Todos los tipos de evento',
+      keyOnlyEventTypes: 'Solo {count} tipo(s) de evento',
+      keyNoExpiry: 'Sin vencimiento',
+      keyExpires: 'Vence el {date}',
+      keyExpired: 'Venció el {date}',
+      keyLastUsed: 'Último uso {date}',
+      keyNeverUsed: 'Sin usar',
+      apiRefTitle: 'Referencia de la API',
+      apiRefLead: 'Todas las rutas que una clave puede llamar, con consola de pruebas y la especificación legible por máquinas.',
+      apiDocs: 'Documentación de la API',
+      apiOpenApi: 'openapi.json',
+      apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
     },
     integrations: {
       pageLead:
