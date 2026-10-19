@@ -352,7 +352,7 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `OUTBOX_POLL_MS` | `5000` | poll interval (a retry due sooner wakes the worker on time) | no |
 | `OUTBOX_MAX_ATTEMPTS` | `5` | reserved; every row gets five attempts before the retry horizon may end it | no |
 | `OUTBOX_RETRY_HORIZON_MS` | `86400000` | how long a failing delivery keeps being retried, counted from its first failure (backoff 1 s, 2 s, 4 s ... capped at 15 min, jittered). `0` = give up after the five attempts, the old behaviour | no |
-| `OUTBOX_CONCURRENCY` | `4` | deliveries in flight per kind of work (emails, calendar writes, webhooks, CRM, sign-up sync) per process; one destination (a webhook subscriber, a booking) is served one delivery at a time, in the order queued, so a retry never lets a later delivery overtake it | no |
+| `OUTBOX_CONCURRENCY` | `4` | deliveries in flight per kind of work (emails, calendar writes, webhooks, CRM, sign-up sync) per process. A booking's calendar writes, one side's mail about a booking, and one subscriber's events about a booking each go one at a time in the order queued, so a retry never lets a later one overtake it; a slow webhook subscriber holds at most one slot per process | no |
 | `OUTBOX_LEASE_MS` | `300000` | how long a claimed row belongs to the worker that claimed it; a live delivery renews it, a dead replica's rows are taken over when it runs out | no |
 | `CORS_ORIGINS` | `PUBLIC_APP_URL` only | comma-separated allowlist to embed the widget on other domains | no |
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
@@ -544,8 +544,12 @@ reference it by `CALENDAR_BACKEND_MODULE`.
   migration claim outbox rows without a lease, so while old and new API pods run
   side by side they can deliver the same row twice, and an old pod still gives a
   failing row up after five attempts. Keep the overlap short (or set
-  `OUTBOX_WORKER_ENABLED=false` on the old pods during the rollout). Rolling
-  back is safe: the old code ignores the three columns.
+  `OUTBOX_WORKER_ENABLED=false` on the old pods during the rollout). Rows
+  already queued at the upgrade carry no order key and are ordered by their
+  booking (by their subscriber, for a webhook), so for those few rows only, a
+  retry of one can still be overtaken by a row about the same booking queued
+  after the upgrade. Rolling back is safe: the old code ignores the four
+  columns.
 
 ## Troubleshooting
 

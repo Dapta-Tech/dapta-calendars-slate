@@ -259,9 +259,11 @@ export interface ClaimOutboxOptions {
    * a row scheduled for later and never tried yet (a reminder) blocks nobody.
    * Rows with no key are never held back.
    *
-   * Also: one webhook SUBSCRIBER has at most one delivery in flight, whatever
-   * bookings its rows are about, so a slow subscriber takes one slot, never
-   * all of them.
+   * Also: a claim never takes a row for a webhook SUBSCRIBER that already has
+   * a delivery in flight, and takes at most one per subscriber, whatever
+   * bookings its rows are about. So a slow subscriber holds one slot per API
+   * process (two replicas claiming at the same instant may each take one),
+   * never all of them, and never more than its own queue.
    */
   inOrder?: boolean;
 }
@@ -309,9 +311,9 @@ export async function claimDueOutbox(
     sql`(o.lease_until IS NULL OR o.lease_until <= ${now})`,
     ...lane,
   ];
-  let candidates: Array<{ id: string; kind: string; webhook_id: string | null }>;
+  let candidates: Array<{ id: string }>;
   if (opts.inOrder) {
-    // Subscribers with a delivery already in flight, on any worker or replica.
+    // Subscribers with a delivery already in flight (any worker, any replica).
     const busySubscribers = (
       await db.all<{ webhook_id: string }>(
         sql`SELECT DISTINCT o.webhook_id AS webhook_id FROM outbox o
@@ -321,47 +323,55 @@ export async function claimDueOutbox(
             )}`,
       )
     ).map((r) => r.webhook_id);
-    // Rank every ACTIVE row of an order key by age and offer only the head,
-    // and only when it is due and free: a head in flight or backing off holds
-    // its whole key. The range bound lets the status/next_attempt_at index
-    // skip far-future reminders: a row backing off is due within
+    const notBusy =
+      busySubscribers.length > 0
+        ? sql`AND NOT (h.kind = 'webhook' AND COALESCE(h.webhook_id, '') IN (${sql.join(
+            busySubscribers.map((w) => sql`${w}`),
+            sql`, `,
+          )}))`
+        : sql``;
+    // Inner: rank every ACTIVE row of an order key by age; only the head can
+    // go, and only when it is due and free (a head in flight or backing off
+    // holds its whole key). The range bound lets the status/next_attempt_at
+    // index skip far-future reminders: a row backing off is due within
     // MAX_BACKOFF_MS (markOutboxRetry clamps it).
-    const heads = await db.all<{ id: string; kind: string; webhook_id: string | null }>(
-      sql`SELECT id, kind, webhook_id FROM (
-            SELECT o.id, o.kind, o.webhook_id, o.next_attempt_at, o.created_at, o.lease_until,
+    // Outer: drop subscribers already busy, and keep ONE head per subscriber,
+    // both before the LIMIT, so a subscriber with a thousand queued bookings
+    // still takes one slot and every other subscriber's head stays in reach.
+    candidates = await db.all<{ id: string }>(
+      sql`SELECT id FROM (
+            SELECT h.id, h.next_attempt_at, h.created_at,
                    ROW_NUMBER() OVER (
-                     PARTITION BY o.kind, COALESCE(${ORDER_KEY('o')}, o.id)
-                     ORDER BY o.created_at, o.id
-                   ) AS rn
-            FROM outbox o
-            WHERE ${sql.join(
-              [
-                sql`o.status = 'pending'`,
-                sql`o.next_attempt_at <= ${now + MAX_BACKOFF_MS}`,
-                sql`(o.attempts > 0 OR o.next_attempt_at <= ${now})`,
-                ...lane,
-              ],
-              sql` AND `,
-            )}
-          ) ranked
-          WHERE rn = 1 AND next_attempt_at <= ${now} AND (lease_until IS NULL OR lease_until <= ${now})
+                     PARTITION BY CASE WHEN h.kind = 'webhook' AND h.webhook_id IS NOT NULL THEN h.webhook_id ELSE h.id END
+                     ORDER BY h.next_attempt_at, h.created_at, h.id
+                   ) AS per_subscriber
+            FROM (
+              SELECT o.id, o.kind, o.webhook_id, o.next_attempt_at, o.created_at, o.lease_until,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY o.kind, COALESCE(${ORDER_KEY('o')}, o.id)
+                       ORDER BY o.created_at, o.id
+                     ) AS in_line
+              FROM outbox o
+              WHERE ${sql.join(
+                [
+                  sql`o.status = 'pending'`,
+                  sql`o.next_attempt_at <= ${now + MAX_BACKOFF_MS}`,
+                  sql`(o.attempts > 0 OR o.next_attempt_at <= ${now})`,
+                  ...lane,
+                ],
+                sql` AND `,
+              )}
+            ) h
+            WHERE h.in_line = 1 AND h.next_attempt_at <= ${now}
+              AND (h.lease_until IS NULL OR h.lease_until <= ${now}) ${notBusy}
+          ) heads
+          WHERE per_subscriber = 1
           ORDER BY next_attempt_at, created_at, id
-          LIMIT ${limit * 4}`,
+          LIMIT ${limit}`,
     );
-    // At most one per subscriber, and none for a subscriber already busy.
-    const taken = new Set(busySubscribers);
-    candidates = [];
-    for (const h of heads) {
-      if (candidates.length >= limit) break;
-      if (h.kind === 'webhook' && h.webhook_id) {
-        if (taken.has(h.webhook_id)) continue;
-        taken.add(h.webhook_id);
-      }
-      candidates.push(h);
-    }
   } else {
-    candidates = await db.all<{ id: string; kind: string; webhook_id: string | null }>(
-      sql`SELECT o.id, o.kind, o.webhook_id FROM outbox o WHERE ${sql.join(due, sql` AND `)}
+    candidates = await db.all<{ id: string }>(
+      sql`SELECT o.id FROM outbox o WHERE ${sql.join(due, sql` AND `)}
           ORDER BY o.next_attempt_at, o.created_at, o.id
           LIMIT ${limit}`,
     );

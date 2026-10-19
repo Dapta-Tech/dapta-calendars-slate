@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { claimDueOutbox, enqueueOutbox, markOutboxDone, type OutboxKind } from './outbox';
+import { claimDueOutbox, enqueueOutbox, markOutboxDone, markOutboxRetry, type OutboxKind } from './outbox';
 
 // Several API replicas drain one outbox. The claim is what keeps two of them
 // from delivering the same row (the same email twice, the same webhook twice),
@@ -63,5 +63,35 @@ describePg('outbox claims across replicas (real Postgres)', () => {
     // The replica whose lease ran out cannot record over the new holder.
     expect(await markOutboxDone(a, id, 31_500, 'a')).toBe(false);
     expect(await markOutboxDone(b, id, 31_500, 'b')).toBe(true);
+  });
+
+  it('in order, racing: a key\'s second row is never claimed while its first is in flight or backing off', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const opts = (token: string) => ({ kinds: [kind], inOrder: true, token, leaseMs: 60_000 });
+    // Three keys, three rows each, queued in order.
+    const ids: Record<string, string[]> = {};
+    let t = 100_000;
+    for (const key of ['k1', 'k2', 'k3']) {
+      ids[key] = [];
+      for (let i = 0; i < 3; i++) {
+        ids[key]!.push(
+          await enqueueOutbox(a, { kind, action: `${key}-${i}`, bookingUid: `${tag}-${key}`, payload: '{}', now: t++ }),
+        );
+      }
+    }
+    const at = t + 10;
+    const [ra, rb] = await Promise.all([claimDueOutbox(a, at, 10, opts('a')), claimDueOutbox(b, at, 10, opts('b'))]);
+    const claimed = [...ra, ...rb].map((r) => r.id).sort();
+    // Exactly the three heads, each once, whichever pool won it.
+    expect(claimed).toEqual([ids.k1![0]!, ids.k2![0]!, ids.k3![0]!].sort());
+    // While the heads are in flight, nothing more of those keys.
+    expect(await claimDueOutbox(b, at + 1, 10, opts('c'))).toHaveLength(0);
+    // k1's head fails and backs off: k1 waits, the others' next rows go once their heads are done.
+    const head = (key: string) => [...ra, ...rb].find((r) => r.id === ids[key]![0])!;
+    await markOutboxRetry(a, ids.k1![0]!, { attempts: 1, error: 'x', now: at + 2, delayMs: 60_000, leaseToken: head('k1').leaseToken });
+    await markOutboxDone(a, ids.k2![0]!, at + 2, head('k2').leaseToken);
+    await markOutboxDone(a, ids.k3![0]!, at + 2, head('k3').leaseToken);
+    const next = await claimDueOutbox(a, at + 3, 10, opts('d'));
+    expect(next.map((r) => r.id).sort()).toEqual([ids.k2![1]!, ids.k3![1]!].sort());
   });
 });

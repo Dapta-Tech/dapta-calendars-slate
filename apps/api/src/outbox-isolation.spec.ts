@@ -256,6 +256,45 @@ describe('OutboxWorker: isolation, backoff, horizon, leases (F7)', () => {
     await until(async () => (await listOutbox(db, { status: 'done' })).length === 6);
   });
 
+  it('a subscriber with a large backlog across many bookings still takes one slot; others go out', async () => {
+    const worker = makeWorker();
+    const slow = await webhook('https://198.51.100.10/slow');
+    const fast = await webhook('https://198.51.100.11/fast');
+    const hang = gate<Response>();
+    const calls: string[] = [];
+    worker.fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return url.includes('/slow') ? hang.promise : ({ ok: true, status: 200 } as Response);
+    }) as unknown as typeof fetch;
+    worker.now = () => 1000;
+    // Thirty bookings' events for the slow subscriber, all queued first: far
+    // more than one claim's worth of heads.
+    for (let i = 0; i < 30; i++) {
+      await enqueueOutbox(db, {
+        kind: 'webhook',
+        action: 'booking.created',
+        accountId,
+        webhookId: slow.id,
+        bookingUid: `bk-slow-${i}`,
+        payload: JSON.stringify({ event: 'booking.created', data: { uid: `bk-slow-${i}` } }),
+        now: i,
+      });
+    }
+    const fastRow = await enqueueOutbox(db, {
+      kind: 'webhook',
+      action: 'booking.created',
+      accountId,
+      webhookId: fast.id,
+      bookingUid: 'bk-fast',
+      payload: JSON.stringify({ event: 'booking.created', data: { uid: 'bk-fast' } }),
+      now: 100,
+    });
+    await worker.pump();
+    await until(async () => (await status(fastRow)).status === 'done');
+    expect(calls.filter((u) => u.includes('/slow'))).toHaveLength(1);
+    hang.resolve({ ok: true, status: 200 } as Response);
+  });
+
   it('backs off 1/2/4/8 s per entry, counted from each failure', async () => {
     const worker = makeWorker();
     const hook = await webhook('https://198.51.100.10/down');

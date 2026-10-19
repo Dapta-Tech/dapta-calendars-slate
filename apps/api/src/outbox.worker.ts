@@ -62,11 +62,13 @@ function span(ms: number): string {
  * no-silent-loss delivery.
  *
  *   - Lanes: each kind of work drains on its own (`OUTBOX_LANES`), with up to
- *     `OUTBOX_CONCURRENCY` deliveries in flight per lane. Each destination (a
- *     webhook subscriber, a booking) is served one delivery at a time, in the
- *     order queued, a row backing off holding the rows behind it. A slow or
- *     failing destination therefore delays only its own deliveries, and a
- *     retry never lets a delete or a "cancelled" overtake what it follows.
+ *     `OUTBOX_CONCURRENCY` deliveries in flight per lane. Rows that share an
+ *     order key (a booking's calendar writes; one side's mail about a booking;
+ *     a subscriber's events about a booking) go one at a time, in the order
+ *     queued, a row backing off holding the rows behind it, and a webhook
+ *     subscriber holds at most one slot per process. A slow or failing
+ *     destination therefore delays only its own deliveries, and a retry never
+ *     lets a delete or a "cancelled" overtake what it follows.
  *   - Claims are leased (`claimDueOutbox`), so several API replicas can run
  *     this worker against one database without delivering a row twice; a
  *     replica that dies mid-delivery has its rows picked up when the lease
