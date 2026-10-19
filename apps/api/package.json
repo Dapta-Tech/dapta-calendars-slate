@@ -14,6 +14,7 @@
     "test": "vitest run",
     "e2e:mcp": "tsx scripts/mcp-e2e.mjs",
     "e2e:oauth": "tsx scripts/oauth-e2e.mjs",
+    "e2e:mcp-login": "tsx scripts/mcp-login-e2e.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

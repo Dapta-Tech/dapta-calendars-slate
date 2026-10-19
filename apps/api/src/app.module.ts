@@ -60,6 +60,7 @@ import {
   OAuthProviderController,
 } from './oauth/oauth.controller';
 import { OAuthService } from './oauth/oauth.service';
+import { ExternalOAuthService } from './oauth/external.service';
 
 @Module({
   controllers: [
@@ -208,6 +209,7 @@ import { OAuthService } from './oauth/oauth.service';
     CalV2RequestIdInterceptor,
     McpGateway,
     OAuthService,
+    ExternalOAuthService,
     AdminService,
     OnboardingService,
     GrowthService,

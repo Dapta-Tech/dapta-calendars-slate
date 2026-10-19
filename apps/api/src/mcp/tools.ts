@@ -19,6 +19,7 @@ import {
   stableStringify,
   toFailure,
   untrusted,
+  signInKey,
   zonedIso,
 } from './support';
 
@@ -53,6 +54,11 @@ export interface ToolDef {
    * credential). Absent: `scope` decides. See `accessOf`.
    */
   access?(args: Record<string, unknown>): 'public' | { scope: ApiScope | null };
+  /**
+   * Whether the tool takes the optional `account_id` (see `takesAccount`).
+   * Absent: every tool that can need a credential takes it.
+   */
+  accountArg?: boolean;
   /** Counts against the tighter write bucket. */
   write: boolean;
   annotations: {
@@ -67,6 +73,20 @@ export interface ToolDef {
 }
 
 // --- Shared schemas -----------------------------------------------------------
+
+/**
+ * Which account a call acts on. Added by the gateway to every tool that acts
+ * on the caller's account and removed before the tool runs: tools read the
+ * account from the principal only.
+ */
+export const accountIdArg = z
+  .string()
+  .min(1)
+  .max(64)
+  .optional()
+  .describe(
+    'The account to act on, from list_my_accounts. Needed only when this connection reaches several accounts; otherwise its own account is used.',
+  );
 
 const timeZone = z
   .string()
@@ -491,7 +511,8 @@ const bookMeeting: ToolDef = {
     // argument, so the same key with changed arguments is refused rather than
     // booking again. A replay answers from the stored result, so it never reaches
     // the booking core (no duplicate-guard or overlap error, no second email).
-    const caller = call.principal ? `key:${call.principal.keyId}` : `anon:${hashApiValue(call.ip)}`;
+    // A sign-in that has not picked an account keeps its own namespace too.
+    const caller = call.principal ? `key:${call.principal.keyId}` : call.login ? signInKey(call.login) : `anon:${hashApiValue(call.ip)}`;
     const namespaceHash = hashApiValue(`${accountId}:${caller}:book_meeting:${args.idempotency_key}`);
     const requestHash = hashApiValue(
       stableStringify({
@@ -661,7 +682,38 @@ const whoami: ToolDef = {
         },
         server_time_utc: new Date().toISOString(),
       },
-      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); ${p.kind === 'oauth' ? `connected app ${p.prefix}` : `key ${p.prefix}`} with scopes ${p.scopes.join(', ') || 'none'}.`,
+      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); ${p.kind === 'oauth' ? `${p.grantId ? 'connected app' : 'sign-in'} ${p.prefix}` : `key ${p.prefix}`} with scopes ${p.scopes.join(', ') || 'none'}.`,
+    };
+  },
+};
+
+const listMyAccountsInput = z.object({});
+const listMyAccounts: ToolDef = {
+  name: 'list_my_accounts',
+  title: 'List the accounts this connection can act in',
+  description:
+    'Lists the accounts this connection reaches, with their names and ids. A sign-in reaches every account where the person is an owner or admin; when there are several, pass the chosen id as account_id to the other tools. An API key reaches only its own account.',
+  scope: null,
+  access: () => ({ scope: null }),
+  accountArg: false,
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listMyAccountsInput,
+  output: z.object({ accounts: z.array(z.object({ id: z.string(), name: z.string() })), count: z.number() }),
+  async run(_args: z.infer<typeof listMyAccountsInput>, call, deps) {
+    let accounts: { id: string; name: string }[];
+    if (call.login) {
+      accounts = call.login.accounts.map((a) => ({ id: a.accountId, name: untrusted(a.accountName, 120) }));
+    } else if (call.principal) {
+      const row = await deps.db.get<{ name: string }>(sql`SELECT name FROM account WHERE id = ${call.principal.accountId} LIMIT 1`);
+      if (!row) throw notFound('Account');
+      accounts = [{ id: call.principal.accountId, name: untrusted(row.name, 120) }];
+    } else {
+      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (Settings, MCP & API).');
+    }
+    return {
+      data: { accounts, count: accounts.length },
+      summary: `${accounts.length} account(s): ${accounts.map((a) => `${a.name} (${a.id})`).join(', ')}.`,
     };
   },
 };
@@ -980,17 +1032,27 @@ const cancelBooking: ToolDef = {
   },
 };
 
-/** Deterministic order: public tools first, then reads, then writes. */
 /** Who may make this call (see `ToolDef.access`). */
 export function accessOf(def: ToolDef, args: Record<string, unknown>): 'public' | { scope: ApiScope | null } {
   if (def.access) return def.access(args);
   return def.scope ? { scope: def.scope } : 'public';
 }
 
+/**
+ * Whether the tool acts on the caller's account, and so takes `account_id`:
+ * every tool that can need a credential (a public-page tool derives its account
+ * from the page), unless it says otherwise.
+ */
+export function takesAccount(def: ToolDef): boolean {
+  return def.accountArg ?? (def.scope !== null || def.access !== undefined);
+}
+
+/** Deterministic order: public tools first, then reads, then writes. */
 export const TOOLS: readonly ToolDef[] = [
   findSlots,
   bookMeeting,
   whoami,
+  listMyAccounts,
   listEventTypes,
   getLink,
   listBookings,

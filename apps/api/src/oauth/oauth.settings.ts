@@ -1,7 +1,7 @@
 import { createECDH, createHash, createPrivateKey, hkdfSync, type JsonWebKey } from 'node:crypto';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
-import type { ServerEnv } from '@slate/config/env';
+import { oauthMode, type ServerEnv } from '@slate/config/env';
 import type { ApiScope } from '@slate/types';
 
 /**
@@ -146,9 +146,13 @@ export function loadSigningKey(raw: string): { signingJwk: OAuthSettings['signin
   return { signingJwk: { ...publicJwk, d: parsed.d }, publicJwk };
 }
 
-/** The settings, or null when OAuth is off. */
+/**
+ * The settings, or null when OAuth is off or an external authorization server
+ * signs people in (OAUTH_AUTHORIZATION_SERVER): then this server is never
+ * built, even if its issuer and key are still set.
+ */
 export function resolveOAuthSettings(env: ServerEnv): OAuthSettings | null {
-  if (!env.OAUTH_ENABLED || !env.OAUTH_ISSUER || !env.MCP_PUBLIC_URL || !env.OAUTH_SIGNING_JWK) return null;
+  if (oauthMode(env) !== 'builtin' || !env.OAUTH_ISSUER || !env.MCP_PUBLIC_URL || !env.OAUTH_SIGNING_JWK) return null;
   const { signingJwk, publicJwk } = loadSigningKey(env.OAUTH_SIGNING_JWK);
   const cookieKey = Buffer.from(
     hkdfSync('sha256', Buffer.from(signingJwk.d!, 'base64url'), 'dapta-calendars', 'oauth-cookie-signing', 32),

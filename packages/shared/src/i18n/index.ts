@@ -1172,6 +1172,18 @@ export interface BookingMessages {
       chatGptStep2: string;
       chatGptStep3: string;
       chatScopesNote: string;
+      /**
+       * OAuth through an external authorization server: people sign in with
+       * the account they use here, there is no consent page or Connected apps
+       * list of ours, and a connection acts with the member's admin role.
+       */
+      signInTitle: string;
+      signInBody: string;
+      signInAccess: string;
+      signInDisconnect: string;
+      chatSignInLead: string;
+      chatSignInClaudeStep3: string;
+      chatSignInGptStep3: string;
       /** Connected apps: OAuth grants with revoke. */
       connectedTitle: string;
       connectedLead: string;
@@ -2476,6 +2488,7 @@ export const en: BookingMessages = {
         find_available_slots: 'Find free times for an event type.',
         book_meeting: 'Book a time on a public booking page and email the invitee.',
         whoami: 'Show which account and access the key has.',
+        list_my_accounts: 'List the accounts this connection can act in.',
         list_event_types: 'List your event types.',
         get_booking_page_link: 'Get the public booking link for an event type.',
         list_bookings: 'List bookings with the minimum fields.',
@@ -2526,6 +2539,16 @@ export const en: BookingMessages = {
       chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
       chatScopesNote:
         'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
+      signInTitle: 'Sign in instead of a key',
+      signInBody:
+        'Claude, ChatGPT, Cursor and other apps that support sign-in connect with no key: add the MCP address as a connector, then sign in with the same account you use for Dapta Calendars.',
+      signInAccess:
+        'A connection acts with your owner or admin access, so it can use every tool. For narrower access, such as read-only or a single event type, create an API key instead.',
+      signInDisconnect:
+        "To disconnect, remove the connector in the app. An owner can also cut a connection off at once by removing that person's admin role.",
+      chatSignInLead: 'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in with your account.',
+      chatSignInClaudeStep3: 'Click Connect and sign in with your Dapta Calendars account.',
+      chatSignInGptStep3: 'Create it, then sign in with your Dapta Calendars account when ChatGPT asks.',
       connectedTitle: 'Connected apps',
       connectedLead:
         'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
@@ -3774,6 +3797,7 @@ export const es: BookingMessages = {
         find_available_slots: 'Busca horarios libres de un tipo de evento.',
         book_meeting: 'Reserva un horario en una página pública y avisa al invitado por correo.',
         whoami: 'Muestra a qué cuenta y acceso corresponde la clave.',
+        list_my_accounts: 'Lista las cuentas en las que puede actuar esta conexión.',
         list_event_types: 'Lista tus tipos de evento.',
         get_booking_page_link: 'Obtiene el enlace público de reservas de un tipo de evento.',
         list_bookings: 'Lista reservas con los campos mínimos.',
@@ -3824,6 +3848,16 @@ export const es: BookingMessages = {
       chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
       chatScopesNote:
         'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
+      signInTitle: 'Inicia sesión en lugar de usar una clave',
+      signInBody:
+        'Claude, ChatGPT, Cursor y otras apps que admiten inicio de sesión se conectan sin clave: agrega la dirección MCP como conector y luego inicia sesión con la misma cuenta que usas en Dapta Calendars.',
+      signInAccess:
+        'Una conexión actúa con tu acceso de propietario o administrador, así que puede usar todas las herramientas. Para un acceso más acotado, como solo lectura o un único tipo de evento, crea una clave de API.',
+      signInDisconnect:
+        'Para desconectar, elimina el conector en la app. Un propietario también puede cortar una conexión al instante quitándole a esa persona el rol de administrador.',
+      chatSignInLead: 'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión con tu cuenta.',
+      chatSignInClaudeStep3: 'Haz clic en Conectar e inicia sesión con tu cuenta de Dapta Calendars.',
+      chatSignInGptStep3: 'Créalo e inicia sesión con tu cuenta de Dapta Calendars cuando ChatGPT te lo pida.',
       connectedTitle: 'Apps conectadas',
       connectedLead:
         'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',

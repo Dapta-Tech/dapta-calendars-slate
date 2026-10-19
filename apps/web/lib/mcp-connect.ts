@@ -122,6 +122,7 @@ export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'find_available_slots', kind: 'read', scope: 'availability:read', publicOk: true },
   { name: 'book_meeting', kind: 'write', scope: null, publicOk: true },
   { name: 'whoami', kind: 'read', scope: null, publicOk: false },
+  { name: 'list_my_accounts', kind: 'read', scope: null, publicOk: false },
   { name: 'list_event_types', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'get_booking_page_link', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'list_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },

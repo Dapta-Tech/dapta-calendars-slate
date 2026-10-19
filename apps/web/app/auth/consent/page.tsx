@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { getMessages, t } from '@slate/shared';
 import { BrandMark } from '@/components/brand/brand';
@@ -61,6 +62,9 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
       // 404: unknown, used or expired. A 401 never gets here: the client
       // redirects through the login (and back) by throwing.
       if (!(e instanceof ApiError) || e.status !== 404) throw e;
+      // An external authorization server signs people in and shows its own
+      // consent: this page does not exist for this deployment.
+      if (e.code === 'EXTERNAL_AUTHORIZATION_SERVER') notFound();
     }
   }
 

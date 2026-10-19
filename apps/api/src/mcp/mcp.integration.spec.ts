@@ -38,13 +38,14 @@ async function firstSlot(client: Awaited<ReturnType<Harness['connect']>>, nth = 
 }
 
 describe('catalog', () => {
-  it('lists ten tools with titles, annotations and output schemas, in a stable order', async () => {
+  it('lists eleven tools with titles, annotations and output schemas, in a stable order', async () => {
     const client = await h.connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
       'find_available_slots',
       'book_meeting',
       'whoami',
+      'list_my_accounts',
       'list_event_types',
       'get_booking_page_link',
       'list_bookings',
@@ -64,6 +65,14 @@ describe('catalog', () => {
     expect(by['list_bookings']!.readOnlyHint).toBe(true);
     expect(by['create_booking']!.idempotentHint).toBe(true);
     expect(by['book_meeting']!.openWorldHint).toBe(true);
+    expect(by['list_my_accounts']!.readOnlyHint).toBe(true);
+    // Every tool that acts on the caller's account takes `account_id`; the
+    // public booking tool and the account list do not.
+    const props = (name: string) => Object.keys((tools.find((t) => t.name === name)!.inputSchema as { properties?: object }).properties ?? {});
+    for (const name of ['find_available_slots', 'whoami', 'list_event_types', 'get_booking_page_link', 'list_bookings', 'get_booking', 'create_booking', 'reschedule_booking', 'cancel_booking'])
+      expect(props(name)).toContain('account_id');
+    expect(props('book_meeting')).not.toContain('account_id');
+    expect(props('list_my_accounts')).not.toContain('account_id');
   });
 });
 

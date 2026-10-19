@@ -410,6 +410,20 @@ export const serverEnvSchema = z.object({
   // Comma-separated EXACT redirect URIs added to the registration allowlist,
   // for a client this deployment trusts that is not on the built-in list.
   OAUTH_DCR_EXTRA_REDIRECT_URIS: z.string().optional(),
+
+  // --- OAuth for the MCP endpoint (an external authorization server) ---------
+  // With OAUTH_ENABLED=true and this set, the API is a resource server ONLY:
+  // sign-in, consent and tokens belong to this external OAuth 2.1 authorization
+  // server, and the built-in one above is not mounted (its routes answer 404,
+  // and OAUTH_ISSUER / OAUTH_SIGNING_JWK are not needed). The value is the
+  // server's issuer, an origin (scheme and host), exactly as its metadata and
+  // its tokens write it. The server must support RFC 8707 resource indicators
+  // (tokens for MCP_PUBLIC_URL carry it as their audience) and publish a JWKS.
+  // Unset: the built-in server runs as configured above.
+  OAUTH_AUTHORIZATION_SERVER: blankIsDefault(z.string().url().optional()),
+  // Where that server publishes its signing keys. Unset: the `jwks_uri` of its
+  // metadata (`<issuer>/.well-known/oauth-authorization-server`).
+  OAUTH_JWKS_URL: blankIsDefault(z.string().url().optional()),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -455,6 +469,17 @@ function secureEnough(url: URL, env: Pick<ServerEnv, 'NODE_ENV'>): boolean {
 }
 
 /**
+ * Who signs MCP connections in: nobody (OAuth off), this API's own
+ * authorization server, or an external one this API only checks tokens from.
+ */
+export type OAuthMode = 'off' | 'builtin' | 'external';
+
+export function oauthMode(env: Pick<ServerEnv, 'OAUTH_ENABLED' | 'OAUTH_AUTHORIZATION_SERVER'>): OAuthMode {
+  if (!env.OAUTH_ENABLED) return 'off';
+  return env.OAUTH_AUTHORIZATION_SERVER ? 'external' : 'builtin';
+}
+
+/**
  * Everything wrong with the OAuth settings, as sentences an operator can act
  * on; empty when OAuth is off or correctly configured. Fail-fast lives in
  * `loadServerEnv`; this is split out so it can be tested without throwing.
@@ -471,6 +496,19 @@ export function oauthConfigProblems(env: ServerEnv): string[] {
     const mcp = new URL(env.MCP_PUBLIC_URL);
     if (!secureEnough(mcp, env)) problems.push('MCP_PUBLIC_URL must use https (http only on localhost outside production).');
     if (mcp.search || mcp.hash) problems.push('MCP_PUBLIC_URL must not carry a query string or a fragment.');
+  }
+  if (env.OAUTH_AUTHORIZATION_SERVER) {
+    // Resource server only: the built-in server's issuer and key are unused.
+    const as = new URL(env.OAUTH_AUTHORIZATION_SERVER);
+    if (!secureEnough(as, env)) problems.push('OAUTH_AUTHORIZATION_SERVER must use https (http only on localhost outside production).');
+    if ((as.pathname !== '/' && as.pathname !== '') || as.search || as.hash || as.username || as.password)
+      problems.push('OAUTH_AUTHORIZATION_SERVER must be an origin only (scheme and host, no path, query, fragment or credentials).');
+    if (env.OAUTH_JWKS_URL) {
+      const jwks = new URL(env.OAUTH_JWKS_URL);
+      if (!secureEnough(jwks, env)) problems.push('OAUTH_JWKS_URL must use https (http only on localhost outside production).');
+      if (jwks.hash || jwks.username || jwks.password) problems.push('OAUTH_JWKS_URL must not carry a fragment or credentials.');
+    }
+    return problems;
   }
   if (!env.OAUTH_ISSUER) {
     problems.push('OAUTH_ISSUER is required: the public origin that serves /oauth/* (for example https://calendar.example.com).');

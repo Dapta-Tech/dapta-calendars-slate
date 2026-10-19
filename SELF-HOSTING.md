@@ -477,6 +477,41 @@ on Postgres, `0025_oauth_record.sql` on SQLite): a new table, no change to
 existing ones. It stays empty while OAuth is off; expired rows are purged in
 the background.
 
+#### Or: sign in through an external authorization server
+
+Instead of running its own, the API can be a resource server for an OAuth 2.1
+authorization server you already have (see
+[docs/MCP.md](docs/MCP.md#oauth-with-an-external-authorization-server)). Set
+`OAUTH_ENABLED=true`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`; the
+built-in server's vars above are then not needed, and its routes, consent page
+and Connected apps answer 404.
+
+| Var | Default | Notes | Secret? |
+|---|---|---|---|
+| `OAUTH_AUTHORIZATION_SERVER` | unset | the external server's issuer, an origin (`https`; `http` only on localhost outside production), written exactly as its metadata and tokens write it. Set, the API checks that server's access tokens and runs no authorization server of its own | no |
+| `OAUTH_JWKS_URL` | unset | where that server publishes its signing keys; unset, the `jwks_uri` of its `/.well-known/oauth-authorization-server` metadata | no |
+
+What the external server must do:
+
+- Support **RFC 8707 resource indicators**: register `MCP_PUBLIC_URL` with it as
+  a resource (an API, an audience), so its access tokens carry it as `aud`.
+- Sign access tokens with **RS256 or ES256** and publish them in a **JWKS**.
+- Let MCP clients register: Client ID Metadata Documents and/or Dynamic Client
+  Registration, as Claude, ChatGPT and Cursor expect. That is configured there,
+  not here.
+
+What your login provider must do: record the external server's user id (the
+`sub` of its tokens) on the member when the person signs in to the web app, in
+`member.idp_subject`. A token whose `sub` no active owner or admin carries gets
+403 ("open the web app once, then reconnect"). The bundled `workos` provider does
+it from the `workos_user_id` claim of its platform token; with another provider,
+add the same call (`recordMemberIdpSubject`) where it resolves the member.
+
+Storage: one additive nullable column, `member.idp_subject`, with a unique index
+on (`idp_subject`, `account_id`) (migration `0028_member_idp_subject.sql` on
+Postgres, `0027_member_idp_subject.sql` on SQLite). NULL everywhere until a login
+records it.
+
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every
 > other secret server-side.

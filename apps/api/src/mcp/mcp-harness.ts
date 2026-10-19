@@ -64,6 +64,8 @@ const ENV_KEYS = [
   'OAUTH_CIMD_ENABLED',
   'OAUTH_DCR_ENABLED',
   'OAUTH_DCR_EXTRA_REDIRECT_URIS',
+  'OAUTH_AUTHORIZATION_SERVER',
+  'OAUTH_JWKS_URL',
 ] as const;
 
 export type HarnessEnv = Partial<Record<(typeof ENV_KEYS)[number], string>>;

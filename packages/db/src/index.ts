@@ -30,3 +30,4 @@ export { pgSchema } from './schema.pg';
 export * from './brand-backup';
 export * from './account-branding';
 export * from './oauth-store';
+export * from './idp-subject';

@@ -61,13 +61,19 @@ export function ConnectAgent({
   available,
   snippets,
   oauth = false,
+  external = false,
   messages: m,
 }: {
   /** The API serves MCP. Off: one plain sentence, no tabs and no address (the page also drops the tool list). */
   available: boolean;
   snippets: ConnectSnippets | null;
-  /** The API runs its own OAuth server: chat apps connect with a sign-in. */
+  /** OAuth is on: chat apps connect with a sign-in. */
   oauth?: boolean;
+  /**
+   * The sign-in is an external authorization server's: people sign in with the
+   * account they use here, and a connection acts with their admin role.
+   */
+  external?: boolean;
   messages: DevMessages;
 }) {
   const base = useId();
@@ -113,6 +119,7 @@ export function ConnectAgent({
         {m.connectTitle}
       </h2>
       <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.connectLead}</p>
+      {external ? <SignInNote m={m} /> : null}
 
       <div
         role="tablist"
@@ -149,7 +156,7 @@ export function ConnectAgent({
         className="flex flex-col gap-field rounded-xl border border-border bg-card p-field"
       >
         {active === 'chat' && oauth && snippets ? (
-          <ChatOAuth snippets={snippets} m={m} />
+          <ChatOAuth snippets={snippets} external={external} m={m} />
         ) : active === 'chat' ? (
           <div className="flex flex-col gap-tight">
             <h3 className="text-base font-semibold">{m.chatTitle}</h3>
@@ -190,8 +197,24 @@ export function ConnectAgent({
   );
 }
 
+/**
+ * Signing in through an external authorization server, said once above the
+ * tabs: with which account, what a connection may do, and how it ends. There
+ * is no consent page or Connected apps list here to say it instead.
+ */
+function SignInNote({ m }: { m: DevMessages }) {
+  return (
+    <div className="mb-field flex flex-col gap-tight rounded-xl border border-border bg-card p-field">
+      <h3 className="text-base font-semibold">{m.signInTitle}</h3>
+      <p className="max-w-prose text-sm text-muted-foreground">{m.signInBody}</p>
+      <p className="max-w-prose text-sm text-muted-foreground">{m.signInAccess}</p>
+      <p className="max-w-prose text-sm text-muted-foreground">{m.signInDisconnect}</p>
+    </div>
+  );
+}
+
 /** The chat-app tab when OAuth is on: real "add custom connector" steps, no key. */
-function ChatOAuth({ snippets, m }: { snippets: ConnectSnippets; m: DevMessages }) {
+function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; external: boolean; m: DevMessages }) {
   const copy = { copyLabel: m.copy, copiedLabel: m.copied };
   const steps = (items: string[]) => (
     <ol className="flex list-decimal flex-col gap-tight pl-group text-sm text-muted-foreground">
@@ -202,7 +225,7 @@ function ChatOAuth({ snippets, m }: { snippets: ConnectSnippets; m: DevMessages 
   );
   return (
     <>
-      <p className="max-w-prose text-sm text-muted-foreground">{m.chatOAuthLead}</p>
+      <p className="max-w-prose text-sm text-muted-foreground">{external ? m.chatSignInLead : m.chatOAuthLead}</p>
       <div>
         <a href={snippets.claudeConnector} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size: 'lg' })}>
           {m.addToClaude}
@@ -211,13 +234,14 @@ function ChatOAuth({ snippets, m }: { snippets: ConnectSnippets; m: DevMessages 
       <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
       <div className="flex flex-col gap-tight">
         <h3 className="text-base font-semibold">{m.chatClaudeHeading}</h3>
-        {steps([m.chatClaudeStep1, m.chatClaudeStep2, m.chatClaudeStep3])}
+        {steps([m.chatClaudeStep1, m.chatClaudeStep2, external ? m.chatSignInClaudeStep3 : m.chatClaudeStep3])}
       </div>
       <div className="flex flex-col gap-tight">
         <h3 className="text-base font-semibold">{m.chatGptHeading}</h3>
-        {steps([m.chatGptStep1, m.chatGptStep2, m.chatGptStep3])}
+        {steps([m.chatGptStep1, m.chatGptStep2, external ? m.chatSignInGptStep3 : m.chatGptStep3])}
       </div>
-      <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>
+      {/* A sign-in has no step-up: what it may do is said above the tabs. */}
+      {external ? null : <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>}
     </>
   );
 }
@@ -237,7 +261,7 @@ export function KindChip({ kind, m }: { kind: ToolKind; m: DevMessages }) {
   );
 }
 
-/** The ten tools with read / write / destructive labels, before anyone creates a key. */
+/** The tools with read / write / destructive labels, before anyone creates a key. */
 export function AgentTools({ messages: m }: { messages: DevMessages }) {
   return (
     <section className="mb-section">

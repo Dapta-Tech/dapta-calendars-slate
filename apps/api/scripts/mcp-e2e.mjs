@@ -95,7 +95,7 @@ try {
   await anon.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
   const tools = (await anon.listTools()).tools.map((t) => t.name);
   say(`anonymous tools/list -> ${tools.length} tools: ${tools.join(', ')}`);
-  if (tools.length !== 10) fail('expected 10 tools');
+  if (tools.length !== 11) fail('expected 11 tools');
   const denied = await anon.callTool({ name: 'list_bookings', arguments: {} });
   if (!denied.isError || !denied.content[0].text.includes('AUTH_REQUIRED')) fail('anonymous list_bookings was not refused');
   say(`anonymous list_bookings -> ${denied.content[0].text.slice(0, 80)}...`);

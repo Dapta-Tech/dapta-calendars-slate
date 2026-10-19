@@ -533,6 +533,12 @@ export interface ConnectedApp {
 export interface ConnectedApps {
   enabled: boolean;
   /**
+   * True when an external authorization server signs connections in: people
+   * connect by signing in with their account, and the connections live there,
+   * so `grants` stays empty and `enabled` false. Absent on an older API.
+   */
+  external?: boolean;
+  /**
    * Whether the API serves the MCP endpoint at all (its MCP_ENABLED). Absent on
    * an older API, which the page treats as off: it never shows an agent an
    * address it has not been told is answering.

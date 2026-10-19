@@ -123,4 +123,31 @@ describe('Settings > MCP & API: the connect-agent guide follows the API', () => 
     expect(html).toContain(m.mcpUrlMissing);
     expect(html).not.toContain(m.mcpUnavailable);
   });
+
+  it('sign-in through an external authorization server: says how it signs in, what it may do and how to disconnect; no Connected apps', async () => {
+    admin.connectedApps.mockResolvedValue({ enabled: false, external: true, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+    const html = await render();
+    expect(html).toContain(m.signInTitle);
+    expect(html).toContain(m.signInBody);
+    expect(html).toContain(m.signInAccess.replace(/'/g, '&#x27;'));
+    expect(html).toContain(m.signInDisconnect.replace(/'/g, '&#x27;'));
+    expect(html).toContain(m.chatOAuthTitle);
+    expect(html).not.toContain('data-testid="connected-apps"');
+    expect(html).toContain('list_my_accounts');
+    expectOtherSectionsUnchanged(html);
+  });
+
+  it("this API's own OAuth server keeps its Connected apps and says nothing about an external sign-in", async () => {
+    admin.connectedApps.mockResolvedValue({ enabled: true, mcpEnabled: true, accessTokenTtlSeconds: 3600, grants: [] });
+    const html = await render();
+    expect(html).toContain('data-testid="connected-apps"');
+    expect(html).not.toContain(m.signInTitle);
+  });
+
+  it('MCP off with an external sign-in still shows only the honest state', async () => {
+    admin.connectedApps.mockResolvedValue({ enabled: false, external: true, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] });
+    const html = await render();
+    expectUnavailable(html);
+    expect(html).not.toContain(m.signInTitle);
+  });
 });
