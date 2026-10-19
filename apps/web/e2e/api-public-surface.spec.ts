@@ -37,6 +37,8 @@ test.describe('status codes', () => {
     '/zzzzzz/nobody',
     '/acme/team/no-such-team',
     '/acme/team/sales/no-such-event',
+    // A guessed invite token reads exactly like any other dead link.
+    '/booking/not-a-real-token',
   ]) {
     test(`a link that leads nowhere answers a real 404, noindex: ${path}`, async ({ request }) => {
       const res = await page(request, path);
@@ -72,6 +74,12 @@ test.describe('titles', () => {
     );
     expect(titleOf((await page(request, EVENT, { 'accept-language': 'es' })).html)).toBe(
       'Intro Call con Alex Rivera',
+    );
+  });
+
+  test('a team event page goes through the same rule, no em dash', async ({ request }) => {
+    expect(titleOf((await page(request, '/acme/team/sales/team-demo', { 'accept-language': 'en-US' })).html)).toBe(
+      'Team Demo with Sales',
     );
   });
 

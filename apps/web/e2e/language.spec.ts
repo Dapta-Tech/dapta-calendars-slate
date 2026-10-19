@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { HOST } from './stack';
+import { E2E, HOST } from './stack';
 
 /**
  * A Spanish speaker's first visit, with no language saved yet: the sign-in and
@@ -40,6 +40,21 @@ test('sign-in and dashboard follow the browser language when nothing is saved', 
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
 
+test('a client navigation from the product to a booking page re-stamps <html lang>', async ({ page, context }) => {
+  // The admin saved English; this browser speaks Spanish. The root landing is
+  // a product route (English), the booking page is the visitor's (Spanish).
+  await context.addCookies([{ name: 'slate_locale', value: 'en', url: E2E.web }]);
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  // A marker that only survives a CLIENT navigation: `<html>` is not re-rendered
+  // there, which is the case `LangStamp` exists for.
+  await page.evaluate(() => ((window as unknown as { __soft?: boolean }).__soft = true));
+  await page.getByRole('link', { name: 'Open the demo booking page' }).click();
+  await expect(page).toHaveURL(new RegExp(`/${HOST.accountCode}/${HOST.handle}/${HOST.slug}`));
+  expect(await page.evaluate(() => (window as unknown as { __soft?: boolean }).__soft)).toBe(true);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'es');
+});
+
 test.describe('in English', () => {
   test.use({ locale: 'en-US' });
 
@@ -48,5 +63,18 @@ test.describe('in English', () => {
     expect(res?.status()).toBe(404);
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  });
+
+  test("a deleted team in the dashboard says so inside the dashboard, not in a visitor's words", async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await page.locator('input[type="email"]').fill(HOST.email);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/\/admin/);
+    await page.goto('/admin/teams/00000000-0000-0000-0000-000000000000');
+    await expect(page.getByRole('heading', { level: 1, name: 'Not found' })).toBeVisible();
+    await expect(page.getByText('This workspace has nothing at this address.', { exact: false })).toBeVisible();
+    await expect(page.getByText('Check the link with the person who shared it.')).toHaveCount(0);
   });
 });
