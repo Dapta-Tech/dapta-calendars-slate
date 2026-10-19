@@ -7,7 +7,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import type { ServerEnv } from '@slate/config/env';
 import { CLIENT_IP_HEADER, INTERNAL_SECRET_HEADER, forwardedClient } from '@slate/shared';
@@ -110,10 +110,22 @@ function headerOf(req: KeyedRequest, name: string): string | undefined {
   return Array.isArray(raw) ? raw.join(',') : typeof raw === 'string' ? raw : undefined;
 }
 
-/** Constant-time: hashing first makes the compare length-independent too. */
+/**
+ * Whether `given` is exactly the internal secret, compared as UTF-8 bytes.
+ *
+ * Constant-time with respect to the content of `given`: when the lengths match
+ * every byte is compared, and when they differ the secret is compared with
+ * itself so the work done is the same. This can reveal the secret's LENGTH,
+ * which is acceptable: the length is not what keeps it secret (the API refuses
+ * one shorter than 32 characters), and nothing else about it leaks.
+ */
 function secretMatches(given: string, secret: string): boolean {
-  const a = createHash('sha256').update(given).digest();
-  const b = createHash('sha256').update(secret).digest();
+  const a = Buffer.from(given, 'utf8');
+  const b = Buffer.from(secret, 'utf8');
+  if (a.length !== b.length) {
+    timingSafeEqual(b, b);
+    return false;
+  }
   return timingSafeEqual(a, b);
 }
 

@@ -109,6 +109,32 @@ describe('rate limiting (P1-5)', () => {
       }
     });
 
+    it('compares the secret byte for byte: only the exact value vouches, whatever its length or alphabet', () => {
+      const ip = '203.0.113.7';
+      const as = (given: string, secret = SECRET) =>
+        vouchedClient(req({ 'x-slate-internal': given, 'x-slate-client-ip': ip }), secret).kind;
+      expect(as(SECRET)).toBe('visitor');
+      // Same length, one character off: first, middle and last position.
+      for (const at of [0, 16, SECRET.length - 1]) {
+        const wrong = SECRET.slice(0, at) + (SECRET[at] === 'y' ? 'z' : 'y') + SECRET.slice(at + 1);
+        expect(wrong).toHaveLength(SECRET.length);
+        expect(as(wrong)).toBe('forged');
+      }
+      // A different length, shorter or longer, including a prefix or an extension of the secret.
+      for (const wrong of [SECRET.slice(0, -1), `${SECRET}x`, SECRET.slice(0, 8), `${SECRET}${SECRET}`]) {
+        expect(as(wrong)).toBe('forged');
+      }
+      // An empty header is a wrong secret, not a missing one.
+      expect(as('')).toBe('forged');
+      // Non-ASCII is compared as UTF-8 bytes: a secret with accents vouches only for itself,
+      // and a value with fewer characters but exactly the secret's byte length is refused.
+      const accented = 'clave-de-pruebas-ñandú-'.padEnd(32, 'x');
+      expect(as(accented, accented)).toBe('visitor');
+      expect(as(accented.replace('ñ', 'n'), accented)).toBe('forged');
+      expect(as(SECRET.slice(0, -2) + 'é', SECRET)).toBe('forged');
+      expect(as('é'.repeat(SECRET.length / 2), SECRET)).toBe('forged');
+    });
+
     it('keys the bucket on it; a wrong secret keys like any request and is reported once a minute', () => {
       const guard = new RateLimitGuard(new NoopRateLimiter(), {
         RATE_LIMIT_TRUSTED_PROXY_HOPS: 1,
