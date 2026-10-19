@@ -80,17 +80,14 @@ export function CodeBlock({
 /**
  * The agent tabs: the MCP address and the exact setup for each agent. Step 2 of
  * the setup guide (`setup-guide.tsx`), which carries the title and, in step 1,
- * the key.
+ * the key, and which shows none of this while the API does not serve MCP.
  */
 export function ConnectAgent({
-  available,
   snippets,
   oauth = false,
   external = false,
   messages: m,
 }: {
-  /** The API serves MCP. Off: one plain sentence, no tabs and no address (the page also drops the tool list). */
-  available: boolean;
   snippets: ConnectSnippets | null;
   /** OAuth is on: chat apps connect with a sign-in. */
   oauth?: boolean;
@@ -124,19 +121,6 @@ export function ConnectAgent({
   };
 
   const copy = { copyLabel: m.copy, copiedLabel: m.copied };
-
-  if (!available) {
-    return (
-      <section className="mb-section" aria-labelledby={`${base}-title`}>
-        <h2 id={`${base}-title`} className="mb-tight text-xl font-semibold">
-          {m.connectTitle}
-        </h2>
-        <div className="rounded-xl border border-border bg-card p-field">
-          <p className="max-w-prose text-sm text-muted-foreground">{m.mcpUnavailable}</p>
-        </div>
-      </section>
-    );
-  }
 
   return (
     <div>

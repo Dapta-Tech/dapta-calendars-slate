@@ -72,7 +72,9 @@ afterEach(() => {
   host = null;
 });
 
-async function mount(opts: { keys?: ApiKeyRow[]; appsConnected?: boolean; snippets?: ConnectSnippets | null } = {}) {
+async function mount(
+  opts: { keys?: ApiKeyRow[]; appsConnected?: boolean; snippets?: ConnectSnippets | null; mcpAvailable?: boolean } = {},
+) {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -82,6 +84,7 @@ async function mount(opts: { keys?: ApiKeyRow[]; appsConnected?: boolean; snippe
         keys={opts.keys ?? []}
         eventTypes={[]}
         now={NOW}
+        mcpAvailable={opts.mcpAvailable ?? true}
         snippets={opts.snippets === undefined ? SNIPPETS : opts.snippets}
         oauth={false}
         appsConnected={opts.appsConnected ?? false}
@@ -190,6 +193,19 @@ describe('KeysPanel', () => {
     const agent = step(el, 'agent');
     expect(agent.querySelector('[role="tablist"]')).not.toBeNull();
     expect(agent.textContent).toContain(SNIPPETS.mcpUrl);
+  });
+
+  it('with MCP off: one sentence, no steps, no address, and the list keeps the one Create', async () => {
+    const el = await mount({ mcpAvailable: false, snippets: null });
+    const guide = el.querySelector<HTMLElement>('[data-testid="setup-guide"]')!;
+    expect(guide.getAttribute('data-mcp')).toBe('off');
+    expect(guide.querySelector('h2')!.textContent).toBe(m.connectTitle);
+    expect(guide.textContent).toContain(m.mcpUnavailable);
+    expect(guide.querySelector('ol')).toBeNull();
+    expect(guide.querySelector('[role="tablist"]')).toBeNull();
+    expect(el.textContent).not.toContain(SNIPPETS.mcpUrl);
+    expect(createButtons(el)).toHaveLength(1);
+    expect(createButtons(el)[0]!.closest('[data-testid="setup-guide"]')).toBeNull();
   });
 
   it('says so in step 2 when the deployment has no public MCP address', async () => {

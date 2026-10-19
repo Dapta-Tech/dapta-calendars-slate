@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
 
 /**
- * Settings, MCP & API shows how to connect an agent only when the API says it
+ * MCP, Connect and keys shows how to connect an agent only when the API says it
  * serves MCP. The web is started with MCP_PUBLIC_URL set (playwright.config.ts),
  * so the address alone would always be there; what decides is the API's own
  * `mcpEnabled` on the Connected apps read.
@@ -13,7 +13,7 @@ import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
  *   API's oauth.integration.spec.ts), served by the proxy in front of the API.
  * - A read that fails (429 here) fails closed to the same state.
  */
-const PAGE = '/admin/settings/developer';
+const PAGE = '/admin/developers/keys';
 const MCP_URL = `${E2E.api}/mcp`;
 const GRANTS = '/v1/oauth/grants';
 const UNAVAILABLE = 'Agent connections are not turned on for this installation.';
@@ -23,13 +23,13 @@ async function openAsOwner(page: Page): Promise<void> {
   await page.getByLabel('Email').fill(HOST.email);
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
-  await expect(page.getByRole('heading', { name: 'Connect your agent' })).toBeVisible();
+  // Exact: with MCP on it is step 2's title, under "Connect your agent in 3 steps".
+  await expect(page.getByRole('heading', { name: 'Connect your agent', exact: true })).toBeVisible();
 }
 
-/** The sections that do not depend on MCP render the same in every state. */
+/** The keys do not depend on MCP and render the same in every state. */
 async function expectOtherSections(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Webhooks' })).toBeVisible();
 }
 
 async function expectUnavailable(page: Page): Promise<void> {

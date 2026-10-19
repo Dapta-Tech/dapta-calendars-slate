@@ -18,12 +18,14 @@ export function isWorkingKey(k: ApiKeyRow, now: number): boolean {
 /**
  * The setup guide above the key list, sharing one create dialog: step 1's
  * button and the list's Create open the same one, and only one of them shows at
- * a time (the guide's while there is no working key, the list's after).
+ * a time (the guide's while there is no working key, the list's after, and
+ * always the list's while the API does not serve MCP and the guide has no steps).
  */
 export function KeysPanel({
   keys,
   eventTypes,
   now,
+  mcpAvailable,
   snippets,
   oauth,
   appsConnected,
@@ -35,6 +37,8 @@ export function KeysPanel({
   keys: ApiKeyRow[];
   eventTypes: Array<{ id: string; title: string }>;
   now: number;
+  /** The API says it serves MCP; off, the guide has no steps (see SetupGuide). */
+  mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
   oauth: boolean;
   /** Some app has signed in through OAuth: an agent is connected without a key. */
@@ -52,6 +56,7 @@ export function KeysPanel({
     <>
       <SetupGuide
         m={m}
+        mcpAvailable={mcpAvailable}
         snippets={snippets}
         oauth={oauth}
         hasKey={hasKey}
@@ -68,7 +73,9 @@ export function KeysPanel({
         locale={locale}
         createOpen={createOpen}
         onCreateOpenChange={setCreateOpen}
-        showCreate={hasKey}
+        // The guide's step 1 holds the page's one Create until a key exists;
+        // with MCP off there is no step 1, so the list keeps it.
+        showCreate={hasKey || !mcpAvailable}
       />
     </>
   );

@@ -17,8 +17,12 @@ import { KeysPanel } from '../keys-panel';
 import { PRODUCT_NAME } from '@/lib/product-name';
 import type { ConnectedApps as ConnectedAppsList } from '@/lib/admin-api';
 
-/** An API without OAuth (or older than it) reads as "OAuth off". */
-const NO_OAUTH: ConnectedAppsList = { enabled: false, accessTokenTtlSeconds: null, grants: [] };
+/**
+ * What the page assumes when it cannot ask the API: OAuth off and MCP off. An
+ * API older than OAuth answers 404 here, and one that errors is no proof that
+ * `/mcp` answers either, so both fail closed.
+ */
+const NO_OAUTH: ConnectedAppsList = { enabled: false, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] };
 
 // Read per request: the MCP address comes from the server's runtime env, which a
 // prerender at build time would freeze to whatever the build machine had.
@@ -61,8 +65,12 @@ export default async function DeveloperKeysPage() {
     adminApi.connectedApps().catch(() => NO_OAUTH),
   ]);
   const m = admin.developer;
+  // The web's MCP_PUBLIC_URL says where MCP would answer, not whether it does:
+  // only the API knows that (MCP_ENABLED). No connection steps, and no address,
+  // unless it says yes; an older API without the field reads as no.
+  const mcpEnabled = oauth.mcpEnabled === true;
   const { mcpUrl } = resolveMcpConfig();
-  const snippets: ConnectSnippets | null = mcpUrl
+  const snippets: ConnectSnippets | null = mcpEnabled && mcpUrl
     ? {
         mcpUrl,
         cursorDeeplink: cursorDeeplink(mcpUrl),
@@ -80,6 +88,7 @@ export default async function DeveloperKeysPage() {
         keys={keys}
         eventTypes={eventTypes}
         now={Date.now()}
+        mcpAvailable={mcpEnabled}
         snippets={snippets}
         oauth={oauth.enabled}
         appsConnected={oauth.grants.length > 0}

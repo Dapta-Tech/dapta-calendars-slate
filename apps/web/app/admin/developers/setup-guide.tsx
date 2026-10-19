@@ -24,6 +24,7 @@ type DevMessages = BookingMessages['admin']['developer'];
  */
 export function SetupGuide({
   m,
+  mcpAvailable,
   snippets,
   oauth,
   hasKey,
@@ -33,6 +34,12 @@ export function SetupGuide({
   onCreate,
 }: {
   m: DevMessages;
+  /**
+   * The API says it serves MCP (`mcpEnabled`). Off, an older API without the
+   * field, or a read that failed: the guide is one sentence, with no steps and
+   * no address, since MCP_PUBLIC_URL only says where MCP would answer.
+   */
+  mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
   oauth: boolean;
   hasKey: boolean;
@@ -42,6 +49,21 @@ export function SetupGuide({
   docsLabel: string;
   onCreate: () => void;
 }) {
+  if (!mcpAvailable) {
+    return (
+      <section
+        aria-labelledby="setup-guide-title"
+        data-testid="setup-guide"
+        data-mcp="off"
+        className="mb-section rounded-xl border border-border bg-card p-card sm:p-group"
+      >
+        <h2 id="setup-guide-title" className="text-xl font-semibold">
+          {m.connectTitle}
+        </h2>
+        <p className="mt-tight max-w-prose text-sm text-muted-foreground">{m.mcpUnavailable}</p>
+      </section>
+    );
+  }
   return (
     <section
       aria-labelledby="setup-guide-title"
