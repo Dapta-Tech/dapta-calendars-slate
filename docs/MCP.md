@@ -20,7 +20,7 @@ without a custom integration.
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
 | OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
 
-A key is created by a workspace admin (Settings, then API keys). Send it only in
+A key is created by a workspace admin (MCP, then Connect and keys). Send it only in
 the `Authorization` header. A key in the URL (`?api_key=`, `?access_token=`) is
 refused with 400 so it never lands in an access log. A wrong, expired or revoked
 key answers 401; it is never quietly treated as anonymous. The account always

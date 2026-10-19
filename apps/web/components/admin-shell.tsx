@@ -88,6 +88,7 @@ function NavGroup({
   collapsed,
   label,
   labels,
+  motionPaused,
   onNavigate,
 }: {
   item: NavItem;
@@ -95,14 +96,18 @@ function NavGroup({
   collapsed: boolean;
   label: string;
   labels: AdminMessages['developerNav'];
+  /** Nobody can see this copy of the rail right now (the closed drawer). */
+  motionPaused?: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const inside = isNavItemActive(pathname, item.href);
   const [open, setOpen] = useState(inside);
   const [flyout, setFlyout] = useState(false);
-  // The rotating logos hold still under the pointer (see McpLogos).
+  // The rotating logos hold still under the pointer and under keyboard focus
+  // (see McpLogos): nobody should have to read a label beside a moving target.
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -146,7 +151,10 @@ function NavGroup({
 
   const onFlyoutKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Tab') {
-      // Leaving the menu by Tab closes it; focus moves on as the browser decides.
+      // Leaving the menu by Tab closes it. Focus goes back to the trigger first
+      // (no preventDefault), so the browser's own Tab then moves on from the
+      // MCP item, the place in the rail the person left from.
+      triggerRef.current?.focus();
       setFlyout(false);
       return;
     }
@@ -173,13 +181,15 @@ function NavGroup({
         onClick={() => (collapsed ? setFlyout((v) => !v) : setOpen((v) => !v))}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         aria-haspopup={collapsed ? 'menu' : undefined}
         aria-expanded={collapsed ? flyout : open}
         aria-controls={!collapsed && open ? listId : undefined}
         title={collapsed ? label : undefined}
         className={navRowClass(collapsed, state)}
       >
-        <Icon name={item.icon} paused={hovered} />
+        <Icon name={item.icon} paused={hovered || focused || motionPaused} />
         <span className={collapsed ? 'sr-only' : 'min-w-0 flex-1 truncate'}>{label}</span>
         {!collapsed ? (
           <i
@@ -270,6 +280,7 @@ function NavLinks({
   nav,
   pages,
   newTab,
+  motionPaused,
   onNavigate,
 }: {
   items: readonly NavItem[];
@@ -279,6 +290,8 @@ function NavLinks({
   pages: AdminMessages['developerNav'];
   /** "(opens in a new tab)", read out after an external item's label. */
   newTab: string;
+  /** This copy of the rail is off screen (the closed drawer): hold the logos still. */
+  motionPaused?: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
@@ -295,6 +308,7 @@ function NavLinks({
                 collapsed={collapsed}
                 label={label}
                 labels={pages}
+                motionPaused={motionPaused}
                 onNavigate={onNavigate}
               />
             </li>
@@ -602,6 +616,7 @@ export function AdminShell({
             nav={messages.nav}
             pages={messages.developerNav}
             newTab={c.switcher.opensNewTab}
+            motionPaused={!drawerOpen}
             onNavigate={() => setDrawerOpen(false)}
           />
         </nav>

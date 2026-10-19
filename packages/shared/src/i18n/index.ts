@@ -1110,7 +1110,7 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
-      /** "MCP & API" page: connect-your-agent guide, tool list, key details. */
+      /** The MCP pages (Connect and keys, API docs): the agent tabs, tool list, key details. */
       connectTitle: string;
       tabCursor: string;
       tabClaudeCode: string;
@@ -1842,8 +1842,8 @@ export const en: BookingMessages = {
       setAvailabilityDesc: 'Weekly hours + date overrides.',
       stylePage: 'Style your booking page',
       stylePageDesc: 'Brand + 9-axis studio.',
-      apiKeys: 'API keys & webhooks',
-      apiKeysDesc: 'Integrate agents & automations.',
+      apiKeys: 'Connect an agent',
+      apiKeysDesc: 'The MCP server and the API keys your AI agent uses.',
       setupTitle: 'Get bookable',
       setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
       setupConnectTitle: 'Connect a calendar',
@@ -3168,8 +3168,8 @@ export const es: BookingMessages = {
       setAvailabilityDesc: 'Horas semanales + excepciones por fecha.',
       stylePage: 'Personaliza tu página de reservas',
       stylePageDesc: 'Marca + estudio de 9 ejes.',
-      apiKeys: 'Claves API y webhooks',
-      apiKeysDesc: 'Integra agentes y automatizaciones.',
+      apiKeys: 'Conecta un agente',
+      apiKeysDesc: 'El servidor MCP y las claves API que usa tu agente de IA.',
       setupTitle: 'Queda lista para reservas',
       setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
       setupConnectTitle: 'Conecta un calendario',

@@ -1,7 +1,5 @@
 ---
-"@slate/web": minor
 "@slate/shared": minor
-"@slate/api": patch
 ---
 
 MCP and Docs in the admin sidebar, at the level of the dForms rail. "MCP & API"

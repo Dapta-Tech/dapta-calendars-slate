@@ -121,12 +121,9 @@ export function ConnectAgent({
   return (
     <div>
       {external ? <SignInNote m={m} /> : null}
-
-      <div
-        role="tablist"
-        aria-label={m.connectTitle}
-        className="-mx-gutter mb-field flex gap-tight overflow-x-auto px-gutter sm:mx-0 sm:px-0"
-      >
+      {/* Scrolls inside its own width: it sits in the guide's step column now,
+          so the old bleed to the page gutter would run into the step numbers. */}
+      <div role="tablist" aria-label={m.connectTitle} className="mb-field flex gap-tight overflow-x-auto">
         {tabs.map((tab, i) => (
           <button
             key={tab.id}

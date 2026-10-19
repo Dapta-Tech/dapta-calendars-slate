@@ -85,6 +85,13 @@ test('on the collapsed rail MCP is a menu: open it, arrow down, pick a page', as
   await expect(menu).toBeHidden();
   await expect(trigger).toBeFocused();
 
+  // Tab leaves the menu, closes it, and moves on from the MCP item: to Docs.
+  await trigger.click();
+  await expect(menu.getByRole('menuitem', { name: 'Connect and keys' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(menu).toBeHidden();
+  await expect(page.locator('aside').first().getByTestId('nav-docs')).toBeFocused();
+
   await trigger.click();
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
@@ -123,6 +130,8 @@ test('a plain member gets Docs but no MCP item, and the address alone says no ac
   // Nor the Home shortcut to the keys.
   await expect(page.locator('main a[href="/admin/developers/keys"]')).toHaveCount(0);
 
-  await page.goto('/admin/developers/keys');
-  await expect(page.getByRole('heading', { name: 'You don’t have access' })).toBeVisible();
+  for (const path of ['/admin/developers/keys', '/admin/developers/webhooks', '/admin/developers/docs']) {
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: 'You don’t have access' }), path).toBeVisible();
+  }
 });

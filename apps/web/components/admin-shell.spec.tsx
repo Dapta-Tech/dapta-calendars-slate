@@ -54,33 +54,45 @@ afterEach(() => {
   host = null;
 });
 
-async function mount(opts: {
+interface ShellOpts {
   pathname?: string;
   isAdmin?: boolean;
   docsHref?: string | null;
   collapsed?: boolean;
   locale?: Locale;
-}) {
+}
+
+function shell(opts: ShellOpts) {
+  return (
+    <AdminShell
+      user={{ displayName: 'Alex Rivera', handle: 'alex-rivera', accountCode: 'acme' }}
+      messages={getMessages(opts.locale ?? 'en').admin}
+      initialTheme="light"
+      initialCollapsed={opts.collapsed ?? false}
+      isAdmin={opts.isAdmin ?? true}
+      docsHref={opts.docsHref === undefined ? DOCS : opts.docsHref}
+    >
+      <p>page</p>
+    </AdminShell>
+  );
+}
+
+async function mount(opts: ShellOpts) {
   nav.pathname = opts.pathname ?? '/admin';
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  await act(async () =>
-    root!.render(
-      <AdminShell
-        user={{ displayName: 'Alex Rivera', handle: 'alex-rivera', accountCode: 'acme' }}
-        messages={getMessages(opts.locale ?? 'en').admin}
-        initialTheme="light"
-        initialCollapsed={opts.collapsed ?? false}
-        isAdmin={opts.isAdmin ?? true}
-        docsHref={opts.docsHref === undefined ? DOCS : opts.docsHref}
-      >
-        <p>page</p>
-      </AdminShell>,
-    ),
-  );
+  await act(async () => root!.render(shell(opts)));
   return host;
 }
+
+/** A client navigation: the shell stays mounted and the path changes under it. */
+async function navigate(pathname: string, opts: ShellOpts = {}) {
+  nav.pathname = pathname;
+  await act(async () => root!.render(shell({ ...opts, pathname })));
+}
+
+const activeLogo = (rail: Element) => rail.querySelector('[data-testid="mcp-logos"] [data-active="true"]')!.getAttribute('data-logo');
 
 /** The desktop rail and the mobile drawer, in DOM order. */
 function rails(el: HTMLElement) {
@@ -177,6 +189,52 @@ describe('AdminShell: the MCP group', () => {
     await press(document.activeElement!, 'Escape');
     expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
     expect(document.activeElement).toBe(button);
+  });
+
+  it('closes the flyout on Tab and puts focus back on the MCP item, so Tab moves on from there', async () => {
+    const el = await mount({ pathname: '/admin', collapsed: true });
+    const { desktop } = rails(el);
+    const button = trigger(desktop)!;
+    await act(async () => button.click());
+    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
+    await press(document.activeElement!, 'Tab');
+    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('opens again on a navigation into the group, even after it was closed by hand', async () => {
+    const el = await mount({ pathname: '/admin/developers/keys' });
+    const button = trigger(rails(el).desktop)!;
+    await act(async () => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    await navigate('/admin/bookings');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    await navigate('/admin/developers/docs');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    const current = rails(el).desktop.querySelector('[data-testid="nav-developers-pages"] [aria-current="page"]');
+    expect(current?.textContent).toBe('API docs');
+  });
+
+  it('turns the logos, holds them under keyboard focus, and never in the closed drawer', async () => {
+    vi.useFakeTimers();
+    try {
+      const el = await mount({});
+      const { desktop, drawer } = rails(el);
+      expect(activeLogo(desktop)).toBe('claude');
+      await act(async () => vi.advanceTimersByTime(2600));
+      expect(activeLogo(desktop)).toBe('openai');
+      // Off screen: the closed drawer's copy has not moved.
+      expect(activeLogo(drawer)).toBe('claude');
+
+      await act(async () => trigger(desktop)!.focus());
+      await act(async () => vi.advanceTimersByTime(2600 * 2));
+      expect(activeLogo(desktop)).toBe('openai');
+      await act(async () => trigger(desktop)!.blur());
+      await act(async () => vi.advanceTimersByTime(2600));
+      expect(activeLogo(desktop)).toBe('cursor');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('closes the flyout on a click elsewhere, and after a page is picked', async () => {

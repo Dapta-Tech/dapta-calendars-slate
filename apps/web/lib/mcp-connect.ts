@@ -1,5 +1,5 @@
 /**
- * Pure builders for the "MCP & API" page: the Cursor deeplink, the config
+ * Pure builders for the MCP pages: the Cursor deeplink, the config
  * snippets for each agent, the scope catalog and the tool list.
  *
  * Nothing here reads the environment or the DOM, so the same functions run on the

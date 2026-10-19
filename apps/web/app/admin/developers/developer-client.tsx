@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
@@ -107,9 +107,21 @@ export function ApiKeys({
   const [expiryDays, setExpiryDays] = useState(0);
   const eventTypeTitles = new Map(eventTypes.map((e) => [e.id, e.title]));
   const [reveal, setReveal] = useState<string | null>(null);
+  const revealRef = useRef<HTMLDivElement>(null);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
+
+  // The new key is shown once, here, below the setup guide: from the guide's
+  // step 1 that is a screen or more away, and the button that opened the dialog
+  // is gone as soon as a key exists, so the dialog has nothing to hand focus
+  // back to. Bring the key into view and put focus on it instead. Runs after
+  // the dialog's own focus restore (cleanups first), so it wins.
+  useEffect(() => {
+    if (!reveal) return;
+    revealRef.current?.scrollIntoView({ block: 'center' });
+    revealRef.current?.focus();
+  }, [reveal]);
 
   const submit = () =>
     start(async () => {
@@ -166,7 +178,12 @@ export function ApiKeys({
       <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
-        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+        <div
+          ref={revealRef}
+          tabIndex={-1}
+          data-testid="api-key-reveal"
+          className="mb-card rounded-xl border border-primary-edge bg-card p-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <p className="mb-tight text-sm text-muted-foreground">{m.copyOnce}</p>
           <code className="break-all font-mono text-sm">{reveal}</code>
         </div>

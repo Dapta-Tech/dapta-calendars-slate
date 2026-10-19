@@ -27,6 +27,7 @@ vi.mock('./actions', () => ({
   revokeConnectedAppAction: vi.fn(),
 }));
 
+import { createApiKeyAction } from './actions';
 import type { ConnectSnippets } from './connect-agent';
 import { isWorkingKey, KeysPanel } from './keys-panel';
 
@@ -120,6 +121,29 @@ describe('KeysPanel', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog!.textContent).toContain(m.scopesLead);
+  });
+
+  it('brings a key made from step 1 into view and focus: it is shown once, below the guide', async () => {
+    vi.mocked(createApiKeyAction).mockResolvedValue({ plaintext: 'dcl_test_once' });
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const el = await mount();
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-testid="setup-create-key"]')!.click());
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const name = dialog.querySelector<HTMLInputElement>('input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Cursor');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const create = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === m.createKey)!;
+    await act(async () => create.click());
+
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const reveal = el.querySelector<HTMLElement>('[data-testid="api-key-reveal"]')!;
+    expect(reveal.textContent).toContain('dcl_test_once');
+    expect(document.activeElement).toBe(reveal);
+    expect(scrolled.mock.contexts[0]).toBe(reveal);
   });
 
   it('with a working key: step 1 is done and the list keeps the one Create', async () => {
