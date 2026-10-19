@@ -1,0 +1,16 @@
+---
+'@slate/shared': minor
+---
+
+Launch hygiene for the public surface: what a page says to people, search engines and link unfurlers.
+
+- `@slate/shared`: `eventPageTitle` and `titleNames` (`seo.ts`). An event page's title adds who it is with (`{event} with {name}`) only when the event's own title does not already name the host, so "An interview with Felipe" is no longer "An interview with Felipe with Felipe". Accents and case are ignored and whole words are matched; a team name is treated the same way. The catalog gains a `site` group (the default title and description every page inherits, and the not-found page) in English and Spanish, with `{product}` standing for the deployment's product name, and the app switcher's Forms row is named `dForms`, as that product names itself.
+
+The web app (not a published package) in the same change:
+
+- `<html lang>` follows the page's language: the admin's on a product route, the visitor's on a public one. Public pages that did not honor `?lang=` (the profile, team pages, manage page) now do, so the document and the page always agree.
+- The default title and description are product copy in the document's language, with no em dash, around `NEXT_PUBLIC_PRODUCT_NAME`; a fork's neutral "Calendars" reads just as well. The sign-in tab title is localized too.
+- `NOINDEX` (runtime, `1|true|yes`, default off) marks a whole deployment as not for search: `X-Robots-Tag: noindex, nofollow` on every response, `<meta name="robots">` on every page, and a `robots.txt` that disallows everything. Without it, `/robots.txt` now exists: booking pages open, `/admin`, `/login`, `/onboarding` and `/api` closed (exact paths, so a vanity slug such as `login-labs` stays crawlable).
+- Unknown hosts, teams and events answer a real `404` (they answered `200` with a not-found page inside). The existence checks moved into segment layouts that run above every loading boundary, and the root `loading.tsx` moved to the routes that still use it (onboarding, manage, booking links). A host with one event is now sent to it by a real `307` rather than a client redirect. The not-found page is localized. Its head (status, `noindex`, title) is server-rendered; Next renders the body of a 404 decided during render in the browser, so a reader without JavaScript sees an empty page.
+- The admin app switcher links Forms when the deployment sets `NEXT_PUBLIC_FORMS_URL` (build time), and says "Coming soon" only when it does not. The switcher shows when either suite URL is set.
+- The admin, onboarding and sign-in pick the language from `Accept-Language` when no language was saved; the saved choice still wins. Accept-Language weights are honored on every surface.
