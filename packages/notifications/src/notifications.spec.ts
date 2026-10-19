@@ -26,6 +26,26 @@ describe('buildIcs', () => {
     expect(ics.includes('\r\n')).toBe(true);
   });
 
+  it('folds every line break in TEXT, a lone CR included, so no value starts a property', () => {
+    const ics = buildIcs({ ...base, title: 'A\rORGANIZER:evil\r\nB\nC', method: 'REQUEST', sequence: 0 });
+    expect(ics).toContain('SUMMARY:A\\nORGANIZER:evil\\nB\\nC');
+    expect(ics.split('\r\n').filter((l) => l.startsWith('ORGANIZER'))).toHaveLength(1);
+  });
+
+  it('quotes a name that could end its parameter, so it cannot set another one', () => {
+    const ics = buildIcs({
+      ...base,
+      attendees: [{ name: 'x;PARTSTAT=ACCEPTED:mailto:ceo@victim.test', email: 'sam@example.com' }],
+      organizer: { name: 'Rivera, "Alex"', email: 'alex@example.com' },
+      method: 'REQUEST',
+      sequence: 0,
+    });
+    const unfolded = ics.replace(/\r\n /g, '');
+    expect(unfolded).toContain('ATTENDEE;CN="x;PARTSTAT=ACCEPTED:mailto:ceo@victim.test";RSVP=TRUE:mailto:sam@example.com');
+    expect(unfolded).toContain('ORGANIZER;CN="Rivera, Alex":mailto:alex@example.com');
+    expect(buildIcs({ ...base, method: 'REQUEST', sequence: 0 })).toContain('ATTENDEE;CN=Sam;RSVP=TRUE');
+  });
+
   it('emits CANCEL with SEQUENCE 2 and the SAME UID', () => {
     const ics = buildIcs({ ...base, method: 'CANCEL', sequence: 2 });
     expect(ics).toContain('METHOD:CANCEL');

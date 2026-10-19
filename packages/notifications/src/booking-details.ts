@@ -10,6 +10,7 @@
  * HTML half is escaped by the layout (`email-layout.ts`), never here, so
  * nothing in this file may emit markup.
  */
+import { stripUnsafeText } from '@slate/engine';
 import { isReservedFieldName } from '@slate/shared';
 import type { TemplateLocale } from './templates';
 
@@ -63,17 +64,18 @@ export const MAX_ANSWER_ITEMS = 50;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
 
-/** A multi-line value made safe for a text part: one newline style, no controls. */
+/** A multi-line value made safe for a text part: one newline style, no controls or bidi marks. */
 function cleanBlock(value: string): string {
-  return value.replace(/\r\n?/g, '\n').replace(CONTROL, '').trim();
+  return stripUnsafeText(value.replace(/\r\n?/g, '\n').replace(CONTROL, '')).trim();
 }
 
 /** A value that must fit on one line (a name, an address, a phone number). */
 function cleanLine(value: string | null | undefined): string {
-  return String(value ?? '')
-    .replace(/\s+/g, ' ')
-    .replace(CONTROL, '')
-    .trim();
+  return stripUnsafeText(
+    String(value ?? '')
+      .replace(/\s+/g, ' ')
+      .replace(CONTROL, ''),
+  ).trim();
 }
 
 function clip(value: string, max = MAX_ANSWER_CHARS): string {

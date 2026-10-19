@@ -207,6 +207,8 @@ describe('team scheduling methods (SQLite in-memory)', () => {
     const ctx = await loadBookingNotificationContext(db, out.uid);
     const allHostEmails = [ctx!.host.email, ...ctx!.coHosts.map((h) => h.email)].sort();
     expect(allHostEmails).toEqual(['alex@example.com', 'jordan@example.com'].sort());
+    // What `{{event_name}}`, `{{team_name}}` and `{{workspace_name}}` read.
+    expect(ctx).toMatchObject({ eventName: 'collab', teamName: 'collab', workspaceName: 'Acme Inc.' });
   });
 
   // --- Fixed round-robin --------------------------------------------------

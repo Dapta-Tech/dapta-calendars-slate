@@ -80,8 +80,12 @@ _Avoid_: notification, alert
 A reminder's mirror after the meeting ends. Same shape, same ownership, disabled unless the host turns it on.
 _Avoid_: post-event email, thank-you email
 
+**Template variable**:
+A placeholder a host writes in email copy, `{{attendee_name}}`, resolved from the booking when the message is rendered. The catalog of names, and where each one can be used, lives in `@slate/engine`; the same language adds fallbacks and `{{#if}}` blocks.
+_Avoid_: merge tag, token, placeholder (in UI copy)
+
 **Form variable**:
-A placeholder in reminder copy that prints an answer to one of that event's own intake questions, written `{{form.<field name>}}`. The prefix keeps a question named `location` from shadowing the built-in `{{location}}`.
+A template variable that prints an answer to one of the booking's intake questions, written `{{form.<field name>}}`, in any email. The prefix keeps a question named `location` from shadowing the built-in `{{location}}`.
 _Avoid_: custom variable, merge tag
 
 **Qualification**:
