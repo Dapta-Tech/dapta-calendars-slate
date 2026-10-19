@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import * as z from 'zod4';
 import type { Db } from '@slate/db';
-import { getAccountByCode, sql } from '@slate/db';
+import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, sql } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import type { BookingService } from '../booking.service';
@@ -12,12 +11,12 @@ import { queryBookings } from './bookings-query';
 import {
   type McpCall,
   ToolFailure,
-  callerLabel,
   emailDomain,
   failureFor,
   instantFrom,
   notFound,
   requireScope,
+  stableStringify,
   untrusted,
   zonedIso,
 } from './support';
@@ -407,54 +406,84 @@ const bookMeeting: ToolDef = {
   }),
   async run(args: z.infer<typeof bookMeetingInput>, call, deps) {
     const page = pageFrom(args);
-    const { resolved } = await resolvePage(deps, page);
+    const { accountId, resolved } = await resolvePage(deps, page);
     const startUtc = instantFrom(args.start, args.attendee.time_zone).toISOString();
-    // Namespaced per caller and per request shape: anonymous callers share one
-    // key column, so a bare key could replay someone else's booking.
-    const fingerprint = JSON.stringify([page, startUtc, args.attendee.email.toLowerCase(), args.idempotency_key, callerLabel(call), call.principal ? '' : call.ip]);
-    const stored = `mcp:${createHash('sha256').update(fingerprint).digest('hex')}`;
     const language = args.language ?? 'en';
-    const who = { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.time_zone };
+    const tz = args.attendee.time_zone;
+    // The idempotency record lives in `api_idempotency`, like the keyed write
+    // tools: namespaced by account + caller + tool + key (anonymous callers share
+    // one table, so the caller is part of the namespace and a bare key could not
+    // replay someone else's booking), and compared against a hash of EVERY
+    // argument, so the same key with changed arguments is refused rather than
+    // booking again. A replay answers from the stored result, so it never reaches
+    // the booking core (no duplicate-guard or overlap error, no second email).
+    const caller = call.principal ? `key:${call.principal.keyId}` : `anon:${hashApiValue(call.ip)}`;
+    const namespaceHash = hashApiValue(`${accountId}:${caller}:book_meeting:${args.idempotency_key}`);
+    const requestHash = hashApiValue(
+      stableStringify({
+        page,
+        startUtc,
+        language,
+        attendee: { name: args.attendee.name, email: args.attendee.email.toLowerCase(), timeZone: tz },
+        answers: args.answers ?? {},
+      }),
+    );
+    const claim = await claimApiIdempotency(deps.db, {
+      namespaceHash,
+      accountId,
+      apiKeyId: caller,
+      method: 'MCP',
+      path: 'book_meeting',
+      requestHash,
+    });
+    if (claim.requestHash !== requestHash)
+      throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
+    if (claim.statusCode != null) {
+      const prior = claim.responseBody as ToolResult['data'] & { booking: { uid: string; status: string; start: string } };
+      return {
+        data: { ...prior, replayed: true },
+        summary: `${line(prior.booking)} (replay of an earlier identical call)`,
+        affected: [prior.booking.uid],
+      };
+    }
+    const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
+    const storedKey = `mcp:${namespaceHash}`;
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(
             page.accountCode,
             page.owner,
             { slug: page.slug, startUtc, attendee: who, answers: args.answers },
-            { idempotencyKey: stored, locale: language },
+            { idempotencyKey: storedKey, locale: language },
           )
         : await deps.bookings.book(
             { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers },
             false,
-            { idempotencyKey: stored, locale: language },
+            { idempotencyKey: storedKey, locale: language },
           );
     if (isServiceError(outcome)) {
       throw failureFor(outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error, outcome.message);
     }
-    const tz = args.attendee.time_zone;
-    const replayed = 'deduplicated' in outcome && outcome.deduplicated === true;
-    return {
-      data: {
-        booking: {
-          uid: outcome.uid,
-          status: outcome.status,
-          start: zonedIso(new Date(outcome.startUtc), tz),
-          end: zonedIso(new Date(outcome.endUtc), tz),
-          start_utc: outcome.startUtc,
-          end_utc: outcome.endUtc,
-          time_zone: tz,
-          event_type_title: untrusted(resolved.eventType.title, 200),
-          host: outcome.host?.name ? untrusted(outcome.host.name, 100) : null,
-        },
-        replayed,
-        next_step:
-          outcome.status === 'pending'
-            ? 'The host must confirm this request; the invitee was emailed.'
-            : 'Confirmed. A confirmation email with a link to reschedule or cancel was sent to the invitee.',
+    const data = {
+      booking: {
+        uid: outcome.uid,
+        status: outcome.status,
+        start: zonedIso(new Date(outcome.startUtc), tz),
+        end: zonedIso(new Date(outcome.endUtc), tz),
+        start_utc: outcome.startUtc,
+        end_utc: outcome.endUtc,
+        time_zone: tz,
+        event_type_title: untrusted(resolved.eventType.title, 200),
+        host: outcome.host?.name ? untrusted(outcome.host.name, 100) : null,
       },
-      summary: `${line({ uid: outcome.uid, status: outcome.status, start: zonedIso(new Date(outcome.startUtc), tz) })}${replayed ? ' (replay of an earlier identical call)' : ''}`,
-      affected: [outcome.uid],
+      replayed: false,
+      next_step:
+        outcome.status === 'pending'
+          ? 'The host must confirm this request; the invitee was emailed.'
+          : 'Confirmed. A confirmation email with a link to reschedule or cancel was sent to the invitee.',
     };
+    await completeApiIdempotency(deps.db, claim.id, 201, data);
+    return { data, summary: line(data.booking), affected: [outcome.uid] };
   },
 };
 

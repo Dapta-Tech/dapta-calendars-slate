@@ -9,7 +9,7 @@ type Slots = { days: { slots: { start: string; start_utc: string }[] }[]; event_
 
 let h: Harness;
 beforeAll(async () => {
-  h = await bootHarness();
+  h = await bootHarness({ MCP_WRITE_RATE_LIMIT_CAPACITY: '200', MCP_RATE_LIMIT_CAPACITY: '500' });
 });
 afterAll(async () => {
   await h.close();
@@ -98,6 +98,52 @@ describe('public tools without a key', () => {
     );
     expect(clash).toContain('SLOT_TAKEN');
     expect(clash).toContain('find_available_slots');
+  });
+
+  it('book_meeting refuses the same idempotency key with any changed argument, instead of booking again', async () => {
+    const client = await h.connect();
+    const slotA = await firstSlot(client, 30);
+    const slotB = await firstSlot(client, 31);
+    const base = {
+      booking_page_url: PAGE,
+      start: slotA.start,
+      attendee: { name: 'Ida Idem', email: 'ida@example.org', time_zone: 'UTC' },
+      answers: { company: 'Initech' },
+      idempotency_key: idem('changed-args-0001'),
+    };
+    structured(await client.callTool({ name: 'book_meeting', arguments: base }));
+    const before = (await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`))!.n;
+    for (const change of [
+      { start: slotB.start },
+      { attendee: { ...base.attendee, name: 'Someone Else' } },
+      { attendee: { ...base.attendee, email: 'other@example.org' } },
+      { answers: { company: 'Globex' } },
+    ]) {
+      const text = errorText(await client.callTool({ name: 'book_meeting', arguments: { ...base, ...change } }));
+      expect(text).toContain('IDEMPOTENCY_KEY_REUSED');
+    }
+    expect((await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`))!.n).toBe(before);
+  });
+
+  it('book_meeting on a team page replays a retry to the original booking', async () => {
+    const client = await h.connect();
+    const r = structured<Slots>(
+      await client.callTool({ name: 'find_available_slots', arguments: { booking_page_url: 'https://x.test/acme/team/sales/team-demo', time_zone: 'UTC' } }),
+    );
+    const args = {
+      account_code: 'acme',
+      team_slug: 'sales',
+      event_slug: 'team-demo',
+      start: r.days[0]!.slots[3]!.start,
+      attendee: { name: 'Tess Team', email: 'tess@example.org', time_zone: 'UTC' },
+      idempotency_key: idem('team-replay-0001'),
+    };
+    const first = structured<{ booking: { uid: string }; replayed: boolean }>(await client.callTool({ name: 'book_meeting', arguments: args }));
+    const again = structured<{ booking: { uid: string }; replayed: boolean }>(await client.callTool({ name: 'book_meeting', arguments: args }));
+    expect(first.replayed).toBe(false);
+    expect(again).toMatchObject({ replayed: true, booking: { uid: first.booking.uid } });
+    const n = await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking WHERE uid = ${first.booking.uid}`);
+    expect(n!.n).toBe(1);
   });
 
   it('rejects a start that is not an offered slot', async () => {

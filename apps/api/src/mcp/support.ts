@@ -142,6 +142,18 @@ export function argsHash(args: unknown): string {
   return createHash('sha256').update(JSON.stringify(redactArgs(args))).digest('hex').slice(0, 16);
 }
 
+/** JSON with sorted keys, so equal requests hash equally whatever their key order. */
+export function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`)
+      .join(',')}}`;
+  return JSON.stringify(value);
+}
+
 // --- Errors ---------------------------------------------------------------
 
 /** What each upstream error code means for the model that triggered it. */
