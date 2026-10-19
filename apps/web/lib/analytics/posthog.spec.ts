@@ -28,6 +28,7 @@ function loadedVendor() {
 
 afterEach(() => {
   delete (window as unknown as { posthog?: unknown }).posthog;
+  document.head.innerHTML = '';
   resetPosthogForTests();
 });
 
@@ -62,26 +63,46 @@ describe('posthogSettings', () => {
 });
 
 describe('scrubEvent', () => {
-  const event = () => ({
-    event: 'calendars_booking_page_viewed',
+  const event = (name = 'calendars_booking_page_viewed') => ({
+    event: name,
     properties: {
       $current_url: 'https://cal.example.test/acme/ana/intro?prefill=ana@example.com#x',
       $referrer: 'https://crm.example.test/contacts/42?email=ana@example.com',
-    },
-    $set_once: { $initial_current_url: 'https://cal.example.test/acme/ana?token=secret' },
+      $session_entry_url: 'https://cal.example.test/acme/ana/intro?prefill=ana@example.com',
+      $session_entry_utm_content: 'ana@example.com',
+      utm_medium: 'badge',
+      gclid: 'CLICK',
+      $browser: 'Chrome',
+      account_code: 'acme',
+      some_new_vendor_property: 'anything',
+    } as Record<string, unknown>,
+    $set_once: { $initial_current_url: 'https://cal.example.test/acme/ana?token=secret', $initial_utm_source: 'x' },
   });
 
-  it('strips every query and fragment; a visitor referrer keeps only its origin', () => {
+  it('a visitor event keeps only the allowlist, with every query cut and the referrer cut to its origin', () => {
     const out = scrubEvent(event(), 'visitor', '/acme/ana/intro')!;
-    expect(out.properties!['$current_url']).toBe('https://cal.example.test/acme/ana/intro');
-    expect(out.properties!['$referrer']).toBe('https://crm.example.test');
-    expect(out.$set_once!['$initial_current_url']).toBe('https://cal.example.test/acme/ana');
+    expect(out.properties).toEqual({
+      $current_url: 'https://cal.example.test/acme/ana/intro',
+      $referrer: 'https://crm.example.test',
+      $browser: 'Chrome',
+      account_code: 'acme',
+    });
+    expect(out.$set_once).toBeUndefined();
     expect(JSON.stringify(out)).not.toContain('example.com');
   });
 
-  it('a host referrer keeps its path, never its query', () => {
+  it('a visitor keeps its own utm_medium on the growth link click only', () => {
+    expect(scrubEvent(event('calendars_cta_clicked'), 'visitor', '/acme')!.properties!['utm_medium']).toBe('badge');
+  });
+
+  it('a host event drops campaign tags and click ids and cuts every query, wherever the key', () => {
     const out = scrubEvent(event(), 'host', '/admin')!;
     expect(out.properties!['$referrer']).toBe('https://crm.example.test/contacts/42');
+    expect(out.properties!['$session_entry_url']).toBe('https://cal.example.test/acme/ana/intro');
+    expect(out.properties).not.toHaveProperty('gclid');
+    expect(out.properties).not.toHaveProperty('utm_medium');
+    expect(out.properties).not.toHaveProperty('$session_entry_utm_content');
+    expect(out.$set_once).toEqual({ $initial_current_url: 'https://cal.example.test/acme/ana' });
   });
 
   it('the host instance never speaks for a page outside the dashboard', () => {
@@ -99,41 +120,30 @@ describe('scrubEvent', () => {
 });
 
 describe('connectPosthog', () => {
-  it('installs the vendor loader stub as a queue, and asks the configured host for the library', () => {
-    // jsdom does not run inline scripts, so run the stub the way a browser
-    // would, against a window of its own.
+  it('installs the vendor loader stub as a queue, and asks the configured host for the library once', () => {
     const own = { document, location: window.location } as unknown as Parameters<typeof connectPosthog>[2] & {
       posthog?: Record<string, unknown>;
     };
-    const append = document.head.appendChild.bind(document.head);
-    const spy = vi.spyOn(document.head, 'appendChild').mockImplementation(<T extends Node>(node: T): T => {
-      append(node);
-      const el = node as unknown as HTMLScriptElement;
-      if (el.tagName === 'SCRIPT' && !el.src) new Function('window', 'document', el.textContent ?? '')(own, document);
-      return node;
-    });
-    try {
-      const port = connectPosthog(CONFIG, 'visitor', own);
-      expect(port).not.toBeNull();
-      const global = own.posthog as unknown as Record<string, unknown> & { _i: unknown[][] };
-      expect(global['__SV']).toBe(1);
-      expect(global._i).toHaveLength(1);
-      expect(global._i[0]![0]).toBe(CONFIG.key);
-      expect(global._i[0]![1]).toMatchObject({ person_profiles: 'never', persistence: 'memory' });
-      expect(global._i[0]![2]).toBe('calendars_visitor');
-      const script = document.querySelector<HTMLScriptElement>('script[src$="/static/array.js"]');
-      expect(script?.src).toBe(`${CONFIG.host}/static/array.js`);
-      // Calls before the library loads wait in the stub's queue for this name.
-      port!.capture('calendars_day_picked', { mode: 'personal' });
-      expect(global['calendars_visitor']).toContainEqual(['capture', 'calendars_day_picked', { mode: 'personal' }]);
-    } finally {
-      spy.mockRestore();
-    }
+    const port = connectPosthog(CONFIG, 'visitor', own);
+    connectPosthog(CONFIG, 'host', own);
+    const global = own.posthog as unknown as Record<string, unknown> & { _i: unknown[][] };
+    expect(global['__SV']).toBe(1);
+    expect(global._i.map((i) => i[2])).toEqual(['calendars_visitor', 'calendars_host']);
+    expect(global._i[0]![0]).toBe(CONFIG.key);
+    expect(global._i[0]![1]).toMatchObject({ person_profiles: 'never', persistence: 'memory' });
+    const scripts = document.querySelectorAll<HTMLScriptElement>('script[src$="/static/array.js"]');
+    expect(Array.from(scripts).map((el) => el.src)).toEqual([`${CONFIG.host}/static/array.js`]);
+    // Calls before the library loads wait in the stub's queue for this name.
+    port.capture('calendars_day_picked', { mode: 'personal' });
+    expect(global['calendars_visitor']).toContainEqual(['capture', 'calendars_day_picked', { mode: 'personal' }]);
+    expect(document.querySelectorAll('script:not([src])')).toHaveLength(0);
   });
 
-  it('reports no port when the vendor global could not be installed', () => {
-    // A document whose inline scripts never run, as under a strict policy.
-    expect(connectPosthog(CONFIG, 'visitor')).toBeNull();
+  it("loads the library from the vendor's own assets host when the host is the vendor's", () => {
+    const own = { document, location: window.location } as unknown as Parameters<typeof connectPosthog>[2];
+    connectPosthog({ ...CONFIG, host: 'https://us.i.posthog.com' }, 'visitor', own);
+    const script = Array.from(document.querySelectorAll<HTMLScriptElement>('script[src$="/static/array.js"]')).at(-1);
+    expect(script?.src).toBe('https://us-assets.i.posthog.com/static/array.js');
   });
 
   it('initializes each audience once, under its own name', () => {
@@ -146,7 +156,7 @@ describe('connectPosthog', () => {
 
   it('a visitor port can never identify, alias or group', () => {
     const vendor = loadedVendor();
-    const port = connectPosthog(CONFIG, 'visitor')!;
+    const port = connectPosthog(CONFIG, 'visitor');
     port.identify('ana@example.com', { email: 'ana@example.com' });
     port.alias('landing-id');
     port.group('calendars_account', 'acme');
@@ -156,7 +166,7 @@ describe('connectPosthog', () => {
 
   it('a host port passes identity through', () => {
     const vendor = loadedVendor();
-    const port = connectPosthog(CONFIG, 'host')!;
+    const port = connectPosthog(CONFIG, 'host');
     port.identify('host@example.test', { role: 'owner' });
     port.alias('landing-id');
     port.group('calendars_account', 'acme');

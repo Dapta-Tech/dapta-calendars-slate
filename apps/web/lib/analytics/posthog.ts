@@ -4,9 +4,8 @@ import type { AnalyticsPort, AnalyticsSurface } from './port';
 /**
  * The PostHog adapter behind the browser analytics port.
  *
- * Zero dependencies: the vendor's documented loader stub (the same one Dapta
- * Forms ships) is installed by hand, and it loads the real library from the
- * configured host. That keeps `posthog-js` out of an open-source repo for a
+ * Zero dependencies: the vendor's documented loader stub is installed by
+ * hand, and it loads the real library from the configured host. That keeps `posthog-js` out of an open-source repo for a
  * feature that ships OFF, and it means a fork pays nothing, not even bundle
  * bytes, unless it turns analytics on.
  *
@@ -14,12 +13,6 @@ import type { AnalyticsPort, AnalyticsSurface } from './port';
  * who opens their own booking page in the same tab is never reported as a
  * visitor with a name, and a visitor is never reported with the host's.
  */
-
-/**
- * The vendor's loader stub, without its `init` call: it defines a queueing
- * `window.posthog` and loads `array.js` from the host given to `init`.
- */
-const LOADER_STUB = `!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);`;
 
 /** One PostHog instance (real, or the stub's queue standing in for it). */
 interface PosthogInstance {
@@ -55,8 +48,76 @@ const INSTANCE_NAME: Record<AnalyticsSurface, string> = {
 /** Where the host instance may report from: the dashboard and the wizard. */
 const HOST_PATH = /^\/(admin|onboarding)(\/|$)/;
 
-/** Properties that hold a URL, wherever the vendor puts them. */
-const URL_PROPERTIES = ['$current_url', '$referrer', '$initial_current_url', '$initial_referrer'] as const;
+/**
+ * What a VISITOR event may carry, and nothing else: an allowlist, so a vendor
+ * release that starts sending something new sends it nowhere. Device and
+ * session basics the vendor needs to accept and count an event, the page
+ * (with its query cut), the referring DOMAIN, and this app's own properties.
+ * Not here, on purpose: every campaign and click id, the session's entry URL
+ * and entry referrer (the full ones, query included), debug timings.
+ */
+const VISITOR_PROPERTIES = new Set([
+  'token',
+  'distinct_id',
+  '$device_id',
+  '$session_id',
+  '$window_id',
+  '$insert_id',
+  '$time',
+  '$lib',
+  '$lib_version',
+  '$lib_custom_api_host',
+  '$lib_rate_limit_remaining_tokens',
+  '$sdk_dist_channel',
+  '$config_defaults',
+  '$configured_session_timeout_ms',
+  '$is_identified',
+  '$process_person_profile',
+  '$recording_status',
+  // The user agent travels in the request header regardless; the vendor's
+  // bot filtering reads it from here.
+  '$raw_user_agent',
+  '$browser',
+  '$browser_version',
+  '$browser_language',
+  '$browser_language_prefix',
+  '$os',
+  '$os_version',
+  '$device',
+  '$device_type',
+  '$screen_height',
+  '$screen_width',
+  '$viewport_height',
+  '$viewport_width',
+  '$timezone',
+  '$timezone_offset',
+  '$host',
+  '$pathname',
+  '$current_url',
+  '$referrer',
+  '$referring_domain',
+  '$session_entry_host',
+  '$session_entry_pathname',
+  '$session_entry_referring_domain',
+  // This app's own.
+  'product',
+  'surface',
+  'account_code',
+  'embed',
+  'page',
+  'mode',
+  'status',
+]);
+
+/** Our own `utm_medium`, read off the clicked growth link, rides on this event only. */
+const CTA_EVENT = 'calendars_cta_clicked';
+
+/**
+ * Campaign tags and per-click ids, with the vendor's `$initial_` and
+ * `$session_entry_` copies. A host's signup source is the API's (claimed
+ * write-once from the first request), so the browser sends none of its own.
+ */
+const CAMPAIGN_KEY = /^(\$initial_|\$session_entry_)?(utm_[a-z_]+|gclid|gclsrc|gad_source|dclid|gbraid|wbraid|fbclid|msclkid|twclid|li_fat_id|igshid|ttclid|rdt_cid|irclid|epik|qclid|sccid|mc_cid|oppref|_kx)$/;
 
 /**
  * A URL without its query string and fragment: `origin + path`, or the origin
@@ -73,26 +134,42 @@ export function withoutQuery(value: unknown, keep: 'path' | 'origin'): unknown {
   }
 }
 
+/** Cut the query from every URL in a property bag, whatever the key. */
+function scrubUrls(bag: Record<string, unknown>, surface: AnalyticsSurface): void {
+  for (const [key, value] of Object.entries(bag)) {
+    if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) continue;
+    // Whoever linked to a booking page is somebody else; their path is none of ours.
+    if (surface === 'visitor' && key.includes('referrer')) bag[key] = withoutQuery(value, 'origin');
+    else if (/[?#]/.test(value)) bag[key] = withoutQuery(value, 'path');
+  }
+}
+
 /**
  * The privacy filter every event passes through before it leaves the browser
  * (`before_send`). Returns null to drop the event.
  *
  *  - The host instance only speaks for dashboard pages. A host who follows a
- *    link from the dashboard to a booking page stays in the same tab, and the
- *    instance would otherwise report that page under their identity.
- *  - Every URL loses its query and fragment; a visitor's referrer is cut to
- *    its origin, since the page that linked to a booking page is somebody
- *    else's and its path is none of ours.
+ *    link from the dashboard to a booking page in the same tab would otherwise
+ *    be reported there under their identity.
+ *  - A visitor event keeps only `VISITOR_PROPERTIES` and carries no person
+ *    properties at all. A host event drops every campaign tag and click id.
+ *  - Every URL left, on either audience, loses its query and fragment.
  */
 export function scrubEvent(event: CaptureEvent, surface: AnalyticsSurface, pathname: string): CaptureEvent | null {
   if (surface === 'host' && !HOST_PATH.test(pathname)) return null;
+  if (surface === 'visitor') {
+    const kept: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(event.properties ?? {})) {
+      if (VISITOR_PROPERTIES.has(key) || (key === 'utm_medium' && event.event === CTA_EVENT)) kept[key] = value;
+    }
+    event.properties = kept;
+    delete event.$set;
+    delete event.$set_once;
+  }
   for (const bag of [event.properties, event.$set, event.$set_once]) {
     if (!bag) continue;
-    for (const key of URL_PROPERTIES) {
-      if (!(key in bag)) continue;
-      const referrer = key === '$referrer' || key === '$initial_referrer';
-      bag[key] = withoutQuery(bag[key], referrer && surface === 'visitor' ? 'origin' : 'path');
-    }
+    if (surface === 'host') for (const key of Object.keys(bag)) if (CAMPAIGN_KEY.test(key)) delete bag[key];
+    scrubUrls(bag, surface);
   }
   return event;
 }
@@ -121,6 +198,11 @@ export function posthogSettings(
     capture_exceptions: false,
     capture_performance: false,
     advanced_disable_flags: true,
+    // The signup source is the API's, claimed write-once from the first
+    // request; the browser collects no campaign tags of its own.
+    save_campaign_params: false,
+    mask_personal_data_properties: true,
+    disable_capture_url_hashes: true,
     before_send: (event: CaptureEvent) => scrubEvent(event, surface, w.location.pathname),
   };
   if (surface === 'host') {
@@ -146,27 +228,61 @@ export function posthogSettings(
 /** Instances this page already initialized, so a remount never inits twice. */
 const initialized = new Set<string>();
 
-function installStub(w: PosthogWindow): PosthogGlobal | null {
-  if (!w.posthog?.__SV) {
-    const script = w.document.createElement('script');
-    script.textContent = LOADER_STUB;
-    // Executes synchronously on insertion: the queue exists before the next line.
-    w.document.head.appendChild(script);
-  }
-  return w.posthog ?? null;
+/** The methods the port calls, queued by the stub until the library loads. */
+const QUEUED_METHODS = ['capture', 'identify', 'alias', 'register', 'group', 'reset'] as const;
+
+/** Where the library is served from: the vendor's own hosts keep it on an assets host. */
+function libraryOrigin(apiHost: string): string {
+  return apiHost.replace('.i.posthog.com', '-assets.i.posthog.com');
+}
+
+/**
+ * The vendor's loader contract, as module code rather than a pasted inline
+ * script (so a strict Content-Security-Policy needs no `unsafe-inline` for it):
+ * `window.posthog` is an array carrying `__SV` and an `_i` queue of
+ * `[key, settings, name]` inits; each named instance is an array of
+ * `[method, ...args]` calls (plus a `people` queue). When the library arrives
+ * it initializes every queued instance and replays its calls, then replaces
+ * the stub, keeping `__SV`.
+ *
+ * Once anything with an `init` lives at `window.posthog` (the stub, or the
+ * library itself), it is used as it is: a second stub over the library would
+ * replace its `init` and orphan every instance already running.
+ */
+function installStub(w: PosthogWindow, apiHost: string): PosthogGlobal {
+  const existing = w.posthog;
+  if (existing && typeof existing.init === 'function') return existing;
+  const stub = [] as unknown as PosthogGlobal & { _i: unknown[][] };
+  stub.__SV = 1;
+  stub._i = [];
+  stub.init = (key: string, config: Record<string, unknown>, name: string) => {
+    const calls = [] as unknown as unknown[][] & Record<string, unknown>;
+    calls['people'] = [];
+    for (const method of QUEUED_METHODS) {
+      calls[method] = (...args: unknown[]) => void calls.push([method, ...args]);
+    }
+    stub[name] = calls;
+    stub._i.push([key, config, name]);
+  };
+  w.posthog = stub;
+  // One request for the library, however many audiences queue an init.
+  const script = w.document.createElement('script');
+  script.async = true;
+  script.crossOrigin = 'anonymous';
+  script.src = `${libraryOrigin(apiHost)}/static/array.js`;
+  w.document.head.appendChild(script);
+  return stub;
 }
 
 /**
  * Start (or reuse) this audience's instance and return the port for it.
- * Returns null when the vendor global could not be installed.
  */
 export function connectPosthog(
   config: AnalyticsConfig,
   surface: AnalyticsSurface,
   w: PosthogWindow = window as PosthogWindow,
-): AnalyticsPort | null {
-  const global = installStub(w);
-  if (!global) return null;
+): AnalyticsPort {
+  const global = installStub(w, config.host);
   const name = INSTANCE_NAME[surface];
   if (!initialized.has(name)) {
     global.init(config.key, posthogSettings(config, surface, w), name);

@@ -81,20 +81,25 @@ function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
   return res;
 }
 
+/** Where a landing's anonymous id may be parked: the product's own front doors. */
+const LANDING_ID_PATH = /^\/(login|onboarding|admin(\/.*)?)?$/;
+
 /**
  * The landing's anonymous analytics id (`?ph_id=`), parked beside the campaign
  * tags for the same login round trip, so the first analytics-bearing page after
  * sign-in (dashboard or wizard) can join "visited the landing" to the host who
  * signed up.
  *
- * Same rules as `parkAttribution`: never on an API route, first touch wins,
- * same ten-minute life. Sanitized here, at the edge, because the value is
+ * Same rules as `parkAttribution` (first touch wins, same ten-minute life),
+ * narrower in one way: only on the product's own entry points. Sanitized here, at the edge, because the value is
  * whatever anyone typed into a URL; a refused id parks nothing. Parked whether
  * or not analytics is configured: it is a short-lived first-party cookie that
  * nothing reads unless analytics is on.
  */
 function parkLandingId(req: NextRequest, res: NextResponse): NextResponse {
-  if (req.nextUrl.pathname.startsWith('/api/')) return res;
+  // Product entry points only. A landing's CTA lands on the root or the
+  // sign-in; a booking page is a host's visitors' page and parks nothing.
+  if (!LANDING_ID_PATH.test(req.nextUrl.pathname)) return res;
   if (req.cookies.has(LANDING_ID_COOKIE)) return res;
   const landingId = sanitizeLandingDistinctId(req.nextUrl.searchParams.get(LANDING_ID_QUERY_KEY));
   if (!landingId) return res;

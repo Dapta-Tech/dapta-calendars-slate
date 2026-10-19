@@ -36,7 +36,7 @@ export function CopyLink({
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(`${window.location.origin}${path}`);
-      track('link_copied');
+      track('link_copied', { link: 'page' });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
