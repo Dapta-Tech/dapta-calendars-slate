@@ -1,16 +1,28 @@
 import * as z from 'zod4';
 import type { Db } from '@slate/db';
-import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, parseJsonColumn, scopedIdempotencyKey, sql } from '@slate/db';
+import {
+  claimApiIdempotency,
+  completeApiIdempotency,
+  getAccountByCode,
+  hashApiValue,
+  normalizeSchedulingMethod,
+  parseJsonColumn,
+  scopedIdempotencyKey,
+  sql,
+} from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
+import type { AdminService } from '../admin.service';
 import type { BookingService } from '../booking.service';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
 import { isServiceError } from '../http';
 import { queryBookings } from './bookings-query';
+import { bindHold, findHold, heldByAnother } from './holds';
 import {
   type McpCall,
   ToolFailure,
+  callerId,
   emailDomain,
   failureFor,
   instantFrom,
@@ -30,6 +42,8 @@ export interface McpToolDeps {
   calV2: CalV2Service;
   pilot: CalV2PilotService;
   bookings: BookingService;
+  /** The host routes' confirm and decline, so the machine path shares their side effects. */
+  admin: Pick<AdminService, 'confirm' | 'decline'>;
 }
 
 export interface ToolResult {
@@ -163,22 +177,7 @@ function pageFrom(input: {
 }): PageRef {
   const expected = 'Use the full link of one event: https://<host>/<account>/<handle>/<event-slug> (team events: /<account>/team/<team>/<event-slug>).';
   if (input.booking_page_url) {
-    let url: URL;
-    try {
-      url = new URL(input.booking_page_url);
-    } catch {
-      throw new ToolFailure('INVALID_ARGUMENT', 'booking_page_url is not a valid URL.', expected);
-    }
-    const parts = url.pathname
-      .split('/')
-      .filter(Boolean)
-      .map((s) => {
-        try {
-          return decodeURIComponent(s);
-        } catch {
-          return s;
-        }
-      });
+    const parts = linkParts(input.booking_page_url, expected);
     if (parts.length === 4 && parts[1] === 'team')
       return { accountCode: parts[0]!, kind: 'team', owner: parts[2]!, slug: parts[3]! };
     if (parts.length === 3 && parts[0] !== 'booking' && parts[0] !== 'manage')
@@ -198,6 +197,146 @@ function pageFrom(input: {
     owner,
     slug: input.event_slug,
   };
+}
+
+/** The decoded path segments of a booking link. */
+function linkParts(link: string, expected: string): string[] {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    throw new ToolFailure('INVALID_ARGUMENT', 'booking_page_url is not a valid URL.', expected);
+  }
+  return url.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    });
+}
+
+interface TeamRef {
+  accountCode: string;
+  teamSlug: string;
+  /** Null: the address names the team page only. */
+  slug: string | null;
+}
+
+/** A team address: a team event link, the team page itself, or the code + slugs. */
+function teamPageFrom(input: { booking_page_url?: string; account_code?: string; team_slug?: string; event_slug?: string }): TeamRef {
+  const expected = 'Use a team link: https://<host>/<account>/team/<team>/<event-slug>, or the team page https://<host>/<account>/team/<team>.';
+  if (input.booking_page_url) {
+    const parts = linkParts(input.booking_page_url, expected);
+    if ((parts.length === 3 || parts.length === 4) && parts[1] === 'team')
+      return { accountCode: parts[0]!, teamSlug: parts[2]!, slug: parts[3] ?? null };
+    throw new ToolFailure(
+      'INVALID_ARGUMENT',
+      'That link is not a team booking link.',
+      `${expected} One person's link goes to find_available_slots and book_meeting instead.`,
+    );
+  }
+  if (!input.account_code || !input.team_slug)
+    throw new ToolFailure('INVALID_ARGUMENT', 'Say which team: pass booking_page_url, or account_code + team_slug (+ event_slug).', expected);
+  return { accountCode: input.account_code, teamSlug: input.team_slug, slug: input.event_slug ?? null };
+}
+
+/**
+ * A public team event. A team page with exactly one event stands for that
+ * event; with several, the error lists them so the agent can pick without
+ * another round trip.
+ */
+async function resolveTeamPage(deps: McpToolDeps, ref: TeamRef) {
+  let slug = ref.slug;
+  if (!slug) {
+    const profile = await deps.bookings.teamProfile(ref.accountCode, ref.teamSlug).catch(() => null);
+    if (!profile) throw notFound('Team page');
+    const events = profile.eventTypes;
+    if (events.length !== 1)
+      throw new ToolFailure(
+        'INVALID_ARGUMENT',
+        events.length ? `That team page offers ${events.length} events; say which one.` : 'That team page offers no public events.',
+        events.length
+          ? `Pass event_slug, one of: ${events
+              .slice(0, 20)
+              .map((e) => `${untrusted(e.slug, 64)} (${untrusted(e.title, 80)}, ${e.lengthMinutes} min)`)
+              .join('; ')}.`
+          : undefined,
+      );
+    slug = events[0]!.slug;
+  }
+  const page: PageRef = { accountCode: ref.accountCode, kind: 'team', owner: ref.teamSlug, slug };
+  return { page, ...(await resolvePage(deps, page)) };
+}
+
+const notTeam = (): ToolFailure =>
+  new ToolFailure(
+    'INVALID_ARGUMENT',
+    'That event type belongs to one person, not a team.',
+    'Use find_available_slots and book_meeting (or create_booking) for it.',
+  );
+
+/** The team facts an agent needs to explain who it booked with. */
+async function teamFacts(deps: McpToolDeps, resolved: Resolved) {
+  const team = await deps.db.get<{ name: string }>(sql`SELECT name FROM team WHERE id = ${resolved.team!.id} LIMIT 1`);
+  const hosts = await deps.db.get<{ n: number | string }>(
+    sql`SELECT COUNT(*) AS n FROM event_type_host WHERE event_type_id = ${resolved.eventType.id}`,
+  );
+  return {
+    slug: resolved.team!.slug,
+    name: untrusted(team?.name ?? resolved.team!.slug, 120),
+    scheduling_type: normalizeSchedulingMethod(resolved.eventType.scheduling_type),
+    host_count: Number(hosts?.n ?? 0),
+  };
+}
+
+const teamShape = z.object({
+  slug: z.string(),
+  name: z.string(),
+  scheduling_type: z
+    .enum(['round_robin', 'collective', 'fixed_round_robin'])
+    .describe('round_robin: one free host is picked at booking time. collective: every host attends. fixed_round_robin: the fixed hosts plus one rotating host.'),
+  host_count: z.number(),
+});
+
+type Resolved = Awaited<ReturnType<CalV2Service['resolveEvent']>>;
+
+/**
+ * The reservation behind a caller's `hold_id`, checked against what is being
+ * booked. Unknown, expired-and-swept, malformed and someone else's holds all
+ * read the same, so the answer says nothing about holds this caller did not make.
+ */
+async function useHold(deps: McpToolDeps, accountId: string, call: McpCall, holdId: string, eventTypeId: string, startUtc: string): Promise<string> {
+  const hold = await findHold(deps.db, accountId, callerId(call), holdId);
+  if (!hold)
+    throw new ToolFailure(
+      'HOLD_NOT_FOUND',
+      'No hold with that hold_id for this caller.',
+      'A hold works only for the key, connection or address that made it. Call hold_slot again, or book without hold_id.',
+    );
+  if (hold.eventTypeId !== eventTypeId || Date.parse(hold.startUtc) !== Date.parse(startUtc))
+    throw new ToolFailure(
+      'HOLD_MISMATCH',
+      'That hold is for another event or another time.',
+      `It holds ${hold.startUtc} (UTC) on the event it was made for. Book that event at that start, or drop hold_id.`,
+    );
+  return hold.reservationUid;
+}
+
+/** Refuse a time someone else is holding (see `heldByAnother`). */
+async function refuseIfHeld(deps: McpToolDeps, resolved: Resolved, startUtc: string, ownReservationUid?: string): Promise<void> {
+  if (resolved.kind !== 'personal' || !resolved.member) return;
+  const startMs = Date.parse(startUtc);
+  const endMs = startMs + resolved.eventType.length_minutes * 60_000;
+  if (await heldByAnother(deps.db, resolved.member.id, startMs, endMs, ownReservationUid))
+    throw new ToolFailure(
+      'SLOT_TAKEN',
+      'Someone else is holding that time right now.',
+      'Call find_available_slots for current openings, then retry with a new start and a NEW idempotency_key.',
+    );
 }
 
 async function resolvePage(deps: McpToolDeps, page: PageRef) {
@@ -317,6 +456,13 @@ function line(b: { uid: string; status: string; start: string }): string {
 
 // --- Tools --------------------------------------------------------------------
 
+const slotRange = {
+  time_zone: timeZone.describe('IANA zone the slots are expressed in, usually the invitee\'s (e.g. America/Bogota).'),
+  start: z.string().max(40).optional().describe('First day or instant. A bare date (2026-11-03) is that day in time_zone. Defaults to now.'),
+  end: z.string().max(40).optional().describe('Last day (inclusive, when a bare date) or instant. Defaults to 14 days after start; at most 31 days are returned.'),
+  max_slots: z.number().int().min(1).max(200).default(60).describe('Cap on slots returned; days are filled in order.'),
+};
+
 const findSlotsInput = z.object({
   ...pageAddress,
   event_type_id: z
@@ -324,11 +470,120 @@ const findSlotsInput = z.object({
     .max(64)
     .optional()
     .describe('Alternative to the page fields: an event type id from list_event_types. Needs an API key with availability:read.'),
-  time_zone: timeZone.describe('IANA zone the slots are expressed in, usually the invitee\'s (e.g. America/Bogota).'),
-  start: z.string().max(40).optional().describe('First day or instant. A bare date (2026-11-03) is that day in time_zone. Defaults to now.'),
-  end: z.string().max(40).optional().describe('Last day (inclusive, when a bare date) or instant. Defaults to 14 days after start; at most 31 days are returned.'),
-  max_slots: z.number().int().min(1).max(200).default(60).describe('Cap on slots returned; days are filled in order.'),
+  ...slotRange,
 });
+
+const questionShape = z.object({
+  name: z.string(),
+  label: z.string(),
+  type: z.string(),
+  required: z.boolean(),
+  options: z.array(z.string()).optional(),
+});
+
+const slotsOutput = z.object({
+  event_type: z.object({
+    id: z.string(),
+    title: z.string(),
+    slug: z.string(),
+    duration_minutes: z.number(),
+    kind: z.enum(['personal', 'team']),
+    questions: z.array(questionShape),
+  }),
+  time_zone: z.string(),
+  range: z.object({ start: z.string(), end: z.string() }),
+  range_clamped: z.boolean().describe('True when the requested range was longer than 31 days and was cut.'),
+  days: z.array(
+    z.object({
+      date: z.string(),
+      slots: z.array(z.object({ start: z.string(), end: z.string(), start_utc: z.string(), end_utc: z.string() })),
+    }),
+  ),
+  slot_count: z.number(),
+  truncated: z.boolean(),
+});
+
+type SlotSelector = { eventTypeId?: string; eventTypeSlug?: string; username?: string; teamSlug?: string };
+
+/**
+ * The open times of one event in the caller's zone, UTC beside each, shared by
+ * find_available_slots and find_team_slots. `allow` is the key's allowlist
+ * (null on a public page); `expect` refuses a personal event where only a team
+ * one makes sense, after the allowlist so an out-of-scope id stays NOT_FOUND.
+ */
+async function slotWindow(
+  deps: McpToolDeps,
+  accountId: string,
+  selector: SlotSelector,
+  allow: string[] | null,
+  args: { time_zone: string; start?: string; end?: string; max_slots: number },
+  expect?: 'team',
+): Promise<{ data: z.infer<typeof slotsOutput>; summary: string; resolved: Resolved }> {
+  const tz = args.time_zone;
+  const now = new Date();
+  let start = args.start ? instantFrom(args.start, tz) : now;
+  if (start < now) start = now;
+  let end = args.end ? instantFrom(args.end, tz, true) : new Date(start.getTime() + 14 * 86_400_000);
+  if (end <= start) throw new ToolFailure('INVALID_ARGUMENT', 'end must be after start.');
+  const clamped = end.getTime() - start.getTime() > MAX_RANGE_MS;
+  if (clamped) end = new Date(start.getTime() + MAX_RANGE_MS);
+  let resolved: Resolved;
+  try {
+    resolved = await deps.calV2.resolveEvent(accountId, selector);
+    if (allow && !allow.includes(resolved.eventType.id)) throw notFound('Event type');
+  } catch (e) {
+    throw e instanceof ToolFailure ? e : notFound('Event type');
+  }
+  if (expect === 'team' && resolved.kind !== 'team') throw notTeam();
+  const grouped = await deps.calV2.slots(
+    accountId,
+    { ...selector, start: start.toISOString(), end: end.toISOString(), timeZone: tz, format: 'range' },
+    allow,
+  );
+  let count = 0;
+  let truncated = false;
+  const days: { date: string; slots: { start: string; end: string; start_utc: string; end_utc: string }[] }[] = [];
+  for (const date of Object.keys(grouped).sort()) {
+    const slots = [];
+    for (const s of grouped[date]!) {
+      if (count >= args.max_slots) {
+        truncated = true;
+        break;
+      }
+      count += 1;
+      slots.push({
+        start: s.start,
+        end: s.end ?? s.start,
+        start_utc: new Date(s.start).toISOString(),
+        end_utc: new Date(s.end ?? s.start).toISOString(),
+      });
+    }
+    if (slots.length) days.push({ date, slots });
+  }
+  const et = resolved.eventType;
+  return {
+    resolved,
+    data: {
+      event_type: {
+        id: et.id,
+        title: untrusted(et.title, 200),
+        slug: et.slug,
+        duration_minutes: et.length_minutes,
+        kind: resolved.kind,
+        questions: questionsOf(et.booking_fields),
+      },
+      time_zone: tz,
+      range: { start: zonedIso(start, tz), end: zonedIso(end, tz) },
+      range_clamped: clamped,
+      days,
+      slot_count: count,
+      truncated,
+    },
+    summary: count
+      ? `${count} open slot(s) for "${untrusted(et.title, 80)}" (${et.length_minutes} min) between ${days[0]!.date} and ${days[days.length - 1]!.date} in ${tz}${truncated ? ' (more exist; narrow the range)' : ''}.`
+      : `No open slots for "${untrusted(et.title, 80)}" between ${zonedIso(start, tz)} and ${zonedIso(end, tz)}.`,
+  };
+}
 
 const findSlots: ToolDef = {
   name: 'find_available_slots',
@@ -341,110 +596,62 @@ const findSlots: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: findSlotsInput,
-  output: z.object({
-    event_type: z.object({
-      id: z.string(),
-      title: z.string(),
-      slug: z.string(),
-      duration_minutes: z.number(),
-      kind: z.enum(['personal', 'team']),
-      questions: z.array(
-        z.object({
-          name: z.string(),
-          label: z.string(),
-          type: z.string(),
-          required: z.boolean(),
-          options: z.array(z.string()).optional(),
-        }),
-      ),
-    }),
-    time_zone: z.string(),
-    range: z.object({ start: z.string(), end: z.string() }),
-    range_clamped: z.boolean().describe('True when the requested range was longer than 31 days and was cut.'),
-    days: z.array(
-      z.object({
-        date: z.string(),
-        slots: z.array(z.object({ start: z.string(), end: z.string(), start_utc: z.string(), end_utc: z.string() })),
-      }),
-    ),
-    slot_count: z.number(),
-    truncated: z.boolean(),
-  }),
+  output: slotsOutput,
   async run(args: z.infer<typeof findSlotsInput>, call, deps) {
-    let accountId: string;
-    let selector: { eventTypeId?: string; eventTypeSlug?: string; username?: string; teamSlug?: string };
-    let allow: string[] | null = null;
     if (args.event_type_id) {
       const principal = requireScope(call, 'availability:read');
-      accountId = principal.accountId;
-      allow = principal.eventTypeIds;
-      selector = { eventTypeId: args.event_type_id };
+      return slotWindow(deps, principal.accountId, { eventTypeId: args.event_type_id }, principal.eventTypeIds, args);
+    }
+    const { accountId, selector } = await resolvePage(deps, pageFrom(args));
+    return slotWindow(deps, accountId, selector, null, args);
+  },
+};
+
+const teamPageAddress = {
+  booking_page_url: z
+    .string()
+    .max(500)
+    .optional()
+    .describe('A team link, e.g. https://host/acme/team/sales/demo, or the team page https://host/acme/team/sales when it offers one event.'),
+  account_code: z.string().max(64).optional().describe('Alternative to booking_page_url: the first path segment of the link.'),
+  team_slug: z.string().max(64).optional().describe('With account_code: the team slug.'),
+  event_slug: z.string().max(64).optional().describe('With account_code + team_slug: the event slug. Optional when the team offers one event.'),
+};
+
+const findTeamSlotsInput = z.object({
+  ...teamPageAddress,
+  event_type_id: z
+    .string()
+    .max(64)
+    .optional()
+    .describe('Alternative to the page fields: a team event type id from list_event_types. Needs an API key with availability:read.'),
+  ...slotRange,
+});
+
+const findTeamSlots: ToolDef = {
+  name: 'find_team_slots',
+  title: 'Find open times with a team',
+  description:
+    'Open times for ONE team event (round-robin, collective or fixed round-robin), grouped by local date with UTC beside each. A round-robin time is open when ANY host is free; a collective one when EVERY host is. Works with no API key on a public team page (booking_page_url), or with a key holding availability:read (event_type_id). Book a returned start with book_team_meeting, which picks the host.',
+  scope: null,
+  access: (args) => (args.event_type_id ? { scope: 'availability:read' } : 'public'),
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: findTeamSlotsInput,
+  output: slotsOutput.extend({ team: teamShape }),
+  async run(args: z.infer<typeof findTeamSlotsInput>, call, deps) {
+    let out: Awaited<ReturnType<typeof slotWindow>>;
+    if (args.event_type_id) {
+      const principal = requireScope(call, 'availability:read');
+      out = await slotWindow(deps, principal.accountId, { eventTypeId: args.event_type_id }, principal.eventTypeIds, args, 'team');
     } else {
-      const r = await resolvePage(deps, pageFrom(args));
-      accountId = r.accountId;
-      selector = r.selector;
+      const { accountId, selector } = await resolveTeamPage(deps, teamPageFrom(args));
+      out = await slotWindow(deps, accountId, selector, null, args, 'team');
     }
-    const tz = args.time_zone;
-    const now = new Date();
-    let start = args.start ? instantFrom(args.start, tz) : now;
-    if (start < now) start = now;
-    let end = args.end ? instantFrom(args.end, tz, true) : new Date(start.getTime() + 14 * 86_400_000);
-    if (end <= start) throw new ToolFailure('INVALID_ARGUMENT', 'end must be after start.');
-    const clamped = end.getTime() - start.getTime() > MAX_RANGE_MS;
-    if (clamped) end = new Date(start.getTime() + MAX_RANGE_MS);
-    let resolved;
-    try {
-      resolved = await deps.calV2.resolveEvent(accountId, selector);
-      if (allow && !allow.includes(resolved.eventType.id)) throw notFound('Event type');
-    } catch (e) {
-      throw e instanceof ToolFailure ? e : notFound('Event type');
-    }
-    const grouped = await deps.calV2.slots(
-      accountId,
-      { ...selector, start: start.toISOString(), end: end.toISOString(), timeZone: tz, format: 'range' },
-      allow,
-    );
-    let count = 0;
-    let truncated = false;
-    const days: { date: string; slots: { start: string; end: string; start_utc: string; end_utc: string }[] }[] = [];
-    for (const date of Object.keys(grouped).sort()) {
-      const slots = [];
-      for (const s of grouped[date]!) {
-        if (count >= args.max_slots) {
-          truncated = true;
-          break;
-        }
-        count += 1;
-        slots.push({
-          start: s.start,
-          end: s.end ?? s.start,
-          start_utc: new Date(s.start).toISOString(),
-          end_utc: new Date(s.end ?? s.start).toISOString(),
-        });
-      }
-      if (slots.length) days.push({ date, slots });
-    }
-    const et = resolved.eventType;
+    const team = await teamFacts(deps, out.resolved);
     return {
-      data: {
-        event_type: {
-          id: et.id,
-          title: untrusted(et.title, 200),
-          slug: et.slug,
-          duration_minutes: et.length_minutes,
-          kind: resolved.kind,
-          questions: questionsOf(et.booking_fields),
-        },
-        time_zone: tz,
-        range: { start: zonedIso(start, tz), end: zonedIso(end, tz) },
-        range_clamped: clamped,
-        days,
-        slot_count: count,
-        truncated,
-      },
-      summary: count
-        ? `${count} open slot(s) for "${untrusted(et.title, 80)}" (${et.length_minutes} min) between ${days[0]!.date} and ${days[days.length - 1]!.date} in ${tz}${truncated ? ' (more exist; narrow the range)' : ''}.`
-        : `No open slots for "${untrusted(et.title, 80)}" between ${zonedIso(start, tz)} and ${zonedIso(end, tz)}.`,
+      data: { ...out.data, team },
+      summary: `${out.summary} Team "${team.name}", ${team.scheduling_type.replace(/_/g, ' ')} across ${team.host_count} host(s).`,
     };
   },
 };
@@ -465,12 +672,19 @@ interface BookMeetingData extends Record<string, unknown> {
   next_step: string;
 }
 
+const holdId = z
+  .string()
+  .max(64)
+  .optional()
+  .describe('The hold_id from hold_slot, to book the exact time you held. Only the caller that made the hold can use it.');
+
 const bookMeetingInput = z.object({
   ...pageAddress,
   start: z.string().max(40).describe('Exact start of an offered slot from find_available_slots, ISO-8601 with offset.'),
   attendee,
   answers,
   language: z.enum(['en', 'es']).optional().describe('Language of the invitee\'s emails.'),
+  hold_id: holdId,
   idempotency_key: idempotencyKey,
 });
 
@@ -478,7 +692,7 @@ const bookMeeting: ToolDef = {
   name: 'book_meeting',
   title: 'Book a meeting on a public booking page',
   description:
-    'Book one slot on a public booking page, with no API key. Sends the invitee a confirmation email, so only call it once the person has agreed to the time and the details. The start must be a slot returned by find_available_slots. A pending status means the host still has to confirm.',
+    'Book one slot on a public booking page, with no API key. Sends the invitee a confirmation email, so only call it once the person has agreed to the time and the details. The start must be a slot returned by find_available_slots. Pass hold_id from hold_slot to book a time you held. A pending status means the host still has to confirm.',
   scope: null,
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -521,6 +735,7 @@ const bookMeeting: ToolDef = {
         language,
         attendee: { name: args.attendee.name, email: args.attendee.email.toLowerCase(), timeZone: tz },
         answers: args.answers ?? {},
+        holdId: args.hold_id,
       }),
     );
     const claim = await claimApiIdempotency(deps.db, {
@@ -588,6 +803,13 @@ const bookMeeting: ToolDef = {
     // call, or one with another workspace's credential, books like the public
     // page it wraps. The duplicate guard is untouched either way.
     const channel = call.principal?.accountId === accountId ? 'api' : 'booking_page';
+    // A hold is checked only now, after both replay paths, so a retried booking
+    // still finds its original result once the hold has been consumed. Neither
+    // refusal is stored: a hold problem says nothing final about the slot.
+    const reservationUid = args.hold_id
+      ? await useHold(deps, accountId, call, args.hold_id, resolved.eventType.id, startUtc)
+      : undefined;
+    await refuseIfHeld(deps, resolved, startUtc, reservationUid);
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(
@@ -597,7 +819,7 @@ const bookMeeting: ToolDef = {
             { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           )
         : await deps.bookings.book(
-            { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers },
+            { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers, reservationUid },
             false,
             { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
           );
@@ -633,6 +855,276 @@ const bookMeeting: ToolDef = {
           : 'Confirmed. A confirmation email with a link to reschedule or cancel was sent to the invitee.',
     };
     return finish(data);
+  },
+};
+
+const holdInput = z.object({
+  ...pageAddress,
+  event_type_id: z
+    .string()
+    .max(64)
+    .optional()
+    .describe('Alternative to the page fields: an event type id from list_event_types. Needs an API key with bookings:write.'),
+  start: z.string().max(40).describe('Exact start of an offered slot from find_available_slots, ISO-8601 with offset.'),
+  time_zone: timeZone.describe('IANA zone for the returned times, usually the invitee\'s.'),
+  idempotency_key: idempotencyKey,
+});
+
+interface HoldData extends Record<string, unknown> {
+  hold: {
+    hold_id: string;
+    expires_at: string;
+    expires_at_utc: string;
+    start: string;
+    end: string;
+    start_utc: string;
+    end_utc: string;
+    time_zone: string;
+  };
+  event_type: { id: string; title: string; duration_minutes: number };
+  replayed: boolean;
+  next_step: string;
+}
+
+const holdSlot: ToolDef = {
+  name: 'hold_slot',
+  title: 'Hold a time slot for about 10 minutes',
+  description:
+    'Keep one offered slot for about 10 minutes while you confirm the details with the person: nobody else is offered or can book it meanwhile. Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. Only the caller that made the hold can use it; an unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
+  scope: null,
+  // A public page holds like the booking page does; an event type by id is the account's own.
+  access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
+  write: true,
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: holdInput,
+  output: z.object({
+    hold: z.object({
+      hold_id: z.string().describe('Pass this to book_meeting or create_booking. Opaque; usable only by this caller.'),
+      expires_at: z.string().describe('When the hold lapses, in time_zone.'),
+      expires_at_utc: z.string(),
+      start: z.string(),
+      end: z.string(),
+      start_utc: z.string(),
+      end_utc: z.string(),
+      time_zone: z.string(),
+    }),
+    event_type: z.object({ id: z.string(), title: z.string(), duration_minutes: z.number() }),
+    replayed: z.boolean().describe('True when this idempotency_key had already placed this exact hold.'),
+    next_step: z.string(),
+  }),
+  async run(args: z.infer<typeof holdInput>, call, deps) {
+    let accountId: string;
+    let resolved: Resolved;
+    if (args.event_type_id) {
+      const p = requireScope(call, 'bookings:write');
+      accountId = p.accountId;
+      resolved = await deps.calV2.resolveEvent(accountId, { eventTypeId: args.event_type_id }).catch(() => {
+        throw notFound('Event type');
+      });
+      if (p.eventTypeIds && !p.eventTypeIds.includes(resolved.eventType.id)) throw notFound('Event type');
+    } else {
+      ({ accountId, resolved } = await resolvePage(deps, pageFrom(args)));
+    }
+    const member = resolved.member;
+    if (resolved.kind !== 'personal' || !member?.handle)
+      throw new ToolFailure(
+        'FEATURE_NOT_SUPPORTED',
+        'Holds work on one-host events only.',
+        'For a team event call book_team_meeting directly: it picks a free host at booking time.',
+      );
+    const tz = args.time_zone;
+    const startUtc = instantFrom(args.start, tz).toISOString();
+    const caller = callerId(call);
+    const { data, replayed } = await keyedWrite(
+      deps,
+      call,
+      accountId,
+      'hold_slot',
+      args.idempotency_key,
+      { eventTypeId: resolved.eventType.id, startUtc },
+      async (): Promise<HoldData> => {
+        // The booking page's own hold: same per-page cap, same fresh calendar
+        // check, same refusal of a time that is not offered or already held.
+        const held = await deps.bookings.reserve({
+          accountCode: resolved.accountCode,
+          handle: member.handle!,
+          slug: resolved.eventType.slug,
+          startUtc,
+        });
+        if (isServiceError(held)) {
+          if (held.error === 'NOT_FOUND') throw notFound('Booking page');
+          if (held.error === 'RATE_LIMITED') throw failureFor('TOO_MANY_HOLDS', held.message);
+          if (held.error === 'CALENDAR_UNAVAILABLE') throw failureFor('CALENDAR_UNAVAILABLE', held.message);
+          throw new ToolFailure(
+            'INVALID_SLOT',
+            'That time cannot be held: it is not offered, or someone is already holding or booking it.',
+            'Call find_available_slots for current openings and hold one of those starts with a NEW idempotency_key.',
+          );
+        }
+        const endUtc = new Date(Date.parse(startUtc) + resolved.eventType.length_minutes * 60_000).toISOString();
+        const hold = await bindHold(deps.db, accountId, caller, {
+          reservationUid: held.reservationUid,
+          eventTypeId: resolved.eventType.id,
+          startUtc,
+          endUtc,
+          expiresAt: held.expiresAt,
+        });
+        // Whole seconds, rounded down: the zoned time cannot carry more, and
+        // both forms must name the same instant (never later than the real one).
+        const expires = new Date(Math.floor(Date.parse(held.expiresAt) / 1000) * 1000);
+        return {
+          hold: {
+            hold_id: hold,
+            expires_at: zonedIso(expires, tz),
+            expires_at_utc: expires.toISOString(),
+            start: zonedIso(new Date(startUtc), tz),
+            end: zonedIso(new Date(endUtc), tz),
+            start_utc: startUtc,
+            end_utc: endUtc,
+            time_zone: tz,
+          },
+          event_type: {
+            id: resolved.eventType.id,
+            title: untrusted(resolved.eventType.title, 200),
+            duration_minutes: resolved.eventType.length_minutes,
+          },
+          replayed: false,
+          next_step: `Held until ${zonedIso(expires, tz)}. Book it with ${args.event_type_id ? 'create_booking' : 'book_meeting'} passing hold_id and start ${zonedIso(new Date(startUtc), tz)}.`,
+        };
+      },
+    );
+    const out = replayed ? { ...data, replayed: true } : data;
+    return {
+      data: out,
+      summary: `Holding ${out.hold.start} for "${out.event_type.title}" until ${out.hold.expires_at}. hold_id: ${out.hold.hold_id}${replayed ? ' (replay of an earlier identical call)' : ''}.`,
+    };
+  },
+};
+
+const bookTeamInput = z.object({
+  ...teamPageAddress,
+  event_type_id: z
+    .string()
+    .max(64)
+    .optional()
+    .describe('Alternative to the page fields: a team event type id from list_event_types. Needs an API key with bookings:write.'),
+  start: z.string().max(40).describe('Exact start of an offered slot from find_team_slots, ISO-8601 with offset.'),
+  attendee,
+  answers,
+  language: z.enum(['en', 'es']).optional().describe('Language of the invitee\'s emails.'),
+  idempotency_key: idempotencyKey,
+});
+
+const bookTeamMeeting: ToolDef = {
+  name: 'book_team_meeting',
+  title: 'Book a meeting with a team',
+  description:
+    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. Emails the invitee, so only call it once the person agreed. The start must come from find_team_slots. Works with no API key on a public team page, or with a key holding bookings:write (event_type_id).',
+  scope: null,
+  access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
+  write: true,
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  input: bookTeamInput,
+  output: z.object({
+    booking: z.object({
+      uid: z.string(),
+      status: z.string(),
+      start: z.string(),
+      end: z.string(),
+      start_utc: z.string(),
+      end_utc: z.string(),
+      time_zone: z.string(),
+      event_type_title: z.string(),
+    }),
+    team: teamShape,
+    assigned_hosts: z.array(z.string()).describe('Display names of the host(s) the booking was assigned to.'),
+    next_step: z.string(),
+  }),
+  async run(args: z.infer<typeof bookTeamInput>, call, deps) {
+    let accountId: string;
+    let resolved: Resolved;
+    let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string };
+    if (args.event_type_id) {
+      const p = requireScope(call, 'bookings:write');
+      accountId = p.accountId;
+      resolved = await deps.calV2.resolveEvent(accountId, { eventTypeId: args.event_type_id }).catch(() => {
+        throw notFound('Event type');
+      });
+      if (p.eventTypeIds && !p.eventTypeIds.includes(resolved.eventType.id)) throw notFound('Event type');
+      if (resolved.kind !== 'team') throw notTeam();
+      const start = instantFrom(args.start, args.attendee.time_zone).toISOString();
+      // The same in-process path create_booking takes, so the same idempotency
+      // record: a retry with the same key returns this booking, never a second.
+      const b = await deps.calV2
+        .createBooking(
+          accountId,
+          {
+            eventTypeId: resolved.eventType.id,
+            start,
+            attendee: { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.time_zone, language: args.language ?? 'en' },
+            bookingFieldsResponses: args.answers ?? {},
+          },
+          args.idempotency_key,
+          p.eventTypeIds,
+          p.keyId,
+        )
+        .catch(async (error: unknown) => withMissing(toFailure(error), resolved.eventType.booking_fields, args.answers));
+      const sum = await summarize(deps, accountId, b, args.attendee.time_zone);
+      booking = {
+        uid: sum.uid,
+        status: sum.status,
+        start: sum.start,
+        end: sum.end,
+        start_utc: sum.start_utc,
+        end_utc: sum.end_utc,
+        time_zone: sum.time_zone,
+        event_type_title: sum.event_type_title ?? untrusted(resolved.eventType.title, 200),
+      };
+    } else {
+      const { page, ...target } = await resolveTeamPage(deps, teamPageFrom(args));
+      ({ accountId, resolved } = target);
+      // A public team page is book_meeting's own path (it books team pages
+      // too), so this is the same action under the same idempotency record.
+      const done = await bookMeeting.run(
+        {
+          account_code: page.accountCode,
+          team_slug: page.owner,
+          event_slug: page.slug,
+          start: args.start,
+          attendee: args.attendee,
+          answers: args.answers,
+          language: args.language,
+          idempotency_key: args.idempotency_key,
+        } satisfies z.infer<typeof bookMeetingInput> as never,
+        call,
+        deps,
+      );
+      const b = (done.data as BookMeetingData).booking;
+      booking = {
+        uid: b.uid,
+        status: b.status,
+        start: b.start,
+        end: b.end,
+        start_utc: b.start_utc,
+        end_utc: b.end_utc,
+        time_zone: b.time_zone,
+        event_type_title: b.event_type_title,
+      };
+    }
+    const assigned = (await deps.calV2.bookingResponse(accountId, booking.uid)).hosts
+      .map((h) => untrusted(h.name ?? h.username ?? '', 100))
+      .filter(Boolean);
+    const team = await teamFacts(deps, resolved);
+    return {
+      data: {
+        booking,
+        team,
+        assigned_hosts: assigned,
+        next_step: 'Booked. The invitee was emailed a confirmation with a link to reschedule or cancel.',
+      },
+      summary: `${line(booking)} Assigned to ${assigned.join(', ') || 'the team'}.`,
+      affected: [booking.uid],
+    };
   },
 };
 
@@ -799,6 +1291,62 @@ const listBookingsInput = z.object({
   cursor: z.string().max(300).optional().describe('next_cursor from the previous page; keep the other arguments identical.'),
   time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
 });
+
+const bookingRows = z.object({
+  bookings: z.array(
+    z.object({
+      uid: z.string(),
+      status: z.string(),
+      start: z.string(),
+      end: z.string(),
+      start_utc: z.string(),
+      event_type_id: z.string(),
+      event_type_title: z.string(),
+      invitee_email_domain: z.string().nullable(),
+      attendee_count: z.number(),
+    }),
+  ),
+  next_cursor: z.string().nullable(),
+});
+
+/** One page of bookings with minimal fields, for list_bookings and list_pending_bookings. */
+async function bookingPage(
+  deps: McpToolDeps,
+  p: { accountId: string; eventTypeIds: string[] | null },
+  args: Omit<z.infer<typeof listBookingsInput>, 'status'>,
+  status: string | undefined,
+): Promise<ToolResult> {
+  const tz = args.time_zone ?? (await hostZone(deps.db, p.accountId));
+  const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to ? undefined : Date.now();
+  const page = await queryBookings(deps.db, {
+    accountId: p.accountId,
+    fromMs,
+    toMs: args.to ? instantFrom(args.to, tz).getTime() : undefined,
+    status,
+    allowedEventTypeIds: p.eventTypeIds,
+    eventTypeId: args.event_type_id,
+    limit: args.limit,
+    cursor: args.cursor,
+    order: args.order,
+  });
+  const bookings = page.items.map((b) => ({
+    uid: b.uid,
+    status: b.status,
+    start: zonedIso(new Date(b.startMs), tz),
+    end: zonedIso(new Date(b.endMs), tz),
+    start_utc: new Date(b.startMs).toISOString(),
+    event_type_id: b.eventTypeId,
+    event_type_title: untrusted(b.eventTypeTitle, 200),
+    invitee_email_domain: emailDomain(b.primaryEmail),
+    attendee_count: b.attendeeCount,
+  }));
+  return {
+    data: { bookings, next_cursor: page.nextCursor },
+    summary: `${bookings.length} ${status === 'pending' ? 'pending ' : ''}booking(s)${page.nextCursor ? ' (more available: pass next_cursor)' : ''}.`,
+    affected: bookings.map((b) => b.uid),
+  };
+}
+
 const listBookings: ToolDef = {
   name: 'list_bookings',
   title: 'List bookings',
@@ -808,53 +1356,25 @@ const listBookings: ToolDef = {
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: listBookingsInput,
-  output: z.object({
-    bookings: z.array(
-      z.object({
-        uid: z.string(),
-        status: z.string(),
-        start: z.string(),
-        end: z.string(),
-        start_utc: z.string(),
-        event_type_id: z.string(),
-        event_type_title: z.string(),
-        invitee_email_domain: z.string().nullable(),
-        attendee_count: z.number(),
-      }),
-    ),
-    next_cursor: z.string().nullable(),
-  }),
+  output: bookingRows,
   async run(args: z.infer<typeof listBookingsInput>, call, deps) {
-    const p = requireScope(call, 'bookings:read');
-    const tz = args.time_zone ?? (await hostZone(deps.db, p.accountId));
-    const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to ? undefined : Date.now();
-    const page = await queryBookings(deps.db, {
-      accountId: p.accountId,
-      fromMs,
-      toMs: args.to ? instantFrom(args.to, tz).getTime() : undefined,
-      status: args.status,
-      allowedEventTypeIds: p.eventTypeIds,
-      eventTypeId: args.event_type_id,
-      limit: args.limit,
-      cursor: args.cursor,
-      order: args.order,
-    });
-    const bookings = page.items.map((b) => ({
-      uid: b.uid,
-      status: b.status,
-      start: zonedIso(new Date(b.startMs), tz),
-      end: zonedIso(new Date(b.endMs), tz),
-      start_utc: new Date(b.startMs).toISOString(),
-      event_type_id: b.eventTypeId,
-      event_type_title: untrusted(b.eventTypeTitle, 200),
-      invitee_email_domain: emailDomain(b.primaryEmail),
-      attendee_count: b.attendeeCount,
-    }));
-    return {
-      data: { bookings, next_cursor: page.nextCursor },
-      summary: `${bookings.length} booking(s)${page.nextCursor ? ' (more available: pass next_cursor)' : ''}.`,
-      affected: bookings.map((b) => b.uid),
-    };
+    return bookingPage(deps, requireScope(call, 'bookings:read'), args, args.status);
+  },
+};
+
+const listPendingInput = listBookingsInput.omit({ status: true });
+const listPendingBookings: ToolDef = {
+  name: 'list_pending_bookings',
+  title: 'List bookings waiting for confirmation',
+  description:
+    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), soonest first, with minimal fields (no names, notes or answers). Needs scope bookings:read and respects the key\'s event-type allowlist. Answer each with confirm_booking or decline_booking; read one with get_booking.',
+  scope: 'bookings:read',
+  write: false,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  input: listPendingInput,
+  output: bookingRows,
+  async run(args: z.infer<typeof listPendingInput>, call, deps) {
+    return bookingPage(deps, requireScope(call, 'bookings:read'), args, 'pending');
   },
 };
 
@@ -930,13 +1450,14 @@ const createBookingInput = z.object({
   guests: z.array(z.string().email().max(254)).max(10).optional().describe('Extra attendee emails; each is emailed.'),
   answers,
   language: z.enum(['en', 'es']).optional(),
+  hold_id: holdId,
   idempotency_key: idempotencyKey,
 });
 const createBooking: ToolDef = {
   name: 'create_booking',
   title: 'Create a booking',
   description:
-    'Book a slot on any event type of the workspace. Needs scope bookings:write. Emails the invitee (and guests), so only call it after the person agreed. The start must be an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, then call find_available_slots again.',
+    'Book a slot on any event type of the workspace. Needs scope bookings:write. Emails the invitee (and guests), so only call it after the person agreed. The start must be an offered slot: a taken or invalid time returns SLOT_TAKEN or INVALID_SLOT, then call find_available_slots again. Pass hold_id from hold_slot to book a time you held.',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -945,6 +1466,14 @@ const createBooking: ToolDef = {
   async run(args: z.infer<typeof createBookingInput>, call, deps) {
     const p = requireScope(call, 'bookings:write');
     const start = instantFrom(args.start, args.attendee.time_zone).toISOString();
+    // Holds are looked at only for an event this key can see; anything else
+    // falls through to the booking call, which answers NOT_FOUND as before.
+    const target = await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null);
+    let reservationUid: string | undefined;
+    if (target && (!p.eventTypeIds || p.eventTypeIds.includes(target.eventType.id))) {
+      if (args.hold_id) reservationUid = await useHold(deps, p.accountId, call, args.hold_id, target.eventType.id, start);
+      await refuseIfHeld(deps, target, start, reservationUid);
+    }
     const b = await deps.calV2.createBooking(
       p.accountId,
       {
@@ -957,6 +1486,7 @@ const createBooking: ToolDef = {
       args.idempotency_key,
       p.eventTypeIds,
       p.keyId,
+      { reservationUid },
     ).catch(async (error: unknown) => {
       const failure = toFailure(error);
       const et = failure.code === 'BOOKING_FIELDS_INVALID' ? await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null) : null;
@@ -1032,6 +1562,145 @@ const cancelBooking: ToolDef = {
   },
 };
 
+/**
+ * A keyed write that stores only its success, keyed by account + caller + tool
+ * + key and compared against a hash of every argument: a retry with the same
+ * key answers what the first call answered; the same key with other arguments
+ * is refused. Refusals are not stored, because every write that uses this is
+ * safe to run again (a hold is re-checked, a decision is idempotent by state).
+ */
+async function keyedWrite<T extends Record<string, unknown>>(
+  deps: McpToolDeps,
+  call: McpCall,
+  accountId: string,
+  tool: string,
+  key: string,
+  request: Record<string, unknown>,
+  work: () => Promise<T>,
+): Promise<{ data: T; replayed: boolean }> {
+  const caller = callerId(call);
+  const requestHash = hashApiValue(stableStringify(request));
+  const claim = await claimApiIdempotency(deps.db, {
+    namespaceHash: hashApiValue(`${accountId}:${caller}:${tool}:${key}`),
+    accountId,
+    apiKeyId: caller,
+    method: 'MCP',
+    path: tool,
+    requestHash,
+  });
+  if (claim.requestHash !== requestHash)
+    throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
+  if (claim.statusCode != null) return { data: claim.responseBody as T, replayed: true };
+  const data = await work();
+  await completeApiIdempotency(deps.db, claim.id, 200, data);
+  return { data, replayed: false };
+}
+
+const decideInput = z.object({
+  booking_uid: z.string().min(1).max(100),
+  time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
+  idempotency_key: idempotencyKey,
+});
+const declineInput = decideInput.extend({
+  reason: z.string().max(500).optional().describe('Shown to the invitee in the email that tells them the request was declined.'),
+});
+const decisionOutput = z.object({
+  booking: bookingSummary,
+  already_applied: z
+    .boolean()
+    .describe('True when the booking was already in this state (an earlier call, or the host in the app, got there first); nothing was sent again.'),
+  next_step: z.string(),
+});
+
+/**
+ * The host's answer to a pending request, by API key: the host routes' own
+ * `confirm` / `decline` (same account scoping, same side effects), plus the
+ * key's allowlist. A booking already in the target state is a success with
+ * `already_applied`, so a retried or repeated decision never fails or emails
+ * twice.
+ */
+async function decide(
+  kind: 'confirm' | 'decline',
+  args: z.infer<typeof declineInput>,
+  call: McpCall,
+  deps: McpToolDeps,
+): Promise<ToolResult> {
+  const p = requireScope(call, 'bookings:write');
+  const uid = args.booking_uid;
+  // Another account's booking, or one outside the key's allowlist, is not found.
+  await deps.calV2.bookingResponse(p.accountId, uid, p.eventTypeIds).catch(() => {
+    throw notFound('Booking');
+  });
+  const target = kind === 'confirm' ? 'accepted' : 'rejected';
+  const { data, replayed } = await keyedWrite(deps, call, p.accountId, `${kind}_booking`, args.idempotency_key, { uid, reason: args.reason }, async () => {
+    const out =
+      kind === 'confirm'
+        ? await deps.admin.confirm({ accountId: p.accountId }, uid)
+        : await deps.admin.decline({ accountId: p.accountId }, uid, args.reason);
+    let already = false;
+    if (!out.ok) {
+      const now = await deps.calV2.bookingResponse(p.accountId, uid).catch(() => null);
+      if (!now) throw notFound('Booking');
+      if (out.reason === 'GONE' && now.status === target) already = true;
+      else if (out.reason === 'GONE')
+        throw new ToolFailure(
+          'NOT_PENDING',
+          `That booking is ${now.status}, not waiting for confirmation, so it cannot be ${kind === 'confirm' ? 'confirmed' : 'declined'}.`,
+          'Use list_pending_bookings for requests that are still waiting.',
+        );
+      else if (out.reason === 'SLOT_TAKEN')
+        throw new ToolFailure(
+          'SLOT_TAKEN',
+          'That time is no longer free: another booking or an event on the host\'s calendar holds it, so nothing was confirmed.',
+          'Decline the request with decline_booking, or ask the invitee for another time.',
+        );
+      else throw failureFor(out.reason, 'The booking could not be changed.');
+    }
+    const b = await deps.calV2.bookingResponse(p.accountId, uid);
+    const booking = await summarize(deps, p.accountId, b, args.time_zone ?? (await hostZone(deps.db, p.accountId, uid)));
+    return {
+      booking,
+      already_applied: already,
+      next_step:
+        kind === 'confirm'
+          ? already
+            ? 'Already confirmed; nothing was sent again.'
+            : 'Confirmed. The invitee was emailed the confirmation and the meeting goes on the host\'s calendar.'
+          : already
+            ? 'Already declined; nothing was sent again.'
+            : 'Declined. The invitee was told by email and the time is free again.',
+    };
+  });
+  const out = replayed ? { ...data, already_applied: true } : data;
+  return { data: out, summary: `${kind === 'confirm' ? 'Confirmed' : 'Declined'}. ${line(out.booking)}`, affected: [uid] };
+}
+
+const confirmBooking: ToolDef = {
+  name: 'confirm_booking',
+  title: 'Confirm a booking request',
+  description:
+    'Accept a booking that is waiting for the host (see list_pending_bookings). Needs scope bookings:write and respects the key\'s event-type allowlist. The host\'s calendar is checked first: a time that filled up meanwhile is SLOT_TAKEN and nothing is confirmed. Emails the invitee. Confirming an already confirmed booking succeeds with already_applied.',
+  scope: 'bookings:write',
+  write: true,
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  input: decideInput,
+  output: decisionOutput,
+  run: (args: z.infer<typeof decideInput>, call, deps) => decide('confirm', args, call, deps),
+};
+
+const declineBooking: ToolDef = {
+  name: 'decline_booking',
+  title: 'Decline a booking request',
+  description:
+    'Turn down a booking that is waiting for the host (see list_pending_bookings) and free its time. Needs scope bookings:write and respects the key\'s event-type allowlist. Emails the invitee (with reason, when given) and cannot be undone, so confirm with the user first. Declining an already declined request succeeds with already_applied.',
+  scope: 'bookings:write',
+  write: true,
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  input: declineInput,
+  output: decisionOutput,
+  run: (args: z.infer<typeof declineInput>, call, deps) => decide('decline', args, call, deps),
+};
+
 /** Who may make this call (see `ToolDef.access`). */
 export function accessOf(def: ToolDef, args: Record<string, unknown>): 'public' | { scope: ApiScope | null } {
   if (def.access) return def.access(args);
@@ -1050,14 +1719,20 @@ export function takesAccount(def: ToolDef): boolean {
 /** Deterministic order: public tools first, then reads, then writes. */
 export const TOOLS: readonly ToolDef[] = [
   findSlots,
+  findTeamSlots,
+  holdSlot,
   bookMeeting,
+  bookTeamMeeting,
   whoami,
   listMyAccounts,
   listEventTypes,
   getLink,
   listBookings,
+  listPendingBookings,
   getBooking,
   createBooking,
   rescheduleBooking,
+  confirmBooking,
+  declineBooking,
   cancelBooking,
 ];

@@ -653,6 +653,12 @@ export class CalV2Service {
     idempotencyKey?: string,
     allowedEventTypeIds?: string[] | null,
     keyIdentity = accountId,
+    /**
+     * In-process callers only, never the HTTP body (which still refuses
+     * `reservationUid`): a hold the caller has already proven is its own, to
+     * be consumed by this booking. The MCP `hold_slot` tool is the one caller.
+     */
+    internal: { reservationUid?: string } = {},
   ) {
     const input = createBookingSchema.parse(raw);
     const resolved = await this.resolveEvent(accountId, input);
@@ -662,6 +668,9 @@ export class CalV2Service {
     )
       v2Error(404, "RESOURCE_NOT_FOUND", "Event type not found.");
     this.rejectUnsupportedBookingFields(input, resolved.eventType);
+    // Holds exist for one-host events only (the core reserves per host).
+    if (internal.reservationUid && resolved.kind !== "personal")
+      featureNotSupported("reservationUid");
 
     let destinationCalendar:
       { id: string; connectionRef: string; externalId: string } | undefined;
@@ -783,6 +792,9 @@ export class CalV2Service {
                 language: input.attendee.language as "en" | "es",
               },
               answers: input.bookingFieldsResponses,
+              ...(internal.reservationUid
+                ? { reservationUid: internal.reservationUid }
+                : {}),
             },
             false,
             // `onBehalf: false` above is deliberate (these bookings are
