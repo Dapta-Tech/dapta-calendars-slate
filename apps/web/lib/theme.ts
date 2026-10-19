@@ -93,7 +93,7 @@ export function parseTheme(value: string | undefined | null): Theme | null {
  *
  *  `lib/robots.ts` reads it too: what is the product here is exactly what
  *  `robots.txt` keeps crawlers out of. */
-export const PRODUCT_PREFIXES: readonly string[] = ['/admin', '/login', '/onboarding', '/api'];
+export const PRODUCT_PREFIXES: readonly string[] = ['/admin', '/login', '/onboarding', '/api', '/auth'];
 
 /**
  * Product surface, or booking page?

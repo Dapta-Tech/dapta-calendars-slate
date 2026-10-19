@@ -314,6 +314,15 @@ export const adminApi = {
   createApiKey: (b: unknown) => req<{ plaintext: string; prefix: string }>('POST', '/v1/api-keys', b),
   revokeApiKey: (id: string) => req<void>('DELETE', `/v1/api-keys/${id}`),
 
+  // OAuth connections (the MCP connector). The consent pair is called by the
+  // `/auth/consent` page with the signed-in host's session; the API refuses an
+  // approval from anyone but an owner or admin.
+  oauthConsent: (uid: string) => req<OAuthConsent>('GET', `/v1/oauth/consent/${encodeURIComponent(uid)}`),
+  oauthDecide: (uid: string, decision: 'approve' | 'deny') =>
+    req<{ redirectTo: string }>('POST', `/v1/oauth/consent/${encodeURIComponent(uid)}`, { decision }),
+  connectedApps: () => req<ConnectedApps>('GET', '/v1/oauth/grants'),
+  revokeConnectedApp: (id: string) => req<void>('DELETE', `/v1/oauth/grants/${encodeURIComponent(id)}`),
+
   // Webhooks
   listWebhooks: () => req<WebhookRow[]>('GET', '/v1/webhooks'),
   createWebhook: (b: unknown) => req('POST', '/v1/webhooks', b),
@@ -484,6 +493,49 @@ export interface CalendarSummary {
  * one may be absent (an older API) or null (never used / no expiry / all event
  * types), and the page renders both.
  */
+/** What the consent page shows for one authorization request. */
+export interface OAuthConsent {
+  uid: string;
+  expiresAt: number;
+  client: {
+    id: string;
+    /** Self-asserted by the app; always shown next to `host`. */
+    name: string | null;
+    /** What to trust: the client_id URL's host (CIMD) or the redirect's. */
+    host: string;
+    via: 'cimd' | 'dcr';
+    redirectUri: string;
+    redirectHost: string;
+    loopback: boolean;
+  };
+  scopes: string[];
+  staysConnected: boolean;
+  grantDays: number;
+  account: { name: string; code: string };
+  member: { email: string | null; displayName: string | null };
+  canApprove: boolean;
+}
+
+export interface ConnectedApp {
+  id: string;
+  clientName: string | null;
+  clientHost: string;
+  redirectHost: string;
+  via: 'cimd' | 'dcr';
+  scopes: string[];
+  approvedBy: string | null;
+  createdAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number | null;
+}
+
+/** `enabled: false` when the deployment runs without OAuth (the list is then empty). */
+export interface ConnectedApps {
+  enabled: boolean;
+  accessTokenTtlSeconds: number | null;
+  grants: ConnectedApp[];
+}
+
 export interface ApiKeyRow extends KeyDetails {
   id: string;
   name: string;

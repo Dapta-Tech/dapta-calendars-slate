@@ -64,7 +64,7 @@ describe('short-links (pure rules)', () => {
      * one entry in that list nothing here covered.
      */
     it('blocks every top-level product path, so none can shadow the framing rule', () => {
-      for (const v of ['admin', 'login', 'onboarding', 'api', 'manage']) {
+      for (const v of ['admin', 'login', 'onboarding', 'api', 'manage', 'auth']) {
         expect(validateVanitySlug(v)).toBe('reserved');
       }
     });

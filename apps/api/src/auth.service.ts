@@ -9,14 +9,23 @@ import { annotateRequestAccount } from './request-log';
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
 export interface MachinePrincipal {
+  /** For an OAuth connection, `oauth:<grantId>`: the idempotency and rate-limit namespace. */
   keyId: string;
-  /** The key's public `dcl_<8hex>` handle; safe to log. */
+  /** The key's public `dcl_<8hex>` handle (`oauth:<grantId>` for OAuth); safe to log. */
   prefix: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
-  /** Epoch ms, or null when the key never expires. */
+  /** Epoch ms, or null when the key never expires (an OAuth token always expires). */
   expiresAtMs: number | null;
+  /** How the caller authenticated. Absent means an API key (every pre-OAuth call site). */
+  kind?: 'api_key' | 'oauth';
+  /** OAuth only: the member who approved the connection (the token's `sub`). */
+  memberId?: string;
+  /** OAuth only: the client the token was issued to (a URL for CIMD clients). */
+  clientId?: string;
+  /** OAuth only: the connection (grant) the token belongs to. */
+  grantId?: string;
 }
 
 /**

@@ -10,7 +10,7 @@
  * Booleans are INTEGER 0/1 on both engines (uniform reads); instants are BIGINT
  * epoch-ms (the int8range EXCLUDE operates over them).
  */
-import { pgTable, text, bigint, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, primaryKey, text, bigint, integer, jsonb } from 'drizzle-orm/pg-core';
 
 export const account = pgTable('account', {
   id: text('id').primaryKey(),
@@ -565,6 +565,33 @@ export const oneOffLink = pgTable('one_off_link', {
   revokedAt: bigint('revoked_at', { mode: 'number' }),
 });
 
+/**
+ * The embedded OAuth authorization server's storage (MCP connector, opt-in via
+ * OAUTH_ENABLED). One row per artifact in the shape every oidc-provider adapter
+ * uses, keyed by (kind, id): grants, refresh tokens, authorization codes,
+ * dynamically registered clients, interactions and sessions, plus two kinds of
+ * ours, `GrantMeta` (what Connected apps lists) and `ConsentTicket` (the
+ * single-use proof of a consent decision). Bearer ids are stored as their
+ * SHA-256. `payload` is JSON as TEXT on both dialects: it is never queried
+ * inside. Indexes live in migration `…_oauth_record.sql`.
+ */
+export const oauthRecord = pgTable(
+  'oauth_record',
+  {
+    kind: text('kind').notNull(),
+    id: text('id').notNull(),
+    payload: text('payload').notNull(),
+    /** The connection an artifact belongs to; revoking it deletes on this. */
+    grantId: text('grant_id'),
+    uid: text('uid'),
+    /** Tenant scope of `GrantMeta` rows (invariant 4); NULL on other kinds. */
+    accountId: text('account_id'),
+    expiresAt: bigint('expires_at', { mode: 'number' }),
+    consumedAt: bigint('consumed_at', { mode: 'number' }),
+  },
+  (t) => [primaryKey({ columns: [t.kind, t.id] })],
+);
+
 export const pgSchema = {
   account,
   member,
@@ -591,4 +618,5 @@ export const pgSchema = {
   accountIntegration,
   oneOffLink,
   accountBranding,
+  oauthRecord,
 };
