@@ -45,8 +45,16 @@ export const OUTBOX_LANES: ReadonlyArray<{ name: string; kinds: readonly OutboxK
   { name: 'webhook', kinds: ['webhook'] },
   { name: 'crm', kinds: ['crm'] },
   { name: 'sync', kinds: ['dapta_sync', 'iam_onboarding'] },
+  { name: 'analytics', kinds: ['analytics'] },
   { name: 'other', kinds: null },
 ];
+
+/**
+ * Kinds that are best effort: they give up once their own attempt budget is
+ * spent, with no retry horizon. A lost product-analytics event is acceptable;
+ * retrying one for a day against a vendor that is down is not worth the load.
+ */
+const NO_RETRY_HORIZON = new Set<string>(['analytics']);
 const NAMED_KINDS = OUTBOX_LANES.flatMap((l) => l.kinds ?? []);
 
 /** A duration for a log line: "45s", "12m", "3h". */
@@ -340,7 +348,8 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     }
     const attempts = row.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
-    if (outboxRetriesExhausted(row, attempts, now, this.horizonMs)) {
+    const horizonMs = NO_RETRY_HORIZON.has(row.kind) ? 0 : this.horizonMs;
+    if (outboxRetriesExhausted(row, attempts, now, horizonMs)) {
       await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
       const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
       this.log.error(

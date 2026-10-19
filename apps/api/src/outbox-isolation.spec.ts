@@ -383,6 +383,31 @@ describe('OutboxWorker: isolation, backoff, horizon, leases (F7)', () => {
     expect(log[0]!.error).toMatch(/Gave up after 6 attempts/);
   });
 
+  it('product analytics is best effort: its own budget, no retry horizon, its own lane', async () => {
+    const env = envWith();
+    const email = new EmailEffects(new BookingNotifier(recordingEmail), db);
+    const vendorDown = { deliver: async () => Promise.reject(new Error('vendor 503')) };
+    const worker = new OutboxWorker(
+      db,
+      env,
+      new CalendarEffects(new DisabledCalendarProvider(), db),
+      email,
+      new DaptaSyncEffects(env),
+      undefined,
+      vendorDown as never,
+    );
+    worker.random = () => 1;
+    const id = await enqueueOutbox(db, { kind: 'analytics', action: 'event', accountId, payload: '{}', maxAttempts: 3, now: 0 });
+    let at = 0;
+    for (let i = 0; i < 3; i++) {
+      await worker.drainOnce(at);
+      at = (await status(id)).nextAttemptAt;
+    }
+    // Three attempts in seconds and done, though the default horizon is a day.
+    expect((await status(id)).status).toBe('failed');
+    expect((await status(id)).attempts).toBe(3);
+  });
+
   it('every attempt of one delivery carries the same delivery id, body and signature', async () => {
     const worker = makeWorker();
     const hook = await createWebhook(db, {
