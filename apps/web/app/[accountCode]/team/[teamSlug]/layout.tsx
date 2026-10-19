@@ -1,16 +1,21 @@
 import type { ReactNode } from 'react';
 import { notFound } from 'next/navigation';
 import { getTeamProfile } from '@/lib/api';
+import { requestPathSegment } from '@/lib/request-path';
 
 /**
- * A team's pages exist only if the team does: a real `404` for one that does
- * not, decided above every loading boundary (see the host layout for why).
+ * A team's pages exist only if the team does, and a team event page only if
+ * the team lists that event: a real `404` otherwise, decided above every
+ * loading boundary, with the event read off the request's path for the same
+ * prefetch reason the host layout gives.
  *
- * The cost, stated: this read is the team landing's only data, so its skeleton
- * could not show before the read without committing the response to `200`
- * first. The landing now paints when that read lands, the moment its content
- * was ready before; the instant skeleton in front of it is what went. The read
- * is `cache()`d, so the pages below and their metadata share it.
+ * The cost, stated: unlike a person's pages, nothing awaited the team before
+ * the first byte (the root layout reads no theme for a team), so this adds one
+ * API read in front of the team landing AND the team event pages on a full
+ * load. The read is the landing's only data, so the landing paints when it
+ * lands, as its content did before, and its instant skeleton is what went; a
+ * team event page's own skeleton now appears after the read rather than before
+ * it. The read is `cache()`d, so the pages below and their metadata share it.
  */
 export default async function TeamLayout({
   children,
@@ -20,6 +25,10 @@ export default async function TeamLayout({
   params: Promise<{ accountCode: string; teamSlug: string }>;
 }) {
   const { accountCode, teamSlug } = await params;
-  if (!(await getTeamProfile(accountCode, teamSlug))) notFound();
+  const team = await getTeamProfile(accountCode, teamSlug);
+  if (!team) notFound();
+  // `/{accountCode}/team/{teamSlug}/{slug}`: the fourth segment, when there is one.
+  const slug = await requestPathSegment(3);
+  if (slug !== null && !team.eventTypes.some((e) => e.slug === slug)) notFound();
   return children;
 }
