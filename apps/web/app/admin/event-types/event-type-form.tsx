@@ -23,6 +23,7 @@ import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
+import { track } from '@/lib/analytics/port';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
@@ -662,6 +663,7 @@ function OneOffLinksSection({
   const copy = async (link: OneOffLinkView, opts?: { quiet?: boolean }): Promise<boolean> => {
     try {
       await navigator.clipboard.writeText(`${window.location.origin}${link.path}`);
+      track('link_copied', { link: 'one_off' });
       setCopiedId(link.id);
       // Let the row settle back to "Copy". Without this the button reads
       // "Copied." for the rest of the session and stops looking like a control.

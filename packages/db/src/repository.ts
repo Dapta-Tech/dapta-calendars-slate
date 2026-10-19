@@ -427,7 +427,7 @@ export async function isSlotBookable(
 }
 
 export interface PublicProfile {
-  account: { code: string; name: string };
+  account: { code: string; name: string; shortCode: string };
   member: {
     handle: string;
     displayName: string | null;
@@ -507,7 +507,7 @@ export async function getPublicProfile(
   return {
     // Public responses always carry the CANONICAL code (vanity ?? short) so
     // clients build/redirect to canonical links even when queried by an alias.
-    account: { code: canonicalPublicCode(account), name: account.name },
+    account: { code: canonicalPublicCode(account), name: account.name, shortCode: account.code },
     member: {
       handle: member.handle,
       displayName: member.display_name,
@@ -816,13 +816,42 @@ async function seatsTakenByStart(
 
 // --- Create booking (the atomic, dual-enforced write) ---------------------
 
+/**
+ * A live booking of this host over [startMs, endMs), held as its organizer OR
+ * as an assigned co-host (`booking_host`). The co-host half matters because
+ * the Postgres EXCLUDE covers `host_member_id` only: a host's seat on a team
+ * booking is invisible to it, so this check is the only guard for it.
+ */
+function hostOverlapSql(hostMemberId: string, startMs: number, endMs: number) {
+  return sql`SELECT b.id FROM booking b
+      WHERE b.status IN ('accepted','pending')
+        AND b.start_ms < ${endMs} AND b.end_ms > ${startMs}
+        AND (b.host_member_id = ${hostMemberId}
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${hostMemberId}))
+      LIMIT 1`;
+}
+
+/**
+ * Lock these members' rows, in id order (one order everywhere, so two writers
+ * can never each hold one the other waits for). A no-op for an empty list.
+ */
+export async function lockMembers(
+  tx: { execute: (query: ReturnType<typeof sql>) => Promise<unknown> },
+  memberIds: string[],
+): Promise<void> {
+  const ids = [...new Set(memberIds.filter(Boolean))].sort();
+  if (ids.length === 0) return;
+  await tx.execute(
+    sql`SELECT id FROM member WHERE id IN (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )}) ORDER BY id FOR UPDATE`,
+  );
+}
+
 function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: number): boolean {
   // SQLite synchronous read via the native drizzle instance (inside a txn).
-  const row = db.sqlite!.drizzle.get<{ id: string }>(
-    sql`SELECT id FROM booking WHERE host_member_id = ${hostMemberId} AND status IN ('accepted','pending')
-        AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`,
-  );
-  return !!row;
+  return !!db.sqlite!.drizzle.get<{ id: string }>(hostOverlapSql(hostMemberId, startMs, endMs));
 }
 
 
@@ -1166,13 +1195,15 @@ export async function createBooking(
   };
 
   if (db.dialect === 'sqlite') {
+    // IMMEDIATE: a second API process on the same file waits for this write
+    // lock and then sees this booking, as the hold write does.
     const outcome = db.sqlite!.txn<'ok' | 'conflict'>(() => {
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
       for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
       return 'ok';
-    });
+    }, { immediate: true });
     if (outcome === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
     // The booking is committed — burn the link (#110). AFTER the write, never
@@ -1186,10 +1217,14 @@ export async function createBooking(
   const pg = db.pg!.drizzle;
   try {
     const conflicted = await pg.transaction(async (tx) => {
-      const rows = (await tx.execute(
-        sql`SELECT id FROM booking WHERE host_member_id = ${member.id} AND status IN ('accepted','pending')
-            AND start_ms < ${endMs} AND end_ms > ${startMs} LIMIT 1`,
-      )) as unknown as Array<{ id: string }>;
+      // The host's row, locked: every guarded write that can give this host a
+      // booking (this one, a team booking naming them as a co-host, a move, a
+      // confirmation) takes it first, so two of them cannot both pass the
+      // check below before either commits.
+      await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
+      const rows = (await tx.execute(hostOverlapSql(member.id, startMs, endMs))) as unknown as Array<{
+        id: string;
+      }>;
       if (rows.length > 0) return true;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);

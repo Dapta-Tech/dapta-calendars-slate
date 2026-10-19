@@ -17,7 +17,7 @@
  * renderer at the base of the redesign. A redesign PR that changes one updates
  * it deliberately and explains the diff in its body.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 
@@ -46,8 +46,11 @@ const api = vi.hoisted(() => ({
   getRescheduleAvailability: vi.fn(),
 }));
 vi.mock('@/lib/api', () => api);
+// The real `publicLocale()` reads `?lang=` from the query the middleware
+// forwards when a page passes none; `eventPage` sets what that query carries.
+const forwarded = vi.hoisted(() => ({ lang: undefined as string | undefined }));
 vi.mock('@/lib/locale', () => ({
-  publicLocale: async (lang?: string) => (lang === 'es' ? 'es' : 'en'),
+  publicLocale: async (lang?: string) => ((lang ?? forwarded.lang) === 'es' ? 'es' : 'en'),
 }));
 vi.mock('@/lib/theme.server', () => ({ resolveDocumentTheme: async () => 'dark' }));
 vi.mock('next/navigation', () => ({
@@ -108,7 +111,13 @@ async function render(page: Promise<ReactElement>): Promise<string> {
   return pretty(renderToStaticMarkup(await page));
 }
 
+// Each render starts from a request with no `?lang=`.
+afterEach(() => {
+  forwarded.lang = undefined;
+});
+
 function eventPage(query: Record<string, string> = {}) {
+  forwarded.lang = query.lang;
   return BookingPage({
     params: Promise.resolve({ accountCode: 'northwind', handle: 'riley-chen', slug: 'design-review' }),
     searchParams: Promise.resolve(query),

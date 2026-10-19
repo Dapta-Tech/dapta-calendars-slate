@@ -390,6 +390,40 @@ describe('a failed read is asked again on its own, a bounded number of times', (
     expect(day(el, MARCH_DAY).dataset.state).toBe('available');
   });
 
+  it('a busy visible month (429) says the service is busy, and is asked again no sooner than it asked', async () => {
+    answerLaterMonths((from) => (Date.parse(from) < Date.parse(FIRST.to) ? MARCH : []));
+    const first = deferred();
+    const el = await mount(first.promise);
+    await land(first, { ok: false, busy: true, retryAfterMs: 6_000 });
+    expect(el.querySelector('.bp-empty')!.textContent).toBe(getMessages('en').trouble.busyTimes);
+    // The plain first backoff (1 s) is shorter than the service asked: no read yet.
+    await wait(RETRY_DELAYS_MS[0]!);
+    expect(reads()).toEqual([]);
+    await wait(6_000 - RETRY_DELAYS_MS[0]!);
+    expect(sameWindow(reads()[0]!, FIRST)).toBe(true);
+    expect(el.querySelector('.bp-empty')).toBeNull();
+    expect(day(el, MARCH_DAY).dataset.state).toBe('available');
+  });
+
+  it("a later month the route answers 429 for waits out the route's Retry-After", async () => {
+    let busy = true;
+    fetchMock.mockImplementation(async () =>
+      busy
+        ? { ok: false, status: 429, headers: new Headers({ 'retry-after': '3' }), json: async () => ({ ok: false, busy: true }) }
+        : { ok: true, json: async () => ({ ok: true, slots: [] }) },
+    );
+    const first = deferred();
+    await mount(first.promise);
+    await land(first, { ok: true, slots: MARCH });
+    await act(async () => {});
+    expect(reads()).toHaveLength(1); // April, read ahead, answered busy
+    await wait(2_900);
+    expect(reads()).toHaveLength(1);
+    busy = false;
+    await wait(200);
+    expect(reads()).toHaveLength(2);
+  });
+
   it('an outage is asked five more times, backing off, then left alone with the sentence', async () => {
     fetchMock.mockImplementation(async () => failing());
     const first = deferred();

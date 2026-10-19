@@ -158,6 +158,19 @@ mint a token for an address at that domain you do not control.
 | `CALENDAR_BUSY_REQUESTS_PER_SECOND` | `4` | — | no (busy requests one API process starts per second for one host; with N replicas give each its share) |
 | `CALENDAR_BUSY_WINDOW_DAYS` | `14` | optional; longest span of one busy request, 1 to 90 days. Raise it above 14 ONLY when your calendar adapter reads busy times from a free/busy query. With an events listing, a long window comes back short on a full calendar and offers times that are taken | no |
 | `CALENDAR_CONFERENCING_LABEL` | — | optional; display name for the conferencing your backend mints, shown to hosts. Unset ⇒ generic wording | no |
+| `CALENDAR_BUSY_CACHE_TTL_MS` | `30000` | optional; how long one busy read answers every visitor of the same calendar on the booking, team and manage pages (0 turns the cache off). Holds, bookings, reschedules and confirmations always read the calendar fresh (ADR 0009) | no |
+| `CALENDAR_BUSY_CACHE_MAX_STALE_MS` | `300000` | optional; when a fresh read fails or is slow, how old the last good read may be and still stand in. Older, the page says the calendar can't be read right now and offers nothing | no |
+| `CALENDAR_BUSY_CACHE_MAX_ENTRIES` | `1000` | optional; read windows held per API process, least recently used out first | no |
+| `CALENDAR_BUSY_READ_TIMEOUT_MS` | `10000` | optional; how long a page waits on a slow calendar before answering from the last good read (or saying it can't be read). The read keeps going and fills the cache for the next visitor | no |
+
+The busy cache is per API process. A booking clears the cached reads of its
+hosts on the process that took it; other replicas catch up within the TTL. It
+only ever feeds what a page shows: every write re-reads the calendar for the
+exact time and refuses (`SLOT_TAKEN`, or `CALENDAR_UNAVAILABLE` with
+`Retry-After` when the calendar cannot be read) rather than trust a cached
+answer. When a read is served stale or fails, the API logs one line per
+connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
+...`), naming the connection by a short hash, never its ref.
 
 ### Email / notifications
 
@@ -260,6 +273,57 @@ there is one upstream identity service and one pair of credentials.
 | `DAPTA_SYNC_TOKEN` | — | only when that endpoint requires a bearer | **yes** |
 | `DAPTA_SYNC_TIMEOUT_MS` | `5000` | never — raise only if the endpoint legitimately runs slow | no |
 
+### Product analytics (optional)
+
+**Off by default, and a fork that leaves it unset loads no script, enqueues
+nothing and makes no request.**
+
+Set a provider and its project key and the deployment reports how it is used
+to an analytics project you own: hosts' activation steps (signup and its
+source, template, calendar connected, hours, first publish, branding) as server
+events, plus dashboard pageviews; and, anonymously, the booking funnel on public
+pages (page viewed, day picked, time picked, booking sent and confirmed, a click
+on the "Made with" badge). The full event list and what is never sent are in
+[`ANALYTICS.md`](ANALYTICS.md).
+
+The short version of the privacy model: hosts are identified by email; visitors
+never are. A visitor gets no person profile, nothing is written to their device,
+and nothing they type is sent. Session recording and autocapture are off on
+every page. URLs lose their query strings before they leave the browser.
+
+**One image, any environment.** The web app reads these variables on the server
+**at request time**, not as `NEXT_PUBLIC_*` build arguments, so the same image
+can run with analytics on, off, or pointed at a different project per
+environment. Set them on **both** apps; the names are the same.
+
+`posthog` is the one adapter in this repository. The host may be PostHog's own
+(`https://us.i.posthog.com`, the default) or your reverse proxy in front of it.
+The browser loads the library from `<host>/static/array.js` (for PostHog's own
+hosts, from their assets host: `https://us-assets.i.posthog.com/static/array.js`)
+and sends events to the host itself; allow both in a Content-Security-Policy
+(`script-src` and `connect-src`). No inline script is added. The vendor sees
+the client's IP address from the request itself: if your policy calls for it,
+turn on your project's "discard client IP" setting.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `PRODUCT_ANALYTICS_PROVIDER` | unset (off) | to enable: `posthog` | no |
+| `PRODUCT_ANALYTICS_KEY` | unset | to enable: the project's write-only ingestion key | no (it reaches the browser by design) |
+| `PRODUCT_ANALYTICS_HOST` | the vendor's public host | only to use your own proxy or region | no |
+| `PRODUCT_ANALYTICS_INTERNAL_EMAILS` | unset | only to mark your own staff and test accounts `is_internal`: comma-separated, case-insensitive substrings of an email | no |
+
+A provider without a usable key or host turns analytics off with one warning at
+boot; it never stops either app from starting. Turning analytics off later
+leaves any queued rows to drain as `skipped`.
+
+**What a visitor's browser stores.** Nothing, from analytics itself. The one
+cookie this feature adds is `slate.ph_id`: when a link to one of the product's
+own entry points (`/`, `/login`, `/onboarding`, `/admin`) arrives carrying
+`?ph_id=` (a marketing landing's anonymous id), the middleware parks it for ten
+minutes, httpOnly, beside the campaign cookie above, so the host who signs up
+can be joined to their landing visit. It is never set on a booking page, only
+when the value looks like an analytics id, and never read unless analytics is on.
+
 ### CRM write-out (optional)
 
 Writes an accepted booking into the CRM your hosts already work in: the invitee
@@ -316,13 +380,13 @@ is byte-identical before and after, so no subscriber needs to be told.
 > be re-pasted from the provider's portal, but a signing secret exists only
 > here. Back the key up the way you back up the database.
 
-> **A key outage drops webhook events, and the drop is permanent.** A refused
-> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
-> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
-> marked `failed` — which is terminal, with no re-drive path. In practice a
-> deployment whose key is removed or corrupted loses every webhook event
-> enqueued in the following ~15 seconds, and restoring the key does **not**
-> replay them. Fix a key problem before it has been wrong for one drain cycle.
+> **A key outage drops webhook events once the retry horizon passes.** A refused
+> delivery is an ordinary outbox failure, so it is retried like any other
+> (exponential backoff from 1 s, capped at 15 min) until it has spent its five
+> attempts AND been failing for `OUTBOX_RETRY_HORIZON_MS` (default 24 h); then
+> the row is marked `failed`, which is terminal, with no re-drive path. Restore
+> the key within the horizon and the queued events go out; after it, they do
+> not.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
@@ -331,13 +395,23 @@ and records the scope names; it is never auto-disconnected, so granting the
 scope in the portal is enough to recover. Disconnecting scrubs the credential,
 marks queued write-out `skipped`, and deletes nothing in the CRM.
 
+### Search engines and suite links (web)
+
+| Var | Default | Notes | Secret? |
+|---|---|---|---|
+| `NOINDEX` | unset | Runtime, read per request. `1`, `true` or `yes` marks the whole deployment as not for search: `X-Robots-Tag: noindex, nofollow` on every page and route response (build assets under `/_next` and the icons excepted), `<meta name="robots" content="noindex, nofollow">` on every page, and a `robots.txt` that disallows everything. Use it on staging and preview copies, whose booking pages would otherwise compete with production's. Unset, `robots.txt` leaves the booking pages open and keeps crawlers out of `/admin`, `/login`, `/onboarding` and `/api` | no |
+| `NEXT_PUBLIC_FORMS_URL` | unset | **Build-time** for web. Where your Forms sidecar lives. Set, the dashboard's app switcher links to it in a new tab (tagged `utm_source=calendars&utm_medium=app_switcher`); unset, it lists Forms as "Coming soon". The switcher appears only when this or `NEXT_PUBLIC_PLATFORM_URL` is set | no |
+
 ### Outbox, CORS, rate limiting
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
-| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox | no |
-| `OUTBOX_POLL_MS` | `5000` | poll interval | no |
-| `OUTBOX_MAX_ATTEMPTS` | `5` | retry ceiling | no |
+| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox. Several API replicas may all run it: rows are claimed with a lease, so none is delivered twice at once | no |
+| `OUTBOX_POLL_MS` | `5000` | poll interval (a retry due sooner wakes the worker on time) | no |
+| `OUTBOX_MAX_ATTEMPTS` | `5` | reserved; every row gets five attempts before the retry horizon may end it | no |
+| `OUTBOX_RETRY_HORIZON_MS` | `86400000` | how long a failing delivery keeps being retried, counted from its first failure (backoff 1 s, 2 s, 4 s ... capped at 15 min, jittered). `0` = give up after the five attempts, the old behaviour | no |
+| `OUTBOX_CONCURRENCY` | `4` | deliveries in flight per kind of work (emails, calendar writes, webhooks, CRM, sign-up sync) per process. A booking's calendar writes, one side's mail about a booking, and one subscriber's events about a booking each go one at a time in the order queued, so a retry never lets a later one overtake it; a slow webhook subscriber holds at most one slot per process | no |
+| `OUTBOX_LEASE_MS` | `300000` | how long a claimed row belongs to the worker that claimed it; a live delivery renews it, a dead replica's rows are taken over when it runs out | no |
 | `CORS_ORIGINS` | `PUBLIC_APP_URL` only | comma-separated allowlist to embed the widget on other domains | no |
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
 | `RATE_LIMIT_CAPACITY` | `60` | burst | no |
@@ -345,6 +419,63 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `1` | reverse proxies in front of the API that append to `X-Forwarded-For` (1 = one load balancer, 2 = CDN + load balancer, 0 = exposed directly). The limiter keys on the entry this many from the right. Set it on the web app too when `INTERNAL_API_SECRET` is set: the web reads the visitor's address the same way | no |
 | `INTERNAL_API_SECRET` | unset | **API and web, same value** (min 32 chars). The booking pages call the API from the web server, so without it every visitor shares the web server's rate-limit bucket and a busy page answers visitors with 429s. With it set on both, the web sends the visitor's address beside the secret and the limiter counts each visitor. The API trusts a forwarded address only beside the matching secret and an IP literal; anything else is keyed as before, and a wrong secret is only counted in the log (one line a minute, no addresses). The web sends it only to the API named by the server-side `API_URL`, so set `API_URL` on the web explicitly to a private or in-cluster address; with `API_URL` unset (the `NEXT_PUBLIC_API_URL` fallback, a public host) the web never sends it and logs a warning at startup. An empty value counts as unset. Set it whenever the web app reaches the API through your reverse proxy or a private network | **yes** |
 | `REQUEST_LOG_ENABLED` | `true` | one line per request (method, route template, status, duration, request id, error code, account); JSON when `NODE_ENV=production`. Never logs query strings, bodies, headers or client addresses | no |
+| `MCP_ENABLED` | `true` | serve the MCP endpoint `POST /mcp` (see [docs/MCP.md](docs/MCP.md)); `false` answers 404. The dashboard's MCP & API page asks the API for this switch and shows how to connect an agent only while it is on, whatever `MCP_PUBLIC_URL` says | no |
+| `MCP_PUBLIC_URL` | unset | the address shown to people connecting an agent. With OAuth off it is display only. With `OAUTH_ENABLED=true` it is **required** and is the resource every access token is issued for (its audience): set it to exactly the URL people paste, path included | no |
+| `MCP_ALLOWED_ORIGINS` | unset | comma-separated browser origins allowed to call `/mcp`. A request with any other `Origin` header gets 403; clients that send none (every non-browser MCP client) are unaffected. A browser-hosted client must also be in `CORS_ORIGINS` | no |
+| `MCP_ALLOWED_HOSTS` | unset | comma-separated hostnames `/mcp` answers to (DNS-rebinding guard). Unset = no Host check | no |
+| `MCP_RATE_LIMIT_CAPACITY` | `30` | tool-call burst per API key (per client address when anonymous). Per process, so N replicas allow up to N times this | no |
+| `MCP_RATE_LIMIT_REFILL_PER_SEC` | `1` | sustained refill for the above | no |
+| `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for `book_meeting`, `create_booking`, `reschedule_booking`, `cancel_booking` | no |
+| `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `0.2` | sustained refill for write tools | no |
+| `MCP_TOOL_TIMEOUT_MS` | `20000` | how long one tool call may run before the caller gets a timeout error | no |
+
+**Webhook deliveries** are POSTed with `X-Slate-Event` (the event name),
+`X-Slate-Signature` (`sha256=` HMAC of the body with the webhook's secret) and
+`X-Slate-Delivery` (the delivery's id). A retry sends the same body, signature
+and delivery id, so a subscriber that already processed an attempt the sender
+saw time out can recognise the retry and ignore it. Each attempt waits at most
+10 s for an answer; a slow subscriber holds up only its own deliveries. When a
+delivery is given up, the webhook's delivery log in the dashboard says so.
+
+### OAuth for the MCP endpoint (optional)
+
+Off by default; API keys and the public tools need none of this. On, the API is
+its own OAuth 2.1 authorization server for `/mcp`, so Claude, ChatGPT, Cursor
+and VS Code connect with a sign-in and a consent screen (see
+[docs/MCP.md](docs/MCP.md#oauth-connect-claude-chatgpt-cursor-or-vs-code-with-a-sign-in)).
+The API refuses to boot with `OAUTH_ENABLED=true` and any required value missing.
+
+| Var | Default | Notes | Secret? |
+|---|---|---|---|
+| `OAUTH_ENABLED` | `false` | serve the authorization server under `/oauth` and its metadata under `/.well-known/` | no |
+| `OAUTH_ISSUER` | unset | **required when on.** The public origin that serves `/oauth/*` and `/.well-known/oauth-authorization-server` (scheme and host only, `https`). It is the `iss` of every token and authorization response: never change it once apps are connected | no |
+| `OAUTH_SIGNING_JWK` | unset | **required when on.** The access-token signing key: one EC P-256 private JWK (ES256) as a JSON string. Every replica uses the same key and verifies tokens offline. Rotating it signs every connected app out of its current access token; refresh tokens keep working, so clients recover on their own | **yes** |
+| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `3600` | access-token lifetime (60 to 86400). After a Disconnect, an access token already handed out keeps working at most this long | no |
+| `OAUTH_GRANT_TTL_DAYS` | `90` | absolute lifetime of a connection; refreshing never extends it | no |
+| `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` | a rotated refresh token presented again within this window rotates again (a client retry after a lost response); later, reuse revokes the whole connection. `0` = strict | no |
+| `OAUTH_CIMD_ENABLED` | `true` | accept clients identified by a Client ID Metadata Document (an https `client_id` this server fetches) | no |
+| `OAUTH_DCR_ENABLED` | `true` | accept Dynamic Client Registration at `/oauth/register`, restricted to a fixed redirect allowlist | no |
+| `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset | comma-separated exact redirect URIs added to that allowlist | no |
+
+Make the key once and store it in your secret manager:
+
+```bash
+node -e "const {generateKeyPairSync}=require('node:crypto');console.log(JSON.stringify(generateKeyPairSync('ec',{namedCurve:'P-256'}).privateKey.export({format:'jwk'})))"
+```
+
+Routing: the browser and the apps reach these paths on the API, so route them to
+the API from whatever host `OAUTH_ISSUER` and `MCP_PUBLIC_URL` name:
+`/oauth/*`, `/.well-known/oauth-authorization-server`,
+`/.well-known/oauth-protected-resource*` and `/mcp`. The web app needs nothing
+new: its consent page lives at `/auth/consent` (keep that path on the web) and
+uses `PUBLIC_APP_URL`. The person signs in through your normal `AUTH_PROVIDER`;
+nothing is registered with any identity vendor. Only owners and admins can
+approve a connection.
+
+Storage is one additive table, `oauth_record` (migration `0026_oauth_record.sql`
+on Postgres, `0025_oauth_record.sql` on SQLite): a new table, no change to
+existing ones. It stays empty while OAuth is off; expired rows are purged in
+the background.
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every
@@ -356,6 +487,9 @@ Terminate TLS at your proxy and route two hostnames:
 
 - `calendars.example.com` → the **web** app (port `3000`)
 - `calendars-api.example.com` → the **API** (port `4000`, health at `/health`)
+
+With OAuth on, also route the OAuth paths to the API (see "OAuth for the MCP
+endpoint"), and keep forwarding `X-Forwarded-Proto` so its cookies are Secure.
 
 Behind a proxy, derive the request origin from `X-Forwarded-*` headers (the app
 does this) — set `PUBLIC_APP_URL` to the public web URL and build the web image with
@@ -516,6 +650,16 @@ reference it by `CALENDAR_BACKEND_MODULE`.
   images does not restore that text. Rollback across this migration is
   forward-only; take a snapshot before upgrading if you need a true point-in-time
   revert.
+- **Outbox leases (`postgres/0027`, `sqlite/0026`).** Workers from before this
+  migration claim outbox rows without a lease, so while old and new API pods run
+  side by side they can deliver the same row twice, and an old pod still gives a
+  failing row up after five attempts. Keep the overlap short (or set
+  `OUTBOX_WORKER_ENABLED=false` on the old pods during the rollout). Rows
+  already queued at the upgrade carry no order key and are ordered by their
+  booking (by their subscriber, for a webhook), so for those few rows only, a
+  retry of one can still be overtaken by a row about the same booking queued
+  after the upgrade. Rolling back is safe: the old code ignores the four
+  columns.
 
 ## Troubleshooting
 
@@ -536,3 +680,4 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — request flows, seams, double-booking safety.
 - [`CLAUDE.md`](CLAUDE.md) — local run/test commands and invariants.
 - [`.env.example`](.env.example) — every variable with inline notes.
+- [`ANALYTICS.md`](ANALYTICS.md): the product analytics events and what is never sent.

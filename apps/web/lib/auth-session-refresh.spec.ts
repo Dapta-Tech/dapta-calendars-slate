@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const cookieJar = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
-vi.mock('next/headers', () => ({ cookies: vi.fn(async () => cookieJar) }));
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => cookieJar),
+  // No Accept-Language: with no language cookie either, the copy is English.
+  headers: async () => ({ get: () => null }),
+}));
 const redirect = vi.fn((url: string) => {
   throw new Error(`NEXT_REDIRECT:${url}`);
 });

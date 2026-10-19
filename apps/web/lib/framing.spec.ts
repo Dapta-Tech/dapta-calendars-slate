@@ -6,7 +6,7 @@ import { frameAncestorsFor, framingHeaders } from './framing';
  * below rather than imported, because the point is to notice when that list
  * changes — an import would silently follow it.
  */
-const PRODUCT_PREFIXES = ['/admin', '/login', '/onboarding', '/api'];
+const PRODUCT_PREFIXES = ['/admin', '/login', '/onboarding', '/api', '/auth'];
 
 describe('frameAncestorsFor', () => {
   it('opens the four public booking routes — the promise the embed rests on', () => {

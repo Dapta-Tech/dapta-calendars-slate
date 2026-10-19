@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getMessages } from '@slate/shared';
+import { LANDING_ID_COOKIE, getMessages } from '@slate/shared';
 import { adminApi, ApiError } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
+import { HostAnalytics } from '@/components/analytics/host-analytics';
+import { analyticsConfig, hostAnalyticsIdentity } from '@/lib/analytics/config';
 import { ToastProvider } from '@/components/toast';
 import { TimeZoneSync } from '@/components/timezone-sync';
 import { currentReturnTo, getSession } from '@/lib/auth-session';
@@ -72,9 +74,17 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       ? await listWorkspaces(session.accessToken)
       : { items: [], hasMore: false };
 
+  // Product analytics, read at request time (never inlined at build): null
+  // when the deployment configures none, and then nothing loads.
+  const analytics = analyticsConfig();
+
   return (
     <ToastProvider>
       <TimeZoneSync currentTimeZone={me.timeZone} />
+      <HostAnalytics
+        config={analytics}
+        identity={analytics ? hostAnalyticsIdentity(me, jar.get(LANDING_ID_COOKIE)?.value) : null}
+      />
       <AdminShell
         initialCollapsed={initialCollapsed}
         initialTheme={initialTheme}

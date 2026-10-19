@@ -7,7 +7,9 @@ import {
   type BookingAnswer,
   type BookingGuest,
 } from './booking-details';
+import { capTemplateText } from '@slate/engine';
 import {
+  MAX_RENDERED_BODY,
   renderTemplate,
   templateVars,
   type EmailTemplate,
@@ -25,6 +27,17 @@ export interface BookingNotification {
   title: string;
   startUtc: string;
   endUtc: string;
+  /**
+   * What `{{event_name}}`, `{{event_description}}`, `{{workspace_name}}` and
+   * `{{team_name}}` read: the event type's own name and description, the
+   * account's name and the owning team's. Snapshotted at enqueue. Absent on
+   * rows queued before they were carried: the event name then reads as the
+   * booking title (what it always was) and the rest as empty.
+   */
+  eventName?: string | null;
+  eventDescription?: string | null;
+  workspaceName?: string | null;
+  teamName?: string | null;
   /**
    * `timeZone` is the host's own zone, which the host's copy is written in (see
    * `recipientTimeZone`). Absent on forks that build notifications directly,
@@ -48,7 +61,8 @@ export interface BookingNotification {
   };
   /**
    * Everyone else the booking invites (extra attendees, added guests), for the
-   * host's copy. Snapshotted at enqueue like the rest. Absent = none listed.
+   * host's copy only (its details block and `{{guests}}`); an invitee copy
+   * never carries it. Snapshotted at enqueue like the rest. Absent = none listed.
    */
   guests?: BookingGuest[] | null;
   /**
@@ -209,10 +223,14 @@ export class BookingNotifier {
     // The host's request is the one host copy with something to do.
     const actionUrl = kind === 'pending' ? hostDashboardUrl(n) : '';
     const html = renderBrandedHtml(kind, vars, locale, audience, growth, { details, actionUrl });
+    // The body cap holds for the whole text part, the host's details included.
     const withDetails = (text: string) =>
-      details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text;
+      capTemplateText(
+        details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text,
+        MAX_RENDERED_BODY,
+      );
     if (n.template) {
-      const base = renderTemplate(n.template, vars);
+      const base = renderTemplate(n.template, vars, locale);
       return { subject: base.subject, text: withDetails(base.text), html };
     }
     const { subject, lines } = legacy();

@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NestInterceptor,
@@ -21,6 +22,7 @@ import {
   UseFilters,
   UseInterceptors,
 } from "@nestjs/common";
+import type { ApiScope } from "@slate/types";
 import { ZodError } from "zod";
 import {
   AuthService,
@@ -154,20 +156,18 @@ function requireVersion(
 @UseFilters(CalV2ExceptionFilter)
 @Controller("v2")
 export class CalV2Controller {
+  // Explicit tokens: the API runs on tsx (esbuild), which emits no decorator
+  // metadata, so Nest cannot infer constructor types. Without them every
+  // dependency is undefined and each /v2 call with a valid key answered 401.
   constructor(
-    private readonly service: CalV2Service,
-    private readonly pilot: CalV2PilotService,
-    private readonly auth: AuthService,
+    @Inject(CalV2Service) private readonly service: CalV2Service,
+    @Inject(CalV2PilotService) private readonly pilot: CalV2PilotService,
+    @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
   private async principal(
     req: ReqLike,
-    scope:
-      | "availability:read"
-      | "bookings:read"
-      | "bookings:write"
-      | "calendars:read"
-      | "event-types:read",
+    scope: ApiScope | readonly ApiScope[],
   ): Promise<MachinePrincipal> {
     const authorization = req.headers.authorization;
     const value = Array.isArray(authorization)
@@ -192,9 +192,10 @@ export class CalV2Controller {
         v2Error(
           403,
           "INSUFFICIENT_SCOPE",
-          `The API key requires scope ${scope}.`,
+          `The API key requires scope ${[scope].flat().join(" or ")}.`,
           {
-            requiredScope: scope,
+            requiredScope: Array.isArray(scope) ? scope[0] : scope,
+            ...(Array.isArray(scope) ? { acceptedScopes: scope } : {}),
           },
         );
       v2Error(
@@ -310,7 +311,7 @@ export class CalV2Controller {
     @Body() body: unknown,
   ) {
     requireVersion(apiVersion, [CAL_V2_BOOKINGS_VERSION]);
-    const principal = await this.principal(req, "bookings:write");
+    const principal = await this.principal(req, ["bookings:cancel", "bookings:write"]);
     return {
       status: "success" as const,
       data: await this.pilot.cancel(

@@ -33,6 +33,9 @@ export function MadeWithBadge({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
+        // Counted by the page's anonymous analytics (`VisitorAnalytics`), with
+        // the medium read off this link's own UTM tags.
+        data-analytics-cta=""
         className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
       >
         {/* The drawn mark, not a pasted PNG: it is ink in `currentColor`, so it

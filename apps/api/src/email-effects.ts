@@ -11,18 +11,22 @@ import {
   type BookingNotificationContext,
   type EventReminder,
   type NotificationSetting,
+  sql,
   type Db,
 } from '@slate/db';
 import {
   BookingNotifier,
   HOST_DETAIL_KINDS,
+  MAX_ANSWER_ITEMS,
   collectBookingAnswers,
   defaultEnabledFor,
+  extractTokens,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
   type EmailTemplateKey,
 } from '@slate/notifications';
+import { MAX_TEMPLATE_VALUE } from '@slate/engine';
 import { adminBookingPath, formatBookingLocation, getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { CalendarProvider } from '@slate/calendar';
@@ -44,7 +48,35 @@ export class OutboxSkipError extends Error {}
  * and tries again, and the row's `last_error` then names the wait so nobody
  * reading the delivery log mistakes it for a transport fault.
  */
-export class ConferencingLinkPendingError extends Error {}
+/**
+ * The least wait between two looks for a conferencing link, so the bounded
+ * wait (CONFERENCING_LINK_WAIT_ATTEMPTS looks) gives the calendar about as
+ * long to mint the room as it had when retries rode the 5 s poll.
+ */
+export const CONFERENCING_LINK_RETRY_MS = 5_000;
+
+export class ConferencingLinkPendingError extends Error {
+  /** The worker waits at least this long before the next look. */
+  readonly retryAfterMs = CONFERENCING_LINK_RETRY_MS;
+}
+
+/**
+ * Mail that only makes sense while the booking is on. Once it is cancelled or
+ * declined, a row of one of these that is still queued (a retry can wait
+ * hours) is skipped rather than sent: a "confirmed" landing after "cancelled"
+ * tells the invitee the opposite of the truth.
+ */
+const LIVE_BOOKING_KINDS = new Set(['confirmation', 'reschedule', 'reminder', 'follow_up']);
+
+/**
+ * One side's mail about one booking goes out in the order it was queued
+ * (confirmed, moved, cancelled), however long a retry waits. The two sides are
+ * ordered apart: an invitee address the mail transport refuses must not hold
+ * up the host's copies.
+ */
+function emailOrderKey(uid: string, audience: 'attendee' | 'host'): string {
+  return `${uid}|${audience}`;
+}
 
 /**
  * How late a conferencing booking's confirmation/reschedule row is first made
@@ -134,6 +166,28 @@ const KIND_SIDES: Record<EmailKind, Array<{ key: EmailTemplateKey; audience: 'at
 export function emailKeyFor(kind: EmailKind, audience: 'attendee' | 'host'): EmailTemplateKey {
   const side = KIND_SIDES[kind].find((s) => s.audience === audience);
   return (side ?? KIND_SIDES[kind][0]!).key;
+}
+
+/**
+ * The answers `{{form.*}}` may quote: only the event's own questions, each
+ * capped to what a template would print anyway. The public booking request
+ * accepts any answer key, so one the event never asked must not ride into
+ * mail sent under the host's name; dropping it also keeps payloads small.
+ */
+function declaredAnswers(ctx: BookingNotificationContext): Record<string, unknown> | null {
+  if (!ctx.formAnswers) return null;
+  const out = Object.create(null) as Record<string, unknown>;
+  for (const field of ctx.bookingFields) {
+    if (!Object.hasOwn(ctx.formAnswers, field.name)) continue;
+    const value = ctx.formAnswers[field.name];
+    out[field.name] =
+      typeof value === 'string'
+        ? value.slice(0, MAX_TEMPLATE_VALUE.text)
+        : Array.isArray(value)
+          ? value.slice(0, MAX_ANSWER_ITEMS).map((v) => (typeof v === 'string' ? v.slice(0, MAX_TEMPLATE_VALUE.text) : v))
+          : value;
+  }
+  return out;
 }
 
 /**
@@ -254,6 +308,7 @@ export class EmailEffects {
             kind: 'email',
             action: 'reminder',
             bookingUid: uid,
+            orderKey: emailOrderKey(uid, side.audience),
             accountId: ctx.accountId,
             payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
@@ -333,6 +388,7 @@ export class EmailEffects {
             kind: 'email',
             action: 'follow_up',
             bookingUid: uid,
+            orderKey: emailOrderKey(uid, side.audience),
             accountId: ctx.accountId,
             payload: JSON.stringify({ ...n, reminderLeadMinutes: row.leadMinutes, reminderId: row.id }),
             nextAttemptAt: fireAt,
@@ -397,6 +453,7 @@ export class EmailEffects {
           kind: 'email',
           action: kind,
           bookingUid: uid,
+          orderKey: emailOrderKey(uid, side.audience),
           accountId: ctx.accountId,
           payload: JSON.stringify(n),
           ...(waitsForLink
@@ -475,18 +532,24 @@ export class EmailEffects {
     const customCopy = setting != null && (setting.subject != null || setting.body != null);
     const locale =
       side.audience === 'attendee' && !customCopy ? (ctx.attendeeLocale ?? ctx.hostLocale) : ctx.hostLocale;
+    const template = resolveTemplate(side.key, setting, locale);
+    const reads = new Set(extractTokens(`${template.subject}\n${template.body}`));
     return {
-      ...this.toNotification(ctx, extra, locale),
+      ...this.toNotification(ctx, extra, locale, reads),
+      // The other people on the booking are the host's to read, never an
+      // invitee's: on a group event they are strangers to each other.
+      ...(side.audience === 'host' && reads.has('guests') ? { guests: ctx.guests } : {}),
       // The manage link is the invitee's tokenised link to THEIR booking; the
       // host's copy is never handed it, so no host mail can carry it.
       ...(side.audience === 'host' ? { manageUrl: null, ...this.hostSide(ctx, kind) } : {}),
       audience: side.audience,
-      template: resolveTemplate(side.key, setting, locale),
+      template,
       templateLocale: locale,
       pending: kind === 'pending',
-      // `{{form.*}}` is reminder copy only (CONTEXT.md): the account-wide
-      // transactional templates cannot know one event type's questions.
-      ...(reminder ? { formAnswers: ctx.formAnswers } : {}),
+      // `{{form.*}}` resolves in every email. An account-wide template cannot
+      // know one event type's questions, so a name the event does not ask
+      // reads as empty and the empty-line rule drops its line.
+      formAnswers: declaredAnswers(ctx),
     };
   }
 
@@ -496,7 +559,8 @@ export class EmailEffects {
    * shows it (the request, the confirmed booking, the move), who the booking
    * is from and what they answered, so the host can decide from the mail
    * itself. The invitee's payload never holds the other guests' addresses or
-   * the answers.
+   * this labelled answers block (its `{{form.*}}` answers are the invitee's
+   * own, and only the event's questions; see `declaredAnswers`).
    *
    * The link is the bookings page behind the host's login, deep-linked to this
    * booking. It never confirms or declines anything by itself: a mail scanner
@@ -524,18 +588,30 @@ export class EmailEffects {
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
     // The language this copy is written in, which the Where is worded in too.
     locale: string | null = ctx.hostLocale,
+    // The variables this copy's template reads, when it has one.
+    reads: ReadonlySet<string> = new Set(),
   ): BookingNotification {
     return {
       accountId: ctx.accountId,
       uid: ctx.uid,
       title: ctx.title,
+      eventName: ctx.eventName,
+      eventDescription: ctx.eventDescription,
+      workspaceName: ctx.workspaceName,
+      teamName: ctx.teamName,
       startUtc: ctx.startUtc,
       endUtc: ctx.endUtc,
       host: ctx.host,
       coHosts: ctx.coHosts,
       // Who the mail is about. The phone and notes stay out of the shared
-      // snapshot: only the host's copy shows them (`hostSide`).
-      attendee: { name: ctx.attendee.name, email: ctx.attendee.email, timeZone: ctx.attendee.timeZone },
+      // snapshot: the host's copy shows them (`hostSide`), and any other copy
+      // carries the phone only when its own template asks for `{{attendee_phone}}`.
+      attendee: {
+        name: ctx.attendee.name,
+        email: ctx.attendee.email,
+        timeZone: ctx.attendee.timeZone,
+        ...(reads.has('attendee_phone') ? { phone: ctx.attendee.phone } : {}),
+      },
       // The Where as one human string, rendered from the booking's snapshotted
       // KIND. Deliberately GENERIC for conferencing: the platform name is a
       // host-facing affordance read from the calendar port in the event-type
@@ -606,6 +682,19 @@ export class EmailEffects {
       throw new OutboxSkipError(
         'email outbox row missing account context — skipped (signed transport requires a tenant)',
       );
+    }
+    if (LIVE_BOOKING_KINDS.has(kind) && n.uid) {
+      const live = await this.db.get<{ status: string; start_ms: number | string }>(
+        sql`SELECT status, start_ms FROM booking WHERE uid = ${n.uid} LIMIT 1`,
+      );
+      if (live && (live.status === 'cancelled' || live.status === 'rejected')) {
+        throw new OutboxSkipError(`${kind} for ${n.uid} skipped: the booking is ${live.status}`);
+      }
+      // A reminder is "before the meeting" or nothing: one held back by a
+      // long outage is dropped once the meeting has started.
+      if (live && kind === 'reminder' && Number(live.start_ms) <= Date.now()) {
+        throw new OutboxSkipError(`reminder for ${n.uid} skipped: the meeting has already started`);
+      }
     }
     if ((kind === 'reminder' || kind === 'follow_up') && n.reminderId && n.uid) {
       // A reminder row can sit dormant for 28 days, so the switch is re-read at

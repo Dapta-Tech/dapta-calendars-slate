@@ -4,10 +4,28 @@ import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
 import { adminApi, ApiError } from '@/lib/admin-api';
+import { expiresAtMsFromDays } from '@/lib/mcp-connect';
 
-export async function createApiKeyAction(name: string, scopes: string[]): Promise<{ plaintext?: string; error?: string }> {
+export interface CreateApiKeyInput {
+  name: string;
+  scopes: string[];
+  /** Limit the key to these event types; empty or absent means all of them. */
+  eventTypeIds?: string[];
+  /** Days until the key stops working; 0 or absent means never. */
+  expiresInDays?: number;
+}
+
+export async function createApiKeyAction(input: CreateApiKeyInput): Promise<{ plaintext?: string; error?: string }> {
   try {
-    const r = await adminApi.createApiKey({ name, scopes });
+    // The expiry is computed here, on the server, from its own clock: a browser
+    // with a wrong clock must not mint a key that is already expired.
+    const expiresAtMs = expiresAtMsFromDays(input.expiresInDays ?? 0, Date.now());
+    const r = await adminApi.createApiKey({
+      name: input.name,
+      scopes: input.scopes,
+      ...(input.eventTypeIds && input.eventTypeIds.length > 0 ? { eventTypeIds: input.eventTypeIds } : {}),
+      ...(expiresAtMs !== undefined ? { expiresAtMs } : {}),
+    });
     revalidatePath('/admin/settings/developer');
     return { plaintext: r.plaintext };
   } catch (e) {
@@ -19,6 +37,18 @@ export async function createApiKeyAction(name: string, scopes: string[]): Promis
 export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await adminApi.revokeApiKey(id);
+    revalidatePath('/admin/settings/developer');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
+/** Disconnect an OAuth connection: its refresh token dies now, its access token at expiry. */
+export async function revokeConnectedAppAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await adminApi.revokeConnectedApp(id);
     revalidatePath('/admin/settings/developer');
     return { ok: true };
   } catch (e) {

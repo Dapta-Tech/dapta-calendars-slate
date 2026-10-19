@@ -1,7 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
+import {
+  ATTRIBUTION_COOKIE,
+  ATTRIBUTION_WINDOW_MS,
+  LANDING_ID_COOKIE,
+  LANDING_ID_QUERY_KEY,
+  parseAttribution,
+  sanitizeLandingDistinctId,
+} from '@slate/shared';
 import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
 import { framingHeaders } from '@/lib/framing';
+import { NOINDEX_HEADER_VALUE, deploymentNoindex } from '@/lib/indexing';
 import { requestOrigin } from '@/lib/request-origin';
 
 /**
@@ -74,6 +82,38 @@ function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
   return res;
 }
 
+/** Where a landing's anonymous id may be parked: the product's own front doors. */
+const LANDING_ID_PATH = /^\/(login|onboarding|admin(\/.*)?)?$/;
+
+/**
+ * The landing's anonymous analytics id (`?ph_id=`), parked beside the campaign
+ * tags for the same login round trip, so the first analytics-bearing page after
+ * sign-in (dashboard or wizard) can join "visited the landing" to the host who
+ * signed up.
+ *
+ * Same rules as `parkAttribution` (first touch wins, same ten-minute life),
+ * narrower in one way: only on the product's own entry points. Sanitized here, at the edge, because the value is
+ * whatever anyone typed into a URL; a refused id parks nothing. Parked whether
+ * or not analytics is configured: it is a short-lived first-party cookie that
+ * nothing reads unless analytics is on.
+ */
+function parkLandingId(req: NextRequest, res: NextResponse): NextResponse {
+  // Product entry points only. A landing's CTA lands on the root or the
+  // sign-in; a booking page is a host's visitors' page and parks nothing.
+  if (!LANDING_ID_PATH.test(req.nextUrl.pathname)) return res;
+  if (req.cookies.has(LANDING_ID_COOKIE)) return res;
+  const landingId = sanitizeLandingDistinctId(req.nextUrl.searchParams.get(LANDING_ID_QUERY_KEY));
+  if (!landingId) return res;
+  res.cookies.set(LANDING_ID_COOKIE, landingId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: Math.floor(ATTRIBUTION_WINDOW_MS / 1000),
+  });
+  return res;
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host')?.toLowerCase().split(':')[0] ?? '';
   const canonical = CANONICAL[host];
@@ -115,7 +155,14 @@ export function middleware(req: NextRequest) {
     res.headers.set(name, value);
   }
 
-  return parkAttribution(req, res);
+  // A deployment marked NOINDEX (lib/indexing.ts) says so in a header on every
+  // response this runs for, not only in the HTML: the header is what covers the
+  // link-preview images, `robots.txt` itself and anything else that is not a
+  // page with a `<head>`. (The matcher skips `_next` build assets and the icons,
+  // which are nothing a search engine lists.)
+  if (deploymentNoindex()) res.headers.set('X-Robots-Tag', NOINDEX_HEADER_VALUE);
+
+  return parkLandingId(req, parkAttribution(req, res));
 }
 
 export const config = {

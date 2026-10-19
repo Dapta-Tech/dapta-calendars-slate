@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
+import { resetAnalytics } from '@/lib/analytics/port';
 import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
 import { AppSwitcher } from '@/components/app-switcher';
 import { BrandMark, PRODUCT_NAME } from '@/components/brand/brand';
@@ -192,7 +193,7 @@ export function AdminShell({
           assistive tech hears the product once either way. */}
       <BrandMark className="h-6 w-auto text-foreground" labelled={railCollapsed} />
       {!railCollapsed ? <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span> : null}
-      <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
+      <AppSwitcher messages={c.switcher} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
           rail is force-collapsed for canvas. */}
       {!studio ? (
@@ -227,7 +228,9 @@ export function AdminShell({
 
   // Sign-out (local provider): a server action clears the session cookie.
   const signOut = (
-    <form action={signOutAction}>
+    // The analytics identity goes with the session: the next person to use
+    // this browser must not be filed as this host.
+    <form action={signOutAction} onSubmit={() => resetAnalytics()}>
       <button
         type="submit"
         title={c.signOut}
@@ -338,7 +341,7 @@ export function AdminShell({
         <div className="flex items-center gap-inline px-inline">
           <BrandMark className="h-6 w-auto text-foreground" />
           <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
-          <AppSwitcher messages={c.switcher} />
+          <AppSwitcher messages={c.switcher} inDrawer />
         </div>
         <nav>
           <NavLinks collapsed={false} nav={messages.nav} onNavigate={() => setDrawerOpen(false)} />

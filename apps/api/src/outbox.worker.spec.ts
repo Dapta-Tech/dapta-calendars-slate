@@ -177,13 +177,20 @@ describe('OutboxWorker — durable drain with retry/backoff (B7/DM1)', () => {
     expect(refs).toHaveLength(1);
   });
 
-  it('gives up after max attempts and logs, leaving the row as a failed delivery-log entry', async () => {
+  it('with no retry horizon, gives up after max attempts and logs, leaving the row as a failed delivery-log entry', async () => {
     const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     try {
       const provider = new FlakyCalendarProvider(0);
       const effects = new CalendarEffects(provider, db);
-      const worker = new OutboxWorker(db, ENV, effects, makeEmailEffects(db), new DaptaSyncEffects(ENV));
+      // OUTBOX_RETRY_HORIZON_MS=0 is the old rule: the attempt budget alone
+      // decides. The default horizon (24 h) is pinned in outbox-isolation.spec.ts.
+      const env = loadServerEnv({
+        NODE_ENV: 'test',
+        INTEGRATION_ENCRYPTION_KEY: WEBHOOK_KEY_B64,
+        OUTBOX_RETRY_HORIZON_MS: '0',
+      } as NodeJS.ProcessEnv);
+      const worker = new OutboxWorker(db, env, effects, makeEmailEffects(db), new DaptaSyncEffects(env));
       // A real, active subscriber (public IP literal → SSRF guard passes offline).
       const wh = await createWebhook(db, {
         accountId,

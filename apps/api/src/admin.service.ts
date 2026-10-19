@@ -77,12 +77,13 @@ import {
   defaultTemplate,
   renderTemplate,
   resolveTemplate,
+  templateAudience,
   templateVars,
   unknownTokens,
   type BookingNotification,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { canClaimVanitySlug } from '@slate/engine';
+import { canClaimVanitySlug, templateIssueMessage, validateTemplate } from '@slate/engine';
 import { CrmAuthError } from '@slate/crm';
 import {
   clampAvailabilityWindow,
@@ -94,14 +95,15 @@ import {
 import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
+import { AnalyticsEffects, analyticsLabel } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
+import { assertTemplates, templateFieldLabel } from './template-validation';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
-
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
@@ -128,6 +130,9 @@ export class AdminService {
     // one refresh per account holds app-wide. Absent (a direct construction),
     // the service builds its own from `entitlements` and `premiumMode`.
     @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
+    // Product analytics. LAST and @Optional() for the same reason as the CRM:
+    // absent, nothing is recorded, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   async me(p: HostPrincipal) {
@@ -307,7 +312,8 @@ export class AdminService {
         answers: body.answers,
         onBehalf: true,
       },
-      // Fail-closed external conflict check at create time (no-op when disabled).
+      // Fail-closed external conflict check at create time (no-op when
+      // disabled). FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
     // Write out only a fresh ACCEPTED booking (pending waits for confirm).
@@ -331,6 +337,7 @@ export class AdminService {
         void this.email.enqueueReminders(b.uid, { manageUrl });
         void this.email.enqueueFollowUps(b.uid, { manageUrl });
       } else if (b.status === 'pending') {
+        this.calendar.onBookingChanged(b.uid);
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
       void enqueueWebhookDeliveries(this.db, p.accountId, 'booking.created', {
@@ -367,7 +374,10 @@ export class AdminService {
   }
 
   async confirm(p: HostPrincipal, uid: string) {
-    const out = await confirmBooking(this.db, uid, p.accountId);
+    // The confirmation is the moment the request becomes a meeting, so the
+    // host's calendar is read FRESH for its time (ADR 0009): busy there refuses
+    // it, and a calendar that cannot be read refuses it too (retry later).
+    const out = await confirmBooking(this.db, uid, p.accountId, this.calendar.provider);
     if (out.ok) {
       // pending→accepted: NOW write the event to the host's calendar and send
       // the attendee the confirmation (they already hold the manage link from
@@ -388,6 +398,7 @@ export class AdminService {
   async decline(p: HostPrincipal, uid: string, reason?: string) {
     const out = await declineBooking(this.db, uid, reason, p.accountId);
     if (out.ok) {
+      this.calendar.onBookingChanged(uid);
       // B3: tell the attendee their pending request was declined (previously
       // nobody was notified — they'd show up to a meeting that never was).
       void this.email.enqueueDeclined(uid, { reason: reason ?? null });
@@ -596,7 +607,7 @@ export class AdminService {
     // Name every field. The controller hands over the raw request body (there is
     // no global ValidationPipe), so spreading it here let a caller overwrite the
     // principal's `accountId`/`memberId` and attach a connection to anyone.
-    return createConnection(this.db, {
+    const created = createConnection(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
       provider: body.provider,
@@ -605,6 +616,12 @@ export class AdminService {
       isDestination: body.isDestination,
       checkConflicts: body.checkConflicts,
     });
+    void created
+      .then(() =>
+        this.analytics?.hostEvent('calendar_connected', p, { provider: analyticsLabel(body.provider), method: 'manual' }),
+      )
+      .catch(() => undefined);
+    return created;
   }
   deleteConnection(p: HostPrincipal, id: string) {
     return deleteConnection(this.db, p.memberId, id);
@@ -760,6 +777,12 @@ export class AdminService {
         checkConflicts: true,
       });
       firstNew = false;
+      // Here, where the row is written: a discover that only re-read an
+      // existing connection (the popup polls) records nothing.
+      void this.analytics?.hostEvent('calendar_connected', p, {
+        provider: analyticsLabel(conn.provider || provider),
+        method: 'connect_flow',
+      });
     }
     const persisted = await listConnections(this.db, p.memberId);
     // Merge in the raw discover metadata (connectionId/connected/state/
@@ -1048,7 +1071,13 @@ export class AdminService {
     hideBranding: boolean,
   ): Promise<{ ok: true; branding: BrandingSettingView } | { ok: false; reason: 'NOT_ENTITLED' }> {
     if (hideBranding && !(await this.isEntitled(p.accountId))) return { ok: false, reason: 'NOT_ENTITLED' };
+    // Read before the write only when analytics is on: a save that changes
+    // nothing is not a toggle.
+    const before = this.analytics?.enabled ? ((await getBrandingSwitch(this.db, p.accountId))?.hideBranding ?? false) : null;
     await setHideBranding(this.db, p.accountId, hideBranding);
+    if (before !== null && before !== hideBranding) {
+      void this.analytics?.hostEvent('hide_branding_toggled', p, { hidden: hideBranding });
+    }
     return { ok: true, branding: await this.brandingStatus(p) };
   }
 
@@ -1069,7 +1098,8 @@ export class AdminService {
     const result = await getAvailability(
       this.db,
       { accountCode, memberId: p.memberId, slug: q.slug, fromMs, toMs, displayTimeZone: q.timeZone },
-      this.calendar.provider,
+      // A display read (the new-booking screen); the booking reads fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return {
@@ -1115,11 +1145,20 @@ export class AdminService {
     };
   }
 
-  updateNotificationSetting(
+  async updateNotificationSetting(
     p: HostPrincipal,
-    key: string,
+    key: EmailTemplateKey,
     patch: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
   ) {
+    if (patch.subject != null || patch.body != null) {
+      const me = await getMe(this.db, p.accountId, p.memberId);
+      const locale = me?.locale === 'es' ? 'es' : 'en';
+      const stored = (await getNotificationSettings(this.db, p.accountId)).get(key);
+      assertTemplates({ context: 'email', audience: templateAudience(key), locale }, [
+        { field: 'subject', label: templateFieldLabel('subject', locale), text: patch.subject, previous: stored?.subject },
+        { field: 'body', label: templateFieldLabel('body', locale), text: patch.body, previous: stored?.body },
+      ]);
+    }
     return upsertNotificationSetting(this.db, p.accountId, key, patch);
   }
 
@@ -1130,8 +1169,9 @@ export class AdminService {
   /**
    * Server-side preview: render the (possibly still-unsaved) template against
    * fixed sample data — the same renderer the outbox uses, so preview ===
-   * reality. Also reports tokens outside the whitelist so the editor can flag
-   * them before saving.
+   * reality. Also reports names outside the catalog (`unknownTokens`) and
+   * every problem a save would refuse or warn about (`issues`, with offsets
+   * into the subject or the body), so the editor can flag them before saving.
    */
   async previewNotificationTemplate(
     p: HostPrincipal,
@@ -1141,27 +1181,37 @@ export class AdminService {
     const me = await getMe(this.db, p.accountId, p.memberId);
     const locale = me?.locale === 'es' ? 'es' : 'en';
     const template = resolveTemplate(key, draft, locale);
+    // The preview reads as the side the key is sent to: the host's copy never
+    // carries the invitee's manage link and is the only one that lists guests.
+    const host = templateAudience(key) === 'host';
     const sample: BookingNotification & { reminderLeadMinutes?: number } = {
       accountId: p.accountId,
       uid: 'sample-uid',
       title: locale === 'es' ? 'Llamada de presentación' : 'Intro Call',
+      eventName: locale === 'es' ? 'Llamada de presentación' : 'Intro Call',
+      eventDescription: locale === 'es' ? 'Una primera llamada de 30 minutos.' : 'A first 30 minute call.',
+      workspaceName: 'Acme',
+      teamName: locale === 'es' ? 'Ventas' : 'Sales',
       startUtc: new Date(Date.now() + 26 * 3_600_000).toISOString(),
       endUtc: new Date(Date.now() + 26 * 3_600_000 + 30 * 60_000).toISOString(),
-      host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com' },
+      host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com', timeZone: me?.timeZone ?? 'UTC' },
       attendee: {
         name: locale === 'es' ? 'Ana García' : 'Sam Guest',
         email: 'guest@example.com',
         timeZone: me?.timeZone ?? 'UTC',
+        phone: '+1 555 0100',
       },
+      guests: [{ name: null, email: 'colleague@example.com' }],
       location: getMessages(locale).location.conferencing,
-      manageUrl: 'https://example.com/manage/sample',
+      manageUrl: host ? null : 'https://example.com/manage/sample',
       bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
       cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
       previousStartUtc: new Date(Date.now() + 2 * 3_600_000).toISOString(),
       pending: key === 'host_booked',
       reminderLeadMinutes: 60,
+      audience: host ? 'host' : 'attendee',
     };
-    const rendered = renderTemplate(template, templateVars(sample, locale));
+    const rendered = renderTemplate(template, templateVars(sample, locale), locale);
     // The host's copy of a request, a booking and a move adds who is asking and
     // what they answered under the template's body, whatever it says. That part
     // is not editable, but the preview shows it (with a sample), so the preview
@@ -1180,10 +1230,18 @@ export class AdminService {
           key === 'host_booked' ? 'https://example.com/admin/bookings' : null,
         )}`
       : rendered.text;
+    const issues = (['subject', 'body'] as const).flatMap((field) =>
+      validateTemplate(template[field], { context: 'email', audience: templateAudience(key) }).map((i) => ({
+        field,
+        ...i,
+        message: templateIssueMessage(i, locale),
+      })),
+    );
     return {
       ...rendered,
       text,
       unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
+      issues,
     };
   }
 }

@@ -25,6 +25,14 @@ const boolish = z
 const optionalSecret = (minLength: number) =>
   z.preprocess((v) => (v === '' ? undefined : v), z.string().min(minLength).optional());
 
+/**
+ * A positive-number knob where an empty value means "use the default". Same
+ * reason as `optionalSecret`: a deploy that renders a missing var as `NAME=`
+ * must not stop the API from booting.
+ */
+const blankIsDefault = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema);
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -183,6 +191,22 @@ export const serverEnvSchema = z.object({
    * any span; then a 60-day read is one request per connection.
    */
   CALENDAR_BUSY_WINDOW_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+  /**
+   * The display cache of busy reads (ADR 0009). Only reads that SHOW
+   * availability use it; holds, bookings, reschedules and confirmations always
+   * read the calendar fresh. TTL: how long one read answers every visitor of
+   * the same calendar (0 turns the cache off and every page view reads the
+   * calendar, as before). MAX_STALE: how old the last good read may be and
+   * still stand in when a fresh read fails; older, the times are withheld.
+   * MAX_ENTRIES: windows held per process, least recently used out first.
+   * READ_TIMEOUT: how long a page waits on a slow calendar before answering
+   * from the last good read, or saying the calendar cannot be read right now.
+   * All optional; the defaults suit one or many replicas.
+   */
+  CALENDAR_BUSY_CACHE_TTL_MS: z.coerce.number().int().min(0).max(600_000).default(30_000),
+  CALENDAR_BUSY_CACHE_MAX_STALE_MS: z.coerce.number().int().min(0).max(3_600_000).default(300_000),
+  CALENDAR_BUSY_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).max(100_000).default(1000),
+  CALENDAR_BUSY_READ_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(10_000),
   // Display name for the conferencing the connected backend mints, shown to the
   // host when they pick the `conferencing` location kind. Deploy config only —
   // this repo names no conferencing vendor (R15, ADR 0008). Unset ⇒ the UI shows
@@ -224,6 +248,30 @@ export const serverEnvSchema = z.object({
   OUTBOX_WORKER_ENABLED: boolish.default('true'),
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(5000),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /**
+   * How long a failing delivery keeps being retried, counted from its first
+   * failure: exponential backoff (1 s, 2 s, 4 s ... capped at 15 min, with
+   * jitter), and once a row has spent its attempt budget AND been failing this
+   * long it is marked failed and logged. Default 24 h, so a subscriber, mail
+   * transport or calendar that is down for minutes or hours loses nothing.
+   * 0 restores the old behaviour: give up when the attempt budget is spent.
+   */
+  OUTBOX_RETRY_HORIZON_MS: z.coerce.number().int().min(0).max(30 * 24 * 3_600_000).default(24 * 3_600_000),
+  /**
+   * Deliveries in flight at once, per kind of work (webhooks, emails, calendar
+   * writes, CRM writes, sign-up sync), per process. Each kind drains on its
+   * own; a booking's deliveries go one at a time in the order queued, and a
+   * slow webhook subscriber holds at most one slot per process, so it holds
+   * up only itself.
+   */
+  OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  /**
+   * How long a claimed row belongs to the process that claimed it. Another
+   * replica takes it over only after this, so it must outlast the slowest
+   * delivery (a calendar write can make several backend calls). A replica that
+   * dies mid-delivery has its rows picked up once the lease runs out.
+   */
+  OUTBOX_LEASE_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(300_000),
 
   // CORS: a comma-separated allowlist of origins permitted to call the API from
   // a browser. When UNSET we default to PUBLIC_APP_URL only (the app's own web
@@ -270,6 +318,98 @@ export const serverEnvSchema = z.object({
   // web's NEXT_PUBLIC_HIDE_BADGE, which is read as the fallback).
   HIDE_BADGE: z.string().optional(),
   NEXT_PUBLIC_HIDE_BADGE: z.string().optional(),
+
+  // --- Product analytics (this deployment's OWN telemetry) ---
+  // How hosts use the product and, anonymously, what visitors do on booking
+  // pages; see `resolveAnalyticsConfig` (@slate/shared). OFF unless both a
+  // provider (`posthog`, the one adapter shipped) and its write-only project
+  // key are set; a bare fork sends nothing anywhere. Plain strings on purpose:
+  // a mistyped value turns analytics off with a warning and never stops the
+  // API booting. The web app reads the SAME names at request time, so one
+  // value per deployment serves both apps and no image rebuild is needed.
+  PRODUCT_ANALYTICS_PROVIDER: z.string().optional(),
+  PRODUCT_ANALYTICS_KEY: z.string().optional(),
+  // Ingestion host, e.g. the deployment's own reverse proxy. Unset = the
+  // vendor's public host.
+  PRODUCT_ANALYTICS_HOST: z.string().optional(),
+  // Comma-separated, case-insensitive substrings of an email that mark the
+  // operator's own people (staff, test accounts): `is_internal` on their
+  // events, so launch numbers can leave them out. Unset = nobody is internal.
+  PRODUCT_ANALYTICS_INTERNAL_EMAILS: z.string().optional(),
+
+  // --- MCP endpoint (`POST /mcp`) -------------------------------------------
+  // Every var here is optional with a safe default: unset, the endpoint serves
+  // the public booking tools to anyone and the key-gated tools to API keys,
+  // refuses browser origins, and rate limits per pod.
+  //
+  // On by default. `false` unmounts nothing but makes `/mcp` answer 404.
+  MCP_ENABLED: boolish.default('true'),
+  // The URL people paste into an agent (shown in docs and the web page). With
+  // OAuth OFF it is only ever displayed, so a wrong value cannot lock anyone
+  // out. With OAuth ON it is also the resource identifier: the audience of
+  // every access token and the `resource` of the protected-resource metadata,
+  // so it must be exactly the URL people paste, path included.
+  MCP_PUBLIC_URL: blankIsDefault(z.string().url().optional()),
+  // Comma-separated browser origins allowed to call `/mcp` (DNS-rebinding guard).
+  // A request carrying an `Origin` header outside this list is refused with 403;
+  // requests without one (every non-browser MCP client) are unaffected. Unset =
+  // no browser origin is allowed. A browser-hosted client must also be listed in
+  // CORS_ORIGINS, or the browser will not let the page read the answer.
+  MCP_ALLOWED_ORIGINS: z.string().optional(),
+  // Comma-separated hostnames `/mcp` answers to (the `Host` header, port
+  // ignored). Unset = no host check. Set it when the API is reachable under
+  // names you do not control (DNS rebinding needs an attacker-chosen Host).
+  MCP_ALLOWED_HOSTS: z.string().optional(),
+  // Per-pod token buckets for tool calls, keyed by API key (or client address
+  // for anonymous calls). Reads: burst CAPACITY, sustained REFILL per second.
+  // Writes (book_meeting, create/reschedule/cancel) have their own, tighter pair.
+  MCP_RATE_LIMIT_CAPACITY: blankIsDefault(z.coerce.number().int().positive().default(30)),
+  MCP_RATE_LIMIT_REFILL_PER_SEC: blankIsDefault(z.coerce.number().positive().default(1)),
+  MCP_WRITE_RATE_LIMIT_CAPACITY: blankIsDefault(z.coerce.number().int().positive().default(10)),
+  MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC: blankIsDefault(z.coerce.number().positive().default(0.2)),
+  // How long one tool call may run before the caller gets a timeout error.
+  MCP_TOOL_TIMEOUT_MS: blankIsDefault(z.coerce.number().int().min(1000).max(120_000).default(20_000)),
+
+  // --- OAuth for the MCP endpoint (this API as its own authorization server) --
+  // OFF by default, and a bare fork never needs it: API keys and the public
+  // booking tools work without it. ON, the API serves an OAuth 2.1
+  // authorization server under `/oauth` so chat apps (Claude, ChatGPT) and IDEs
+  // connect with a sign-in and a consent screen instead of a pasted key. The
+  // person signs in the way the dashboard already signs them in (the configured
+  // AUTH_PROVIDER); nothing is registered with any identity vendor.
+  //
+  // Turning it on REQUIRES MCP_PUBLIC_URL (it becomes the token audience),
+  // OAUTH_ISSUER and OAUTH_SIGNING_JWK; the API refuses to boot without them
+  // rather than serve a half-configured authorization server.
+  OAUTH_ENABLED: boolish.default('false'),
+  // The public ORIGIN that serves `/oauth/*` and
+  // `/.well-known/oauth-authorization-server` (scheme + host, no path), e.g.
+  // https://calendar.example.com. It is the `iss` of every token and of every
+  // authorization response, so it must never change once apps are connected.
+  OAUTH_ISSUER: blankIsDefault(z.string().url().optional()),
+  // The private signing key for access tokens: one EC P-256 JWK (ES256) as a
+  // JSON string, with its private part `d`. Every replica holds the same key and
+  // verifies tokens without a database read. A secret: deploy it like one.
+  OAUTH_SIGNING_JWK: optionalSecret(1),
+  // Access-token lifetime. Short on purpose: a revoked connection keeps working
+  // until its last access token expires.
+  OAUTH_ACCESS_TOKEN_TTL_SECONDS: blankIsDefault(z.coerce.number().int().min(60).max(86_400).default(3600)),
+  // Absolute lifetime of a connection (its grant and refresh tokens). Refresh
+  // rotation never extends it; after this the person connects again.
+  OAUTH_GRANT_TTL_DAYS: blankIsDefault(z.coerce.number().int().min(1).max(365).default(90)),
+  // A rotated refresh token presented again within this many seconds is treated
+  // as a client retry (a lost response), not a theft. Later than that, reuse
+  // revokes the whole connection. 0 = strict.
+  OAUTH_REFRESH_REUSE_GRACE_SECONDS: blankIsDefault(z.coerce.number().int().min(0).max(60).default(10)),
+  // Client ID Metadata Documents (the client's id is an https URL we fetch).
+  // What Claude and ChatGPT prefer. On by default when OAuth is on.
+  OAUTH_CIMD_ENABLED: boolish.default('true'),
+  // Dynamic Client Registration (`POST /oauth/register`), the fallback Cursor
+  // and VS Code still need. Restricted to a fixed list of redirect addresses.
+  OAUTH_DCR_ENABLED: boolish.default('true'),
+  // Comma-separated EXACT redirect URIs added to the registration allowlist,
+  // for a client this deployment trusts that is not on the built-in list.
+  OAUTH_DCR_EXTRA_REDIRECT_URIS: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -298,7 +438,63 @@ export function loadServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEn
         'production. Set AUTH_PROVIDER=workos (with the private auth overlay) or another real provider.',
     );
   }
+  const oauth = oauthConfigProblems(parsed.data);
+  if (oauth.length > 0) {
+    throw new Error(`Refusing to boot: OAUTH_ENABLED=true but the authorization server is not configured:\n${oauth.map((p) => `  - ${p}`).join('\n')}`);
+  }
   return parsed.data;
+}
+
+/** Loopback hosts a development deployment may serve over plain http. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** https, or http on a loopback host outside production. */
+function secureEnough(url: URL, env: Pick<ServerEnv, 'NODE_ENV'>): boolean {
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && env.NODE_ENV !== 'production' && LOOPBACK_HOSTS.has(url.hostname);
+}
+
+/**
+ * Everything wrong with the OAuth settings, as sentences an operator can act
+ * on; empty when OAuth is off or correctly configured. Fail-fast lives in
+ * `loadServerEnv`; this is split out so it can be tested without throwing.
+ * The signing key is checked for SHAPE here (config stays dependency-free);
+ * the API imports it at boot and refuses a key that does not load.
+ */
+export function oauthConfigProblems(env: ServerEnv): string[] {
+  if (!env.OAUTH_ENABLED) return [];
+  const problems: string[] = [];
+  if (!env.MCP_ENABLED) problems.push('MCP_ENABLED must be true: the authorization server only protects the MCP endpoint.');
+  if (!env.MCP_PUBLIC_URL) {
+    problems.push('MCP_PUBLIC_URL is required: it is the resource every access token is issued for (its audience).');
+  } else {
+    const mcp = new URL(env.MCP_PUBLIC_URL);
+    if (!secureEnough(mcp, env)) problems.push('MCP_PUBLIC_URL must use https (http only on localhost outside production).');
+    if (mcp.search || mcp.hash) problems.push('MCP_PUBLIC_URL must not carry a query string or a fragment.');
+  }
+  if (!env.OAUTH_ISSUER) {
+    problems.push('OAUTH_ISSUER is required: the public origin that serves /oauth/* (for example https://calendar.example.com).');
+  } else {
+    const issuer = new URL(env.OAUTH_ISSUER);
+    if (!secureEnough(issuer, env)) problems.push('OAUTH_ISSUER must use https (http only on localhost outside production).');
+    if ((issuer.pathname !== '/' && issuer.pathname !== '') || issuer.search || issuer.hash)
+      problems.push('OAUTH_ISSUER must be an origin only (scheme and host, no path, query or fragment).');
+  }
+  if (!env.OAUTH_SIGNING_JWK) {
+    problems.push('OAUTH_SIGNING_JWK is required: an EC P-256 private JWK (ES256) as a JSON string.');
+  } else {
+    let jwk: Record<string, unknown> | null = null;
+    try {
+      const value: unknown = JSON.parse(env.OAUTH_SIGNING_JWK);
+      if (value && typeof value === 'object' && !Array.isArray(value)) jwk = value as Record<string, unknown>;
+    } catch {
+      /* reported below */
+    }
+    if (!jwk) problems.push('OAUTH_SIGNING_JWK is not a JSON object.');
+    else if (jwk.kty !== 'EC' || jwk.crv !== 'P-256' || typeof jwk.d !== 'string' || typeof jwk.x !== 'string' || typeof jwk.y !== 'string')
+      problems.push('OAUTH_SIGNING_JWK must be an EC P-256 PRIVATE key (kty "EC", crv "P-256", with x, y and d).');
+  }
+  return problems;
 }
 
 /** True when DATABASE_URL points at Postgres (vs SQLite). */

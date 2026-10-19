@@ -26,6 +26,7 @@ import {
   resolveBooking,
   sql,
 } from '@slate/db';
+import type { ApiScope } from '@slate/types';
 import { BookingService } from './booking.service';
 import { AuthService, type ReqLike } from './auth.service';
 import { unwrap } from './http';
@@ -207,7 +208,11 @@ export class MachineController {
    * is out-of-account OR out-of-scope both surface as 403 (anti-uid-probing) so
    * an agent can't enumerate other tenants' booking ids.
    */
-  private async scopedBooking(req: ReqLike, uid: string, scope: 'bookings:write' | 'bookings:read') {
+  private async scopedBooking(
+    req: ReqLike,
+    uid: string,
+    scope: ApiScope | readonly ApiScope[],
+  ) {
     const principal = await this.auth.resolveMachine(req, scope);
     const b = await resolveBooking(this.db, uid, principal.accountId);
     if (!b) throw new ForbiddenException({ error: 'FORBIDDEN', message: 'Not permitted.' });
@@ -237,7 +242,7 @@ export class MachineController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: { reason?: string },
   ) {
-    await this.scopedBooking(req, uid, 'bookings:write');
+    await this.scopedBooking(req, uid, ['bookings:cancel', 'bookings:write']);
     // P1-1/P1-2: a retried cancel returns success (already-cancelled), not 410.
     return unwrap(await this.svc.cancel(uid, { reason: body?.reason, byHost: true, idempotencyKey }));
   }

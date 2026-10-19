@@ -33,6 +33,9 @@ ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
 ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
 ARG NEXT_PUBLIC_PLATFORM_URL=
 ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
+# Where the Forms sidecar lives. Set = the app switcher links to it; unset = "Coming soon".
+ARG NEXT_PUBLIC_FORMS_URL=
+ENV NEXT_PUBLIC_FORMS_URL=$NEXT_PUBLIC_FORMS_URL
 # Where "Create your free calendar" and the "Made with" badge send a visitor. Unset = neither renders (a fork shows no Dapta growth surface).
 ARG NEXT_PUBLIC_SIGNUP_URL=
 ENV NEXT_PUBLIC_SIGNUP_URL=$NEXT_PUBLIC_SIGNUP_URL
@@ -54,6 +57,9 @@ ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
 ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
 ARG NEXT_PUBLIC_PLATFORM_URL=
 ENV NEXT_PUBLIC_PLATFORM_URL=$NEXT_PUBLIC_PLATFORM_URL
+# Where the Forms sidecar lives. Set = the app switcher links to it; unset = "Coming soon".
+ARG NEXT_PUBLIC_FORMS_URL=
+ENV NEXT_PUBLIC_FORMS_URL=$NEXT_PUBLIC_FORMS_URL
 # Where "Create your free calendar" and the "Made with" badge send a visitor. Unset = neither renders (a fork shows no Dapta growth surface).
 ARG NEXT_PUBLIC_SIGNUP_URL=
 ENV NEXT_PUBLIC_SIGNUP_URL=$NEXT_PUBLIC_SIGNUP_URL

@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { BookingNotifier, type BookingNotification } from './booking-notifier';
 import type { EmailMessage, EmailProvider, EmailResult } from './email.port';
+import { variablesFor } from '@slate/engine';
 import {
   DEFAULT_TEMPLATES,
   EMAIL_TEMPLATE_KEYS,
+  MAX_RENDERED_BODY,
+  MAX_RENDERED_SUBJECT,
+  TEMPLATE_VARIABLES,
   defaultTemplate,
   extractTokens,
+  formatDuration,
   renderTemplate,
   resolveTemplate,
   templateVars,
@@ -59,6 +64,7 @@ describe('{{form.*}} — the per-event intake namespace', () => {
       renderTemplate(
         { subject: 's', body: 'Primera vez: {{form.newbie}}' },
         templateVars(withAnswers({ newbie: true }), 'es'),
+        'es',
       ).text,
     ).toBe('Primera vez: Sí');
   });
@@ -98,6 +104,177 @@ describe('{{form.*}} — the per-event intake namespace', () => {
     expect(unknownTokens(text, ['topic'])).toEqual(['form.gone', 'bogus']);
     // With no event in hand (the account-wide preview) every form token is unknown.
     expect(unknownTokens(text)).toEqual(['form.topic', 'form.gone', 'bogus']);
+  });
+});
+
+describe('the template engine in emails', () => {
+  const withAnswers = (answers: Record<string, unknown>): BookingNotification => ({
+    ...base,
+    formAnswers: answers,
+  });
+
+  it('offers exactly the engine catalog for emails', () => {
+    expect([...TEMPLATE_VARIABLES]).toEqual(variablesFor('email').map((d) => d.name));
+  });
+
+  it('resolves the new variables from the notification', () => {
+    const n: BookingNotification = {
+      ...base,
+      host: { ...base.host, timeZone: 'Europe/Madrid' },
+      attendee: { ...base.attendee, phone: ' +1 555 0100 ' },
+      guests: [{ name: 'Lu', email: 'lu@example.com' }, { name: null, email: 'mo@example.com' }],
+      eventName: 'Intro',
+      eventDescription: 'A first call.',
+      workspaceName: 'Acme',
+      teamName: 'Sales',
+      audience: 'host',
+    };
+    const v = templateVars(n);
+    expect(v.attendee_first_name).toBe('Sam');
+    expect(v.attendee_phone).toBe('+1 555 0100');
+    expect(v.guests).toBe('lu@example.com, mo@example.com');
+    expect(v.attendee_time_zone).toBe('America/New_York');
+    expect(v.host_email).toBe('alex@example.com');
+    expect(v.event_name).toBe('Intro');
+    expect(v.event_title).toBe('Intro Call');
+    expect(v.event_description).toBe('A first call.');
+    expect(v.duration).toBe('30 min');
+    expect(v.workspace_name).toBe('Acme');
+    expect(v.team_name).toBe('Sales');
+    expect(v.booking_uid).toBe('bk-123');
+    // The host reads in their zone; the explicit variants name one side.
+    expect(v.time_zone).toBe('Europe/Madrid');
+    expect(v.start_time).toMatch(/5:00/);
+    expect(v.start_time_host).toBe(v.start_time);
+    expect(v.end_time_host).toMatch(/5:30/);
+    expect(v.start_time_attendee).toMatch(/11:00/);
+    // The invitee's copy never lists the other people on the booking.
+    expect(templateVars({ ...n, audience: 'attendee' }).guests).toBe('');
+    expect(templateVars({ ...n, audience: 'attendee' }).time_zone).toBe('America/New_York');
+  });
+
+  it('reads a payload queued before the new fields as the old mail did', () => {
+    const v = templateVars(base);
+    expect(v.event_name).toBe('Intro Call');
+    expect(v.event_description).toBe('');
+    expect(v.team_name).toBe('');
+    // No host zone carried: the host-side times fall back to the invitee's.
+    expect(v.start_time_host).toBe(v.start_time_attendee);
+  });
+
+  it('formats a duration in hours and minutes', () => {
+    expect(formatDuration('2026-08-01T15:00:00Z', '2026-08-01T15:30:00Z')).toBe('30 min');
+    expect(formatDuration('2026-08-01T15:00:00Z', '2026-08-01T16:00:00Z')).toBe('1 h');
+    expect(formatDuration('2026-08-01T15:00:00Z', '2026-08-01T16:45:00Z')).toBe('1 h 45 min');
+    expect(formatDuration('bad', '2026-08-01T16:45:00Z')).toBe('');
+  });
+
+  it('renders fallbacks and blocks that depend on the answers', () => {
+    const t = {
+      subject: 'Hi {{attendee_first_name | "there"}}: {{event_name}}',
+      body: [
+        'Hello {{name}},',
+        '{{#if form.company}}',
+        'Company: {{form.company}}',
+        '{{/if}}',
+        '{{#if form.plan == "pro"}}',
+        'A specialist will join.',
+        '{{else}}',
+        'See you soon.',
+        '{{/if}}',
+        '{{#if form.tools contains "Calendars"}}Calendars user.{{/if}}',
+        '{{#if form.newbie}}First time.{{/if}}',
+      ].join('\n'),
+    };
+    const pro = renderTemplate(
+      t,
+      templateVars(withAnswers({ company: 'Acme', plan: 'Pro', tools: ['Forms', 'Calendars'], newbie: false })),
+    );
+    expect(pro.subject).toBe('Hi Sam: Intro Call');
+    expect(pro.text).toBe('Hello Sam Guest,\nCompany: Acme\nA specialist will join.\nCalendars user.');
+    const basic = renderTemplate(t, templateVars({ ...withAnswers({ plan: 'Basic' }), attendee: { ...base.attendee, name: '' } }));
+    expect(basic.subject).toBe('Hi there: Intro Call');
+    // "Hello {{name}}," with no name is a line whose only value is empty: dropped.
+    expect(basic.text).toBe('See you soon.');
+  });
+
+  it('never expands a template an invitee typed into an answer', () => {
+    const r = renderTemplate(
+      { subject: '{{form.company}}', body: 'Company: {{form.company}}' },
+      templateVars(withAnswers({ company: '{{manage_url}} {{#if attendee_email}}x{{/if}}' })),
+    );
+    expect(r.subject).toBe('{{manage_url}} {{#if attendee_email}}x{{/if}}');
+    expect(r.text).toBe('Company: {{manage_url}} {{#if attendee_email}}x{{/if}}');
+    expect(r.html).not.toContain('https://');
+  });
+
+  it('keeps the subject on one capped line, whatever the values hold', () => {
+    const evil = { ...base, title: `Intro\r\nBcc: x@evil.test\u202E ${'y'.repeat(400)}` };
+    const r = renderTemplate({ subject: '{{event_title}} {{event_title}}', body: 'b' }, templateVars(evil));
+    expect(r.subject).not.toMatch(/[\r\n\u202E]/);
+    expect(r.subject.length).toBeLessThanOrEqual(MAX_RENDERED_SUBJECT);
+  });
+});
+
+/**
+ * The renderer this module shipped before the engine, verbatim. Every template
+ * a host could save with it must render byte for byte the same on the engine;
+ * only what it could not read (aliases, fallbacks, blocks) may differ.
+ */
+const OLD_TOKEN_RE = /\{\{\s*([a-z_]+|form\.[A-Za-z0-9_]{1,64})\s*\}\}/g;
+function oldRender(template: { subject: string; body: string }, vars: Record<string, unknown>) {
+  const value = (name: string): string => {
+    if (!Object.hasOwn(vars, name)) return '';
+    const v = vars[name];
+    if (v == null) return '';
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+    if (Array.isArray(v)) return v.map(String).filter(Boolean).join(', ');
+    return String(v);
+  };
+  const subject = template.subject
+    .replace(OLD_TOKEN_RE, (_, name: string) => value(name))
+    .replace(/\s+/g, ' ')
+    .trim();
+  const lines = template.body
+    .split('\n')
+    .map((line) => {
+      let sawToken = false;
+      let sawValue = false;
+      const out = line.replace(OLD_TOKEN_RE, (_, name: string) => {
+        sawToken = true;
+        const v = value(name);
+        if (v !== '') sawValue = true;
+        return v;
+      });
+      return sawToken && !sawValue ? null : out;
+    })
+    .filter((l): l is string => l !== null);
+  return { subject, text: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() };
+}
+
+describe('the engine renders every old template as the old renderer did', () => {
+  const vars = templateVars({
+    ...base,
+    cancellationReason: 'Line one\nline two',
+    formAnswers: { topic: 'Pricing', tools: ['Forms', 'Calendars'], newbie: true, empty: '' },
+  });
+  const corpus: Array<{ subject: string; body: string }> = [
+    ...EMAIL_TEMPLATE_KEYS.flatMap((k) => [DEFAULT_TEMPLATES.en[k], DEFAULT_TEMPLATES.es[k]]),
+    { subject: '{{{attendee_name}}}', body: '{{{attendee_name}}}\n{{ host_name }}\n{{Name}} {{abc1}}' },
+    { subject: 'x {{__proto__}} {{constructor}}', body: 'A{{__proto__}}\nB {{constructor}} {{location}}' },
+    { subject: 's', body: `Long {{${'a'.repeat(80)}}}\nkeep\r\nCRLF {{attendee_name}}\r\n{{nope}}\r\nend` },
+    { subject: 's', body: 'Topic: {{form.topic}}\nTools: {{form.tools}}\nNew: {{form.newbie}}\nEmpty: {{form.empty}}' },
+    { subject: 's', body: 'Why: {{cancellation_reason}}\n\n\n\nAfter {{form.missing}} {{form.a-b}}' },
+    { subject: 'a\tb  {{attendee_name}}\n', body: '{{ {{attendee_name}} }}\n{{attendee_name\n}}\nx {{ }} y' },
+    { subject: '{{else}} {{/if}}', body: 'Hi {{else}}\nThere {{/if}}\n{{#if x}}' },
+  ];
+
+  it.each(corpus.map((t, n) => [n, t] as const))('template %i', (_n, t) => {
+    const now = renderTemplate(t, vars);
+    const old = oldRender(t, vars);
+    // One deliberate difference: a CR the host typed is a line break, never a
+    // bare CR on the wire.
+    expect({ subject: now.subject, text: now.text }).toEqual({ ...old, text: old.text.replace(/\r\n?/g, '\n') });
   });
 });
 
@@ -214,6 +391,16 @@ describe('BookingNotifier — audience + template rendering', () => {
     expect(recipients(m)).toEqual(['sam@example.com']);
     expect(m.idempotencyKey).toBe('calendar:bk-123:confirmation');
     expect(m.subject).toMatch(/^Confirmed: Intro Call/);
+  });
+
+  it('the body cap holds for the whole host text, the details block included', async () => {
+    await notifier.sendConfirmation({
+      ...base,
+      audience: 'host',
+      template: { subject: 's', body: 'x'.repeat(MAX_RENDERED_BODY) },
+      answers: Array.from({ length: 10 }, (_, i) => ({ label: `Q${i}`, value: 'y'.repeat(900) })),
+    });
+    expect(email.sent[0]!.text.length).toBeLessThanOrEqual(MAX_RENDERED_BODY);
   });
 
   it('audience=host sends to host + co-hosts with a :host key and host copy', async () => {

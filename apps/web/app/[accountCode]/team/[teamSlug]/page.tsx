@@ -2,11 +2,15 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, readableZone, t } from '@slate/shared';
 import { getTeamProfile } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { GrowthCta } from '@/components/booking-page-parts';
 import { brandingShown, signupHref } from '@/lib/growth';
@@ -29,7 +33,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, teamSlug } = await params;
   const query = await searchParams;
-  const team = await getTeamProfile(accountCode, teamSlug);
+  const team = await orBusy(getTeamProfile(accountCode, teamSlug));
+  if (isBusy(team)) return { robots: { index: false, follow: false } };
   if (!team) return {};
   // The workspace rides along only when it says something the team's name does
   // not (`profileEyebrow`, the rule for the line over the name on the page), and
@@ -61,7 +66,9 @@ export default async function TeamPage({
 }) {
   const { accountCode, teamSlug } = await params;
   const query = await searchParams;
-  const [team, locale] = await Promise.all([getTeamProfile(accountCode, teamSlug), publicLocale()]);
+  const [read, locale] = await Promise.all([orBusy(getTeamProfile(accountCode, teamSlug)), publicLocale()]);
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const team = read;
   if (!team) notFound();
   const msg = getMessages(locale);
 
@@ -107,6 +114,14 @@ export default async function TeamPage({
       </main>
       <MadeWithBadge locale={locale} accountCode={code} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="team"
+        accountKey={team.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

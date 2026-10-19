@@ -1,14 +1,18 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import { getMessages, t } from '@slate/shared';
+import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
-import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { failedChunk, toChunk, type AvailabilityChunk } from '@/lib/availability-source';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { firstWindow } from '@/lib/availability-window';
 import { publicLocale } from '@/lib/locale';
 import { BookingFlow } from '@/components/booking-flow';
 import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
 import { brandingShown } from '@/lib/growth';
@@ -33,16 +37,20 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, handle, slug } = await params;
   const query = await searchParams;
-  const lang = typeof query.lang === 'string' ? query.lang : undefined;
-  const profile = await getProfile(accountCode, handle);
+  const profile = await orBusy(getProfile(accountCode, handle));
+  // A busy service renders the busy notice (below); it must not be indexed as the page.
+  if (isBusy(profile)) return { robots: { index: false, follow: false } };
   const event = profile?.eventTypes.find((e) => e.slug === slug);
   if (!profile || !event) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   // Title and description say what the card says: the event, the host, the
   // length. The image is `opengraph-image.tsx` beside this file, so no
-  // `images` here: an explicit list would replace the host's card.
-  const growth = getMessages(await publicLocale(lang)).growth;
-  const title = t(growth.seoEventTitle, { event: event.title, name });
+  // `images` here: an explicit list would replace the host's card. A title that
+  // already names the host is not told who it is with a second time.
+  // `publicLocale()` reads `?lang=` from the same forwarded query `<html lang>`
+  // does, so the title and the document never disagree.
+  const growth = getMessages(await publicLocale()).growth;
+  const title = eventPageTitle(growth.seoEventTitle, event.title, name);
   const description =
     event.description ||
     t(growth.seoEvent, {
@@ -76,8 +84,9 @@ export default async function BookingPage({
 }) {
   const { accountCode, handle, slug } = await params;
   const query = await searchParams;
-  const lang = typeof query.lang === 'string' ? query.lang : undefined;
-  const locale = await publicLocale(lang);
+  // One source for the language: the same `publicLocale()` the root layout's
+  // `<html lang>` asks, `?lang=` included.
+  const locale = await publicLocale();
   // Inline embed (E): the mode plus any appearance overrides the snippet
   // carries. Outside embed mode the overrides are empty by construction.
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);
@@ -85,7 +94,11 @@ export default async function BookingPage({
   const now = new Date();
   const from = now.toISOString();
 
-  const profile = await getProfile(accountCode, handle);
+  const read = await orBusy(getProfile(accountCode, handle));
+  // The service was too busy to answer (429): say so and retry, never the
+  // outage page. See `BusyPage`.
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const profile = read;
   // The public listing is the event's existence check: it holds every event
   // the availability route answers for on this URL (hidden ones are reached
   // only through `/booking/{token}`).
@@ -118,7 +131,7 @@ export default async function BookingPage({
   };
   const initial: Promise<AvailabilityChunk> = getAvailability({ accountCode, handle, slug, ...visible }).then(
     toChunk,
-    () => ({ ok: false }) as const,
+    failedChunk,
   );
 
   return (
@@ -168,6 +181,14 @@ export default async function BookingPage({
           that turned the branding off while paying for Dapta AI has none. */}
       <MadeWithBadge locale={locale} accountCode={accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="event"
+        accountKey={profile.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

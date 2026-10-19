@@ -23,6 +23,7 @@ import {
 import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
+import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { EmailEffects } from './email-effects';
@@ -163,6 +164,9 @@ export class BookingService {
     // one refresh per account holds app-wide. Absent (a direct construction),
     // the service builds its own from the two values above.
     @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
+    // Product analytics. Optional and last like the others: absent, a booking
+    // records no event, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   private _gate?: EntitlementGate;
@@ -273,8 +277,9 @@ export class BookingService {
         }),
       },
       // Subtract the host's real connected-calendar busy times (no-op on the
-      // OSS default disabled provider).
-      this.calendar.provider,
+      // OSS default disabled provider). A DISPLAY read: through the short busy
+      // cache (ADR 0009). The hold and the booking re-read the calendar fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -313,6 +318,7 @@ export class BookingService {
       },
       // A time busy in the host's connected calendar is refused at the hold,
       // not only at booking (no-op on the OSS default disabled provider).
+      // FRESH, never the display cache (ADR 0009): a failed read refuses.
       this.calendar.provider,
     );
     if (!held.ok) {
@@ -380,12 +386,20 @@ export class BookingService {
       metadata?: Record<string, unknown>;
       /**
        * True when the caller is an API key (the machine API or the
-       * v2 compatibility surface). Read ONLY by the duplicate-booking
-       * guard (#69), which exempts host-initiated and API-key writes. It is
+       * v2 compatibility surface). Read by the duplicate-booking guard (#69),
+       * which exempts host-initiated and API-key writes, and as the analytics
+       * channel when `analyticsChannel` is absent. It is
        * separate from `onBehalf` because the compatibility surface is an
        * API-key write that deliberately reports `onBehalf: false`.
        */
       apiKeyWrite?: boolean;
+      /**
+       * The channel product analytics records for this booking, when the
+       * caller knows better than `apiKeyWrite` can say. The MCP's keyless-page
+       * tool books like the public route (so the duplicate guard still applies)
+       * but, called with a credential, is an API booking. Analytics only.
+       */
+      analyticsChannel?: BookingChannel;
       /**
        * Retry-dedupe key. CONTEXT, never the request body (#104): `POST
        * /v1/bookings` is unauthenticated, and a key set there would land in a
@@ -439,6 +453,7 @@ export class BookingService {
         oneOffToken: context?.oneOffToken,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
+      // FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
 
@@ -508,8 +523,20 @@ export class BookingService {
         void this.email.enqueueReminders(b.uid, { manageUrl });
         void this.email.enqueueFollowUps(b.uid, { manageUrl });
       } else if (b.status === 'pending') {
+        // A request holds its time too: no cached read may still offer it here.
+        this.calendar.onBookingChanged(b.uid);
         void this.email.enqueuePending(b.uid, { manageUrl });
       }
+      // A fresh booking only (a replay or a seat on an existing group booking
+      // mints no manage token): about the host who received it, never the
+      // visitor (see AnalyticsEffects). Host-made bookings take their own
+      // route (`HostController.hostCreate`) and say so there.
+      void this.analytics?.bookingCreated({
+        uid: b.uid,
+        inviteeEmail: b.attendee.email,
+        channel: context?.analyticsChannel ?? (context?.apiKeyWrite ? 'api' : 'booking_page'),
+        isTeam: false,
+      });
       // Durable webhook delivery: enqueue one outbox row per subscriber; the
       // OutboxWorker signs + POSTs with retry+backoff (B7/DM1). No-op when the
       // account has no matching webhooks (bare clone-and-run).
@@ -645,7 +672,8 @@ export class BookingService {
         toMs,
         displayTimeZone: q.timeZone,
       },
-      this.calendar.provider,
+      // A display read (the picker); the reschedule itself reads fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -712,6 +740,7 @@ export class BookingService {
       void this.email.enqueueReminders(newUid, { manageUrl });
       void this.email.enqueueFollowUps(newUid, { manageUrl });
     } else {
+      this.calendar.onBookingChanged(newUid);
       void this.email.enqueuePending(newUid, { manageUrl });
     }
     this.fireWebhook(newUid, 'booking.rescheduled', {
@@ -746,8 +775,8 @@ export class BookingService {
           ? contextIdempotencyKeySchema.parse(opts.idempotencyKey)
           : undefined,
       },
-      // Fail-closed external conflict check on the target slot — the same
-      // policy as create (no-op when the provider is disabled).
+      // Fail-closed external conflict check on the target slot, the same
+      // policy as create (no-op when the provider is disabled). FRESH (ADR 0009).
       this.calendar.provider,
     );
     if (!out.ok) return this.mapMutation(out.reason);
@@ -890,7 +919,8 @@ export class BookingService {
           slug: q.slug,
         }),
       },
-      this.calendar.provider,
+      // A display read; the team booking re-checks every host fresh.
+      this.calendar.displayProvider,
     );
     if (!result) return null;
     return availabilityResponseSchema.parse({
@@ -941,6 +971,8 @@ export class BookingService {
      */
     context?: {
       apiKeyWrite?: boolean;
+      /** Analytics only; see `book()`. */
+      analyticsChannel?: BookingChannel;
       idempotencyKey?: string;
       oneOffToken?: string;
       /** The invitee's language when the caller knows it; see `book()`. */
@@ -970,6 +1002,7 @@ export class BookingService {
         apiKeyWrite: context?.apiKeyWrite,
         oneOffToken: context?.oneOffToken,
       },
+      // Every candidate host is checked FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
     if (!out.ok) {
@@ -1020,6 +1053,15 @@ export class BookingService {
       status: 'accepted',
       startUtc: body.startUtc,
     });
+    // Fresh bookings only, as on the personal path: a replay mints no token.
+    if (out.manageToken) {
+      void this.analytics?.bookingCreated({
+        uid: out.uid,
+        inviteeEmail: body.attendee?.email,
+        channel: context?.analyticsChannel ?? (context?.apiKeyWrite ? 'api' : 'booking_page'),
+        isTeam: true,
+      });
+    }
     // Read the row back for the fields the create call does not hand out: the
     // title, the resolved end instant, and the organizer's name/handle.
     //

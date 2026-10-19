@@ -9,10 +9,23 @@ import { annotateRequestAccount } from './request-log';
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
 export interface MachinePrincipal {
+  /** For an OAuth connection, `oauth:<grantId>`: the idempotency and rate-limit namespace. */
   keyId: string;
+  /** The key's public `dcl_<8hex>` handle (`oauth:<grantId>` for OAuth); safe to log. */
+  prefix: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
+  /** Epoch ms, or null when the key never expires (an OAuth token always expires). */
+  expiresAtMs: number | null;
+  /** How the caller authenticated. Absent means an API key (every pre-OAuth call site). */
+  kind?: 'api_key' | 'oauth';
+  /** OAuth only: the member who approved the connection (the token's `sub`). */
+  memberId?: string;
+  /** OAuth only: the client the token was issued to (a URL for CIMD clients). */
+  clientId?: string;
+  /** OAuth only: the connection (grant) the token belongs to. */
+  grantId?: string;
 }
 
 /**
@@ -42,8 +55,25 @@ export class AuthService {
     return { ...id, role };
   }
 
-  /** Resolve a machine principal from an API key and enforce a required scope. */
-  async resolveMachine(req: ReqLike, requiredScope: ApiScope): Promise<MachinePrincipal> {
+  /**
+   * Verify one presented API key and return its principal, or null when it is
+   * unknown, revoked or expired. No scope check: the MCP door authenticates once
+   * per request and then checks scopes per tool.
+   */
+  async authenticateKey(key: string): Promise<MachinePrincipal | null> {
+    return key ? verifyApiKey(this.db, key) : null;
+  }
+
+  /**
+   * Resolve a machine principal from an API key and enforce a required scope.
+   * A list means "any of": the REST cancel routes take `bookings:cancel` or the
+   * older `bookings:write`, so keys minted before the cancel scope existed keep
+   * working.
+   */
+  async resolveMachine(
+    req: ReqLike,
+    requiredScope: ApiScope | readonly ApiScope[],
+  ): Promise<MachinePrincipal> {
     const auth = header(req, 'authorization');
     const bearer = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : undefined;
     const key = bearer ?? header(req, 'x-api-key');
@@ -51,8 +81,9 @@ export class AuthService {
     if (!principal)
       throw new UnauthorizedException({ error: 'UNAUTHENTICATED', message: 'Invalid API key.' });
     annotateRequestAccount(req, principal.accountId);
-    if (!principal.scopes.includes(requiredScope))
-      throw new ForbiddenException({ error: 'FORBIDDEN', message: `Missing scope: ${requiredScope}` });
+    const accepted = Array.isArray(requiredScope) ? requiredScope : [requiredScope as ApiScope];
+    if (!accepted.some((scope) => principal.scopes.includes(scope)))
+      throw new ForbiddenException({ error: 'FORBIDDEN', message: `Missing scope: ${accepted.join(' or ')}` });
     return principal;
   }
 

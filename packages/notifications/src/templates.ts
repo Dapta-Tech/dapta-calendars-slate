@@ -3,16 +3,28 @@
  *
  * Every booking email renders from a { subject, body } template: the shipped
  * defaults below (EN/ES, per email key) or a per-account override stored in
- * `notification_setting`. Bodies are PLAIN TEXT with `{{variable}}` tokens —
- * no user-authored HTML ever reaches an email (public-facing hardening E8):
- * rendering escapes both template text and substituted values, and only
- * whitelisted variables resolve; unknown tokens render empty.
+ * `notification_setting`. Bodies are PLAIN TEXT written in the template
+ * language of `@slate/engine` (`{{variable}}`, fallbacks, `{{#if}}` blocks), the
+ * same one the calendar event uses. No user-authored HTML ever reaches an email
+ * (public-facing hardening E8): rendering escapes both template text and
+ * substituted values, and only catalog variables resolve; unknown names render
+ * empty.
  *
  * Line rule (keeps optional fields tidy, mirrors the pre-template behavior):
  * a line that contains tokens which ALL resolve empty is dropped — so
  * "Where: {{location}}" vanishes when there is no location, and
  * "{{pending_note}}" only appears for approval-required bookings.
  */
+import {
+  FORM_VARIABLE_PREFIX,
+  formVariable,
+  renderTemplate as renderWithEngine,
+  stripUnsafeText,
+  templateVariableNames,
+  type TemplateAudience,
+  type TemplateLocale,
+  type TemplateValue,
+} from '@slate/engine';
 import { isValidTimeZone } from '@slate/shared';
 import type { BookingNotification } from './booking-notifier';
 import { escapeHtml } from './util';
@@ -59,6 +71,11 @@ export function isAccountTemplateKey(v: string): v is EmailTemplateKey {
   return isEmailTemplateKey(v) && !(EVENT_LEVEL_TEMPLATE_KEYS as readonly string[]).includes(v);
 }
 
+/** Who reads a key's copy: the `host_*` keys go to the host side, the rest to the invitee. */
+export function templateAudience(key: EmailTemplateKey): TemplateAudience {
+  return key.startsWith('host_') ? 'host' : 'invitee';
+}
+
 /**
  * Whether a key sends with NO stored setting. Lifecycle mail defaults ON
  * (parity with the pre-toggle product); the post-meeting follow-up is
@@ -68,77 +85,82 @@ export function defaultEnabledFor(key: EmailTemplateKey): boolean {
   return key !== 'follow_up';
 }
 
-export type TemplateLocale = 'en' | 'es';
+export type { TemplateLocale };
 
 export interface EmailTemplate {
   subject: string;
   body: string;
 }
 
-/** The variable whitelist — the ONLY tokens that resolve (editor shows these). */
+/**
+ * The variables an email can use: the `email` half of the engine's catalog
+ * (`variablesFor('email')`, which the editor lists), spelled out here so the
+ * compiler checks that `templateVars` gives every one of them a value. A spec
+ * keeps the two lists equal.
+ */
 export const TEMPLATE_VARIABLES = [
   'attendee_name',
+  'attendee_first_name',
   'attendee_email',
+  'attendee_phone',
+  'guests',
+  'attendee_time_zone',
   'host_name',
+  'host_email',
+  'event_name',
   'event_title',
+  'event_description',
+  'duration',
+  'location',
+  'workspace_name',
+  'team_name',
   'start_time',
   'end_time',
-  'location',
+  'start_time_host',
+  'end_time_host',
+  'start_time_attendee',
+  'end_time_attendee',
+  'time_zone',
+  'previous_start_time',
+  'reminder_lead',
   // The conferencing link. UNIQUE among these: it is the one variable resolved
   // at DELIVERY time rather than snapshotted at enqueue, because it is minted
   // later by the calendar outbox row (ADR 0007). Empty when the write-out has
-  // not produced one — the empty-line rule then drops its whole line.
+  // not produced one, and the empty-line rule then drops its whole line.
   'meeting_url',
   'manage_url',
   'cancel_link',
   'reschedule_link',
-  'cancellation_reason',
-  'previous_start_time',
-  'reminder_lead',
-  'pending_note',
   'booking_link',
+  'booking_uid',
+  'cancellation_reason',
+  'pending_note',
 ] as const;
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number];
 
 /**
- * The rendered variable map: every built-in is present (the renderer may read
- * `v.start_time` without a guard), plus an open tail for the `{{form.*}}`
- * namespace, whose names are only known at run time.
+ * The rendered variable map: every built-in is present as text (the branded
+ * layout reads `v.start_time` without a guard), plus an open tail for the
+ * `{{form.*}}` namespace, whose names are only known at run time and whose
+ * values stay RAW (a yes/no answer stays a boolean and a multi-select a list,
+ * so `{{#if form.x}}` and `contains` read them as answers, not as text).
  */
-export type TemplateVarMap = Record<TemplateVariable, string> & Record<string, string>;
+export type TemplateVarMap = Record<TemplateVariable, string> & Record<string, TemplateValue>;
 
-/**
- * `{{built_in}}` or `{{form.<field name>}}`. The `form.` half is the per-event
- * namespace (#68 decision 2): a reminder may quote that event type's own intake
- * answers, and the prefix is what stops a question named `location` from
- * shadowing the built-in `{{location}}` — so no new names are reserved and
- * every already-saved form keeps working. The charset matches what the event
- * editor already sanitizes intake field names to (`[A-Za-z0-9_]`).
- */
-const TOKEN_RE = /\{\{\s*([a-z_]+|form\.[A-Za-z0-9_]{1,64})\s*\}\}/g;
+export { FORM_VARIABLE_PREFIX, formVariable };
 
-/** The `{{form.*}}` namespace prefix. */
-export const FORM_VARIABLE_PREFIX = 'form.';
-
-/** The variable name for one intake field — `{{form.budget}}`. */
-export function formVariable(fieldName: string): string {
-  return `${FORM_VARIABLE_PREFIX}${fieldName}`;
-}
-
-/** All `{{token}}` names appearing in a template string (editor validation). */
+/** All variable names a template reads (canonical; aliases resolved). */
 export function extractTokens(text: string): string[] {
-  const names = new Set<string>();
-  for (const m of text.matchAll(TOKEN_RE)) names.add(m[1]!);
-  return [...names];
+  return templateVariableNames(text);
 }
 
 /**
- * Tokens present in the text that will render empty (flagged in the preview and
- * in the event editor's dangling-reference warning).
+ * Names in the text that will render empty (flagged in the preview and in the
+ * event editor's dangling-reference warning).
  *
  * `formFields` is the set of intake field names on the event type being edited;
- * pass it and `{{form.x}}` counts as known when `x` is one of them. Omit it —
- * the account-level preview, which has no event — and every `form.` token is
+ * pass it and `{{form.x}}` counts as known when `x` is one of them. Omit it
+ * (the account-level preview, which has no event) and every `form.` name is
  * reported, which is the honest answer there.
  */
 export function unknownTokens(text: string, formFields?: readonly string[]): string[] {
@@ -179,17 +201,30 @@ export function formatLead(leadMinutes: number | undefined, locale: TemplateLoca
   return locale === 'es' ? `en ${leadMinutes} minutos` : `in ${leadMinutes} minutes`;
 }
 
+/** "30 min", "1 h", "1 h 30 min": the meeting length, the same in EN and ES. */
+export function formatDuration(startIso: string, endIso: string): string {
+  const minutes = Math.round((Date.parse(endIso) - Date.parse(startIso)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
 /**
- * One intake answer as email text. Booleans are the only value that needs the
- * locale — a raw `true` in a reminder body reads as a bug. An absent answer is
- * the empty string, which the line-drop rule then removes along with its label.
+ * One intake answer as the engine reads it. Text, numbers and yes/no stay as
+ * they are and lists keep their items, so the engine can word a boolean in the
+ * reader's language and test a list item by item. Anything else (an object, a
+ * nested list) is not an answer a form produces and reads as empty.
  */
-function answerText(value: unknown, locale: TemplateLocale): string {
-  if (value == null) return '';
-  if (typeof value === 'boolean') return value ? (locale === 'es' ? 'Sí' : 'Yes') : locale === 'es' ? 'No' : 'No';
-  if (Array.isArray(value)) return value.map((v) => answerText(v, locale)).filter(Boolean).join(', ');
-  if (typeof value === 'object') return '';
-  return String(value);
+function answerValue(value: unknown): TemplateValue {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value.filter(
+      (v): v is string | number | boolean => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
+    );
+  }
+  return null;
 }
 
 /**
@@ -197,14 +232,11 @@ function answerText(value: unknown, locale: TemplateLocale): string {
  * booking's own intake answers. Own properties only, and every key is
  * `form.`-prefixed, so an answer can never collide with a built-in.
  */
-export function formVars(
-  answers: Record<string, unknown> | null | undefined,
-  locale: TemplateLocale = 'en',
-): Record<string, string> {
-  const out: Record<string, string> = Object.create(null) as Record<string, string>;
+export function formVars(answers: Record<string, unknown> | null | undefined): Record<string, TemplateValue> {
+  const out: Record<string, TemplateValue> = Object.create(null) as Record<string, TemplateValue>;
   if (!answers) return out;
   for (const [name, value] of Object.entries(answers)) {
-    out[formVariable(name)] = answerText(value, locale);
+    out[formVariable(name)] = answerValue(value);
   }
   return out;
 }
@@ -235,46 +267,83 @@ export function recipientTimeZone(
   return n.attendee.timeZone ?? 'UTC';
 }
 
+/** The invitee's zone, as stored; UTC when it is missing or unreadable. */
+function attendeeTimeZone(n: Pick<BookingNotification, 'attendee'>): string {
+  return isValidTimeZone(n.attendee.timeZone) ? n.attendee.timeZone : 'UTC';
+}
+
+/** The host's zone; the invitee's when the payload carries no readable one. */
+function hostTimeZone(n: Pick<BookingNotification, 'host' | 'attendee'>): string {
+  return isValidTimeZone(n.host.timeZone) ? n.host.timeZone : attendeeTimeZone(n);
+}
+
 /**
  * Build the variable map for one notification. Times are formatted in the
  * reader's zone (`recipientTimeZone`), subject included, since the subject
- * renders from these same variables. `{{form.*}}` entries come from the answers
- * snapshotted onto the notification.
+ * renders from these same variables; `*_host` and `*_attendee` name one side's
+ * zone explicitly. `{{form.*}}` entries come from the answers snapshotted onto
+ * the notification. Fields a payload queued before they existed does not carry
+ * read as empty (or, for the event name, as the booking title it always was).
  */
 export function templateVars(
   n: BookingNotification & { reminderLeadMinutes?: number },
   locale: TemplateLocale = 'en',
 ): TemplateVarMap {
   const tz = recipientTimeZone(n);
+  const hostTz = hostTimeZone(n);
+  const attendeeTz = attendeeTimeZone(n);
   const pendingNote = n.pending
     ? locale === 'es'
       ? 'Esta solicitud está pendiente de tu confirmación.'
       : 'This request is pending your confirmation.'
     : '';
+  const attendeeName = n.attendee.name ?? '';
   // Kept as its own typed map so the compiler still enforces that every
   // built-in has a value; the form namespace is open by nature and merges on
   // top without being able to shadow one (every key is `form.`-prefixed).
   const builtIn: Record<TemplateVariable, string> = {
-    attendee_name: n.attendee.name ?? '',
+    attendee_name: attendeeName,
+    attendee_first_name: attendeeName.trim().split(/\s+/)[0] ?? '',
     attendee_email: n.attendee.email ?? '',
+    attendee_phone: n.attendee.phone?.trim() ?? '',
+    // The other people on the booking are the host's to read: on a group
+    // event they are strangers to each invitee.
+    guests: n.audience === 'host' ? (n.guests ?? []).map((g) => g.email).filter(Boolean).join(', ') : '',
+    attendee_time_zone: n.attendee.timeZone ?? '',
     host_name: n.host.name ?? '',
+    host_email: n.host.email ?? '',
+    event_name: n.eventName ?? n.title,
     event_title: n.title,
+    event_description: n.eventDescription ?? '',
+    duration: formatDuration(n.startUtc, n.endUtc),
+    location: n.location ?? '',
+    workspace_name: n.workspaceName ?? '',
+    team_name: n.teamName ?? '',
     start_time: formatWhen(n.startUtc, tz, locale),
     end_time: formatWhen(n.endUtc, tz, locale),
-    location: n.location ?? '',
+    start_time_host: formatWhen(n.startUtc, hostTz, locale),
+    end_time_host: formatWhen(n.endUtc, hostTz, locale),
+    start_time_attendee: formatWhen(n.startUtc, attendeeTz, locale),
+    end_time_attendee: formatWhen(n.endUtc, attendeeTz, locale),
+    time_zone: tz,
+    previous_start_time: n.previousStartUtc ? formatWhen(n.previousStartUtc, tz, locale) : '',
+    reminder_lead: formatLead(n.reminderLeadMinutes, locale),
     meeting_url: n.meetingUrl ?? '',
     manage_url: inviteeManageUrl(n),
     cancel_link: inviteeManageUrl(n),
     reschedule_link: inviteeManageUrl(n),
-    cancellation_reason: n.cancellationReason ?? '',
-    previous_start_time: n.previousStartUtc ? formatWhen(n.previousStartUtc, tz, locale) : '',
-    reminder_lead: formatLead(n.reminderLeadMinutes, locale),
-    pending_note: pendingNote,
     booking_link: n.bookingLink ?? '',
+    booking_uid: n.uid,
+    cancellation_reason: n.cancellationReason ?? '',
+    pending_note: pendingNote,
   };
+  // The branded layout prints these straight (escaped), so they lose invisible
+  // and bidi controls here, once, as the engine cleans what it inserts. A row
+  // queued long ago can lack a field the type says is there: it reads as empty.
+  for (const key of TEMPLATE_VARIABLES) builtIn[key] = stripUnsafeText(String(builtIn[key] ?? ''));
   // Safe by construction: `builtIn` is exhaustive above, and every form key is
   // `form.`-prefixed so the spread cannot drop or shadow one.
-  return { ...builtIn, ...formVars(n.formAnswers, locale) } as TemplateVarMap;
+  return { ...builtIn, ...formVars(n.formAnswers) } as TemplateVarMap;
 }
 
 export interface RenderedEmail {
@@ -283,47 +352,30 @@ export interface RenderedEmail {
   html: string;
 }
 
-/** Own-property lookup only — `{{constructor}}`/`{{__proto__}}` must resolve
- *  empty, never reach into Object.prototype and stringify a function. */
-function varValue(vars: Record<string, string>, name: string): string {
-  return Object.hasOwn(vars, name) ? (vars[name] ?? '') : '';
-}
-
-function substituteLine(line: string, vars: Record<string, string>): string | null {
-  let sawToken = false;
-  let sawValue = false;
-  const out = line.replace(TOKEN_RE, (_, name: string) => {
-    sawToken = true;
-    const v = varValue(vars, name);
-    if (v !== '') sawValue = true;
-    return v;
-  });
-  // Drop a line whose tokens all resolved empty ("Where: {{location}}" with no
-  // location) — literal-only lines always stay.
-  if (sawToken && !sawValue) return null;
-  return out;
-}
+/** A subject is one header line; 255 is what every mail and calendar backend keeps. */
+export const MAX_RENDERED_SUBJECT = 255;
+/** The plain-text body, after every value is in. */
+export const MAX_RENDERED_BODY = 20_000;
 
 /**
- * Render a template against the whitelist variables. Safe by construction:
- * the HTML variant escapes the whole substituted line (template text AND
- * values), so neither an edited template nor attendee-supplied data can inject
- * markup. Unknown tokens resolve empty.
+ * Render a template with the engine (`@slate/engine`): values, fallbacks and
+ * `{{#if}}` blocks, single pass, own-property lookup, every value cleaned and
+ * capped. The subject renders on one line; the body keeps the empty-line rule.
+ * The HTML variant escapes the whole rendered text (template text AND values),
+ * so neither an edited template nor attendee-supplied data can inject markup.
+ * `locale` words yes/no answers.
  */
 export function renderTemplate(
   template: EmailTemplate,
-  vars: Record<string, string>,
+  vars: Readonly<Record<string, TemplateValue>>,
+  locale: TemplateLocale = 'en',
 ): RenderedEmail {
-  const subject = template.subject
-    .replace(TOKEN_RE, (_, name: string) => varValue(vars, name))
-    .replace(/\s+/g, ' ')
-    .trim();
-  const lines = template.body
-    .split('\n')
-    .map((l) => substituteLine(l, vars))
-    .filter((l): l is string => l !== null);
-  // Collapse runs of blank lines left behind by dropped neighbors.
-  const text = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const subject = renderWithEngine(template.subject, vars, {
+    mode: 'line',
+    locale,
+    maxLength: MAX_RENDERED_SUBJECT,
+  });
+  const text = renderWithEngine(template.body, vars, { mode: 'text', locale, maxLength: MAX_RENDERED_BODY });
   const html = `<p>${text.split('\n').map(escapeHtml).join('<br/>')}</p>`;
   return { subject, text, html };
 }

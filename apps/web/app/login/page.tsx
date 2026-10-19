@@ -1,17 +1,21 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import { getLocale } from '@/lib/locale';
 import { authProvider } from '@/lib/auth-session';
+import { PRODUCT_NAME } from '@/lib/product-name';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 import { firstParam, safeReturnTo, withReturnTo } from '@/lib/return-to';
 import { LoginForm } from './login-form';
 
-// Customer-facing name (build-time inlined); "Slate" never surfaces in the UI.
-const productName = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
-
-export const metadata = { title: `Sign in — ${productName}` };
+// The tab says what the page says, in the same language, beside the product
+// name the deployment set ("Slate" never surfaces in the UI).
+export async function generateMetadata(): Promise<Metadata> {
+  const m = getMessages(await getLocale()).admin.login;
+  return { title: `${m.title} · ${PRODUCT_NAME}` };
+}
 
 export default async function LoginPage({
   searchParams,
@@ -43,7 +47,7 @@ export default async function LoginPage({
         <span className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-ink">
           <img src="/dapta-mark.png" alt="" width={28} height={28} className="h-7 w-7 object-contain" />
         </span>
-        <span className="text-2xl font-semibold tracking-tight">{productName}</span>
+        <span className="text-2xl font-semibold tracking-tight">{PRODUCT_NAME}</span>
       </div>
 
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6">

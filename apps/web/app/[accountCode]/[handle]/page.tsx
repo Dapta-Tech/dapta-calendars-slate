@@ -2,11 +2,15 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect, redirect } from 'next/navigation';
 import { getMessages, t } from '@slate/shared';
 import { getProfile } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { landingTarget, wantsProfile } from '@/lib/landing';
@@ -34,7 +38,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, handle } = await params;
   const query = await searchParams;
-  const profile = await getProfile(accountCode, handle);
+  const profile = await orBusy(getProfile(accountCode, handle));
+  if (isBusy(profile)) return { robots: { index: false, follow: false } };
   if (!profile) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   const bio = (profile.member.style as { bio?: string } | null)?.bio;
@@ -64,7 +69,9 @@ export default async function ProfilePage({
 }) {
   const { accountCode, handle } = await params;
   const query = await searchParams;
-  const [profile, locale] = await Promise.all([getProfile(accountCode, handle), publicLocale()]);
+  const [read, locale] = await Promise.all([orBusy(getProfile(accountCode, handle)), publicLocale()]);
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const profile = read;
   if (!profile) notFound();
   const msg = getMessages(locale);
   // Inline embed (E): the mode plus any appearance overrides the snippet
@@ -137,6 +144,14 @@ export default async function ProfilePage({
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="profile"
+        accountKey={profile.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

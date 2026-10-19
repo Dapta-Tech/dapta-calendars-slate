@@ -9,7 +9,7 @@
  * INTEGER epoch-ms, dates "YYYY-MM-DD" / times "HH:mm" as TEXT, booleans as
  * INTEGER 0/1, arrays / structured config as TEXT JSON.
  */
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { primaryKey, sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
 export const account = sqliteTable('account', {
   id: text('id').primaryKey(),
@@ -440,6 +440,14 @@ export const outbox = sqliteTable('outbox', {
   lastError: text('last_error'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
+  /** Epoch-ms until which a worker owns the row (0026); NULL = not claimed. */
+  leaseUntil: integer('lease_until'),
+  /** Which claim holds the lease; outcomes are written only by its holder. */
+  leaseToken: text('lease_token'),
+  /** Epoch-ms of the first failed attempt; the retry horizon counts from it. */
+  firstFailedAt: integer('first_failed_at'),
+  /** Rows of one kind sharing it go one at a time, in queue order (0027/0026). */
+  orderKey: text('order_key'),
 });
 
 /**
@@ -520,6 +528,21 @@ export const oneOffLink = sqliteTable('one_off_link', {
   revokedAt: integer('revoked_at'),
 });
 
+export const oauthRecord = sqliteTable(
+  'oauth_record',
+  {
+    kind: text('kind').notNull(),
+    id: text('id').notNull(),
+    payload: text('payload').notNull(),
+    grantId: text('grant_id'),
+    uid: text('uid'),
+    accountId: text('account_id'),
+    expiresAt: integer('expires_at'),
+    consumedAt: integer('consumed_at'),
+  },
+  (t) => [primaryKey({ columns: [t.kind, t.id] })],
+);
+
 export const sqliteSchema = {
   account,
   member,
@@ -546,4 +569,5 @@ export const sqliteSchema = {
   accountIntegration,
   oneOffLink,
   accountBranding,
+  oauthRecord,
 };

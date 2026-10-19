@@ -73,9 +73,17 @@ test('keyboard only: arrows to a day, Enter, Tab to a time, type, submit', async
   await page.goto(PAGE, { waitUntil: 'networkidle' });
   const firstOpen = page.getByRole('grid').getByRole('button', { disabled: false }).first();
   await firstOpen.focus();
+  const start = await firstOpen.getAttribute('data-day');
+  const focusedDay = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset['day'] ?? null);
   // Arrows move the cursor without picking (#194): times stay as they were.
+  // The grid moves focus to the new cursor on the next animation frame, so
+  // each key waits for focus to arrive, as a person does. A key sent before
+  // that frame lands on the old day, and the late focus then takes the next
+  // key with it (an Enter meant for a time re-picks a day instead).
   await page.keyboard.press('ArrowRight');
+  await expect.poll(focusedDay).not.toBe(start);
   await page.keyboard.press('ArrowLeft');
+  await expect.poll(focusedDay).toBe(start);
   await page.keyboard.press('Enter');
   const firstTime = timesRegion(page).getByRole('button', { name: TIME }).first();
   await expect(firstTime).toBeVisible();

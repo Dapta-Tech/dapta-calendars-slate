@@ -21,6 +21,7 @@
  */
 import type { TemplateVarMap } from './templates';
 import { bookingDetailsCopy, type BookingDetails } from './booking-details';
+import { escapeHtml } from './util';
 
 export type EmailKind =
   | 'confirmation'
@@ -75,12 +76,9 @@ const C = EMAIL_COLORS;
 
 const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
 
+/** The one HTML escaper (`escapeHtml`), tolerant of a missing value. */
 function esc(s: string): string {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return escapeHtml(String(s ?? ''));
 }
 
 /** Escaped, with the value's own line breaks kept as `<br>`. */

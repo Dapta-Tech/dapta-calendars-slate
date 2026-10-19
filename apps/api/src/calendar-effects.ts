@@ -1,5 +1,6 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { CalendarProvider } from '@slate/calendar';
+import type { ServerEnv } from '@slate/config/env';
 import { getMessages } from '@slate/shared';
 import {
   claimBookingDestination,
@@ -7,13 +8,17 @@ import {
   enqueueOutbox,
   fillBookingReference,
   loadBookingForCalendarWrite,
+  loadBookingHostConnectionRefs,
   attendeesFor,
   loadBookingReferences,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
+  sql,
   type Db,
 } from '@slate/db';
-import { CALENDAR, DB } from './tokens';
+import { BUSY_CACHE_DEFAULTS, BusyCache, CachedBusyProvider } from './busy-cache';
+import { OutboxSkipError } from './email-effects';
+import { CALENDAR, DB, ENV } from './tokens';
 
 /** Calendar lifecycle transitions the outbox can carry. */
 export type CalendarAction = 'create' | 'delete' | 'reschedule';
@@ -39,15 +44,52 @@ export type CalendarAction = 'create' | 'delete' | 'reschedule';
 @Injectable()
 export class CalendarEffects {
   private readonly log = new Logger('CalendarEffects');
+  /** The display cache of busy reads (ADR 0009); null when off or with no calendar. */
+  private readonly busyCache: BusyCache | null;
+  private readonly display: CalendarProvider;
 
   constructor(
     @Inject(CALENDAR) private readonly calendar: CalendarProvider,
     @Inject(DB) private readonly db: Db,
-  ) {}
+    // Optional and LAST so the specs that build this positionally keep working.
+    // Without an env there is no cache, and `displayProvider` is the raw one.
+    @Optional() @Inject(ENV) env?: ServerEnv,
+  ) {
+    const ttlMs = env?.CALENDAR_BUSY_CACHE_TTL_MS ?? 0;
+    this.busyCache =
+      env && calendar.enabled && ttlMs > 0
+        ? new BusyCache({
+            ttlMs,
+            maxStaleMs: env.CALENDAR_BUSY_CACHE_MAX_STALE_MS ?? BUSY_CACHE_DEFAULTS.maxStaleMs,
+            maxEntries: env.CALENDAR_BUSY_CACHE_MAX_ENTRIES ?? BUSY_CACHE_DEFAULTS.maxEntries,
+            readTimeoutMs: env.CALENDAR_BUSY_READ_TIMEOUT_MS ?? BUSY_CACHE_DEFAULTS.readTimeoutMs,
+            failureCooldownMs: BUSY_CACHE_DEFAULTS.failureCooldownMs,
+            warn: (line) => this.log.warn(line),
+          })
+        : null;
+    this.display = this.busyCache ? new CachedBusyProvider(calendar, this.busyCache) : calendar;
+  }
 
-  /** The wired provider — handed to the availability path for busy-subtraction. */
+  /**
+   * The wired provider, read FRESH on every call. Everything that DECIDES
+   * something reads busy through this one: a hold, a booking, a reschedule, a
+   * host's confirmation, the connection self-test. Never cached (ADR 0009).
+   */
   get provider(): CalendarProvider {
     return this.calendar;
+  }
+
+  /**
+   * The provider for reads that only SHOW availability: the booking and team
+   * pages, the manage page's reschedule picker, the host's new-booking screen,
+   * the slot reads of the machine and v2 surfaces. Busy comes from a short
+   * per-connection cache, with the last good read standing in (for a bounded
+   * time) when the calendar fails or is slow. Never hand it to a write path:
+   * a time it shows is re-checked fresh through `provider` before anything is
+   * held or booked.
+   */
+  get displayProvider(): CalendarProvider {
+    return this.display;
   }
 
   /**
@@ -55,17 +97,42 @@ export class CalendarEffects {
    * pending→accepted confirm): queue a durable create of the remote event.
    */
   onBookingAccepted(uid: string): void {
+    this.forgetBusy(uid);
     this.enqueue('create', uid);
   }
 
   /** A booking was cancelled/declined: queue a durable delete of its event(s). */
   onBookingCancelled(uid: string): void {
+    this.forgetBusy(uid);
     this.enqueue('delete', uid);
   }
 
   /** A booking moved (reschedule): queue a durable MOVE of the existing event. */
   onBookingRescheduled(uid: string): void {
+    this.forgetBusy(uid);
     this.enqueue('reschedule', uid);
+  }
+
+  /**
+   * A booking changed in a way that writes nothing to a calendar (a request
+   * made or declined): only this process's cached busy reads for its hosts are
+   * cleared. Other replicas catch up within the cache's TTL.
+   */
+  onBookingChanged(uid: string): void {
+    this.forgetBusy(uid);
+  }
+
+  /**
+   * Clear this process's cached busy reads for the calendars of a booking's
+   * hosts. Never throws and never blocks the caller: the cache only feeds what
+   * a page shows, and a stale display costs at most one TTL.
+   */
+  private forgetBusy(uid: string): void {
+    const cache = this.busyCache;
+    if (!cache) return;
+    void loadBookingHostConnectionRefs(this.db, uid)
+      .then((refs) => cache.invalidate(refs))
+      .catch((err) => this.log.warn(`could not clear cached busy reads: ${err instanceof Error ? err.name : 'error'}`));
   }
 
   /**
@@ -92,6 +159,18 @@ export class CalendarEffects {
    */
   async runCalendarJob(action: CalendarAction, uid: string): Promise<void> {
     if (!this.calendar.enabled) return;
+    if (action !== 'delete') {
+      // A write or a move is for a booking that is ON. One that was cancelled
+      // or declined while this row waited (a retry can wait hours) must not
+      // put an event back on the host's calendar: nothing would ever delete
+      // it. Skipped, not retried; the delete queued behind it runs next.
+      const row = await this.db.get<{ status: string }>(
+        sql`SELECT status FROM booking WHERE uid = ${uid} LIMIT 1`,
+      );
+      if (row && row.status !== 'accepted') {
+        throw new OutboxSkipError(`calendar ${action} for ${uid} skipped: the booking is ${row.status}`);
+      }
+    }
     if (action === 'delete') {
       await this.removeEvent(uid);
     } else if (action === 'reschedule') {
@@ -99,6 +178,9 @@ export class CalendarEffects {
     } else {
       await this.writeEvent(uid);
     }
+    // The hosts' calendars now hold (or no longer hold) the event, so a read
+    // cached before this write is out of date on this process.
+    this.forgetBusy(uid);
   }
 
   /**

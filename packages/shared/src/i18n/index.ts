@@ -183,6 +183,48 @@ export interface BookingMessages {
     linkInvalidTitle: string;
     linkInvalidBody: string;
   };
+  /**
+   * What a visitor reads when something on our side gets in the way: the
+   * service too busy to answer (a 429), a calendar that cannot be read just
+   * now, a request that did not go through. Short and honest, and each one
+   * says what to do next. Never an internal name, a status code or a vendor.
+   */
+  trouble: {
+    /** A page the service was too busy to serve (429). It retries on its own. */
+    busyTitle: string;
+    busyBody: string;
+    /** The countdown to the automatic retry: "{seconds}" is a whole number. */
+    busyRetrying: string;
+    /** After the automatic retries ran out. */
+    busyStill: string;
+    tryAgain: string;
+    /** The month's times could not be read because the service was busy. */
+    busyTimes: string;
+    /** A hold on the picked time was refused; the booking can still go ahead. */
+    holdBusy: string;
+    holdUnconfirmed: string;
+    holdGone: string;
+    holdFailed: string;
+    /** Shown above Confirm when a booking did not go through; the form is kept. */
+    bookBusy: string;
+    bookFailed: string;
+    /** The manage page's reschedule and cancel outcomes. */
+    actionBusy: string;
+    actionCalendar: string;
+    actionTaken: string;
+    actionUnavailable: string;
+    actionLinkDead: string;
+    actionFailed: string;
+    pickTime: string;
+    /** In place of the manage page's picker when its times could not be read. */
+    manageTimesUnavailable: string;
+    manageTimesBusy: string;
+    /** The public error boundaries: the page itself failed to load. */
+    pageTitle: string;
+    pageBody: string;
+    manageTitle: string;
+    manageBody: string;
+  };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
     madeWith: string;
@@ -209,6 +251,26 @@ export interface BookingMessages {
     noEvents: string;
     /** Empty state on the team landing page. */
     noTeamEvents: string;
+  };
+  /**
+   * The site itself, before any page names itself: the default `<title>` and
+   * description every page inherits, and the page a link that leads nowhere
+   * lands on. `{product}` is the deployment's product name, so a fork that
+   * keeps the neutral default reads just as well as Dapta's own build.
+   */
+  site: {
+    title: string;
+    description: string;
+    notFoundTitle: string;
+    notFoundBody: string;
+    notFoundHome: string;
+    /** The root page of a fork running the local sign-in (Dapta's build sends
+     *  `/` straight to the app): what this is, and the seeded demo page. */
+    devLandingTitle: string;
+    devLandingBody: string;
+    devLandingCta: string;
+    /** Before the demo page's path, which renders as code after it. */
+    devLandingTry: string;
   };
   /**
    * Location kind labels — WHERE a meeting happens. Shared by the public
@@ -295,6 +357,10 @@ export interface BookingMessages {
       language: string;
       collapse: string;
       expand: string;
+      /** A dashboard page for something this workspace does not have (a deleted
+       *  event type, team or schedule, or a mistyped address). */
+      notFoundTitle: string;
+      notFoundBody: string;
       /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
        *  new tab. The icon says it visually; this says it out loud. */
       opensNewTab: string;
@@ -1035,6 +1101,118 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
+      /** "MCP & API" page: connect-your-agent guide, tool list, key details. */
+      connectTitle: string;
+      connectLead: string;
+      tabCursor: string;
+      tabClaudeCode: string;
+      tabCodex: string;
+      tabOther: string;
+      tabChat: string;
+      stepKey: string;
+      stepKeyEnv: string;
+      mcpUrlLabel: string;
+      mcpUrlMissing: string;
+      /** The API does not serve MCP (or could not be asked): no steps, no address, no tool list. */
+      mcpUnavailable: string;
+      copy: string;
+      copied: string;
+      addToCursor: string;
+      cursorLead: string;
+      cursorKeyNote: string;
+      cursorFileLabel: string;
+      claudeCodeLead: string;
+      codexLead: string;
+      otherLead: string;
+      otherUrl: string;
+      otherHeader: string;
+      chatTitle: string;
+      chatBody: string;
+      toolsTitle: string;
+      toolsLead: string;
+      kindRead: string;
+      kindWrite: string;
+      kindDestructive: string;
+      toolNeedsNoKey: string;
+      toolNeedsAnyKey: string;
+      toolOrPublic: string;
+      toolNeeds: string;
+      toolDescriptions: Record<string, string>;
+      scopeLabels: Record<string, string>;
+      scopesLead: string;
+      eventTypesLabel: string;
+      eventTypesAll: string;
+      eventTypesOnly: string;
+      expiryLabel: string;
+      expiryNever: string;
+      expiryDays: string;
+      keyScopesUnknown: string;
+      keyAllEventTypes: string;
+      keyOnlyEventTypes: string;
+      keyNoExpiry: string;
+      keyExpires: string;
+      keyExpired: string;
+      keyLastUsed: string;
+      keyNeverUsed: string;
+      apiRefTitle: string;
+      apiRefLead: string;
+      apiDocs: string;
+      apiOpenApi: string;
+      apiRefMissing: string;
+      /** OAuth on (the API serves its own authorization server): the chat-app tab. */
+      chatOAuthTitle: string;
+      chatOAuthLead: string;
+      addToClaude: string;
+      chatClaudeHeading: string;
+      chatClaudeStep1: string;
+      chatClaudeStep2: string;
+      chatClaudeStep3: string;
+      chatGptHeading: string;
+      chatGptStep1: string;
+      chatGptStep2: string;
+      chatGptStep3: string;
+      chatScopesNote: string;
+      /** Connected apps: OAuth grants with revoke. */
+      connectedTitle: string;
+      connectedLead: string;
+      connectedNone: string;
+      connectedUnnamed: string;
+      connectedFrom: string;
+      connectedApprovedBy: string;
+      connectedSince: string;
+      connectedLastUsed: string;
+      connectedNeverUsed: string;
+      connectedRevoke: string;
+      connectedRevokeTitle: string;
+      connectedRevokeBody: string;
+      connectedRevokedToast: string;
+      connectedExpiryNote: string;
+    };
+    /**
+     * The OAuth consent page (`/auth/consent`): an app asks to act on the
+     * workspace. Client names are self-asserted, so the host it is identified
+     * by is shown beside them, never instead.
+     */
+    oauthConsent: {
+      pageTitle: string;
+      heading: string;
+      unnamed: string;
+      identifiedAs: string;
+      returnsTo: string;
+      loopbackWarning: string;
+      workspace: string;
+      signedInAs: string;
+      scopesLead: string;
+      staysConnected: string;
+      shortLived: string;
+      approve: string;
+      deny: string;
+      working: string;
+      notAdminTitle: string;
+      notAdminBody: string;
+      expiredTitle: string;
+      expiredBody: string;
+      errorBody: string;
     };
     /**
      * Integrations tab (H1b / #93) — connect one CRM credential per account.
@@ -1357,11 +1535,11 @@ export const en: BookingMessages = {
     timezone: 'Timezone',
     noSlots: 'No available times in this range.',
     noTimesNow: 'No times are available right now. Please check back soon.',
-    timesUnavailable: 'Times are temporarily unavailable. Please try again in a few minutes.',
-    timesStillUnavailable: 'Times are still unavailable. Please try again in a few minutes.',
-    calendarUnavailableTitle: 'This time could not be confirmed',
+    timesUnavailable: 'We can’t read this calendar right now. Try again in a moment.',
+    timesStillUnavailable: 'We still can’t read this calendar. Try again in a minute.',
+    calendarUnavailableTitle: 'We couldn’t confirm this time',
     calendarUnavailableBody:
-      'We could not confirm this time right now. Please try again in a few minutes.',
+      'We couldn’t check the host’s calendar just now, so nothing was booked. Try again in a moment.',
     book: 'Book',
     confirm: 'Confirm booking',
     confirming: 'Confirming…',
@@ -1485,6 +1663,33 @@ export const en: BookingMessages = {
     linkInvalidBody:
       'Manage links change each time a booking is rescheduled, so an older email carries a link that no longer opens. Your booking has not been affected — open the most recent confirmation or reschedule email to manage it.',
   },
+  trouble: {
+    busyTitle: 'Busy for a moment',
+    busyBody: 'We are getting a lot of requests right now. We will try again in a few seconds.',
+    busyRetrying: 'Trying again in {seconds} s.',
+    busyStill: 'Still busy. Try again in a minute.',
+    tryAgain: 'Try again',
+    busyTimes: 'Lots of people are booking right now. The times will show in a moment.',
+    holdBusy: 'We could not hold this time just now. You can still book it.',
+    holdUnconfirmed: 'We could not check this time with the host’s calendar just now. Try booking it, or pick it again in a moment.',
+    holdGone: 'That time was just taken. Pick another.',
+    holdFailed: 'We could not hold this time. You can still try to book it.',
+    bookBusy: 'Lots of people are booking right now. Your details are still here: press Confirm again in a few seconds.',
+    bookFailed: 'That did not go through. Your details are still here: try again in a moment.',
+    actionBusy: 'Lots of requests right now. Try again in a few seconds.',
+    actionCalendar: 'We could not check the host’s calendar just now, so nothing changed. Try again in a moment.',
+    actionTaken: 'That time was just taken. Pick another.',
+    actionUnavailable: 'That time is no longer available. Pick another.',
+    actionLinkDead: 'This link no longer works. Open the most recent email about this booking.',
+    actionFailed: 'That did not go through. Try again in a moment.',
+    pickTime: 'Pick a new time first.',
+    manageTimesUnavailable: 'We cannot read the host’s calendar right now. Try again in a moment.',
+    manageTimesBusy: 'Lots of requests right now. Try again in a few seconds.',
+    pageTitle: 'This page didn’t load',
+    pageBody: 'Something went wrong on our side. Try again in a moment.',
+    manageTitle: 'We couldn’t load your booking',
+    manageBody: 'Your booking has not changed. Try again in a moment, or open the link in your most recent email.',
+  },
   growth: {
     madeWith: 'Made with Dapta Calendars',
     ctaLine: 'Dapta Calendars is free for anyone.',
@@ -1499,6 +1704,19 @@ export const en: BookingMessages = {
     timesIn: 'Times in {timeZone}',
     noEvents: 'No bookable events yet.',
     noTeamEvents: 'No bookable team events yet.',
+  },
+  site: {
+    title: '{product}: free online scheduling and booking pages',
+    description:
+      '{product} gives you a booking page to share with one link. People pick a time in their own time zone, in English or Spanish. Open source.',
+    notFoundTitle: 'Page not found',
+    notFoundBody: 'This page does not exist. Check the link with the person who shared it.',
+    notFoundHome: 'Go home',
+    devLandingTitle: 'Open-source scheduling',
+    devLandingBody:
+      'A booking platform you clone and run. SQLite by default, deploy anywhere. This dev instance is seeded with a demo booking page.',
+    devLandingCta: 'Open the demo booking page',
+    devLandingTry: 'Try',
   },
   location: {
     whereLabel: 'Where',
@@ -1539,6 +1757,8 @@ export const en: BookingMessages = {
       signOut: 'Sign out',
       viewPublic: 'View public page',
       language: 'Language',
+      notFoundTitle: 'Not found',
+      notFoundBody: 'This workspace has nothing at this address. It may have been deleted.',
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
       opensNewTab: 'Opens in a new tab',
@@ -1593,7 +1813,7 @@ export const en: BookingMessages = {
       general: 'General',
       bookingPage: 'Booking Page',
       members: 'Members',
-      developer: 'Developer',
+      developer: 'MCP & API',
       notifications: 'Notifications',
       integrations: 'Integrations',
     },
@@ -2213,6 +2433,139 @@ export const en: BookingMessages = {
       revokedToast: 'Key revoked.',
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
+      connectTitle: 'Connect your agent',
+      connectLead:
+        'Run Dapta Calendars from your own AI agent: find a free slot, book, reschedule and cancel without opening this dashboard. Create an API key below, then pick your agent.',
+      tabCursor: 'Cursor',
+      tabClaudeCode: 'Claude Code',
+      tabCodex: 'Codex',
+      tabOther: 'Other agents',
+      tabChat: 'Claude.ai and ChatGPT',
+      stepKey: 'Create an API key below and copy it when it is shown. Give it only the access the agent needs.',
+      stepKeyEnv: 'Set the key in the terminal you start your agent from, so it is never pasted into a config:',
+      mcpUrlLabel: 'MCP address',
+      mcpUrlMissing:
+        'This installation has no public MCP address yet. Ask whoever runs it to set MCP_PUBLIC_URL (or API_PUBLIC_URL), then come back.',
+      mcpUnavailable:
+        'Agent connections are not turned on for this installation. When they are, the steps to connect your agent will show here.',
+      copy: 'Copy',
+      copied: 'Copied',
+      addToCursor: 'Add to Cursor',
+      cursorLead: 'One click opens Cursor and asks you to confirm. Then set your key as shown below.',
+      cursorKeyNote:
+        'The link carries the name of the variable, never the key itself. Cursor reads the key from your environment when it starts.',
+      cursorFileLabel: 'Or paste this into .cursor/mcp.json (project) or ~/.cursor/mcp.json (all projects):',
+      claudeCodeLead: 'Run this once in your terminal:',
+      codexLead: 'Add this to ~/.codex/config.toml, or .codex/config.toml in a trusted project:',
+      otherLead: 'Any agent or SDK that speaks MCP over HTTP needs two things.',
+      otherUrl: 'Server address',
+      otherHeader: 'Header on every request',
+      chatTitle: 'Claude.ai and ChatGPT',
+      chatBody:
+        'One-click sign-in for the Claude and ChatGPT apps is coming. Until then, the public booking tools work with no key: an agent can find a time and book on any public booking page. Everything else needs an API key from a terminal-based agent.',
+      toolsTitle: 'What an agent can do',
+      toolsLead: 'A key grants only the tools whose access you tick. Read tools only look; write tools change your calendar; cancelling cannot be undone.',
+      kindRead: 'Read',
+      kindWrite: 'Write',
+      kindDestructive: 'Destructive',
+      toolNeedsNoKey: 'No key needed on a public booking page',
+      toolNeedsAnyKey: 'Works with any key',
+      toolOrPublic: '(or no key on a public booking page)',
+      toolNeeds: 'Needs: {scope}',
+      toolDescriptions: {
+        find_available_slots: 'Find free times for an event type.',
+        book_meeting: 'Book a time on a public booking page and email the invitee.',
+        whoami: 'Show which account and access the key has.',
+        list_event_types: 'List your event types.',
+        get_booking_page_link: 'Get the public booking link for an event type.',
+        list_bookings: 'List bookings with the minimum fields.',
+        get_booking: 'Read one booking, including what the invitee wrote.',
+        create_booking: 'Book a meeting on your behalf. Safe to retry.',
+        reschedule_booking: 'Move a booking to another time. Safe to retry.',
+        cancel_booking: 'Cancel a booking and tell the invitee.',
+      },
+      scopeLabels: {
+        'event-types:read': 'See event types',
+        'availability:read': 'Check free times',
+        'bookings:read': 'Read bookings',
+        'bookings:write': 'Create and reschedule bookings',
+        'bookings:cancel': 'Cancel bookings',
+        'calendars:read': 'See connected calendars',
+      },
+      scopesLead: 'Access this key grants',
+      eventTypesLabel: 'Event types',
+      eventTypesAll: 'All event types',
+      eventTypesOnly: 'Only these event types',
+      expiryLabel: 'Expires',
+      expiryNever: 'Never',
+      expiryDays: 'In {days} days',
+      keyScopesUnknown: 'Access not shown',
+      keyAllEventTypes: 'All event types',
+      keyOnlyEventTypes: 'Only {count} event type(s)',
+      keyNoExpiry: 'No expiry',
+      keyExpires: 'Expires {date}',
+      keyExpired: 'Expired {date}',
+      keyLastUsed: 'Last used {date}',
+      keyNeverUsed: 'Never used',
+      apiRefTitle: 'API reference',
+      apiRefLead: 'Every route a key can call, with a try-it console and the machine-readable spec.',
+      apiDocs: 'API docs',
+      apiOpenApi: 'openapi.json',
+      apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
+      chatOAuthTitle: 'Claude, Claude Desktop and ChatGPT',
+      chatOAuthLead:
+        'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in here and choose what the app may do.',
+      addToClaude: 'Add to Claude',
+      chatClaudeHeading: 'In Claude',
+      chatClaudeStep1: 'Click Add to Claude, or open Settings, then Connectors, and choose Add custom connector.',
+      chatClaudeStep2: 'Use the MCP address below as the server URL and click Add.',
+      chatClaudeStep3: 'Click Connect. You come back here to sign in and approve.',
+      chatGptHeading: 'In ChatGPT',
+      chatGptStep1: 'Open Plugins, choose the plus button and Add custom MCP server.',
+      chatGptStep2: 'Use the MCP address below as the server URL and choose OAuth for authentication.',
+      chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
+      chatScopesNote:
+        'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
+      connectedTitle: 'Connected apps',
+      connectedLead:
+        'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
+      connectedNone: 'No connected apps.',
+      connectedUnnamed: 'Unnamed app',
+      connectedFrom: 'Identified as {host}',
+      connectedApprovedBy: 'Approved by {who}',
+      connectedSince: 'Connected {date}',
+      connectedLastUsed: 'Last used {date}',
+      connectedNeverUsed: 'Not used yet',
+      connectedRevoke: 'Disconnect',
+      connectedRevokeTitle: 'Disconnect this app?',
+      connectedRevokeBody:
+        '“{name}” can no longer renew its access. Access it already holds keeps working for up to {minutes} min, then stops.',
+      connectedRevokedToast: 'App disconnected.',
+      connectedExpiryNote:
+        'Disconnecting stops an app from renewing its access right away. Access it already holds runs out within {minutes} min.',
+    },
+    oauthConsent: {
+      pageTitle: 'Connect an app',
+      heading: '{client} wants to use your {product} workspace',
+      unnamed: 'An app',
+      identifiedAs: 'Identified as {host}',
+      returnsTo: 'After you answer you go back to {host}.',
+      loopbackWarning:
+        'This app runs on your own computer. Only allow it if you started this connection yourself, just now.',
+      workspace: 'Workspace',
+      signedInAs: 'Signed in as {who}',
+      scopesLead: 'It will be able to',
+      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it in Settings, MCP and API.',
+      shortLived: 'Its access lasts about an hour; after that it has to ask again.',
+      approve: 'Allow',
+      deny: 'Deny',
+      working: 'One moment…',
+      notAdminTitle: 'Only an owner or admin can connect apps',
+      notAdminBody:
+        'A connected app acts for the whole workspace, so an owner or admin has to connect it. You can still deny this request.',
+      expiredTitle: 'This request has expired',
+      expiredBody: 'Go back to the app you were connecting and start again.',
+      errorBody: 'Something went wrong. Go back to the app you were connecting and try again.',
     },
     integrations: {
       pageLead:
@@ -2479,12 +2832,11 @@ export const es: BookingMessages = {
     timezone: 'Zona horaria',
     noSlots: 'No hay horarios disponibles en este rango.',
     noTimesNow: 'No hay horarios disponibles por el momento. Vuelve a intentarlo pronto.',
-    timesUnavailable:
-      'Los horarios no están disponibles temporalmente. Inténtalo de nuevo en unos minutos.',
-    timesStillUnavailable: 'Los horarios siguen sin estar disponibles. Inténtalo de nuevo en unos minutos.',
-    calendarUnavailableTitle: 'No se pudo confirmar este horario',
+    timesUnavailable: 'No podemos leer este calendario ahora mismo. Inténtalo de nuevo en un momento.',
+    timesStillUnavailable: 'Aún no podemos leer este calendario. Inténtalo de nuevo en un minuto.',
+    calendarUnavailableTitle: 'No pudimos confirmar este horario',
     calendarUnavailableBody:
-      'No pudimos confirmar este horario en este momento. Inténtalo de nuevo en unos minutos.',
+      'No pudimos revisar el calendario del anfitrión ahora mismo, así que no se reservó nada. Inténtalo de nuevo en un momento.',
     book: 'Reservar',
     confirm: 'Confirmar reserva',
     confirming: 'Confirmando…',
@@ -2607,6 +2959,33 @@ export const es: BookingMessages = {
     linkInvalidBody:
       'Los enlaces de gestión cambian cada vez que se reprograma una reserva, así que un correo anterior lleva un enlace que ya no abre. Tu reserva no se ha visto afectada: abre el correo de confirmación o de reprogramación más reciente para gestionarla.',
   },
+  trouble: {
+    busyTitle: 'Un momento, por favor',
+    busyBody: 'Estamos recibiendo muchas solicitudes ahora mismo. Lo intentaremos de nuevo en unos segundos.',
+    busyRetrying: 'Reintentando en {seconds} s.',
+    busyStill: 'Sigue ocupado. Inténtalo de nuevo en un minuto.',
+    tryAgain: 'Reintentar',
+    busyTimes: 'Hay mucha gente reservando ahora mismo. Los horarios aparecerán en un momento.',
+    holdBusy: 'No pudimos apartar este horario ahora mismo. Aún puedes reservarlo.',
+    holdUnconfirmed: 'No pudimos revisar este horario en el calendario del anfitrión. Intenta reservarlo, o vuelve a elegirlo en un momento.',
+    holdGone: 'Ese horario acaba de ocuparse. Elige otro.',
+    holdFailed: 'No pudimos apartar este horario. Aún puedes intentar reservarlo.',
+    bookBusy: 'Hay mucha gente reservando ahora mismo. Tus datos siguen aquí: vuelve a confirmar en unos segundos.',
+    bookFailed: 'No se pudo completar. Tus datos siguen aquí: inténtalo de nuevo en un momento.',
+    actionBusy: 'Hay muchas solicitudes ahora mismo. Inténtalo de nuevo en unos segundos.',
+    actionCalendar: 'No pudimos revisar el calendario del anfitrión ahora mismo, así que nada cambió. Inténtalo de nuevo en un momento.',
+    actionTaken: 'Ese horario acaba de ocuparse. Elige otro.',
+    actionUnavailable: 'Ese horario ya no está disponible. Elige otro.',
+    actionLinkDead: 'Este enlace ya no funciona. Abre el correo más reciente sobre esta reserva.',
+    actionFailed: 'No se pudo completar. Inténtalo de nuevo en un momento.',
+    pickTime: 'Primero elige un horario nuevo.',
+    manageTimesUnavailable: 'No podemos leer el calendario del anfitrión ahora mismo. Inténtalo de nuevo en un momento.',
+    manageTimesBusy: 'Hay muchas solicitudes ahora mismo. Inténtalo de nuevo en unos segundos.',
+    pageTitle: 'Esta página no cargó',
+    pageBody: 'Algo falló de nuestro lado. Inténtalo de nuevo en un momento.',
+    manageTitle: 'No pudimos cargar tu reserva',
+    manageBody: 'Tu reserva no ha cambiado. Inténtalo de nuevo en un momento, o abre el enlace de tu correo más reciente.',
+  },
   growth: {
     madeWith: 'Hecho con Dapta Calendars',
     ctaLine: 'Dapta Calendars es gratis para todos.',
@@ -2621,6 +3000,19 @@ export const es: BookingMessages = {
     timesIn: 'Horarios en {timeZone}',
     noEvents: 'Aún no hay eventos disponibles para reservar.',
     noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
+  },
+  site: {
+    title: '{product}: agenda de citas en línea gratis',
+    description:
+      '{product} te da una página de reservas para compartir con un solo enlace. Cada persona elige una hora en su propia zona horaria, en español o en inglés. Código abierto.',
+    notFoundTitle: 'Página no encontrada',
+    notFoundBody: 'Esta página no existe. Revisa el enlace con quien te lo compartió.',
+    notFoundHome: 'Ir al inicio',
+    devLandingTitle: 'Agenda de código abierto',
+    devLandingBody:
+      'Una plataforma de reservas que clonas y ejecutas. SQLite por defecto, despliégala donde quieras. Esta instancia de desarrollo trae una página de reservas de demostración.',
+    devLandingCta: 'Abrir la página demo',
+    devLandingTry: 'Prueba',
   },
   location: {
     whereLabel: 'Dónde',
@@ -2661,6 +3053,8 @@ export const es: BookingMessages = {
       signOut: 'Cerrar sesión',
       viewPublic: 'Ver página pública',
       language: 'Idioma',
+      notFoundTitle: 'No encontrado',
+      notFoundBody: 'Este espacio no tiene nada en esta dirección. Puede que se haya eliminado.',
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
       opensNewTab: 'Se abre en una pestaña nueva',
@@ -2715,7 +3109,7 @@ export const es: BookingMessages = {
       general: 'General',
       bookingPage: 'Página de reservas',
       members: 'Miembros',
-      developer: 'Desarrollador',
+      developer: 'MCP y API',
       notifications: 'Notificaciones',
       integrations: 'Integraciones',
     },
@@ -3337,6 +3731,139 @@ export const es: BookingMessages = {
       revokedToast: 'Clave revocada.',
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
+      connectTitle: 'Conecta tu agente',
+      connectLead:
+        'Maneja Dapta Calendars desde tu propio agente de IA: busca un espacio libre, reserva, reagenda y cancela sin abrir este panel. Crea una clave API abajo y elige tu agente.',
+      tabCursor: 'Cursor',
+      tabClaudeCode: 'Claude Code',
+      tabCodex: 'Codex',
+      tabOther: 'Otros agentes',
+      tabChat: 'Claude.ai y ChatGPT',
+      stepKey: 'Crea una clave API abajo y cópiala cuando aparezca. Dale solo el acceso que el agente necesita.',
+      stepKeyEnv: 'Define la clave en la terminal desde la que abres tu agente, así nunca queda pegada en una configuración:',
+      mcpUrlLabel: 'Dirección MCP',
+      mcpUrlMissing:
+        'Esta instalación aún no tiene una dirección MCP pública. Pide a quien la administra que defina MCP_PUBLIC_URL (o API_PUBLIC_URL) y vuelve.',
+      mcpUnavailable:
+        'Las conexiones de agentes no están activadas en esta instalación. Cuando lo estén, aquí verás los pasos para conectar tu agente.',
+      copy: 'Copiar',
+      copied: 'Copiado',
+      addToCursor: 'Añadir a Cursor',
+      cursorLead: 'Un clic abre Cursor y te pide confirmar. Después define tu clave como se muestra abajo.',
+      cursorKeyNote:
+        'El enlace lleva el nombre de la variable, nunca la clave. Cursor lee la clave de tu entorno al iniciar.',
+      cursorFileLabel: 'O pega esto en .cursor/mcp.json (proyecto) o ~/.cursor/mcp.json (todos los proyectos):',
+      claudeCodeLead: 'Ejecuta esto una vez en tu terminal:',
+      codexLead: 'Agrega esto a ~/.codex/config.toml, o a .codex/config.toml en un proyecto de confianza:',
+      otherLead: 'Cualquier agente o SDK que hable MCP por HTTP necesita dos cosas.',
+      otherUrl: 'Dirección del servidor',
+      otherHeader: 'Encabezado en cada solicitud',
+      chatTitle: 'Claude.ai y ChatGPT',
+      chatBody:
+        'Pronto habrá inicio de sesión con un clic para las apps de Claude y ChatGPT. Mientras tanto, las herramientas de reserva pública funcionan sin clave: un agente puede buscar un horario y reservar en cualquier página pública. Todo lo demás necesita una clave API desde un agente de terminal.',
+      toolsTitle: 'Qué puede hacer un agente',
+      toolsLead: 'Una clave solo da las herramientas cuyo acceso marques. Las de lectura solo miran; las de escritura cambian tu agenda; cancelar no se puede deshacer.',
+      kindRead: 'Lectura',
+      kindWrite: 'Escritura',
+      kindDestructive: 'Destructiva',
+      toolNeedsNoKey: 'Sin clave en una página de reservas pública',
+      toolNeedsAnyKey: 'Funciona con cualquier clave',
+      toolOrPublic: '(o sin clave en una página de reservas pública)',
+      toolNeeds: 'Requiere: {scope}',
+      toolDescriptions: {
+        find_available_slots: 'Busca horarios libres de un tipo de evento.',
+        book_meeting: 'Reserva un horario en una página pública y avisa al invitado por correo.',
+        whoami: 'Muestra a qué cuenta y acceso corresponde la clave.',
+        list_event_types: 'Lista tus tipos de evento.',
+        get_booking_page_link: 'Obtiene el enlace público de reservas de un tipo de evento.',
+        list_bookings: 'Lista reservas con los campos mínimos.',
+        get_booking: 'Lee una reserva, incluido lo que escribió el invitado.',
+        create_booking: 'Reserva una reunión en tu nombre. Se puede reintentar sin riesgo.',
+        reschedule_booking: 'Mueve una reserva a otro horario. Se puede reintentar sin riesgo.',
+        cancel_booking: 'Cancela una reserva y avisa al invitado.',
+      },
+      scopeLabels: {
+        'event-types:read': 'Ver tipos de evento',
+        'availability:read': 'Consultar horarios libres',
+        'bookings:read': 'Leer reservas',
+        'bookings:write': 'Crear y reagendar reservas',
+        'bookings:cancel': 'Cancelar reservas',
+        'calendars:read': 'Ver calendarios conectados',
+      },
+      scopesLead: 'Acceso que da esta clave',
+      eventTypesLabel: 'Tipos de evento',
+      eventTypesAll: 'Todos los tipos de evento',
+      eventTypesOnly: 'Solo estos tipos de evento',
+      expiryLabel: 'Vence',
+      expiryNever: 'Nunca',
+      expiryDays: 'En {days} días',
+      keyScopesUnknown: 'Acceso no disponible',
+      keyAllEventTypes: 'Todos los tipos de evento',
+      keyOnlyEventTypes: 'Solo {count} tipo(s) de evento',
+      keyNoExpiry: 'Sin vencimiento',
+      keyExpires: 'Vence el {date}',
+      keyExpired: 'Venció el {date}',
+      keyLastUsed: 'Último uso {date}',
+      keyNeverUsed: 'Sin usar',
+      apiRefTitle: 'Referencia de la API',
+      apiRefLead: 'Todas las rutas que una clave puede llamar, con consola de pruebas y la especificación legible por máquinas.',
+      apiDocs: 'Documentación de la API',
+      apiOpenApi: 'openapi.json',
+      apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
+      chatOAuthTitle: 'Claude, Claude Desktop y ChatGPT',
+      chatOAuthLead:
+        'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión aquí y eliges qué puede hacer la app.',
+      addToClaude: 'Agregar a Claude',
+      chatClaudeHeading: 'En Claude',
+      chatClaudeStep1: 'Haz clic en Agregar a Claude, o abre Configuración, luego Conectores, y elige Agregar conector personalizado.',
+      chatClaudeStep2: 'Usa la dirección MCP de abajo como URL del servidor y haz clic en Agregar.',
+      chatClaudeStep3: 'Haz clic en Conectar. Vuelves aquí para iniciar sesión y aprobar.',
+      chatGptHeading: 'En ChatGPT',
+      chatGptStep1: 'Abre Plugins, elige el botón más y Agregar servidor MCP personalizado.',
+      chatGptStep2: 'Usa la dirección MCP de abajo como URL del servidor y elige OAuth como autenticación.',
+      chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
+      chatScopesNote:
+        'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
+      connectedTitle: 'Apps conectadas',
+      connectedLead:
+        'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',
+      connectedNone: 'No hay apps conectadas.',
+      connectedUnnamed: 'App sin nombre',
+      connectedFrom: 'Identificada como {host}',
+      connectedApprovedBy: 'Aprobada por {who}',
+      connectedSince: 'Conectada el {date}',
+      connectedLastUsed: 'Último uso {date}',
+      connectedNeverUsed: 'Sin usar todavía',
+      connectedRevoke: 'Desconectar',
+      connectedRevokeTitle: '¿Desconectar esta app?',
+      connectedRevokeBody:
+        '«{name}» ya no podrá renovar su acceso. El acceso que ya tiene sigue funcionando hasta {minutes} min y luego se detiene.',
+      connectedRevokedToast: 'App desconectada.',
+      connectedExpiryNote:
+        'Desconectar impide de inmediato que la app renueve su acceso. El acceso que ya tiene se agota en menos de {minutes} min.',
+    },
+    oauthConsent: {
+      pageTitle: 'Conectar una app',
+      heading: '{client} quiere usar tu espacio de trabajo de {product}',
+      unnamed: 'Una app',
+      identifiedAs: 'Identificada como {host}',
+      returnsTo: 'Después de responder vuelves a {host}.',
+      loopbackWarning:
+        'Esta app se ejecuta en tu propio computador. Permítela solo si tú mismo iniciaste esta conexión, ahora mismo.',
+      workspace: 'Espacio de trabajo',
+      signedInAs: 'Sesión iniciada como {who}',
+      scopesLead: 'Podrá',
+      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en Configuración, MCP y API.',
+      shortLived: 'Su acceso dura cerca de una hora; después tendrá que pedirlo de nuevo.',
+      approve: 'Permitir',
+      deny: 'Rechazar',
+      working: 'Un momento…',
+      notAdminTitle: 'Solo un propietario o administrador puede conectar apps',
+      notAdminBody:
+        'Una app conectada actúa por todo el espacio de trabajo, así que debe conectarla un propietario o administrador. Aun así puedes rechazar esta solicitud.',
+      expiredTitle: 'Esta solicitud venció',
+      expiredBody: 'Vuelve a la app que estabas conectando y empieza de nuevo.',
+      errorBody: 'Algo salió mal. Vuelve a la app que estabas conectando e inténtalo de nuevo.',
     },
     integrations: {
       pageLead:
