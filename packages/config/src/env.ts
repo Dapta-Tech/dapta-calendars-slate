@@ -240,6 +240,29 @@ export const serverEnvSchema = z.object({
   OUTBOX_WORKER_ENABLED: boolish.default('true'),
   OUTBOX_POLL_MS: z.coerce.number().int().positive().default(5000),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /**
+   * How long a failing delivery keeps being retried, counted from its first
+   * failure: exponential backoff (1 s, 2 s, 4 s ... capped at 15 min, with
+   * jitter), and once a row has spent its attempt budget AND been failing this
+   * long it is marked failed and logged. Default 24 h, so a subscriber, mail
+   * transport or calendar that is down for minutes or hours loses nothing.
+   * 0 restores the old behaviour: give up when the attempt budget is spent.
+   */
+  OUTBOX_RETRY_HORIZON_MS: z.coerce.number().int().min(0).max(30 * 24 * 3_600_000).default(24 * 3_600_000),
+  /**
+   * Deliveries in flight at once, per kind of work (webhooks, emails, calendar
+   * writes, CRM writes, sign-up sync), per process. Each kind drains on its
+   * own, and one destination (a webhook, a booking) has at most one delivery
+   * in flight, so a slow subscriber cannot hold up anything else.
+   */
+  OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+  /**
+   * How long a claimed row belongs to the process that claimed it. Another
+   * replica takes it over only after this, so it must outlast the slowest
+   * delivery (a calendar write can make several backend calls). A replica that
+   * dies mid-delivery has its rows picked up once the lease runs out.
+   */
+  OUTBOX_LEASE_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(300_000),
 
   // CORS: a comma-separated allowlist of origins permitted to call the API from
   // a browser. When UNSET we default to PUBLIC_APP_URL only (the app's own web

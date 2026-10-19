@@ -2800,9 +2800,49 @@ export async function listWebhookDeliveries(
   }));
 }
 
+/**
+ * The delivery log's last word on an event the outbox stopped retrying, so the
+ * host sees in the dashboard that this one will not arrive (not only that the
+ * attempts failed). Best effort: a subscriber deleted meanwhile records nothing.
+ */
+export async function recordWebhookGaveUp(
+  db: Db,
+  args: { webhookId: string; body: string; attempts: number },
+): Promise<void> {
+  const hook = await db.get<{ account_id: string }>(
+    sql`SELECT account_id FROM webhook WHERE id = ${args.webhookId} LIMIT 1`,
+  );
+  if (!hook) return;
+  let event = '';
+  try {
+    event = (JSON.parse(args.body) as { event?: string }).event ?? '';
+  } catch {
+    // An unreadable body still gets its line; the event name is just unknown.
+  }
+  await recordWebhookDelivery(db, {
+    webhookId: args.webhookId,
+    accountId: hook.account_id,
+    event,
+    ok: false,
+    statusCode: null,
+    error: `Gave up after ${args.attempts} attempts. This event will not be delivered.`,
+  });
+}
+
 export async function deliverWebhookEvent(
   db: Db,
-  args: { webhookId: string; body: string; key: Buffer | null },
+  args: {
+    webhookId: string;
+    body: string;
+    key: Buffer | null;
+    /**
+     * The delivery's own id (the outbox row id), sent as `X-Slate-Delivery`.
+     * The same on every retry of one event to one subscriber, so a subscriber
+     * that got an attempt the sender saw time out can tell the retry is the
+     * same delivery and ignore it.
+     */
+    deliveryId?: string;
+  },
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const hook = await db.get<
@@ -2841,6 +2881,7 @@ export async function deliverWebhookEvent(
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'X-Slate-Event': event,
+    ...(args.deliveryId ? { 'X-Slate-Delivery': args.deliveryId } : {}),
   };
   // Signing is a delivery precondition, not a best-effort extra: an envelope we
   // cannot open FAILS the attempt (recorded, then rethrown so the outbox retries

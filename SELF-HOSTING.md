@@ -329,13 +329,13 @@ is byte-identical before and after, so no subscriber needs to be told.
 > be re-pasted from the provider's portal, but a signing secret exists only
 > here. Back the key up the way you back up the database.
 
-> **A key outage drops webhook events, and the drop is permanent.** A refused
-> delivery is an ordinary outbox failure, so it consumes the normal retry budget:
-> `OUTBOX_MAX_ATTEMPTS` (default 5) with 1s/2s/4s/8s backoff, then the row is
-> marked `failed` — which is terminal, with no re-drive path. In practice a
-> deployment whose key is removed or corrupted loses every webhook event
-> enqueued in the following ~15 seconds, and restoring the key does **not**
-> replay them. Fix a key problem before it has been wrong for one drain cycle.
+> **A key outage drops webhook events once the retry horizon passes.** A refused
+> delivery is an ordinary outbox failure, so it is retried like any other
+> (exponential backoff from 1 s, capped at 15 min) until it has spent its five
+> attempts AND been failing for `OUTBOX_RETRY_HORIZON_MS` (default 24 h); then
+> the row is marked `failed`, which is terminal, with no re-drive path. Restore
+> the key within the horizon and the queued events go out; after it, they do
+> not.
 
 A private app needs exactly two scopes, and there is no meetings scope to grant:
 `crm.objects.contacts.read` and `crm.objects.contacts.write`. A missing scope
@@ -348,9 +348,12 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
-| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox | no |
-| `OUTBOX_POLL_MS` | `5000` | poll interval | no |
-| `OUTBOX_MAX_ATTEMPTS` | `5` | retry ceiling | no |
+| `OUTBOX_WORKER_ENABLED` | `true` | set `false` if a separate process drains the outbox. Several API replicas may all run it: rows are claimed with a lease, so none is delivered twice at once | no |
+| `OUTBOX_POLL_MS` | `5000` | poll interval (a retry due sooner wakes the worker on time) | no |
+| `OUTBOX_MAX_ATTEMPTS` | `5` | reserved; every row gets five attempts before the retry horizon may end it | no |
+| `OUTBOX_RETRY_HORIZON_MS` | `86400000` | how long a failing delivery keeps being retried, counted from its first failure (backoff 1 s, 2 s, 4 s ... capped at 15 min, jittered). `0` = give up after the five attempts, the old behaviour | no |
+| `OUTBOX_CONCURRENCY` | `4` | deliveries in flight per kind of work (emails, calendar writes, webhooks, CRM, sign-up sync) per process; one destination (a webhook subscriber, a booking) has at most one in flight | no |
+| `OUTBOX_LEASE_MS` | `300000` | how long a claimed row belongs to the worker that claimed it; a live delivery renews it, a dead replica's rows are taken over when it runs out | no |
 | `CORS_ORIGINS` | `PUBLIC_APP_URL` only | comma-separated allowlist to embed the widget on other domains | no |
 | `RATE_LIMIT_ENABLED` | `true` | per-IP token bucket on public endpoints | no |
 | `RATE_LIMIT_CAPACITY` | `60` | burst | no |
@@ -358,6 +361,14 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `RATE_LIMIT_TRUSTED_PROXY_HOPS` | `1` | reverse proxies in front of the API that append to `X-Forwarded-For` (1 = one load balancer, 2 = CDN + load balancer, 0 = exposed directly). The limiter keys on the entry this many from the right. Set it on the web app too when `INTERNAL_API_SECRET` is set: the web reads the visitor's address the same way | no |
 | `INTERNAL_API_SECRET` | unset | **API and web, same value** (min 32 chars). The booking pages call the API from the web server, so without it every visitor shares the web server's rate-limit bucket and a busy page answers visitors with 429s. With it set on both, the web sends the visitor's address beside the secret and the limiter counts each visitor. The API trusts a forwarded address only beside the matching secret and an IP literal; anything else is keyed as before, and a wrong secret is only counted in the log (one line a minute, no addresses). The web sends it only to the API named by the server-side `API_URL`, so set `API_URL` on the web explicitly to a private or in-cluster address; with `API_URL` unset (the `NEXT_PUBLIC_API_URL` fallback, a public host) the web never sends it and logs a warning at startup. An empty value counts as unset. Set it whenever the web app reaches the API through your reverse proxy or a private network | **yes** |
 | `REQUEST_LOG_ENABLED` | `true` | one line per request (method, route template, status, duration, request id, error code, account); JSON when `NODE_ENV=production`. Never logs query strings, bodies, headers or client addresses | no |
+
+**Webhook deliveries** are POSTed with `X-Slate-Event` (the event name),
+`X-Slate-Signature` (`sha256=` HMAC of the body with the webhook's secret) and
+`X-Slate-Delivery` (the delivery's id). A retry sends the same body, signature
+and delivery id, so a subscriber that already processed an attempt the sender
+saw time out can recognise the retry and ignore it. Each attempt waits at most
+10 s for an answer; a slow subscriber holds up only its own deliveries. When a
+delivery is given up, the webhook's delivery log in the dashboard says so.
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every

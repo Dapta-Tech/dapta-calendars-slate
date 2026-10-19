@@ -8,13 +8,19 @@ import {
 } from '@nestjs/common';
 import {
   claimDueOutbox,
+  DEFAULT_LEASE_MS,
   deliverWebhookEvent,
   loadEncryptionKey,
   markOutboxDone,
   markOutboxFailed,
   markOutboxRetry,
   markOutboxSkipped,
+  outboxRetriesExhausted,
+  recordWebhookGaveUp,
+  renewOutboxLease,
+  retryDelayMs,
   type Db,
+  type OutboxKind,
   type OutboxRow,
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
@@ -25,17 +31,52 @@ import { EmailEffects, OutboxSkipError } from './email-effects';
 import { DB, ENV } from './tokens';
 
 /**
- * The OUTBOX WORKER (B7 / audit DM1). Polls the `outbox` table and drains due
- * rows, executing each durable side-effect and retrying with exponential
- * backoff until it succeeds or exhausts its attempts. This is what turns the old
- * fire-and-forget calendar/webhook calls into no-silent-loss delivery.
+ * The lanes the worker drains, each on its own: a lane has its own delivery
+ * slots, so a webhook subscriber that takes ten seconds to answer occupies a
+ * webhook slot and nothing else. Emails, calendar writes and CRM writes never
+ * queue behind it. `other` takes any kind no lane names, so a row of an
+ * unknown kind still fails visibly instead of waiting forever.
+ */
+export const OUTBOX_LANES: ReadonlyArray<{ name: string; kinds: readonly OutboxKind[] | null }> = [
+  { name: 'email', kinds: ['email'] },
+  { name: 'calendar', kinds: ['calendar'] },
+  { name: 'webhook', kinds: ['webhook'] },
+  { name: 'crm', kinds: ['crm'] },
+  { name: 'sync', kinds: ['dapta_sync', 'iam_onboarding'] },
+  { name: 'other', kinds: null },
+];
+const NAMED_KINDS = OUTBOX_LANES.flatMap((l) => l.kinds ?? []);
+
+/** A duration for a log line: "45s", "12m", "3h". */
+function span(ms: number): string {
+  if (ms < 120_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 7_200_000) return `${Math.round(ms / 60_000)}m`;
+  return `${Math.round(ms / 3_600_000)}h`;
+}
+
+/**
+ * The OUTBOX WORKER (B7 / audit DM1). Drains the `outbox` table, executing each
+ * durable side-effect and retrying it until it succeeds or its retries end.
+ * This is what turns fire-and-forget calendar/webhook/email calls into
+ * no-silent-loss delivery.
  *
- *   - Success → the row is marked `done`.
- *   - Failure → attempts++ and the row is rescheduled (backoff); once attempts
- *     reach `max_attempts` it is marked `failed` and logged (the row remains as
- *     the delivery-log record — nothing is silently dropped).
- *   - Idempotent: calendar write-out is guarded by the DH1 claim, so a retry
- *     cannot double-create a remote event.
+ *   - Lanes: each kind of work drains on its own (`OUTBOX_LANES`), with up to
+ *     `OUTBOX_CONCURRENCY` deliveries in flight per lane, and at most one per
+ *     destination (a webhook subscriber, a booking). A slow or failing
+ *     destination therefore delays only its own deliveries.
+ *   - Claims are leased (`claimDueOutbox`), so several API replicas can run
+ *     this worker against one database without delivering a row twice; a
+ *     replica that dies mid-delivery has its rows picked up when the lease
+ *     runs out. A delivery still running renews its lease.
+ *   - Success: the row is marked `done`.
+ *   - Failure: attempts++ and the row is due again after an exponential,
+ *     jittered backoff counted from the failure itself (1s, 2s, 4s ... capped
+ *     at 15 min). Once it has spent its attempt budget AND been failing for
+ *     `OUTBOX_RETRY_HORIZON_MS` (default 24 h) it is marked `failed` and
+ *     logged; a webhook's give-up also lands in the host's delivery log.
+ *   - Idempotent: calendar write-out is guarded by the DH1 claim, and a
+ *     webhook carries the same body, signature and `X-Slate-Delivery` id on
+ *     every attempt.
  *
  * The poll loop starts on module init (unless disabled or under `NODE_ENV=test`)
  * and stops on destroy. `drainOnce` is public so tests can pump the queue
@@ -46,9 +87,20 @@ import { DB, ENV } from './tokens';
 export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('OutboxWorker');
   private timer: ReturnType<typeof setInterval> | null = null;
-  private running = false;
+  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeAt = Number.POSITIVE_INFINITY;
+  private stopped = false;
+  /** Deliveries in flight per lane, and the lanes whose claim is running. */
+  private readonly inFlight = new Map<string, number>();
+  private readonly claiming = new Set<string>();
+  /** Lanes asked to claim while their claim was running: claim again after it. */
+  private readonly again = new Set<string>();
   /** Injectable for tests; defaults to global fetch for webhook delivery. */
   fetchImpl: typeof fetch = fetch;
+  /** The clock the poll loop reads; a field so specs can move it. */
+  now: () => number = Date.now;
+  /** The jitter source for retry delays; a field so specs can pin it. */
+  random: () => number = Math.random;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -64,6 +116,18 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     // no CRM handler simply has no `crm` rows to drain.
     @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
   ) {}
+
+  private get concurrency(): number {
+    return Math.max(1, this.env.OUTBOX_CONCURRENCY ?? 4);
+  }
+
+  private get leaseMs(): number {
+    return this.env.OUTBOX_LEASE_MS ?? DEFAULT_LEASE_MS;
+  }
+
+  private get horizonMs(): number {
+    return this.env.OUTBOX_RETRY_HORIZON_MS ?? 24 * 3_600_000;
+  }
 
   /**
    * The webhook signing key (#75), resolved once and cached — including the
@@ -98,69 +162,193 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     if (!this.env.OUTBOX_WORKER_ENABLED || this.env.NODE_ENV === 'test') return;
     this.timer = setInterval(() => {
-      void this.tick();
+      void this.pump();
     }, this.env.OUTBOX_POLL_MS);
     // Don't keep the process alive solely for the poll loop.
     this.timer.unref?.();
-    this.log.log(`outbox worker started (poll ${this.env.OUTBOX_POLL_MS}ms)`);
+    this.log.log(
+      `outbox worker started (poll ${this.env.OUTBOX_POLL_MS}ms, ${this.concurrency} per lane, ` +
+        `retry horizon ${span(this.horizonMs)})`,
+    );
   }
 
   onModuleDestroy(): void {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
     this.timer = null;
-  }
-
-  /** One poll tick, guarded so ticks never overlap in-process. */
-  private async tick(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
-      await this.drainOnce();
-    } catch (err) {
-      this.log.error(`outbox drain failed: ${String(err)}`);
-    } finally {
-      this.running = false;
-    }
+    this.wakeTimer = null;
   }
 
   /**
-   * Process every currently-due row once. Returns the number of rows processed
-   * (attempted), regardless of success. Deterministic for tests via `now`.
+   * One poll tick: every lane with a free slot claims what it can take and
+   * starts it. Resolves once the claims are made, NOT when the deliveries end
+   * (that is `drainOnce`). Public so specs can drive the live path.
    */
-  async drainOnce(now = Date.now()): Promise<number> {
-    const rows = await claimDueOutbox(this.db, now);
-    for (const row of rows) {
-      await this.process(row, now);
-    }
-    return rows.length;
+  async pump(): Promise<void> {
+    if (this.stopped) return;
+    await Promise.all(OUTBOX_LANES.map((lane) => this.pumpLane(lane)));
   }
 
-  private async process(row: OutboxRow, now: number): Promise<void> {
+  /**
+   * Fill a lane's free slots. Never awaits the deliveries it starts: a slow
+   * one holds its own slot, not the poll loop, so the next tick still claims
+   * for every other lane (and for this one, if it has room).
+   */
+  private async pumpLane(lane: (typeof OUTBOX_LANES)[number]): Promise<void> {
+    if (this.stopped) return;
+    if (this.claiming.has(lane.name)) {
+      this.again.add(lane.name);
+      return;
+    }
+    const free = this.concurrency - (this.inFlight.get(lane.name) ?? 0);
+    if (free <= 0) return;
+    this.claiming.add(lane.name);
+    let rows: OutboxRow[] = [];
+    try {
+      rows = await claimDueOutbox(this.db, this.now(), free, this.claimOptions(lane));
+    } catch (err) {
+      this.log.error(`outbox claim failed (${lane.name}): ${String(err)}`);
+    } finally {
+      this.claiming.delete(lane.name);
+    }
+    for (const row of rows) {
+      this.inFlight.set(lane.name, (this.inFlight.get(lane.name) ?? 0) + 1);
+      void this.process(row, this.now).finally(() => {
+        this.inFlight.set(lane.name, Math.max(0, (this.inFlight.get(lane.name) ?? 1) - 1));
+        // A slot just freed, and the destination it served may have more
+        // waiting: look now rather than at the next poll, so a healthy
+        // subscriber's backlog drains back to back.
+        void this.pumpLane(lane);
+      });
+    }
+    if (this.again.delete(lane.name)) void this.pumpLane(lane);
+  }
+
+  private claimOptions(lane: (typeof OUTBOX_LANES)[number]) {
+    return {
+      ...(lane.kinds ? { kinds: lane.kinds } : { excludeKinds: NAMED_KINDS }),
+      leaseMs: this.leaseMs,
+      onePerDestination: true,
+    };
+  }
+
+  /**
+   * A retry is due before the next poll: tick then, so a 1 s backoff is 1 s,
+   * not "whenever the poll comes round". Only while the poll loop runs.
+   */
+  private wake(at: number): void {
+    if (!this.timer || this.stopped || at >= this.wakeAt) return;
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeAt = at;
+    this.wakeTimer = setTimeout(
+      () => {
+        this.wakeTimer = null;
+        this.wakeAt = Number.POSITIVE_INFINITY;
+        void this.pump();
+      },
+      Math.max(0, at - this.now()),
+    );
+    this.wakeTimer.unref?.();
+  }
+
+  /**
+   * Process every currently-due row, lane by lane, and wait for all of it.
+   * Returns the number of rows processed (attempted), regardless of success.
+   *
+   * With `at`, time stands still at that instant for the whole drain (claims,
+   * leases, and every retry's schedule), which is what makes the specs
+   * deterministic. Rows a destination had to wait for are taken in further
+   * rounds of the same drain; a row that failed is due again only in the
+   * future, so the drain always ends.
+   */
+  async drainOnce(at?: number): Promise<number> {
+    const clock = at === undefined ? this.now : () => at;
+    let total = 0;
+    for (let round = 0; round < 100; round++) {
+      const counts = await Promise.all(
+        OUTBOX_LANES.map(async (lane) => {
+          const rows = await claimDueOutbox(this.db, clock(), 50, this.claimOptions(lane));
+          let next = 0;
+          const slot = async (): Promise<void> => {
+            while (next < rows.length) await this.process(rows[next++]!, clock);
+          };
+          await Promise.all(Array.from({ length: Math.min(this.concurrency, rows.length) }, slot));
+          return rows.length;
+        }),
+      );
+      const n = counts.reduce((a, b) => a + b, 0);
+      total += n;
+      if (n === 0) break;
+    }
+    return total;
+  }
+
+  private async process(row: OutboxRow, clock: () => number): Promise<void> {
+    // Keep the claim while the delivery runs, however long it takes, so no
+    // other worker starts the same row meanwhile.
+    const renew = row.leaseToken
+      ? setInterval(
+          () => {
+            void renewOutboxLease(this.db, row.id, row.leaseToken!, this.now() + this.leaseMs).catch(
+              () => undefined,
+            );
+          },
+          Math.max(1000, Math.floor(this.leaseMs / 3)),
+        )
+      : null;
+    renew?.unref?.();
     try {
       await this.execute(row);
-      await markOutboxDone(this.db, row.id, now);
-    } catch (err) {
-      if (err instanceof OutboxSkipError) {
-        // A decision, not a failure: record the reason ONCE and stop — waiting
-        // and retrying cannot change the outcome.
-        await markOutboxSkipped(this.db, row.id, { reason: err.message, now });
-        this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
-        return;
+      clearInterval(renew ?? undefined);
+      const written = await markOutboxDone(this.db, row.id, clock(), row.leaseToken);
+      if (!written) {
+        // Its lease passed to another worker (a delivery slower than the
+        // lease), or the row was removed meanwhile (a reminder dropped by a
+        // cancel). The delivery happened; only this record of it did not land.
+        this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) delivered, but the row was taken over or removed meanwhile`);
       }
-      const attempts = row.attempts + 1;
-      const message = err instanceof Error ? err.message : String(err);
-      if (attempts >= row.maxAttempts) {
-        await markOutboxFailed(this.db, row.id, { attempts, error: message, now });
-        this.log.error(
-          `outbox ${row.kind}:${row.action} (${row.id}) gave up after ${attempts} attempts: ${message}`,
-        );
-      } else {
-        await markOutboxRetry(this.db, row.id, { attempts, error: message, now });
-        this.log.warn(
-          `outbox ${row.kind}:${row.action} (${row.id}) failed (attempt ${attempts}/${row.maxAttempts}), will retry: ${message}`,
-        );
+    } catch (err) {
+      clearInterval(renew ?? undefined);
+      try {
+        await this.recordFailure(row, err, clock);
+      } catch (writeErr) {
+        // The row keeps its lease and is retried once it runs out.
+        this.log.error(`outbox ${row.kind}:${row.action} (${row.id}) outcome not recorded: ${String(writeErr)}`);
       }
     }
+  }
+
+  private async recordFailure(row: OutboxRow, err: unknown, clock: () => number): Promise<void> {
+    const now = clock();
+    if (err instanceof OutboxSkipError) {
+      // A decision, not a failure: record the reason ONCE and stop: waiting
+      // and retrying cannot change the outcome.
+      await markOutboxSkipped(this.db, row.id, { reason: err.message, now, leaseToken: row.leaseToken });
+      this.log.warn(`outbox ${row.kind}:${row.action} (${row.id}) skipped: ${err.message}`);
+      return;
+    }
+    const attempts = row.attempts + 1;
+    const message = err instanceof Error ? err.message : String(err);
+    if (outboxRetriesExhausted(row, attempts, now, this.horizonMs)) {
+      await markOutboxFailed(this.db, row.id, { attempts, error: message, now, leaseToken: row.leaseToken });
+      const tried = row.firstFailedAt == null ? '' : ` over ${span(now - row.firstFailedAt)}`;
+      this.log.error(
+        `outbox ${row.kind}:${row.action} (${row.id}) failed for good after ${attempts} attempts${tried}: ${message}`,
+      );
+      if (row.kind === 'webhook' && row.webhookId && row.payload != null) {
+        await recordWebhookGaveUp(this.db, { webhookId: row.webhookId, body: row.payload, attempts }).catch(
+          () => undefined,
+        );
+      }
+      return;
+    }
+    const delayMs = retryDelayMs(attempts, this.random);
+    await markOutboxRetry(this.db, row.id, { attempts, error: message, now, delayMs, leaseToken: row.leaseToken });
+    this.log.warn(
+      `outbox ${row.kind}:${row.action} (${row.id}) failed (attempt ${attempts}), next try in ${span(delayMs)}: ${message}`,
+    );
+    this.wake(now + delayMs);
   }
 
   /** Perform the row's side-effect. Throws on failure so `process` can retry. */
@@ -188,6 +376,8 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
         {
           webhookId: row.webhookId,
           body: row.payload,
+          // The row id: the same on every retry of this event to this subscriber.
+          deliveryId: row.id,
           // #75: null is a valid state (a deployment with only legacy plaintext
           // secrets). An ENCRYPTED secret with no key throws inside, which the
           // catch below turns into a normal retry — so a key removed by mistake
