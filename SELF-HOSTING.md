@@ -260,6 +260,52 @@ there is one upstream identity service and one pair of credentials.
 | `DAPTA_SYNC_TOKEN` | — | only when that endpoint requires a bearer | **yes** |
 | `DAPTA_SYNC_TIMEOUT_MS` | `5000` | never — raise only if the endpoint legitimately runs slow | no |
 
+### Product analytics (optional)
+
+**Off by default, and a fork that leaves it unset loads no script, enqueues
+nothing and makes no request.**
+
+Set a provider and its project key and the deployment reports how it is used
+to an analytics project you own: hosts' activation steps (signup and its
+source, template, calendar connected, hours, first publish, branding) as server
+events, plus dashboard pageviews; and, anonymously, the booking funnel on public
+pages (page viewed, day picked, time picked, booking sent and confirmed, a click
+on the "Made with" badge). The full event list and what is never sent are in
+[`ANALYTICS.md`](ANALYTICS.md).
+
+The short version of the privacy model: hosts are identified by email; visitors
+never are. A visitor gets no person profile, nothing is written to their device,
+and nothing they type is sent. Session recording and autocapture are off on
+every page. URLs lose their query strings before they leave the browser.
+
+**One image, any environment.** The web app reads these variables on the server
+**at request time**, not as `NEXT_PUBLIC_*` build arguments, so the same image
+can run with analytics on, off, or pointed at a different project per
+environment. Set them on **both** apps; the names are the same.
+
+`posthog` is the one adapter in this repository. The host may be PostHog's own
+(`https://us.i.posthog.com`, the default) or your reverse proxy in front of it;
+the browser loads the library from `<host>/static/array.js` and sends events to
+the same host.
+
+| Var | Default | Required when | Secret? |
+|---|---|---|---|
+| `PRODUCT_ANALYTICS_PROVIDER` | unset (off) | to enable: `posthog` | no |
+| `PRODUCT_ANALYTICS_KEY` | unset | to enable: the project's write-only ingestion key | no (it reaches the browser by design) |
+| `PRODUCT_ANALYTICS_HOST` | the vendor's public host | only to use your own proxy or region | no |
+| `PRODUCT_ANALYTICS_INTERNAL_EMAILS` | unset | only to mark your own staff and test accounts `is_internal`: comma-separated, case-insensitive substrings of an email | no |
+
+A provider without a usable key or host turns analytics off with one warning at
+boot; it never stops either app from starting. Turning analytics off later
+leaves any queued rows to drain as `skipped`.
+
+**What a visitor's browser stores.** Nothing, from analytics itself. The one
+cookie this feature adds is `slate.ph_id`: when a link arrives carrying
+`?ph_id=` (a marketing landing's anonymous id), the middleware parks it for ten
+minutes, httpOnly, beside the campaign cookie above, so the host who signs up
+can be joined to their landing visit. It is set only from that parameter, only
+when the value looks like an analytics id, and never read unless analytics is on.
+
 ### CRM write-out (optional)
 
 Writes an accepted booking into the CRM your hosts already work in: the invitee
@@ -536,3 +582,4 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — request flows, seams, double-booking safety.
 - [`CLAUDE.md`](CLAUDE.md) — local run/test commands and invariants.
 - [`.env.example`](.env.example) — every variable with inline notes.
+- [`ANALYTICS.md`](ANALYTICS.md): the product analytics events and what is never sent.
