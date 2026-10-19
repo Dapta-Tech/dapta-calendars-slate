@@ -32,6 +32,7 @@ import { checkWebhookUrl } from '@slate/db';
 import { isAccountTemplateKey, isEmailTemplateKey, type EmailTemplateKey } from '@slate/notifications';
 import { ZodError } from 'zod';
 import { AdminService } from './admin.service';
+import { AnalyticsEffects } from './analytics-effects';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { OnboardingService } from './onboarding.service';
 import { GrowthService } from './growth.service';
@@ -58,6 +59,9 @@ export class HostController {
     @Optional()
     @Inject(CrmPropertyCatalogService)
     private readonly crmProperties?: CrmPropertyCatalogService,
+    // Product analytics. LAST and @Optional() for the same reason: absent, no
+    // event is recorded, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   /**
@@ -140,7 +144,15 @@ export class HostController {
         message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
       });
     }
-    return this.onboarding.submitSetup(p, parsed.data);
+    const created = await this.onboarding.submitSetup(p, parsed.data);
+    void this.analytics?.hostEvent('template_chosen', p, { template: parsed.data.templateId });
+    // A template creates a visible event type: the host's first publish.
+    void this.analytics?.hostEvent('event_type_published', p, {
+      source: 'onboarding',
+      is_team: false,
+      requires_confirmation: false,
+    });
+    return created;
   }
 
   /**
@@ -187,7 +199,10 @@ export class HostController {
         message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
       });
     }
-    return this.growth.claim(p, parsed.data.attribution);
+    const result = await this.growth.claim(p, parsed.data.attribution);
+    // Only a WON claim is the signup source; a refused one is somebody's later click.
+    if (result.claimed) void this.analytics?.attributionCaptured(p, parsed.data.attribution);
+    return result;
   }
 
   @Get('handle-available')
@@ -235,6 +250,7 @@ export class HostController {
         error: 'DAPTA_SUBSCRIPTION_REQUIRED',
         message: 'Hiding the branding is included with your Dapta AI subscription.',
       });
+    void this.analytics?.hostEvent('hide_branding_toggled', p, { hidden: body.hideBranding });
     return out.branding;
   }
 
@@ -293,6 +309,11 @@ export class HostController {
     try {
       const { backupAs, ...patch } = brandingWriteSchema.parse(body);
       await this.admin.updateBranding(p, patch, backupAs);
+      // Which settings moved, never their values.
+      void this.analytics?.hostEvent('branding_changed', p, {
+        change: backupAs ? 'look_applied' : 'page_style',
+        fields: Object.keys(patch).sort().join(','),
+      });
       return { ok: true };
     } catch (err) {
       if (err instanceof ZodError)
@@ -316,7 +337,9 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     try {
-      return await this.admin.saveBrandKit(p, brandKitSchema.parse(body));
+      const kit = await this.admin.saveBrandKit(p, brandKitSchema.parse(body));
+      void this.analytics?.hostEvent('branding_changed', p, { change: 'brand_kit' });
+      return kit;
     } catch (err) {
       if (err instanceof ZodError)
         throw new BadRequestException({ error: 'BAD_REQUEST', message: err.issues[0]?.message });
@@ -331,6 +354,7 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     const applied = await this.admin.applyBrandKitToMe(p);
     if (!applied) throw new NotFoundException({ error: 'NO_BRAND_KIT', message: 'This workspace has no brand kit yet.' });
+    void this.analytics?.hostEvent('branding_changed', p, { change: 'kit_applied' });
     return { ok: true };
   }
 
@@ -341,6 +365,7 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     const reverted = await this.admin.revertBranding(p);
     if (!reverted) throw new NotFoundException({ error: 'NOTHING_TO_REVERT', message: 'There is no applied look to revert.' });
+    void this.analytics?.hostEvent('branding_changed', p, { change: 'reverted' });
     return { ok: true };
   }
 
@@ -402,6 +427,12 @@ export class HostController {
         });
       throw new BadRequestException({ error: 'SLOT_TAKEN', message: 'That time is taken.' });
     }
+    void this.analytics?.bookingCreated({
+      uid: out.booking.uid,
+      inviteeEmail: out.booking.attendee?.email,
+      channel: 'host',
+      isTeam: false,
+    });
     return { uid: out.booking.uid, status: out.booking.status };
   }
 
@@ -555,7 +586,9 @@ export class HostController {
     const p = await this.auth.resolveHost(req);
     if (!body?.provider || !body?.externalId)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'provider, externalId required' });
-    return this.admin.createConnection(p, body);
+    const created = await this.admin.createConnection(p, body);
+    void this.analytics?.hostEvent('calendar_connected', p, { provider: body.provider, method: 'manual' });
+    return created;
   }
 
   /**
@@ -578,7 +611,20 @@ export class HostController {
   @HttpCode(200)
   async discoverConnections(@Req() req: ReqLike, @Body() body: { provider?: string; email?: string }) {
     const p = await this.auth.resolveHost(req);
-    return this.admin.discoverConnections(p, body?.provider ?? 'google', body?.email);
+    // Which connections are NEW is only knowable against the list before the
+    // call, read only when analytics is on so nobody else pays for it.
+    const before = this.analytics?.enabled
+      ? new Set((await this.admin.listConnections(p)).map((c) => c.id))
+      : null;
+    const after = await this.admin.discoverConnections(p, body?.provider ?? 'google', body?.email);
+    if (before) {
+      for (const c of after) {
+        if (!before.has(c.id)) {
+          void this.analytics?.hostEvent('calendar_connected', p, { provider: c.provider, method: 'connect_flow' });
+        }
+      }
+    }
+    return after;
   }
 
   /** List the calendars a connected account exposes (post-connect pick). */

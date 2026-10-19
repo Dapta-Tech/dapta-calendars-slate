@@ -62,6 +62,7 @@ import {
 import { oneOffLinkPath } from '@slate/engine';
 import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
 import { ZodError } from 'zod';
+import { AnalyticsEffects } from './analytics-effects';
 import { AuthService, type ReqLike } from './auth.service';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { GrowthService } from './growth.service';
@@ -134,6 +135,9 @@ export class AdminCrudController {
     @Optional()
     @Inject(CrmPropertyCatalogService)
     private readonly crmProperties?: CrmPropertyCatalogService,
+    // Product analytics. LAST and @Optional() for the same reason: absent, no
+    // event is recorded, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   /**
@@ -294,7 +298,15 @@ export class AdminCrudController {
       input.crmPropertyMappings,
       (input.bookingFields ?? []) as MappableField[],
     );
-    return unwrapCrud(await createEventType(this.db, p.accountId, p.memberId, input));
+    const created = unwrapCrud(await createEventType(this.db, p.accountId, p.memberId, input));
+    if (!created.hidden) {
+      void this.analytics?.hostEvent('event_type_published', p, {
+        source: 'dashboard',
+        is_team: Boolean(created.teamId),
+        requires_confirmation: Boolean(input.requiresConfirmation),
+      });
+    }
+    return created;
   }
 
   @Patch('event-types/:id')
@@ -312,7 +324,17 @@ export class AdminCrudController {
       input.crmPropertyMappings,
       (input.bookingFields ?? existing.bookingFields ?? []) as MappableField[],
     );
-    return unwrapCrud(await updateEventType(this.db, p.accountId, id, input));
+    const updated = unwrapCrud(await updateEventType(this.db, p.accountId, id, input));
+    // Published = visible on the booking page. Only the save that turns a
+    // hidden event type visible counts, so routine edits are not "publishes".
+    if (existing.hidden && !updated.hidden) {
+      void this.analytics?.hostEvent('event_type_published', p, {
+        source: 'dashboard',
+        is_team: Boolean(updated.teamId),
+        requires_confirmation: Boolean(updated.requiresConfirmation),
+      });
+    }
+    return updated;
   }
 
   @Delete('event-types/:id')
@@ -439,7 +461,11 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     const input = parse(scheduleInputSchema, body);
     // A schedule is always created under the caller — nothing cross-member here.
-    return createSchedule(this.db, p.accountId, p.memberId, input);
+    const created = await createSchedule(this.db, p.accountId, p.memberId, input);
+    if (input.rules?.length) {
+      void this.analytics?.hostEvent('hours_set', p, { rule_count: input.rules.length, created: true });
+    }
+    return created;
   }
 
   @Patch('schedules/:id')
@@ -449,7 +475,12 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(scheduleInputSchema.partial(), body);
-    return unwrapCrud(await updateSchedule(this.db, p.accountId, id, input));
+    const updated = unwrapCrud(await updateSchedule(this.db, p.accountId, id, input));
+    // Hours are set when the save carries rules; a rename or a zone change is not.
+    if (input.rules?.length) {
+      void this.analytics?.hostEvent('hours_set', p, { rule_count: input.rules.length, created: false });
+    }
+    return updated;
   }
 
   @Delete('schedules/:id')

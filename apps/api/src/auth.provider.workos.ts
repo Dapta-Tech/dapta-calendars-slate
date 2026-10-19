@@ -24,7 +24,14 @@ import type { Db, AccountRole } from '@slate/db';
 import { deriveUniqueHandle, insertAccountWithShortCode, jsonParam, sql } from '@slate/db';
 import { withNewHostBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
-import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
+import {
+  header,
+  notifySignup,
+  type AuthProvider,
+  type ResolvedHost,
+  type ReqLike,
+  type SignupObserver,
+} from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
 type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE' | 'OPERATOR_EMAIL_DOMAIN'>;
@@ -45,6 +52,8 @@ export class WorkOsAuthProvider implements AuthProvider {
   constructor(
     private readonly db: Db,
     private readonly env: WorkOsEnv,
+    /** Told when a login creates or adopts a member. Omitted: nothing observes signups. */
+    private readonly onSignup?: SignupObserver,
   ) {
     if (!env.JWT_SECRET) {
       // Defensive: the factory already guards this, but never run without a key.
@@ -141,6 +150,16 @@ export class WorkOsAuthProvider implements AuthProvider {
                 display_name = COALESCE(display_name, ${displayName})
               WHERE id = ${invited.id}`,
         );
+        const adopted = await this.db.get<{ role: string }>(
+          sql`SELECT role FROM member WHERE id = ${invited.id} LIMIT 1`,
+        );
+        notifySignup(this.onSignup, {
+          accountId,
+          memberId: invited.id,
+          role: adopted?.role ?? 'member',
+          isFirstMember: false,
+          fromInvite: true,
+        });
         return invited.id;
       }
     }
@@ -173,6 +192,12 @@ export class WorkOsAuthProvider implements AuthProvider {
       sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
     );
     if (!row) throw unauthenticated('Could not resolve member.');
+    // Only the request whose INSERT won reports the signup: a concurrent first
+    // login lost the conflict and selects the winner's row, whose id is not
+    // the one generated above.
+    if (row.id === id) {
+      notifySignup(this.onSignup, { accountId, memberId: id, role, isFirstMember: !occupied, fromInvite: false });
+    }
     return row.id;
   }
 }
