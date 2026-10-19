@@ -1742,6 +1742,16 @@ export interface BookingNotificationContext {
   accountId: string;
   uid: string;
   title: string;
+  /**
+   * For the template variables `{{event_name}}`, `{{event_description}}`,
+   * `{{workspace_name}}` and `{{team_name}}`: the event type's name and
+   * description, the account's name and the owning team's. Null when the
+   * booking has no event type, the event no team, or the text is empty.
+   */
+  eventName: string | null;
+  eventDescription: string | null;
+  workspaceName: string | null;
+  teamName: string | null;
   startUtc: string;
   endUtc: string;
   status: string;
@@ -1863,6 +1873,10 @@ export async function loadBookingNotificationContext(
     event_slug: string | null;
     event_reminders: unknown;
     responses: unknown;
+    event_name: string | null;
+    event_description: string | null;
+    workspace_name: string | null;
+    team_name: string | null;
   }>(
     sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
                b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
@@ -1870,11 +1884,13 @@ export async function loadBookingNotificationContext(
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
                et.booking_fields AS event_fields, b.locale AS booking_locale,
-               b.metadata AS booking_metadata
+               b.metadata AS booking_metadata, et.title AS event_name,
+               et.description AS event_description, acc.name AS workspace_name, t.name AS team_name
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
         LEFT JOIN account acc ON acc.id = b.account_id
         LEFT JOIN event_type et ON et.id = b.event_type_id
+        LEFT JOIN team t ON t.id = et.team_id
         WHERE b.uid = ${uid} LIMIT 1`,
   );
   if (!row) return null;
@@ -1932,6 +1948,10 @@ export async function loadBookingNotificationContext(
     accountId: row.account_id,
     uid: row.uid,
     title: row.title,
+    eventName: row.event_name?.trim() || null,
+    eventDescription: row.event_description?.trim() || null,
+    workspaceName: row.workspace_name?.trim() || null,
+    teamName: row.team_name?.trim() || null,
     startUtc: new Date(Number(row.start_ms)).toISOString(),
     endUtc: new Date(Number(row.end_ms)).toISOString(),
     status: row.status,

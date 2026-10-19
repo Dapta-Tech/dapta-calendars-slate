@@ -316,6 +316,9 @@ importers:
 
   packages/notifications:
     dependencies:
+      '@slate/engine':
+        specifier: workspace:*
+        version: link:../engine
       '@slate/shared':
         specifier: workspace:*
         version: link:../shared

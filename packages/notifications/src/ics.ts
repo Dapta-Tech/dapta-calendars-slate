@@ -33,13 +33,17 @@ export interface IcsInput {
   stamp: string;
 }
 
-/** Escape a TEXT value (RFC 5545 §3.3.11). */
+/**
+ * Escape a TEXT value (RFC 5545 §3.3.11). Every line break, a lone CR
+ * included, becomes `\n`: a raw CR would end the content line and let the
+ * rest of a title or description start a property of its own.
+ */
 function escapeText(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    .replace(/\r\n?|\n/g, '\\n');
 }
 
 /**

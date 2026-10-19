@@ -12,3 +12,4 @@ export * from './one-off-link';
 export * from './pg-errors';
 export * from './location';
 export * from './onboarding';
+export * from './template';

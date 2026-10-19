@@ -82,7 +82,7 @@ import {
   type BookingNotification,
   type EmailTemplateKey,
 } from '@slate/notifications';
-import { canClaimVanitySlug } from '@slate/engine';
+import { canClaimVanitySlug, templateIssueMessage, validateTemplate } from '@slate/engine';
 import { CrmAuthError } from '@slate/crm';
 import {
   clampAvailabilityWindow,
@@ -99,6 +99,7 @@ import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
+import { assertTemplates } from './template-validation';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -1143,11 +1144,18 @@ export class AdminService {
     };
   }
 
-  updateNotificationSetting(
+  async updateNotificationSetting(
     p: HostPrincipal,
     key: string,
     patch: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
   ) {
+    if (patch.subject != null || patch.body != null) {
+      const stored = (await getNotificationSettings(this.db, p.accountId)).get(key);
+      assertTemplates('email', [
+        { label: 'Subject', text: patch.subject, previous: stored?.subject },
+        { label: 'Body', text: patch.body, previous: stored?.body },
+      ]);
+    }
     return upsertNotificationSetting(this.db, p.accountId, key, patch);
   }
 
@@ -1158,8 +1166,9 @@ export class AdminService {
   /**
    * Server-side preview: render the (possibly still-unsaved) template against
    * fixed sample data — the same renderer the outbox uses, so preview ===
-   * reality. Also reports tokens outside the whitelist so the editor can flag
-   * them before saving.
+   * reality. Also reports names outside the catalog (`unknownTokens`) and
+   * every problem a save would refuse or warn about (`issues`, with offsets
+   * into the subject or the body), so the editor can flag them before saving.
    */
   async previewNotificationTemplate(
     p: HostPrincipal,
@@ -1173,6 +1182,10 @@ export class AdminService {
       accountId: p.accountId,
       uid: 'sample-uid',
       title: locale === 'es' ? 'Llamada de presentación' : 'Intro Call',
+      eventName: locale === 'es' ? 'Llamada de presentación' : 'Intro Call',
+      eventDescription: locale === 'es' ? 'Una primera llamada de 30 minutos.' : 'A first 30 minute call.',
+      workspaceName: 'Acme',
+      teamName: locale === 'es' ? 'Ventas' : 'Sales',
       startUtc: new Date(Date.now() + 26 * 3_600_000).toISOString(),
       endUtc: new Date(Date.now() + 26 * 3_600_000 + 30 * 60_000).toISOString(),
       host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com' },
@@ -1180,7 +1193,9 @@ export class AdminService {
         name: locale === 'es' ? 'Ana García' : 'Sam Guest',
         email: 'guest@example.com',
         timeZone: me?.timeZone ?? 'UTC',
+        phone: '+1 555 0100',
       },
+      guests: [{ name: null, email: 'colleague@example.com' }],
       location: getMessages(locale).location.conferencing,
       manageUrl: 'https://example.com/manage/sample',
       bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
@@ -1189,7 +1204,7 @@ export class AdminService {
       pending: key === 'host_booked',
       reminderLeadMinutes: 60,
     };
-    const rendered = renderTemplate(template, templateVars(sample, locale));
+    const rendered = renderTemplate(template, templateVars(sample, locale), locale);
     // The host's copy of a request, a booking and a move adds who is asking and
     // what they answered under the template's body, whatever it says. That part
     // is not editable, but the preview shows it (with a sample), so the preview
@@ -1208,10 +1223,18 @@ export class AdminService {
           key === 'host_booked' ? 'https://example.com/admin/bookings' : null,
         )}`
       : rendered.text;
+    const issues = (['subject', 'body'] as const).flatMap((field) =>
+      validateTemplate(template[field], { context: 'email' }).map((i) => ({
+        field,
+        ...i,
+        message: templateIssueMessage(i, locale),
+      })),
+    );
     return {
       ...rendered,
       text,
       unknownTokens: unknownTokens(`${template.subject}\n${template.body}`),
+      issues,
     };
   }
 }

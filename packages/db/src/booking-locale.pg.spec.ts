@@ -81,6 +81,8 @@ describePg('booking.locale and the notification context (real Postgres)', () => 
     expect(ctx.attendee).toMatchObject({ phone: '+1 602 555 0143', notes: 'Joining from my phone' });
     expect(ctx.guests.map((g) => g.email).sort()).toEqual([`ana-${run}@example.com`, `bo-${run}@example.com`]);
     expect(ctx.bookingFields.map((f) => f.label)).toEqual(['Company', 'What would you like to discuss?']);
+    // The template variables' names: a personal event has no team.
+    expect(ctx).toMatchObject({ eventName: 'Intro Call', workspaceName: 'Acme Inc.', teamName: null });
 
     const moved = await rescheduleBookingV2(db, { accountId, uid, newStartMs: later! });
     if (!moved.ok) throw new Error(`reschedule failed: ${moved.reason}`);

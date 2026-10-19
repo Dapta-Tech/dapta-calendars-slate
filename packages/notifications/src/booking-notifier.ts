@@ -26,6 +26,17 @@ export interface BookingNotification {
   startUtc: string;
   endUtc: string;
   /**
+   * What `{{event_name}}`, `{{event_description}}`, `{{workspace_name}}` and
+   * `{{team_name}}` read: the event type's own name and description, the
+   * account's name and the owning team's. Snapshotted at enqueue. Absent on
+   * rows queued before they were carried: the event name then reads as the
+   * booking title (what it always was) and the rest as empty.
+   */
+  eventName?: string | null;
+  eventDescription?: string | null;
+  workspaceName?: string | null;
+  teamName?: string | null;
+  /**
    * `timeZone` is the host's own zone, which the host's copy is written in (see
    * `recipientTimeZone`). Absent on forks that build notifications directly,
    * and on rows queued before it was carried (the API fills those in at
@@ -212,7 +223,7 @@ export class BookingNotifier {
     const withDetails = (text: string) =>
       details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text;
     if (n.template) {
-      const base = renderTemplate(n.template, vars);
+      const base = renderTemplate(n.template, vars, locale);
       return { subject: base.subject, text: withDetails(base.text), html };
     }
     const { subject, lines } = legacy();

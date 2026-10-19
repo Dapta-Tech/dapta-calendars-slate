@@ -474,6 +474,109 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(sent[0]!.attachments ?? []).toHaveLength(0); // no invite on a follow-up
   });
 
+  it('a transactional email reads the template language: new variables, answers and blocks', async () => {
+    await upsertNotificationSetting(db, accountId, 'attendee_confirmation', {
+      subject: 'Hi {{first_name | "there"}}: {{event_name}}',
+      body: [
+        'Team: {{team_name | "none"}}',
+        '{{#if form.company == "acme"}}',
+        'VIP {{form.company}}',
+        '{{else}}',
+        'Standard',
+        '{{/if}}',
+        'Phone: {{attendee_phone}}',
+        'Workspace: {{workspace_name}}',
+        'Length: {{duration}}',
+        'Ref: {{booking_uid}}',
+      ].join('\n'),
+    });
+    const uid = await book();
+    await settle();
+    const row = (await emailRows(uid, 'confirmation')).find(
+      (r) => (JSON.parse(r.payload!) as { audience: string }).audience === 'attendee',
+    )!;
+    const payload = JSON.parse(row.payload!) as {
+      formAnswers?: Record<string, unknown>;
+      eventName?: string;
+      workspaceName?: string;
+      attendee: Record<string, unknown>;
+    };
+    // `{{form.*}}` now resolves in transactional mail, not only in reminders.
+    expect(payload.formAnswers).toEqual({ company: 'Acme' });
+    expect(payload).toMatchObject({ eventName: 'Intro Call', workspaceName: 'Acme Inc.' });
+    await effects.deliver('confirmation', row.payload!, row.accountId);
+    const m = email.sent.at(-1)!;
+    expect(m.subject).toBe('Hi Sam: Intro Call');
+    expect(m.text).toContain('Team: none\nVIP Acme\n');
+    expect(m.text).not.toContain('Standard');
+    expect(m.text).not.toContain('Phone:'); // read, but empty: the line is dropped
+    expect(m.text).toContain('Workspace: Acme Inc.');
+    expect(m.text).toMatch(/Length: \d+ (min|h)/);
+    expect(m.text).toContain(`Ref: ${uid}`);
+  });
+
+  it('a copy carries the phone and the guests only when its own template reads them', async () => {
+    const uid = await book();
+    await settle();
+    const plain = (await emailRows(uid, 'confirmation')).find(
+      (r) => (JSON.parse(r.payload!) as { audience: string }).audience === 'attendee',
+    )!;
+    const before = JSON.parse(plain.payload!) as { attendee: Record<string, unknown>; guests?: unknown };
+    expect('phone' in before.attendee).toBe(false);
+    expect('guests' in before).toBe(false);
+
+    await upsertNotificationSetting(db, accountId, 'attendee_confirmation', {
+      body: 'Phone: {{attendee_phone}}\nWith: {{guests}}',
+    });
+    const uid2 = await book();
+    await settle();
+    const asked = (await emailRows(uid2, 'confirmation')).find(
+      (r) => (JSON.parse(r.payload!) as { audience: string }).audience === 'attendee',
+    )!;
+    const after = JSON.parse(asked.payload!) as { attendee: Record<string, unknown>; guests?: unknown };
+    expect('phone' in after.attendee).toBe(true);
+    expect(after.guests).toEqual([]);
+  });
+
+  it('saving copy that cannot render is refused; stored copy and a bare toggle still save', async () => {
+    let refused: unknown;
+    try {
+      await admin.updateNotificationSetting(principal, 'attendee_confirmation', { body: 'Hi {{atendee_name}}' });
+    } catch (err) {
+      refused = (err as { getResponse?: () => unknown }).getResponse?.();
+    }
+    expect(refused).toMatchObject({
+      message: 'Body: {{atendee_name}} is not a variable. Pick one from the list.',
+      issues: [{ field: 'Body', code: 'unknown_variable', token: '{{atendee_name}}', start: 3, end: 19 }],
+    });
+    const saved = await admin.updateNotificationSetting(principal, 'attendee_confirmation', {
+      subject: '{{event_name}} with {{host_name}}',
+      body: '{{#if form.company}}For {{form.company}}{{/if}}',
+    });
+    expect(saved.subject).toBe('{{event_name}} with {{host_name}}');
+
+    // Copy saved before the check existed: re-saving it as it is, or only
+    // flipping the switch, is never blocked by it.
+    await upsertNotificationSetting(db, accountId, 'host_booked', { body: 'Legacy {{bogus}}' });
+    await expect(
+      admin.updateNotificationSetting(principal, 'host_booked', { body: 'Legacy {{bogus}}' }),
+    ).resolves.toBeTruthy();
+    await expect(admin.updateNotificationSetting(principal, 'host_booked', { enabled: false })).resolves.toBeTruthy();
+  });
+
+  it('the preview lists every problem a save would refuse, in the host language', async () => {
+    const preview = await admin.previewNotificationTemplate(principal, 'attendee_confirmation', {
+      subject: '{{event_name}} {{#if form.x}}',
+      body: 'Hi {{nope}} {{duration}}',
+    });
+    expect(preview.issues.map((i) => [i.field, i.code])).toEqual([
+      ['subject', 'unclosed_block'],
+      ['body', 'unknown_variable'],
+    ]);
+    expect(preview.issues[1]!.message).toBe('{{nope}} is not a variable. Pick one from the list.');
+    expect(preview.text).toMatch(/\d+ min/);
+  });
+
   it('preview renders sample data and flags unknown tokens; reset restores defaults', async () => {
     const preview = await admin.previewNotificationTemplate(principal, 'attendee_confirmation', {
       subject: 'Yo {{attendee_name}} {{bogus_token}}',

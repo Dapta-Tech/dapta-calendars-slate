@@ -67,6 +67,7 @@ import { AuthService, type ReqLike } from './auth.service';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
+import { assertReminderTemplates } from './template-validation';
 import { DB } from './tokens';
 import { withNewHostBranding } from '@slate/shared';
 
@@ -308,6 +309,7 @@ export class AdminCrudController {
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
+    assertReminderTemplates(input.reminders, []);
     await this.assertMappingsAreDeliverable(
       p.accountId,
       input.crmPropertyMappings,
@@ -331,6 +333,7 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
+    assertReminderTemplates(input.reminders, existing.reminders);
     // Validated against the questions this save LEAVES BEHIND: a partial update
     // that omits `bookingFields` keeps the event's existing ones, and checking
     // against an empty list would refuse every question mapping on such a save.

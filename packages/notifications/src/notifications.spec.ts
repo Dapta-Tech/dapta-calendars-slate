@@ -26,6 +26,12 @@ describe('buildIcs', () => {
     expect(ics.includes('\r\n')).toBe(true);
   });
 
+  it('folds every line break in TEXT, a lone CR included, so no value starts a property', () => {
+    const ics = buildIcs({ ...base, title: 'A\rORGANIZER:evil\r\nB\nC', method: 'REQUEST', sequence: 0 });
+    expect(ics).toContain('SUMMARY:A\\nORGANIZER:evil\\nB\\nC');
+    expect(ics.split('\r\n').filter((l) => l.startsWith('ORGANIZER'))).toHaveLength(1);
+  });
+
   it('emits CANCEL with SEQUENCE 2 and the SAME UID', () => {
     const ics = buildIcs({ ...base, method: 'CANCEL', sequence: 2 });
     expect(ics).toContain('METHOD:CANCEL');

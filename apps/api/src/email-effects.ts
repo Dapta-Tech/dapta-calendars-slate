@@ -19,6 +19,7 @@ import {
   HOST_DETAIL_KINDS,
   collectBookingAnswers,
   defaultEnabledFor,
+  extractTokens,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
@@ -507,18 +508,21 @@ export class EmailEffects {
     const customCopy = setting != null && (setting.subject != null || setting.body != null);
     const locale =
       side.audience === 'attendee' && !customCopy ? (ctx.attendeeLocale ?? ctx.hostLocale) : ctx.hostLocale;
+    const template = resolveTemplate(side.key, setting, locale);
     return {
-      ...this.toNotification(ctx, extra, locale),
+      ...this.toNotification(ctx, extra, locale, new Set(extractTokens(`${template.subject}\n${template.body}`))),
       // The manage link is the invitee's tokenised link to THEIR booking; the
       // host's copy is never handed it, so no host mail can carry it.
       ...(side.audience === 'host' ? { manageUrl: null, ...this.hostSide(ctx, kind) } : {}),
       audience: side.audience,
-      template: resolveTemplate(side.key, setting, locale),
+      template,
       templateLocale: locale,
       pending: kind === 'pending',
-      // `{{form.*}}` is reminder copy only (CONTEXT.md): the account-wide
-      // transactional templates cannot know one event type's questions.
-      ...(reminder ? { formAnswers: ctx.formAnswers } : {}),
+      // `{{form.*}}` resolves in every email. An account-wide template cannot
+      // know one event type's questions, so a name the booking did not answer
+      // reads as empty and the empty-line rule drops its line; the answers are
+      // the invitee's own, so quoting them back to the invitee exposes nothing.
+      formAnswers: ctx.formAnswers,
     };
   }
 
@@ -556,18 +560,32 @@ export class EmailEffects {
     extra: { manageUrl?: string; cancellationReason?: string | null; previousStartUtc?: string | null },
     // The language this copy is written in, which the Where is worded in too.
     locale: string | null = ctx.hostLocale,
+    // The variables this copy's template reads, when it has one.
+    reads: ReadonlySet<string> = new Set(),
   ): BookingNotification {
     return {
       accountId: ctx.accountId,
       uid: ctx.uid,
       title: ctx.title,
+      eventName: ctx.eventName,
+      eventDescription: ctx.eventDescription,
+      workspaceName: ctx.workspaceName,
+      teamName: ctx.teamName,
       startUtc: ctx.startUtc,
       endUtc: ctx.endUtc,
       host: ctx.host,
       coHosts: ctx.coHosts,
-      // Who the mail is about. The phone and notes stay out of the shared
-      // snapshot: only the host's copy shows them (`hostSide`).
-      attendee: { name: ctx.attendee.name, email: ctx.attendee.email, timeZone: ctx.attendee.timeZone },
+      // Who the mail is about. The phone, the notes and the other guests stay
+      // out of the shared snapshot: the host's copy shows them (`hostSide`),
+      // and any other copy carries the phone or the guests only when its own
+      // template text asks for `{{attendee_phone}}` or `{{guests}}`.
+      attendee: {
+        name: ctx.attendee.name,
+        email: ctx.attendee.email,
+        timeZone: ctx.attendee.timeZone,
+        ...(reads.has('attendee_phone') ? { phone: ctx.attendee.phone } : {}),
+      },
+      ...(reads.has('guests') ? { guests: ctx.guests } : {}),
       // The Where as one human string, rendered from the booking's snapshotted
       // KIND. Deliberately GENERIC for conferencing: the platform name is a
       // host-facing affordance read from the calendar port in the event-type
