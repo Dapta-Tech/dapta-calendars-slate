@@ -3,8 +3,8 @@
  * (`mcpEnabled` on the Connected apps read). The web's MCP_PUBLIC_URL alone is
  * not enough: a deployment can set it while the API answers `/mcp` with 404.
  * MCP off, an older API without the field, and a failed read all land on the
- * same honest state: one sentence, no tabs, no address. API keys, webhooks and
- * the API reference render the same either way.
+ * same honest state: one sentence, no tabs, no address, no tool list. API keys,
+ * webhooks and the API reference render the same either way.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -51,6 +51,9 @@ function expectUnavailable(html: string): void {
   expect(html).not.toContain(m.addToCursor);
   expect(html).not.toContain('role="tablist"');
   expect(html).not.toContain(m.mcpUrlMissing);
+  // The tool list describes the endpoint that is off.
+  expect(html).not.toContain(m.toolsTitle);
+  expect(html).not.toContain('find_available_slots');
 }
 
 function expectOtherSectionsUnchanged(html: string): void {
@@ -84,6 +87,7 @@ describe('Settings > MCP & API: the connect-agent guide follows the API', () => 
     expect(html).toContain(MCP_URL);
     expect(html).toContain('cursor://anysphere.cursor-deeplink/mcp/install');
     expect(html).toContain(m.addToCursor);
+    expect(html).toContain(m.toolsTitle);
     expect(html).not.toContain(m.mcpUnavailable);
     expectOtherSectionsUnchanged(html);
   });

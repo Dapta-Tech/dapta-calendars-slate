@@ -23,7 +23,7 @@ export const E2E = {
   proxyPort,
   analyticsPort,
   web: `http://localhost:${webPort}`,
-  /** The web app's API_URL: a pass-through to `api` that can answer 429 on cue (fault-proxy.mjs). */
+  /** The web app's API_URL: a pass-through to `api` that can answer 429 or a canned JSON reply on cue (fault-proxy.mjs). */
   proxy: `http://localhost:${proxyPort}`,
   /** The same production build started as a deployment marked NOINDEX (CI only). */
   noindexWeb: `http://localhost:${noindexWebPort}`,

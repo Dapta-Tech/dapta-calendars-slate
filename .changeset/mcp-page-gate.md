@@ -13,5 +13,6 @@ The MCP & API page shows how to connect an agent only when the API serves MCP.
   `MCP_PUBLIC_URL` / `API_PUBLIC_URL` alone, so a deployment with those set and
   `MCP_ENABLED=false` told hosts to connect to an address that answers 404.
 - MCP off, an older API without the field, or a failed read all show one plain
-  sentence instead of the steps, with no address. Fail closed. API keys, webhooks,
-  connected apps and the API reference are unchanged.
+  sentence instead of the steps, with no address, and drop the "What an agent can
+  do" tool list. Fail closed. API keys, webhooks, connected apps and the API
+  reference are unchanged.

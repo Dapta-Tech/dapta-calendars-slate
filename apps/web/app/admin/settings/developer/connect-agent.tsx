@@ -63,7 +63,7 @@ export function ConnectAgent({
   oauth = false,
   messages: m,
 }: {
-  /** The API serves MCP. Off: one plain sentence, no tabs and no address. */
+  /** The API serves MCP. Off: one plain sentence, no tabs and no address (the page also drops the tool list). */
   available: boolean;
   snippets: ConnectSnippets | null;
   /** The API runs its own OAuth server: chat apps connect with a sign-in. */

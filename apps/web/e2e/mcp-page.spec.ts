@@ -16,7 +16,7 @@ import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
 const PAGE = '/admin/settings/developer';
 const MCP_URL = `${E2E.api}/mcp`;
 const GRANTS = '/v1/oauth/grants';
-const UNAVAILABLE = 'Agent connections are not available on this workspace yet.';
+const UNAVAILABLE = 'Agent connections are not turned on for this installation.';
 
 async function openAsOwner(page: Page): Promise<void> {
   await page.goto(`/login?next=${encodeURIComponent(PAGE)}`);
@@ -36,6 +36,8 @@ async function expectUnavailable(page: Page): Promise<void> {
   await expect(page.getByText(UNAVAILABLE)).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Connect your agent' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveCount(0);
+  // The tool list describes the endpoint that is off.
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toHaveCount(0);
   // No address anywhere on the page, not even in a copy block or a link.
   expect(await page.content()).not.toContain(MCP_URL);
   await expectOtherSections(page);
@@ -55,6 +57,7 @@ test('MCP on: the steps show the configured address, and that address answers', 
   await expect(page.getByText(MCP_URL, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveAttribute('href', /^cursor:\/\//);
   await expect(page.getByText(UNAVAILABLE)).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
   await expectOtherSections(page);
 
   // The page only names an address that is really serving MCP.
@@ -65,7 +68,7 @@ test('MCP on: the steps show the configured address, and that address answers', 
   expect(mcp.status()).toBe(200);
 });
 
-test('MCP off: an honest sentence, no steps and no address', async ({ page }) => {
+test('MCP off: an honest sentence, no steps, no tool list and no address', async ({ page }) => {
   await answerWith({
     match: GRANTS,
     method: 'GET',

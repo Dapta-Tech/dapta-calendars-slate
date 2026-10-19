@@ -97,7 +97,8 @@ export default async function DeveloperSettings() {
       {oauth.enabled ? (
         <ConnectedApps apps={oauth.grants} accessTokenTtlSeconds={oauth.accessTokenTtlSeconds ?? 3600} messages={m} locale={locale} />
       ) : null}
-      <AgentTools messages={m} />
+      {/* The tool list describes the MCP endpoint: nothing to list while it is off. */}
+      {mcpEnabled ? <AgentTools messages={m} /> : null}
       <Webhooks webhooks={webhooks} messages={m} locale={locale} />
       <ApiReference apiOrigin={apiOrigin} messages={m} />
     </div>
