@@ -202,13 +202,18 @@ export const CAMPAIGN_VALUE_MAX = 100;
 
 /**
  * The characters a campaign label is made of, checked after Unicode
- * compatibility folding: letters (not modifier letters, which include colon
- * lookalikes), combining marks, digits in any script, the space, and a short
- * list of punctuation. An ALLOWLIST, so a character nobody thought of (a
- * lookalike colon or slash, an invisible format character, a backslash, a
- * semicolon) is refused by construction rather than by one more rule.
+ * compatibility folding: letters (modifier letters too, except the colon
+ * lookalikes among them), combining marks, digits in any script, the space,
+ * currency signs, pictographs (emoji), dash punctuation, typographic quotes,
+ * `¡`, `¿`, `·`, and `._&#%+/'"()!,*|~:`. An ALLOWLIST, so a character nobody
+ * thought of (a lookalike slash, a backslash, a semicolon, `@`) is refused by
+ * construction rather than by one more rule.
  */
-const CAMPAIGN_CHARS = /^[\p{Ll}\p{Lu}\p{Lt}\p{Lo}\p{Mn}\p{Mc}\p{Nd} ._&#%+/'()!,*|~:-]+$/u;
+const CAMPAIGN_CHARS =
+  /^(?:(?![ːˑ꞉꞊])[\p{L}\p{M}\p{Nd}\p{Sc}\p{Extended_Pictographic}\p{Pd} ._&#%+/'"()!,*|~:‘’“”¡¿·])+$/u;
+
+/** A slash with something other than a space or a slash on both sides: a path step. */
+const TIGHT_SLASH = /(?<=[^\s/])\/(?=[^\s/])/g;
 
 /**
  * A campaign tag fit to send to analytics, or null.
@@ -219,22 +224,28 @@ const CAMPAIGN_CHARS = /^[\p{Ll}\p{Lu}\p{Lt}\p{Lo}\p{Mn}\p{Mc}\p{Nd} ._&#%+/'()!
  * tag, none of which is a campaign label. Those are withheld rather than
  * cleaned: a guessed repair would be a value nobody chose.
  *
- * Withheld: any character outside `CAMPAIGN_CHARS` (so `@`, `?`, `=`, `;`,
- * `\`, lookalikes and invisible characters); a colon not followed by a space
- * (`tel:`, `mailto:`, a port, `a:b:c`; "q3: launch" is kept); two slashes
- * anywhere, or a dotted host followed by a slash (a URL or a path); an HTML
- * numeric entity (`&#64`, with or without its `;`); a phone number (nine or
- * more digits in groups, or led by `+`, anywhere in the value); an `%u`
- * escape; anything past `CAMPAIGN_VALUE_MAX`.
+ * Withheld: an invisible character (any default-ignorable code point, which
+ * could split a phone or a host unseen); any character outside
+ * `CAMPAIGN_CHARS` (so `@`, `?`, `=`, `;`, `\`, lookalike colons and
+ * slashes); a colon not followed by a space (`tel:`, `mailto:`, a port,
+ * `a:b:c`; "q3: launch" is kept); `//`, a leading `/`, or two slashes that
+ * each join non-spaces (a path; "google / cpc / brand" is kept); a dotted name before a
+ * slash (a host and its path); an HTML numeric entity (`&#64`, with or without
+ * its `;`); a phone number (nine or more digits with anything but letters
+ * between them, or led by `+`, anywhere in the value); a `%u` escape; anything
+ * past `CAMPAIGN_VALUE_MAX`.
  *
  * Kept, on purpose: an unbroken run of digits, which cannot be told from a
  * numeric campaign id (an ad platform's `{campaignid}`). That includes a phone
- * whose `+` was not URL-encoded: the query parser turns it into a space.
+ * whose `+` was not URL-encoded: the query parser turns it into a space. The
+ * other side of the phone rule: a date-coded name such as `launch_20261018_01`
+ * reads as grouped digits and is withheld.
  *
- * The value has been decoded once already, so a `%XX` run that still decodes
- * is an encoding left over: it is decoded and the result checked again, once
- * (a value encoded three times is refused). A `%` that is not an encoding
- * ("20%descuento") is a literal percent and stays.
+ * The value has been decoded once already, so an escape that still decodes is
+ * an encoding left over: it is decoded and the result checked again, once (a
+ * value encoded three times is refused). An escaped ASCII character counts
+ * even inside a run that is not valid UTF-8 as a whole. A `%` that is not an
+ * encoding ("20%descuento") is a literal percent and stays.
  */
 export function analyticsCampaignValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -244,6 +255,7 @@ export function analyticsCampaignValue(value: unknown): string | null {
 function campaignLabel(v: string, depth: number): string | null {
   if (!v || v.length > CAMPAIGN_VALUE_MAX) return null;
   const folded = v.normalize('NFKC');
+  if (/\p{Default_Ignorable_Code_Point}/u.test(folded)) return null;
   if (/%u[0-9a-f]{4}/i.test(folded)) return null;
   let decodedSome = false;
   const decoded = folded.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
@@ -252,24 +264,27 @@ function campaignLabel(v: string, depth: number): string | null {
       decodedSome = true;
       return out;
     } catch {
-      return run;
+      // Not valid UTF-8 as a whole: an escaped ASCII character in it still is one.
+      if (!/%[0-7][0-9a-f]/i.test(run)) return run;
+      decodedSome = true;
+      return run.replace(/%([0-7][0-9a-f])/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
     }
   });
   if (decodedSome) return depth === 0 ? campaignLabel(decoded.trim(), 1) : null;
   if (!CAMPAIGN_CHARS.test(folded)) return null;
-  if (/:(?!\s)|\/\/|\/.*\//.test(folded)) return null;
+  if (/:(?!\s)|\/\/|^\//.test(folded) || (folded.match(TIGHT_SLASH)?.length ?? 0) >= 2) return null;
   if (/[\p{L}\p{N}-]\.[\p{L}\p{N}-]*\//u.test(folded)) return null;
   if (/&#x?[0-9a-f]/i.test(folded)) return null;
   if (looksLikePhone(folded)) return null;
   return v;
 }
 
-/** Nine or more digits that are grouped (or led by `+`), anywhere in the value. */
+/** Nine or more digits with anything but letters between them, or led by `+`, anywhere. */
 function looksLikePhone(v: string): boolean {
-  for (const m of v.matchAll(/\+?\p{Nd}[\p{Nd} ()./_-]*\p{Nd}/gu)) {
+  for (const m of v.matchAll(/\+?\p{Nd}[^\p{L}]*\p{Nd}/gu)) {
     const run = m[0];
     const digits = run.match(/\p{Nd}/gu)?.length ?? 0;
-    if (digits >= 9 && (run.startsWith('+') || /[ ()./_-]/.test(run))) return true;
+    if (digits >= 9 && (run.startsWith('+') || /[^\p{Nd}]/u.test(run))) return true;
   }
   return false;
 }
