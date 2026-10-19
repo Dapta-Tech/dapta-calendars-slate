@@ -1723,10 +1723,15 @@ export async function declineBooking(
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
-  await db.run(
+  // Guarded on the CURRENT status, as `confirmBooking` is: a confirmation (or a
+  // second decline) that lands between the read above and this write must not
+  // be overwritten into a rejection, and must not be announced twice.
+  const declined = await db.get<{ id: string }>(
     sql`UPDATE booking SET status = 'rejected', cancellation_reason = ${reason ?? null},
-        updated_at = ${Date.now()} WHERE id = ${b.id}`,
+        updated_at = ${Date.now()} WHERE id = ${b.id} AND status = 'pending'
+        RETURNING id`,
   );
+  if (!declined) return { ok: false, reason: 'GONE' };
   return {
     ok: true,
     uid: b.uid,
