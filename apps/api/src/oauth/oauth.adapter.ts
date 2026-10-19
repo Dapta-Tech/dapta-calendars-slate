@@ -36,10 +36,20 @@ import {
  *    token reads as unspent and may rotate again. The window starts at the
  *    FIRST consumption; a replay cannot move it.
  *
- * 3. UNUSED REGISTRATIONS EXPIRE. A dynamically registered client is stored
+ * 3. NOTHING OUTLIVES A REVOKED GRANT. A refresh token or code is only
+ *    stored while its grant exists: after the insert the grant row is checked,
+ *    and if a concurrent revocation already removed it the new row is deleted
+ *    and the issuing request fails. (Such a row would be dead anyway, since
+ *    oidc-provider requires the grant on every refresh and nothing re-creates
+ *    a revoked grant; this keeps it from existing at all.)
+ *
+ * 4. UNUSED REGISTRATIONS EXPIRE. A dynamically registered client is stored
  *    with a short life (`dcrUnusedTtlMs`); the service extends it to the life
  *    of the grant when someone actually connects with it.
  */
+
+/** Artifacts that are only valid while their grant exists. */
+const GRANT_BOUND_KINDS = new Set(['RefreshToken', 'AuthorizationCode']);
 
 /** Kinds whose id is an identifier, not a credential. */
 const PLAIN_ID_KINDS = new Set(['Client', 'Grant', 'Session']);
@@ -76,14 +86,20 @@ export function oauthAdapter(db: Db, options: OAuthAdapterOptions): AdapterConst
       let expiresAt = expiresIn ? t + expiresIn * 1000 : null;
       if (this.kind === 'Client' && expiresAt === null) expiresAt = t + options.dcrUnusedTtlMs;
       const grantId = typeof payload.grantId === 'string' ? payload.grantId : this.kind === 'Grant' ? id : null;
+      const key = storageId(this.kind, id);
       await upsertOAuthRecord(db, {
         kind: this.kind,
-        id: storageId(this.kind, id),
+        id: key,
         payload: stored,
         grantId,
         uid: typeof payload.uid === 'string' ? payload.uid : null,
         expiresAt,
       });
+      if (GRANT_BOUND_KINDS.has(this.kind) && grantId && !(await findOAuthRecord(db, 'Grant', grantId, now()))) {
+        // Revoked while this request was issuing: never leave a descendant.
+        await destroyOAuthRecord(db, this.kind, key);
+        throw new errors.InvalidGrant('grant was revoked');
+      }
       if (this.kind === 'RefreshToken' && grantId) options.onRefreshTokenStored?.(grantId);
     }
 

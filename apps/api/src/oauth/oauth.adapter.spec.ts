@@ -26,6 +26,7 @@ describe('oauth adapter', () => {
   it('stores a bearer id hashed, without the value in the payload, and reads it back with it', async () => {
     const Adapter = make(0);
     const rt = new Adapter('RefreshToken');
+    await new Adapter('Grant').upsert('g1', { accountId: 'm1', clientId: 'c1' }, 3600);
     await rt.upsert('secret-token-value', { jti: 'secret-token-value', grantId: 'g1', exp: 9_999_999_999 }, 3600);
     const row = (await db.get<{ id: string; payload: string }>(sql`SELECT id, payload FROM oauth_record WHERE kind = 'RefreshToken'`))!;
     expect(row.id).toBe(createHash('sha256').update('secret-token-value').digest('base64url'));
@@ -52,6 +53,7 @@ describe('oauth adapter', () => {
   it('inside the retry grace a second consume of a refresh token passes; after it, reads as spent', async () => {
     const Adapter = make(10_000);
     const rt = new Adapter('RefreshToken');
+    await new Adapter('Grant').upsert('g1', { accountId: 'm1', clientId: 'c1' }, 3600);
     await rt.upsert('t1', { jti: 't1', grantId: 'g1' }, 3600);
     await rt.consume('t1');
     now += 5_000;
@@ -65,11 +67,26 @@ describe('oauth adapter', () => {
   it('an authorization code never gets a grace', async () => {
     const Adapter = make(10_000);
     const code = new Adapter('AuthorizationCode');
+    await new Adapter('Grant').upsert('g2', { accountId: 'm1', clientId: 'c1' }, 3600);
     await code.upsert('c1', { jti: 'c1', grantId: 'g2' }, 60);
     await code.consume('c1');
     expect((await code.find('c1'))?.consumed).toBeTruthy();
     await expect(code.consume('c1')).rejects.toMatchObject({ error: 'invalid_grant' });
     expect(revoked).toEqual(['g2']);
+  });
+
+  it('refuses to store a refresh token or code for a grant that is gone, and leaves no row behind', async () => {
+    const Adapter = make(0);
+    const grant = new Adapter('Grant');
+    const rt = new Adapter('RefreshToken');
+    await grant.upsert('g3', { accountId: 'm1', clientId: 'c1' }, 3600);
+    await rt.upsert('ok', { jti: 'ok', grantId: 'g3' }, 3600);
+    expect(await rt.find('ok')).toBeTruthy();
+    // A concurrent revocation lands between the winner's claim and its insert.
+    await rt.revokeByGrantId('g3');
+    await expect(rt.upsert('late', { jti: 'late', grantId: 'g3' }, 3600)).rejects.toMatchObject({ error: 'invalid_grant' });
+    await expect(new Adapter('AuthorizationCode').upsert('late-code', { jti: 'late-code', grantId: 'g3' }, 60)).rejects.toMatchObject({ error: 'invalid_grant' });
+    expect(await db.get(sql`SELECT id FROM oauth_record WHERE grant_id = 'g3'`)).toBeUndefined();
   });
 
   it('gives an unused dynamic registration a short life', async () => {

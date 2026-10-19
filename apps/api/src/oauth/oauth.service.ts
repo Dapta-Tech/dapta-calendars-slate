@@ -735,10 +735,17 @@ export class OAuthService implements OnModuleDestroy {
       // them from the document, cached, on every use.)
       if (via === 'dcr') await extendOAuthRecordExpiry(this.db, 'Client', clientId, expiresAt);
     } catch (error) {
-      // Never leave a grant nobody can see or disconnect.
+      // Never leave a grant nobody can see or disconnect, and still answer
+      // the client so it is not left waiting for a redirect.
       await revokeOAuthGrant(this.db, grantId).catch(() => undefined);
       this.logger.error(`oauth consent could not be recorded: ${String(error)}`);
-      return 'Something went wrong while connecting the app. Go back to the app and try again.';
+      await provider.interactionFinished(
+        req,
+        res,
+        { error: 'server_error', error_description: 'The connection could not be recorded. Try again.' },
+        { mergeWithLastSubmission: false },
+      );
+      return null;
     }
     this.audit({ msg: 'oauth.consent', decision: 'approve', accountId, clientId, grantId, scopes });
     await provider.interactionFinished(
