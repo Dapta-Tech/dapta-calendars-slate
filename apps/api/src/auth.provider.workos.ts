@@ -162,8 +162,14 @@ export class WorkOsAuthProvider implements AuthProvider {
             isFirstMember: false,
             fromInvite: true,
           });
+          return invited.id;
         }
-        return invited.id;
+        // Lost the race: answer with the member bound to THIS login, which is
+        // the invite when the winner was the same person signing in twice.
+        const bound = await this.db.get<{ id: string }>(
+          sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
+        );
+        return bound?.id ?? invited.id;
       }
     }
 

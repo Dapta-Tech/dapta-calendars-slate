@@ -80,10 +80,18 @@ describe('product analytics (API)', () => {
   const captures = async () => (await payloads()).filter((p) => p.type === 'capture').map((p) => p.capture!);
   /**
    * Events are fire-and-forget, so a count read the moment the first row lands
-   * would miss a wrong second one. Wait for the writes to settle first.
+   * would miss a wrong second one. Wait until the outbox has stopped growing
+   * (unchanged across several reads), then read.
    */
   const settled = async () => {
-    await new Promise((r) => setTimeout(r, 60));
+    let last = -1;
+    let steady = 0;
+    for (let i = 0; i < 100 && steady < 5; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      const n = (await rows()).length;
+      steady = n === last ? steady + 1 : 0;
+      last = n;
+    }
     return captures();
   };
 
@@ -316,8 +324,7 @@ describe('product analytics (API)', () => {
       const first = await svc.book(body, true, context);
       const second = await svc.book(body, true, context);
       expect('error' in first || 'error' in second).toBe(false);
-      await new Promise((r) => setTimeout(r, 60));
-      const all = await captures();
+      const all = await settled();
       expect(all.map((c) => [c.event, c.properties['channel']])).toEqual([['calendars_booking_created', 'api']]);
     });
 
