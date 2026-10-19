@@ -7,9 +7,10 @@ import {
   mailSupportAddress,
   type EmailProvider,
 } from '@slate/notifications';
-import { badgeHidden, buildSignupUrl } from '@slate/shared';
+import { ANALYTICS_GROUP_TYPE, badgeHidden, buildSignupUrl } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
+  ANALYTICS,
   AUTH_PROVIDER,
   CALENDAR,
   CRM,
@@ -38,6 +39,8 @@ import { resolveEntitlementsProvider } from './entitlements.provider';
 import { entitlementGateProvider } from './entitlement-gate';
 import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
+import { createAnalyticsProvider } from './analytics.provider';
+import { AnalyticsEffects } from './analytics-effects';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
 import { PublicController } from './public.controller';
@@ -145,11 +148,33 @@ import { CalendarRetryAfterInterceptor } from './retry-after';
     // and Settings share its in-flight map and failure backoff, so a burst
     // anywhere makes one upstream call per account.
     entitlementGateProvider,
+    // Product analytics (the deployment's own telemetry). OSS default: no
+    // provider, so nothing is enqueued or sent. A provider set without a usable
+    // key or host is OFF, said once here, and never a reason to refuse to boot.
+    {
+      provide: ANALYTICS,
+      useFactory: (env: ServerEnv) => {
+        const provider = createAnalyticsProvider(env, ANALYTICS_GROUP_TYPE);
+        const asked = env.PRODUCT_ANALYTICS_PROVIDER?.trim().toLowerCase();
+        if (!provider && asked && asked !== 'none') {
+          new Logger('Analytics').warn(
+            'PRODUCT_ANALYTICS_PROVIDER is set but the provider, key or host is not usable; analytics is off.',
+          );
+        }
+        return provider;
+      },
+      inject: [ENV],
+    },
+    AnalyticsEffects,
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
+    // Signups are reported through a plain callback, because accounts and
+    // members are created just in time inside the provider: there is no signup
+    // endpoint to instrument, and the providers stay ignorant of analytics.
     {
       provide: AUTH_PROVIDER,
-      useFactory: (env: ServerEnv, db: Db) => createAuthProvider(env, db),
-      inject: [ENV, DB],
+      useFactory: (env: ServerEnv, db: Db, analytics: AnalyticsEffects) =>
+        createAuthProvider(env, db, analytics.onSignup),
+      inject: [ENV, DB, AnalyticsEffects],
     },
     // Rate limiter for the public surface (P1-5): token bucket by default, noop
     // when RATE_LIMIT_ENABLED=false; swappable for a distributed limiter.

@@ -42,6 +42,12 @@ const childEnv = {
   REQUEST_LOG_ENABLED: 'true',
   RATE_LIMIT_ENABLED: 'true',
   RATE_LIMIT_TRUSTED_PROXY_HOPS: '1',
+  // Product analytics ON, at the stand-in host; keep in step with ANALYTICS_ENV
+  // in stack.ts (the web server's copy).
+  PRODUCT_ANALYTICS_PROVIDER: 'posthog',
+  PRODUCT_ANALYTICS_KEY: 'phc_e2e_stand_in',
+  PRODUCT_ANALYTICS_HOST: `http://127.0.0.1:${env('E2E_ANALYTICS_PORT', '4520')}`,
+  PRODUCT_ANALYTICS_INTERNAL_EMAILS: 'jordan@example.com',
   ...(which === 'limited'
     ? // One outbox worker per database: two would race for the same rows.
       { RATE_LIMIT_CAPACITY: '5', RATE_LIMIT_REFILL_PER_SEC: '0.2', OUTBOX_WORKER_ENABLED: 'false' }

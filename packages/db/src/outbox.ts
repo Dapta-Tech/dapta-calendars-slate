@@ -56,7 +56,14 @@ export type OutboxKind =
    * associated to it. Two rows would need an ordering the outbox does not
    * have, and the meeting cannot be associated before the contact id exists.
    */
-  | 'crm';
+  | 'crm'
+  /**
+   * Product analytics: one event (or one account-properties update) for the
+   * deployment's own telemetry. Enqueued only when analytics is configured,
+   * so a bare fork never writes one; a row left behind after the key is
+   * removed drains as `skipped`.
+   */
+  | 'analytics';
 /**
  * `skipped` = deliberately not performed (e.g. a legacy email row whose tenant
  * context is unrecoverable on a transport that requires it) — recorded ONCE

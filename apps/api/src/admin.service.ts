@@ -94,6 +94,7 @@ import {
 import { getMessages } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import type { HostPrincipal } from './auth.service';
+import { AnalyticsEffects, analyticsLabel } from './analytics-effects';
 import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
@@ -101,7 +102,6 @@ import { EmailEffects } from './email-effects';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
-
 
 /** Authed host/dashboard operations. All are scoped to the caller's account. */
 @Injectable()
@@ -128,6 +128,9 @@ export class AdminService {
     // one refresh per account holds app-wide. Absent (a direct construction),
     // the service builds its own from `entitlements` and `premiumMode`.
     @Optional() @Inject(ENTITLEMENT_GATE) private readonly sharedGate?: EntitlementGate,
+    // Product analytics. LAST and @Optional() for the same reason as the CRM:
+    // absent, nothing is recorded, which is also what analytics being off does.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   async me(p: HostPrincipal) {
@@ -602,7 +605,7 @@ export class AdminService {
     // Name every field. The controller hands over the raw request body (there is
     // no global ValidationPipe), so spreading it here let a caller overwrite the
     // principal's `accountId`/`memberId` and attach a connection to anyone.
-    return createConnection(this.db, {
+    const created = createConnection(this.db, {
       accountId: p.accountId,
       memberId: p.memberId,
       provider: body.provider,
@@ -611,6 +614,12 @@ export class AdminService {
       isDestination: body.isDestination,
       checkConflicts: body.checkConflicts,
     });
+    void created
+      .then(() =>
+        this.analytics?.hostEvent('calendar_connected', p, { provider: analyticsLabel(body.provider), method: 'manual' }),
+      )
+      .catch(() => undefined);
+    return created;
   }
   deleteConnection(p: HostPrincipal, id: string) {
     return deleteConnection(this.db, p.memberId, id);
@@ -766,6 +775,12 @@ export class AdminService {
         checkConflicts: true,
       });
       firstNew = false;
+      // Here, where the row is written: a discover that only re-read an
+      // existing connection (the popup polls) records nothing.
+      void this.analytics?.hostEvent('calendar_connected', p, {
+        provider: analyticsLabel(conn.provider || provider),
+        method: 'connect_flow',
+      });
     }
     const persisted = await listConnections(this.db, p.memberId);
     // Merge in the raw discover metadata (connectionId/connected/state/
@@ -1054,7 +1069,13 @@ export class AdminService {
     hideBranding: boolean,
   ): Promise<{ ok: true; branding: BrandingSettingView } | { ok: false; reason: 'NOT_ENTITLED' }> {
     if (hideBranding && !(await this.isEntitled(p.accountId))) return { ok: false, reason: 'NOT_ENTITLED' };
+    // Read before the write only when analytics is on: a save that changes
+    // nothing is not a toggle.
+    const before = this.analytics?.enabled ? ((await getBrandingSwitch(this.db, p.accountId))?.hideBranding ?? false) : null;
     await setHideBranding(this.db, p.accountId, hideBranding);
+    if (before !== null && before !== hideBranding) {
+      void this.analytics?.hostEvent('hide_branding_toggled', p, { hidden: hideBranding });
+    }
     return { ok: true, branding: await this.brandingStatus(p) };
   }
 

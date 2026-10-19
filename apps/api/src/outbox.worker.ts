@@ -25,6 +25,7 @@ import {
   type OutboxRow,
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
+import { AnalyticsEffects } from './analytics-effects';
 import { CalendarEffects, type CalendarAction } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { DaptaSyncEffects } from './dapta-sync.effects';
@@ -120,6 +121,10 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     // the existing worker specs construct this positionally, and a worker with
     // no CRM handler simply has no `crm` rows to drain.
     @Optional() @Inject(CrmEffects) private readonly crm?: CrmEffects,
+    // Product analytics. Optional and last for the same reason as the CRM: a
+    // worker built without it has no `analytics` rows to drain, because
+    // nothing enqueues them when analytics is off.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
 
   private get concurrency(): number {
@@ -416,6 +421,11 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     }
     if (row.kind === 'iam_onboarding') {
       await this.daptaSync.deliverLeadScore(row.action, row.payload);
+      return;
+    }
+    if (row.kind === 'analytics') {
+      if (!this.analytics) throw new OutboxSkipError('analytics is not configured');
+      await this.analytics.deliver(row.action, row.payload);
       return;
     }
     throw new Error(`unknown outbox kind: ${String(row.kind)}`);

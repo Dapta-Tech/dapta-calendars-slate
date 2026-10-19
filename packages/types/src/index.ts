@@ -740,8 +740,21 @@ export type BookingView = z.infer<typeof bookingViewSchema>;
 
 // --- Public page metadata -------------------------------------------------
 
+/**
+ * The account on a public payload. `code` is the CANONICAL public code (the
+ * vanity slug once one is claimed) and can change; `shortCode` is the
+ * six-character code the account was born with, which never does, and is
+ * already public (every alias URL carries it). Optional on the wire so an
+ * older API still parses.
+ */
+const publicAccountSchema = z.object({
+  code: z.string(),
+  name: z.string(),
+  shortCode: z.string().optional(),
+});
+
 export const publicProfileSchema = z.object({
-  account: z.object({ code: z.string(), name: z.string() }),
+  account: publicAccountSchema,
   member: z.object({
     handle: z.string(),
     displayName: z.string().nullable(),
@@ -784,7 +797,7 @@ export type PublicProfile = z.infer<typeof publicProfileSchema>;
 // --- Teams (public team pages + round-robin) ------------------------------
 
 export const teamProfileSchema = z.object({
-  account: z.object({ code: z.string(), name: z.string() }),
+  account: publicAccountSchema,
   team: z.object({
     slug: z.string(),
     name: z.string(),

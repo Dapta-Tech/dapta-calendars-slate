@@ -5,6 +5,7 @@ import type { BookingMessages } from '@slate/shared';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/toast';
 import { EmbedIcon, EmbedSnippetModal } from '@/components/embed-snippet-modal';
+import { track } from '@/lib/analytics/port';
 import { toggleEventTypeHiddenAction } from './actions';
 
 type EventTypesMessages = BookingMessages['admin']['eventTypes'];
@@ -66,6 +67,7 @@ export function EventRowActions({
     if (!publicPath) return;
     try {
       await navigator.clipboard.writeText(`${window.location.origin}${publicPath}`);
+      track('link_copied', { link: 'event_type' });
       success(m.linkCopied);
     } catch {
       /* clipboard blocked — no-op */

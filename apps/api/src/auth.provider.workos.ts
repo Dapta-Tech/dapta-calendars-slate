@@ -24,7 +24,14 @@ import type { Db, AccountRole } from '@slate/db';
 import { deriveUniqueHandle, insertAccountWithShortCode, jsonParam, sql } from '@slate/db';
 import { withNewHostBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
-import { header, type AuthProvider, type ResolvedHost, type ReqLike } from './auth.provider';
+import {
+  header,
+  notifySignup,
+  type AuthProvider,
+  type ResolvedHost,
+  type ReqLike,
+  type SignupObserver,
+} from './auth.provider';
 import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
 type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE' | 'OPERATOR_EMAIL_DOMAIN'>;
@@ -45,6 +52,8 @@ export class WorkOsAuthProvider implements AuthProvider {
   constructor(
     private readonly db: Db,
     private readonly env: WorkOsEnv,
+    /** Told when a login creates or adopts a member. Omitted: nothing observes signups. */
+    private readonly onSignup?: SignupObserver,
   ) {
     if (!env.JWT_SECRET) {
       // Defensive: the factory already guards this, but never run without a key.
@@ -130,18 +139,37 @@ export class WorkOsAuthProvider implements AuthProvider {
     // yet. Bind this login's `sub` to it (keeping its granted role) and activate,
     // so invite → first-login lands the user in the role they were granted.
     if (email) {
-      const invited = await this.db.get<{ id: string }>(
-        sql`SELECT id FROM member
+      const invited = await this.db.get<{ id: string; role: string }>(
+        sql`SELECT id, role FROM member
             WHERE account_id = ${accountId} AND external_id IS NULL AND lower(email) = lower(${email})
             ORDER BY created_at ASC LIMIT 1`,
       );
       if (invited) {
-        await this.db.run(
+        // Bound only while still unbound, and the write reports whether THIS
+        // request did it (`RETURNING`, both dialects): the first dashboard load
+        // after a login sends parallel requests, and only one of them adopted.
+        const adopted = await this.db.get<{ id: string }>(
           sql`UPDATE member SET external_id = ${sub}, status = 'active',
                 display_name = COALESCE(display_name, ${displayName})
-              WHERE id = ${invited.id}`,
+              WHERE id = ${invited.id} AND external_id IS NULL
+              RETURNING id`,
         );
-        return invited.id;
+        if (adopted) {
+          notifySignup(this.onSignup, {
+            accountId,
+            memberId: invited.id,
+            role: invited.role,
+            isFirstMember: false,
+            fromInvite: true,
+          });
+          return invited.id;
+        }
+        // Lost the race: answer with the member bound to THIS login, which is
+        // the invite when the winner was the same person signing in twice.
+        const bound = await this.db.get<{ id: string }>(
+          sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
+        );
+        return bound?.id ?? invited.id;
       }
     }
 
@@ -173,6 +201,12 @@ export class WorkOsAuthProvider implements AuthProvider {
       sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
     );
     if (!row) throw unauthenticated('Could not resolve member.');
+    // Only the request whose INSERT won reports the signup: a concurrent first
+    // login lost the conflict and selects the winner's row, whose id is not
+    // the one generated above.
+    if (row.id === id) {
+      notifySignup(this.onSignup, { accountId, memberId: id, role, isFirstMember: !occupied, fromInvite: false });
+    }
     return row.id;
   }
 }

@@ -91,7 +91,8 @@ export const getProfile = cache(
 );
 
 export interface TeamProfile {
-  account: { code: string; name: string };
+  /** `shortCode` never changes (see `publicProfileSchema`); absent from an older API. */
+  account: { code: string; name: string; shortCode?: string };
   team: { slug: string; name: string; logoUrl: string | null; timeZone: string };
   eventTypes: Array<{
     slug: string;

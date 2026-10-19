@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { E2E } from './e2e/stack';
+import { ANALYTICS_ENV, E2E } from './e2e/stack';
 
 /**
  * The browser suite: the real web app and the real API on a fresh database,
@@ -56,6 +56,11 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: `node ../../scripts/qa/stand-in-analytics.mjs ${E2E.analyticsPort}`,
+      url: `${E2E.analytics}/__qa/events`,
+      reuseExistingServer: false,
+    },
+    {
       command: 'node e2e/start-api.mjs main',
       url: `${E2E.api}/health`,
       reuseExistingServer: false,
@@ -75,8 +80,13 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      // On CI the image is built WITHOUT the analytics variables and started
+      // with them, the way one image serves every environment: a value that
+      // only works when inlined at build time fails the analytics spec here.
       command: process.env.CI
-        ? `pnpm exec next build && pnpm exec next start -p ${E2E.webPort}`
+        ? `env ${Object.keys(ANALYTICS_ENV)
+            .map((k) => `-u ${k}`)
+            .join(' ')} pnpm exec next build && pnpm exec next start -p ${E2E.webPort}`
         : `pnpm exec next dev -p ${E2E.webPort}`,
       url: `${E2E.web}/acme/alex-rivera/intro-call`,
       reuseExistingServer: false,
@@ -87,6 +97,7 @@ export default defineConfig({
         // is transparent unless a test tells it to answer 429.
         API_URL: E2E.proxy,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
+        ...ANALYTICS_ENV,
       },
     },
   ],

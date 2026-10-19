@@ -747,7 +747,14 @@ export function GrowthCta({
   return (
     <aside aria-label={m.growth.ctaButton} className="bp-growth">
       <p className="bp-muted bp-growth-line">{m.growth.ctaLine}</p>
-      <a href={href} target="_blank" rel="noopener noreferrer" className={`${quiet ? 'bp-btn-outline' : 'bp-btn'} bp-growth-btn`}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        // Counted by the page's anonymous analytics, like the badge.
+        data-analytics-cta=""
+        className={`${quiet ? 'bp-btn-outline' : 'bp-btn'} bp-growth-btn`}
+      >
         {m.growth.ctaButton}
         <span className="sr-only"> {m.growth.ctaOpensNewTab}</span>
       </a>
