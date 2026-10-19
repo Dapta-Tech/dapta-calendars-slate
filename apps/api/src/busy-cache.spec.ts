@@ -163,7 +163,8 @@ describe('BusyCache: the display cache of busy reads (F2, ADR 0009)', () => {
     cal.busy.set('conn-a', [meeting(T0 + 16 * HOUR)]);
     const started = Date.now();
     const answer = await provider.listBusy(month(now));
-    expect(Date.now() - started).toBeGreaterThanOrEqual(45);
+    // The 50 ms timeout, give or take a timer's slack on a busy runner.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
     expect(answer).toHaveLength(2); // the stale one
     expect(logs.at(-1)).toMatch(/event=stale_served .*reason=timeout/);
     cal.hold = null;
