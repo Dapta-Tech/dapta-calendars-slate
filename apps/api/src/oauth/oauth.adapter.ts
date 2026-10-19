@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { Adapter, AdapterConstructor, AdapterPayload } from 'oidc-provider';
+import { errors, type Adapter, type AdapterConstructor, type AdapterPayload } from 'oidc-provider';
 import {
-  consumeOAuthRecord,
+  claimOAuthRecord,
   destroyOAuthRecord,
   findOAuthRecord,
   findOAuthRecordByUid,
@@ -25,11 +25,16 @@ import {
  *    their id, and they are never sent back by the browser (see the cookie
  *    path in `oauth.service.ts`) or used to skip a login.
  *
- * 2. REFRESH-TOKEN REUSE. oidc-provider revokes the whole grant when a spent
- *    refresh token comes back. A client whose response was lost and that
- *    retries within `refreshGraceMs` is not a thief, so inside that window a
- *    spent refresh token reads as unspent (it rotates again). The window starts
- *    at the FIRST consumption and replays cannot move it (`consumeOAuthRecord`).
+ * 2. SINGLE USE UNDER CONCURRENCY, AND REUSE. oidc-provider reads a code or
+ *    refresh token, checks it is unspent, then calls `consume`. Two concurrent
+ *    requests could both pass the check, so `consume` is an atomic claim
+ *    (`claimOAuthRecord`): the loser is refused with `invalid_grant` and the
+ *    whole grant is revoked, exactly as oidc-provider does for a token that
+ *    comes back after it was spent. The one exception is the refresh retry
+ *    grace: a client whose response was lost and that retries within
+ *    `refreshGraceMs` is not a thief, so inside that window a spent refresh
+ *    token reads as unspent and may rotate again. The window starts at the
+ *    FIRST consumption; a replay cannot move it.
  *
  * 3. UNUSED REGISTRATIONS EXPIRE. A dynamically registered client is stored
  *    with a short life (`dcrUnusedTtlMs`); the service extends it to the life
@@ -49,6 +54,8 @@ export interface OAuthAdapterOptions {
   dcrUnusedTtlMs: number;
   /** Told when a refresh token is stored: the grant was just used. */
   onRefreshTokenStored?: (grantId: string) => void;
+  /** Told when a concurrent second use revoked a grant. */
+  onReuseRevoked?: (kind: string, grantId: string) => void;
   now?: () => number;
 }
 
@@ -85,7 +92,7 @@ export function oauthAdapter(db: Db, options: OAuthAdapterOptions): AdapterConst
       const payload: Record<string, unknown> = { ...row.payload };
       if (id !== undefined && this.hashed()) payload.jti = id;
       if (row.consumedAt !== null) {
-        const inGrace = this.kind === 'RefreshToken' && now() - row.consumedAt <= options.refreshGraceMs;
+        const inGrace = this.inGrace(row.consumedAt);
         if (!inGrace) payload.consumed = Math.floor(row.consumedAt / 1000);
       }
       return payload as AdapterPayload;
@@ -104,8 +111,21 @@ export function oauthAdapter(db: Db, options: OAuthAdapterOptions): AdapterConst
       return undefined;
     }
 
+    private inGrace(consumedAt: number): boolean {
+      return this.kind === 'RefreshToken' && options.refreshGraceMs > 0 && now() - consumedAt <= options.refreshGraceMs;
+    }
+
     async consume(id: string): Promise<void> {
-      await consumeOAuthRecord(db, this.kind, storageId(this.kind, id), now());
+      const key = storageId(this.kind, id);
+      if (await claimOAuthRecord(db, this.kind, key, now())) return;
+      // Spent between oidc-provider's check and here: a concurrent use.
+      const row = await findOAuthRecord(db, this.kind, key, now());
+      if (row?.consumedAt != null && this.inGrace(row.consumedAt)) return;
+      if (row?.grantId) {
+        await revokeOAuthGrant(db, row.grantId);
+        options.onReuseRevoked?.(this.kind, row.grantId);
+      }
+      throw new errors.InvalidGrant(`${this.kind === 'RefreshToken' ? 'refresh token' : 'grant'} already used`);
     }
 
     async destroy(id: string): Promise<void> {

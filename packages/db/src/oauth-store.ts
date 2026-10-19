@@ -114,6 +114,21 @@ export async function consumeOAuthRecord(db: Db, kind: string, id: string, now =
   await db.run(sql`UPDATE oauth_record SET consumed_at = COALESCE(consumed_at, ${now}) WHERE kind = ${kind} AND id = ${id}`);
 }
 
+/**
+ * Spend an artifact if, and only if, nobody has spent it yet: one conditional
+ * `UPDATE … RETURNING`, so of two concurrent callers exactly one gets `true`
+ * without a transaction (Postgres; SQLite >= 3.35). This is what makes an
+ * authorization code or a refresh token single-use under concurrency.
+ */
+export async function claimOAuthRecord(db: Db, kind: string, id: string, now = Date.now()): Promise<boolean> {
+  const row = await db.get<{ id: string }>(
+    sql`UPDATE oauth_record SET consumed_at = ${now}
+        WHERE kind = ${kind} AND id = ${id} AND consumed_at IS NULL
+        RETURNING id`,
+  );
+  return !!row;
+}
+
 export async function destroyOAuthRecord(db: Db, kind: string, id: string): Promise<void> {
   await db.run(sql`DELETE FROM oauth_record WHERE kind = ${kind} AND id = ${id}`);
 }

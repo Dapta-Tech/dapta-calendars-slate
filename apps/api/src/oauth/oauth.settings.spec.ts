@@ -141,8 +141,13 @@ describe('client metadata document fetch guard', () => {
   it('knows the special-use ranges', () => {
     for (const ip of ['127.0.0.1', '10.0.0.1', '172.16.5.4', '192.168.1.1', '169.254.169.254', '100.64.0.1', '0.0.0.0', '::1', '::', 'fe80::1', 'fd00::1', '::ffff:10.0.0.1', '224.0.0.1', '2001:db8::1'])
       expect(isSpecialUseAddress(ip), ip).toBe(true);
-    for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '::ffff:8.8.8.8'])
+    for (const ip of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '::ffff:8.8.8.8', '::ffff:808:808'])
       expect(isSpecialUseAddress(ip), ip).toBe(false);
+  });
+
+  it('judges every spelling of an IPv4-mapped address as its IPv4, and refuses IPv4-compatible ones', () => {
+    for (const ip of ['::ffff:7f00:1', '::FFFF:7F00:0001', '0:0:0:0:0:ffff:7f00:1', '::ffff:a00:1', '::ffff:a9fe:a9fe', '::ffff:c0a8:101', '::7f00:1', '::a00:1'])
+      expect(isSpecialUseAddress(ip), ip).toBe(true);
     expect(isSpecialUseAddress('not-an-ip')).toBe(true);
   });
 
@@ -160,6 +165,8 @@ describe('client metadata document fetch guard', () => {
     expect(await cimdFetchAllowed('http://public.example/client.json', lookup)).toBe(false);
     expect(await cimdFetchAllowed('https://169.254.169.254/latest', lookup)).toBe(false);
     expect(await cimdFetchAllowed('https://[::1]/c', lookup)).toBe(false);
+    expect(await cimdFetchAllowed('https://[::ffff:7f00:1]/c', lookup)).toBe(false);
+    expect(await cimdFetchAllowed('https://hexmapped.example/c', async () => [{ address: '::ffff:7f00:1' }])).toBe(false);
     expect(await cimdFetchAllowed('https://8.8.8.8/c', lookup)).toBe(true);
   });
 });

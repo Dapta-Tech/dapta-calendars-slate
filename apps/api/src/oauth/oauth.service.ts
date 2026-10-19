@@ -263,6 +263,7 @@ export class OAuthService implements OnModuleDestroy {
         refreshGraceMs: s.refreshGraceSeconds * 1000,
         dcrUnusedTtlMs: DCR_UNUSED_TTL_MS,
         onRefreshTokenStored: (grantId) => this.noteUse(grantId),
+        onReuseRevoked: (kind, grantId) => this.audit({ msg: 'oauth.grant_revoked', grantId, via: `concurrent ${kind} reuse` }),
       }),
       clients: [],
       jwks: { keys: [s.signingJwk as never] },
@@ -652,7 +653,10 @@ export class OAuthService implements OnModuleDestroy {
         throw new ForbiddenException({ error: 'FORBIDDEN', message: 'Only a workspace owner or admin can connect an app.' });
     }
     const ticket = randomBytes(32).toString('base64url');
-    const expiresAt = Math.min(Date.now() + TICKET_TTL_MS, (interaction.exp ?? 0) * 1000);
+    // Never outlives its request; an interaction always carries `exp`, but a
+    // missing one must not mint a ticket that is born expired.
+    const until = Date.now() + TICKET_TTL_MS;
+    const expiresAt = interaction.exp ? Math.min(until, interaction.exp * 1000) : until;
     await upsertOAuthRecord(this.db, {
       kind: 'ConsentTicket',
       id: storageId('ConsentTicket', ticket),
@@ -724,9 +728,18 @@ export class OAuthService implements OnModuleDestroy {
       createdAt: Date.now(),
       lastUsedAt: null,
     };
-    await upsertOAuthRecord(this.db, { kind: 'GrantMeta', id: grantId, grantId, accountId, payload: { ...meta }, expiresAt });
-    // A registration someone connected with lives as long as its grant.
-    if (via === 'dcr') await extendOAuthRecordExpiry(this.db, 'Client', clientId, expiresAt);
+    try {
+      await upsertOAuthRecord(this.db, { kind: 'GrantMeta', id: grantId, grantId, accountId, payload: { ...meta }, expiresAt });
+      // A registration someone connected with lives as long as its grant.
+      // (Metadata-document clients are never stored: oidc-provider resolves
+      // them from the document, cached, on every use.)
+      if (via === 'dcr') await extendOAuthRecordExpiry(this.db, 'Client', clientId, expiresAt);
+    } catch (error) {
+      // Never leave a grant nobody can see or disconnect.
+      await revokeOAuthGrant(this.db, grantId).catch(() => undefined);
+      this.logger.error(`oauth consent could not be recorded: ${String(error)}`);
+      return 'Something went wrong while connecting the app. Go back to the app and try again.';
+    }
     this.audit({ msg: 'oauth.consent', decision: 'approve', accountId, clientId, grantId, scopes });
     await provider.interactionFinished(
       req,

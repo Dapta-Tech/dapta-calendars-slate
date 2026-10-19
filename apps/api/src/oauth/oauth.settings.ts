@@ -205,21 +205,32 @@ const SPECIAL_USE = (() => {
   ] as const)
     list.addSubnet(net, prefix, 'ipv4');
   for (const [net, prefix] of [
-    ['::', 128], ['::1', 128], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 23], ['2001:db8::', 32],
+    ['::', 96], ['::1', 128], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 23], ['2001:db8::', 32],
     ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
   ] as const)
     list.addSubnet(net, prefix, 'ipv6');
   return list;
 })();
 
-/** Whether an IP literal is in a special-use range (IPv4-mapped IPv6 judged as its IPv4). */
+/**
+ * Whether an IP literal is in a special-use range. Every spelling of an
+ * IPv4-mapped IPv6 address (`::ffff:127.0.0.1`, `::ffff:7f00:1`,
+ * `0:0:0:0:0:ffff:7f00:1`) is judged as the IPv4 address it carries; the
+ * WHATWG URL parser does the canonicalization, so no hand-written expansion.
+ * The deprecated IPv4-compatible range (`::/96`) is refused outright.
+ */
 export function isSpecialUseAddress(address: string): boolean {
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
-  const ip = mapped ? mapped[1]! : address;
-  const family = isIP(ip);
-  if (family === 4) return SPECIAL_USE.check(ip, 'ipv4');
-  if (family === 6) return SPECIAL_USE.check(ip, 'ipv6');
-  return true;
+  const family = isIP(address);
+  if (family === 4) return SPECIAL_USE.check(address, 'ipv4');
+  if (family !== 6) return true;
+  const canonical = new URL(`http://[${address}]/`).hostname.slice(1, -1).toLowerCase();
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical);
+  if (mapped) {
+    const hi = parseInt(mapped[1]!, 16);
+    const lo = parseInt(mapped[2]!, 16);
+    return SPECIAL_USE.check(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`, 'ipv4');
+  }
+  return SPECIAL_USE.check(canonical, 'ipv6');
 }
 
 export type Lookup = (hostname: string) => Promise<{ address: string }[]>;

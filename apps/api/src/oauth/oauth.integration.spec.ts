@@ -391,6 +391,11 @@ describe('client ID metadata documents', () => {
     const t = await exchange(h, client, back.searchParams.get('code')!, started.pkce.verifier);
     expect(t.status).toBe(200);
     expect(t.json.refresh_token).toBeTruthy();
+    // Never stored as a client row (nothing to expire): every use resolves the
+    // document, so refreshing works for the whole life of the grant.
+    expect(await h.db.get(sql`SELECT id FROM oauth_record WHERE kind = 'Client' AND id = ${id}`)).toBeUndefined();
+    const again = await refresh(h, client, String(t.json.refresh_token));
+    expect(again.status).toBe(200);
   });
 
   it('refuses a document whose client_id is not its own URL', async () => {
@@ -571,6 +576,23 @@ describe('refresh tokens and revocation', () => {
     // The live descendant died with the grant.
     const after = await refresh(strict, client, String(t1.json.refresh_token));
     expect(after.json.error).toBe('invalid_grant');
+  });
+
+  it('two concurrent uses of one refresh token: exactly one wins, and the connection is revoked', async () => {
+    const t0 = await connect(strict, client);
+    const results = await Promise.all([1, 2, 3].map(() => refresh(strict, client, t0.refresh_token!)));
+    const winners = results.filter((r) => r.status === 200);
+    expect(winners.length).toBeLessThanOrEqual(1);
+    expect(results.filter((r) => r.json.error === 'invalid_grant').length).toBeGreaterThanOrEqual(2);
+    // Whatever the winner got died with the grant.
+    for (const w of winners) expect((await refresh(strict, client, String(w.json.refresh_token))).json.error).toBe('invalid_grant');
+  });
+
+  it('two concurrent exchanges of one code: exactly one gets tokens', async () => {
+    const { code, verifier } = await authorizeAndApprove(strict, client);
+    const results = await Promise.all([1, 2, 3].map(() => exchange(strict, client, code!, verifier)));
+    expect(results.filter((r) => r.status === 200).length).toBeLessThanOrEqual(1);
+    expect(results.filter((r) => r.json.error === 'invalid_grant').length).toBeGreaterThanOrEqual(2);
   });
 
   it('within the retry grace a spent token rotates again instead of revoking', async () => {

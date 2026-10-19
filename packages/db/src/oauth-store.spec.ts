@@ -4,6 +4,7 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import {
+  claimOAuthRecord,
   consumeOAuthRecord,
   destroyOAuthRecord,
   extendOAuthRecordExpiry,
@@ -73,6 +74,16 @@ function oauthStoreContract(open: () => Promise<Db>, close: (db: Db) => Promise<
     const row = await findOAuthRecord(db, 'RefreshToken', id);
     expect(row?.consumedAt).toBe(1000);
     expect(row?.payload.n).toBe(2);
+  });
+
+  it('claim spends an artifact exactly once, even when two callers race', async () => {
+    const id = tag();
+    await upsertOAuthRecord(db, { kind: 'RefreshToken', id, payload: {} });
+    const results = await Promise.all([1, 2, 3].map(() => claimOAuthRecord(db, 'RefreshToken', id, 1000)));
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await claimOAuthRecord(db, 'RefreshToken', id, 2000)).toBe(false);
+    expect((await findOAuthRecord(db, 'RefreshToken', id))?.consumedAt).toBe(1000);
+    expect(await claimOAuthRecord(db, 'RefreshToken', tag())).toBe(false);
   });
 
   it('take is single-use and ignores expired rows', async () => {
