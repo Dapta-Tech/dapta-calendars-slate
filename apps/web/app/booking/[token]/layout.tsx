@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { notFound } from 'next/navigation';
 import { getOneOffLink } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
 
 /**
  * An unknown invite token is a missing route, answered with a real 404 BEFORE
@@ -18,7 +19,10 @@ export default async function OneOffLinkLayout({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const resolved = await getOneOffLink(token);
+  const resolved = await orBusy(getOneOffLink(token));
+  // Busy (429) is neither a dead link nor a missing one: the page renders the
+  // busy notice from the same cached read.
+  if (isBusy(resolved)) return children;
   if (!resolved.ok && resolved.reason === 'not-found') notFound();
   return children;
 }

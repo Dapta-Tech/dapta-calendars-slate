@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { notFound } from 'next/navigation';
 import { getProfile } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
 import { requestPathSegment } from '@/lib/request-path';
 
 /**
@@ -35,7 +36,11 @@ export default async function HostLayout({
   params: Promise<{ accountCode: string; handle: string }>;
 }) {
   const { accountCode, handle } = await params;
-  const profile = await getProfile(accountCode, handle);
+  const profile = await orBusy(getProfile(accountCode, handle));
+  // A busy API (429) says nothing about existence: the page below renders the
+  // busy notice from the same cached read, rather than this layout throwing it
+  // to the error boundary or calling it a 404.
+  if (isBusy(profile)) return children;
   if (!profile) notFound();
   // `/{accountCode}/{handle}/{slug}`: the third segment, when there is one.
   const slug = await requestPathSegment(2);

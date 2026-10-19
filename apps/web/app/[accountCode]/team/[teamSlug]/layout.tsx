@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { notFound } from 'next/navigation';
 import { getTeamProfile } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
 import { requestPathSegment } from '@/lib/request-path';
 
 /**
@@ -25,7 +26,10 @@ export default async function TeamLayout({
   params: Promise<{ accountCode: string; teamSlug: string }>;
 }) {
   const { accountCode, teamSlug } = await params;
-  const team = await getTeamProfile(accountCode, teamSlug);
+  const team = await orBusy(getTeamProfile(accountCode, teamSlug));
+  // Busy (429) is not missing: the page renders the busy notice from the same
+  // cached read.
+  if (isBusy(team)) return children;
   if (!team) notFound();
   // `/{accountCode}/team/{teamSlug}/{slug}`: the fourth segment, when there is one.
   const slug = await requestPathSegment(3);
