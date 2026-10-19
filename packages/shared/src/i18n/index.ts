@@ -211,6 +211,19 @@ export interface BookingMessages {
     noTeamEvents: string;
   };
   /**
+   * The site itself, before any page names itself: the default `<title>` and
+   * description every page inherits, and the page a link that leads nowhere
+   * lands on. `{product}` is the deployment's product name, so a fork that
+   * keeps the neutral default reads just as well as Dapta's own build.
+   */
+  site: {
+    title: string;
+    description: string;
+    notFoundTitle: string;
+    notFoundBody: string;
+    notFoundHome: string;
+  };
+  /**
    * Location kind labels — WHERE a meeting happens. Shared by the public
    * booking page, the manage page and the event-type editor so one kind reads
    * the same everywhere. No conferencing vendor is named (R15); the running
@@ -1500,6 +1513,14 @@ export const en: BookingMessages = {
     noEvents: 'No bookable events yet.',
     noTeamEvents: 'No bookable team events yet.',
   },
+  site: {
+    title: '{product}: free online scheduling and booking pages',
+    description:
+      '{product} gives you a booking page to share with one link. People pick a time in their own time zone, in English or Spanish. Open source.',
+    notFoundTitle: 'Page not found',
+    notFoundBody: 'This booking page does not exist. Check the link with the person who shared it.',
+    notFoundHome: 'Go home',
+  },
   location: {
     whereLabel: 'Where',
     conferencing: 'Online meeting',
@@ -2621,6 +2642,14 @@ export const es: BookingMessages = {
     timesIn: 'Horarios en {timeZone}',
     noEvents: 'Aún no hay eventos disponibles para reservar.',
     noTeamEvents: 'Aún no hay eventos de equipo disponibles para reservar.',
+  },
+  site: {
+    title: '{product}: agenda de citas en línea gratis',
+    description:
+      '{product} te da una página de reservas para compartir con un solo enlace. Cada persona elige una hora en su propia zona horaria, en español o en inglés. Código abierto.',
+    notFoundTitle: 'Página no encontrada',
+    notFoundBody: 'Esta página de reservas no existe. Revisa el enlace con quien te lo compartió.',
+    notFoundHome: 'Ir al inicio',
   },
   location: {
     whereLabel: 'Dónde',
