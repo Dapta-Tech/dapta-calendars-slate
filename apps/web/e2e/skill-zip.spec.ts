@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { readZip } from '../lib/test/read-zip';
-import { E2E, HOST } from './stack';
+import { E2E, HOST, signIn } from './stack';
 
 /**
  * The skill zip, in the real app on both projects: an owner downloads it from
@@ -14,12 +14,6 @@ import { E2E, HOST } from './stack';
 
 const JORDAN = 'jordan@example.com';
 const METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
-
-async function signIn(page: Page, email: string): Promise<void> {
-  await expect(page).toHaveURL(/\/login/);
-  await page.locator('input[type="email"]').fill(email);
-  await page.locator('button[type="submit"]').click();
-}
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);
