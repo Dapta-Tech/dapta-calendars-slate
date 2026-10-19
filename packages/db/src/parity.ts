@@ -1395,12 +1395,17 @@ export async function rescheduleBooking(
   // stable, no mint-new row), record where it came FROM (the previous start) in
   // `from_reschedule` — the old system's back-pointer analog. `rescheduled=1`
   // flags that it moved at all.
+  // Only while it is still accepted: a cancel, a decline or a v2 move that
+  // landed since the read above leaves nothing to move (GONE), rather than
+  // rewriting the time of a booking that is no longer on.
   const updateSql = sql`UPDATE booking SET start_ms = ${args.newStartMs}, end_ms = ${newEndMs},
     rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
-    updated_at = ${now} WHERE id = ${b.id}`;
+    updated_at = ${now} WHERE id = ${b.id} AND status = 'accepted'
+    RETURNING id`;
 
   const moved = await runGuardedUpdate(db, assignedHostIds, overlapChecks, updateSql);
-  if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };
+  if (moved === 'gone') return { ok: false, reason: 'GONE' };
+  if (moved === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
     uid: b.uid,
@@ -1416,14 +1421,42 @@ export async function rescheduleBooking(
  * LIST of checks because a team booking has a host SET, not a host: a
  * collective move has to answer for each of its co-hosts, and checking them one
  * transaction at a time would leave open the window this guard exists to close.
+ *
+ * `updateSql` must carry its expected state in its WHERE (`status = ...`) and
+ * end in `RETURNING id`. An update that matches no row means the booking
+ * changed state since it was read (cancelled, declined, moved by v2): the
+ * answer is `gone`, never a success the caller would act on. Postgres
+ * re-checks that WHERE against the row as committed, so a concurrent cancel
+ * cannot slip between the check and the write.
  */
-function runGuardedUpdate(
+async function runGuardedUpdate(
   db: Db,
   memberIds: string[],
   overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
-): Promise<boolean> {
-  return runGuarded(db, memberIds, overlapChecks, [updateSql]);
+): Promise<'ok' | 'conflict' | 'gone'> {
+  if (db.dialect === 'sqlite') {
+    return db.sqlite!.txn<'ok' | 'conflict' | 'gone'>(
+      () => {
+        for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return 'conflict';
+        return db.sqlite!.drizzle.get(updateSql) ? 'ok' : 'gone';
+      },
+      { immediate: true },
+    );
+  }
+  try {
+    return await db.pg!.drizzle.transaction(async (tx) => {
+      await lockMembers(tx, memberIds);
+      for (const check of overlapChecks) {
+        const rows = (await tx.execute(check)) as unknown as unknown[];
+        if (rows.length > 0) return 'conflict' as const;
+      }
+      const updated = (await tx.execute(updateSql)) as unknown as unknown[];
+      return updated.length > 0 ? ('ok' as const) : ('gone' as const);
+    });
+  } catch {
+    return 'conflict';
+  }
 }
 
 /**
@@ -1665,9 +1698,13 @@ export async function confirmBooking(
   // confirm can only move pending→accepted once (defence-in-depth alongside the
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
-    WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, hostIds, overlapChecks, updateSql);
-  if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
+    WHERE id = ${b.id} AND status = 'pending'
+    RETURNING id`;
+  const confirmed = await runGuardedUpdate(db, hostIds, overlapChecks, updateSql);
+  // Cancelled, declined or confirmed by someone else since the read above:
+  // nothing was confirmed here, so nothing may be announced.
+  if (confirmed === 'gone') return { ok: false, reason: 'GONE' };
+  if (confirmed === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
     uid: b.uid,
