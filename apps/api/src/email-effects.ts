@@ -176,7 +176,7 @@ export function emailKeyFor(kind: EmailKind, audience: 'attendee' | 'host'): Ema
  */
 function declaredAnswers(ctx: BookingNotificationContext): Record<string, unknown> | null {
   if (!ctx.formAnswers) return null;
-  const out: Record<string, unknown> = {};
+  const out = Object.create(null) as Record<string, unknown>;
   for (const field of ctx.bookingFields) {
     if (!Object.hasOwn(ctx.formAnswers, field.name)) continue;
     const value = ctx.formAnswers[field.name];

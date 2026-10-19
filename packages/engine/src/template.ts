@@ -529,14 +529,27 @@ export interface RenderOptions {
 
 // C0 and C1 controls except tab/LF/CR (handled per mode), the bidi embedding,
 // override and isolate controls, the LRM, RLM and Arabic letter marks, and the
-// invisible zero-width space, word joiner and BOM: the classic ways to make
-// rendered text read differently from what was typed. The zero-width joiner
-// and non-joiner stay, since emoji and several scripts need them.
-// eslint-disable-next-line no-control-regex
-const UNSAFE_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+// characters that print as nothing (soft hyphen, zero-width space, word joiner,
+// invisible operators, fillers, the braille blank, BOM, and the tag characters
+// that can carry hidden text): the classic ways to make rendered text read
+// differently from what was typed. The zero-width joiner and non-joiner stay,
+// since emoji and several scripts need them.
+const UNSAFE_CHARS =
+  // eslint-disable-next-line no-control-regex, no-misleading-character-class
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\u2800\u3164\uFEFF\uFFA0\u{E0000}-\u{E007F}]/gu;
+
+/** `text` without the characters above (line breaks and tabs kept). */
+export function stripUnsafeText(text: string): string {
+  return text.replace(UNSAFE_CHARS, '');
+}
 
 /** The default cap on one inserted value, per mode (see `RenderOptions`). */
 export const MAX_TEMPLATE_VALUE: Readonly<Record<RenderMode, number>> = { line: 200, text: 2000 };
+
+/** Cut `value` to `max` characters, an ellipsis marking the cut (never inside an emoji). */
+export function capTemplateText(value: string, max: number): string {
+  return cap(value, max);
+}
 
 function cap(value: string, max: number): string {
   if (value.length <= max) return value;
@@ -680,12 +693,12 @@ export function renderTemplate(template: string | ParsedTemplate, values: Templa
     out = pieces
       .map((p) => p.text)
       .join('')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .replace(/\s+/g, ' ');
   } else {
-    out = joinLines(pieces)
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    // The host's own text is cleaned like a value: one line-break style (a
+    // bare CR must never reach a mail transport) and no invisible controls.
+    out = joinLines(pieces).replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n');
   }
+  out = stripUnsafeText(out).trim();
   return opts.maxLength ? cap(out, opts.maxLength) : out;
 }

@@ -589,6 +589,19 @@ describe('notification settings — toggles + templates through the outbox', () 
     await expect(admin.updateNotificationSetting(principal, 'host_booked', { enabled: false })).resolves.toBeTruthy();
   });
 
+  it("a host key's preview reads as the host's copy: no manage link, the guests listed", async () => {
+    const host = await admin.previewNotificationTemplate(principal, 'host_cancelled', {
+      body: 'manage={{manage_url}} guests={{guests}}',
+    });
+    expect(host.text).toBe('manage= guests=colleague@example.com');
+    expect(host.issues).toEqual([]);
+    const invitee = await admin.previewNotificationTemplate(principal, 'attendee_cancellation', {
+      body: 'manage={{manage_url}}\nguests={{guests}}',
+    });
+    expect(invitee.text).toBe('manage=https://example.com/manage/sample');
+    expect(invitee.issues.map((i) => i.code)).toEqual(['host_only']);
+  });
+
   it('the preview lists every problem a save would refuse, in the host language', async () => {
     const preview = await admin.previewNotificationTemplate(principal, 'attendee_confirmation', {
       subject: '{{event_name}} {{#if form.x}}',

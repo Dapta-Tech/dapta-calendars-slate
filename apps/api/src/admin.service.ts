@@ -1181,6 +1181,9 @@ export class AdminService {
     const me = await getMe(this.db, p.accountId, p.memberId);
     const locale = me?.locale === 'es' ? 'es' : 'en';
     const template = resolveTemplate(key, draft, locale);
+    // The preview reads as the side the key is sent to: the host's copy never
+    // carries the invitee's manage link and is the only one that lists guests.
+    const host = templateAudience(key) === 'host';
     const sample: BookingNotification & { reminderLeadMinutes?: number } = {
       accountId: p.accountId,
       uid: 'sample-uid',
@@ -1191,7 +1194,7 @@ export class AdminService {
       teamName: locale === 'es' ? 'Ventas' : 'Sales',
       startUtc: new Date(Date.now() + 26 * 3_600_000).toISOString(),
       endUtc: new Date(Date.now() + 26 * 3_600_000 + 30 * 60_000).toISOString(),
-      host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com' },
+      host: { name: me?.displayName ?? 'Alex Rivera', email: me?.email ?? 'host@example.com', timeZone: me?.timeZone ?? 'UTC' },
       attendee: {
         name: locale === 'es' ? 'Ana García' : 'Sam Guest',
         email: 'guest@example.com',
@@ -1200,12 +1203,13 @@ export class AdminService {
       },
       guests: [{ name: null, email: 'colleague@example.com' }],
       location: getMessages(locale).location.conferencing,
-      manageUrl: 'https://example.com/manage/sample',
+      manageUrl: host ? null : 'https://example.com/manage/sample',
       bookingLink: 'https://example.com/acme/alex-rivera/intro-call',
       cancellationReason: locale === 'es' ? 'Conflicto de agenda' : 'Schedule conflict',
       previousStartUtc: new Date(Date.now() + 2 * 3_600_000).toISOString(),
       pending: key === 'host_booked',
       reminderLeadMinutes: 60,
+      audience: host ? 'host' : 'attendee',
     };
     const rendered = renderTemplate(template, templateVars(sample, locale), locale);
     // The host's copy of a request, a booking and a move adds who is asking and

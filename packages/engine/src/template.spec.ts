@@ -191,6 +191,12 @@ describe('renderTemplate: safety', () => {
     expect(line('{{attendee_name}}', { attendee_name: family })).toBe(family);
   });
 
+  it('cleans the host text too: one line-break style, no invisible controls', () => {
+    expect(text('Hi\r.\rMAIL FROM:x\r\nend')).toBe('Hi\n.\nMAIL FROM:x\nend');
+    expect(text('A\u202Eb\u0000c\u{E0041}d\te')).toBe('Abcd\te');
+    expect(line('Hi\u0000Bcc: x\u0085 A\u200B')).toBe('HiBcc: x A');
+  });
+
   it('never cuts an emoji in half at the cap', () => {
     const out = cleanTemplateValue(`${'a'.repeat(198)}\uD83D\uDE00tail`, { mode: 'line' });
     expect(out).toBe(`${'a'.repeat(198)}…`);

@@ -6,6 +6,8 @@
  * line folding, and TEXT escaping per the spec.
  */
 
+import { stripUnsafeText } from '@slate/engine';
+
 export type IcsMethod = 'REQUEST' | 'CANCEL';
 
 export interface IcsInput {
@@ -39,11 +41,26 @@ export interface IcsInput {
  * rest of a title or description start a property of its own.
  */
 function escapeText(value: string): string {
-  return value
+  return stripUnsafeText(value)
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\r\n?|\n/g, '\\n');
+}
+
+/**
+ * A `;CN=` parameter (RFC 5545 §3.2). A parameter is not TEXT: a backslash
+ * escapes nothing there, so a `;` or `:` in a name would end the parameter and
+ * let the rest of it set another one (`;PARTSTAT=ACCEPTED`) or the address.
+ * A name holding any of `;:,` is quoted; a quoted string cannot hold `"` or a
+ * control character, so those are dropped.
+ */
+function commonName(name: string | null | undefined): string {
+  if (!name) return '';
+  // eslint-disable-next-line no-control-regex
+  const value = stripUnsafeText(name).replace(/[\u0000-\u001f\u007f"]/g, '');
+  if (!value) return '';
+  return /[;:,]/.test(value) ? `;CN="${value}"` : `;CN=${value}`;
 }
 
 /**
@@ -112,12 +129,10 @@ export function buildIcs(input: IcsInput): string {
   // occur in real query strings and corrupt the link.
   if (url) lines.push(`URL:${url}`);
   if (input.organizer?.email) {
-    const cn = input.organizer.name ? `;CN=${escapeText(input.organizer.name)}` : '';
-    lines.push(`ORGANIZER${cn}:mailto:${input.organizer.email}`);
+    lines.push(`ORGANIZER${commonName(input.organizer.name)}:mailto:${input.organizer.email}`);
   }
   for (const a of input.attendees) {
-    const cn = a.name ? `;CN=${escapeText(a.name)}` : '';
-    lines.push(`ATTENDEE${cn};RSVP=TRUE:mailto:${a.email}`);
+    lines.push(`ATTENDEE${commonName(a.name)};RSVP=TRUE:mailto:${a.email}`);
   }
   lines.push('END:VEVENT', 'END:VCALENDAR');
   return lines.map(foldLine).join('\r\n') + '\r\n';

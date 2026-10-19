@@ -7,7 +7,9 @@ import {
   type BookingAnswer,
   type BookingGuest,
 } from './booking-details';
+import { capTemplateText } from '@slate/engine';
 import {
+  MAX_RENDERED_BODY,
   renderTemplate,
   templateVars,
   type EmailTemplate,
@@ -221,8 +223,12 @@ export class BookingNotifier {
     // The host's request is the one host copy with something to do.
     const actionUrl = kind === 'pending' ? hostDashboardUrl(n) : '';
     const html = renderBrandedHtml(kind, vars, locale, audience, growth, { details, actionUrl });
+    // The body cap holds for the whole text part, the host's details included.
     const withDetails = (text: string) =>
-      details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text;
+      capTemplateText(
+        details ? [text, bookingDetailsText(details, locale, actionUrl)].filter(Boolean).join('\n\n') : text,
+        MAX_RENDERED_BODY,
+      );
     if (n.template) {
       const base = renderTemplate(n.template, vars, locale);
       return { subject: base.subject, text: withDetails(base.text), html };

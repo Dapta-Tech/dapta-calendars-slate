@@ -5,6 +5,7 @@ import { variablesFor } from '@slate/engine';
 import {
   DEFAULT_TEMPLATES,
   EMAIL_TEMPLATE_KEYS,
+  MAX_RENDERED_BODY,
   MAX_RENDERED_SUBJECT,
   TEMPLATE_VARIABLES,
   defaultTemplate,
@@ -270,7 +271,10 @@ describe('the engine renders every old template as the old renderer did', () => 
 
   it.each(corpus.map((t, n) => [n, t] as const))('template %i', (_n, t) => {
     const now = renderTemplate(t, vars);
-    expect({ subject: now.subject, text: now.text }).toEqual(oldRender(t, vars));
+    const old = oldRender(t, vars);
+    // One deliberate difference: a CR the host typed is a line break, never a
+    // bare CR on the wire.
+    expect({ subject: now.subject, text: now.text }).toEqual({ ...old, text: old.text.replace(/\r\n?/g, '\n') });
   });
 });
 
@@ -387,6 +391,16 @@ describe('BookingNotifier — audience + template rendering', () => {
     expect(recipients(m)).toEqual(['sam@example.com']);
     expect(m.idempotencyKey).toBe('calendar:bk-123:confirmation');
     expect(m.subject).toMatch(/^Confirmed: Intro Call/);
+  });
+
+  it('the body cap holds for the whole host text, the details block included', async () => {
+    await notifier.sendConfirmation({
+      ...base,
+      audience: 'host',
+      template: { subject: 's', body: 'x'.repeat(MAX_RENDERED_BODY) },
+      answers: Array.from({ length: 10 }, (_, i) => ({ label: `Q${i}`, value: 'y'.repeat(900) })),
+    });
+    expect(email.sent[0]!.text.length).toBeLessThanOrEqual(MAX_RENDERED_BODY);
   });
 
   it('audience=host sends to host + co-hosts with a :host key and host copy', async () => {

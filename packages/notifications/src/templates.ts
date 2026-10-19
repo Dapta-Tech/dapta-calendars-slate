@@ -19,6 +19,7 @@ import {
   FORM_VARIABLE_PREFIX,
   formVariable,
   renderTemplate as renderWithEngine,
+  stripUnsafeText,
   templateVariableNames,
   type TemplateAudience,
   type TemplateLocale,
@@ -336,6 +337,10 @@ export function templateVars(
     cancellation_reason: n.cancellationReason ?? '',
     pending_note: pendingNote,
   };
+  // The branded layout prints these straight (escaped), so they lose invisible
+  // and bidi controls here, once, as the engine cleans what it inserts. A row
+  // queued long ago can lack a field the type says is there: it reads as empty.
+  for (const key of TEMPLATE_VARIABLES) builtIn[key] = stripUnsafeText(String(builtIn[key] ?? ''));
   // Safe by construction: `builtIn` is exhaustive above, and every form key is
   // `form.`-prefixed so the spread cannot drop or shadow one.
   return { ...builtIn, ...formVars(n.formAnswers) } as TemplateVarMap;
