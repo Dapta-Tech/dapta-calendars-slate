@@ -36,7 +36,9 @@ export function DeveloperPage({
     <div className="mx-auto max-w-5xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
       {/* `longSubtitle` keeps the lead at reading width, inside the column below. */}
       {title ? <PageHeader title={title} subtitle={subtitle} longSubtitle /> : null}
-      <div className="flex max-w-3xl flex-col gap-section">{children}</div>
+      {/* Block flow, not a flex gap: each section keeps the margin it always
+          had, and neighbouring margins collapse into one section step. */}
+      <div className="max-w-3xl">{children}</div>
     </div>
   );
 }

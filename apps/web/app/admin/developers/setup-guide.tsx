@@ -46,7 +46,7 @@ export function SetupGuide({
     <section
       aria-labelledby="setup-guide-title"
       data-testid="setup-guide"
-      className="rounded-xl border border-border bg-card p-card sm:p-group"
+      className="mb-section rounded-xl border border-border bg-card p-card sm:p-group"
     >
       <h2 id="setup-guide-title" className="text-xl font-semibold">
         {m.guideTitle}
@@ -78,6 +78,7 @@ export function SetupGuide({
             value={t(m.guidePrompt, { product: productName })}
             copyLabel={m.copyPrompt}
             copiedLabel={m.copied}
+            wrap
           />
           <p className="mt-field max-w-prose text-xs text-muted-foreground">
             {m.guideTryNote}{' '}

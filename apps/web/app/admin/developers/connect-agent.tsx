@@ -23,7 +23,20 @@ export interface ConnectSnippets {
 
 type TabId = 'cursor' | 'claude-code' | 'codex' | 'other' | 'chat';
 
-export function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; label?: string; copyLabel: string; copiedLabel: string }) {
+export function CodeBlock({
+  value,
+  label,
+  copyLabel,
+  copiedLabel,
+  wrap = false,
+}: {
+  value: string;
+  label?: string;
+  copyLabel: string;
+  copiedLabel: string;
+  /** Prose to paste (a prompt), not code: it wraps instead of scrolling sideways. */
+  wrap?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -39,7 +52,11 @@ export function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: str
       {label ? <span className="text-xs text-muted-foreground">{label}</span> : null}
       {/* Copy sits top-right inside the block, so a one-line value takes one line. */}
       <div className="flex items-start gap-inline rounded-md border border-border bg-muted p-inline pl-field">
-        <pre className="min-w-0 flex-1 self-center overflow-x-auto whitespace-pre font-mono text-xs">
+        <pre
+          className={`min-w-0 flex-1 self-center font-mono text-xs ${
+            wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto whitespace-pre'
+          }`}
+        >
           <code>{value}</code>
         </pre>
         <Button
@@ -50,7 +67,10 @@ export function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: str
           aria-label={`${copyLabel} · ${label ?? value.slice(0, 24)}`}
         >
           <i aria-hidden className={`pi ${copied ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 12 }} />
-          {copied ? copiedLabel : copyLabel}
+          {/* Icon only under 640px, where the block sits in the guide's step
+              column and the word would take half its width; the aria-label
+              names the button either way. */}
+          <span className="hidden sm:inline">{copied ? copiedLabel : copyLabel}</span>
         </Button>
       </div>
     </div>
@@ -121,9 +141,10 @@ export function ConnectAgent({
   return (
     <div>
       {external ? <SignInNote m={m} /> : null}
-      {/* Scrolls inside its own width: it sits in the guide's step column now,
-          so the old bleed to the page gutter would run into the step numbers. */}
-      <div role="tablist" aria-label={m.connectTitle} className="mb-field flex gap-tight overflow-x-auto">
+      {/* Wraps rather than scrolls: in the guide's step column a scrolling strip
+          hid two of the five agents at 360px with nothing to say they were
+          there, and the old bleed to the page gutter ran into the step numbers. */}
+      <div role="tablist" aria-label={m.connectTitle} className="mb-field flex flex-wrap gap-tight">
         {tabs.map((tab, i) => (
           <button
             key={tab.id}
