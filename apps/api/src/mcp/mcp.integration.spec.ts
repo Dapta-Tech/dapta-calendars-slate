@@ -146,6 +146,49 @@ describe('public tools without a key', () => {
     expect(n!.n).toBe(1);
   });
 
+  it('book_meeting recovers a booking whose idempotency record was never completed (personal and team)', async () => {
+    const client = await h.connect();
+    const personal = await firstSlot(client, 40);
+    const teamSlots = structured<Slots>(
+      await client.callTool({ name: 'find_available_slots', arguments: { booking_page_url: 'https://x.test/acme/team/sales/team-demo', time_zone: 'UTC' } }),
+    );
+    const cases = [
+      { booking_page_url: PAGE, start: personal.start, answers: { company: 'Initech' }, idempotency_key: idem('half-done-0001') },
+      {
+        account_code: 'acme',
+        team_slug: 'sales',
+        event_slug: 'team-demo',
+        start: teamSlots.days[1]!.slots[0]!.start,
+        idempotency_key: idem('half-done-0002'),
+      },
+    ];
+    for (const c of cases) {
+      const args = { ...c, attendee: { name: 'Hal Half', email: 'hal@example.org', time_zone: 'UTC' } };
+      const first = structured<{ booking: { uid: string } }>(await client.callTool({ name: 'book_meeting', arguments: args }));
+      // The first attempt committed the booking but never recorded its result (a timeout, a crash).
+      await h.db.run(sql`UPDATE api_idempotency SET status_code = NULL, response_body = NULL WHERE path = 'book_meeting' AND status_code = 201`);
+      const retry = structured<{ booking: { uid: string }; replayed: boolean }>(await client.callTool({ name: 'book_meeting', arguments: args }));
+      expect(retry).toMatchObject({ replayed: true, booking: { uid: first.booking.uid } });
+      const n = await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking WHERE uid = ${first.booking.uid}`);
+      expect(n!.n).toBe(1);
+    }
+  });
+
+  it('book_meeting hands a definite refusal back to an identical retry', async () => {
+    const client = await h.connect();
+    const slot = await firstSlot(client, 44);
+    const book = (email: string, key: string) =>
+      client.callTool({
+        name: 'book_meeting',
+        arguments: { booking_page_url: PAGE, start: slot.start, attendee: { name: 'N', email, time_zone: 'UTC' }, answers: { company: 'c' }, idempotency_key: idem(key) },
+      });
+    structured(await book('first@example.org', 'refusal-0001'));
+    const a = errorText(await book('second@example.org', 'refusal-0002'));
+    const b = errorText(await book('second@example.org', 'refusal-0002'));
+    expect(a).toContain('SLOT_TAKEN');
+    expect(b).toBe(a);
+  });
+
   it('rejects a start that is not an offered slot', async () => {
     const client = await h.connect();
     const text = errorText(

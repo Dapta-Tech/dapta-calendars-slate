@@ -1,6 +1,6 @@
 import * as z from 'zod4';
 import type { Db } from '@slate/db';
-import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, sql } from '@slate/db';
+import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, scopedIdempotencyKey, sql } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import type { BookingService } from '../booking.service';
@@ -371,6 +371,22 @@ const findSlots: ToolDef = {
   },
 };
 
+interface BookMeetingData extends Record<string, unknown> {
+  booking: {
+    uid: string;
+    status: string;
+    start: string;
+    end: string;
+    start_utc: string;
+    end_utc: string;
+    time_zone: string;
+    event_type_title: string;
+    host: string | null;
+  };
+  replayed: boolean;
+  next_step: string;
+}
+
 const bookMeetingInput = z.object({
   ...pageAddress,
   start: z.string().max(40).describe('Exact start of an offered slot from find_available_slots, ISO-8601 with offset.'),
@@ -438,8 +454,12 @@ const bookMeeting: ToolDef = {
     });
     if (claim.requestHash !== requestHash)
       throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
+    if (claim.statusCode != null && claim.statusCode >= 400) {
+      const stored = claim.responseBody as { error: string; message: string };
+      throw failureFor(stored.error, stored.message);
+    }
     if (claim.statusCode != null) {
-      const prior = claim.responseBody as ToolResult['data'] & { booking: { uid: string; status: string; start: string } };
+      const prior = claim.responseBody as BookMeetingData;
       return {
         data: { ...prior, replayed: true },
         summary: `${line(prior.booking)} (replay of an earlier identical call)`,
@@ -448,6 +468,42 @@ const bookMeeting: ToolDef = {
     }
     const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
     const storedKey = `mcp:${namespaceHash}`;
+    const finish = async (data: BookMeetingData) => {
+      await completeApiIdempotency(deps.db, claim.id, 201, data);
+      return { data, summary: line(data.booking), affected: [data.booking.uid] } satisfies ToolResult;
+    };
+    // The claim row can be "in progress" because an earlier attempt timed out or
+    // was cut off AFTER it committed the booking. Ask the bookings table (the
+    // key is unique there, for personal and team events alike) before booking.
+    const prior = await deps.db.get<{ uid: string; start_ms: number; email: string | null }>(
+      sql`SELECT b.uid, b.start_ms,
+                 (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
+                    ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS email
+          FROM booking b
+          WHERE b.account_id = ${accountId}
+            AND b.idempotency_key = ${scopedIdempotencyKey(accountId, storedKey)} LIMIT 1`,
+    );
+    if (prior) {
+      if (Number(prior.start_ms) !== Date.parse(startUtc) || (prior.email ?? '').toLowerCase() !== args.attendee.email.toLowerCase())
+        throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
+      const b = await deps.calV2.bookingResponse(accountId, prior.uid);
+      const done = await finish({
+        booking: {
+          uid: b.uid,
+          status: b.status,
+          start: zonedIso(new Date(b.start), tz),
+          end: zonedIso(new Date(b.end), tz),
+          start_utc: new Date(b.start).toISOString(),
+          end_utc: new Date(b.end).toISOString(),
+          time_zone: tz,
+          event_type_title: untrusted(resolved.eventType.title, 200),
+          host: b.hosts[0]?.name ? untrusted(b.hosts[0].name, 100) : null,
+        },
+        replayed: true,
+        next_step: 'This request had already been booked; nothing was sent again.',
+      });
+      return { ...done, summary: `${done.summary} (replay of an earlier identical call)` };
+    }
     const outcome =
       resolved.kind === 'team'
         ? await deps.bookings.teamBook(
@@ -462,9 +518,15 @@ const bookMeeting: ToolDef = {
             { idempotencyKey: storedKey, locale: language },
           );
     if (isServiceError(outcome)) {
-      throw failureFor(outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error, outcome.message);
+      const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;
+      // A definite refusal (taken slot, bad answers) is the answer to this exact
+      // request, so a retry gets it back instead of trying again. A transient one
+      // (the host calendar could not confirm) stays open for the retry to run.
+      if (code !== 'CALENDAR_UNAVAILABLE')
+        await completeApiIdempotency(deps.db, claim.id, outcome.status, { error: code, message: outcome.message });
+      throw failureFor(code, outcome.message);
     }
-    const data = {
+    const data: BookMeetingData = {
       booking: {
         uid: outcome.uid,
         status: outcome.status,
@@ -482,8 +544,7 @@ const bookMeeting: ToolDef = {
           ? 'The host must confirm this request; the invitee was emailed.'
           : 'Confirmed. A confirmation email with a link to reschedule or cancel was sent to the invitee.',
     };
-    await completeApiIdempotency(deps.db, claim.id, 201, data);
-    return { data, summary: line(data.booking), affected: [outcome.uid] };
+    return finish(data);
   },
 };
 
