@@ -13,6 +13,7 @@ import {
   markOutboxFailed,
   markOutboxRetry,
   MAX_BACKOFF_MS,
+  newOutboxId,
   outboxRetriesExhausted,
   renewOutboxLease,
   retryDelayMs,
@@ -212,7 +213,42 @@ describe('outbox — durable side-effect queue (B7/DM1)', () => {
     expect((await claimDueOutbox(db, 50, 10, opts)).map((r) => r.id)).toEqual([cancelHost]);
   });
 
+  it('rows queued in the same millisecond keep their queue order', async () => {
+    const opts = { kinds: ['analytics'] as const, inOrder: true };
+    // An event and the account update it implies, queued at the same instant.
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++)
+      ids.push(await enqueueOutbox(db, { kind: 'analytics', action: `e${i}`, accountId: 'acct', payload: '{}', now: 500 }));
+    const rows = await listOutbox(db, { kind: 'analytics' });
+    // The stamp is the clock the caller gave; the id carries the queue order.
+    expect(rows.every((r) => r.createdAt === 500)).toBe(true);
+    expect([...ids].sort()).toEqual(ids);
+    const seen: string[] = [];
+    for (let t = 1000; seen.length < 5; t++) {
+      const [row] = await claimDueOutbox(db, t, 10, opts);
+      seen.push(row!.id);
+      await markOutboxDone(db, row!.id, t, row!.leaseToken);
+    }
+    expect(seen).toEqual(ids);
+  });
+
+  it('new ids keep increasing within a process, through a clock that steps back and a busy millisecond', () => {
+    // Clocks ahead of every id already made in this process, so each branch runs.
+    const t = Date.now() + 60_000;
+    const counter = (id: string) => id.slice(15, 18);
+    const ids = [newOutboxId(t), newOutboxId(t), newOutboxId(t - 1000)];
+    expect(ids.map(counter)).toEqual(['000', '001', '002']);
+    for (let i = 0; i < 5000; i++) ids.push(newOutboxId(t + 1));
+    expect(counter(ids[3]!)).toBe('000'); // a later clock starts the counter again
+    ids.push(newOutboxId(t + 10));
+    expect(counter(ids.at(-1)!)).toBe('000');
+    expect([...ids].sort()).toEqual(ids);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
   it('the default order key: the booking, or for a webhook the subscriber and the booking', () => {
+    expect(defaultOrderKey({ kind: 'analytics', accountId: 'acct' })).toBe('acct');
     expect(defaultOrderKey({ kind: 'calendar', bookingUid: 'b1' })).toBe('b1');
     expect(defaultOrderKey({ kind: 'webhook', webhookId: 'w', bookingUid: 'b1' })).toBe('w|b1');
     expect(defaultOrderKey({ kind: 'webhook', webhookId: 'w' })).toBe('w');

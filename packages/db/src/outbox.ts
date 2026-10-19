@@ -28,7 +28,7 @@
  * in the order queued, which keeps one slow destination from occupying every
  * delivery slot and keeps a retry from letting a later row overtake it.
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from './client';
 
@@ -181,17 +181,47 @@ export function outboxRetriesExhausted(
 /** Record a due unit of work. Returns the new row id. */
 /** The order key a row gets when its caller names none; see `EnqueueOutboxInput.orderKey`. */
 export function defaultOrderKey(
-  input: Pick<EnqueueOutboxInput, 'kind' | 'bookingUid' | 'webhookId'>,
+  input: Pick<EnqueueOutboxInput, 'kind' | 'bookingUid' | 'webhookId' | 'accountId'>,
 ): string | null {
   if (input.kind === 'webhook') {
     if (!input.webhookId) return null;
     return input.bookingUid ? `${input.webhookId}|${input.bookingUid}` : input.webhookId;
   }
+  // One account's product-analytics events go out in the order they happened
+  // (an event, then the account update it implies), as they did when the
+  // outbox drained one row at a time.
+  if (input.kind === 'analytics') return input.accountId ?? null;
   return input.bookingUid ?? null;
 }
 
+/**
+ * A new outbox row's id: the UUID version 7 layout (milliseconds, then a
+ * counter, then random bits), strictly increasing within this process. The
+ * claim breaks a `created_at` tie on the id, so rows queued in the same
+ * millisecond (an analytics event and the account update it implies) keep
+ * their queue order instead of a random one. `created_at` stays the honest
+ * clock. Rows queued by two processes in the same millisecond still tie, as
+ * there is no shared sequence; the random tail keeps every id unique.
+ */
+let lastIdMs = 0;
+let lastIdSeq = 0;
+export function newOutboxId(clock: number = Date.now()): string {
+  if (clock > lastIdMs) {
+    lastIdMs = clock;
+    lastIdSeq = 0;
+  } else if (++lastIdSeq > 0xfff) {
+    lastIdMs += 1;
+    lastIdSeq = 0;
+  }
+  const ms = lastIdMs.toString(16).padStart(12, '0').slice(-12);
+  const tail = randomBytes(8);
+  tail[0] = (tail[0]! & 0x3f) | 0x80; // RFC 9562 variant
+  const r = tail.toString('hex');
+  return `${ms.slice(0, 8)}-${ms.slice(8)}-7${lastIdSeq.toString(16).padStart(3, '0')}-${r.slice(0, 4)}-${r.slice(4)}`;
+}
+
 export async function enqueueOutbox(db: Db, input: EnqueueOutboxInput): Promise<string> {
-  const id = randomUUID();
+  const id = newOutboxId();
   const now = input.now ?? Date.now();
   const dueAt = input.nextAttemptAt ?? now;
   const orderKey = input.orderKey !== undefined ? input.orderKey : defaultOrderKey(input);
