@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import { getMessages, t } from '@slate/shared';
+import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
 import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
 import { firstWindow } from '@/lib/availability-window';
@@ -42,9 +42,10 @@ export async function generateMetadata({
   const name = profile.member.displayName ?? profile.member.handle;
   // Title and description say what the card says: the event, the host, the
   // length. The image is `opengraph-image.tsx` beside this file, so no
-  // `images` here: an explicit list would replace the host's card.
+  // `images` here: an explicit list would replace the host's card. A title that
+  // already names the host is not told who it is with a second time.
   const growth = getMessages(await publicLocale(lang)).growth;
-  const title = t(growth.seoEventTitle, { event: event.title, name });
+  const title = eventPageTitle(growth.seoEventTitle, event.title, name);
   const description =
     event.description ||
     t(growth.seoEvent, {
