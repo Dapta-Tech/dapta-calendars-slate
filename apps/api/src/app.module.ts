@@ -50,6 +50,8 @@ import { AdminCrudController } from './admin-crud.controller';
 import { CalV2Controller, CalV2RequestIdInterceptor } from './cal-v2.controller';
 import { CalV2Service } from './cal-v2.service';
 import { CalV2PilotService } from './cal-v2-pilot.service';
+import { McpController } from './mcp/mcp.controller';
+import { McpGateway } from './mcp/mcp.gateway';
 import { CalendarRetryAfterInterceptor } from './retry-after';
 
 @Module({
@@ -60,6 +62,7 @@ import { CalendarRetryAfterInterceptor } from './retry-after';
     HostController,
     MachineController,
     CalV2Controller,
+    McpController,
     AdminCrudController,
   ],
   providers: [
@@ -190,6 +193,7 @@ import { CalendarRetryAfterInterceptor } from './retry-after';
     CalV2Service,
     CalV2PilotService,
     CalV2RequestIdInterceptor,
+    McpGateway,
     AdminService,
     OnboardingService,
     GrowthService,

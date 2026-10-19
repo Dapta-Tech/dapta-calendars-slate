@@ -25,6 +25,14 @@ const boolish = z
 const optionalSecret = (minLength: number) =>
   z.preprocess((v) => (v === '' ? undefined : v), z.string().min(minLength).optional());
 
+/**
+ * A positive-number knob where an empty value means "use the default". Same
+ * reason as `optionalSecret`: a deploy that renders a missing var as `NAME=`
+ * must not stop the API from booting.
+ */
+const blankIsDefault = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema);
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -328,6 +336,37 @@ export const serverEnvSchema = z.object({
   // operator's own people (staff, test accounts): `is_internal` on their
   // events, so launch numbers can leave them out. Unset = nobody is internal.
   PRODUCT_ANALYTICS_INTERNAL_EMAILS: z.string().optional(),
+
+  // --- MCP endpoint (`POST /mcp`) -------------------------------------------
+  // Every var here is optional with a safe default: unset, the endpoint serves
+  // the public booking tools to anyone and the key-gated tools to API keys,
+  // refuses browser origins, and rate limits per pod.
+  //
+  // On by default. `false` unmounts nothing but makes `/mcp` answer 404.
+  MCP_ENABLED: boolish.default('true'),
+  // The URL people paste into an agent (shown in docs and the web page). Only
+  // ever displayed, never used to validate a request, so a wrong value cannot
+  // lock anyone out.
+  MCP_PUBLIC_URL: blankIsDefault(z.string().url().optional()),
+  // Comma-separated browser origins allowed to call `/mcp` (DNS-rebinding guard).
+  // A request carrying an `Origin` header outside this list is refused with 403;
+  // requests without one (every non-browser MCP client) are unaffected. Unset =
+  // no browser origin is allowed. A browser-hosted client must also be listed in
+  // CORS_ORIGINS, or the browser will not let the page read the answer.
+  MCP_ALLOWED_ORIGINS: z.string().optional(),
+  // Comma-separated hostnames `/mcp` answers to (the `Host` header, port
+  // ignored). Unset = no host check. Set it when the API is reachable under
+  // names you do not control (DNS rebinding needs an attacker-chosen Host).
+  MCP_ALLOWED_HOSTS: z.string().optional(),
+  // Per-pod token buckets for tool calls, keyed by API key (or client address
+  // for anonymous calls). Reads: burst CAPACITY, sustained REFILL per second.
+  // Writes (book_meeting, create/reschedule/cancel) have their own, tighter pair.
+  MCP_RATE_LIMIT_CAPACITY: blankIsDefault(z.coerce.number().int().positive().default(30)),
+  MCP_RATE_LIMIT_REFILL_PER_SEC: blankIsDefault(z.coerce.number().positive().default(1)),
+  MCP_WRITE_RATE_LIMIT_CAPACITY: blankIsDefault(z.coerce.number().int().positive().default(10)),
+  MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC: blankIsDefault(z.coerce.number().positive().default(0.2)),
+  // How long one tool call may run before the caller gets a timeout error.
+  MCP_TOOL_TIMEOUT_MS: blankIsDefault(z.coerce.number().int().min(1000).max(120_000).default(20_000)),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
