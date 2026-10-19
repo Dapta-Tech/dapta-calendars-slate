@@ -15,6 +15,21 @@ afterAll(async () => {
   await h.close();
 });
 
+/**
+ * Slot `nth` of the `day`-th listed day (0 = the first) that offers more than
+ * `nth` slots. How much of today is left depends on the wall clock: late in the
+ * host's day it has fewer than four slots, or none and is not listed at all. So
+ * a spec never reads `days[0].slots[n]` directly.
+ */
+function slotOnADay<S>(r: { days: { slots: S[] }[] }, nth = 0, day = 0): S {
+  const slot = r.days.filter((d) => d.slots.length > nth)[day]?.slots[nth];
+  expect(slot, `no day number ${day + 1} with ${nth + 1} or more slots; slots per day: ${r.days.map((d) => d.slots.length).join(', ')}`).toBeDefined();
+  return slot!;
+}
+
+/** A bare date `days` days from now, for a range end that never falls behind the clock. */
+const dateAhead = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
 async function firstSlot(client: Awaited<ReturnType<Harness['connect']>>, nth = 0) {
   const r = structured<Slots>(
     await client.callTool({ name: 'find_available_slots', arguments: { booking_page_url: PAGE, time_zone: 'America/New_York' } }),
@@ -58,10 +73,11 @@ describe('public tools without a key', () => {
     const r = structured<Slots & { range_clamped: boolean }>(
       await client.callTool({
         name: 'find_available_slots',
-        arguments: { booking_page_url: PAGE, time_zone: 'America/Bogota', end: '2026-12-31' },
+        // Far enough ahead that the 31-day cap always applies.
+        arguments: { booking_page_url: PAGE, time_zone: 'America/Bogota', end: dateAhead(90) },
       }),
     );
-    const s = r.days[0]!.slots[0]!;
+    const s = slotOnADay(r);
     expect(s.start).toMatch(/-05:00$/);
     expect(new Date(s.start).toISOString()).toBe(s.start_utc);
     expect(r.range_clamped).toBe(true);
@@ -134,7 +150,7 @@ describe('public tools without a key', () => {
       account_code: 'acme',
       team_slug: 'sales',
       event_slug: 'team-demo',
-      start: r.days[0]!.slots[3]!.start,
+      start: slotOnADay(r, 3).start,
       attendee: { name: 'Tess Team', email: 'tess@example.org', time_zone: 'UTC' },
       idempotency_key: idem('team-replay-0001'),
     };
@@ -158,7 +174,7 @@ describe('public tools without a key', () => {
         account_code: 'acme',
         team_slug: 'sales',
         event_slug: 'team-demo',
-        start: teamSlots.days[1]!.slots[0]!.start,
+        start: slotOnADay(teamSlots, 0, 1).start,
         idempotency_key: idem('half-done-0002'),
       },
     ];
@@ -214,7 +230,7 @@ describe('public tools without a key', () => {
         arguments: { booking_page_url: 'https://x.test/acme/team/sales/team-demo', time_zone: 'UTC' },
       }),
     );
-    const slot = r.days[0]!.slots[0]!;
+    const slot = slotOnADay(r);
     const booked = structured<{ booking: { status: string } }>(
       await client.callTool({
         name: 'book_meeting',
