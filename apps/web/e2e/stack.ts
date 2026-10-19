@@ -54,12 +54,14 @@ export interface StandInCall {
 /**
  * Sign in through the real login form, from a page the app has already sent to
  * `/login` (with or without a `next`). The dev login makes the account on first
- * use. One helper for every spec, so a change to the form changes one place.
+ * use. The selectors name the form's controls by type, not by their words, so
+ * the helper works in every language the login renders (a Spanish browser gets
+ * "Correo" and "Continuar"), the way language.spec.ts already reads it.
  */
 export async function signIn(page: Page, email: string): Promise<void> {
   await expect(page).toHaveURL(/\/login/);
-  await page.getByLabel('Email').fill(email);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('button[type="submit"]').click();
 }
 
 export async function standInCalls(op?: StandInCall['op']): Promise<StandInCall[]> {
