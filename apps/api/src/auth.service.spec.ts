@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from '@slate/db';
 import { LocalAuthProvider, type AuthProvider, type ResolvedHost } from './auth.provider';
-import { AuthService, LOGIN_SEEN_REFRESH_MS } from './auth.service';
+import { AuthService, LOGIN_SEEN_REFRESH_MS, loginSeenRefreshMs } from './auth.service';
 
 /**
  * Every verified host request tells when a login last resolved the member
@@ -65,6 +65,26 @@ describe('AuthService.resolveHost stamps the login, at most once a day', () => {
     await db.run(sql`UPDATE member SET login_seen_at = NULL WHERE id = ${alex.memberId}`);
     await auth.resolveHost(req());
     expect(Number(await seenAt())).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('a short link window shortens the refresh step, so a person signing in every 23 hours never falls out of a one-day window', async () => {
+    expect(loginSeenRefreshMs(30)).toBe(LOGIN_SEEN_REFRESH_MS);
+    expect(loginSeenRefreshMs(1)).toBe(LOGIN_SEEN_REFRESH_MS / 4);
+    let issuedAt = Date.now() - 3 * 23 * 3_600_000;
+    const provider: AuthProvider = { name: 'fake', resolveHost: async (): Promise<ResolvedHost> => ({ ...alex, authenticatedAt: issuedAt }) };
+    const auth = new AuthService(db, provider, { OAUTH_LINK_MAX_AGE_DAYS: 1 });
+    for (let i = 0; i < 3; i += 1) {
+      await auth.resolveHost(req());
+      expect(Number(await seenAt())).toBe(issuedAt);
+      issuedAt += 23 * 3_600_000;
+    }
+  });
+
+  it('a token that does not say when it was issued stamps nothing', async () => {
+    await db.run(sql`UPDATE member SET login_seen_at = NULL WHERE id = ${alex.memberId}`);
+    const provider: AuthProvider = { name: 'fake', resolveHost: async (): Promise<ResolvedHost> => ({ ...alex, authenticatedAt: null }) };
+    await new AuthService(db, provider).resolveHost(req());
+    expect(await seenAt()).toBeNull();
   });
 
   it('a failed stamp never costs the request', async () => {

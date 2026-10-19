@@ -509,9 +509,12 @@ accounts where their login carried no `sub`). The bundled `workos` provider does
 it from the `workos_user_id` claim of its platform token; with another provider,
 add the same call (`recordMemberIdpSubject`) where it resolves the member. Every
 verified web login also stamps `member.login_seen_at` with the issue time of
-its token (`authenticatedAt` from the provider, else the request time; at most
-once a day, never backwards, for any provider); a sign-in reaches only members
-stamped within `OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
+its token (`authenticatedAt` from the provider: the token's `iat`; a provider
+with no tokens, like the local stub, gives the request time; a token without
+`iat` stamps nothing, so your login tokens must carry it). The stamp is renewed
+in steps of a day (a quarter of the window when that is shorter) and never moves
+backwards; a sign-in reaches only members stamped within
+`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
 403 ("open the app on the web once, then reconnect").
 
 Offboarding: removing the member in this app (or disabling them, or removing
@@ -520,10 +523,10 @@ identity service takes effect within `OAUTH_LINK_MAX_AGE_DAYS` of their last
 web login in that account, because this app is never told about it.
 
 Storage: two additive nullable columns, `member.idp_subject` (unique per
-account, index on (`idp_subject`, `account_id`)) and `member.login_seen_at`,
-plus an index on `member.external_id` (migration `0028_member_idp_subject.sql`
-on Postgres, `0027_member_idp_subject.sql` on SQLite). NULL everywhere until a
-login records them.
+account, index on (`idp_subject`, `account_id`)) and `member.login_seen_at`
+(migration `0028_member_idp_subject.sql` on Postgres,
+`0027_member_idp_subject.sql` on SQLite); the lookup by `member.external_id`
+uses its existing index. NULL everywhere until a login records them.
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every

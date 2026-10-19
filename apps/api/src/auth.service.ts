@@ -1,15 +1,25 @@
-import { ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import { verifyApiKey, memberRoleAndLoginSeen, noteMemberLogin } from '@slate/db';
+import type { ServerEnv } from '@slate/config/env';
 import type { ApiScope } from '@slate/types';
-import { AUTH_PROVIDER, DB } from './tokens';
+import { AUTH_PROVIDER, DB, ENV } from './tokens';
 import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
 import { annotateRequestAccount } from './request-log';
 
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
-/** How stale `member.login_seen_at` may get before a verified login stamps it again. */
+/** How stale `member.login_seen_at` may get before a verified login stamps it again, at most. */
 export const LOGIN_SEEN_REFRESH_MS = 86_400_000;
+
+/**
+ * The refresh step for a link window of `maxAgeDays`: a day, or a quarter of
+ * the window when that is shorter. A whole day against a one-day window would
+ * let a person who signs in every 23 hours fall out of it between stamps.
+ */
+export function loginSeenRefreshMs(maxAgeDays: number): number {
+  return Math.min(LOGIN_SEEN_REFRESH_MS, (maxAgeDays * 86_400_000) / 4);
+}
 
 export interface MachinePrincipal {
   /**
@@ -46,11 +56,16 @@ export interface MachinePrincipal {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger('Auth');
+  private readonly loginSeenRefreshMs: number;
 
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
-  ) {}
+    // Optional so specs can build the service with two arguments: the default window.
+    @Optional() @Inject(ENV) env?: Pick<ServerEnv, 'OAUTH_LINK_MAX_AGE_DAYS'>,
+  ) {
+    this.loginSeenRefreshMs = loginSeenRefreshMs(env?.OAUTH_LINK_MAX_AGE_DAYS ?? 30);
+  }
 
   /**
    * Resolve the authenticated host via the configured provider, then enrich it
@@ -64,17 +79,19 @@ export class AuthService {
    * authorization server is held to). It is stamped with the token's issue
    * time, never the request time: a token minted before someone was removed
    * upstream stays valid until it expires, and using it must not keep the
-   * stamp fresh. A stamp a day older than that is renewed here, for every
-   * provider, and never moves backwards; a failed write is logged and never
-   * costs the request.
+   * stamp fresh. A stamp older than that by the refresh step (a day, or a
+   * quarter of a shorter link window) is renewed here, for every provider,
+   * and never moves backwards; a token that does not say when it was issued
+   * stamps nothing. A failed write is logged and never costs the request.
    */
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
     const id = await this.provider.resolveHost(req);
     annotateRequestAccount(req, id.accountId);
     const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
-    const vouchedAt = Math.min(id.authenticatedAt ?? Date.now(), Date.now());
-    if (member && (member.loginSeenAt === null || vouchedAt - member.loginSeenAt >= LOGIN_SEEN_REFRESH_MS)) {
-      await noteMemberLogin(this.db, id.accountId, id.memberId, vouchedAt, LOGIN_SEEN_REFRESH_MS).catch((error: unknown) =>
+    const vouchedAt = id.authenticatedAt === null ? null : Math.min(id.authenticatedAt ?? Date.now(), Date.now());
+    const step = this.loginSeenRefreshMs;
+    if (member && vouchedAt !== null && (member.loginSeenAt === null || vouchedAt - member.loginSeenAt >= step)) {
+      await noteMemberLogin(this.db, id.accountId, id.memberId, vouchedAt, step).catch((error: unknown) =>
         this.logger.warn(`could not stamp the login of member ${id.memberId}: ${error instanceof Error ? error.message : String(error)}`),
       );
     }

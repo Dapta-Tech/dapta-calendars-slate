@@ -36,15 +36,21 @@ export async function recordMemberIdpSubject(
   accountId: string,
   memberId: string,
   subject: string,
-  seenAt = Date.now(),
+  seenAt: number | null = Date.now(),
 ): Promise<IdpSubjectWrite> {
   const current = sql`SELECT idp_subject FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`;
   const clear = sql`UPDATE member SET idp_subject = NULL
       WHERE account_id = ${accountId} AND idp_subject = ${subject} AND id <> ${memberId}
       RETURNING id`;
   // The login that records the link was just verified: it also counts as seen,
-  // as of when the identity service vouched for it (`seenAt`).
-  const set = sql`UPDATE member SET idp_subject = ${subject}, login_seen_at = ${seenAt} WHERE id = ${memberId} AND account_id = ${accountId}`;
+  // as of when the identity service vouched for it (`seenAt`), never moving an
+  // existing stamp backwards. Null (a token that does not say): no stamp.
+  const set =
+    seenAt === null
+      ? sql`UPDATE member SET idp_subject = ${subject} WHERE id = ${memberId} AND account_id = ${accountId}`
+      : sql`UPDATE member SET idp_subject = ${subject},
+              login_seen_at = CASE WHEN login_seen_at IS NULL OR login_seen_at < ${seenAt} THEN ${seenAt} ELSE login_seen_at END
+            WHERE id = ${memberId} AND account_id = ${accountId}`;
   const unchanged: IdpSubjectWrite = { written: false, clearedMemberIds: [] };
 
   if (db.dialect === 'sqlite') {
@@ -130,14 +136,20 @@ export interface SubjectMembership {
  * cuts access at once.
  */
 export async function membershipsBySubject(db: Db, subject: string, seenSince: number): Promise<SubjectMembership[]> {
+  // Two indexed lookups joined by UNION, not one OR: an OR across idp_subject
+  // and external_id cannot use either index and scans every member, on every
+  // MCP request. The first branch uses member_idp_subject_account_idx; the
+  // second finds the person's other members through member_external_id_lookup_idx
+  // (an equality join, so a NULL external_id never matches).
   const rows = await db.all<{ member_id: string; account_id: string; account_name: string; role: string; status: string }>(
     sql`SELECT m.id AS member_id, m.account_id, a.name AS account_name, m.role, m.status
         FROM member m JOIN account a ON a.id = m.account_id
         WHERE m.login_seen_at >= ${seenSince}
-          AND (m.idp_subject = ${subject}
-            OR m.external_id IN (
-              SELECT l.external_id FROM member l
-              WHERE l.idp_subject = ${subject} AND l.login_seen_at >= ${seenSince} AND l.external_id IS NOT NULL))
+          AND m.id IN (
+            SELECT id FROM member WHERE idp_subject = ${subject}
+            UNION
+            SELECT r.id FROM member r JOIN member l ON l.external_id = r.external_id
+            WHERE l.idp_subject = ${subject} AND l.login_seen_at >= ${seenSince})
         ORDER BY a.created_at ASC, a.id ASC
         LIMIT 200`,
   );

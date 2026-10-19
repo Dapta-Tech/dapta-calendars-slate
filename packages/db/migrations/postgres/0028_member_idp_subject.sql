@@ -22,20 +22,19 @@
 -- previous holder is cleared in the same transaction). The unique index makes
 -- that an invariant rather than a convention, and its leading column serves the
 -- door's lookup by subject across accounts. NULLs are distinct in a Postgres
--- unique index, so every existing row (all NULL) is unaffected. The plain index
--- on external_id serves the lookup of the person's other members; the existing
--- (account_id, external_id) index cannot, its leading column is the account.
+-- unique index, so every existing row (all NULL) is unaffected. The lookup of
+-- the person's other members by external_id uses the existing
+-- member_external_id_lookup_idx (0013); nothing new is needed for it.
 --
 -- Migration safety: two ADD COLUMNs, nullable, no default: catalog-only (no
 -- rewrite, no scan), bounded by lock_timeout so a long transaction makes the
--- boot fail fast and retry. The indexes are built over a small table, one of
--- them over a column that is NULL on every row.
+-- boot fail fast and retry. The one index is built over a column that is NULL
+-- on every row of a small table.
 SET lock_timeout = '5s';
 
 ALTER TABLE member ADD COLUMN IF NOT EXISTS idp_subject TEXT;
 ALTER TABLE member ADD COLUMN IF NOT EXISTS login_seen_at BIGINT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS member_idp_subject_account_idx ON member (idp_subject, account_id);
-CREATE INDEX IF NOT EXISTS member_external_id_idx ON member (external_id);
 
 RESET lock_timeout;

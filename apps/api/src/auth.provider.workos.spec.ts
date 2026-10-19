@@ -16,7 +16,7 @@ function bearer(token: string): ReqLike {
 
 function mint(claims: Record<string, unknown>): string {
   const nowSec = Math.floor(Date.now() / 1000);
-  return signJwtHs256({ iss: ISS, aud: AUD, exp: nowSec + 3600, ...claims }, SECRET);
+  return signJwtHs256({ iss: ISS, aud: AUD, iat: nowSec, exp: nowSec + 3600, ...claims }, SECRET);
 }
 
 describe('WorkOsAuthProvider — validates the platform JWT and projects a principal', () => {
@@ -263,6 +263,26 @@ describe('WorkOsAuthProvider: records the sign-in subject on the member', () => 
     // A token minted now makes the same link usable.
     await auth.resolveHost(bearer(mint({ account_id: 'acct_old', sub: 'iam_old', workos_user_id: 'user_01OLD40', iat: Math.floor(Date.now() / 1000) })));
     expect(await membershipsBySubject(db, 'user_01OLD40', Date.now() - 30 * 86_400_000)).toHaveLength(1);
+  });
+
+  it('a token that does not say when it was issued signs in but stamps nothing', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_noiat', sub: 'iam_noiat', workos_user_id: 'user_01NOIAT', iat: undefined })));
+    expect(who.authenticatedAt).toBeNull();
+    expect(await subjectOf(who.memberId)).toBe('user_01NOIAT');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(seen).toBeNull();
+    expect(await membershipsBySubject(db, 'user_01NOIAT', Date.now() - 30 * 86_400_000)).toEqual([]);
+  });
+
+  it('a new subject recorded from an older token never moves the stamp backwards', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_back', sub: 'iam_back', workos_user_id: 'user_01FIRST', iat: nowSec })));
+    await auth.resolveHost(bearer(mint({ account_id: 'acct_back', sub: 'iam_back', workos_user_id: 'user_01SECOND', iat: nowSec - 10 * 86_400 })));
+    expect(await subjectOf(who.memberId)).toBe('user_01SECOND');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBe(nowSec * 1000);
   });
 
   it('an account reached by switching (no workos_user_id in its session) is reached through the first account\'s link', async () => {

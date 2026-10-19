@@ -49,6 +49,19 @@ describe('recordMemberIdpSubject', () => {
     expect(await recordMemberIdpSubject(db, a, m, 'user_1')).toEqual({ written: false, clearedMemberIds: [] });
   });
 
+  it('never moves the stamp backwards, and stamps nothing without an issue time', async () => {
+    const a = await account('Acme');
+    const m = await member(a);
+    await recordMemberIdpSubject(db, a, m, 'user_new_first', 5_000);
+    await recordMemberIdpSubject(db, a, m, 'user_new_second', 1_000);
+    expect(await subjectOf(m)).toBe('user_new_second');
+    expect((await memberRoleAndLoginSeen(db, a, m))!.loginSeenAt).toBe(5_000);
+    const n = await member(a);
+    await recordMemberIdpSubject(db, a, n, 'user_no_time', null);
+    expect(await subjectOf(n)).toBe('user_no_time');
+    expect((await memberRoleAndLoginSeen(db, a, n))!.loginSeenAt).toBeNull();
+  });
+
   it('rewrites a changed subject', async () => {
     const a = await account('Acme');
     const m = await member(a);

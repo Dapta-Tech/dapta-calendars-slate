@@ -103,12 +103,13 @@ export class WorkOsAuthProvider implements AuthProvider {
     const member = await this.resolveMember(accountId, sub, claims);
     // When the identity service minted this token: the last moment it vouched
     // for this person in this account (never later than now, whatever the
-    // clock). A token without `iat` leaves it to the request time.
+    // clock). A token without `iat` vouches for nothing: it still signs the
+    // person in, but stamps no freshness, so using it cannot extend MCP access.
     const authenticatedAt =
-      typeof claims.iat === 'number' && Number.isFinite(claims.iat) ? Math.min(claims.iat * 1000, Date.now()) : undefined;
+      typeof claims.iat === 'number' && Number.isFinite(claims.iat) ? Math.min(claims.iat * 1000, Date.now()) : null;
     const subject = typeof claims.workos_user_id === 'string' && claims.workos_user_id ? claims.workos_user_id : undefined;
-    if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject, authenticatedAt ?? Date.now());
-    return { accountId, memberId: member.id, ...(authenticatedAt !== undefined ? { authenticatedAt } : {}) };
+    if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject, authenticatedAt);
+    return { accountId, memberId: member.id, authenticatedAt };
   }
 
   /**
@@ -119,7 +120,7 @@ export class WorkOsAuthProvider implements AuthProvider {
    * transaction. Never costs a login: a failure is logged and the next request
    * tries again.
    */
-  private async recordSubject(accountId: string, memberId: string, subject: string, authenticatedAt: number): Promise<void> {
+  private async recordSubject(accountId: string, memberId: string, subject: string, authenticatedAt: number | null): Promise<void> {
     try {
       const out = await recordMemberIdpSubject(this.db, accountId, memberId, subject, authenticatedAt);
       if (!out.written) return;

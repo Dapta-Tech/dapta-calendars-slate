@@ -36,5 +36,5 @@ the caller's account, in every mode; a key or a single-account connection may
 name only its own account, anything else is `NOT_FOUND`.
 
 One additive migration in both dialects: the nullable `member.idp_subject` and
-`member.login_seen_at` columns, a unique index on (`idp_subject`, `account_id`)
-and an index on `member.external_id`.
+`member.login_seen_at` columns and a unique index on (`idp_subject`,
+`account_id`). The lookup by `external_id` uses the existing index on it.
