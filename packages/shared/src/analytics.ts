@@ -311,12 +311,15 @@ function isPath(v: string): boolean {
 }
 
 /**
- * A phone number: 9 or more digits in a run led by `+`, or 9 or more digits in
- * consecutive short blocks (1 to 4 digits, as phones are written) anywhere in
- * the value. Dates are set aside first, except in a `+`-led run, where every
- * digit belongs to the number. A block of 5 or more digits breaks a sequence:
- * joined ids (`12345678901_98765432101`) and an id with a short suffix are not
- * phones; an unbroken run without a `+` is never read as one.
+ * A phone number, any of:
+ *  - 9 or more digits in a run led by `+`;
+ *  - 9 or more digits in consecutive short blocks (1 to 4 digits) anywhere;
+ *  - a run of 9 to 15 digits in two or more blocks, none longer than 8, as
+ *    national formats write them (`300 1234567`, `(11) 98765-4321`).
+ * Dates are set aside first, except in a `+`-led run, where every digit
+ * belongs to the number. Joined ids (`12345678901_98765432101`) and an id with
+ * a short suffix (`1234567890_2024`) have a block too long for a phone; an
+ * unbroken run without a `+` is never read as one.
  */
 function looksLikePhone(v: string): boolean {
   for (const m of v.matchAll(/\+?\p{Nd}(?:[^\p{L}]*\p{Nd})?/gu)) {
@@ -325,8 +328,11 @@ function looksLikePhone(v: string): boolean {
       if ((run.match(/\p{Nd}/gu)?.length ?? 0) >= 9) return true;
       continue;
     }
+    const blocks = run.replace(DATE, ' ').match(/\p{Nd}+/gu) ?? [];
+    const total = blocks.reduce((n, b) => n + b.length, 0);
+    if (blocks.length >= 2 && total >= 9 && total <= 15 && blocks.every((b) => b.length <= 8)) return true;
     let digits = 0;
-    for (const block of run.replace(DATE, ' ').match(/\p{Nd}+/gu) ?? []) {
+    for (const block of blocks) {
       digits = block.length <= 4 ? digits + block.length : 0;
       if (digits >= 9) return true;
     }
