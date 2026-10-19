@@ -51,6 +51,13 @@ import { CalV2Service } from './cal-v2.service';
 import { CalV2PilotService } from './cal-v2-pilot.service';
 import { McpController } from './mcp/mcp.controller';
 import { McpGateway } from './mcp/mcp.gateway';
+import {
+  OAuthHostController,
+  OAuthInteractionController,
+  OAuthMetadataController,
+  OAuthProviderController,
+} from './oauth/oauth.controller';
+import { OAuthService } from './oauth/oauth.service';
 
 @Module({
   controllers: [
@@ -61,6 +68,12 @@ import { McpGateway } from './mcp/mcp.gateway';
     MachineController,
     CalV2Controller,
     McpController,
+    // OAuth for the MCP endpoint (off unless OAUTH_ENABLED). The interaction
+    // routes MUST stay before the provider's catch-all mount under /oauth.
+    OAuthMetadataController,
+    OAuthInteractionController,
+    OAuthHostController,
+    OAuthProviderController,
     AdminCrudController,
   ],
   providers: [
@@ -190,6 +203,7 @@ import { McpGateway } from './mcp/mcp.gateway';
     CalV2PilotService,
     CalV2RequestIdInterceptor,
     McpGateway,
+    OAuthService,
     AdminService,
     OnboardingService,
     GrowthService,

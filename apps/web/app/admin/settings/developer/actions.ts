@@ -45,6 +45,18 @@ export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; err
   }
 }
 
+/** Disconnect an OAuth connection: its refresh token dies now, its access token at expiry. */
+export async function revokeConnectedAppAction(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await adminApi.revokeConnectedApp(id);
+    revalidatePath('/admin/settings/developer');
+    return { ok: true };
+  } catch (e) {
+    unstable_rethrow(e); // let a 401→/login redirect through
+    return { ok: false, error: e instanceof Error ? e.message : 'Failed' };
+  }
+}
+
 /**
  * Create a webhook, returning the signing secret ONCE (W / #75).
  *

@@ -45,6 +45,14 @@ export interface ToolDef {
   description: string;
   /** Scope every caller needs, or null for a tool open to anonymous callers. */
   scope: ApiScope | null;
+  /**
+   * Who may make THIS call, decided from the raw arguments before the tool
+   * runs, so the HTTP door can answer an unauthenticated call with the OAuth
+   * 401 challenge (a tool error never shows a client's sign-in prompt).
+   * `public`: no credential needed; otherwise the scope it needs (null: any
+   * credential). Absent: `scope` decides. See `accessOf`.
+   */
+  access?(args: Record<string, unknown>): 'public' | { scope: ApiScope | null };
   /** Counts against the tighter write bucket. */
   write: boolean;
   annotations: {
@@ -308,6 +316,8 @@ const findSlots: ToolDef = {
   description:
     'List the open times for ONE event type, grouped by local date, each with its UTC offset. Works with no API key on any public booking page (pass booking_page_url), or with a key holding availability:read (pass event_type_id). Only start times returned here can be booked. Team events are supported.',
   scope: null,
+  // A public page needs nothing; an event type by id is the account's own data.
+  access: (args) => (args.event_type_id ? { scope: 'availability:read' } : 'public'),
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: findSlotsInput,
@@ -604,8 +614,9 @@ const whoamiInput = z.object({});
 const whoami: ToolDef = {
   name: 'whoami',
   title: 'Show the account and key behind this connection',
-  description: 'Returns the workspace this API key belongs to, the owner\'s name and time zone, and what the key is allowed to do. Needs any valid API key.',
+  description: 'Returns the workspace this API key or connected app belongs to, the owner\'s name and time zone, and what it is allowed to do. Needs any valid API key or connection.',
   scope: null,
+  access: () => ({ scope: null }),
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   input: whoamiInput,
@@ -645,7 +656,7 @@ const whoami: ToolDef = {
         },
         server_time_utc: new Date().toISOString(),
       },
-      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); key ${p.prefix} with scopes ${p.scopes.join(', ') || 'none'}.`,
+      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); ${p.kind === 'oauth' ? `connected app ${p.prefix}` : `key ${p.prefix}`} with scopes ${p.scopes.join(', ') || 'none'}.`,
     };
   },
 };
@@ -965,6 +976,12 @@ const cancelBooking: ToolDef = {
 };
 
 /** Deterministic order: public tools first, then reads, then writes. */
+/** Who may make this call (see `ToolDef.access`). */
+export function accessOf(def: ToolDef, args: Record<string, unknown>): 'public' | { scope: ApiScope | null } {
+  if (def.access) return def.access(args);
+  return def.scope ? { scope: def.scope } : 'public';
+}
+
 export const TOOLS: readonly ToolDef[] = [
   findSlots,
   bookMeeting,

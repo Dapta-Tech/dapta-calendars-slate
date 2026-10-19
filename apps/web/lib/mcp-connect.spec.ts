@@ -5,6 +5,7 @@ import {
   MCP_TOOLS,
   SCOPE_CATALOG,
   claudeCodeCommand,
+  claudeConnectorLink,
   codexConfigToml,
   cursorDeeplink,
   cursorMcpJson,
@@ -121,5 +122,17 @@ describe('key details tolerance', () => {
   it('turns a day preset into an absolute time, and 0 into none', () => {
     expect(expiresAtMsFromDays(0, now)).toBeUndefined();
     expect(expiresAtMsFromDays(30, now)).toBe(now + 30 * 86_400_000);
+  });
+});
+
+describe('Claude connector link', () => {
+  it('pre-fills the add-custom-connector dialog with the name and the address, nothing else', () => {
+    const link = new URL(claudeConnectorLink(URL_, 'Dapta Calendars'));
+    expect(`${link.origin}${link.pathname}`).toBe('https://claude.ai/customize/connectors');
+    expect(Object.fromEntries(link.searchParams)).toEqual({
+      modal: 'add-custom-connector',
+      connectorName: 'Dapta Calendars',
+      connectorUrl: URL_,
+    });
   });
 });

@@ -7,6 +7,7 @@ import { json, type NextFunction, type Request, type Response } from 'express';
 import { AppModule } from './app.module';
 import { securityHeaders } from './security-headers';
 import { requestLogger } from './request-log';
+import { oidcOwnsBody } from './oauth/oauth.settings';
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -52,6 +53,10 @@ async function bootstrap() {
   const large = json({ limit: MAX_REQUEST_BODY });
   const small = json({ limit: DEFAULT_BODY_LIMIT });
   app.use((req: Request, res: Response, next: NextFunction) => {
+    // The OAuth server reads its own bodies (form-encoded token requests, JSON
+    // registrations) with its own 56kb cap; a body parsed here first is one it
+    // can only fall back on with a warning.
+    if (oidcOwnsBody(req.path)) return next();
     const parse = INLINE_IMAGE_ROUTES.some((re) => re.test(req.path)) ? large : small;
     return parse(req, res, next);
   });
@@ -65,7 +70,13 @@ async function bootstrap() {
   // public widget on other domains by adding them to CORS_ORIGINS.
   const configured = env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
   const origins = configured && configured.length > 0 ? configured : [env.PUBLIC_APP_URL];
-  app.enableCors({ origin: origins, credentials: true });
+  // The OAuth discovery documents are public by definition, and browser-based
+  // MCP clients read them cross-origin: any origin, no credentials, GET only.
+  app.enableCors((req: Request, cb: (err: Error | null, options: Record<string, unknown>) => void) =>
+    cb(null, (req.url ?? '').startsWith('/.well-known/oauth-')
+      ? { origin: '*', methods: ['GET'], credentials: false }
+      : { origin: origins, credentials: true }),
+  );
   console.log(`[api] CORS allowlist: ${origins.join(', ')}`);
   await app.listen(env.API_PORT);
   console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL.replace(/\/\/([^:@/]+):[^@]+@/, '//$1:***@')})`);

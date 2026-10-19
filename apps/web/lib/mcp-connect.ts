@@ -63,6 +63,16 @@ export function genericConnection(mcpUrl: string): { url: string; header: string
   return { url: mcpUrl, header: `Authorization: Bearer <your ${API_KEY_ENV}>` };
 }
 
+/**
+ * Claude's "Add custom connector" dialog, pre-filled with the name and the
+ * MCP address. It only fills the form: the person still confirms in Claude,
+ * then signs in here (OAuth). Carries no credential.
+ */
+export function claudeConnectorLink(mcpUrl: string, name: string): string {
+  const q = new URLSearchParams({ modal: 'add-custom-connector', connectorName: name, connectorUrl: mcpUrl });
+  return `https://claude.ai/customize/connectors?${q}`;
+}
+
 export function exportKeyCommand(): string {
   return `export ${API_KEY_ENV}="dcl_your_key_here"`;
 }

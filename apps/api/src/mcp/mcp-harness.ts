@@ -7,10 +7,11 @@ import { join } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { json } from 'express';
+import { json, type NextFunction, type Request as ExpressRequest, type Response as ExpressResponse } from 'express';
 import { createApiKey, createDb, migrate, seed, sql, type Db } from '@slate/db';
 import { AppModule } from '../app.module';
 import { McpGateway } from './mcp.gateway';
+import { oidcOwnsBody } from '../oauth/oauth.settings';
 
 /**
  * A real API for specs: the whole `AppModule` (so every `@Inject` is exercised
@@ -21,6 +22,7 @@ export interface Harness {
   base: string;
   url: string;
   db: Db;
+  app: NestExpressApplication;
   gateway: McpGateway;
   audit: string[];
   accountId: string;
@@ -50,10 +52,23 @@ const ENV_KEYS = [
   'MCP_TOOL_TIMEOUT_MS',
   'RATE_LIMIT_CAPACITY',
   'RATE_LIMIT_REFILL_PER_SEC',
+  'RATE_LIMIT_ENABLED',
   'PUBLIC_APP_URL',
+  'MCP_PUBLIC_URL',
+  'OAUTH_ENABLED',
+  'OAUTH_ISSUER',
+  'OAUTH_SIGNING_JWK',
+  'OAUTH_ACCESS_TOKEN_TTL_SECONDS',
+  'OAUTH_GRANT_TTL_DAYS',
+  'OAUTH_REFRESH_REUSE_GRACE_SECONDS',
+  'OAUTH_CIMD_ENABLED',
+  'OAUTH_DCR_ENABLED',
+  'OAUTH_DCR_EXTRA_REDIRECT_URIS',
 ] as const;
 
-export async function bootHarness(env: Partial<Record<(typeof ENV_KEYS)[number], string>> = {}): Promise<Harness> {
+export type HarnessEnv = Partial<Record<(typeof ENV_KEYS)[number], string>>;
+
+export async function bootHarness(env: HarnessEnv = {}, opts: { port?: number } = {}): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'mcp-spec-'));
   const url = `file:${join(dir, 'spec.db')}`;
   const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -73,8 +88,10 @@ export async function bootHarness(env: Partial<Record<(typeof ENV_KEYS)[number],
   const other = await seedOtherTenant(db);
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false, bodyParser: false });
-  app.use(json({ limit: '100kb' }));
-  await app.listen(0, '127.0.0.1');
+  // Same split as main.ts: the OAuth server parses its own bodies.
+  const parse = json({ limit: '100kb' });
+  app.use((req: ExpressRequest, res: ExpressResponse, next: NextFunction) => (oidcOwnsBody(req.path) ? next() : parse(req, res, next)));
+  await app.listen(opts.port ?? 0, '127.0.0.1');
   // Providers read the environment while the app is built; put it back at once
   // so harnesses booted side by side do not leak settings into each other.
   for (const k of ENV_KEYS) {
@@ -91,6 +108,7 @@ export async function bootHarness(env: Partial<Record<(typeof ENV_KEYS)[number],
     base,
     url: `${base}/mcp`,
     db,
+    app,
     gateway,
     audit,
     accountId,

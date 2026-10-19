@@ -46,9 +46,11 @@ export function callerLabel(call: McpCall): string {
 }
 
 /**
- * The seam Phase 2 changes. Today a protected tool called without a key is a
- * tool error that says what to do. With OAuth it becomes an HTTP 401 challenge
- * (and a 403 `insufficient_scope` step-up) raised from here, before the tool runs.
+ * The last word on scope, inside the tool. With OAuth on, the HTTP door has
+ * already answered a missing credential with a 401 challenge and an OAuth
+ * token lacking a scope with a 403 step-up, so reaching the throws below means
+ * an API key (whose scopes are fixed at creation) or OAuth off. The tool error
+ * says what to do in either case.
  */
 export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[]): MachinePrincipal {
   const accepted = Array.isArray(scope) ? scope : [scope as ApiScope];
@@ -60,6 +62,12 @@ export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[
     );
   }
   if (!accepted.some((s) => call.principal!.scopes.includes(s))) {
+    if (call.principal.kind === 'oauth')
+      throw new ToolFailure(
+        'INSUFFICIENT_SCOPE',
+        `This connection was not granted \`${accepted.join('` or `')}\`.`,
+        `It has: ${call.principal.scopes.join(', ') || 'none'}. Reconnect the app and approve the missing access.`,
+      );
     throw new ToolFailure(
       'INSUFFICIENT_SCOPE',
       `This API key (${call.principal.prefix}) lacks scope \`${accepted.join('` or `')}\`.`,
