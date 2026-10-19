@@ -8,6 +8,7 @@ import {
   bookingStartOutOfRange,
   isSlotBookable,
   jsonParam,
+  lockMembers,
   parseJsonColumn,
   scopedIdempotencyKey,
 } from './repository';
@@ -609,6 +610,10 @@ export async function rescheduleBookingV2(
       });
     } else {
       result = await db.pg!.drizzle.transaction(async (tx) => {
+        // The hosts' rows first, then the booking's: the order every other
+        // guarded write takes them in (see `lockMembers`), so a v1 move and a
+        // v2 move of the same booking wait on each other instead of deadlocking.
+        await lockMembers(tx, hostIds);
         const current = (await tx.execute(
           sql`SELECT status FROM booking WHERE id = ${source.id} FOR UPDATE`,
         )) as unknown as Array<{ status: string }>;

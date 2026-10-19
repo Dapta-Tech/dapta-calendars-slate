@@ -46,6 +46,7 @@ import {
   resolveScheduleTimeZone,
   scopedIdempotencyKey,
   type BookingFieldDef,
+  lockMembers,
 } from './repository';
 import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
 import {
@@ -1116,19 +1117,32 @@ function validateTeamIntake(et: TeamEventType, answers?: Record<string, unknown>
  */
 async function runGuarded(
   db: Db,
+  /**
+   * Every member the write gives (or keeps) a booking. On Postgres their rows
+   * are locked first, in id order, so two guarded writes over the same member
+   * run one after the other: under READ COMMITTED the overlap checks are plain
+   * reads, and the EXCLUDE covers the organizer only, so a co-host's seat had
+   * no other guard against a concurrent write. SQLite runs one writer at a
+   * time already; IMMEDIATE makes a second process wait rather than fail.
+   */
+  memberIds: string[],
   overlapChecks: Array<ReturnType<typeof sql>>,
   statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
   if (db.dialect === 'sqlite') {
-    return db.sqlite!.txn<boolean>(() => {
-      for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
-      for (const stmt of statements) db.sqlite!.drizzle.run(stmt);
-      return true;
-    });
+    return db.sqlite!.txn<boolean>(
+      () => {
+        for (const check of overlapChecks) if (db.sqlite!.drizzle.get(check)) return false;
+        for (const stmt of statements) db.sqlite!.drizzle.run(stmt);
+        return true;
+      },
+      { immediate: true },
+    );
   }
   const pg = db.pg!.drizzle;
   try {
     return await pg.transaction(async (tx) => {
+      await lockMembers(tx, memberIds);
       for (const check of overlapChecks) {
         const rows = (await tx.execute(check)) as unknown as unknown[];
         if (rows.length > 0) return false;
@@ -1155,6 +1169,7 @@ function insertBookingGuarded(
 ): Promise<boolean> {
   return runGuarded(
     db,
+    hostMemberIds,
     hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
     statements,
   );
@@ -1384,7 +1399,7 @@ export async function rescheduleBooking(
     rescheduled = 1, from_reschedule = ${previousStartUtc}, metadata = ${metaExpr},
     updated_at = ${now} WHERE id = ${b.id}`;
 
-  const moved = await runGuardedUpdate(db, overlapChecks, updateSql);
+  const moved = await runGuardedUpdate(db, assignedHostIds, overlapChecks, updateSql);
   if (!moved) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
@@ -1404,10 +1419,11 @@ export async function rescheduleBooking(
  */
 function runGuardedUpdate(
   db: Db,
+  memberIds: string[],
   overlapChecks: Array<ReturnType<typeof sql>>,
   updateSql: ReturnType<typeof sql>,
 ): Promise<boolean> {
-  return runGuarded(db, overlapChecks, [updateSql]);
+  return runGuarded(db, memberIds, overlapChecks, [updateSql]);
 }
 
 /**
@@ -1650,7 +1666,7 @@ export async function confirmBooking(
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
     WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, overlapChecks, updateSql);
+  const ok = await runGuardedUpdate(db, hostIds, overlapChecks, updateSql);
   if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
