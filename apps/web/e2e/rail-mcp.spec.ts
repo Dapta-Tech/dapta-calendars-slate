@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { E2E, HOST } from './stack';
+import { E2E, HOST, signIn } from './stack';
 
 /**
  * The rail's MCP group and Docs item, in the real app on both projects (the
@@ -10,12 +10,6 @@ import { E2E, HOST } from './stack';
  */
 
 const JORDAN = 'jordan@example.com';
-
-async function signIn(page: Page, email: string): Promise<void> {
-  await expect(page).toHaveURL(/\/login/);
-  await page.locator('input[type="email"]').fill(email);
-  await page.locator('button[type="submit"]').click();
-}
 
 /** The rail a person actually sees: the desktop aside, or the drawer, opened. */
 async function rail(page: Page, mobile: boolean) {

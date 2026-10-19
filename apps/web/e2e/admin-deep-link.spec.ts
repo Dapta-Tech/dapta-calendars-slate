@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { E2E, visitorEmail } from './stack';
+import { expect, test, type APIRequestContext } from '@playwright/test';
+import { E2E, signIn, visitorEmail } from './stack';
 
 /**
  * The host's request email, followed from a signed-out browser: its "Confirm
@@ -39,12 +39,6 @@ async function requestBooking(request: APIRequestContext, tag: string): Promise<
     return body.uid;
   }
   throw new Error('no free time left to request');
-}
-
-async function signIn(page: Page, email: string): Promise<void> {
-  await expect(page).toHaveURL(/\/login/);
-  await page.getByLabel('Email').fill(email);
-  await page.getByRole('button', { name: 'Continue' }).click();
 }
 
 test('signed out: the email link goes through the login and lands on that booking, ready to act', async ({

@@ -4,6 +4,7 @@
  * a stand-in calendar backend on loopback.
  */
 import { resolve } from 'node:path';
+import { expect, type Page } from '@playwright/test';
 
 const port = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
 const webPort = port('E2E_WEB_PORT', 3411);
@@ -48,6 +49,17 @@ export interface StandInCall {
   op?: 'listBusy' | 'createEvent' | 'updateEvent' | 'deleteEvent' | 'listCalendars' | 'checkConnection';
   body?: Record<string, unknown>;
   at: number;
+}
+
+/**
+ * Sign in through the real login form, from a page the app has already sent to
+ * `/login` (with or without a `next`). The dev login makes the account on first
+ * use. One helper for every spec, so a change to the form changes one place.
+ */
+export async function signIn(page: Page, email: string): Promise<void> {
+  await expect(page).toHaveURL(/\/login/);
+  await page.getByLabel('Email').fill(email);
+  await page.getByRole('button', { name: 'Continue' }).click();
 }
 
 export async function standInCalls(op?: StandInCall['op']): Promise<StandInCall[]> {
