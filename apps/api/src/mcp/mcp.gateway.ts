@@ -152,6 +152,7 @@ export class McpGateway {
       requestId: call.requestId,
       protocolVersion: call.protocolVersion,
       caller: callerLabel(call),
+      ...(call.principal?.kind === 'oauth' ? { client: call.principal.clientId ?? null } : {}),
       accountId: call.principal?.accountId ?? null,
       tool: def.name,
       argsHash: argsHash(args),
