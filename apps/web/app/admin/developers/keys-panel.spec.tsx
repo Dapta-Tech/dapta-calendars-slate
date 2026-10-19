@@ -242,12 +242,10 @@ describe('KeysPanel', () => {
     expect(skill.textContent).toContain(
       'Download the skill: a zip that teaches any agent with a terminal to use the Dapta Calendars API with the same key.',
     );
-    const link = skill.querySelector<HTMLAnchorElement>('[data-testid="setup-skill-download"]')!;
-    expect(link.getAttribute('href')).toBe('/api/developers/skill');
-    // The route names the file; the attribute only says "save it".
-    expect(link.hasAttribute('download')).toBe(true);
-    expect(link.textContent).toBe(m.guideSkillButton);
-    expect(link.querySelector('i.pi-download')!.getAttribute('aria-hidden')).not.toBeNull();
+    // A button that fetches the zip (skill-download.spec.tsx has its states), not a bare link.
+    const download = skill.querySelector<HTMLButtonElement>('button[data-testid="setup-skill-download"]')!;
+    expect(download.textContent).toBe(m.guideSkillButton);
+    expect(skill.querySelector('a')).toBeNull();
     expect(skill.querySelector('[data-testid="setup-skill-unavailable"]')).toBeNull();
   });
 
@@ -255,7 +253,7 @@ describe('KeysPanel', () => {
     const el = await mount({ skillAvailable: false });
     const skill = el.querySelector<HTMLElement>('[data-testid="setup-skill"]')!;
     expect(skill.querySelector('[data-testid="setup-skill-download"]')).toBeNull();
-    expect(skill.querySelector('a')).toBeNull();
+    expect(skill.querySelector('button, a')).toBeNull();
     expect(skill.querySelector('[data-testid="setup-skill-unavailable"]')!.textContent).toBe(m.guideSkillUnavailable);
   });
 });

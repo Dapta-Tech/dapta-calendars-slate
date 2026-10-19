@@ -1239,7 +1239,17 @@ export interface BookingMessages {
       guideSkillTitle: string;
       guideSkillBody: string;
       guideSkillButton: string;
+      /** The button while the zip is being built. */
+      guideSkillPending: string;
       guideSkillUnavailable: string;
+      /**
+       * A download that failed, by the route's `error` code: the session ended,
+       * a member asked, or anything else (the network included). A missing
+       * public address reuses `guideSkillUnavailable`.
+       */
+      guideSkillErrorSession: string;
+      guideSkillErrorForbidden: string;
+      guideSkillErrorGeneric: string;
     };
     /**
      * The OAuth consent page (`/auth/consent`): an app asks to act on the
@@ -2630,7 +2640,11 @@ export const en: BookingMessages = {
       guideSkillBody:
         'Download the skill: a zip that teaches any agent with a terminal to use the {product} API with the same key.',
       guideSkillButton: 'Download the skill',
+      guideSkillPending: 'Preparing the skill…',
       guideSkillUnavailable: 'The skill is not available on this installation: it has no public API address yet.',
+      guideSkillErrorSession: 'Your session has ended. Sign in again, then download the skill.',
+      guideSkillErrorForbidden: 'Only owners and admins can download the skill.',
+      guideSkillErrorGeneric: 'The skill could not be downloaded. Try again.',
     },
     oauthConsent: {
       pageTitle: 'Connect an app',
@@ -3963,7 +3977,11 @@ export const es: BookingMessages = {
       guideSkillBody:
         'Descarga el skill: un zip que le enseña a cualquier agente con terminal a usar la API de {product} con la misma clave API.',
       guideSkillButton: 'Descargar el skill',
+      guideSkillPending: 'Preparando el skill…',
       guideSkillUnavailable: 'El skill no está disponible en esta instalación: todavía no tiene una dirección pública de la API.',
+      guideSkillErrorSession: 'Tu sesión terminó. Vuelve a iniciar sesión y descarga el skill.',
+      guideSkillErrorForbidden: 'Solo los propietarios y administradores pueden descargar el skill.',
+      guideSkillErrorGeneric: 'No se pudo descargar el skill. Inténtalo de nuevo.',
     },
     oauthConsent: {
       pageTitle: 'Conectar una app',

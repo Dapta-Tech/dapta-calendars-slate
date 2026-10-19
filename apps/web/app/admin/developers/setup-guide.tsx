@@ -3,11 +3,11 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { t, type BookingMessages } from '@slate/shared';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { DEVELOPERS_DOCS_HREF } from '@/lib/admin-nav';
 import { cn } from '@/lib/cn';
-import { SKILL_ROUTE } from '@/lib/developer-skill/skill-names';
 import { CodeBlock, ConnectAgent, type ConnectSnippets } from './connect-agent';
+import { SkillDownload } from './skill-download';
 
 type DevMessages = BookingMessages['admin']['developer'];
 
@@ -26,7 +26,8 @@ type DevMessages = BookingMessages['admin']['developer'];
  * Under the steps, the way in for an agent without MCP: the skill zip, which
  * teaches it the REST API with the same key. It is built on the server for this
  * installation; with no public API address there is nothing to write into it,
- * so the guide says so instead of offering a download that would fail.
+ * so the guide says so instead of offering a download that would fail. A
+ * download that fails anyway (the session ended meanwhile) says why in place.
  */
 export function SetupGuide({
   m,
@@ -130,19 +131,7 @@ export function SetupGuide({
           {t(m.guideSkillBody, { product: productName })}
         </p>
         {skillAvailable ? (
-          <div className="mt-field">
-            {/* A plain link with `download`: the route answers with the file and
-                its name, so the browser saves it without leaving the page. */}
-            <a
-              href={SKILL_ROUTE}
-              download
-              data-testid="setup-skill-download"
-              className={buttonVariants({ variant: 'outline', size: 'lg' })}
-            >
-              <i aria-hidden className="pi pi-download" style={{ fontSize: 14 }} />
-              {m.guideSkillButton}
-            </a>
-          </div>
+          <SkillDownload m={m} />
         ) : (
           <p data-testid="setup-skill-unavailable" className="mt-field max-w-prose text-sm text-muted-foreground">
             {m.guideSkillUnavailable}
