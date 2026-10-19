@@ -4,10 +4,28 @@ import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
 import { adminApi, ApiError } from '@/lib/admin-api';
+import { expiresAtMsFromDays } from '@/lib/mcp-connect';
 
-export async function createApiKeyAction(name: string, scopes: string[]): Promise<{ plaintext?: string; error?: string }> {
+export interface CreateApiKeyInput {
+  name: string;
+  scopes: string[];
+  /** Limit the key to these event types; empty or absent means all of them. */
+  eventTypeIds?: string[];
+  /** Days until the key stops working; 0 or absent means never. */
+  expiresInDays?: number;
+}
+
+export async function createApiKeyAction(input: CreateApiKeyInput): Promise<{ plaintext?: string; error?: string }> {
   try {
-    const r = await adminApi.createApiKey({ name, scopes });
+    // The expiry is computed here, on the server, from its own clock: a browser
+    // with a wrong clock must not mint a key that is already expired.
+    const expiresAtMs = expiresAtMsFromDays(input.expiresInDays ?? 0, Date.now());
+    const r = await adminApi.createApiKey({
+      name: input.name,
+      scopes: input.scopes,
+      ...(input.eventTypeIds && input.eventTypeIds.length > 0 ? { eventTypeIds: input.eventTypeIds } : {}),
+      ...(expiresAtMs !== undefined ? { expiresAtMs } : {}),
+    });
     revalidatePath('/admin/settings/developer');
     return { plaintext: r.plaintext };
   } catch (e) {

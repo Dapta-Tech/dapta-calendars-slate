@@ -484,6 +484,14 @@ export interface ApiKeyRow {
   prefix: string;
   last4: string;
   revoked_at_ms: number | null;
+  /**
+   * Added by the MCP work. Every one may be absent (an older API) or null (never
+   * used / no expiry / all event types), and the page renders both.
+   */
+  scopes?: string[] | null;
+  eventTypeIds?: string[] | null;
+  expiresAt?: number | string | null;
+  lastUsedAt?: number | string | null;
 }
 export interface WebhookDeliveryRow {
   id: string;

@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
-import type { ApiScope } from '@slate/types';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
@@ -10,7 +9,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { Select } from '@/components/ui/select';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
+import { EXPIRY_PRESET_DAYS, expiryState, SCOPE_CATALOG, scopeLabel, toMs } from '@/lib/mcp-connect';
+import { KindChip } from './connect-agent';
 import {
   createApiKeyAction,
   createWebhookAction,
@@ -23,28 +25,68 @@ import {
 
 type DevMessages = BookingMessages['admin']['developer'];
 
-const SCOPES: ApiScope[] = [
-  'availability:read',
-  'event-types:read',
-  'calendars:read',
-  'bookings:read',
-  'bookings:write',
-];
+const DEFAULT_SCOPES = ['availability:read'];
+
+/** A fixed, locale-free date so server and client render the same text. */
+const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+function KeyFacts({ k, m, now, eventTypeTitles }: { k: ApiKeyRow; m: DevMessages; now: number; eventTypeTitles: Map<string, string> }) {
+  const state = expiryState(k.expiresAt, now);
+  const expMs = toMs(k.expiresAt);
+  const last = toMs(k.lastUsedAt);
+  const ids = k.eventTypeIds ?? [];
+  const scopes = k.scopes ?? null;
+  return (
+    <div className="flex basis-full flex-col gap-tight text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-inline">
+        {scopes === null ? (
+          <span>{m.keyScopesUnknown}</span>
+        ) : (
+          scopes.map((s) => (
+            <span key={s} className="inline-flex items-center rounded-full bg-muted px-inline py-tight text-foreground">
+              {scopeLabel(m.scopeLabels, s)}
+            </span>
+          ))
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-field gap-y-tight">
+        <span title={ids.map((id) => eventTypeTitles.get(id) ?? id).join(', ') || undefined}>
+          {ids.length === 0 ? m.keyAllEventTypes : t(m.keyOnlyEventTypes, { count: String(ids.length) })}
+        </span>
+        <span className={state === 'expired' ? 'text-destructive' : undefined}>
+          {expMs === null ? m.keyNoExpiry : t(state === 'expired' ? m.keyExpired : m.keyExpires, { date: day(expMs) })}
+        </span>
+        <span>{last === null ? m.keyNeverUsed : t(m.keyLastUsed, { date: day(last) })}</span>
+      </div>
+    </div>
+  );
+}
+
 const TRIGGERS = ['booking.created', 'booking.rescheduled', 'booking.cancelled'];
 
 export function ApiKeys({
   keys,
+  eventTypes = [],
+  now,
   messages: m,
   locale,
 }: {
   keys: ApiKeyRow[];
+  /** For the optional allowlist; empty hides the picker. */
+  eventTypes?: Array<{ id: string; title: string }>;
+  /** Server clock at render, so "expired" is the same on both sides of hydration. */
+  now: number;
   messages: DevMessages;
   /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
   locale?: Locale;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['availability:read']);
+  const [scopes, setScopes] = useState<string[]>(DEFAULT_SCOPES);
+  const [limitTypes, setLimitTypes] = useState(false);
+  const [typeIds, setTypeIds] = useState<string[]>([]);
+  const [expiryDays, setExpiryDays] = useState(0);
+  const eventTypeTitles = new Map(eventTypes.map((e) => [e.id, e.title]));
   const [reveal, setReveal] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
@@ -52,12 +94,24 @@ export function ApiKeys({
 
   const submit = () =>
     start(async () => {
-      const r = await createApiKeyAction(name, scopes);
+      const r = await createApiKeyAction({
+        name,
+        scopes,
+        eventTypeIds: limitTypes ? typeIds : undefined,
+        expiresInDays: expiryDays,
+      });
       if (r.plaintext) {
         setReveal(r.plaintext);
         setName('');
-        setScopes(['availability:read']);
+        setScopes(DEFAULT_SCOPES);
+        setLimitTypes(false);
+        setTypeIds([]);
+        setExpiryDays(0);
         setOpen(false);
+      } else {
+        // The modal stays open with everything typed: an API that predates a
+        // scope refuses the key, and closing the form would read as success.
+        error(r.error ?? m.genericError);
       }
     });
 
@@ -121,6 +175,7 @@ export function ApiKeys({
                 {m.revoke}
               </Button>
             ) : null}
+            {!k.revoked_at_ms ? <KeyFacts k={k} m={m} now={now} eventTypeTitles={eventTypeTitles} /> : null}
           </li>
         ))}
         {keys.length === 0 ? <li className="text-sm text-muted-foreground">{m.noKeys}</li> : null}
@@ -137,27 +192,69 @@ export function ApiKeys({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
-          <div className="flex flex-col gap-tight text-sm">
-            <span className="text-muted-foreground">{m.scopes}</span>
+          <fieldset className="flex flex-col gap-tight text-sm">
+            <legend className="text-muted-foreground">{m.scopesLead}</legend>
             <div className="flex flex-col">
-              {SCOPES.map((s) => (
-                <label key={s} className="flex min-h-control cursor-pointer items-center gap-inline">
+              {SCOPE_CATALOG.map(({ scope, kind }) => (
+                <label key={scope} className="flex min-h-control cursor-pointer items-center gap-inline">
                   <Checkbox
-                    checked={scopes.includes(s)}
+                    checked={scopes.includes(scope)}
                     onChange={(e) =>
-                      setScopes((cur) => (e.target.checked ? [...cur, s] : cur.filter((x) => x !== s)))
+                      setScopes((cur) => (e.target.checked ? [...cur, scope] : cur.filter((x) => x !== scope)))
                     }
                   />
-                  <code className="font-mono text-xs text-foreground">{s}</code>
+                  <span className="min-w-0 flex-1">{scopeLabel(m.scopeLabels, scope)}</span>
+                  <KindChip kind={kind} m={m} />
                 </label>
               ))}
             </div>
+          </fieldset>
+          {eventTypes.length > 0 ? (
+            <fieldset className="flex flex-col gap-tight text-sm">
+              <legend className="text-muted-foreground">{m.eventTypesLabel}</legend>
+              <label className="flex min-h-control cursor-pointer items-center gap-inline">
+                <Checkbox checked={!limitTypes} onChange={() => setLimitTypes(false)} />
+                {m.eventTypesAll}
+              </label>
+              <label className="flex min-h-control cursor-pointer items-center gap-inline">
+                <Checkbox checked={limitTypes} onChange={() => setLimitTypes(true)} />
+                {m.eventTypesOnly}
+              </label>
+              {limitTypes ? (
+                <div className="ml-group flex flex-col">
+                  {eventTypes.map((et) => (
+                    <label key={et.id} className="flex min-h-control cursor-pointer items-center gap-inline">
+                      <Checkbox
+                        checked={typeIds.includes(et.id)}
+                        onChange={(e) =>
+                          setTypeIds((cur) => (e.target.checked ? [...cur, et.id] : cur.filter((x) => x !== et.id)))
+                        }
+                      />
+                      {et.title}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </fieldset>
+          ) : null}
+          <div className="flex flex-col gap-tight text-sm">
+            <span className="text-muted-foreground">{m.expiryLabel}</span>
+            <Select
+              value={String(expiryDays)}
+              onChange={(v) => setExpiryDays(Number(v))}
+              options={EXPIRY_PRESET_DAYS.map((d) => ({
+                value: String(d),
+                label: d === 0 ? m.expiryNever : t(m.expiryDays, { days: String(d) }),
+              }))}
+              locale={locale}
+              ariaLabel={m.expiryLabel}
+            />
           </div>
           <div className="mt-tight flex flex-wrap justify-end gap-inline">
             <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
               {m.cancel}
             </Button>
-            <Button size="lg" disabled={pending || !name || scopes.length === 0} onClick={submit}>
+            <Button size="lg" disabled={pending || !name || scopes.length === 0 || (limitTypes && typeIds.length === 0)} onClick={submit}>
               {pending ? m.creating : m.createKey}
             </Button>
           </div>

@@ -1,27 +1,67 @@
 import { getMessages } from '@slate/shared';
 import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
+import {
+  claudeCodeCommand,
+  codexConfigToml,
+  cursorDeeplink,
+  cursorMcpJson,
+  exportKeyCommand,
+  genericConnection,
+} from '@/lib/mcp-connect';
+import { resolveMcpConfig } from '@/lib/mcp-config';
 import { NoAccess } from '@/components/no-access';
+import { ApiReference } from './api-reference';
+import { AgentTools, ConnectAgent, type ConnectSnippets } from './connect-agent';
 import { ApiKeys, Webhooks } from './developer-client';
 
+// Read per request: the MCP address comes from the server's runtime env, which a
+// prerender at build time would freeze to whatever the build machine had.
 export const dynamic = 'force-dynamic';
 
 export default async function DeveloperSettings() {
   const [me, locale] = await Promise.all([adminApi.me(), getLocale()]);
-  // Developer (API keys + webhooks) is admin/owner-only — the API 403s for a
-  // plain member, so gate here for a graceful message.
+  // MCP & API (API keys + webhooks) is admin/owner-only — the API 403s for a
+  // plain member, so gate here for a graceful message. The route keeps its old
+  // `/developer` path so existing links and bookmarks still land here.
   if (!isAdminRole(me.role)) {
     const nm = getMessages(locale).admin.members;
     return <NoAccess title={nm.noAccessTitle} body={nm.noAccessBody} />;
   }
-  const [keys, webhooks] = await Promise.all([adminApi.listApiKeys(), adminApi.listWebhooks()]);
+  const [keys, webhooks, eventTypes] = await Promise.all([
+    adminApi.listApiKeys(),
+    adminApi.listWebhooks(),
+    // The allowlist picker is optional: a failure here must not take the page down.
+    adminApi.listEventTypes().catch(() => []),
+  ]);
   const m = getMessages(locale).admin.developer;
+  const { mcpUrl, apiOrigin } = resolveMcpConfig();
+  const snippets: ConnectSnippets | null = mcpUrl
+    ? {
+        mcpUrl,
+        cursorDeeplink: cursorDeeplink(mcpUrl),
+        cursorJson: cursorMcpJson(mcpUrl),
+        claudeCode: claudeCodeCommand(mcpUrl),
+        codexToml: codexConfigToml(mcpUrl),
+        exportKey: exportKeyCommand(),
+        header: genericConnection(mcpUrl).header,
+      }
+    : null;
   return (
     <div className="flex max-w-3xl flex-col gap-section">
       {/* Page-level lead: who this page is for (QA2 fix 4). */}
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
-      <ApiKeys keys={keys} messages={m} locale={locale} />
+      <ConnectAgent snippets={snippets} messages={m} />
+      <ApiKeys
+        keys={keys}
+        eventTypes={eventTypes.map((e) => ({ id: e.id, title: e.title }))}
+        now={Date.now()}
+        messages={m}
+        locale={locale}
+      />
+      <AgentTools messages={m} />
       <Webhooks webhooks={webhooks} messages={m} locale={locale} />
+      <ApiReference apiOrigin={apiOrigin} messages={m} />
     </div>
   );
 }
