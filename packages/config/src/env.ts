@@ -416,14 +416,20 @@ export const serverEnvSchema = z.object({
   // sign-in, consent and tokens belong to this external OAuth 2.1 authorization
   // server, and the built-in one above is not mounted (its routes answer 404,
   // and OAUTH_ISSUER / OAUTH_SIGNING_JWK are not needed). The value is the
-  // server's issuer, an origin (scheme and host), exactly as its metadata and
-  // its tokens write it. The server must support RFC 8707 resource indicators
-  // (tokens for MCP_PUBLIC_URL carry it as their audience) and publish a JWKS.
-  // Unset: the built-in server runs as configured above.
+  // server's issuer, an origin (scheme and host, lowercase, no trailing slash),
+  // exactly as its metadata and its tokens write it. The server must support
+  // RFC 8707 resource indicators (tokens for MCP_PUBLIC_URL carry it as their
+  // audience) and publish a JWKS. Unset: the built-in server runs as above.
   OAUTH_AUTHORIZATION_SERVER: blankIsDefault(z.string().url().optional()),
   // Where that server publishes its signing keys. Unset: the `jwks_uri` of its
   // metadata (`<issuer>/.well-known/oauth-authorization-server`).
   OAUTH_JWKS_URL: blankIsDefault(z.string().url().optional()),
+  // How long after a person's last verified web login in an account a sign-in
+  // through that server may still act there. This app is not told when someone
+  // is removed upstream; past this many days it treats them as gone until they
+  // open the web app again. Match the upstream session lifetime, so MCP access
+  // never outlives what the web allows.
+  OAUTH_LINK_MAX_AGE_DAYS: blankIsDefault(z.coerce.number().int().min(1).max(365).default(30)),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -503,6 +509,10 @@ export function oauthConfigProblems(env: ServerEnv): string[] {
     if (!secureEnough(as, env)) problems.push('OAUTH_AUTHORIZATION_SERVER must use https (http only on localhost outside production).');
     if ((as.pathname !== '/' && as.pathname !== '') || as.search || as.hash || as.username || as.password)
       problems.push('OAUTH_AUTHORIZATION_SERVER must be an origin only (scheme and host, no path, query, fragment or credentials).');
+    // It is compared character for character with every token's `iss`: a
+    // trailing slash or an uppercase letter would refuse every sign-in.
+    else if (env.OAUTH_AUTHORIZATION_SERVER !== as.origin)
+      problems.push(`OAUTH_AUTHORIZATION_SERVER must be written exactly as the origin ${as.origin} (it is compared with every token's iss).`);
     if (env.OAUTH_JWKS_URL) {
       const jwks = new URL(env.OAUTH_JWKS_URL);
       if (!secureEnough(jwks, env)) problems.push('OAUTH_JWKS_URL must use https (http only on localhost outside production).');

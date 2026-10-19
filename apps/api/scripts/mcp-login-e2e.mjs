@@ -11,7 +11,8 @@
  *   present, the 401 challenge, 403 for a sign-in linked to no member, then
  *   with a sign-in: tools/list, whoami, list_my_accounts, list_event_types,
  *   find_available_slots, create_booking, get_booking and cancel_booking; a
- *   sign-in reaching two accounts picks one with account_id; the audit lines.
+ *   sign-in reaching two accounts picks one with account_id; an account reached
+ *   by switching; a link not seen for too long refused; the audit lines.
  *
  *   pnpm run build:packages              # workspace packages, once
  *   cd apps/api && pnpm e2e:mcp-login    # port 4798, or: pnpm e2e:mcp-login 4800
@@ -25,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createDb, migrate, recordMemberIdpSubject, seed, sql } from '@slate/db';
+import { createDb, migrate, noteMemberLogin, recordMemberIdpSubject, seed, sql } from '@slate/db';
 import { startFakeAs } from '../src/oauth/fake-as.ts';
 
 const apiDir = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,6 +66,18 @@ await db.run(sql`INSERT INTO member (id, account_id, handle, display_name, time_
 await db.run(sql`INSERT INTO member (id, account_id, handle, display_name, time_zone, role, created_at) VALUES (${casey}, ${acme}, 'casey', 'Casey', 'UTC', 'admin', ${now})`);
 await recordMemberIdpSubject(db, globex, bo, 'user_01E2EMULTI');
 await recordMemberIdpSubject(db, acme, casey, 'user_01E2EMULTI');
+// A third person, linked in acme only: their session for globex (reached by
+// switching) carried no subject, but it is the same upstream user and was seen.
+const danaAcme = randomUUID();
+const danaGlobex = randomUUID();
+await db.run(sql`INSERT INTO member (id, account_id, external_id, handle, display_name, time_zone, role, created_at) VALUES (${danaAcme}, ${acme}, 'iam_dana', 'dana', 'Dana', 'UTC', 'admin', ${now})`);
+await db.run(sql`INSERT INTO member (id, account_id, external_id, handle, display_name, time_zone, role, created_at) VALUES (${danaGlobex}, ${globex}, 'iam_dana', 'dana', 'Dana', 'UTC', 'admin', ${now})`);
+await recordMemberIdpSubject(db, acme, danaAcme, 'user_01E2EDANA');
+await noteMemberLogin(db, globex, danaGlobex, now, 86_400_000);
+// A fourth, linked but not seen on the web for 40 days.
+const ed = randomUUID();
+await db.run(sql`INSERT INTO member (id, account_id, handle, display_name, time_zone, role, created_at) VALUES (${ed}, ${acme}, 'ed', 'Ed', 'UTC', 'admin', ${now})`);
+await recordMemberIdpSubject(db, acme, ed, 'user_01E2EED', now - 40 * 86_400_000);
 await db.close();
 
 const child = spawn('node', ['node_modules/tsx/dist/cli.mjs', '--tsconfig', 'tsconfig.runtime.json', 'src/main.ts'], {
@@ -133,7 +146,9 @@ try {
   check(expired.status === 401 && (expired.headers.get('www-authenticate') ?? '').startsWith('Bearer error="invalid_token"'), 'expired token: 401 invalid_token');
   const stranger = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, await as.mint({ sub: 'user_01NOBODY' }));
   const strangerBody = await stranger.json();
-  check(stranger.status === 403 && stranger.headers.get('www-authenticate') === null && strangerBody.error.message.includes('Open dCal on the web once'), `unlinked sign-in: 403 "${strangerBody.error.message}"`);
+  check(stranger.status === 403 && stranger.headers.get('www-authenticate') === null && strangerBody.error.message.includes('Open the app on the web once'), `unlinked sign-in: 403 "${strangerBody.error.message}"`);
+  const stale = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, await as.mint({ sub: 'user_01E2EED' }));
+  check(stale.status === 403, 'a link not seen on the web for 40 days: 403');
 
   // --- One account -------------------------------------------------------------
   const token = await as.mint({ sub: 'user_01E2EALEX', client_id: 'https://client.example.test/metadata.json' });
@@ -180,6 +195,14 @@ try {
   check(unnamed.isError && unnamed.content[0].text.startsWith('ACCOUNT_REQUIRED'), 'two accounts, no account_id -> ACCOUNT_REQUIRED');
   const named = (await multi.callTool({ name: 'whoami', arguments: { account_id: globex } })).structuredContent;
   check(named.account.code === 'globex' && named.key.prefix === `login:${bo.slice(0, 8)}`, `account_id picks the account -> ${named.account.code} as ${named.key.prefix}`);
+
+  // --- An account reached by switching -------------------------------------------
+  const dana = await connect(await as.mint({ sub: 'user_01E2EDANA' }));
+  clients.push(dana);
+  const danas = (await dana.callTool({ name: 'list_my_accounts', arguments: {} })).structuredContent.accounts;
+  check(danas.length === 2 && danas.some((a) => a.id === globex), `switched-to account reached through the first account's link -> ${danas.map((a) => a.name).join(', ')}`);
+  const danaThere = (await dana.callTool({ name: 'whoami', arguments: { account_id: globex } })).structuredContent;
+  check(danaThere.account.code === 'globex' && danaThere.key.prefix === `login:${danaGlobex.slice(0, 8)}`, `acts there as its own member ${danaThere.key.prefix}`);
 
   // --- Logs ------------------------------------------------------------------
   await Promise.all(clients.map((x) => x.close()));

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { membershipsBySubject, recordMemberIdpSubject } from './idp-subject';
+import { membershipsBySubject, memberRoleAndLoginSeen, noteMemberLogin, recordMemberIdpSubject } from './idp-subject';
 
 /**
  * `member.idp_subject` on SQLite: recording a sign-in subject at web login
@@ -19,14 +19,18 @@ async function account(name: string, createdAt = Date.now()): Promise<string> {
   return id;
 }
 
-async function member(accountId: string, role = 'admin', status = 'active'): Promise<string> {
+async function member(accountId: string, role = 'admin', status = 'active', externalId: string | null = null): Promise<string> {
   const id = randomUUID();
   await db.run(
-    sql`INSERT INTO member (id, account_id, handle, time_zone, role, status, created_at)
-        VALUES (${id}, ${accountId}, ${`h${id.slice(0, 7)}`}, 'UTC', ${role}, ${status}, ${Date.now()})`,
+    sql`INSERT INTO member (id, account_id, external_id, handle, time_zone, role, status, created_at)
+        VALUES (${id}, ${accountId}, ${externalId}, ${`h${id.slice(0, 7)}`}, 'UTC', ${role}, ${status}, ${Date.now()})`,
   );
   return id;
 }
+
+const DAY = 86_400_000;
+const seen = (id: string, at: number) => db.run(sql`UPDATE member SET login_seen_at = ${at} WHERE id = ${id}`);
+const since = (now = Date.now()) => now - 30 * DAY;
 
 const subjectOf = async (id: string) => (await db.get<{ idp_subject: string | null }>(sql`SELECT idp_subject FROM member WHERE id = ${id}`))!.idp_subject;
 
@@ -36,11 +40,12 @@ beforeEach(async () => {
 });
 
 describe('recordMemberIdpSubject', () => {
-  it('records a subject once, and reports nothing on the same value again', async () => {
+  it('records a subject once, stamping the login as seen, and reports nothing on the same value again', async () => {
     const a = await account('Acme');
     const m = await member(a);
-    expect(await recordMemberIdpSubject(db, a, m, 'user_1')).toEqual({ written: true, clearedMemberIds: [] });
+    expect(await recordMemberIdpSubject(db, a, m, 'user_1', 1_000)).toEqual({ written: true, clearedMemberIds: [] });
     expect(await subjectOf(m)).toBe('user_1');
+    expect((await memberRoleAndLoginSeen(db, a, m))!.loginSeenAt).toBe(1_000);
     expect(await recordMemberIdpSubject(db, a, m, 'user_1')).toEqual({ written: false, clearedMemberIds: [] });
   });
 
@@ -91,18 +96,80 @@ describe('recordMemberIdpSubject', () => {
   });
 });
 
+describe('noteMemberLogin', () => {
+  it('stamps a member never seen, then writes again only once the stamp is a day old', async () => {
+    const a = await account('Acme');
+    const m = await member(a);
+    const t0 = 10 * DAY;
+    expect(await noteMemberLogin(db, a, m, t0, DAY)).toBe(true);
+    expect(await noteMemberLogin(db, a, m, t0 + DAY - 1, DAY)).toBe(false);
+    expect((await memberRoleAndLoginSeen(db, a, m))!.loginSeenAt).toBe(t0);
+    expect(await noteMemberLogin(db, a, m, t0 + DAY + 1, DAY)).toBe(true);
+    expect((await memberRoleAndLoginSeen(db, a, m))!.loginSeenAt).toBe(t0 + DAY + 1);
+    // Another account's member, or one that does not exist, is never touched.
+    const b = await account('Globex');
+    expect(await noteMemberLogin(db, b, m, t0 + 5 * DAY, DAY)).toBe(false);
+    expect(await memberRoleAndLoginSeen(db, b, m)).toBeNull();
+  });
+});
+
 describe('membershipsBySubject', () => {
   it('returns every member carrying the subject with its role, status and account name, oldest account first', async () => {
     const newer = await account('Newer', Date.now());
-    const older = await account('Older', Date.now() - 86_400_000);
+    const older = await account('Older', Date.now() - DAY);
     const mNewer = await member(newer, 'member', 'active');
     const mOlder = await member(older, 'owner', 'disabled');
     await recordMemberIdpSubject(db, newer, mNewer, 'user_m');
     await recordMemberIdpSubject(db, older, mOlder, 'user_m');
-    expect(await membershipsBySubject(db, 'user_m')).toEqual([
+    expect(await membershipsBySubject(db, 'user_m', since())).toEqual([
       { memberId: mOlder, accountId: older, accountName: 'Older', role: 'owner', status: 'disabled' },
       { memberId: mNewer, accountId: newer, accountName: 'Newer', role: 'member', status: 'active' },
     ]);
-    expect(await membershipsBySubject(db, 'user_none')).toEqual([]);
+    expect(await membershipsBySubject(db, 'user_none', since())).toEqual([]);
+  });
+
+  it('honors a fresh link and refuses a stale one', async () => {
+    const a = await account('Acme');
+    const m = await member(a);
+    await recordMemberIdpSubject(db, a, m, 'user_age');
+    expect(await membershipsBySubject(db, 'user_age', since())).toHaveLength(1);
+    await seen(m, Date.now() - 31 * DAY);
+    expect(await membershipsBySubject(db, 'user_age', since())).toEqual([]);
+    await db.run(sql`UPDATE member SET login_seen_at = NULL WHERE id = ${m}`);
+    expect(await membershipsBySubject(db, 'user_age', since())).toEqual([]);
+  });
+
+  it("reaches the person's members in other accounts through the upstream user id, each only while it is itself fresh", async () => {
+    const primary = await account('Primary', Date.now() - 2 * DAY);
+    const switched = await account('Switched', Date.now() - DAY);
+    const stranger = await account('Stranger');
+    const linked = await member(primary, 'admin', 'active', 'iam_user_1');
+    // The session for the switched-to account carried no subject: never linked there.
+    const other = await member(switched, 'owner', 'active', 'iam_user_1');
+    const someoneElse = await member(stranger, 'owner', 'active', 'iam_user_2');
+    await recordMemberIdpSubject(db, primary, linked, 'user_person');
+    await seen(other, Date.now());
+    await seen(someoneElse, Date.now());
+    expect((await membershipsBySubject(db, 'user_person', since())).map((r) => r.memberId)).toEqual([linked, other]);
+    // Not seen in the switched-to account for longer than the window: that account drops out.
+    await seen(other, Date.now() - 40 * DAY);
+    expect((await membershipsBySubject(db, 'user_person', since())).map((r) => r.memberId)).toEqual([linked]);
+    // The link itself gone stale: nothing, even where the person was seen.
+    await seen(other, Date.now());
+    await seen(linked, Date.now() - 40 * DAY);
+    expect(await membershipsBySubject(db, 'user_person', since())).toEqual([]);
+  });
+
+  it('takes both upstream users when two of them carry the same subject', async () => {
+    const a = await account('A', Date.now() - 3 * DAY);
+    const b = await account('B', Date.now() - 2 * DAY);
+    const c = await account('C', Date.now() - DAY);
+    const ua = await member(a, 'admin', 'active', 'iam_a');
+    const ub = await member(b, 'admin', 'active', 'iam_b');
+    const ubElsewhere = await member(c, 'admin', 'active', 'iam_b');
+    await recordMemberIdpSubject(db, a, ua, 'user_twice');
+    await recordMemberIdpSubject(db, b, ub, 'user_twice');
+    await seen(ubElsewhere, Date.now());
+    expect((await membershipsBySubject(db, 'user_twice', since())).map((r) => r.memberId)).toEqual([ua, ub, ubElsewhere]);
   });
 });

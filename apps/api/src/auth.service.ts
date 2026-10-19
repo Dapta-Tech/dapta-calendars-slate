@@ -1,12 +1,15 @@
-import { ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
-import { verifyApiKey, getMemberRole } from '@slate/db';
+import { verifyApiKey, memberRoleAndLoginSeen, noteMemberLogin } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { AUTH_PROVIDER, DB } from './tokens';
 import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
 import { annotateRequestAccount } from './request-log';
 
 export type { HostPrincipal, ReqLike } from './auth.provider';
+
+/** How stale `member.login_seen_at` may get before a verified login stamps it again. */
+export const LOGIN_SEEN_REFRESH_MS = 86_400_000;
 
 export interface MachinePrincipal {
   /**
@@ -42,6 +45,8 @@ export interface MachinePrincipal {
  */
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger('Auth');
+
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
@@ -53,12 +58,23 @@ export class AuthService {
    * The provider stays role-agnostic; role resolution is centralized here so it
    * behaves identically across the local and workos providers. Throws 401 if the
    * provider cannot resolve the host.
+   *
+   * The same read tells when a verified login last resolved this member
+   * (`login_seen_at`, what an MCP sign-in through an external authorization
+   * server is held to). A stamp older than a day is renewed here, for every
+   * provider; a failed write is logged and never costs the request.
    */
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
     const id = await this.provider.resolveHost(req);
     annotateRequestAccount(req, id.accountId);
-    const role = (await getMemberRole(this.db, id.accountId, id.memberId)) ?? 'member';
-    return { ...id, role };
+    const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
+    const now = Date.now();
+    if (member && (member.loginSeenAt === null || now - member.loginSeenAt >= LOGIN_SEEN_REFRESH_MS)) {
+      await noteMemberLogin(this.db, id.accountId, id.memberId, now, LOGIN_SEEN_REFRESH_MS).catch((error: unknown) =>
+        this.logger.warn(`could not stamp the login of member ${id.memberId}: ${error instanceof Error ? error.message : String(error)}`),
+      );
+    }
+    return { ...id, role: member?.role ?? 'member' };
   }
 
   /**

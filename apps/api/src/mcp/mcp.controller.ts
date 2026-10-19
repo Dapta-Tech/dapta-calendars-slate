@@ -47,11 +47,11 @@ export function toolCallNeeds(body: unknown): { credential: boolean; scopes: Api
 
 /**
  * A valid sign-in that may act in no account: never linked (the person has
- * not opened the web app since the link was introduced), or not an active
- * owner or admin anywhere.
+ * not opened the web app since the link was introduced), not seen on the web
+ * within OAUTH_LINK_MAX_AGE_DAYS, or not an active owner or admin anywhere.
  */
 export const NOT_LINKED_MESSAGE =
-  'This Dapta sign-in is not an owner or admin of any dCal account yet. Open dCal on the web once, then reconnect.';
+  'This sign-in is not an owner or admin of any account on this server yet. Open the app on the web once, then reconnect.';
 
 /** Credentials in the URL end up in access logs and proxies; refuse them outright. */
 const URL_CREDENTIAL_PARAMS = ['key', 'api_key', 'apikey', 'access_token', 'token', 'authorization'];

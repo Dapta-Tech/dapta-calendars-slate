@@ -61,8 +61,22 @@ describe('configuration', () => {
     expect(problems({ OAUTH_AUTHORIZATION_SERVER: 'http://localhost:9000', NODE_ENV: 'production', AUTH_PROVIDER: 'workos' })).toContain('https');
     expect(problems({ OAUTH_JWKS_URL: 'http://keys.example.test/jwks' })).toContain('OAUTH_JWKS_URL must use https');
     expect(problems({ MCP_PUBLIC_URL: '' })).toContain('MCP_PUBLIC_URL is required');
+    // Compared character for character with every token's iss: only the canonical origin boots.
+    expect(problems({ OAUTH_AUTHORIZATION_SERVER: 'https://auth.example.test/' })).toBe(
+      'OAUTH_AUTHORIZATION_SERVER must be written exactly as the origin https://auth.example.test (it is compared with every token\'s iss).',
+    );
+    expect(problems({ OAUTH_AUTHORIZATION_SERVER: 'https://Auth.Example.test' })).toContain('exactly as the origin https://auth.example.test');
+    expect(problems({ OAUTH_AUTHORIZATION_SERVER: 'https://auth.example.test:443' })).toContain('exactly as the origin https://auth.example.test');
+    expect(() => loadServerEnv({ OAUTH_ENABLED: 'true', MCP_PUBLIC_URL: RESOURCE, OAUTH_AUTHORIZATION_SERVER: 'https://auth.example.test/' })).toThrow(/exactly as the origin/);
     expect(() => loadServerEnv({ OAUTH_ENABLED: 'true', MCP_PUBLIC_URL: RESOURCE, OAUTH_AUTHORIZATION_SERVER: 'not a url' })).toThrow(/OAUTH_AUTHORIZATION_SERVER/);
     expect(() => loadServerEnv({ OAUTH_ENABLED: 'true', MCP_PUBLIC_URL: RESOURCE, OAUTH_AUTHORIZATION_SERVER: 'ftp://auth.example.test' })).toThrow(/https/);
+  });
+
+  it('holds a link for OAUTH_LINK_MAX_AGE_DAYS, 30 by default, 1 to 365', () => {
+    expect(resolveExternalSettings(on({}))!.linkMaxAgeMs).toBe(30 * 86_400_000);
+    expect(resolveExternalSettings(on({ OAUTH_LINK_MAX_AGE_DAYS: '7' }))!.linkMaxAgeMs).toBe(7 * 86_400_000);
+    expect(resolveExternalSettings(on({ OAUTH_LINK_MAX_AGE_DAYS: '' }))!.linkMaxAgeMs).toBe(30 * 86_400_000);
+    for (const bad of ['0', '366', 'soon']) expect(() => loadServerEnv({ OAUTH_LINK_MAX_AGE_DAYS: bad })).toThrow(/OAUTH_LINK_MAX_AGE_DAYS/);
   });
 
   it('is off without OAUTH_ENABLED, whatever else is set', () => {

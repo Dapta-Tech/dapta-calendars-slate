@@ -488,8 +488,9 @@ and Connected apps answer 404.
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
-| `OAUTH_AUTHORIZATION_SERVER` | unset | the external server's issuer, an origin (`https`; `http` only on localhost outside production), written exactly as its metadata and tokens write it. Set, the API checks that server's access tokens and runs no authorization server of its own | no |
+| `OAUTH_AUTHORIZATION_SERVER` | unset | the external server's issuer, a bare origin (`https`; `http` only on localhost outside production), written exactly as `new URL(value).origin` gives it: lowercase, no trailing slash, no default port. Anything else is refused at boot, because it is compared with every token's `iss`. Set, the API checks that server's access tokens and runs no authorization server of its own | no |
 | `OAUTH_JWKS_URL` | unset | where that server publishes its signing keys; unset, the `jwks_uri` of its `/.well-known/oauth-authorization-server` metadata | no |
+| `OAUTH_LINK_MAX_AGE_DAYS` | `30` | how long after a person's last verified web login in an account a sign-in may still act there (1 to 365). Match your identity service's session lifetime | no |
 
 What the external server must do:
 
@@ -502,15 +503,26 @@ What the external server must do:
 
 What your login provider must do: record the external server's user id (the
 `sub` of its tokens) on the member when the person signs in to the web app, in
-`member.idp_subject`. A token whose `sub` no active owner or admin carries gets
-403 ("open the web app once, then reconnect"). The bundled `workos` provider does
+`member.idp_subject`, and keep `member.external_id` the person's own user id in
+every account (the link is per person: it also reaches their members in
+accounts where their login carried no `sub`). The bundled `workos` provider does
 it from the `workos_user_id` claim of its platform token; with another provider,
-add the same call (`recordMemberIdpSubject`) where it resolves the member.
+add the same call (`recordMemberIdpSubject`) where it resolves the member. Every
+verified web login also stamps `member.login_seen_at` (at most once a day, for
+any provider); a sign-in reaches only members stamped within
+`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
+403 ("open the app on the web once, then reconnect").
 
-Storage: one additive nullable column, `member.idp_subject`, with a unique index
-on (`idp_subject`, `account_id`) (migration `0028_member_idp_subject.sql` on
-Postgres, `0027_member_idp_subject.sql` on SQLite). NULL everywhere until a login
-records it.
+Offboarding: removing the member in this app (or disabling them, or removing
+their admin role) cuts MCP access at once. Removing someone only in your
+identity service takes effect within `OAUTH_LINK_MAX_AGE_DAYS` of their last
+web login in that account, because this app is never told about it.
+
+Storage: two additive nullable columns, `member.idp_subject` (unique per
+account, index on (`idp_subject`, `account_id`)) and `member.login_seen_at`,
+plus an index on `member.external_id` (migration `0028_member_idp_subject.sql`
+on Postgres, `0027_member_idp_subject.sql` on SQLite). NULL everywhere until a
+login records them.
 
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every

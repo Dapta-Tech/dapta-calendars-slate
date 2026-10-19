@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { membershipsBySubject, recordMemberIdpSubject } from './idp-subject';
+import { membershipsBySubject, memberRoleAndLoginSeen, noteMemberLogin, recordMemberIdpSubject } from './idp-subject';
 
 /**
  * `member.idp_subject` against a REAL Postgres. The SQLite twin
@@ -57,7 +57,31 @@ describePg('member.idp_subject (real Postgres)', () => {
     const other = await account('Pg Globex');
     const there = await member(other);
     await recordMemberIdpSubject(db, other, there, subject);
-    expect((await membershipsBySubject(db, subject)).map((m) => m.memberId).sort()).toEqual([second, there].sort());
+    expect((await membershipsBySubject(db, subject, Date.now() - 30 * 86_400_000)).map((m) => m.memberId).sort()).toEqual([second, there].sort());
+    // Stale: refused.
+    await db.run(sql`UPDATE member SET login_seen_at = ${Date.now() - 40 * 86_400_000} WHERE id = ${there}`);
+    expect((await membershipsBySubject(db, subject, Date.now() - 30 * 86_400_000)).map((m) => m.memberId)).toEqual([second]);
+  });
+
+  it("reaches the person's other members through the upstream user id, and stamps a login at most once a day", async () => {
+    const primary = await account('Pg Primary');
+    const switched = await account('Pg Switched');
+    const iamUser = `iam_${run}`;
+    const linked = randomUUID();
+    const other = randomUUID();
+    for (const [id, acct] of [[linked, primary], [other, switched]] as const)
+      await db.run(
+        sql`INSERT INTO member (id, account_id, external_id, handle, time_zone, role, status, created_at)
+            VALUES (${id}, ${acct}, ${iamUser}, ${`h${id.slice(0, 7)}`}, 'UTC', 'admin', 'active', ${Date.now()})`,
+      );
+    const subject = `user_person_${run}`;
+    await recordMemberIdpSubject(db, primary, linked, subject);
+    expect((await membershipsBySubject(db, subject, Date.now() - 86_400_000)).map((m) => m.memberId)).toEqual([linked]);
+    const now = Date.now();
+    expect(await noteMemberLogin(db, switched, other, now, 86_400_000)).toBe(true);
+    expect(await noteMemberLogin(db, switched, other, now + 1000, 86_400_000)).toBe(false);
+    expect((await memberRoleAndLoginSeen(db, switched, other))!.loginSeenAt).toBe(now);
+    expect((await membershipsBySubject(db, subject, now - 86_400_000)).map((m) => m.memberId).sort()).toEqual([linked, other].sort());
   });
 
   it('two members of one account claiming one subject at once: one wins, and never both', async () => {

@@ -18,9 +18,11 @@ import { resourceMetadataUrlFor, trimSlash } from './oauth.settings';
  *    ES256 only, `iss` exactly the configured issuer, `aud` containing the MCP
  *    URL (RFC 8707), `sub` and `exp` present. Nothing else in the token is
  *    trusted; `client_id`/`azp` and `sid` are only logged.
- *  - MAPS the token's `sub` to the members it may act as: the ones whose
- *    `idp_subject` the host login provider recorded, active owners and admins
- *    only (`mayHoldGrant`, the built-in server's rule), read on every request.
+ *  - MAPS the token's `sub` to the members it may act as: the person whose
+ *    `idp_subject` the host login provider recorded, in every account they
+ *    belong to, among members whose web login was verified within
+ *    OAUTH_LINK_MAX_AGE_DAYS, active owners and admins only (`mayHoldGrant`,
+ *    the built-in server's rule), read on every request.
  *
  * Every outbound request is to a configured URL (never one built from a
  * request header), carries no header of the caller's, and is bounded in time,
@@ -50,6 +52,8 @@ export interface ExternalOAuthSettings {
   jwksUrl: string | null;
   /** http is accepted for a fetched `jwks_uri` only on loopback outside production. */
   production: boolean;
+  /** How long after its last verified web login a member stays reachable (OAUTH_LINK_MAX_AGE_DAYS). */
+  linkMaxAgeMs: number;
 }
 
 /** The settings, or null unless OAuth is on with an external authorization server. */
@@ -62,6 +66,7 @@ export function resolveExternalSettings(env: ServerEnv): ExternalOAuthSettings |
     resourceMetadataUrl: resourceMetadataUrlFor(resource),
     jwksUrl: env.OAUTH_JWKS_URL ?? null,
     production: env.NODE_ENV === 'production',
+    linkMaxAgeMs: env.OAUTH_LINK_MAX_AGE_DAYS * 86_400_000,
   };
 }
 
@@ -288,11 +293,12 @@ export class ExternalOAuthService {
   }
 
   /**
-   * The accounts a sign-in may act in: one per member carrying its subject who
-   * is active and an owner or admin. Read on every request, never cached.
+   * The accounts a sign-in may act in: one per member of the person behind
+   * its subject who was seen on the web within the window and is active and
+   * an owner or admin. Read on every request, never cached.
    */
   async accountsFor(subject: string): Promise<LoginAccount[]> {
-    const memberships = await membershipsBySubject(this.db, subject);
+    const memberships = await membershipsBySubject(this.db, subject, Date.now() - this.settings!.linkMaxAgeMs);
     return memberships
       .filter((m) => mayHoldGrant(m))
       .map((m) => ({ accountId: m.accountId, accountName: m.accountName, memberId: m.memberId, role: m.role }));

@@ -249,12 +249,15 @@ built-in server runs exactly as described above.
 Any OAuth 2.1 authorization server works if it supports **RFC 8707 resource
 indicators** (its access tokens for `MCP_PUBLIC_URL` carry that URL as their
 `aud`), signs them with **RS256 or ES256**, publishes a **JWKS**, and has an
-issuer that is an origin: for example WorkOS AuthKit or Auth0. Register
-`MCP_PUBLIC_URL` with it as a resource (an API, an audience). The login provider
-of this deployment (`AUTH_PROVIDER`) must record that server's user id for the
-person, the `sub` of its tokens, on their member (`member.idp_subject`) when they
-sign in to the web app; the bundled `workos` provider does that with the
-`workos_user_id` claim of its platform token.
+issuer that is a bare origin (`https://auth.example.com`, no trailing slash):
+for example WorkOS AuthKit. `OAUTH_AUTHORIZATION_SERVER` must be written exactly
+as that origin; anything else is refused at boot, because it is compared with
+every token's `iss`. Register `MCP_PUBLIC_URL` with the server as a resource (an
+API, an audience). The login provider of this deployment (`AUTH_PROVIDER`) must
+record that server's user id for the person, the `sub` of its tokens, on their
+member (`member.idp_subject`) when they sign in to the web app; the bundled
+`workos` provider does that with the `workos_user_id` claim of its platform
+token.
 
 | Endpoint | What it serves |
 |---|---|
@@ -272,12 +275,16 @@ sign in to the web app; the bundled `workos` provider does that with the
   present, 30 s of clock tolerance. Nothing else in the token is trusted;
   `client_id`/`azp` and `sid` are only written to the audit line. Any failure,
   a key-fetch outage included, is the same 401, never a 500.
-- **Who it acts as.** The token's `sub` finds the person's members: those whose
-  `idp_subject` is that `sub` and who are active owners or admins (the same rule
-  as the built-in server's consent). Checked on every request, so removing a
-  member, disabling them or taking their admin role away cuts access at once.
-  None: **HTTP 403** with a plain message (open the web app once, then
-  reconnect), never a 401, so the client does not loop back into its sign-in.
+- **Who it acts as.** The token's `sub` finds the person: the members whose
+  `idp_subject` is that `sub`. The link is per person, so it reaches the
+  person's members in every account (the same upstream user, `external_id`),
+  also where their login never carried the `sub` (an account they reach by
+  switching). Of those, only members a verified web login resolved within
+  `OAUTH_LINK_MAX_AGE_DAYS` (default 30) count, the linking member included,
+  and only active owners and admins (the same rule as the built-in server's
+  consent). Checked on every request. None: **HTTP 403** with a plain message
+  (open the web app once, then reconnect), never a 401, so the client does not
+  loop back into its sign-in.
 - **What it may do.** An external server has no scopes of ours, so a sign-in
   acts with the member's admin rights: every tool, no event-type allowlist, no
   step-up. For narrow access (read-only, one event type), use a scoped API key.
@@ -285,6 +292,13 @@ sign in to the web app; the bundled `workos` provider does that with the
   call names one with `account_id`; `list_my_accounts` lists them.
 - **Disconnecting.** Remove the connector in the client. An owner can cut a
   person off by removing their admin role or the member.
+- **Offboarding.** Removing the member here (or disabling them, or taking their
+  admin role) cuts MCP access on the next request. Removing someone only in the
+  upstream identity service, which this app is never told about, takes effect
+  within `OAUTH_LINK_MAX_AGE_DAYS` of their last web login in that account:
+  after that the link is stale and every call is the 403. Set it to the
+  upstream session lifetime, so MCP access never outlives what the web allows;
+  remove the member here too when it must end at once.
 
 ## Security
 
@@ -334,6 +348,7 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset |
 | `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
 | `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
+| `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after their last web login in an account a sign-in still reaches it) |
 
 ## Check it yourself
 

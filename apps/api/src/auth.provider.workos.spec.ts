@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, migrate, seed, sql, type Db } from '@slate/db';
+import { createDb, membershipsBySubject, migrate, seed, sql, type Db } from '@slate/db';
 import { loadServerEnv } from '@slate/config/env';
 import { createAuthProvider, type ReqLike } from './auth.provider';
 import { WorkOsAuthProvider } from './auth.provider.workos';
+import { AuthService } from './auth.service';
 import { signJwtHs256 } from './jwt';
 
 const SECRET = 'workos-provider-test-secret';
@@ -199,11 +200,13 @@ describe('WorkOsAuthProvider: records the sign-in subject on the member', () => 
     await seed(db);
   });
 
-  it('records it on the first login, once, with an audit line', async () => {
+  it('records it on the first login, once, with an audit line, and counts the login as seen', async () => {
     const { p, lines } = provider();
     const t = mint({ account_id: 'acct_s1', sub: 'iam_1', workos_user_id: 'user_01ALPHA' });
     const who = await p.resolveHost(bearer(t));
     expect(await subjectOf(who.memberId)).toBe('user_01ALPHA');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBeGreaterThan(Date.now() - 60_000);
     await p.resolveHost(bearer(t));
     expect(lines).toEqual([expect.objectContaining({ msg: 'auth.idp_subject_recorded', accountId: who.accountId, memberId: who.memberId, takenFrom: [] })]);
     expect(JSON.stringify(lines)).not.toContain('user_01ALPHA');
@@ -247,6 +250,18 @@ describe('WorkOsAuthProvider: records the sign-in subject on the member', () => 
     await p.resolveHost(bearer(mint({ account_id: 'acct_none', sub: 'iam_none' })));
     expect(await subjectOf(who.memberId)).toBe('user_01KEEP');
     expect(lines).toHaveLength(1);
+  });
+
+  it('an account reached by switching (no workos_user_id in its session) is reached through the first account\'s link', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    // The first login carries the WorkOS user id; the switched-to account's session does not.
+    const first = await auth.resolveHost(bearer(mint({ account_id: 'acct_primary', sub: 'iam_person', workos_user_id: 'user_01PERSON' })));
+    const second = await auth.resolveHost(bearer(mint({ account_id: 'acct_switched', sub: 'iam_person' })));
+    expect(await subjectOf(second.memberId)).toBeNull();
+    // Both are owners (the first member of each account), both seen just now.
+    const reached = await membershipsBySubject(db, 'user_01PERSON', Date.now() - 30 * 86_400_000);
+    expect(reached.map((m) => m.memberId).sort()).toEqual([first.memberId, second.memberId].sort());
+    expect(reached.every((m) => m.role === 'owner' && m.status === 'active')).toBe(true);
   });
 
   it('a failed write never costs the login', async () => {

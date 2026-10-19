@@ -58,12 +58,19 @@ async function tool(h: Harness, token: string, name: string, args: Record<string
 const memberId = async (h: Harness, handle: string) =>
   (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = ${handle} LIMIT 1`))!.id;
 
-/** Record a subject on a member the way a web login does (the latest login wins within the account). */
+/** Record a subject on a member the way a web login does (the latest login wins within the account; the login counts as seen). */
 async function link(h: Harness, member: string, subject: string) {
   const row = (await h.db.get<{ account_id: string }>(sql`SELECT account_id FROM member WHERE id = ${member}`))!;
   await h.db.run(sql`UPDATE member SET idp_subject = NULL WHERE account_id = ${row.account_id} AND idp_subject = ${subject}`);
-  await h.db.run(sql`UPDATE member SET idp_subject = ${subject} WHERE id = ${member}`);
+  await h.db.run(sql`UPDATE member SET idp_subject = ${subject}, login_seen_at = ${Date.now()} WHERE id = ${member}`);
 }
+
+const DAY = 86_400_000;
+const seenAt = (h: Harness, member: string, at: number | null) => h.db.run(sql`UPDATE member SET login_seen_at = ${at} WHERE id = ${member}`);
+
+/** A dashboard request as this member: what a web login does, through the local auth stub. */
+const openWebApp = async (h: Harness, accountId: string, member: string) =>
+  (await fetch(`${h.base}/v1/oauth/grants`, { headers: { 'x-slate-account': accountId, 'x-slate-member': member } })).status;
 
 /** A new member of the seeded account, with its own subject. */
 async function addMember(h: Harness, role: 'owner' | 'admin' | 'member', status: 'active' | 'disabled' = 'active') {
@@ -255,6 +262,60 @@ describe('the door', () => {
     expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
     await h.db.run(sql`DELETE FROM member WHERE id = ${id}`);
     expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+  });
+});
+
+describe('how long a link holds, and the accounts reached by switching', () => {
+  it('a stale link answers like no link; opening the web app once makes it fresh again', async () => {
+    const { as, h } = await setup();
+    const id = await addMember(h, 'admin');
+    await link(h, id, 'user_stale');
+    const token = await as.mint({ sub: 'user_stale' });
+    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    await seenAt(h, id, Date.now() - 31 * DAY);
+    const stale = await rpc(h, 'tools/list', {}, token);
+    expect(stale.status).toBe(403);
+    expect((await body(stale)).error!.message).toBe(NOT_LINKED_MESSAGE);
+    // Never stamped at all: the same.
+    await seenAt(h, id, null);
+    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+    // A verified dashboard request stamps the member again.
+    expect(await openWebApp(h, h.accountId, id)).toBe(200);
+    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+  });
+
+  it('OAUTH_LINK_MAX_AGE_DAYS sets the window', async () => {
+    const { as, h } = await setup({ OAUTH_LINK_MAX_AGE_DAYS: '1' });
+    const id = await addMember(h, 'admin');
+    await link(h, id, 'user_short');
+    await seenAt(h, id, Date.now() - 2 * DAY);
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(403);
+    await seenAt(h, id, Date.now() - DAY / 2);
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(200);
+  });
+
+  it("an admin of an account reached by switching (whose session carried no subject) signs in through the first account's link, while seen there", async () => {
+    const { as, h } = await setup();
+    const alex = await memberId(h, 'alex-rivera');
+    const bo = await memberId(h, 'bo');
+    // The same upstream user in both accounts; only the first account's login carried the subject.
+    await h.db.run(sql`UPDATE member SET external_id = 'iam_alex' WHERE id IN (${alex}, ${bo})`);
+    await link(h, alex, 'user_switcher');
+    expect(await openWebApp(h, h.other.accountId, bo)).toBe(200);
+    const token = await as.mint({ sub: 'user_switcher' });
+    const accounts = structured<{ accounts: { id: string }[] }>(await tool(h, token, 'list_my_accounts'));
+    expect(accounts.accounts.map((a) => a.id).sort()).toEqual([h.accountId, h.other.accountId].sort());
+    const there = structured<{ account: { code: string }; key: { prefix: string } }>(await tool(h, token, 'whoami', { account_id: h.other.accountId }));
+    expect(there.account.code).toBe('globex');
+    expect(there.key.prefix).toBe(`login:${bo.slice(0, 8)}`);
+    // Not seen in the second account within the window: it drops out, the first stays.
+    await seenAt(h, bo, Date.now() - 31 * DAY);
+    const left = structured<{ accounts: { id: string }[] }>(await tool(h, token, 'list_my_accounts'));
+    expect(left.accounts.map((a) => a.id)).toEqual([h.accountId]);
+    // A different upstream user in the second account is never reached.
+    await h.db.run(sql`UPDATE member SET external_id = 'iam_someone_else' WHERE id = ${bo}`);
+    await seenAt(h, bo, Date.now());
+    expect(structured<{ accounts: { id: string }[] }>(await tool(h, token, 'list_my_accounts')).accounts.map((a) => a.id)).toEqual([h.accountId]);
   });
 });
 

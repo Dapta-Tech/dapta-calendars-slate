@@ -74,6 +74,9 @@ export const member = pgTable('member', {
   // with (a token's `sub`), recorded by the host login provider at web login
   // (0028). One member per subject within an account; NULL until then.
   idpSubject: text('idp_subject'),
+  // Epoch ms a verified web login last resolved this member, refreshed at most
+  // once a day (0028). An MCP sign-in reaches only members seen recently.
+  loginSeenAt: bigint('login_seen_at', { mode: 'number' }),
   handle: text('handle'),
   displayName: text('display_name'),
   email: text('email'),
