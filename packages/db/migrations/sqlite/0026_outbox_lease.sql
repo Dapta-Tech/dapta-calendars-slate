@@ -1,4 +1,4 @@
--- See migrations/postgres/0026_outbox_lease.sql for the rationale.
+-- See migrations/postgres/0027_outbox_lease.sql for the rationale.
 --
 -- Nullable, no default: every existing row reads as not leased and never
 -- failed, and is claimed and retried exactly like a new one.

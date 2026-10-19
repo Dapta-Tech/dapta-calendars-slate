@@ -451,13 +451,13 @@ export const outbox = pgTable('outbox', {
   lastError: text('last_error'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
-  /** Epoch-ms until which a worker owns the row (0026); NULL = not claimed. */
+  /** Epoch-ms until which a worker owns the row (0027); NULL = not claimed. */
   leaseUntil: bigint('lease_until', { mode: 'number' }),
   /** Which claim holds the lease; outcomes are written only by its holder. */
   leaseToken: text('lease_token'),
   /** Epoch-ms of the first failed attempt; the retry horizon counts from it. */
   firstFailedAt: bigint('first_failed_at', { mode: 'number' }),
-  /** Rows of one kind sharing it go one at a time, in queue order (0026/0025). */
+  /** Rows of one kind sharing it go one at a time, in queue order (0027/0026). */
   orderKey: text('order_key'),
 });
 

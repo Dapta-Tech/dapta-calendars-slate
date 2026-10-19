@@ -650,7 +650,7 @@ reference it by `CALENDAR_BACKEND_MODULE`.
   images does not restore that text. Rollback across this migration is
   forward-only; take a snapshot before upgrading if you need a true point-in-time
   revert.
-- **Outbox leases (`postgres/0026`, `sqlite/0025`).** Workers from before this
+- **Outbox leases (`postgres/0027`, `sqlite/0026`).** Workers from before this
   migration claim outbox rows without a lease, so while old and new API pods run
   side by side they can deliver the same row twice, and an old pod still gives a
   failing row up after five attempts. Keep the overlap short (or set
