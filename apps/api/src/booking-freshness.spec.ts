@@ -176,6 +176,42 @@ describe('booking paths read the calendar fresh, never the display cache (ADR 00
       expect(backend.reads).toBe(readsBefore + 1);
       expect(await admin.confirm(principal, freeOne)).toMatchObject({ ok: true });
     });
+
+    it("a confirmation answers for every assigned host: a co-host's busy calendar or booking refuses it too", async () => {
+      await db.run(sql`UPDATE event_type SET requires_confirmation = 1 WHERE slug = 'intro-call'`);
+      const slots = (await booking.availability(q()))!.slots;
+      const jordan = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee'`))!.id;
+      const request = async (startUtc: string, tag: string) => {
+        const r = await booking.book({
+          accountCode: 'acme',
+          handle: 'alex-rivera',
+          slug: 'intro-call',
+          startUtc,
+          attendee: attendee(tag),
+          answers: { company: 'Acme' },
+        });
+        if (isServiceError(r)) throw new Error(r.message);
+        // A co-host on the request, as a team booking records one.
+        const id = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${r.uid}`))!.id;
+        await db.run(
+          sql`INSERT INTO booking_host (id, booking_id, member_id, is_fixed, created_at)
+              VALUES (${`bh-${tag}`}, ${id}, ${jordan}, 1, 0)`,
+        );
+        return r.uid;
+      };
+      const calendarClash = await request(slots[1]!.startUtc, 'co1');
+      backend.busy.set('ref-jordan-lee', [busyAt(slots[1]!.startUtc)]);
+      expect(await admin.confirm(principal, calendarClash)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+
+      const bookingClash = await request(slots[6]!.startUtc, 'co2');
+      // Jordan already holds an accepted booking over that time, as its organizer.
+      await db.run(
+        sql`INSERT INTO booking (id, account_id, uid, host_member_id, title, start_ms, end_ms, status, created_at, updated_at)
+            VALUES ('jordan-own', ${principal.accountId}, 'jordan-own-uid', ${jordan}, 'Busy', ${Date.parse(slots[6]!.startUtc)},
+              ${Date.parse(slots[6]!.startUtc) + 30 * 60_000}, 'accepted', 0, 0)`,
+      );
+      expect(await admin.confirm(principal, bookingClash)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    });
   });
 
   describe('with a calendar that fails, and a good read cached (stale-on-error)', () => {
@@ -237,6 +273,19 @@ describe('booking paths read the calendar fresh, never the display cache (ADR 00
       expect(
         await booking.teamBook('acme', 'sales', { slug: 'team-demo', startUtc: target, attendee: attendee('t') }),
       ).toMatchObject(unavailable);
+      expect(await admin.confirm(principal, pending.uid)).toMatchObject({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
+      // A co-host whose calendar cannot be read refuses it the same way.
+      backend.failing = false;
+      backend.listBusy = (input) =>
+        input.connectionRefs.includes('ref-jordan-lee')
+          ? Promise.reject(new Error('backend 503'))
+          : Promise.resolve([]);
+      const jordan = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee'`))!.id;
+      const pendingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${pending.uid}`))!.id;
+      await db.run(
+        sql`INSERT INTO booking_host (id, booking_id, member_id, is_fixed, created_at)
+            VALUES ('bh-unreadable', ${pendingId}, ${jordan}, 1, 0)`,
+      );
       expect(await admin.confirm(principal, pending.uid)).toMatchObject({ ok: false, reason: 'CALENDAR_UNAVAILABLE' });
       // Nothing was written by any of them.
       expect(await db.all(sql`SELECT id FROM booking WHERE start_ms = ${Date.parse(target)}`)).toEqual([]);

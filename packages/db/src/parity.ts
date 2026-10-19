@@ -1599,8 +1599,8 @@ export async function addAttendeeToBooking(
 /**
  * Host confirms a pending booking → accepted (guarded by overlap + EXCLUDE).
  *
- * With `calendar`, the host's connected calendar is read for the booking's
- * time first, the same fail-closed check create and reschedule run: a request
+ * With `calendar`, the connected calendar of every assigned host is read for
+ * the booking's time first, the same fail-closed check create and reschedule run: a request
  * can wait days for its answer, and the host's calendar may have filled that
  * time meanwhile. Busy there answers `SLOT_TAKEN`; a calendar that cannot be
  * read answers `CALENDAR_UNAVAILABLE` (nothing is confirmed, try again). The
@@ -1617,11 +1617,16 @@ export async function confirmBooking(
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
-  if (b.host_member_id) {
-    const startMs = Number(b.start_ms);
-    const endMs = Number(b.end_ms);
+  const startMs = Number(b.start_ms);
+  const endMs = Number(b.end_ms);
+  // Everyone the booking assigns: its organizer and any co-host in
+  // `booking_host`, the same set create and reschedule answer for. No path
+  // writes a pending booking with co-hosts today (team bookings are created
+  // accepted), but a confirmation must not be the one place that forgets them.
+  const hostIds = await loadAssignedHostIds(db, b.id, b.host_member_id);
+  for (const hostId of hostIds) {
     try {
-      const busy = await loadExternalBusy(db, calendar, b.host_member_id, startMs, endMs, b.event_type_id);
+      const busy = await loadExternalBusy(db, calendar, hostId, startMs, endMs, b.event_type_id);
       if (busy.some((x) => x.start.getTime() < endMs && x.end.getTime() > startMs)) {
         return { ok: false, reason: 'SLOT_TAKEN' };
       }
@@ -1630,15 +1635,22 @@ export async function confirmBooking(
     }
   }
   const now = Date.now();
-  const overlapSql = sql`SELECT id FROM booking WHERE host_member_id = ${b.host_member_id}
-    AND status = 'accepted' AND id <> ${b.id}
-    AND start_ms < ${b.end_ms} AND end_ms > ${b.start_ms} LIMIT 1`;
+  // An ACCEPTED booking of any assigned host over the same time, held as its
+  // organizer or as a co-host.
+  const overlapChecks = hostIds.map(
+    (hostId) => sql`SELECT b.id FROM booking b
+      WHERE b.status = 'accepted' AND b.id <> ${b.id}
+        AND b.start_ms < ${b.end_ms} AND b.end_ms > ${b.start_ms}
+        AND (b.host_member_id = ${hostId}
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${hostId}))
+      LIMIT 1`,
+  );
   // DH1: guard the transition on the CURRENT status so a concurrent/retried
   // confirm can only move pending→accepted once (defence-in-depth alongside the
   // idempotent calendar write claim).
   const updateSql = sql`UPDATE booking SET status = 'accepted', updated_at = ${now}
     WHERE id = ${b.id} AND status = 'pending'`;
-  const ok = await runGuardedUpdate(db, [overlapSql], updateSql);
+  const ok = await runGuardedUpdate(db, overlapChecks, updateSql);
   if (!ok) return { ok: false, reason: 'SLOT_TAKEN' };
   return {
     ok: true,
