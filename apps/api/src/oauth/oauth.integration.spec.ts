@@ -625,10 +625,13 @@ describe('refresh tokens and revocation', () => {
     const t0 = await connect(strict, client);
     const list = (await (await fetch(`${strict.issuer}/v1/oauth/grants`, { headers: strict.owner })).json()) as {
       enabled: boolean;
+      mcpEnabled: boolean;
       accessTokenTtlSeconds: number;
       grants: { id: string; clientName: string; clientHost: string; scopes: string[]; approvedBy: string }[];
     };
     expect(list.enabled).toBe(true);
+    // OAuth refuses to boot without MCP, so OAuth on always reports MCP on.
+    expect(list.mcpEnabled).toBe(true);
     expect(list.accessTokenTtlSeconds).toBe(3600);
     const grantId = (JSON.parse(Buffer.from(t0.access_token.split('.')[1]!, 'base64url').toString()) as { grant_id: string }).grant_id;
     const mine = list.grants.find((g) => g.id === grantId)!;
@@ -671,11 +674,25 @@ describe('refresh tokens and revocation', () => {
     }
   });
 
-  it('Connected apps answers enabled:false with OAuth off', async () => {
+  /** `GET /v1/oauth/grants` as the seeded owner of a harness. */
+  async function grantsAsOwner(h: Harness): Promise<unknown> {
+    const owner = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${h.accountId} AND role = 'owner' LIMIT 1`))!;
+    const res = await fetch(`${h.base}/v1/oauth/grants`, { headers: { 'x-slate-account': h.accountId, 'x-slate-member': owner.id } });
+    expect(res.status).toBe(200);
+    return res.json();
+  }
+
+  it('Connected apps answers enabled:false with OAuth off, and reports MCP on (the default)', async () => {
     const off = await bootHarness();
     open.push(off);
-    const owner = (await off.db.get<{ id: string }>(sql`SELECT id FROM member WHERE account_id = ${off.accountId} AND role = 'owner' LIMIT 1`))!;
-    const res = await fetch(`${off.base}/v1/oauth/grants`, { headers: { 'x-slate-account': off.accountId, 'x-slate-member': owner.id } });
-    expect(await res.json()).toEqual({ enabled: false, accessTokenTtlSeconds: null, grants: [] });
+    expect(await grantsAsOwner(off)).toEqual({ enabled: false, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+  });
+
+  it('Connected apps reports mcpEnabled:false when the API does not serve MCP', async () => {
+    const noMcp = await bootHarness({ MCP_ENABLED: 'false' });
+    open.push(noMcp);
+    expect(await grantsAsOwner(noMcp)).toEqual({ enabled: false, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] });
+    // The flag tells the truth about the door: the same API answers /mcp with 404.
+    expect((await noMcp.post({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).status).toBe(404);
   });
 });

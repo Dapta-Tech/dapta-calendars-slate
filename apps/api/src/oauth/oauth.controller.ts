@@ -15,8 +15,10 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import type { ServerEnv } from '@slate/config/env';
 import { AuthService, type ReqLike } from '../auth.service';
 import { assertAdmin } from '../permissions';
+import { ENV } from '../tokens';
 import { OAuthService, oauthErrorPage } from './oauth.service';
 
 /**
@@ -103,6 +105,7 @@ export class OAuthHostController {
   constructor(
     @Inject(OAuthService) private readonly oauth: OAuthService,
     @Inject(AuthService) private readonly auth: AuthService,
+    @Inject(ENV) private readonly env: ServerEnv,
   ) {}
 
   @Get('consent/:uid')
@@ -123,13 +126,21 @@ export class OAuthHostController {
     return this.oauth.decide(uid, host, decision);
   }
 
+  /**
+   * The Connected apps list, with the two switches the MCP & API page reads:
+   * `enabled` (OAuth) and `mcpEnabled` (MCP_ENABLED: whether this API serves
+   * `/mcp` at all). The page shows how to connect an agent only on
+   * `mcpEnabled: true`, so nobody is handed an address that answers 404.
+   */
   @Get('grants')
   async grants(@Req() req: ReqLike) {
     const host = await this.auth.resolveHost(req);
     assertAdmin(host);
-    if (!this.oauth.enabled) return { enabled: false, accessTokenTtlSeconds: null, grants: [] };
+    const mcpEnabled = this.env.MCP_ENABLED;
+    if (!this.oauth.enabled) return { enabled: false, mcpEnabled, accessTokenTtlSeconds: null, grants: [] };
     return {
       enabled: true,
+      mcpEnabled,
       accessTokenTtlSeconds: this.oauth.settings!.accessTokenTtlSeconds,
       grants: await this.oauth.listGrants(host.accountId),
     };

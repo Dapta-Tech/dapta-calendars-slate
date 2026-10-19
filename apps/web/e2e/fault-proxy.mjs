@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // A transparent proxy between the browser suite's web app and its API, which
-// can be told to answer the next few matching requests with 429 + Retry-After
-// itself. That is how the suite shows what a visitor sees when the API is busy
-// (the web calls the API from its own server, so a browser-side stub cannot
-// reach those calls). Everything else passes through untouched, both ways.
+// can be told to answer the next few matching requests itself: with 429 +
+// Retry-After, or with a canned JSON reply. That is how the suite shows what a
+// visitor sees when the API is busy, or what a host sees when the API reports a
+// switch the suite's API does not run with (the web calls the API from its own
+// server, so a browser-side stub cannot reach those calls). Everything else
+// passes through untouched, both ways.
 //
 //   node e2e/fault-proxy.mjs          (port E2E_PROXY_PORT, default 4413)
 //
@@ -12,6 +14,8 @@
 //   POST /__qa/throttle {match, times, retryAfter, method?}
 //        the next `times` requests whose path contains `match` (and whose
 //        method is `method`, when given) get 429 with `Retry-After: retryAfter`
+//   POST /__qa/answer {match, times, status, body, method?}
+//        the next `times` matching requests get `status` with the JSON `body`
 //   POST /__qa/reset                  drop every rule
 //   GET  /__qa/served                 how many 429s were answered so far
 import { createServer, request as forward } from 'node:http';
@@ -58,6 +62,16 @@ const server = createServer(async (req, res) => {
       });
       return json(res, 200, { ok: true });
     }
+    if (path === '/__qa/answer') {
+      const b = await readBody(req);
+      rules.push({
+        match: String(b.match ?? ''),
+        method: b.method ? String(b.method).toUpperCase() : null,
+        times: Number(b.times ?? 1),
+        answer: { status: Number(b.status ?? 200), body: b.body ?? {} },
+      });
+      return json(res, 200, { ok: true });
+    }
     return json(res, 404, { error: 'NOT_FOUND' });
   }
 
@@ -66,9 +80,11 @@ const server = createServer(async (req, res) => {
   );
   if (rule) {
     rule.times -= 1;
-    served += 1;
-    // Drain what the caller sent, then answer the way the API's limiter does.
+    // Drain what the caller sent first, whichever way the rule answers.
     req.resume();
+    if (rule.answer) return json(res, rule.answer.status, rule.answer.body);
+    served += 1;
+    // Answer the way the API's limiter does.
     return json(
       res,
       429,

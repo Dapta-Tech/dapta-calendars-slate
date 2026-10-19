@@ -58,10 +58,13 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
 }
 
 export function ConnectAgent({
+  available,
   snippets,
   oauth = false,
   messages: m,
 }: {
+  /** The API serves MCP. Off: one plain sentence, no tabs and no address. */
+  available: boolean;
   snippets: ConnectSnippets | null;
   /** The API runs its own OAuth server: chat apps connect with a sign-in. */
   oauth?: boolean;
@@ -90,6 +93,19 @@ export function ConnectAgent({
   };
 
   const copy = { copyLabel: m.copy, copiedLabel: m.copied };
+
+  if (!available) {
+    return (
+      <section className="mb-section" aria-labelledby={`${base}-title`}>
+        <h2 id={`${base}-title`} className="mb-tight text-xl font-semibold">
+          {m.connectTitle}
+        </h2>
+        <div className="rounded-xl border border-border bg-card p-field">
+          <p className="max-w-prose text-sm text-muted-foreground">{m.mcpUnavailable}</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mb-section" aria-labelledby={`${base}-title`}>

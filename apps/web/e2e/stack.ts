@@ -177,6 +177,18 @@ export async function throttle(rule: { match: string; times: number; retryAfter:
   });
 }
 
+/**
+ * Make the API answer the next `times` requests whose path contains `match`
+ * with `status` and the JSON `body`, from the same proxy. Undo with `clearThrottle`.
+ */
+export async function answerWith(rule: { match: string; times: number; status: number; body: unknown; method?: string }): Promise<void> {
+  await fetch(`${E2E.proxy}/__qa/answer`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(rule),
+  });
+}
+
 export async function clearThrottle(): Promise<void> {
   await fetch(`${E2E.proxy}/__qa/reset`, { method: 'POST' });
 }
