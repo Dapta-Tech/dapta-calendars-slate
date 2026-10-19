@@ -19,6 +19,24 @@ import { ApiKeys, Webhooks } from './developer-client';
 // prerender at build time would freeze to whatever the build machine had.
 export const dynamic = 'force-dynamic';
 
+/**
+ * Every event type an admin can scope a key to: their own plus each team's, the
+ * same set the Events page shows. `GET /v1/event-types` alone returns only the
+ * caller's personal ones, so a key could never be limited to a team event.
+ */
+async function allowlistEventTypes(): Promise<{ id: string; title: string }[]> {
+  const [own, teams] = await Promise.all([adminApi.listEventTypes(), adminApi.listTeams()]);
+  const perTeam = await Promise.all(
+    teams.map(async (team) =>
+      (await adminApi.teamEventTypes(team.id)).map((e) => ({ id: e.id, title: `${e.title} (${team.name})` })),
+    ),
+  );
+  const seen = new Set<string>();
+  return [...own.map((e) => ({ id: e.id, title: e.title })), ...perTeam.flat()].filter((e) =>
+    seen.has(e.id) ? false : (seen.add(e.id), true),
+  );
+}
+
 export default async function DeveloperSettings() {
   const [me, locale] = await Promise.all([adminApi.me(), getLocale()]);
   // MCP & API (API keys + webhooks) is admin/owner-only; the API 403s for a
@@ -32,7 +50,7 @@ export default async function DeveloperSettings() {
     adminApi.listApiKeys(),
     adminApi.listWebhooks(),
     // The allowlist picker is optional: a failure here must not take the page down.
-    adminApi.listEventTypes().catch(() => []),
+    allowlistEventTypes().catch(() => []),
   ]);
   const m = getMessages(locale).admin.developer;
   const { mcpUrl, apiOrigin } = resolveMcpConfig();
@@ -54,7 +72,7 @@ export default async function DeveloperSettings() {
       <ConnectAgent snippets={snippets} messages={m} />
       <ApiKeys
         keys={keys}
-        eventTypes={eventTypes.map((e) => ({ id: e.id, title: e.title }))}
+        eventTypes={eventTypes}
         now={Date.now()}
         messages={m}
         locale={locale}
