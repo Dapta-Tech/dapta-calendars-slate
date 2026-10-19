@@ -14,9 +14,10 @@ import { ANALYTICS_ENV, E2E } from './e2e/stack';
  * so the suite runs beside a `pnpm dev` on 3000 / 4000. A second API on
  * E2E_LIMITED_API_PORT (4412) has a small rate limit for the limiter tests, so
  * the rest of the suite never trips it. The web reaches the main API through a
- * pass-through proxy on E2E_PROXY_PORT (4413) that the busy-state tests can make
- * answer 429. On CI (or `CI=1` locally) the web build is also started a second
- * time on E2E_NOINDEX_WEB_PORT (3412) as a deployment marked NOINDEX, for
+ * pass-through proxy on E2E_PROXY_PORT (4413) that a test can make answer 429
+ * (the busy-state tests) or a canned JSON reply (mcp-page.spec.ts). On CI (or
+ * `CI=1` locally) the web build is also started a second time on
+ * E2E_NOINDEX_WEB_PORT (3412) as a deployment marked NOINDEX, for
  * `api-noindex.spec.ts`.
  */
 export default defineConfig({
@@ -76,7 +77,8 @@ export default defineConfig({
     },
     {
       // Between the web and the API: passes everything through, and answers
-      // 429 on cue for the busy-state tests (busy.spec.ts).
+      // 429 on cue for the busy-state tests (busy.spec.ts), or a canned JSON
+      // reply for the MCP & API states (mcp-page.spec.ts).
       command: 'node e2e/fault-proxy.mjs',
       url: `${E2E.proxy}/__qa/health`,
       reuseExistingServer: false,
@@ -96,9 +98,12 @@ export default defineConfig({
       env: {
         NEXT_PUBLIC_API_URL: E2E.api,
         // The web's server-side API base goes through the fault proxy, which
-        // is transparent unless a test tells it to answer 429.
+        // is transparent unless a test tells it to answer 429 or a canned reply.
         API_URL: E2E.proxy,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
+        // Runtime, like on a deployment: the address MCP & API shows when the
+        // API reports MCP on (mcp-page.spec.ts). The suite's API serves it.
+        MCP_PUBLIC_URL: `${E2E.api}/mcp`,
         ...ANALYTICS_ENV,
       },
     },

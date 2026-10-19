@@ -532,6 +532,12 @@ export interface ConnectedApp {
 /** `enabled: false` when the deployment runs without OAuth (the list is then empty). */
 export interface ConnectedApps {
   enabled: boolean;
+  /**
+   * Whether the API serves the MCP endpoint at all (its MCP_ENABLED). Absent on
+   * an older API, which the page treats as off: it never shows an agent an
+   * address it has not been told is answering.
+   */
+  mcpEnabled?: boolean;
   accessTokenTtlSeconds: number | null;
   grants: ConnectedApp[];
 }

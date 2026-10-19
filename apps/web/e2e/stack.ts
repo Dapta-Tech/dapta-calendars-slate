@@ -23,7 +23,7 @@ export const E2E = {
   proxyPort,
   analyticsPort,
   web: `http://localhost:${webPort}`,
-  /** The web app's API_URL: a pass-through to `api` that can answer 429 on cue (fault-proxy.mjs). */
+  /** The web app's API_URL: a pass-through to `api` that can answer 429 or a canned JSON reply on cue (fault-proxy.mjs). */
   proxy: `http://localhost:${proxyPort}`,
   /** The same production build started as a deployment marked NOINDEX (CI only). */
   noindexWeb: `http://localhost:${noindexWebPort}`,
@@ -171,6 +171,18 @@ export const visitorEmail = (tag: string) => `visitor-${tag}-${Date.now().toStri
  */
 export async function throttle(rule: { match: string; times: number; retryAfter: number; method?: string }): Promise<void> {
   await fetch(`${E2E.proxy}/__qa/throttle`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(rule),
+  });
+}
+
+/**
+ * Make the API answer the next `times` requests whose path contains `match`
+ * with `status` and the JSON `body`, from the same proxy. Undo with `clearThrottle`.
+ */
+export async function answerWith(rule: { match: string; times: number; status: number; body: unknown; method?: string }): Promise<void> {
+  await fetch(`${E2E.proxy}/__qa/answer`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(rule),

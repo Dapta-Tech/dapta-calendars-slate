@@ -1113,6 +1113,8 @@ export interface BookingMessages {
       stepKeyEnv: string;
       mcpUrlLabel: string;
       mcpUrlMissing: string;
+      /** The API does not serve MCP (or could not be asked): no steps, no address, no tool list. */
+      mcpUnavailable: string;
       copy: string;
       copied: string;
       addToCursor: string;
@@ -2444,6 +2446,8 @@ export const en: BookingMessages = {
       mcpUrlLabel: 'MCP address',
       mcpUrlMissing:
         'This installation has no public MCP address yet. Ask whoever runs it to set MCP_PUBLIC_URL (or API_PUBLIC_URL), then come back.',
+      mcpUnavailable:
+        'Agent connections are not turned on for this installation. When they are, the steps to connect your agent will show here.',
       copy: 'Copy',
       copied: 'Copied',
       addToCursor: 'Add to Cursor',
@@ -3740,6 +3744,8 @@ export const es: BookingMessages = {
       mcpUrlLabel: 'Dirección MCP',
       mcpUrlMissing:
         'Esta instalación aún no tiene una dirección MCP pública. Pide a quien la administra que defina MCP_PUBLIC_URL (o API_PUBLIC_URL) y vuelve.',
+      mcpUnavailable:
+        'Las conexiones de agentes no están activadas en esta instalación. Cuando lo estén, aquí verás los pasos para conectar tu agente.',
       copy: 'Copiar',
       copied: 'Copiado',
       addToCursor: 'Añadir a Cursor',
