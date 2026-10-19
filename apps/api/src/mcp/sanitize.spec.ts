@@ -9,6 +9,9 @@ describe('untrusted: invitee text never opens a tag', () => {
     ['a split tag', '<scr<b>ipt>x'],
     ['a comment or doctype opener', 'x <!-- y <!doctype'],
     ['a closing-tag opener', 'x </div'],
+    ['an invisible character between < and the name', `<${String.fromCharCode(0x200b)}script>alert(1)`],
+    ['a control character between < and the name', `<${String.fromCharCode(1)}script`],
+    ['a markdown link that leaves a lone <', '[<](http://x.test)script>alert(1)'],
   ])('%s leaves no tag opener', (_label, input) => {
     expect(untrusted(input)).not.toMatch(/<[A-Za-z!/?]/);
   });

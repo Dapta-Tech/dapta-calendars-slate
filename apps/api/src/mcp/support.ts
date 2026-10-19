@@ -91,6 +91,44 @@ const INVISIBLE = new RegExp('[\\u200B-\\u200F\\u2028\\u2029\\u202A-\\u202E\\u20
 // eslint-disable-next-line no-control-regex
 const CONTROL = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]', 'g');
 
+/** A `<` that can open markup: an element, a closing tag, a comment, a doctype or a processing instruction. */
+function opensTag(text: string, i: number): boolean {
+  const next = text.charCodeAt(i + 1);
+  return (
+    (next >= 65 && next <= 90) || // A-Z
+    (next >= 97 && next <= 122) || // a-z
+    next === 33 || // !
+    next === 47 || // /
+    next === 63 // ?
+  );
+}
+
+/**
+ * Removes markup without a regex: every `<` that can open a tag goes, with the tag
+ * up to its `>` when there is one, and the pass repeats until nothing changes, so a
+ * nested `<<b>script>` cannot reassemble into a tag. A `<` before a digit or a
+ * space stays (`<10`, `a < b`): select options and answers must round-trip. Linear
+ * per pass; every pass but the last removes at least one character.
+ */
+function stripTags(input: string): string {
+  let text = input;
+  for (;;) {
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+      if (text[i] === '<' && opensTag(text, i)) {
+        const close = text.indexOf('>', i + 1);
+        i = close === -1 ? i + 1 : close + 1;
+        continue;
+      }
+      out += text[i];
+      i += 1;
+    }
+    if (out === text) return out;
+    text = out;
+  }
+}
+
 /**
  * Text written by an invitee (a name, a note, an intake answer, a reason).
  * Cleaned and capped so it reads as data: control and invisible characters go,
@@ -109,11 +147,10 @@ export function untrusted(value: unknown, max = 500): string {
     .replace(INVISIBLE, '')
     .replace(CONTROL, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]*>/g, '')
-    .replace(/<(?=[A-Za-z!/?])/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  // Last, so nothing removed above (an invisible character, a markdown link) can
+  // put a `<` back next to a letter after the tags are gone.
+  text = stripTags(text).replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
