@@ -55,17 +55,18 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   const uid = firstParam((await searchParams).uid);
 
   let details: OAuthConsent | null = null;
-  if (uid && UID.test(uid)) {
-    try {
-      details = await adminApi.oauthConsent(uid);
-    } catch (e) {
-      // 404: unknown, used or expired. A 401 never gets here: the client
-      // redirects through the login (and back) by throwing.
-      if (!(e instanceof ApiError) || e.status !== 404) throw e;
-      // An external authorization server signs people in and shows its own
-      // consent: this page does not exist for this deployment.
-      if (e.code === 'EXTERNAL_AUTHORIZATION_SERVER') notFound();
-    }
+  try {
+    // With no valid request id there is nothing to show, but the API still
+    // says whether this page exists at all (no session needed for that).
+    if (uid && UID.test(uid)) details = await adminApi.oauthConsent(uid);
+    else await adminApi.oauthConsentWithoutRequest();
+  } catch (e) {
+    // 404: unknown, used or expired. A 401 never gets here: the client
+    // redirects through the login (and back) by throwing.
+    if (!(e instanceof ApiError) || e.status !== 404) throw e;
+    // An external authorization server signs people in and shows its own
+    // consent: this page does not exist for this deployment.
+    if (e.code === 'EXTERNAL_AUTHORIZATION_SERVER') notFound();
   }
 
   if (!details) {

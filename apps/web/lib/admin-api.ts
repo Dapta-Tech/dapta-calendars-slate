@@ -318,6 +318,8 @@ export const adminApi = {
   // `/auth/consent` page with the signed-in host's session; the API refuses an
   // approval from anyone but an owner or admin.
   oauthConsent: (uid: string) => req<OAuthConsent>('GET', `/v1/oauth/consent/${encodeURIComponent(uid)}`),
+  /** The consent read with no request: always a 404, coded when an external server signs people in. */
+  oauthConsentWithoutRequest: () => req<void>('GET', '/v1/oauth/consent'),
   oauthDecide: (uid: string, decision: 'approve' | 'deny') =>
     req<{ redirectTo: string }>('POST', `/v1/oauth/consent/${encodeURIComponent(uid)}`, { decision }),
   connectedApps: () => req<ConnectedApps>('GET', '/v1/oauth/grants'),

@@ -54,7 +54,7 @@ Every tool that acts on the caller's account (all but `book_meeting` and
 `list_my_accounts`) takes an optional `account_id`. A key or a sign-in that
 reaches one account never needs it, and may name only that account. A sign-in
 that reaches several accounts must name one on each call; without it the call
-fails with `ACCOUNT_REQUIRED` listing the accounts (so does `list_my_accounts`).
+fails with `ACCOUNT_REQUIRED` listing the accounts; `list_my_accounts` returns the same list.
 A public booking page needs no account: `find_available_slots` and `book_meeting`
 on a page link take theirs from the link.
 
@@ -242,8 +242,8 @@ MCP URL and choose OAuth.
 Set `OAUTH_AUTHORIZATION_SERVER` (with `OAUTH_ENABLED=true`) and the API is an
 OAuth **resource server** only: sign-in, consent, client registration (CIMD,
 DCR) and tokens all belong to that server. The built-in server above is not
-mounted (`/oauth/*`, the consent page and Connected apps answer 404, and
-`OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are not needed, nor read). Unset, the
+mounted (`/oauth/*` and the consent page answer 404, Connected apps is hidden,
+and `OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are not needed, nor read). Unset, the
 built-in server runs exactly as described above.
 
 Any OAuth 2.1 authorization server works if it supports **RFC 8707 resource
@@ -290,6 +290,12 @@ token.
   step-up. For narrow access (read-only, one event type), use a scoped API key.
 - **Several accounts.** One account is used automatically. With several, each
   call names one with `account_id`; `list_my_accounts` lists them.
+- **The `resource` parameter.** A client that omits RFC 8707 `resource` when it
+  asks for a token gets the authorization server's default audience, which is
+  not `MCP_PUBLIC_URL`: every call is then a 401 and the client loops back into
+  its sign-in. Register `MCP_PUBLIC_URL` with the server as an additional
+  resource, not as its default (other resources may rely on the default), and
+  use clients that send `resource`, as current Claude and Cursor do.
 - **Disconnecting.** Remove the connector in the client. An owner can cut a
   person off by removing their admin role or the member.
 - **Offboarding.** Removing the member here (or disabling them, or taking their

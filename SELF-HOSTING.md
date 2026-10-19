@@ -483,8 +483,8 @@ Instead of running its own, the API can be a resource server for an OAuth 2.1
 authorization server you already have (see
 [docs/MCP.md](docs/MCP.md#oauth-with-an-external-authorization-server)). Set
 `OAUTH_ENABLED=true`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`; the
-built-in server's vars above are then not needed, and its routes, consent page
-and Connected apps answer 404.
+built-in server's vars above are then not needed, its routes and consent page
+answer 404, and Connected apps is hidden.
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|

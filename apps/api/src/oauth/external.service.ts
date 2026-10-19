@@ -86,7 +86,6 @@ export interface LoginAccount {
   accountId: string;
   accountName: string;
   memberId: string;
-  role: string;
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -301,6 +300,6 @@ export class ExternalOAuthService {
     const memberships = await membershipsBySubject(this.db, subject, Date.now() - this.settings!.linkMaxAgeMs);
     return memberships
       .filter((m) => mayHoldGrant(m))
-      .map((m) => ({ accountId: m.accountId, accountName: m.accountName, memberId: m.memberId, role: m.role }));
+      .map((m) => ({ accountId: m.accountId, accountName: m.accountName, memberId: m.memberId }));
   }
 }

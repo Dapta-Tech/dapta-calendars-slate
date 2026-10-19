@@ -144,10 +144,24 @@ export class OAuthHostController {
     @Inject(ENV) private readonly env: ServerEnv,
   ) {}
 
+  /**
+   * The consent page with no request to show (no `uid`, or a malformed one):
+   * always 404, coded for an external authorization server so the page is a
+   * 404 too. No session needed; the mode is public anyway (the
+   * protected-resource metadata names the server).
+   */
+  @Get('consent')
+  consentWithoutRequest() {
+    if (oauthMode(this.env) === 'external') externalSignIn();
+    notEnabled();
+  }
+
+  // With an external server the mode decides before the session does: a
+  // signed-out visitor gets the 404 straight away, not a login first.
   @Get('consent/:uid')
   async consent(@Req() req: ReqLike, @Param('uid') uid: string) {
-    const host = await this.auth.resolveHost(req);
     if (oauthMode(this.env) === 'external') externalSignIn();
+    const host = await this.auth.resolveHost(req);
     if (!this.oauth.enabled) notEnabled();
     return this.oauth.consentDetails(uid, host);
   }
@@ -155,8 +169,8 @@ export class OAuthHostController {
   @Post('consent/:uid')
   @HttpCode(200)
   async decide(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { decision?: unknown }) {
-    const host = await this.auth.resolveHost(req);
     if (oauthMode(this.env) === 'external') externalSignIn();
+    const host = await this.auth.resolveHost(req);
     if (!this.oauth.enabled) notEnabled();
     const decision = body?.decision;
     if (decision !== 'approve' && decision !== 'deny')

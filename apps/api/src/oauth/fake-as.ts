@@ -7,7 +7,9 @@ import { SignJWT, exportJWK, generateKeyPair, type JWK } from 'jose';
  * keys generated here, its RFC 8414 metadata and its JWKS served by a local
  * HTTP server, tokens minted on demand. Each document can be switched to a
  * failure (status 500, a stall, a wrong issuer, an oversized body, a redirect)
- * to prove the resource server never answers worse than a 401 or a 503.
+ * to prove the resource server never answers worse than a 401 or a 503. The
+ * oversized body and the redirect target are VALID documents, so only the size
+ * cap and the refusal to follow redirects can turn them away.
  */
 
 type CryptoKeyLike = Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
@@ -40,14 +42,16 @@ export async function startFakeAs(opts: { audience: string }): Promise<FakeAs> {
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0]!;
     hits[path] = (hits[path] ?? 0) + 1;
-    const mode = path === '/.well-known/oauth-authorization-server' ? modes.metadata : path === '/oauth2/jwks' ? modes.jwks : null;
+    const jwksPath = path === '/oauth2/jwks' || path === '/moved/jwks';
+    const metadataPath = path === '/.well-known/oauth-authorization-server' || path === '/moved/metadata';
+    // The redirect targets always answer with the valid document.
+    const mode = path.startsWith('/moved/') ? 'ok' : metadataPath ? modes.metadata : jwksPath ? modes.jwks : null;
     if (mode === null) return void res.writeHead(404).end();
     if (mode === 'stall') return; // never answers; the client's timeout must fire
     if (mode === 'error') return void res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"boom"}');
-    if (mode === 'redirect') return void res.writeHead(302, { location: `${issuer}/elsewhere` }).end();
-    if (mode === 'huge') return void res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ issuer, pad: 'x'.repeat(100_000) }));
-    const body =
-      path === '/oauth2/jwks'
+    if (mode === 'redirect') return void res.writeHead(302, { location: `${issuer}/moved/${jwksPath ? 'jwks' : 'metadata'}` }).end();
+    const body: Record<string, unknown> =
+      jwksPath
         ? { keys: [rsaJwk, ecJwk] }
         : {
             issuer: mode === 'wrong-issuer' ? 'https://someone-else.example.test' : issuer,
@@ -61,6 +65,8 @@ export async function startFakeAs(opts: { audience: string }): Promise<FakeAs> {
             scopes_supported: ['openid', 'profile', 'email', 'offline_access'],
             client_id_metadata_document_supported: true,
           };
+    // A valid document, padded past the 64 KB cap.
+    if (mode === 'huge') body.padding = 'x'.repeat(100_000);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

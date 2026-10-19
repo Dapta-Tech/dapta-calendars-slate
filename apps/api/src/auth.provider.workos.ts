@@ -6,10 +6,11 @@
  * (shared secret; claims `sub`, `account_id`, `email`, `name`, and
  * `workos_user_id` when the login came through WorkOS). This provider is the
  * DOWNSTREAM validator only: it verifies that token and projects its claims
- * onto a local `{accountId, memberId}`, recording `workos_user_id` on the member
- * (`member.idp_subject`) so an MCP sign-in through the same identity can find it. This is the exact split the predecessor
- * service used, and it is what makes local and remote behave identically: the
- * secret is symmetric, so there is nothing environment-specific to fetch.
+ * onto a local `{accountId, memberId}`, recording `workos_user_id` on the
+ * member (`member.idp_subject`) so an MCP sign-in through the same identity can
+ * find it. This is the exact split the predecessor service used, and it is
+ * what makes local and remote behave identically: the secret is symmetric, so
+ * there is nothing environment-specific to fetch.
  *
  * Because it only ever *validates* tokens (never issues them, never calls the
  * identity service or WorkOS), it cannot affect the upstream login in any way —

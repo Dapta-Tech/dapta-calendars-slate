@@ -9,8 +9,9 @@
 OAuth for the MCP endpoint through an external authorization server. With
 `OAUTH_ENABLED=true` and the new `OAUTH_AUTHORIZATION_SERVER` (the server's
 issuer, an origin), the API is an OAuth resource server only: the built-in
-authorization server is not mounted (its routes, the consent page and Connected
-apps answer 404) and `OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are not needed.
+authorization server is not mounted (its routes and the consent page answer
+404, and Connected apps is hidden) and `OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are
+not needed.
 Protected-resource metadata names the external server, its own metadata is
 served from this origin for older clients (fetched server-side, cached, size
 and time bounded), and the MCP door verifies its access tokens against its JWKS
