@@ -7,12 +7,16 @@ import { BrandMark, IS_DAPTA_BRAND, PRODUCT_NAME } from '@/components/brand/bran
  * App-switcher — the discreet exit to the wider Dapta suite (ported from the
  * old Angular app's R16 switcher). An Atlassian-style grid affordance next to
  * the product wordmark that opens a small menu:
- *   • <product> (current)  • Dapta (→ platform, new tab, UTM-tagged)  • Forms (soon)
+ *   • Dapta (→ platform, new tab, UTM-tagged)  • <product> (current)  • Forms
  *
- * Growth-loop only — hidden entirely when NEXT_PUBLIC_PLATFORM_URL is unset
- * (white-label / self-host builds), so the switcher never dead-ends on a lone
- * "current" row. Tokens only; WAI-ARIA menu-button pattern (Escape / outside
- * click dismiss, focus first item on open).
+ * Forms is a link (new tab, UTM-tagged) when the deployment says where it lives
+ * (NEXT_PUBLIC_FORMS_URL), and a "Coming soon" row only when it does not. The
+ * same rule the Forms app follows for its own Calendars row.
+ *
+ * Growth-loop only: hidden entirely when NEITHER suite URL is set (white-label
+ * / self-host builds), so the switcher never dead-ends on a lone "current" row.
+ * Tokens only; WAI-ARIA menu-button pattern (Escape / outside click dismiss,
+ * focus first item on open).
  */
 
 interface SwitcherMessages {
@@ -24,10 +28,12 @@ interface SwitcherMessages {
   forms: string;
 }
 
+// Full static property accesses, so Next inlines them into the client bundle.
 const PLATFORM_URL = process.env.NEXT_PUBLIC_PLATFORM_URL || '';
+const FORMS_URL = process.env.NEXT_PUBLIC_FORMS_URL || '';
 
-/** The platform URL (from NEXT_PUBLIC_PLATFORM_URL) carrying app-switcher UTM tags. */
-function platformHref(base: string): string {
+/** A suite URL (platform or Forms) carrying the app-switcher UTM tags. */
+function suiteHref(base: string): string {
   try {
     const url = new URL(base);
     url.searchParams.set('utm_source', 'calendars');
@@ -40,17 +46,25 @@ function platformHref(base: string): string {
 
 export function AppSwitcher({
   messages: m,
-  collapsed = false,
+  inDrawer = false,
 }: {
   messages: SwitcherMessages;
-  collapsed?: boolean;
+  /**
+   * Rendered in the mobile drawer. There the trigger sits mid-row in a panel
+   * about 290px wide that scrolls (so it clips), and a 240px menu hung off the
+   * trigger ran past its right edge, cutting every row in half at 360px. In the
+   * drawer the menu hangs off the PANEL instead: the wrapper drops `relative`,
+   * so the drawer (fixed, hence positioned) is the containing block, and the
+   * menu opens at the panel's own gutter, still right under the trigger.
+   */
+  inDrawer?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // No platform configured → the switcher would only show "current"; hide it.
-  const hasPlatform = PLATFORM_URL.length > 0;
+  // No suite configured → the switcher would only show "current"; hide it.
+  const hasSuite = PLATFORM_URL.length > 0 || FORMS_URL.length > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -72,10 +86,10 @@ export function AppSwitcher({
     if (open) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [open]);
 
-  if (!hasPlatform) return null;
+  if (!hasSuite) return null;
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef} className={inDrawer ? undefined : 'relative'}>
       <button
         type="button"
         aria-haspopup="menu"
@@ -94,7 +108,7 @@ export function AppSwitcher({
           role="menu"
           aria-label={m.menuLabel}
           className={`absolute z-50 mt-inline w-60 rounded-md border border-border bg-popover p-inline text-popover-foreground shadow-lg ${
-            collapsed ? 'left-0' : 'left-0'
+            inDrawer ? 'left-card' : 'left-0'
           }`}
         >
           <p className="px-inline py-tight text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -102,20 +116,28 @@ export function AppSwitcher({
           </p>
 
           {/* Dapta AI — the platform (external, new tab). First, per Felipe. */}
-          <a
-            role="menuitem"
-            tabIndex={-1}
-            href={platformHref(PLATFORM_URL)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <img src="/dapta-mark.png" alt="" width={24} height={24} className="h-6 w-6 shrink-0 rounded-md object-contain" />
-            <span className="flex-1 truncate">Dapta AI</span>
-            <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
-            <span className="sr-only">{m.opensNewTab}</span>
-          </a>
+          {PLATFORM_URL ? (
+            <a
+              role="menuitem"
+              tabIndex={-1}
+              href={suiteHref(PLATFORM_URL)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              {/* Tiled, as every row is: `dapta-mark.png` is fixed white artwork, so
+                  bare on the light popover it was white on white. `bg-brand-ink`
+                  is the one ground that does not flip with the theme (the same
+                  fix the Forms switcher carries). */}
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink">
+                <img src="/dapta-mark.png" alt="" width={18} height={18} className="h-[18px] w-[18px] object-contain" />
+              </span>
+              <span className="flex-1 truncate">Dapta AI</span>
+              <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
+              <span className="sr-only">{m.opensNewTab}</span>
+            </a>
+          ) : null}
 
           {/* Current product */}
           <span
@@ -137,21 +159,41 @@ export function AppSwitcher({
             <i aria-hidden className="pi pi-check text-primary" style={{ fontSize: 14 }} />
           </span>
 
-          {/* Forms (coming soon) */}
-          <span
-            role="menuitem"
-            tabIndex={-1}
-            aria-disabled="true"
-            className="flex items-center gap-field rounded-sm px-inline py-inline text-sm text-muted-foreground"
-          >
-            <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground" aria-hidden>
-              <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
+          {/* Forms: the sibling sidecar (external, new tab) where the deployment
+              has one; a "Coming soon" row otherwise. */}
+          {FORMS_URL ? (
+            <a
+              role="menuitem"
+              tabIndex={-1}
+              href={suiteHref(FORMS_URL)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink text-brand-ink-foreground" aria-hidden>
+                <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
+              </span>
+              <span className="flex-1 truncate">{m.forms}</span>
+              <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
+              <span className="sr-only">{m.opensNewTab}</span>
+            </a>
+          ) : (
+            <span
+              role="menuitem"
+              tabIndex={-1}
+              aria-disabled="true"
+              className="flex items-center gap-field rounded-sm px-inline py-inline text-sm text-muted-foreground"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground" aria-hidden>
+                <i className="pi pi-file-edit" style={{ fontSize: 13 }} />
+              </span>
+              <span className="flex-1 truncate">{m.forms}</span>
+              <span className="rounded-full border border-border px-inline py-tight text-2xs font-medium uppercase tracking-wide">
+                {m.comingSoon}
+              </span>
             </span>
-            <span className="flex-1 truncate">{m.forms}</span>
-            <span className="rounded-full border border-border px-inline py-tight text-2xs font-medium uppercase tracking-wide">
-              {m.comingSoon}
-            </span>
-          </span>
+          )}
         </div>
       ) : null}
     </div>

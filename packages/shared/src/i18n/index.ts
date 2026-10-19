@@ -1569,7 +1569,7 @@ export const en: BookingMessages = {
         eyebrow: 'Dapta',
         comingSoon: 'Coming soon',
         opensNewTab: '(opens in a new tab)',
-        forms: 'Forms',
+        forms: 'dForms',
       },
       theme: {
         toLight: 'Switch to light theme',
@@ -2699,7 +2699,7 @@ export const es: BookingMessages = {
         eyebrow: 'Dapta',
         comingSoon: 'Próximamente',
         opensNewTab: '(se abre en una pestaña nueva)',
-        forms: 'Forms',
+        forms: 'dForms',
       },
       theme: {
         toLight: 'Cambiar al tema claro',
