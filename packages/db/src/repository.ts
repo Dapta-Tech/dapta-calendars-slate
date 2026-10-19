@@ -427,7 +427,7 @@ export async function isSlotBookable(
 }
 
 export interface PublicProfile {
-  account: { code: string; name: string };
+  account: { code: string; name: string; shortCode: string };
   member: {
     handle: string;
     displayName: string | null;
@@ -507,7 +507,7 @@ export async function getPublicProfile(
   return {
     // Public responses always carry the CANONICAL code (vanity ?? short) so
     // clients build/redirect to canonical links even when queried by an alias.
-    account: { code: canonicalPublicCode(account), name: account.name },
+    account: { code: canonicalPublicCode(account), name: account.name, shortCode: account.code },
     member: {
       handle: member.handle,
       displayName: member.display_name,

@@ -409,7 +409,7 @@ export async function updateHandle(db: Db, memberId: string, handle: string): Pr
 // --- Teams ----------------------------------------------------------------
 
 export interface TeamProfileView {
-  account: { code: string; name: string };
+  account: { code: string; name: string; shortCode: string };
   team: {
     slug: string;
     name: string;
@@ -463,7 +463,7 @@ export async function getTeamProfile(
   );
   return {
     // Canonical code always (vanity ?? short) — clients redirect aliases to it.
-    account: { code: canonicalPublicCode(account), name: account.name },
+    account: { code: canonicalPublicCode(account), name: account.name, shortCode: account.code },
     team: {
       slug: team.slug,
       name: team.name,

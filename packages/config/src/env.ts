@@ -270,6 +270,24 @@ export const serverEnvSchema = z.object({
   // web's NEXT_PUBLIC_HIDE_BADGE, which is read as the fallback).
   HIDE_BADGE: z.string().optional(),
   NEXT_PUBLIC_HIDE_BADGE: z.string().optional(),
+
+  // --- Product analytics (this deployment's OWN telemetry) ---
+  // How hosts use the product and, anonymously, what visitors do on booking
+  // pages; see `resolveAnalyticsConfig` (@slate/shared). OFF unless both a
+  // provider (`posthog`, the one adapter shipped) and its write-only project
+  // key are set; a bare fork sends nothing anywhere. Plain strings on purpose:
+  // a mistyped value turns analytics off with a warning and never stops the
+  // API booting. The web app reads the SAME names at request time, so one
+  // value per deployment serves both apps and no image rebuild is needed.
+  PRODUCT_ANALYTICS_PROVIDER: z.string().optional(),
+  PRODUCT_ANALYTICS_KEY: z.string().optional(),
+  // Ingestion host, e.g. the deployment's own reverse proxy. Unset = the
+  // vendor's public host.
+  PRODUCT_ANALYTICS_HOST: z.string().optional(),
+  // Comma-separated, case-insensitive substrings of an email that mark the
+  // operator's own people (staff, test accounts): `is_internal` on their
+  // events, so launch numbers can leave them out. Unset = nobody is internal.
+  PRODUCT_ANALYTICS_INTERNAL_EMAILS: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
