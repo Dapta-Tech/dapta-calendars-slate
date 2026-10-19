@@ -18,8 +18,12 @@ export interface AnalyticsPort {
   capture(event: string, properties?: AnalyticsProps): void;
   /** Host only. A visitor port ignores it. */
   identify(distinctId: string, personProperties: AnalyticsProps): void;
-  /** Host only: join an earlier anonymous id (a landing visit) to the person. */
-  alias(previousId: string): void;
+  /**
+   * Host only: join an earlier anonymous id (a landing visit) to the person
+   * `distinctId`, named explicitly so the join never depends on what the
+   * current id happens to be when the call runs.
+   */
+  alias(previousId: string, distinctId: string): void;
   /** Properties added to every later event on this port. */
   register(properties: AnalyticsProps): void;
   /** Host only: the account group every later event belongs to. */

@@ -4,10 +4,10 @@ import type { AnalyticsPort, AnalyticsSurface } from './port';
 /**
  * The PostHog adapter behind the browser analytics port.
  *
- * Zero dependencies: the vendor's documented loader stub is installed by
- * hand, and it loads the real library from the configured host. That keeps `posthog-js` out of an open-source repo for a
- * feature that ships OFF, and it means a fork pays nothing, not even bundle
- * bytes, unless it turns analytics on.
+ * Nothing bundled: the vendor's loader contract is installed by hand, and it
+ * loads the real library from the configured host. `posthog-js` is only a
+ * test dependency, so a feature that ships OFF costs a fork nothing, not even
+ * bundle bytes, unless it turns analytics on.
  *
  * Each audience gets its own NAMED instance with its own settings, so a host
  * who opens their own booking page in the same tab is never reported as a
@@ -18,7 +18,7 @@ import type { AnalyticsPort, AnalyticsSurface } from './port';
 interface PosthogInstance {
   capture(event: string, properties?: Record<string, unknown>): void;
   identify(distinctId: string, properties?: Record<string, unknown>): void;
-  alias(alias: string): void;
+  alias(alias: string, original?: string): void;
   register(properties: Record<string, unknown>): void;
   group(type: string, key: string, properties?: Record<string, unknown>): void;
   reset(): void;
@@ -107,6 +107,7 @@ const VISITOR_PROPERTIES = new Set([
   'page',
   'mode',
   'status',
+  'preselected',
 ]);
 
 /** Our own `utm_medium`, read off the clicked growth link, rides on this event only. */
@@ -298,8 +299,11 @@ export function connectPosthog(
     identify: (distinctId, personProperties) => {
       if (isHost) instance()?.identify(distinctId, personProperties);
     },
-    alias: (previousId) => {
-      if (isHost) instance()?.alias(previousId);
+    // The person is passed, never left to the current id: the library replays
+    // queued `alias` calls BEFORE every other call when it loads, so on a
+    // first page the current id would still be this browser's anonymous one.
+    alias: (previousId, distinctId) => {
+      if (isHost) instance()?.alias(previousId, distinctId);
     },
     register: (properties: AnalyticsProps) => instance()?.register(properties),
     group: (type, key, properties) => {

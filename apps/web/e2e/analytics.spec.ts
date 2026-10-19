@@ -183,8 +183,12 @@ test('a new host is identified by email, joins their account, and their signup i
 
   const identify = await waitForAnalytics((e) => e.event === '$identify' && e.distinct_id === email, since);
   expect(identify.$set).toMatchObject({ email, role: 'owner', is_internal: false });
-  // The landing visit is joined to the person, after identify.
-  await waitForAnalytics((e) => e.event === '$create_alias' && e.properties?.['alias'] === landingId, since);
+  // The landing visit is joined to the PERSON (the host's email), whatever
+  // order the library replays its queue in.
+  await waitForAnalytics(
+    (e) => e.event === '$create_alias' && e.properties?.['alias'] === landingId && e.distinct_id === email,
+    since,
+  );
 
   // The server's half: the signup, with the account it created.
   const signup = await waitForAnalytics(

@@ -74,7 +74,8 @@ describe('HostAnalytics', () => {
       'host@example.test',
       { email: 'host@example.test', member_id: 'm1', role: 'owner', is_internal: false },
     ]);
-    expect(v.calls[1]![2]).toEqual(['0198a1b2-c3d4']);
+    // Named explicitly: the library replays a queued alias before identify.
+    expect(v.calls[1]![2]).toEqual(['0198a1b2-c3d4', 'host@example.test']);
     expect(v.calls[2]![2]![0]).toMatchObject({ product: 'calendars', account_code: 'abc123', surface: 'dashboard' });
     // The browser joins the group but never sets the account's own facts.
     expect(v.calls[3]![2]).toEqual(['calendars_account', 'abc123', undefined]);

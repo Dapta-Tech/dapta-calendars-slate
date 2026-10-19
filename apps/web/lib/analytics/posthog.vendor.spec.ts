@@ -115,10 +115,17 @@ describe('the PostHog adapter, against the real library', () => {
     port.capture('calendars_booking_page_viewed', { page: 'event' });
     b.load();
     port.capture('calendars_cta_clicked', { utm_medium: 'badge', page: 'event' });
+    port.capture('calendars_day_picked', { mode: 'personal', preselected: true });
     await wait(FLUSH_MS);
 
     const events = await b.sent();
-    expect(events.map((e) => e.event)).toEqual(['calendars_booking_page_viewed', 'calendars_cta_clicked']);
+    expect(events.map((e) => e.event)).toEqual([
+      'calendars_booking_page_viewed',
+      'calendars_cta_clicked',
+      'calendars_day_picked',
+    ]);
+    // Every property this app sends survives the allowlist.
+    expect(events[2]!.properties).toMatchObject({ mode: 'personal', preselected: true });
     for (const e of events) {
       const all = strings(e).join(' ');
       expect(all).not.toContain('example.com');
@@ -167,6 +174,20 @@ describe('the PostHog adapter, against the real library', () => {
       expect(all).not.toContain('?');
       expect(e.properties['$pathname']).not.toBe('/acme/ana/intro');
     }
+    b.close();
+  }, 20_000);
+
+  it('a landing visit queued before the library loads is joined to the host, not to the anonymous id', async () => {
+    // The first page after a signup: the calls are queued before array.js
+    // arrives, and the library replays a queued alias before anything else.
+    const b = browser('https://cal.example.test/onboarding');
+    const port = connectPosthog(CONFIG, 'host', b.w);
+    port.identify('host@example.test', { email: 'host@example.test' });
+    port.alias('0198a1b2-c3d4-landing', 'host@example.test');
+    b.load();
+    await wait(FLUSH_MS);
+    const alias = (await b.sent()).find((e) => e.event === '$create_alias');
+    expect(alias?.properties).toMatchObject({ alias: '0198a1b2-c3d4-landing', distinct_id: 'host@example.test' });
     b.close();
   }, 20_000);
 

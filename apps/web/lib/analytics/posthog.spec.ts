@@ -158,7 +158,7 @@ describe('connectPosthog', () => {
     const vendor = loadedVendor();
     const port = connectPosthog(CONFIG, 'visitor');
     port.identify('ana@example.com', { email: 'ana@example.com' });
-    port.alias('landing-id');
+    port.alias('landing-id', 'ana@example.com');
     port.group('calendars_account', 'acme');
     port.capture('calendars_booking_confirmed');
     expect(vendor.calls.map(([, method]) => method)).toEqual(['capture']);
@@ -168,11 +168,11 @@ describe('connectPosthog', () => {
     const vendor = loadedVendor();
     const port = connectPosthog(CONFIG, 'host');
     port.identify('host@example.test', { role: 'owner' });
-    port.alias('landing-id');
+    port.alias('landing-id', 'host@example.test');
     port.group('calendars_account', 'acme');
     expect(vendor.calls).toEqual([
       ['calendars_host', 'identify', ['host@example.test', { role: 'owner' }]],
-      ['calendars_host', 'alias', ['landing-id']],
+      ['calendars_host', 'alias', ['landing-id', 'host@example.test']],
       ['calendars_host', 'group', ['calendars_account', 'acme', undefined]],
     ]);
   });

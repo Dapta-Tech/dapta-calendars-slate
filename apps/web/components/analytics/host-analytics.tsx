@@ -45,9 +45,10 @@ export function HostAnalytics({
     if (!port) return;
     setActiveAnalyticsPort(port);
     port.identify(email, { email, member_id: memberId, role, is_internal: isInternal });
-    // AFTER identify: alias joins its argument to the CURRENT id, which before
-    // identify would be this origin's anonymous id rather than the person.
-    if (landingId) aliasOnce(port, landingId);
+    // Joined to the person by name: the vendor replays a queued alias before
+    // the identify above, so leaving it to the current id would join the
+    // landing visit to this browser's anonymous id instead.
+    if (landingId) aliasOnce(port, landingId, email);
     port.register({
       product: ANALYTICS_PRODUCT,
       surface: 'dashboard',
@@ -71,7 +72,7 @@ export function HostAnalytics({
  * again without this latch. Blocked storage aliases anyway: the vendor drops a
  * repeated merge, and a join that never happens is the only real loss.
  */
-function aliasOnce(port: AnalyticsPort, landingId: string): void {
+function aliasOnce(port: AnalyticsPort, landingId: string, email: string): void {
   try {
     const latch = `calendars_ph_alias:${landingId}`;
     if (window.localStorage.getItem(latch)) return;
@@ -79,5 +80,5 @@ function aliasOnce(port: AnalyticsPort, landingId: string): void {
   } catch {
     /* private mode: alias anyway */
   }
-  port.alias(landingId);
+  port.alias(landingId, email);
 }
