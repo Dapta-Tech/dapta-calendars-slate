@@ -400,6 +400,8 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
 | `NOINDEX` | unset | Runtime, read per request. `1`, `true` or `yes` marks the whole deployment as not for search: `X-Robots-Tag: noindex, nofollow` on every page and route response (build assets under `/_next` and the icons excepted), `<meta name="robots" content="noindex, nofollow">` on every page, and a `robots.txt` that disallows everything. Use it on staging and preview copies, whose booking pages would otherwise compete with production's. Unset, `robots.txt` leaves the booking pages open and keeps crawlers out of `/admin`, `/login`, `/onboarding` and `/api` | no |
+| `DOCS_URL` | unset | Runtime, read per request. Where the dashboard sidebar's **Docs** item points, in a new tab (tagged `utm_source=calendars&utm_medium=sidebar`). Unset, the sidebar has no Docs item. Anything that is not an `http(s)` URL counts as unset | no |
+| `DOCS_URL_ES` | `DOCS_URL` | Runtime. The Docs item for readers whose dashboard is in Spanish. One `DOCS_URL_<LOCALE>` per supported language; a language without one falls back to `DOCS_URL` | no |
 | `NEXT_PUBLIC_FORMS_URL` | unset | **Build-time** for web. Where your Forms sidecar lives. Set, the dashboard's app switcher links to it in a new tab (tagged `utm_source=calendars&utm_medium=app_switcher`); unset, it lists Forms as "Coming soon". The switcher appears only when this or `NEXT_PUBLIC_PLATFORM_URL` is set | no |
 
 ### Outbox, CORS, rate limiting

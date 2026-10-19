@@ -23,7 +23,7 @@ export interface ConnectSnippets {
 
 type TabId = 'cursor' | 'claude-code' | 'codex' | 'other' | 'chat';
 
-function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; label?: string; copyLabel: string; copiedLabel: string }) {
+export function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; label?: string; copyLabel: string; copiedLabel: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -57,6 +57,11 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
   );
 }
 
+/**
+ * The agent tabs: the MCP address and the exact setup for each agent. Step 2 of
+ * the setup guide (`setup-guide.tsx`), which carries the title and, in step 1,
+ * the key.
+ */
 export function ConnectAgent({
   available,
   snippets,
@@ -114,11 +119,7 @@ export function ConnectAgent({
   }
 
   return (
-    <section className="mb-section" aria-labelledby={`${base}-title`}>
-      <h2 id={`${base}-title`} className="mb-tight text-xl font-semibold">
-        {m.connectTitle}
-      </h2>
-      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.connectLead}</p>
+    <div>
       {external ? <SignInNote m={m} /> : null}
 
       <div
@@ -167,7 +168,6 @@ export function ConnectAgent({
         ) : (
           <>
             <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
-            <p className="max-w-prose text-sm text-muted-foreground">{m.stepKey}</p>
             <CodeBlock value={snippets.exportKey} label={m.stepKeyEnv} {...copy} />
             {active === 'cursor' ? (
               <>
@@ -193,7 +193,7 @@ export function ConnectAgent({
           </>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 

@@ -1,55 +1,42 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { signOutAction } from '@/app/login/actions';
 import { resetAnalytics } from '@/lib/analytics/port';
+import { adminNav, type NavIcon, type NavItem, type SubNavItem } from '@/lib/admin-nav';
 import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
 import { AppSwitcher } from '@/components/app-switcher';
 import { BrandMark, PRODUCT_NAME } from '@/components/brand/brand';
+import { McpLogos } from '@/components/mcp-logos';
 import { ThemeToggle } from '@/components/theme-toggle';
 import type { Theme } from '@/lib/theme';
 
 type AdminMessages = BookingMessages['admin'];
 
 /** Design-parity admin shell — mirrors the old Angular app-shell: a flush 240px
- *  sidebar (bg-popover, right border, never a floating card), a flat 6-item nav
- *  in the original order, a bottom user footer, a desktop collapse rail
- *  (localStorage-persisted), and a <768px off-canvas drawer with a hamburger
- *  top bar. Tokens only (no raw hex); R22 press/hover feedback; R27/R28. */
-
-type IconName = 'home' | 'calendar' | 'clock' | 'ticket' | 'users' | 'calendarPlus' | 'cog';
-
-interface NavItem {
-  key: keyof AdminMessages['nav'];
-  href: string;
-  icon: IconName;
-  /** Active when the path starts with any of these (in addition to href). */
-  match?: string[];
-}
-
-// Same information architecture + order as the old app — Home, Bookings,
-// Availability, Event Types, Teams, Calendars, Settings. Calendars is a
-// top-level item (route /admin/connections), no longer a Settings sub-tab.
-// Labels are resolved from the active locale's catalog (F8).
-const NAV: NavItem[] = [
-  { key: 'home', href: '/admin', icon: 'home' },
-  { key: 'bookings', href: '/admin/bookings', icon: 'calendar' },
-  { key: 'availability', href: '/admin/availability', icon: 'clock' },
-  { key: 'eventTypes', href: '/admin/event-types', icon: 'ticket' },
-  { key: 'teams', href: '/admin/teams', icon: 'users' },
-  { key: 'calendars', href: '/admin/connections', icon: 'calendarPlus' },
-  { key: 'settings', href: '/admin/settings', icon: 'cog' },
-];
+ *  sidebar (bg-popover, right border, never a floating card), a flat nav in the
+ *  original order (see `lib/admin-nav.ts`), a bottom user footer, a desktop
+ *  collapse rail (localStorage-persisted), and a <768px off-canvas drawer with a
+ *  hamburger top bar. Tokens only (no raw hex); R22 press/hover feedback; R27/R28. */
 
 const NAV_COLLAPSED_KEY = 'slate.nav.collapsed';
 
 // Dapta's icon system is PrimeIcons (pi pi-*) — the same set the production
 // Angular admin panel uses. Nav glyphs map 1:1 to their pi names; sized at the
-// design-system's 20px sidebar icon.
-const PI_BY_NAME: Record<IconName, string> = {
+// design-system's 20px sidebar icon. MCP is the one exception: its icon is the
+// rotating AI app logos, same 20px.
+const PI_BY_NAME: Record<Exclude<NavIcon, 'mcp'>, string> = {
   home: 'pi-home',
   calendar: 'pi-calendar',
   clock: 'pi-clock',
@@ -57,53 +44,305 @@ const PI_BY_NAME: Record<IconName, string> = {
   users: 'pi-users',
   calendarPlus: 'pi-calendar-plus',
   cog: 'pi-cog',
+  book: 'pi-book',
 };
 
-function Icon({ name, className }: { name: IconName; className?: string }) {
+function Icon({ name, paused }: { name: NavIcon; paused?: boolean }) {
+  if (name === 'mcp') return <McpLogos size={20} paused={paused} />;
+  return <i aria-hidden className={`pi ${PI_BY_NAME[name]}`} style={{ fontSize: 20 }} />;
+}
+
+/**
+ * The look of one rail row. `parent` is a group whose open accordion already
+ * shows the current page under it: it reads as "you are in here" without the
+ * wash, which belongs to the one row that IS the page.
+ */
+function navRowClass(collapsed: boolean, state: 'active' | 'parent' | 'idle') {
+  return [
+    'flex items-center gap-field rounded-md text-sm transition-colors active:scale-[0.99]',
+    collapsed ? 'mx-auto h-11 w-11 justify-center gap-0 px-0' : 'min-h-control w-full px-field py-field text-left',
+    state === 'active'
+      ? 'bg-muted font-medium text-foreground'
+      : state === 'parent'
+        ? 'font-medium text-foreground hover:bg-muted'
+        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+  ].join(' ');
+}
+
+/**
+ * A rail item with pages under it (MCP). One `<button>` in both rail widths:
+ *
+ *  - Wide rail and drawer: a disclosure. The pages show indented below it, and
+ *    open on their own whenever the current route is one of them.
+ *  - Collapsed rail: a menu button. The pages open in a flyout beside the icon
+ *    (WAI-ARIA menu button: focus lands on the first page, the arrow keys, Home
+ *    and End move, Escape or a click elsewhere closes and hands focus back).
+ *
+ * The flyout is positioned against the item itself. The desktop rail opens no
+ * stacking context (no transform, no z-index, no sticky), so the panel's z-50
+ * ranks against the page and paints over it.
+ */
+function NavGroup({
+  item,
+  pages,
+  collapsed,
+  label,
+  labels,
+  onNavigate,
+}: {
+  item: NavItem;
+  pages: readonly SubNavItem[];
+  collapsed: boolean;
+  label: string;
+  labels: AdminMessages['developerNav'];
+  onNavigate?: () => void;
+}) {
+  const pathname = usePathname();
+  const inside = isNavItemActive(pathname, item.href);
+  const [open, setOpen] = useState(inside);
+  const [flyout, setFlyout] = useState(false);
+  // The rotating logos hold still under the pointer (see McpLogos).
+  const [hovered, setHovered] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const closeFlyout = useCallback((refocus: boolean) => {
+    setFlyout(false);
+    if (refocus) triggerRef.current?.focus();
+  }, []);
+
+  // Arriving on one of the pages opens the group, including after the person
+  // closed it by hand and then followed a link here from somewhere else.
+  useEffect(() => {
+    if (inside) setOpen(true);
+  }, [inside, pathname]);
+
+  // The flyout belongs to the 64px rail; if the rail widens under it, the
+  // accordion takes over.
+  useEffect(() => {
+    if (!collapsed) setFlyout(false);
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!flyout) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) closeFlyout(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeFlyout(true);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [flyout, closeFlyout]);
+
+  const state = !inside ? 'idle' : collapsed || !open ? 'active' : 'parent';
+
+  const onFlyoutKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Tab') {
+      // Leaving the menu by Tab closes it; focus moves on as the browser decides.
+      setFlyout(false);
+      return;
+    }
+    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? items.length - 1
+          : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
+
   return (
-    <i
-      aria-hidden
-      className={`pi ${PI_BY_NAME[name]}${className ? ` ${className}` : ''}`}
-      style={{ fontSize: 20 }}
-    />
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid={`nav-${item.key}`}
+        onClick={() => (collapsed ? setFlyout((v) => !v) : setOpen((v) => !v))}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        aria-haspopup={collapsed ? 'menu' : undefined}
+        aria-expanded={collapsed ? flyout : open}
+        aria-controls={!collapsed && open ? listId : undefined}
+        title={collapsed ? label : undefined}
+        className={navRowClass(collapsed, state)}
+      >
+        <Icon name={item.icon} paused={hovered} />
+        <span className={collapsed ? 'sr-only' : 'min-w-0 flex-1 truncate'}>{label}</span>
+        {!collapsed ? (
+          <i
+            aria-hidden
+            className={`pi pi-chevron-down ml-auto shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`}
+            style={{ fontSize: 12 }}
+          />
+        ) : null}
+      </button>
+
+      {!collapsed && open ? (
+        <ul id={listId} className="mt-tight flex flex-col gap-tight" data-testid={`nav-${item.key}-pages`}>
+          {pages.map((page) => {
+            const active = isNavItemActive(pathname, page.href);
+            return (
+              <li key={page.key}>
+                <Link
+                  href={page.href}
+                  onClick={onNavigate}
+                  aria-current={active ? 'page' : undefined}
+                  data-testid={`nav-${item.key}-${page.key}`}
+                  // pl-11 sets the label on the parent label's column (12px
+                  // padding + 20px icon + 12px gap), which is what reads as
+                  // "under MCP" without a second icon per row.
+                  className={[
+                    'flex min-h-control items-center rounded-md py-inline pl-11 pr-field text-sm transition-colors active:scale-[0.99]',
+                    active
+                      ? 'bg-muted font-medium text-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  ].join(' ')}
+                >
+                  <span className="min-w-0 truncate">{labels[page.key]}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      {collapsed && flyout ? (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={label}
+          onKeyDown={onFlyoutKeyDown}
+          data-testid={`nav-${item.key}-flyout`}
+          className="absolute left-full top-0 z-50 ml-field flex w-56 flex-col rounded-md border border-border bg-popover py-tight text-popover-foreground shadow-lg"
+        >
+          {/* The group's name, for the eye: the icon alone said nothing. */}
+          <p aria-hidden className="px-field py-tight text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </p>
+          {pages.map((page) => {
+            const active = isNavItemActive(pathname, page.href);
+            return (
+              <Link
+                key={page.key}
+                href={page.href}
+                role="menuitem"
+                aria-current={active ? 'page' : undefined}
+                data-testid={`nav-${item.key}-flyout-${page.key}`}
+                onClick={() => {
+                  closeFlyout(false);
+                  onNavigate?.();
+                }}
+                className={`flex min-h-control w-full items-center gap-inline px-field text-left text-sm transition-colors hover:bg-muted focus-visible:bg-muted ${
+                  active ? 'bg-muted font-medium text-foreground' : 'text-foreground'
+                }`}
+              >
+                <i
+                  aria-hidden
+                  className={`pi ${page.icon} ${active ? 'text-foreground' : 'text-muted-foreground'}`}
+                  style={{ fontSize: 16 }}
+                />
+                <span className="min-w-0 flex-1 truncate">{labels[page.key]}</span>
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 function NavLinks({
+  items,
   collapsed,
   nav,
+  pages,
+  newTab,
   onNavigate,
 }: {
+  items: readonly NavItem[];
   collapsed: boolean;
   nav: AdminMessages['nav'];
+  /** Labels of the pages under MCP. */
+  pages: AdminMessages['developerNav'];
+  /** "(opens in a new tab)", read out after an external item's label. */
+  newTab: string;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   return (
     <ul className="flex flex-col gap-tight">
-      {NAV.map((item) => {
-        const active = isNavItemActive(pathname, item.href, item.match);
+      {items.map((item) => {
         const label = nav[item.key];
+        if (item.children) {
+          return (
+            <li key={item.key}>
+              <NavGroup
+                item={item}
+                pages={item.children}
+                collapsed={collapsed}
+                label={label}
+                labels={pages}
+                onNavigate={onNavigate}
+              />
+            </li>
+          );
+        }
+        // An external item is never "here": its href is another origin.
+        const active = !item.external && isNavItemActive(pathname, item.href, item.match);
+        const className = navRowClass(collapsed, active ? 'active' : 'idle');
+        // Label stays in the a11y tree when collapsed (sr-only) so the
+        // icon-only link keeps a discernible name (WCAG 4.1.2).
+        const body = (
+          <>
+            <Icon name={item.icon} />
+            <span className={collapsed ? 'sr-only' : ''}>{label}</span>
+          </>
+        );
         return (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              onClick={onNavigate}
-              title={collapsed ? label : undefined}
-              aria-current={active ? 'page' : undefined}
-              className={[
-                'flex items-center gap-field rounded-md text-sm transition-colors active:scale-[0.99]',
-                collapsed ? 'mx-auto h-11 w-11 justify-center gap-0 px-0' : 'min-h-control px-field py-field',
-                active
-                  ? 'bg-muted font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              ].join(' ')}
-            >
-              <Icon name={item.icon} />
-              {/* Label stays in the a11y tree when collapsed (sr-only) so the
-                  icon-only link keeps a discernible name (WCAG 4.1.2). */}
-              <span className={collapsed ? 'sr-only' : ''}>{label}</span>
-            </Link>
+          <li key={item.key}>
+            {item.external ? (
+              <a
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onNavigate}
+                title={collapsed ? label : undefined}
+                data-testid={`nav-${item.key}`}
+                className={className}
+              >
+                {body}
+                {/* The arrow the app switcher's external rows carry, so "leaves
+                    the app" reads the same wherever it appears. Hidden on the
+                    64px rail, where the 44px tile is the icon alone. */}
+                {!collapsed ? (
+                  <i aria-hidden className="pi pi-external-link ml-auto text-muted-foreground" style={{ fontSize: 14 }} />
+                ) : null}
+                <span className="sr-only"> {newTab}</span>
+              </a>
+            ) : (
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                title={collapsed ? label : undefined}
+                aria-current={active ? 'page' : undefined}
+                className={className}
+              >
+                {body}
+              </Link>
+            )}
           </li>
         );
       })}
@@ -125,6 +364,8 @@ export function AdminShell({
   messages,
   initialCollapsed = false,
   initialTheme,
+  isAdmin = false,
+  docsHref = null,
   children,
 }: {
   user: ShellUser | null;
@@ -140,10 +381,15 @@ export function AdminShell({
   /** Server-read cookie value → the toggle's icon is right on the first paint,
    *  same reason and same shape as `initialCollapsed` (#90). */
   initialTheme: Theme;
+  /** Owner or admin: the only roles the MCP pages serve, so the only ones who get the item. */
+  isAdmin?: boolean;
+  /** The documentation in the reader's language, already tagged; null hides the Docs item. */
+  docsHref?: string | null;
   children: ReactNode;
 }) {
   const pathname = usePathname();
   const c = messages.common;
+  const items = adminNav({ isAdmin, docsHref });
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   // Owned here, not in ThemeToggle: the footer renders twice (desktop rail and
   // mobile drawer) and both instances have to agree across a resize.
@@ -313,7 +559,13 @@ export function AdminShell({
       >
         {brand}
         <nav aria-label="Primary">
-          <NavLinks collapsed={railCollapsed} nav={messages.nav} />
+          <NavLinks
+            items={items}
+            collapsed={railCollapsed}
+            nav={messages.nav}
+            pages={messages.developerNav}
+            newTab={c.switcher.opensNewTab}
+          />
         </nav>
         {renderFooter(railCollapsed)}
       </aside>
@@ -344,7 +596,14 @@ export function AdminShell({
           <AppSwitcher messages={c.switcher} inDrawer />
         </div>
         <nav>
-          <NavLinks collapsed={false} nav={messages.nav} onNavigate={() => setDrawerOpen(false)} />
+          <NavLinks
+            items={items}
+            collapsed={false}
+            nav={messages.nav}
+            pages={messages.developerNav}
+            newTab={c.switcher.opensNewTab}
+            onNavigate={() => setDrawerOpen(false)}
+          />
         </nav>
         {renderFooter(false)}
       </aside>

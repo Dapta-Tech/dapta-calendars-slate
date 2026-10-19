@@ -21,11 +21,28 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  longSubtitle = false,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
+  /**
+   * The subtitle runs under the title AND the action. For a lead of several
+   * lines: beside a button at 360px it would be squeezed into half the width.
+   */
+  longSubtitle?: boolean;
 }) {
+  if (longSubtitle) {
+    return (
+      <div className="mb-group">
+        <div className="flex items-start justify-between gap-field">
+          <h1 className="min-w-0 text-3xl font-semibold tracking-tight">{title}</h1>
+          {action ? <div className="shrink-0">{action}</div> : null}
+        </div>
+        {subtitle ? <p className="mt-tight max-w-prose text-muted-foreground">{subtitle}</p> : null}
+      </div>
+    );
+  }
   return (
     <div className="mb-group flex items-start justify-between gap-field">
       <div className="min-w-0">

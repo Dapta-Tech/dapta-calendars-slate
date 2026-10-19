@@ -99,7 +99,7 @@ export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[
     throw new ToolFailure(
       'AUTH_REQUIRED',
       `This tool needs an API key with scope \`${accepted.join('` or `')}\`.`,
-      'Create a key in the Calendars web app (Settings, MCP & API) and send it as the header `Authorization: Bearer dcl_...`. Without a key only find_available_slots (public booking pages) and book_meeting work.',
+      'Create a key in the Calendars web app (MCP, then Connect and keys) and send it as the header `Authorization: Bearer dcl_...`. Without a key only find_available_slots (public booking pages) and book_meeting work.',
     );
   }
   if (!accepted.some((s) => call.principal!.scopes.includes(s))) {

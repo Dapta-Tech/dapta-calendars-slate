@@ -209,7 +209,7 @@ every scope it needs, and asks the person to approve again (step-up). API keys
 keep their scope errors as tool results, because a key's scopes cannot be
 stepped up.
 
-**Connected apps.** Settings, MCP and API lists every connection of the
+**Connected apps.** MCP, Connect and keys lists every connection of the
 workspace (app, host, scopes, who approved it, when, last used) with
 **Disconnect**. Disconnecting revokes the connection: its refresh token stops
 working at once; an access token it already holds keeps working until it
@@ -218,7 +218,7 @@ removed or no longer an owner or admin can no longer refresh either.
 
 **Add it in Claude** (claude.ai, Desktop, mobile): Settings, then Connectors,
 then Add custom connector; paste the MCP URL; click Add, then Connect. The page
-in Settings, MCP and API has an **Add to Claude** button that pre-fills the
+in MCP, Connect and keys has an **Add to Claude** button that pre-fills the
 dialog. In Claude Code:
 
 ```bash
