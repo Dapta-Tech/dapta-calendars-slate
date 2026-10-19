@@ -7,6 +7,8 @@ import { BrandedShell } from '@/components/branded-shell';
 import { logoOf } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { landingTarget, wantsProfile } from '@/lib/landing';
@@ -137,6 +139,14 @@ export default async function ProfilePage({
       </main>
       <MadeWithBadge locale={locale} accountCode={accountCode} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="profile"
+        accountKey={profile.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

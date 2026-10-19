@@ -7,6 +7,8 @@ import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
+import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { analyticsConfig } from '@/lib/analytics/config';
 import { ProfileView, profileEyebrow } from '@/components/profile-view';
 import { GrowthCta } from '@/components/booking-page-parts';
 import { brandingShown, signupHref } from '@/lib/growth';
@@ -107,6 +109,14 @@ export default async function TeamPage({
       </main>
       <MadeWithBadge locale={locale} accountCode={code} show={branding} />
       {embed ? <EmbedResizeReporter /> : null}
+      {/* Anonymous counts for the host's funnel, never the visitor's identity.
+          Configured at request time; null (every bare fork) renders nothing. */}
+      <VisitorAnalytics
+        config={analyticsConfig()}
+        page="team"
+        accountKey={team.account.shortCode ?? null}
+        embed={embed}
+      />
     </BrandedShell>
   );
 }

@@ -1,5 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { ATTRIBUTION_COOKIE, ATTRIBUTION_WINDOW_MS, parseAttribution } from '@slate/shared';
+import {
+  ATTRIBUTION_COOKIE,
+  ATTRIBUTION_WINDOW_MS,
+  LANDING_ID_COOKIE,
+  LANDING_ID_QUERY_KEY,
+  parseAttribution,
+  sanitizeLandingDistinctId,
+} from '@slate/shared';
 import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
 import { framingHeaders } from '@/lib/framing';
 import { requestOrigin } from '@/lib/request-origin';
@@ -74,6 +81,33 @@ function parkAttribution(req: NextRequest, res: NextResponse): NextResponse {
   return res;
 }
 
+/**
+ * The landing's anonymous analytics id (`?ph_id=`), parked beside the campaign
+ * tags for the same login round trip, so the first analytics-bearing page after
+ * sign-in (dashboard or wizard) can join "visited the landing" to the host who
+ * signed up.
+ *
+ * Same rules as `parkAttribution`: never on an API route, first touch wins,
+ * same ten-minute life. Sanitized here, at the edge, because the value is
+ * whatever anyone typed into a URL; a refused id parks nothing. Parked whether
+ * or not analytics is configured: it is a short-lived first-party cookie that
+ * nothing reads unless analytics is on.
+ */
+function parkLandingId(req: NextRequest, res: NextResponse): NextResponse {
+  if (req.nextUrl.pathname.startsWith('/api/')) return res;
+  if (req.cookies.has(LANDING_ID_COOKIE)) return res;
+  const landingId = sanitizeLandingDistinctId(req.nextUrl.searchParams.get(LANDING_ID_QUERY_KEY));
+  if (!landingId) return res;
+  res.cookies.set(LANDING_ID_COOKIE, landingId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: Math.floor(ATTRIBUTION_WINDOW_MS / 1000),
+  });
+  return res;
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get('host')?.toLowerCase().split(':')[0] ?? '';
   const canonical = CANONICAL[host];
@@ -115,7 +149,7 @@ export function middleware(req: NextRequest) {
     res.headers.set(name, value);
   }
 
-  return parkAttribution(req, res);
+  return parkLandingId(req, parkAttribution(req, res));
 }
 
 export const config = {

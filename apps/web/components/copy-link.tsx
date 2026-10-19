@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { track } from '@/lib/analytics/port';
 import { cn } from '@/lib/cn';
 
 const stripProtocol = (u: string) => u.replace(/^https?:\/\//, '');
@@ -35,6 +36,7 @@ export function CopyLink({
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(`${window.location.origin}${path}`);
+      track('link_copied');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
