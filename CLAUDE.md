@@ -153,8 +153,10 @@ DB layer, run this before you push.
    calendar write, email, or webhook inline from a request handler — enqueue it
    (see `apps/api/src/calendar-effects.ts`, `email-effects.ts`). Rows are claimed
    with a lease (several replicas may drain one outbox), each kind of work drains
-   in its own lane, and one destination has at most one delivery in flight, so a
-   slow subscriber delays only itself. Do not reintroduce a shared, sequential drain.
+   in its own lane, and one destination is served one delivery at a time in the
+   order queued, so a slow subscriber delays only itself and a retry never lets a
+   later row (a delete, a "cancelled") overtake it. Do not reintroduce a shared,
+   sequential drain.
 6. **Auth behind a port — never import provider specifics outside it.** The auth
    port is `apps/api/src/auth.provider.ts` (`local` stub + `createAuthProvider`);
    the WorkOS/JWT adapter is `auth.provider.workos.ts`, selected by

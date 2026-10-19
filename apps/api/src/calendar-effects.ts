@@ -13,9 +13,11 @@ import {
   loadBookingReferences,
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
+  sql,
   type Db,
 } from '@slate/db';
 import { BUSY_CACHE_DEFAULTS, BusyCache, CachedBusyProvider } from './busy-cache';
+import { OutboxSkipError } from './email-effects';
 import { CALENDAR, DB, ENV } from './tokens';
 
 /** Calendar lifecycle transitions the outbox can carry. */
@@ -157,6 +159,18 @@ export class CalendarEffects {
    */
   async runCalendarJob(action: CalendarAction, uid: string): Promise<void> {
     if (!this.calendar.enabled) return;
+    if (action !== 'delete') {
+      // A write or a move is for a booking that is ON. One that was cancelled
+      // or declined while this row waited (a retry can wait hours) must not
+      // put an event back on the host's calendar: nothing would ever delete
+      // it. Skipped, not retried; the delete queued behind it runs next.
+      const row = await this.db.get<{ status: string }>(
+        sql`SELECT status FROM booking WHERE uid = ${uid} LIMIT 1`,
+      );
+      if (row && row.status !== 'accepted') {
+        throw new OutboxSkipError(`calendar ${action} for ${uid} skipped: the booking is ${row.status}`);
+      }
+    }
     if (action === 'delete') {
       await this.removeEvent(uid);
     } else if (action === 'reschedule') {

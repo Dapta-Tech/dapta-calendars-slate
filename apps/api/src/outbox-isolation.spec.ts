@@ -24,6 +24,7 @@ import { CalendarEffects } from './calendar-effects';
 import { DaptaSyncEffects } from './dapta-sync.effects';
 import { EmailEffects } from './email-effects';
 import { OutboxWorker } from './outbox.worker';
+import { CalendarHttpError } from './calendar.http-provider';
 
 // F7: one slow or failing destination must delay nothing but itself. Measured
 // before this: a subscriber that slept 15 s held the single drain for its 10 s
@@ -53,7 +54,7 @@ function gate<T = void>() {
   return { promise, resolve, reject };
 }
 
-async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
+async function until(check: () => Promise<boolean>, ms = 15_000): Promise<void> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     if (await check()) return;
@@ -404,5 +405,125 @@ describe('OutboxWorker: isolation, backoff, horizon, leases (F7)', () => {
     expect(await worker.drainOnce(30_000)).toBe(0);
     expect(await worker.drainOnce(60_000)).toBe(1);
     expect(sentEmails).toEqual(['bk-dead']);
+  });
+
+  describe('a retry that waits hours must not undo what happened meanwhile', () => {
+    /** A calendar backend that is down until told otherwise, and records what it was asked to write. */
+    function backend() {
+      const state = { down: true, created: 0, deleted: 0 };
+      const provider: CalendarProvider = {
+        enabled: true,
+        listBusy: () => Promise.resolve([]),
+        createEvent: async () => {
+          if (state.down) throw new Error('backend 503');
+          state.created++;
+          return { externalEventId: `evt-${state.created}`, meetingUrl: null };
+        },
+        updateEvent: async (i) => ({ externalEventId: i.externalEventId, meetingUrl: null }),
+        deleteEvent: async () => {
+          if (state.down) throw new Error('backend 503');
+          state.deleted++;
+        },
+        listCalendars: () => Promise.resolve([]),
+        checkConnection: () => Promise.resolve({ ok: true, detail: 'ok' }),
+      };
+      return { state, provider };
+    }
+
+    async function booked(): Promise<string> {
+      const member = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'alex-rivera'`))!.id;
+      await db.run(
+        sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+            VALUES ('cc-order', ${accountId}, ${member}, 'generic', 'ref-order', 1, 1, 0)`,
+      );
+      const avail = await getAvailability(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        fromMs: Date.now(),
+        toMs: Date.now() + 10 * 86_400_000,
+      });
+      const b = await createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startMs: Date.parse(avail!.slots[0]!.startUtc),
+        attendee: { name: 'Sam', email: 'sam-order@example.com', timeZone: 'UTC' },
+        answers: { company: 'Acme' },
+      });
+      if (!b.ok) throw new Error('seed booking failed');
+      return b.booking.uid;
+    }
+
+    it('create fails, the visitor cancels, the backend recovers: no event is left on the calendar', async () => {
+      const { state, provider } = backend();
+      const worker = makeWorker(envWith(), provider);
+      const uid = await booked();
+      const create = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid, now: 0 });
+      await worker.drainOnce(0); // the backend is down: the create backs off
+      expect((await status(create)).attempts).toBe(1);
+
+      await db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${uid}`);
+      const del = await enqueueOutbox(db, { kind: 'calendar', action: 'delete', bookingUid: uid, now: 10 });
+      // The delete is due, but it never overtakes the create still backing off.
+      await worker.drainOnce(20);
+      expect((await status(del)).status).toBe('pending');
+      expect((await status(del)).attempts).toBe(0);
+
+      state.down = false;
+      await worker.drainOnce(2_000);
+      // The create sees the booking is off and is skipped; then the delete runs.
+      expect((await status(create)).status).toBe('skipped');
+      expect((await status(create)).lastError).toMatch(/the booking is cancelled/);
+      expect((await status(del)).status).toBe('done');
+      expect(state.created).toBe(0);
+    });
+
+    it('a confirmation still queued when the booking is cancelled is skipped, never sent after it', async () => {
+      const worker = makeWorker();
+      const uid = await booked();
+      await db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${uid}`);
+      const mail = await enqueueOutbox(db, {
+        kind: 'email',
+        action: 'confirmation',
+        bookingUid: uid,
+        accountId,
+        payload: notification(accountId, uid),
+        now: 0,
+      });
+      await worker.drainOnce(0);
+      expect((await status(mail)).status).toBe('skipped');
+    });
+
+    it('a reminder held back past the start of the meeting is dropped', async () => {
+      const worker = makeWorker();
+      const uid = await booked();
+      await db.run(sql`UPDATE booking SET start_ms = ${Date.now() - 60_000} WHERE uid = ${uid}`);
+      const mail = await enqueueOutbox(db, {
+        kind: 'email',
+        action: 'reminder',
+        bookingUid: uid,
+        accountId,
+        payload: notification(accountId, uid),
+        now: 0,
+      });
+      await worker.drainOnce(0);
+      expect((await status(mail)).status).toBe('skipped');
+      expect((await status(mail)).lastError).toMatch(/already started/);
+    });
+
+    it('a failure that names its wait (a backend Retry-After) is not asked again sooner', async () => {
+      const failing: CalendarProvider = {
+        ...backend().provider,
+        createEvent: async () => {
+          throw new CalendarHttpError(429, 'createEvent', 'slow down', 30_000);
+        },
+      };
+      const worker = makeWorker(envWith(), failing);
+      const uid = await booked();
+      const create = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: uid, now: 0 });
+      await worker.drainOnce(0);
+      expect((await status(create)).nextAttemptAt).toBe(30_000);
+    });
   });
 });

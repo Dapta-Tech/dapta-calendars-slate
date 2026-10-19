@@ -252,8 +252,8 @@ export const serverEnvSchema = z.object({
   /**
    * Deliveries in flight at once, per kind of work (webhooks, emails, calendar
    * writes, CRM writes, sign-up sync), per process. Each kind drains on its
-   * own, and one destination (a webhook, a booking) has at most one delivery
-   * in flight, so a slow subscriber cannot hold up anything else.
+   * own, and one destination (a webhook, a booking) is served one delivery at
+   * a time in the order queued, so a slow subscriber holds up only itself.
    */
   OUTBOX_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
   /**

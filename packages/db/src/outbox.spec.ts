@@ -6,11 +6,13 @@ import {
   backoffMs,
   claimDueOutbox,
   countOutbox,
+  defaultOrderKey,
   enqueueOutbox,
   listOutbox,
   markOutboxDone,
   markOutboxFailed,
   markOutboxRetry,
+  MAX_BACKOFF_MS,
   outboxRetriesExhausted,
   renewOutboxLease,
   retryDelayMs,
@@ -146,7 +148,7 @@ describe('outbox — durable side-effect queue (B7/DM1)', () => {
       await enqueueOutbox(db, { kind: 'webhook', action: `a${i}`, webhookId: 'A', payload: '{}', now: i });
     await enqueueOutbox(db, { kind: 'webhook', action: 'b', webhookId: 'B', payload: '{}', now: 10 });
     await enqueueOutbox(db, { kind: 'webhook', action: 'c', webhookId: 'C', payload: '{}', now: 11 });
-    const opts = { kinds: ['webhook'] as const, onePerDestination: true, leaseMs: 60_000 };
+    const opts = { kinds: ['webhook'] as const, inOrder: true, leaseMs: 60_000 };
     const first = await claimDueOutbox(db, 100, 10, opts);
     // A's OLDEST, then B and C: A's backlog takes one slot, not every slot.
     expect(first.map((r) => r.action)).toEqual(['a0', 'b', 'c']);
@@ -154,6 +156,73 @@ describe('outbox — durable side-effect queue (B7/DM1)', () => {
     expect(await claimDueOutbox(db, 200, 10, opts)).toHaveLength(0);
     await markOutboxDone(db, first[0]!.id, 300, first[0]!.leaseToken);
     expect((await claimDueOutbox(db, 400, 10, opts)).map((r) => r.action)).toEqual(['a1']);
+  });
+
+  it('in order per destination: a row backing off holds the rows queued after it', async () => {
+    const opts = { kinds: ['calendar'] as const, inOrder: true, leaseMs: 60_000 };
+    // The booking's create, then (the visitor cancels) its delete.
+    const create = await enqueueOutbox(db, { kind: 'calendar', action: 'create', bookingUid: 'b1', now: 0 });
+    const del = await enqueueOutbox(db, { kind: 'calendar', action: 'delete', bookingUid: 'b1', now: 1 });
+    const [first] = await claimDueOutbox(db, 10, 10, opts);
+    expect(first!.id).toBe(create);
+    // The create fails and backs off: the delete, due now, must NOT overtake it.
+    await markOutboxRetry(db, create, { attempts: 1, error: 'backend down', now: 20, delayMs: 60_000, leaseToken: first!.leaseToken });
+    expect(await claimDueOutbox(db, 30, 10, opts)).toHaveLength(0);
+    // The create comes due again and goes first; only after it, the delete.
+    const [again] = await claimDueOutbox(db, 60_020, 10, opts);
+    expect(again!.id).toBe(create);
+    expect(await claimDueOutbox(db, 60_030, 10, opts)).toHaveLength(0);
+    await markOutboxDone(db, create, 60_040, again!.leaseToken);
+    expect((await claimDueOutbox(db, 60_050, 10, opts)).map((r) => r.id)).toEqual([del]);
+  });
+
+  it('in order per destination: a row scheduled for later and never tried blocks nobody', async () => {
+    const opts = { kinds: ['email'] as const, inOrder: true };
+    // A reminder queued weeks ahead, then a cancellation due now.
+    await enqueueOutbox(db, { kind: 'email', action: 'reminder', bookingUid: 'b1', payload: '{}', now: 0, nextAttemptAt: 30 * 86_400_000 });
+    const cancel = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'b1', payload: '{}', now: 10 });
+    expect((await claimDueOutbox(db, 20, 10, opts)).map((r) => r.id)).toEqual([cancel]);
+  });
+
+  it("a subscriber's events keep their order per booking, without holding its other bookings' events", async () => {
+    const opts = { kinds: ['webhook'] as const, inOrder: true, leaseMs: 60_000 };
+    const created1 = await enqueueOutbox(db, { kind: 'webhook', action: 'booking.created', webhookId: 'A', bookingUid: 'b1', payload: '{}', now: 0 });
+    const cancelled1 = await enqueueOutbox(db, { kind: 'webhook', action: 'booking.cancelled', webhookId: 'A', bookingUid: 'b1', payload: '{}', now: 1 });
+    const created2 = await enqueueOutbox(db, { kind: 'webhook', action: 'booking.created', webhookId: 'A', bookingUid: 'b2', payload: '{}', now: 2 });
+    const [first] = await claimDueOutbox(db, 10, 10, opts);
+    expect(first!.id).toBe(created1);
+    // One subscriber, one delivery in flight: nothing else of A while it runs.
+    expect(await claimDueOutbox(db, 11, 10, opts)).toHaveLength(0);
+    await markOutboxRetry(db, created1, { attempts: 1, error: 'HTTP 503', now: 20, delayMs: 60_000, leaseToken: first!.leaseToken });
+    // b1's cancellation waits behind its creation; b2's event does not.
+    expect((await claimDueOutbox(db, 30, 10, opts)).map((r) => r.id)).toEqual([created2]);
+    expect(cancelled1).toBeTruthy();
+  });
+
+  it("one side's mail never waits on the other side's: an invitee address refused does not hold up the host", async () => {
+    const opts = { kinds: ['email'] as const, inOrder: true, leaseMs: 60_000 };
+    const attendee = await enqueueOutbox(db, { kind: 'email', action: 'confirmation', bookingUid: 'b1', orderKey: 'b1|attendee', payload: '{}', now: 0 });
+    const host = await enqueueOutbox(db, { kind: 'email', action: 'confirmation', bookingUid: 'b1', orderKey: 'b1|host', payload: '{}', now: 1 });
+    const both = await claimDueOutbox(db, 10, 10, opts);
+    expect(both.map((r) => r.id).sort()).toEqual([attendee, host].sort());
+    const a = both.find((r) => r.id === attendee)!;
+    await markOutboxRetry(db, attendee, { attempts: 1, error: '550 no such user', now: 20, delayMs: 60_000, leaseToken: a.leaseToken });
+    const cancelHost = await enqueueOutbox(db, { kind: 'email', action: 'cancellation', bookingUid: 'b1', orderKey: 'b1|host', payload: '{}', now: 30 });
+    await markOutboxDone(db, host, 40, both.find((r) => r.id === host)!.leaseToken);
+    expect((await claimDueOutbox(db, 50, 10, opts)).map((r) => r.id)).toEqual([cancelHost]);
+  });
+
+  it('the default order key: the booking, or for a webhook the subscriber and the booking', () => {
+    expect(defaultOrderKey({ kind: 'calendar', bookingUid: 'b1' })).toBe('b1');
+    expect(defaultOrderKey({ kind: 'webhook', webhookId: 'w', bookingUid: 'b1' })).toBe('w|b1');
+    expect(defaultOrderKey({ kind: 'webhook', webhookId: 'w' })).toBe('w');
+    expect(defaultOrderKey({ kind: 'dapta_sync' })).toBeNull();
+  });
+
+  it('a retry is never scheduled past MAX_BACKOFF_MS, so an in-order claim always sees it', async () => {
+    const id = await enqueueOutbox(db, { kind: 'webhook', action: 'x', webhookId: 'w', payload: '{}', now: 0 });
+    await markOutboxRetry(db, id, { attempts: 1, error: 'x', now: 0, delayMs: 10 * 3_600_000 });
+    expect((await listOutbox(db))[0]!.nextAttemptAt).toBe(MAX_BACKOFF_MS);
   });
 
   it('a lane claims only its kinds; the catch-all lane takes the rest', async () => {

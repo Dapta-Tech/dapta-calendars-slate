@@ -15,6 +15,7 @@ import {
   markOutboxFailed,
   markOutboxRetry,
   markOutboxSkipped,
+  MAX_BACKOFF_MS,
   outboxRetriesExhausted,
   recordWebhookGaveUp,
   renewOutboxLease,
@@ -61,9 +62,11 @@ function span(ms: number): string {
  * no-silent-loss delivery.
  *
  *   - Lanes: each kind of work drains on its own (`OUTBOX_LANES`), with up to
- *     `OUTBOX_CONCURRENCY` deliveries in flight per lane, and at most one per
- *     destination (a webhook subscriber, a booking). A slow or failing
- *     destination therefore delays only its own deliveries.
+ *     `OUTBOX_CONCURRENCY` deliveries in flight per lane. Each destination (a
+ *     webhook subscriber, a booking) is served one delivery at a time, in the
+ *     order queued, a row backing off holding the rows behind it. A slow or
+ *     failing destination therefore delays only its own deliveries, and a
+ *     retry never lets a delete or a "cancelled" overtake what it follows.
  *   - Claims are leased (`claimDueOutbox`), so several API replicas can run
  *     this worker against one database without delivering a row twice; a
  *     replica that dies mid-delivery has its rows picked up when the lease
@@ -229,7 +232,7 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
     return {
       ...(lane.kinds ? { kinds: lane.kinds } : { excludeKinds: NAMED_KINDS }),
       leaseMs: this.leaseMs,
-      onePerDestination: true,
+      inOrder: true,
     };
   }
 
@@ -343,7 +346,13 @@ export class OutboxWorker implements OnModuleInit, OnModuleDestroy {
       }
       return;
     }
-    const delayMs = retryDelayMs(attempts, this.random);
+    // A failure that names its own wait (a calendar backend's Retry-After,
+    // the conferencing-link look) is not asked again sooner than that.
+    const floor = (err as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+    const delayMs = Math.max(
+      retryDelayMs(attempts, this.random),
+      typeof floor === 'number' && floor > 0 ? Math.min(floor, MAX_BACKOFF_MS) : 0,
+    );
     await markOutboxRetry(this.db, row.id, { attempts, error: message, now, delayMs, leaseToken: row.leaseToken });
     this.log.warn(
       `outbox ${row.kind}:${row.action} (${row.id}) failed (attempt ${attempts}), next try in ${span(delayMs)}: ${message}`,

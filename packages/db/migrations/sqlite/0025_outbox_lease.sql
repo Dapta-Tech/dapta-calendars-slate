@@ -6,3 +6,4 @@
 ALTER TABLE outbox ADD COLUMN lease_until INTEGER;
 ALTER TABLE outbox ADD COLUMN lease_token TEXT;
 ALTER TABLE outbox ADD COLUMN first_failed_at INTEGER;
+ALTER TABLE outbox ADD COLUMN order_key TEXT;

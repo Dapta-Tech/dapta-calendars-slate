@@ -2713,12 +2713,17 @@ export async function enqueueWebhookDeliveries(
 ): Promise<number> {
   const hooks = await loadMatchingWebhooks(db, accountId, event);
   const body = JSON.stringify({ event, data: payload });
+  // The booking the event is about, when it names one: a subscriber's events
+  // about one booking are delivered in order (created before cancelled), and
+  // its events about other bookings are not held behind them.
+  const uid = (payload as { uid?: unknown } | null)?.uid;
   for (const h of hooks) {
     await enqueueOutbox(db, {
       kind: 'webhook',
       action: event,
       accountId,
       webhookId: h.id,
+      bookingUid: typeof uid === 'string' && uid ? uid : null,
       payload: body,
       now,
     });
@@ -2746,12 +2751,14 @@ async function recordWebhookDelivery(
     ok: boolean;
     statusCode: number | null;
     error: string | null;
+    /** Epoch-ms; defaults to now. */
+    at?: number;
   },
 ): Promise<void> {
   await db.run(
     sql`INSERT INTO webhook_delivery (id, webhook_id, account_id, event, ok, status_code, error, created_at)
         VALUES (${randomUUID()}, ${row.webhookId}, ${row.accountId}, ${row.event},
-          ${row.ok ? 1 : 0}, ${row.statusCode}, ${row.error}, ${Date.now()})`,
+          ${row.ok ? 1 : 0}, ${row.statusCode}, ${row.error}, ${row.at ?? Date.now()})`,
   );
   await db.run(
     sql`DELETE FROM webhook_delivery WHERE webhook_id = ${row.webhookId} AND id NOT IN (
@@ -2819,6 +2826,11 @@ export async function recordWebhookGaveUp(
   } catch {
     // An unreadable body still gets its line; the event name is just unknown.
   }
+  // After the attempt it follows, even within the same millisecond: the log
+  // reads newest first, and this line has to be the last word.
+  const last = await db.get<{ at: number | string | null }>(
+    sql`SELECT MAX(created_at) AS at FROM webhook_delivery WHERE webhook_id = ${args.webhookId}`,
+  );
   await recordWebhookDelivery(db, {
     webhookId: args.webhookId,
     accountId: hook.account_id,
@@ -2826,6 +2838,7 @@ export async function recordWebhookGaveUp(
     ok: false,
     statusCode: null,
     error: `Gave up after ${args.attempts} attempts. This event will not be delivered.`,
+    at: Math.max(Date.now(), Number(last?.at ?? 0) + 1),
   });
 }
 

@@ -23,12 +23,13 @@
  * and not already leased, so two API replicas (or two workers in one process)
  * never deliver the same row at once, on either dialect. The outcome is written
  * only by the lease's holder, and a worker that dies mid-delivery has its rows
- * claimed again once the lease runs out. A claim can also ask for at most one
- * row in flight per destination (a webhook subscriber, a booking), which is
- * what keeps one slow destination from occupying every delivery slot.
+ * claimed again once the lease runs out. A claim can also ask for each
+ * destination (a webhook subscriber, a booking) to be served one row at a time,
+ * in the order queued, which keeps one slow destination from occupying every
+ * delivery slot and keeps a retry from letting a later row overtake it.
  */
 import { randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { Db } from './client';
 
 /**
@@ -84,6 +85,8 @@ export interface OutboxRow {
   leaseToken: string | null;
   /** Epoch-ms of the first failed attempt; null until one fails. */
   firstFailedAt: number | null;
+  /** Rows of one kind sharing it are delivered one at a time, in queue order. */
+  orderKey: string | null;
 }
 
 export interface EnqueueOutboxInput {
@@ -97,6 +100,16 @@ export interface EnqueueOutboxInput {
   maxAttempts?: number;
   /** Epoch-ms; injected so callers/tests control the clock. Defaults to Date.now(). */
   now?: number;
+  /**
+   * Rows of one kind that share this key are delivered one at a time, in the
+   * order queued (see `ClaimOutboxOptions.inOrder`). Omitted: the booking for
+   * most rows, and the subscriber plus the booking for a webhook row, so one
+   * subscriber's events about one booking keep their order while its events
+   * about other bookings are not held behind them. Email rows pass the
+   * booking and the side (attendee or host), so the two sides never wait on
+   * each other. `null` orders the row with nothing.
+   */
+  orderKey?: string | null;
   /**
    * Epoch-ms at which this row first becomes due. Defaults to `now` (immediate).
    * Set it in the FUTURE to schedule delivery — e.g. a reminder at `start − lead`.
@@ -159,17 +172,29 @@ export function outboxRetriesExhausted(
 }
 
 /** Record a due unit of work. Returns the new row id. */
+/** The order key a row gets when its caller names none; see `EnqueueOutboxInput.orderKey`. */
+export function defaultOrderKey(
+  input: Pick<EnqueueOutboxInput, 'kind' | 'bookingUid' | 'webhookId'>,
+): string | null {
+  if (input.kind === 'webhook') {
+    if (!input.webhookId) return null;
+    return input.bookingUid ? `${input.webhookId}|${input.bookingUid}` : input.webhookId;
+  }
+  return input.bookingUid ?? null;
+}
+
 export async function enqueueOutbox(db: Db, input: EnqueueOutboxInput): Promise<string> {
   const id = randomUUID();
   const now = input.now ?? Date.now();
   const dueAt = input.nextAttemptAt ?? now;
+  const orderKey = input.orderKey !== undefined ? input.orderKey : defaultOrderKey(input);
   await db.run(
     sql`INSERT INTO outbox
           (id, kind, action, booking_uid, account_id, webhook_id, payload,
-           status, attempts, max_attempts, next_attempt_at, last_error, created_at, updated_at)
+           status, attempts, max_attempts, next_attempt_at, last_error, created_at, updated_at, order_key)
         VALUES (${id}, ${input.kind}, ${input.action}, ${input.bookingUid ?? null},
           ${input.accountId ?? null}, ${input.webhookId ?? null}, ${input.payload ?? null},
-          'pending', 0, ${input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${dueAt}, NULL, ${now}, ${now})`,
+          'pending', 0, ${input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${dueAt}, NULL, ${now}, ${now}, ${orderKey})`,
   );
   return id;
 }
@@ -209,6 +234,7 @@ function mapRow(r: Record<string, unknown>): OutboxRow {
     leaseUntil: r.lease_until == null ? null : Number(r.lease_until),
     leaseToken: (r.lease_token as string | null) ?? null,
     firstFailedAt: r.first_failed_at == null ? null : Number(r.first_failed_at),
+    orderKey: (r.order_key as string | null) ?? null,
   };
 }
 
@@ -222,18 +248,32 @@ export interface ClaimOutboxOptions {
   /** The claim's identity, written to `lease_token`. Default: a fresh UUID. */
   token?: string;
   /**
-   * At most one row in flight per destination: a webhook row's subscriber
-   * (`webhook_id`), any other row's booking (`booking_uid`), per kind. A
-   * destination with a row already leased contributes nothing, and one with
-   * several due rows contributes its oldest. Rows with no destination are
-   * never held back.
+   * Rows of one kind that share an order key (`order_key`; see
+   * `EnqueueOutboxInput.orderKey`) are delivered ONE AT A TIME and IN THE ORDER
+   * THEY WERE QUEUED. Only the oldest active row of a key can be claimed, and
+   * only when it is due and not already in flight; while it backs off after a
+   * failure, the rows queued after it wait. That keeps a booking's calendar
+   * create ahead of its delete, its "confirmed" mail ahead of its "cancelled",
+   * and a subscriber's `booking.created` ahead of its `booking.cancelled`,
+   * however long a retry takes. "Active" means attempted at least once, or due:
+   * a row scheduled for later and never tried yet (a reminder) blocks nobody.
+   * Rows with no key are never held back.
+   *
+   * Also: one webhook SUBSCRIBER has at most one delivery in flight, whatever
+   * bookings its rows are about, so a slow subscriber takes one slot, never
+   * all of them.
    */
-  onePerDestination?: boolean;
+  inOrder?: boolean;
 }
 
-/** A row's destination, as SQL: the subscriber for a webhook, else the booking. */
-const DESTINATION = (alias: string) =>
-  sql.raw(`CASE WHEN ${alias}.kind = 'webhook' THEN ${alias}.webhook_id ELSE ${alias}.booking_uid END`);
+/**
+ * A row's order key, as SQL. A row queued before the column existed falls back
+ * to what it was ordered by then: its subscriber for a webhook, else its booking.
+ */
+const ORDER_KEY = (alias: string) =>
+  sql.raw(
+    `COALESCE(${alias}.order_key, CASE WHEN ${alias}.kind = 'webhook' THEN ${alias}.webhook_id ELSE ${alias}.booking_uid END)`,
+  );
 
 /**
  * CLAIM up to `limit` pending rows that are due (`next_attempt_at <= now`) and
@@ -255,47 +295,77 @@ export async function claimDueOutbox(
   if (limit <= 0) return [];
   const leaseMs = opts.leaseMs ?? DEFAULT_LEASE_MS;
   const token = opts.token ?? randomUUID();
-  const conds = [
+  const lane: SQL[] = [];
+  if (opts.kinds) {
+    if (opts.kinds.length === 0) return [];
+    lane.push(sql`o.kind IN (${sql.join(opts.kinds.map((k) => sql`${k}`), sql`, `)})`);
+  }
+  if (opts.excludeKinds && opts.excludeKinds.length > 0) {
+    lane.push(sql`o.kind NOT IN (${sql.join(opts.excludeKinds.map((k) => sql`${k}`), sql`, `)})`);
+  }
+  const due = [
     sql`o.status = 'pending'`,
     sql`o.next_attempt_at <= ${now}`,
     sql`(o.lease_until IS NULL OR o.lease_until <= ${now})`,
+    ...lane,
   ];
-  if (opts.kinds) {
-    if (opts.kinds.length === 0) return [];
-    conds.push(sql`o.kind IN (${sql.join(opts.kinds.map((k) => sql`${k}`), sql`, `)})`);
-  }
-  if (opts.excludeKinds && opts.excludeKinds.length > 0) {
-    conds.push(sql`o.kind NOT IN (${sql.join(opts.excludeKinds.map((k) => sql`${k}`), sql`, `)})`);
-  }
-  if (opts.onePerDestination) {
-    // A destination already being delivered to (by any worker, on any
-    // replica) waits for that delivery to end.
-    conds.push(sql`NOT EXISTS (
-      SELECT 1 FROM outbox x
-      WHERE x.status = 'pending' AND x.lease_until > ${now} AND x.kind = o.kind
-        AND ${DESTINATION('x')} = ${DESTINATION('o')})`);
-  }
-  const where = sql.join(conds, sql` AND `);
-  const candidates = opts.onePerDestination
-    ? await db.all<{ id: string }>(
-        sql`SELECT id FROM (
-              SELECT o.id, o.next_attempt_at, o.created_at,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY o.kind, COALESCE(${DESTINATION('o')}, o.id)
-                       ORDER BY o.next_attempt_at, o.created_at, o.id
-                     ) AS rn
-              FROM outbox o
-              WHERE ${where}
-            ) ranked
-            WHERE rn = 1
-            ORDER BY next_attempt_at, created_at, id
-            LIMIT ${limit}`,
+  let candidates: Array<{ id: string; kind: string; webhook_id: string | null }>;
+  if (opts.inOrder) {
+    // Subscribers with a delivery already in flight, on any worker or replica.
+    const busySubscribers = (
+      await db.all<{ webhook_id: string }>(
+        sql`SELECT DISTINCT o.webhook_id AS webhook_id FROM outbox o
+            WHERE ${sql.join(
+              [sql`o.status = 'pending'`, sql`o.lease_until > ${now}`, sql`o.kind = 'webhook'`, sql`o.webhook_id IS NOT NULL`, ...lane],
+              sql` AND `,
+            )}`,
       )
-    : await db.all<{ id: string }>(
-        sql`SELECT o.id FROM outbox o WHERE ${where}
-            ORDER BY o.next_attempt_at, o.created_at, o.id
-            LIMIT ${limit}`,
-      );
+    ).map((r) => r.webhook_id);
+    // Rank every ACTIVE row of an order key by age and offer only the head,
+    // and only when it is due and free: a head in flight or backing off holds
+    // its whole key. The range bound lets the status/next_attempt_at index
+    // skip far-future reminders: a row backing off is due within
+    // MAX_BACKOFF_MS (markOutboxRetry clamps it).
+    const heads = await db.all<{ id: string; kind: string; webhook_id: string | null }>(
+      sql`SELECT id, kind, webhook_id FROM (
+            SELECT o.id, o.kind, o.webhook_id, o.next_attempt_at, o.created_at, o.lease_until,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY o.kind, COALESCE(${ORDER_KEY('o')}, o.id)
+                     ORDER BY o.created_at, o.id
+                   ) AS rn
+            FROM outbox o
+            WHERE ${sql.join(
+              [
+                sql`o.status = 'pending'`,
+                sql`o.next_attempt_at <= ${now + MAX_BACKOFF_MS}`,
+                sql`(o.attempts > 0 OR o.next_attempt_at <= ${now})`,
+                ...lane,
+              ],
+              sql` AND `,
+            )}
+          ) ranked
+          WHERE rn = 1 AND next_attempt_at <= ${now} AND (lease_until IS NULL OR lease_until <= ${now})
+          ORDER BY next_attempt_at, created_at, id
+          LIMIT ${limit * 4}`,
+    );
+    // At most one per subscriber, and none for a subscriber already busy.
+    const taken = new Set(busySubscribers);
+    candidates = [];
+    for (const h of heads) {
+      if (candidates.length >= limit) break;
+      if (h.kind === 'webhook' && h.webhook_id) {
+        if (taken.has(h.webhook_id)) continue;
+        taken.add(h.webhook_id);
+      }
+      candidates.push(h);
+    }
+  } else {
+    candidates = await db.all<{ id: string; kind: string; webhook_id: string | null }>(
+      sql`SELECT o.id, o.kind, o.webhook_id FROM outbox o WHERE ${sql.join(due, sql` AND `)}
+          ORDER BY o.next_attempt_at, o.created_at, o.id
+          LIMIT ${limit}`,
+    );
+  }
   if (candidates.length === 0) return [];
   const ids = sql.join(
     candidates.map((c) => sql`${c.id}`),
@@ -356,7 +426,7 @@ export async function markOutboxDone(
 /**
  * Record a failed attempt and schedule the next one. `attempts` is the new
  * (incremented) count; the row stays `pending` and is due again `delayMs`
- * after `now` (default `backoffMs(attempts)`), counted from the FAILURE, not
+ * after `now` (default `backoffMs(attempts)`, at most `MAX_BACKOFF_MS`), counted from the FAILURE, not
  * from when the batch it was in started. The first failure is remembered in
  * `first_failed_at`, which the retry horizon counts from. Releases the lease.
  */
@@ -366,7 +436,9 @@ export async function markOutboxRetry(
   args: { attempts: number; error: string; now?: number; delayMs?: number; leaseToken?: string | null },
 ): Promise<boolean> {
   const now = args.now ?? Date.now();
-  const nextAt = now + Math.max(0, args.delayMs ?? backoffMs(args.attempts));
+  // Never later than MAX_BACKOFF_MS: an in-order claim looks for a backing-off
+  // row only that far ahead (see `claimDueOutbox`).
+  const nextAt = now + Math.min(MAX_BACKOFF_MS, Math.max(0, args.delayMs ?? backoffMs(args.attempts)));
   const row = await db.get<{ id: string }>(
     sql`UPDATE outbox
         SET attempts = ${args.attempts}, next_attempt_at = ${nextAt},

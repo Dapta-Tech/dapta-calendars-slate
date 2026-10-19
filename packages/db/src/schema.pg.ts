@@ -457,6 +457,8 @@ export const outbox = pgTable('outbox', {
   leaseToken: text('lease_token'),
   /** Epoch-ms of the first failed attempt; the retry horizon counts from it. */
   firstFailedAt: bigint('first_failed_at', { mode: 'number' }),
+  /** Rows of one kind sharing it go one at a time, in queue order (0026/0025). */
+  orderKey: text('order_key'),
 });
 
 /**
