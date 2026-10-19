@@ -20,6 +20,7 @@ import {
   formVariable,
   renderTemplate as renderWithEngine,
   templateVariableNames,
+  type TemplateAudience,
   type TemplateLocale,
   type TemplateValue,
 } from '@slate/engine';
@@ -67,6 +68,11 @@ export const ACCOUNT_TEMPLATE_KEYS = EMAIL_TEMPLATE_KEYS.filter(
 
 export function isAccountTemplateKey(v: string): v is EmailTemplateKey {
   return isEmailTemplateKey(v) && !(EVENT_LEVEL_TEMPLATE_KEYS as readonly string[]).includes(v);
+}
+
+/** Who reads a key's copy: the `host_*` keys go to the host side, the rest to the invitee. */
+export function templateAudience(key: EmailTemplateKey): TemplateAudience {
+  return key.startsWith('host_') ? 'host' : 'invitee';
 }
 
 /**
@@ -299,7 +305,9 @@ export function templateVars(
     attendee_first_name: attendeeName.trim().split(/\s+/)[0] ?? '',
     attendee_email: n.attendee.email ?? '',
     attendee_phone: n.attendee.phone?.trim() ?? '',
-    guests: (n.guests ?? []).map((g) => g.email).filter(Boolean).join(', '),
+    // The other people on the booking are the host's to read: on a group
+    // event they are strangers to each invitee.
+    guests: n.audience === 'host' ? (n.guests ?? []).map((g) => g.email).filter(Boolean).join(', ') : '',
     attendee_time_zone: n.attendee.timeZone ?? '',
     host_name: n.host.name ?? '',
     host_email: n.host.email ?? '',

@@ -59,7 +59,8 @@ export interface BookingNotification {
   };
   /**
    * Everyone else the booking invites (extra attendees, added guests), for the
-   * host's copy. Snapshotted at enqueue like the rest. Absent = none listed.
+   * host's copy only (its details block and `{{guests}}`); an invitee copy
+   * never carries it. Snapshotted at enqueue like the rest. Absent = none listed.
    */
   guests?: BookingGuest[] | null;
   /**

@@ -126,7 +126,7 @@ describe('the template engine in emails', () => {
       eventDescription: 'A first call.',
       workspaceName: 'Acme',
       teamName: 'Sales',
-      audience: 'attendee',
+      audience: 'host',
     };
     const v = templateVars(n);
     expect(v.attendee_first_name).toBe('Sam');
@@ -141,12 +141,15 @@ describe('the template engine in emails', () => {
     expect(v.workspace_name).toBe('Acme');
     expect(v.team_name).toBe('Sales');
     expect(v.booking_uid).toBe('bk-123');
-    // The invitee reads in their zone; the explicit variants name one side.
-    expect(v.time_zone).toBe('America/New_York');
-    expect(v.start_time).toMatch(/11:00/);
-    expect(v.start_time_attendee).toBe(v.start_time);
-    expect(v.start_time_host).toMatch(/5:00/);
+    // The host reads in their zone; the explicit variants name one side.
+    expect(v.time_zone).toBe('Europe/Madrid');
+    expect(v.start_time).toMatch(/5:00/);
+    expect(v.start_time_host).toBe(v.start_time);
     expect(v.end_time_host).toMatch(/5:30/);
+    expect(v.start_time_attendee).toMatch(/11:00/);
+    // The invitee's copy never lists the other people on the booking.
+    expect(templateVars({ ...n, audience: 'attendee' }).guests).toBe('');
+    expect(templateVars({ ...n, audience: 'attendee' }).time_zone).toBe('America/New_York');
   });
 
   it('reads a payload queued before the new fields as the old mail did', () => {
@@ -209,6 +212,65 @@ describe('the template engine in emails', () => {
     const r = renderTemplate({ subject: '{{event_title}} {{event_title}}', body: 'b' }, templateVars(evil));
     expect(r.subject).not.toMatch(/[\r\n\u202E]/);
     expect(r.subject.length).toBeLessThanOrEqual(MAX_RENDERED_SUBJECT);
+  });
+});
+
+/**
+ * The renderer this module shipped before the engine, verbatim. Every template
+ * a host could save with it must render byte for byte the same on the engine;
+ * only what it could not read (aliases, fallbacks, blocks) may differ.
+ */
+const OLD_TOKEN_RE = /\{\{\s*([a-z_]+|form\.[A-Za-z0-9_]{1,64})\s*\}\}/g;
+function oldRender(template: { subject: string; body: string }, vars: Record<string, unknown>) {
+  const value = (name: string): string => {
+    if (!Object.hasOwn(vars, name)) return '';
+    const v = vars[name];
+    if (v == null) return '';
+    if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+    if (Array.isArray(v)) return v.map(String).filter(Boolean).join(', ');
+    return String(v);
+  };
+  const subject = template.subject
+    .replace(OLD_TOKEN_RE, (_, name: string) => value(name))
+    .replace(/\s+/g, ' ')
+    .trim();
+  const lines = template.body
+    .split('\n')
+    .map((line) => {
+      let sawToken = false;
+      let sawValue = false;
+      const out = line.replace(OLD_TOKEN_RE, (_, name: string) => {
+        sawToken = true;
+        const v = value(name);
+        if (v !== '') sawValue = true;
+        return v;
+      });
+      return sawToken && !sawValue ? null : out;
+    })
+    .filter((l): l is string => l !== null);
+  return { subject, text: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() };
+}
+
+describe('the engine renders every old template as the old renderer did', () => {
+  const vars = templateVars({
+    ...base,
+    cancellationReason: 'Line one\nline two',
+    formAnswers: { topic: 'Pricing', tools: ['Forms', 'Calendars'], newbie: true, empty: '' },
+  });
+  const corpus: Array<{ subject: string; body: string }> = [
+    ...EMAIL_TEMPLATE_KEYS.flatMap((k) => [DEFAULT_TEMPLATES.en[k], DEFAULT_TEMPLATES.es[k]]),
+    { subject: '{{{attendee_name}}}', body: '{{{attendee_name}}}\n{{ host_name }}\n{{Name}} {{abc1}}' },
+    { subject: 'x {{__proto__}} {{constructor}}', body: 'A{{__proto__}}\nB {{constructor}} {{location}}' },
+    { subject: 's', body: `Long {{${'a'.repeat(80)}}}\nkeep\r\nCRLF {{attendee_name}}\r\n{{nope}}\r\nend` },
+    { subject: 's', body: 'Topic: {{form.topic}}\nTools: {{form.tools}}\nNew: {{form.newbie}}\nEmpty: {{form.empty}}' },
+    { subject: 's', body: 'Why: {{cancellation_reason}}\n\n\n\nAfter {{form.missing}} {{form.a-b}}' },
+    { subject: 'a\tb  {{attendee_name}}\n', body: '{{ {{attendee_name}} }}\n{{attendee_name\n}}\nx {{ }} y' },
+    { subject: '{{else}} {{/if}}', body: 'Hi {{else}}\nThere {{/if}}\n{{#if x}}' },
+  ];
+
+  it.each(corpus.map((t, n) => [n, t] as const))('template %i', (_n, t) => {
+    const now = renderTemplate(t, vars);
+    expect({ subject: now.subject, text: now.text }).toEqual(oldRender(t, vars));
   });
 });
 

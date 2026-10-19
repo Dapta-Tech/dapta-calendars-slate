@@ -29,6 +29,7 @@ import {
   deleteTeam,
   getAccountMember,
   getEventTypeById,
+  getMe,
   getSchedule,
   getTeamById,
   inviteMember,
@@ -155,6 +156,12 @@ export class AdminCrudController {
     // event is recorded, which is also what analytics being off does.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {}
+
+  /** The language the host reads template errors in (their own UI locale). */
+  private async hostLocale(p: { accountId: string; memberId: string }): Promise<'en' | 'es'> {
+    const me = await getMe(this.db, p.accountId, p.memberId);
+    return me?.locale === 'es' ? 'es' : 'en';
+  }
 
   /**
    * Refuse a mapping this portal could not deliver (#64).
@@ -309,7 +316,7 @@ export class AdminCrudController {
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
-    assertReminderTemplates(input.reminders, []);
+    if (input.reminders) assertReminderTemplates(input.reminders, [], await this.hostLocale(p));
     await this.assertMappingsAreDeliverable(
       p.accountId,
       input.crmPropertyMappings,
@@ -333,7 +340,7 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
-    assertReminderTemplates(input.reminders, existing.reminders);
+    if (input.reminders) assertReminderTemplates(input.reminders, existing.reminders, await this.hostLocale(p));
     // Validated against the questions this save LEAVES BEHIND: a partial update
     // that omits `bookingFields` keeps the event's existing ones, and checking
     // against an empty list would refuse every question mapping on such a save.

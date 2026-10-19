@@ -53,6 +53,15 @@ describe('catalog', () => {
     }
   });
 
+  it('keeps the other guests to the host side of email', () => {
+    expect(variablesFor('email').map((d) => d.name)).toContain('guests');
+    expect(variablesFor('email', 'host').map((d) => d.name)).toContain('guests');
+    expect(variablesFor('email', 'invitee').map((d) => d.name)).not.toContain('guests');
+    expect(variablesFor('description').map((d) => d.name)).not.toContain('guests');
+    expect(codes('{{guests}}')).toEqual(['host_only']);
+    expect(validateTemplate('{{guests}}', { context: 'email', audience: 'host' })).toEqual([]);
+  });
+
   it('resolves the short aliases to canonical names', () => {
     expect(canonicalVariable('name')).toBe('attendee_name');
     expect(canonicalVariable('first_name')).toBe('attendee_first_name');
@@ -175,6 +184,18 @@ describe('renderTemplate: safety', () => {
     expect(text('{{attendee_name}}', { attendee_name: 'a\tb\nc\u202Ed' })).toBe('a\tb\ncd');
   });
 
+  it('removes the Arabic letter mark and invisible spaces, keeps the joiners emoji need', () => {
+    const v = { attendee_name: 'A\u061CB\u200BC\u2060D\uFEFFE' };
+    expect(line('{{attendee_name}}', v)).toBe('ABCDE');
+    const family = '\uD83D\uDC69\u200D\uD83D\uDC67';
+    expect(line('{{attendee_name}}', { attendee_name: family })).toBe(family);
+  });
+
+  it('never cuts an emoji in half at the cap', () => {
+    const out = cleanTemplateValue(`${'a'.repeat(198)}\uD83D\uDE00tail`, { mode: 'line' });
+    expect(out).toBe(`${'a'.repeat(198)}…`);
+  });
+
   it('can strip angle brackets for sinks that may read markup', () => {
     expect(
       renderTemplate('{{attendee_name}}', { attendee_name: '<a href=x>hi</a>' }, { mode: 'text', stripAngleBrackets: true }),
@@ -192,6 +213,47 @@ describe('renderTemplate: safety', () => {
   it('treats a non-finite or object value as empty', () => {
     const v = { attendee_name: { toString: () => 'boom' } as unknown as string, host_name: Number.POSITIVE_INFINITY };
     expect(line('[{{attendee_name}}][{{host_name}}]', v)).toBe('[][]');
+  });
+});
+
+describe('renderTemplate: stored text reads as the first email renderer read it', () => {
+  it('keeps its name charset: digits print as text, any lowercase name resolves', () => {
+    expect(text('Code {{abc1}}')).toBe('Code {{abc1}}');
+    expect(text(`Code {{${'a'.repeat(80)}}}`)).toBe('');
+    expect(text(`Keep {{${'a'.repeat(80)}}} {{host_name}}`)).toBe('Keep  Felipe');
+  });
+
+  it('never reads a tag across lines', () => {
+    expect(text('{{@N@attendee_name@N@}}'.replace(/@N@/g, '\n'))).toBe('{{\nattendee_name\n}}');
+  });
+
+  it('prints a block that does not pair up as written, so nothing after it is hidden', () => {
+    expect(text('Hi\n{{#if form.vip}}\nVIP\nThanks')).toBe('Hi\n{{#if form.vip}}\nVIP\nThanks');
+    expect(text('Hi {{/if}} there')).toBe('Hi {{/if}} there');
+    expect(text('A {{#if form.company}}x{{/if}} {{/if}} B')).toBe('A x {{/if}} B');
+    // An `{{else}}` outside a block is an unknown name: empty, and its line drops.
+    expect(text('Hi {{else}}\nNext')).toBe('Next');
+    // Inside a block that never closes, the `{{else}}` is outside every block
+    // too, so its line drops, as the first renderer dropped it.
+    expect(text('{{#if form.company}}A{{else}}B\nNext')).toBe('Next');
+    expect(text('{{#if form.company}}A {{name}}{{else}}B')).toBe('{{#if form.company}}A Ana GómezB');
+  });
+});
+
+describe('renderTemplate: blocks and blank lines', () => {
+  it('drops a line left blank by an inline block', () => {
+    expect(text('A\n{{#if form.missing}}Company: {{form.company}}{{/if}}\nB')).toBe('A\nB');
+    expect(text('A\n  {{#if form.missing}}x{{/if}}  \nB')).toBe('A\nB');
+    expect(text('A\n{{#if form.company}}Company: {{form.company}}{{/if}}\nB')).toBe('A\nCompany: Acme\nB');
+  });
+
+  it('keeps a blank line the host wrote after a standalone block', () => {
+    expect(text('A\n{{#if form.missing}}\nB\n{{/if}}\n\nC')).toBe('A\n\nC');
+    expect(text('A\n{{#if form.company}}\nB\n{{/if}}\n\nC')).toBe('A\nB\n\nC');
+  });
+
+  it('reads a yes/no answer by its word with contains, as with ==', () => {
+    expect(line('{{#if form.newbie contains "yes"}}y{{/if}}{{#if form.newbie contains "es"}}partial{{/if}}')).toBe('y');
   });
 });
 
@@ -254,6 +316,12 @@ describe('validateTemplate', () => {
       'form.a',
       'host_name',
     ]);
+  });
+
+  it('quotes a token with a dollar sign as written', () => {
+    expect(templateIssueMessage({ code: 'bad_tag', token: "{{cost $'}}" })).toBe(
+      "{{cost $'}} is not valid. Variables look like {{attendee_name}}.",
+    );
   });
 
   it('explains every issue in both languages', () => {

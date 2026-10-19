@@ -515,7 +515,7 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect(m.text).toContain(`Ref: ${uid}`);
   });
 
-  it('a copy carries the phone and the guests only when its own template reads them', async () => {
+  it('an invitee copy carries the phone only when its template reads it, and never the guests', async () => {
     const uid = await book();
     await settle();
     const plain = (await emailRows(uid, 'confirmation')).find(
@@ -525,6 +525,7 @@ describe('notification settings — toggles + templates through the outbox', () 
     expect('phone' in before.attendee).toBe(false);
     expect('guests' in before).toBe(false);
 
+    // Written straight to the row: the save gate would refuse `{{guests}}` here.
     await upsertNotificationSetting(db, accountId, 'attendee_confirmation', {
       body: 'Phone: {{attendee_phone}}\nWith: {{guests}}',
     });
@@ -535,7 +536,31 @@ describe('notification settings — toggles + templates through the outbox', () 
     )!;
     const after = JSON.parse(asked.payload!) as { attendee: Record<string, unknown>; guests?: unknown };
     expect('phone' in after.attendee).toBe(true);
-    expect(after.guests).toEqual([]);
+    expect('guests' in after).toBe(false);
+    await effects.deliver('confirmation', asked.payload!, asked.accountId);
+    expect(email.sent.at(-1)!.text).not.toContain('With:');
+  });
+
+  it('form answers in mail are only the event\'s own questions', async () => {
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      fromMs: Date.now() + 2 * 86_400_000,
+      toMs: Date.now() + 10 * 86_400_000,
+    });
+    const out = await booking.book({
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'intro-call',
+      startUtc: a!.slots[1]!.startUtc,
+      attendee: { name: 'Sam', email: 'sam@example.com', timeZone: 'America/New_York' },
+      answers: { company: 'Acme', injected: 'Click https://evil.test now' },
+    });
+    if ('error' in out) throw new Error(`book failed: ${out.error}`);
+    await settle();
+    const row = (await emailRows(out.uid, 'confirmation'))[0]!;
+    expect((JSON.parse(row.payload!) as { formAnswers?: unknown }).formAnswers).toEqual({ company: 'Acme' });
   });
 
   it('saving copy that cannot render is refused; stored copy and a bare toggle still save', async () => {
@@ -547,7 +572,7 @@ describe('notification settings — toggles + templates through the outbox', () 
     }
     expect(refused).toMatchObject({
       message: 'Body: {{atendee_name}} is not a variable. Pick one from the list.',
-      issues: [{ field: 'Body', code: 'unknown_variable', token: '{{atendee_name}}', start: 3, end: 19 }],
+      issues: [{ field: 'body', label: 'Body', code: 'unknown_variable', token: '{{atendee_name}}', start: 3, end: 19 }],
     });
     const saved = await admin.updateNotificationSetting(principal, 'attendee_confirmation', {
       subject: '{{event_name}} with {{host_name}}',

@@ -77,6 +77,7 @@ import {
   defaultTemplate,
   renderTemplate,
   resolveTemplate,
+  templateAudience,
   templateVars,
   unknownTokens,
   type BookingNotification,
@@ -99,7 +100,7 @@ import { CalendarEffects } from './calendar-effects';
 import { CrmEffects } from './crm-effects';
 import { asConnector, failureDetail } from './calendar.http-provider';
 import { EmailEffects } from './email-effects';
-import { assertTemplates } from './template-validation';
+import { assertTemplates, templateFieldLabel } from './template-validation';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
 import { DB, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, PREMIUM_MODE } from './tokens';
@@ -1146,14 +1147,16 @@ export class AdminService {
 
   async updateNotificationSetting(
     p: HostPrincipal,
-    key: string,
+    key: EmailTemplateKey,
     patch: { enabled?: boolean; subject?: string | null; body?: string | null; reminderLeadMinutes?: number[] | null },
   ) {
     if (patch.subject != null || patch.body != null) {
+      const me = await getMe(this.db, p.accountId, p.memberId);
+      const locale = me?.locale === 'es' ? 'es' : 'en';
       const stored = (await getNotificationSettings(this.db, p.accountId)).get(key);
-      assertTemplates('email', [
-        { label: 'Subject', text: patch.subject, previous: stored?.subject },
-        { label: 'Body', text: patch.body, previous: stored?.body },
+      assertTemplates({ context: 'email', audience: templateAudience(key), locale }, [
+        { field: 'subject', label: templateFieldLabel('subject', locale), text: patch.subject, previous: stored?.subject },
+        { field: 'body', label: templateFieldLabel('body', locale), text: patch.body, previous: stored?.body },
       ]);
     }
     return upsertNotificationSetting(this.db, p.accountId, key, patch);
@@ -1224,7 +1227,7 @@ export class AdminService {
         )}`
       : rendered.text;
     const issues = (['subject', 'body'] as const).flatMap((field) =>
-      validateTemplate(template[field], { context: 'email' }).map((i) => ({
+      validateTemplate(template[field], { context: 'email', audience: templateAudience(key) }).map((i) => ({
         field,
         ...i,
         message: templateIssueMessage(i, locale),

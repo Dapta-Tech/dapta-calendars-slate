@@ -14,12 +14,19 @@
  * link, for instance, is a capability that must never sit in a calendar event
  * shared with guests, and the meeting link does not exist yet when the event
  * is first written.
+ *
+ * `hostOnly` marks a variable that reads other people's data, so it resolves
+ * only in the host's copy of an email: `guests` lists everyone else on the
+ * booking, and on a group event those are strangers to each invitee.
  */
 
 export const TEMPLATE_CONTEXTS = ['title', 'description', 'email'] as const;
 export type TemplateContext = (typeof TEMPLATE_CONTEXTS)[number];
 
 export type TemplateLocale = 'en' | 'es';
+
+/** Who reads a rendered text: the invitee (and anyone they share it with) or the host side. */
+export type TemplateAudience = 'invitee' | 'host';
 
 export const TEMPLATE_VARIABLE_GROUPS = ['invitee', 'host', 'event', 'time', 'links', 'booking'] as const;
 export type TemplateVariableGroup = (typeof TEMPLATE_VARIABLE_GROUPS)[number];
@@ -31,6 +38,8 @@ export interface TemplateVariableDef {
   label: Record<TemplateLocale, string>;
   /** What the preview shows for this variable. */
   sample: Record<TemplateLocale, string>;
+  /** Resolves only in the host's copy (see the header). */
+  hostOnly?: true;
 }
 
 const ALL: readonly TemplateContext[] = ['title', 'description', 'email'];
@@ -43,8 +52,16 @@ function v(
   contexts: readonly TemplateContext[],
   label: [string, string],
   sample: [string, string],
+  hostOnly?: true,
 ): TemplateVariableDef {
-  return { name, group, contexts, label: { en: label[0], es: label[1] }, sample: { en: sample[0], es: sample[1] } };
+  return {
+    name,
+    group,
+    contexts,
+    label: { en: label[0], es: label[1] },
+    sample: { en: sample[0], es: sample[1] },
+    ...(hostOnly ? { hostOnly } : {}),
+  };
 }
 
 /**
@@ -58,7 +75,7 @@ export const TEMPLATE_CATALOG: readonly TemplateVariableDef[] = [
   v('attendee_first_name', 'invitee', ALL, ['Invitee first name', 'Nombre de pila del invitado'], ['Ana', 'Ana']),
   v('attendee_email', 'invitee', ALL, ['Invitee email', 'Correo del invitado'], ['ana@example.com', 'ana@example.com']),
   v('attendee_phone', 'invitee', ALL, ['Invitee phone', 'Teléfono del invitado'], ['+57 300 123 4567', '+57 300 123 4567']),
-  v('guests', 'invitee', BODY, ['Other guests', 'Otros invitados'], ['luis@example.com', 'luis@example.com']),
+  v('guests', 'invitee', EMAIL, ['Other guests', 'Otros invitados'], ['luis@example.com', 'luis@example.com'], true),
   v('attendee_time_zone', 'invitee', BODY, ['Invitee time zone', 'Zona horaria del invitado'], ['America/Bogota', 'America/Bogota']),
   v('host_name', 'host', ALL, ['Host name', 'Nombre del anfitrión'], ['Felipe Gómez', 'Felipe Gómez']),
   v('host_email', 'host', BODY, ['Host email', 'Correo del anfitrión'], ['felipe@example.com', 'felipe@example.com']),
@@ -115,9 +132,15 @@ export function templateVariable(name: string): TemplateVariableDef | undefined 
   return BY_NAME.get(canonicalVariable(name));
 }
 
-/** The catalog entries usable in one context, in catalog order. */
-export function variablesFor(context: TemplateContext): TemplateVariableDef[] {
-  return TEMPLATE_CATALOG.filter((d) => d.contexts.includes(context));
+/**
+ * The catalog entries usable in one context, in catalog order. With an
+ * audience, only those that resolve for it (no host-only variable for the
+ * invitee); without one, all of them.
+ */
+export function variablesFor(context: TemplateContext, audience?: TemplateAudience): TemplateVariableDef[] {
+  return TEMPLATE_CATALOG.filter(
+    (d) => d.contexts.includes(context) && !(audience === 'invitee' && d.hostOnly),
+  );
 }
 
 export function isFormVariable(name: string): boolean {

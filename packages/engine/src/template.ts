@@ -35,6 +35,7 @@ import {
   canonicalVariable,
   isFormVariable,
   templateVariable,
+  type TemplateAudience,
   type TemplateContext,
   type TemplateLocale,
 } from './template-catalog';
@@ -60,6 +61,8 @@ export type TemplateNode =
       cond: TemplateCondition;
       then: TemplateNode[];
       otherwise: TemplateNode[];
+      /** The opening tag shares its line with other text (not standalone). */
+      inline: boolean;
       start: number;
       end: number;
       raw: string;
@@ -69,6 +72,7 @@ export type TemplateIssueCode =
   | 'unknown_variable'
   | 'unknown_question'
   | 'not_available'
+  | 'host_only'
   | 'bad_tag'
   | 'unclosed_tag'
   | 'unclosed_block'
@@ -103,9 +107,10 @@ export const MAX_TEMPLATE_LITERAL = 100;
  * Parser                                                                   *
  * ------------------------------------------------------------------------ */
 
-// A leading underscore parses (and then resolves empty) so `{{__proto__}}` in a
-// stored template renders as nothing, exactly as the first email renderer did.
-const NAME = String.raw`(?:[a-z_][a-z0-9_]{0,63}|form\.[A-Za-z0-9_]{1,64})`;
+// The built-in half is the first email renderer's own charset, so a stored
+// template reads the same: `{{__proto__}}` or a long unknown name resolves
+// empty, `{{abc1}}` stays text. No catalog name has a digit.
+const NAME = String.raw`(?:[a-z_]+|form\.[A-Za-z0-9_]{1,64})`;
 // Straight double, straight single and typographic double quotes (an OS
 // autocorrect can turn one into the other while a host types).
 const LITERAL = String.raw`(?:"([^"\r\n]*)"|'([^'\r\n]*)'|“([^”\r\n]*)”)`;
@@ -127,6 +132,8 @@ type Tag =
   | { kind: 'close' };
 
 function readTag(inner: string): Tag | null {
+  // A tag is on one line; the first renderer matched body lines one at a time.
+  if (/[\r\n]/.test(inner)) return null;
   const body = inner.trim();
   // `else` would also read as a variable name, so the block words go first.
   if (ELSE_TAG.test(body)) return { kind: 'else' };
@@ -150,7 +157,7 @@ interface Frame {
 
 type Token =
   | { t: 'text'; value: string }
-  | { t: 'tag'; tag: Tag; raw: string; start: number; end: number };
+  | { t: 'tag'; tag: Tag; raw: string; start: number; end: number; standalone?: boolean };
 
 /** Split the text into literal runs and recognized tags (positions are offsets into `text`). */
 function tokenize(text: string, issues: TemplateIssue[]): Token[] {
@@ -203,6 +210,59 @@ function tokenize(text: string, issues: TemplateIssue[]): Token[] {
 }
 
 /**
+ * Blocks that cannot pair up render as the text they are, the way the first
+ * email renderer printed any `{{#if ...}}` it could not read: an unclosed
+ * `{{#if}}` and a stray `{{/if}}` print as written, so a broken block never
+ * hides the rest of a message. A stray `{{else}}` renders empty, as that
+ * renderer treated every lowercase name it did not know. Each is still an
+ * error for `validateTemplate`.
+ */
+function pairBlocks(tokens: readonly Token[], issues: TemplateIssue[]): Token[] {
+  const literal = new Set<number>();
+  const empty = new Set<number>();
+  // First the opens no close ever pairs with: a close always pairs with the
+  // nearest open still waiting, so taking those out moves no other pair.
+  const waiting: number[] = [];
+  tokens.forEach((tok, n) => {
+    if (tok.t !== 'tag') return;
+    if (tok.tag.kind === 'if') waiting.push(n);
+    else if (tok.tag.kind === 'close' && waiting.pop() === undefined) {
+      issues.push(issue('stray_close', tok.raw, tok.start, tok.end));
+      literal.add(n);
+    }
+  });
+  for (const n of waiting) {
+    const tok = tokens[n] as Extract<Token, { t: 'tag' }>;
+    issues.push(issue('unclosed_block', tok.raw, tok.start, tok.end));
+    literal.add(n);
+  }
+  // Then an `{{else}}` outside every block that is left.
+  let depth = 0;
+  tokens.forEach((tok, n) => {
+    if (tok.t !== 'tag' || literal.has(n)) return;
+    if (tok.tag.kind === 'if') depth += 1;
+    else if (tok.tag.kind === 'close') depth -= 1;
+    else if (tok.tag.kind === 'else' && depth === 0) {
+      issues.push(issue('stray_else', tok.raw, tok.start, tok.end));
+      empty.add(n);
+    }
+  });
+  const out: Token[] = [];
+  tokens.forEach((tok, n) => {
+    const last = out[out.length - 1];
+    const text = tok.t === 'text' ? tok.value : literal.has(n) ? tok.raw : null;
+    if (text !== null) {
+      if (last && last.t === 'text') last.value += text;
+      else out.push({ t: 'text', value: text });
+    } else if (empty.has(n) && tok.t === 'tag') {
+      // An empty name is the one that never resolves (and is never reported twice).
+      out.push({ ...tok, tag: { kind: 'var', name: '', fallback: null } });
+    } else out.push(tok);
+  });
+  return out;
+}
+
+/**
  * Mustache's "standalone tag" rule: a line holding nothing but one block tag
  * disappears with its line break, so
  *
@@ -238,17 +298,18 @@ function applyStandalone(tokens: Token[]): void {
       next.value = after.slice(trail[0].length);
       startsLine.add(next);
     }
+    tok.standalone = true;
   }
 }
 
 /**
  * Parse a template into nodes plus syntax issues. Never throws: a tag that
  * does not parse stays literal text (exactly how the original email renderer
- * treated `{{Name}}`), and an unclosed block keeps the text it holds.
+ * treated `{{Name}}`), and so does a block that does not pair up.
  */
 export function parseTemplate(text: string): ParsedTemplate {
   const issues: TemplateIssue[] = [];
-  const tokens = tokenize(text, issues);
+  const tokens = pairBlocks(tokenize(text, issues), issues);
   applyStandalone(tokens);
 
   const root: TemplateNode[] = [];
@@ -283,6 +344,7 @@ export function parseTemplate(text: string): ParsedTemplate {
         cond: tag.cond,
         then: [],
         otherwise: [],
+        inline: !tok.standalone,
         start,
         end,
         raw,
@@ -290,17 +352,13 @@ export function parseTemplate(text: string): ParsedTemplate {
       target().push(node);
       stack.push({ node, inElse: false });
     } else if (tag.kind === 'else') {
-      const top = stack[stack.length - 1];
-      if (!top) issues.push(issue('stray_else', raw, start, end));
-      else if (top.inElse) issues.push(issue('duplicate_else', raw, start, end));
+      // `pairBlocks` has made every remaining `{{else}}` sit inside a block.
+      const top = stack[stack.length - 1]!;
+      if (top.inElse) issues.push(issue('duplicate_else', raw, start, end));
       else top.inElse = true;
     } else {
-      const top = stack.pop();
-      if (!top) issues.push(issue('stray_close', raw, start, end));
+      stack.pop();
     }
-  }
-  for (const frame of stack) {
-    issues.push(issue('unclosed_block', frame.node.raw, frame.node.start, frame.node.end));
   }
   return { nodes: root, issues };
 }
@@ -315,6 +373,11 @@ function issue(code: TemplateIssueCode, token: string, start: number, end: numbe
 
 export interface ValidateOptions {
   context: TemplateContext;
+  /**
+   * Who reads the text. A host-only variable (`guests`) is refused unless it
+   * is `host`, so an omitted audience fails safe.
+   */
+  audience?: TemplateAudience;
   /**
    * The event type's question names. Given: `{{form.x}}` for a question the
    * event does not ask is a WARNING (questions can be renamed or removed after
@@ -331,6 +394,7 @@ export function validateTemplate(text: string, opts: ValidateOptions): TemplateI
   const issues = [...parsed.issues];
   const questions = opts.questions ? new Set(opts.questions) : null;
   const check = (name: string, raw: string, start: number, end: number): void => {
+    if (name === '') return; // a stray `{{else}}`, already reported by the parser
     if (isFormVariable(name)) {
       const field = name.slice(FORM_VARIABLE_PREFIX.length);
       if (!FORM_FIELD_NAME_RE.test(field)) issues.push(issue('bad_tag', raw, start, end));
@@ -340,6 +404,7 @@ export function validateTemplate(text: string, opts: ValidateOptions): TemplateI
     const def = templateVariable(name);
     if (!def) issues.push(issue('unknown_variable', raw, start, end));
     else if (!def.contexts.includes(opts.context)) issues.push(issue('not_available', raw, start, end));
+    else if (def.hostOnly && opts.audience !== 'host') issues.push(issue('host_only', raw, start, end));
   };
   walk(parsed.nodes, (node) => {
     if (node.type === 'var') check(node.name, node.raw, node.start, node.end);
@@ -357,7 +422,7 @@ export function templateErrors(text: string, opts: ValidateOptions): TemplateIss
 export function templateVariableNames(text: string): string[] {
   const names = new Set<string>();
   walk(parseTemplate(text).nodes, (node) => {
-    if (node.type === 'var') names.add(node.name);
+    if (node.type === 'var' && node.name !== '') names.add(node.name);
     else if (node.type === 'if') names.add(node.cond.name);
   });
   return [...names];
@@ -385,6 +450,10 @@ const MESSAGES: Record<TemplateIssueCode, Record<TemplateLocale, string>> = {
   not_available: {
     en: '{token} is not available here.',
     es: '{token} no está disponible aquí.',
+  },
+  host_only: {
+    en: "{token} is only available in the host's copy.",
+    es: '{token} solo está disponible en la copia del anfitrión.',
   },
   bad_tag: {
     en: '{token} is not valid. Variables look like {{attendee_name}}.',
@@ -422,7 +491,8 @@ const MESSAGES: Record<TemplateIssueCode, Record<TemplateLocale, string>> = {
 
 /** A plain-language message for one issue. */
 export function templateIssueMessage(i: Pick<TemplateIssue, 'code' | 'token'>, locale: TemplateLocale = 'en'): string {
-  return MESSAGES[i.code][locale].replace('{token}', i.token);
+  // A function, so a `$` in the token is never read as a replacement pattern.
+  return MESSAGES[i.code][locale].replace('{token}', () => i.token);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -457,15 +527,24 @@ export interface RenderOptions {
   stripAngleBrackets?: boolean;
 }
 
-// C0 and C1 controls except tab/LF/CR (handled per mode), plus bidi embedding,
-// override and isolate controls and the LRM/RLM marks: the classic ways to make
-// rendered text read differently from what was typed.
+// C0 and C1 controls except tab/LF/CR (handled per mode), the bidi embedding,
+// override and isolate controls, the LRM, RLM and Arabic letter marks, and the
+// invisible zero-width space, word joiner and BOM: the classic ways to make
+// rendered text read differently from what was typed. The zero-width joiner
+// and non-joiner stay, since emoji and several scripts need them.
 // eslint-disable-next-line no-control-regex
-const UNSAFE_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+const UNSAFE_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g;
+
+/** The default cap on one inserted value, per mode (see `RenderOptions`). */
+export const MAX_TEMPLATE_VALUE: Readonly<Record<RenderMode, number>> = { line: 200, text: 2000 };
 
 function cap(value: string, max: number): string {
   if (value.length <= max) return value;
-  return `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+  let cut = Math.max(0, max - 1);
+  // Never cut between the two halves of an emoji or another astral character.
+  const code = value.charCodeAt(cut - 1);
+  if (code >= 0xd800 && code <= 0xdbff) cut -= 1;
+  return `${value.slice(0, cut).trimEnd()}…`;
 }
 
 /** One value as text: lists joined, booleans as Yes/No in the reader's language. */
@@ -489,7 +568,7 @@ export function cleanTemplateValue(text: string, opts: Pick<RenderOptions, 'mode
   if (opts.mode === 'line') out = out.replace(/[\n\t]+/g, ' ');
   out = out.replace(UNSAFE_CHARS, '');
   if (opts.stripAngleBrackets) out = out.replace(/[<>]/g, '');
-  return cap(out, opts.maxValueLength ?? (opts.mode === 'line' ? 200 : 2000));
+  return cap(out, opts.maxValueLength ?? MAX_TEMPLATE_VALUE[opts.mode]);
 }
 
 function lookup(values: TemplateValues, name: string): TemplateValue {
@@ -520,13 +599,15 @@ function holds(cond: TemplateCondition, values: TemplateValues): boolean {
   if (cond.op === 'contains') {
     // A list contains an item; a text contains a phrase. Both ignore case.
     if (Array.isArray(raw)) return raw.some((x) => itemEquals(x, want));
+    // A yes/no answer has no phrase in it: it contains only its own word.
+    if (typeof raw === 'boolean') return itemEquals(raw, want);
     return want !== '' && normalized(formatTemplateValue(raw)).includes(want);
   }
   const equal = Array.isArray(raw) ? raw.some((x) => itemEquals(x, want)) : itemEquals(raw, want);
   return cond.op === 'eq' ? equal : !equal;
 }
 
-type Piece = { kind: 'lit'; text: string } | { kind: 'val'; text: string };
+type Piece = { kind: 'lit' | 'val'; text: string } | { kind: 'block'; text: '' };
 
 function emit(nodes: readonly TemplateNode[], values: TemplateValues, opts: RenderOptions, out: Piece[]): void {
   const locale = opts.locale ?? 'en';
@@ -537,6 +618,8 @@ function emit(nodes: readonly TemplateNode[], values: TemplateValues, opts: Rend
       if (text.trim() === '' && node.fallback !== null) text = cleanTemplateValue(node.fallback, opts);
       out.push({ kind: 'val', text });
     } else {
+      // An inline block marks its line, so a line left blank by it drops.
+      if (node.inline) out.push({ kind: 'block', text: '' });
       emit(holds(node.cond, values) ? node.then : node.otherwise, values, opts, out);
     }
   }
@@ -546,20 +629,31 @@ function emit(nodes: readonly TemplateNode[], values: TemplateValues, opts: Rend
  * Text mode's line rule (unchanged from the first email renderer): a template
  * line whose variables ALL came out empty is dropped, so "Where: {{location}}"
  * vanishes when there is no location. Line breaks INSIDE a value (a long-text
- * answer) do not split a template line; literal-only lines always stay.
+ * answer) do not split a template line; literal-only lines always stay. A line
+ * that holds an inline block and nothing but blanks once rendered drops too,
+ * so `{{#if form.company}}Company: {{form.company}}{{/if}}` on a line of its
+ * own leaves no gap when there is no company.
  */
 function joinLines(pieces: readonly Piece[]): string {
   const lines: string[] = [];
   let buf = '';
   let sawVar = false;
   let sawValue = false;
+  let sawBlock = false;
   const flush = (): void => {
-    if (!(sawVar && !sawValue)) lines.push(buf);
+    const emptyVars = sawVar && !sawValue;
+    const emptyBlock = sawBlock && buf.trim() === '';
+    if (!emptyVars && !emptyBlock) lines.push(buf);
     buf = '';
     sawVar = false;
     sawValue = false;
+    sawBlock = false;
   };
   for (const piece of pieces) {
+    if (piece.kind === 'block') {
+      sawBlock = true;
+      continue;
+    }
     if (piece.kind === 'val') {
       sawVar = true;
       if (piece.text !== '') sawValue = true;
