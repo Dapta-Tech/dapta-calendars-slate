@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { E2E } from './e2e/stack';
+import { ANALYTICS_ENV, E2E } from './e2e/stack';
 
 /**
  * The browser suite: the real web app and the real API on a fresh database,
@@ -54,6 +54,11 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: `node ../../scripts/qa/stand-in-analytics.mjs ${E2E.analyticsPort}`,
+      url: `${E2E.analytics}/__qa/events`,
+      reuseExistingServer: false,
+    },
+    {
       command: 'node e2e/start-api.mjs main',
       url: `${E2E.api}/health`,
       reuseExistingServer: false,
@@ -76,6 +81,7 @@ export default defineConfig({
         NEXT_PUBLIC_API_URL: E2E.api,
         API_URL: E2E.api,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
+        ...ANALYTICS_ENV,
       },
     },
   ],
