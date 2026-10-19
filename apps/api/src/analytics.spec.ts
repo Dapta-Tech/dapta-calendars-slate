@@ -234,7 +234,7 @@ describe('product analytics (API)', () => {
       const [event, account] = await payloads();
       expect(event!.capture!.properties).toMatchObject({ utm_source: 'newsletter', utm_withheld: true });
       expect(event!.capture!.properties).not.toHaveProperty('utm_content');
-      expect(account!.update!.properties).toEqual({ utm_source: 'newsletter', account_code: 'acme' });
+      expect(account!.update!.properties).toEqual({ utm_source: 'newsletter', utm_withheld: true, account_code: 'acme' });
       const sent = JSON.stringify(await payloads());
       expect(sent).not.toContain('ana@example.com');
       expect(sent).not.toContain('bob@example.com');

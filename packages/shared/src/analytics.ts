@@ -213,11 +213,13 @@ export const CAMPAIGN_VALUE_MAX = 100;
  * since it cannot be told from a numeric campaign id.
  *
  * Checked after Unicode compatibility folding (NFKC), so a fullwidth `＠` or
- * `／／` reads as what it looks like; the value sent is the one received.
- * Percent-encoded markers are refused too (`%25`, an encoded percent, covers a
- * value encoded twice). Plain `&` and `#` are allowed: "Q&A webinar" and
- * "Video #2" are real campaign names, and `=`, `?` and `//` already catch the
- * query and URL shapes they would otherwise take part in.
+ * `／／` reads as what it looks like; the value sent is the one received. A
+ * colon is refused outright: it is how a scheme (`tel:`, `mailto:`), a port
+ * or a credential starts, and campaign names do without one. The value has
+ * been decoded once already, so any `%XX` still in it means it was encoded
+ * twice to hide something, and it is refused. Plain `&` and `#` are allowed:
+ * "Q&A webinar" and "Video #2" are real campaign names, and `=`, `?` and `//`
+ * already catch the query and URL shapes they would otherwise take part in.
  */
 export function analyticsCampaignValue(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -226,12 +228,12 @@ export function analyticsCampaignValue(value: unknown): string | null {
   const folded = v.normalize('NFKC');
   // An address or handle, a query, a URL: a scheme or `//`, or a host
   // followed by a path. A bare host (`chatgpt.com`) is a source label.
-  if (/[@?=]|\/\/|[a-z0-9-]\.[a-z]{2,}\//i.test(folded)) return null;
+  if (/[@?=:]|\/\/|[a-z0-9-]\.[a-z]{2,}\//i.test(folded)) return null;
   if (/&#?\w+;/.test(folded)) return null;
   // A query parser turns a literal `+` into a space, so grouped digits count too.
   const digits = folded.replace(/\D/g, '').length;
   if (/^\+?[\d ().-]+$/.test(folded) && /[+ ().-]/.test(folded) && digits >= 9) return null;
-  if (/%(40|3f|3d|3a|2f|25)/i.test(folded)) return null;
+  if (/%[0-9a-f]{2}/i.test(folded)) return null;
   return v;
 }
 

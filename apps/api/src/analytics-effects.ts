@@ -204,6 +204,9 @@ export class AnalyticsEffects {
         },
         now,
       );
+      // The account says so too: an account whose every tag was withheld would
+      // otherwise read as one that arrived with none.
+      if (withheld) source.utm_withheld = true;
       if (Object.keys(source).length > 0) await this.enqueueAccount(who, source, now);
     } catch (err) {
       this.log.error(`analytics attribution not recorded: ${String(err)}`);
