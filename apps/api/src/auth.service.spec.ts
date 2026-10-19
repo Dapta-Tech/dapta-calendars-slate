@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from '@slate/db';
-import { LocalAuthProvider } from './auth.provider';
+import { LocalAuthProvider, type AuthProvider, type ResolvedHost } from './auth.provider';
 import { AuthService, LOGIN_SEEN_REFRESH_MS } from './auth.service';
 
 /**
@@ -39,6 +39,32 @@ describe('AuthService.resolveHost stamps the login, at most once a day', () => {
     await auth.resolveHost(req());
     expect(Number(await seenAt())).toBe(t0 + LOGIN_SEEN_REFRESH_MS + 1);
     spy.mockRestore();
+  });
+
+  it('stamps when the identity service vouched (the token issue time), never the request time', async () => {
+    const DAY = LOGIN_SEEN_REFRESH_MS;
+    let issuedAt = Date.now() - 40 * DAY;
+    const provider: AuthProvider = { name: 'fake', resolveHost: async (): Promise<ResolvedHost> => ({ ...alex, authenticatedAt: issuedAt }) };
+    const auth = new AuthService(db, provider);
+    await auth.resolveHost(req());
+    expect(Number(await seenAt())).toBe(issuedAt);
+    // The same old token used again and again: the stamp stays where it was.
+    for (let i = 0; i < 3; i += 1) await auth.resolveHost(req());
+    expect(Number(await seenAt())).toBe(issuedAt);
+    // A token minted today moves it forward...
+    const fresh = Date.now() - 1000;
+    issuedAt = fresh;
+    await auth.resolveHost(req());
+    expect(Number(await seenAt())).toBe(fresh);
+    // ...and an older one presented after it never moves it back.
+    issuedAt = fresh - 5 * DAY;
+    await auth.resolveHost(req());
+    expect(Number(await seenAt())).toBe(fresh);
+    // An issue time in the future counts as now.
+    issuedAt = Date.now() + 10 * DAY;
+    await db.run(sql`UPDATE member SET login_seen_at = NULL WHERE id = ${alex.memberId}`);
+    await auth.resolveHost(req());
+    expect(Number(await seenAt())).toBeLessThanOrEqual(Date.now());
   });
 
   it('a failed stamp never costs the request', async () => {

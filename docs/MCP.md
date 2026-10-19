@@ -279,8 +279,9 @@ token.
   `idp_subject` is that `sub`. The link is per person, so it reaches the
   person's members in every account (the same upstream user, `external_id`),
   also where their login never carried the `sub` (an account they reach by
-  switching). Of those, only members a verified web login resolved within
-  `OAUTH_LINK_MAX_AGE_DAYS` (default 30) count, the linking member included,
+  switching). Of those, only members the identity service vouched for within
+  `OAUTH_LINK_MAX_AGE_DAYS` (default 30: the issue time of the last token it
+  minted for them, seen at a web login) count, the linking member included,
   and only active owners and admins (the same rule as the built-in server's
   consent). Checked on every request. None: **HTTP 403** with a plain message
   (open the web app once, then reconnect), never a 401, so the client does not
@@ -301,8 +302,10 @@ token.
 - **Offboarding.** Removing the member here (or disabling them, or taking their
   admin role) cuts MCP access on the next request. Removing someone only in the
   upstream identity service, which this app is never told about, takes effect
-  within `OAUTH_LINK_MAX_AGE_DAYS` of their last web login in that account:
-  after that the link is stale and every call is the 403. Set it to the
+  within `OAUTH_LINK_MAX_AGE_DAYS` of the last token it issued them for that
+  account (its issue time, not when it was last used, so a token minted before
+  the removal cannot keep the link alive): after that the link is stale and
+  every call is the 403. Set it to the
   upstream session lifetime, so MCP access never outlives what the web allows;
   remove the member here too when it must end at once.
 
@@ -354,7 +357,7 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset |
 | `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
 | `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
-| `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after their last web login in an account a sign-in still reaches it) |
+| `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after the identity service last vouched for someone in an account a sign-in still reaches it) |
 
 ## Check it yourself
 

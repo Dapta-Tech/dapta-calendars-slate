@@ -424,11 +424,12 @@ export const serverEnvSchema = z.object({
   // Where that server publishes its signing keys. Unset: the `jwks_uri` of its
   // metadata (`<issuer>/.well-known/oauth-authorization-server`).
   OAUTH_JWKS_URL: blankIsDefault(z.string().url().optional()),
-  // How long after a person's last verified web login in an account a sign-in
-  // through that server may still act there. This app is not told when someone
-  // is removed upstream; past this many days it treats them as gone until they
-  // open the web app again. Match the upstream session lifetime, so MCP access
-  // never outlives what the web allows.
+  // How long after the upstream identity service last vouched for a person in
+  // an account (the issue time of the last token it minted for them, seen at a
+  // web login) a sign-in through that server may still act there. This app is
+  // not told when someone is removed upstream; past this many days it treats
+  // them as gone until they open the web app again. Match the upstream session
+  // lifetime, so MCP access never outlives what the web allows.
   OAUTH_LINK_MAX_AGE_DAYS: blankIsDefault(z.coerce.number().int().min(1).max(365).default(30)),
 });
 

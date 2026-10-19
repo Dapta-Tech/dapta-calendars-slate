@@ -11,8 +11,9 @@
 --     carries it (it is recorded whether or not the MCP signs in through that
 --     server yet, so the switch finds people already linked), and on every
 --     deployment whose login provider records none.
---   - member.login_seen_at: epoch ms a verified web login last resolved the
---     member, refreshed at most once a day. The MCP door honors only members
+--   - member.login_seen_at: epoch ms the identity service last vouched for the
+--     member (the issue time of the token of a verified web login), refreshed
+--     at most once a day, never backwards. The MCP door honors only members
 --     seen within OAUTH_LINK_MAX_AGE_DAYS: this app is not told when someone is
 --     removed upstream, so MCP access ends when the web's would. NULL until the
 --     member's next web login.

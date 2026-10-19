@@ -252,6 +252,19 @@ describe('WorkOsAuthProvider: records the sign-in subject on the member', () => 
     expect(lines).toHaveLength(1);
   });
 
+  it('stamps the link as of the token issue time: a 40-day-old token links nothing usable', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const iat = Math.floor(Date.now() / 1000) - 40 * 86_400;
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_old', sub: 'iam_old', workos_user_id: 'user_01OLD40', iat })));
+    expect(who.authenticatedAt).toBe(iat * 1000);
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBe(iat * 1000);
+    expect(await membershipsBySubject(db, 'user_01OLD40', Date.now() - 30 * 86_400_000)).toEqual([]);
+    // A token minted now makes the same link usable.
+    await auth.resolveHost(bearer(mint({ account_id: 'acct_old', sub: 'iam_old', workos_user_id: 'user_01OLD40', iat: Math.floor(Date.now() / 1000) })));
+    expect(await membershipsBySubject(db, 'user_01OLD40', Date.now() - 30 * 86_400_000)).toHaveLength(1);
+  });
+
   it('an account reached by switching (no workos_user_id in its session) is reached through the first account\'s link', async () => {
     const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
     // The first login carries the WorkOS user id; the switched-to account's session does not.

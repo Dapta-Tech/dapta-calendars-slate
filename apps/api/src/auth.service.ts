@@ -59,18 +59,22 @@ export class AuthService {
    * behaves identically across the local and workos providers. Throws 401 if the
    * provider cannot resolve the host.
    *
-   * The same read tells when a verified login last resolved this member
-   * (`login_seen_at`, what an MCP sign-in through an external authorization
-   * server is held to). A stamp older than a day is renewed here, for every
-   * provider; a failed write is logged and never costs the request.
+   * The same read tells when the upstream identity service last vouched for
+   * this member (`login_seen_at`, what an MCP sign-in through an external
+   * authorization server is held to). It is stamped with the token's issue
+   * time, never the request time: a token minted before someone was removed
+   * upstream stays valid until it expires, and using it must not keep the
+   * stamp fresh. A stamp a day older than that is renewed here, for every
+   * provider, and never moves backwards; a failed write is logged and never
+   * costs the request.
    */
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
     const id = await this.provider.resolveHost(req);
     annotateRequestAccount(req, id.accountId);
     const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
-    const now = Date.now();
-    if (member && (member.loginSeenAt === null || now - member.loginSeenAt >= LOGIN_SEEN_REFRESH_MS)) {
-      await noteMemberLogin(this.db, id.accountId, id.memberId, now, LOGIN_SEEN_REFRESH_MS).catch((error: unknown) =>
+    const vouchedAt = Math.min(id.authenticatedAt ?? Date.now(), Date.now());
+    if (member && (member.loginSeenAt === null || vouchedAt - member.loginSeenAt >= LOGIN_SEEN_REFRESH_MS)) {
+      await noteMemberLogin(this.db, id.accountId, id.memberId, vouchedAt, LOGIN_SEEN_REFRESH_MS).catch((error: unknown) =>
         this.logger.warn(`could not stamp the login of member ${id.memberId}: ${error instanceof Error ? error.message : String(error)}`),
       );
     }

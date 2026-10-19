@@ -22,9 +22,10 @@ runs exactly as before.
 
 A token's `sub` maps to the person whose new `member.idp_subject` carries it,
 and through `external_id` to their members in every account, counting only
-members a verified web login resolved within the new `OAUTH_LINK_MAX_AGE_DAYS`
-(default 30, stamped in the new `member.login_seen_at` at most once a day for
-any provider) that are active owners or admins, checked on every request; none
+members the identity service vouched for within the new
+`OAUTH_LINK_MAX_AGE_DAYS` (default 30; the issue time of the token of a verified
+web login, stamped in the new `member.login_seen_at` at most once a day for any
+provider) that are active owners or admins, checked on every request; none
 is a 403. The `workos` login provider records `workos_user_id` at web login
 (the latest login within an account wins). `OAUTH_AUTHORIZATION_SERVER` must be
 written exactly as its origin, or the API refuses to boot. A sign-in acts with the member's admin

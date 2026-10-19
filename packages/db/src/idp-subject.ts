@@ -1,8 +1,9 @@
 /**
  * The link between a member and the person's user id at the external OAuth
  * authorization server MCP clients sign in with (`member.idp_subject`, the `sub`
- * of that server's tokens), and when a verified web login last resolved the
- * member (`member.login_seen_at`).
+ * of that server's tokens), and when the identity service last vouched for
+ * the member at a verified web login (`member.login_seen_at`, its token's
+ * issue time).
  *
  * The host login provider records the subject at web login; every verified
  * web login stamps `login_seen_at` (at most once a day). The MCP door reads
@@ -35,14 +36,15 @@ export async function recordMemberIdpSubject(
   accountId: string,
   memberId: string,
   subject: string,
-  now = Date.now(),
+  seenAt = Date.now(),
 ): Promise<IdpSubjectWrite> {
   const current = sql`SELECT idp_subject FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`;
   const clear = sql`UPDATE member SET idp_subject = NULL
       WHERE account_id = ${accountId} AND idp_subject = ${subject} AND id <> ${memberId}
       RETURNING id`;
-  // The login that records the link has just been verified: it also counts as seen.
-  const set = sql`UPDATE member SET idp_subject = ${subject}, login_seen_at = ${now} WHERE id = ${memberId} AND account_id = ${accountId}`;
+  // The login that records the link was just verified: it also counts as seen,
+  // as of when the identity service vouched for it (`seenAt`).
+  const set = sql`UPDATE member SET idp_subject = ${subject}, login_seen_at = ${seenAt} WHERE id = ${memberId} AND account_id = ${accountId}`;
   const unchanged: IdpSubjectWrite = { written: false, clearedMemberIds: [] };
 
   if (db.dialect === 'sqlite') {
@@ -67,7 +69,7 @@ export async function recordMemberIdpSubject(
   });
 }
 
-/** A member's role and when a verified web login last resolved it, or null for a member not in the account. */
+/** A member's role and when the identity service last vouched for it, or null for a member not in the account. */
 export async function memberRoleAndLoginSeen(
   db: Db,
   accountId: string,
@@ -81,16 +83,18 @@ export async function memberRoleAndLoginSeen(
 }
 
 /**
- * Stamp `login_seen_at` after a verified web login, only when the stored value
- * is missing or older than `refreshAfterMs`, so a busy dashboard writes about
- * once a day per member. The condition sits in the statement, so parallel
- * requests write at most once. Answers whether it wrote.
+ * Stamp `login_seen_at` with `seenAt` (when the identity service vouched for a
+ * verified web login: its token's issue time), only when the stored value is
+ * missing or more than `refreshAfterMs` older, so a busy dashboard writes about
+ * once a day per member and the stamp never moves backwards. The condition
+ * sits in the statement, so parallel requests write at most once. Answers
+ * whether it wrote.
  */
-export async function noteMemberLogin(db: Db, accountId: string, memberId: string, now: number, refreshAfterMs: number): Promise<boolean> {
+export async function noteMemberLogin(db: Db, accountId: string, memberId: string, seenAt: number, refreshAfterMs: number): Promise<boolean> {
   const row = await db.get<{ id: string }>(
-    sql`UPDATE member SET login_seen_at = ${now}
+    sql`UPDATE member SET login_seen_at = ${seenAt}
         WHERE id = ${memberId} AND account_id = ${accountId}
-          AND (login_seen_at IS NULL OR login_seen_at < ${now - refreshAfterMs})
+          AND (login_seen_at IS NULL OR login_seen_at < ${seenAt - refreshAfterMs})
         RETURNING id`,
   );
   return !!row;

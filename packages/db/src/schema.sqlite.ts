@@ -75,8 +75,9 @@ export const member = sqliteTable('member', {
   // with (a token's `sub`), recorded by the host login provider at web login
   // (0027). One member per subject within an account; NULL until then.
   idpSubject: text('idp_subject'),
-  // Epoch ms a verified web login last resolved this member, refreshed at most
-  // once a day (0027). An MCP sign-in reaches only members seen recently.
+  // Epoch ms the identity service last vouched for this member (its token's
+  // issue time at a web login), refreshed at most once a day (0027). An MCP
+  // sign-in reaches only members seen recently.
   loginSeenAt: integer('login_seen_at'),
   handle: text('handle'),
   displayName: text('display_name'),

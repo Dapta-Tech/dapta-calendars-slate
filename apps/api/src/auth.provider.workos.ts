@@ -101,9 +101,14 @@ export class WorkOsAuthProvider implements AuthProvider {
 
     const accountId = await this.resolveAccount(accountExtId, claims);
     const member = await this.resolveMember(accountId, sub, claims);
+    // When the identity service minted this token: the last moment it vouched
+    // for this person in this account (never later than now, whatever the
+    // clock). A token without `iat` leaves it to the request time.
+    const authenticatedAt =
+      typeof claims.iat === 'number' && Number.isFinite(claims.iat) ? Math.min(claims.iat * 1000, Date.now()) : undefined;
     const subject = typeof claims.workos_user_id === 'string' && claims.workos_user_id ? claims.workos_user_id : undefined;
-    if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject);
-    return { accountId, memberId: member.id };
+    if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject, authenticatedAt ?? Date.now());
+    return { accountId, memberId: member.id, ...(authenticatedAt !== undefined ? { authenticatedAt } : {}) };
   }
 
   /**
@@ -114,9 +119,9 @@ export class WorkOsAuthProvider implements AuthProvider {
    * transaction. Never costs a login: a failure is logged and the next request
    * tries again.
    */
-  private async recordSubject(accountId: string, memberId: string, subject: string): Promise<void> {
+  private async recordSubject(accountId: string, memberId: string, subject: string, authenticatedAt: number): Promise<void> {
     try {
-      const out = await recordMemberIdpSubject(this.db, accountId, memberId, subject);
+      const out = await recordMemberIdpSubject(this.db, accountId, memberId, subject, authenticatedAt);
       if (!out.written) return;
       const line = { ts: new Date().toISOString(), level: 'info', msg: 'auth.idp_subject_recorded', accountId, memberId, takenFrom: out.clearedMemberIds };
       try {
