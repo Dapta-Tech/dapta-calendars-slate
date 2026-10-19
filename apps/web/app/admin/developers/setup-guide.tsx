@@ -24,7 +24,8 @@ type DevMessages = BookingMessages['admin']['developer'];
  * is no key (R30: one create action per screen).
  *
  * Under the steps, the way in for an agent without MCP: the skill zip, which
- * teaches it the REST API with the same key. It is built on the server for this
+ * teaches it the REST API with the same key (offered with MCP off too, where it
+ * is the only way in). It is built on the server for this
  * installation; with no public API address there is nothing to write into it,
  * so the guide says so instead of offering a download that would fail. A
  * download that fails anyway (the session ended meanwhile) says why in place.
@@ -62,6 +63,23 @@ export function SetupGuide({
   skillAvailable: boolean;
   onCreate: () => void;
 }) {
+  // The skill teaches the REST API, which does not depend on MCP, so it is
+  // offered in both states. With MCP off it is the only way in, and the
+  // sentence above it already says why, so it loses the "No MCP?" question.
+  const skill = (asked: boolean) => (
+    <div data-testid="setup-skill" className="mt-group border-t border-border pt-group">
+      {asked ? <h3 className="mb-tight text-base font-semibold">{m.guideSkillTitle}</h3> : null}
+      <p className="max-w-prose text-sm text-muted-foreground">{t(m.guideSkillBody, { product: productName })}</p>
+      {skillAvailable ? (
+        <SkillDownload m={m} />
+      ) : (
+        <p data-testid="setup-skill-unavailable" className="mt-field max-w-prose text-sm text-muted-foreground">
+          {m.guideSkillUnavailable}
+        </p>
+      )}
+    </div>
+  );
+
   if (!mcpAvailable) {
     return (
       <section
@@ -74,6 +92,7 @@ export function SetupGuide({
           {m.connectTitle}
         </h2>
         <p className="mt-tight max-w-prose text-sm text-muted-foreground">{m.mcpUnavailable}</p>
+        {skill(false)}
       </section>
     );
   }
@@ -125,19 +144,7 @@ export function SetupGuide({
         </Step>
       </ol>
 
-      <div data-testid="setup-skill" className="mt-group border-t border-border pt-group">
-        <h3 className="text-base font-semibold">{m.guideSkillTitle}</h3>
-        <p className="mt-tight max-w-prose text-sm text-muted-foreground">
-          {t(m.guideSkillBody, { product: productName })}
-        </p>
-        {skillAvailable ? (
-          <SkillDownload m={m} />
-        ) : (
-          <p data-testid="setup-skill-unavailable" className="mt-field max-w-prose text-sm text-muted-foreground">
-            {m.guideSkillUnavailable}
-          </p>
-        )}
-      </div>
+      {skill(true)}
     </section>
   );
 }

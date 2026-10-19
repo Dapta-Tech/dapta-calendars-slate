@@ -216,6 +216,15 @@ describe('KeysPanel', () => {
     expect(createButtons(el)[0]!.closest('[data-testid="setup-guide"]')).toBeNull();
   });
 
+  it('with MCP off still offers the skill, the only way in, without the "No MCP?" question', async () => {
+    const el = await mount({ mcpAvailable: false, snippets: null });
+    const skill = el.querySelector<HTMLElement>('[data-testid="setup-guide"] [data-testid="setup-skill"]')!;
+    expect(skill).not.toBeNull();
+    expect(skill.querySelector('h3')).toBeNull();
+    expect(skill.textContent).not.toContain(m.guideSkillTitle);
+    expect(skill.querySelector('button, a')).not.toBeNull();
+  });
+
   it('says so in step 2 when the deployment has no public MCP address', async () => {
     const el = await mount({ snippets: null });
     expect(step(el, 'agent').textContent).toContain(m.mcpUrlMissing);
