@@ -13,8 +13,12 @@
 //
 // Every contract call is recorded. Test-only endpoints, all under /__qa:
 //   GET  /__qa/calls          the recorded calls, oldest first
-//   POST /__qa/reset          forget calls and created events, clear the mode
+//   POST /__qa/reset          forget calls and created events, clear the mode, restore the latency
 //   POST /__qa/mode {busy}    'ok' (default) | 'error' (500) | 'malformed' (200, wrong shape)
+//   POST /__qa/latency {ms}   wait this long before answering each contract call (default 0)
+//
+// QA_CALENDAR_LATENCY_MS sets the starting latency, so a load run can stand in
+// for a real backend's round trip instead of answering in a millisecond.
 //
 // Usage: node scripts/qa/stand-in-calendar.mjs [port]   (default 4519, or QA_CALENDAR_PORT)
 import { createServer } from 'node:http';
@@ -43,6 +47,9 @@ export function startStandIn(port = 0) {
   const calls = [];
   const events = new Map();
   let mode = 'ok';
+  const raw = Number(process.env.QA_CALENDAR_LATENCY_MS ?? 0);
+  const startLatency = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 120_000) : 0;
+  let latencyMs = startLatency;
 
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -66,7 +73,13 @@ export function startStandIn(port = 0) {
         calls.length = 0;
         events.clear();
         mode = 'ok';
+        latencyMs = startLatency;
         return send(200, { ok: true });
+      }
+      if (url.pathname === '/__qa/latency') {
+        const ms = Number(body?.ms ?? 0);
+        latencyMs = Number.isFinite(ms) && ms > 0 ? Math.min(ms, 120_000) : 0;
+        return send(200, { latencyMs });
       }
       if (url.pathname === '/__qa/mode') {
         mode = body?.busy ?? 'ok';
@@ -77,6 +90,7 @@ export function startStandIn(port = 0) {
 
     const call = { method: req.method, path: url.pathname, body, at: Date.now() };
     calls.push(call);
+    if (latencyMs > 0) await new Promise((r) => setTimeout(r, latencyMs));
 
     if (req.method === 'POST' && url.pathname === '/v1/free-busy') {
       call.op = 'listBusy';
