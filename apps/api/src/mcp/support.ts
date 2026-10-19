@@ -176,7 +176,7 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
     hint: 'That idempotency_key was already used with different arguments. Use a new key for a different request.',
   },
   BOOKING_FIELDS_INVALID: {
-    hint: 'Read the message. If it names an intake question, pass an answer under that name in `answers` (the questions are listed by find_available_slots and list_event_types).',
+    hint: 'Pass an answer for each required intake question in `answers`, keyed by question name. The questions are listed by find_available_slots and list_event_types.',
   },
   GONE: {
     message: 'That booking can no longer be changed (it is cancelled, declined or finished).',

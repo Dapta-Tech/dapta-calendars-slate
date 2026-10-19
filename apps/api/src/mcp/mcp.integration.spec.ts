@@ -345,6 +345,75 @@ describe('keyed tools', () => {
   });
 });
 
+describe('intake questions', () => {
+  it('find_available_slots returns the real required questions on the page path and the key path', async () => {
+    const anon = await h.connect();
+    const page = structured<{ event_type: { questions: { name: string; label: string; type: string; required: boolean }[] } }>(
+      await anon.callTool({ name: 'find_available_slots', arguments: { booking_page_url: PAGE, time_zone: 'UTC' } }),
+    );
+    expect(page.event_type.questions[0]).toMatchObject({ name: 'company', label: 'Company', type: 'text', required: true });
+    const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
+    const keyed = await h.connect(await h.key(['availability:read']));
+    const byId = structured<{ event_type: { questions: { name: string; required: boolean }[] } }>(
+      await keyed.callTool({ name: 'find_available_slots', arguments: { event_type_id: intro, time_zone: 'UTC' } }),
+    );
+    expect(byId.event_type.questions.find((q) => q.name === 'company')?.required).toBe(true);
+  });
+
+  it('a booking without a required answer names the missing field ids, on both booking tools', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
+    const slot = await firstSlot(c, 50);
+    const who = { name: 'No Answer', email: 'noanswer@example.org', time_zone: 'UTC' };
+    const created = errorText(
+      await c.callTool({ name: 'create_booking', arguments: { event_type_id: intro, start: slot.start, attendee: who, idempotency_key: idem('missing-answer-01') } }),
+    );
+    expect(created).toContain('BOOKING_FIELDS_INVALID');
+    expect(created).toContain('company (Company)');
+    const anon = await h.connect();
+    const public_ = errorText(
+      await anon.callTool({ name: 'book_meeting', arguments: { booking_page_url: PAGE, start: slot.start, attendee: who, idempotency_key: idem('missing-answer-02') } }),
+    );
+    expect(public_).toContain('company (Company)');
+  });
+});
+
+describe('times use one convention in every booking-returning tool', () => {
+  it('follows the requested zone, else the host zone, always with the UTC instant', async () => {
+    const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
+    const c = await h.connect(await h.key(ALL));
+    const s1 = await firstSlot(c, 53);
+    const s2 = await firstSlot(c, 57);
+    type B = { uid: string; start: string; start_utc: string; time_zone: string };
+    const inZone = (b: B, zone: string) => {
+      expect(b.time_zone).toBe(zone);
+      const offset = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' }).formatToParts(new Date(b.start_utc)).find((p) => p.type === 'timeZoneName')!.value;
+      const want = offset === 'GMT' ? '+00:00' : offset.replace('GMT', '');
+      expect(b.start.endsWith(want)).toBe(true);
+      expect(new Date(b.start).toISOString()).toBe(b.start_utc);
+    };
+    const created = structured<{ booking: B }>(
+      await c.callTool({
+        name: 'create_booking',
+        arguments: { event_type_id: intro, start: s1.start, attendee: { name: 'Zed', email: 'zed@example.org', time_zone: 'America/Bogota' }, answers: { company: 'Z' }, idempotency_key: idem('zone-create-0001') },
+      }),
+    );
+    inZone(created.booking, 'America/Bogota');
+    const moved = structured<{ booking: B }>(
+      await c.callTool({ name: 'reschedule_booking', arguments: { booking_uid: created.booking.uid, start: s2.start, idempotency_key: idem('zone-move-00001') } }),
+    );
+    inZone(moved.booking, 'America/New_York'); // the host's zone, not UTC
+    const got = structured<{ booking: B }>(await c.callTool({ name: 'get_booking', arguments: { booking_uid: moved.booking.uid } }));
+    inZone(got.booking, 'America/New_York');
+    const asked = structured<{ booking: B }>(await c.callTool({ name: 'get_booking', arguments: { booking_uid: moved.booking.uid, time_zone: 'Asia/Tokyo' } }));
+    inZone(asked.booking, 'Asia/Tokyo');
+    const list = structured<{ bookings: { start: string; start_utc: string }[] }>(await c.callTool({ name: 'list_bookings', arguments: { limit: 5 } }));
+    expect(list.bookings.every((b) => !b.start.endsWith('+00:00') && new Date(b.start).toISOString() === b.start_utc)).toBe(true);
+    const cancelled = structured<{ booking: B }>(await c.callTool({ name: 'cancel_booking', arguments: { booking_uid: moved.booking.uid } }));
+    inZone(cancelled.booking, 'America/New_York');
+  });
+});
+
 describe('scope denial per tool', () => {
   const calls: [string, string, Record<string, unknown>][] = [
     ['list_event_types', 'event-types:read', {}],

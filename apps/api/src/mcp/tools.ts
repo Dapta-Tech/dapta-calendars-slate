@@ -1,6 +1,6 @@
 import * as z from 'zod4';
 import type { Db } from '@slate/db';
-import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, scopedIdempotencyKey, sql } from '@slate/db';
+import { claimApiIdempotency, completeApiIdempotency, getAccountByCode, hashApiValue, parseJsonColumn, scopedIdempotencyKey, sql } from '@slate/db';
 import type { ApiScope } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import type { BookingService } from '../booking.service';
@@ -17,6 +17,7 @@ import {
   notFound,
   requireScope,
   stableStringify,
+  toFailure,
   untrusted,
   zonedIso,
 } from './support';
@@ -186,8 +187,14 @@ async function resolvePage(deps: McpToolDeps, page: PageRef) {
   }
 }
 
+/** The intake questions of an event type. The column is JSON text on SQLite, so parse it first. */
+function fieldsOf(raw: unknown): Record<string, unknown>[] {
+  const parsed = typeof raw === 'string' ? parseJsonColumn<unknown>(raw, []) : raw;
+  return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+}
+
 function questionsOf(raw: unknown) {
-  const fields = Array.isArray(raw) ? raw : [];
+  const fields = fieldsOf(raw);
   return fields.slice(0, 20).map((f: Record<string, unknown>) => ({
     name: untrusted(f['name'], 64),
     label: untrusted(f['label'], 200),
@@ -212,6 +219,47 @@ async function bookingMeta(db: Db, accountId: string, uid: string) {
         WHERE b.account_id = ${accountId} AND b.uid = ${uid} LIMIT 1`,
   );
   return row ?? null;
+}
+
+/** Required intake questions that `answers` leaves empty, as "name (Label)". */
+function missingAnswers(raw: unknown, answers: Record<string, unknown> | undefined): string[] {
+  return fieldsOf(raw)
+    .filter((f) => f['required'] === true && f['type'] !== 'guests')
+    .filter((f) => {
+      const v = answers?.[String(f['name'])];
+      return v === undefined || v === '' || v === false || (Array.isArray(v) && v.length === 0);
+    })
+    .map((f) => `${untrusted(f['name'], 64)} (${untrusted(f['label'], 80)})`);
+}
+
+/** Say which answers are missing, so the agent can retry without guessing. */
+function withMissing(error: unknown, raw: unknown, answers: Record<string, unknown> | undefined): never {
+  if (error instanceof ToolFailure && error.code === 'BOOKING_FIELDS_INVALID') {
+    const missing = missingAnswers(raw, answers);
+    if (missing.length)
+      throw new ToolFailure(
+        error.code,
+        `${error.message} Missing required answers: ${missing.join(', ')}.`,
+        'Pass them in `answers`, keyed by the name before the parentheses, then retry with a NEW idempotency_key.',
+      );
+  }
+  throw error;
+}
+
+/** Zone for times in a result when the caller named none: the booking's host, else the workspace owner, else UTC. */
+async function hostZone(db: Db, accountId: string, uid?: string): Promise<string> {
+  const row = uid
+    ? await db.get<{ time_zone: string | null }>(
+        sql`SELECT m.time_zone FROM booking b JOIN member m ON m.id = b.host_member_id
+            WHERE b.account_id = ${accountId} AND b.uid = ${uid} LIMIT 1`,
+      )
+    : undefined;
+  const owner =
+    row ??
+    (await db.get<{ time_zone: string | null }>(
+      sql`SELECT time_zone FROM member WHERE account_id = ${accountId} AND role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+    ));
+  return owner?.time_zone && isValidTimeZone(owner.time_zone) ? owner.time_zone : 'UTC';
 }
 
 async function summarize(deps: McpToolDeps, accountId: string, b: Booking, tz: string) {
@@ -524,7 +572,11 @@ const bookMeeting: ToolDef = {
       // (the host calendar could not confirm) stays open for the retry to run.
       if (code !== 'CALENDAR_UNAVAILABLE')
         await completeApiIdempotency(deps.db, claim.id, outcome.status, { error: code, message: outcome.message });
-      throw failureFor(code, outcome.message);
+      try {
+        throw failureFor(code, outcome.message);
+      } catch (error) {
+        withMissing(error, resolved.eventType.booking_fields, args.answers);
+      }
     }
     const data: BookMeetingData = {
       booking: {
@@ -677,7 +729,7 @@ const listBookingsInput = z.object({
   order: z.enum(['asc', 'desc']).default('asc').describe('asc = soonest first.'),
   limit: z.number().int().min(1).max(50).default(25),
   cursor: z.string().max(300).optional().describe('next_cursor from the previous page; keep the other arguments identical.'),
-  time_zone: timeZone.default('UTC').describe('Zone for the returned times.'),
+  time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
 });
 const listBookings: ToolDef = {
   name: 'list_bookings',
@@ -706,7 +758,7 @@ const listBookings: ToolDef = {
   }),
   async run(args: z.infer<typeof listBookingsInput>, call, deps) {
     const p = requireScope(call, 'bookings:read');
-    const tz = args.time_zone;
+    const tz = args.time_zone ?? (await hostZone(deps.db, p.accountId));
     const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to ? undefined : Date.now();
     const page = await queryBookings(deps.db, {
       accountId: p.accountId,
@@ -738,7 +790,7 @@ const listBookings: ToolDef = {
   },
 };
 
-const getBookingInput = z.object({ booking_uid: z.string().min(1).max(100), time_zone: timeZone.default('UTC') });
+const getBookingInput = z.object({ booking_uid: z.string().min(1).max(100), time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.') });
 const getBooking: ToolDef = {
   name: 'get_booking',
   title: 'Get one booking',
@@ -777,7 +829,7 @@ const getBooking: ToolDef = {
     const raw = (b.bookingFieldsResponses ?? {}) as Record<string, unknown>;
     const answersOut: Record<string, string> = {};
     for (const [k, v] of Object.entries(raw).slice(0, 20)) answersOut[untrusted(k, 64)] = untrusted(v, 500);
-    const summary = await summarize(deps, p.accountId, b, args.time_zone);
+    const summary = await summarize(deps, p.accountId, b, args.time_zone ?? (await hostZone(deps.db, p.accountId, b.uid)));
     return {
       data: {
         booking: summary,
@@ -837,7 +889,11 @@ const createBooking: ToolDef = {
       args.idempotency_key,
       p.eventTypeIds,
       p.keyId,
-    );
+    ).catch(async (error: unknown) => {
+      const failure = toFailure(error);
+      const et = failure.code === 'BOOKING_FIELDS_INVALID' ? await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null) : null;
+      return withMissing(failure, et?.eventType.booking_fields, args.answers);
+    });
     const summary = await summarize(deps, p.accountId, b, args.attendee.time_zone);
     return { data: { booking: summary }, summary: line(summary), affected: [b.uid] };
   },
@@ -847,7 +903,7 @@ const rescheduleInput = z.object({
   booking_uid: z.string().min(1).max(100),
   start: z.string().max(40).describe('New start: an offered slot from find_available_slots, ISO-8601 with offset.'),
   reason: z.string().max(500).optional(),
-  time_zone: timeZone.default('UTC').describe('Zone for the returned times.'),
+  time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
   idempotency_key: idempotencyKey,
 });
 const rescheduleBooking: ToolDef = {
@@ -862,7 +918,8 @@ const rescheduleBooking: ToolDef = {
   output: z.object({ booking: bookingSummary, previous_uid: z.string() }),
   async run(args: z.infer<typeof rescheduleInput>, call, deps) {
     const p = requireScope(call, 'bookings:write');
-    const start = instantFrom(args.start, args.time_zone).toISOString();
+    const zone = args.time_zone ?? (await hostZone(deps.db, p.accountId, args.booking_uid));
+    const start = instantFrom(args.start, zone).toISOString();
     const b = await deps.pilot.reschedule(
       p.accountId,
       args.booking_uid,
@@ -871,7 +928,7 @@ const rescheduleBooking: ToolDef = {
       p.keyId,
       p.eventTypeIds,
     );
-    const summary = await summarize(deps, p.accountId, b, args.time_zone);
+    const summary = await summarize(deps, p.accountId, b, zone);
     return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}`, affected: [args.booking_uid, b.uid] };
   },
 };
@@ -879,7 +936,7 @@ const rescheduleBooking: ToolDef = {
 const cancelInput = z.object({
   booking_uid: z.string().min(1).max(100),
   reason: z.string().max(500).optional().describe('Shown to the invitee in the cancellation email.'),
-  time_zone: timeZone.default('UTC'),
+  time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
   idempotency_key: idempotencyKey.optional(),
 });
 const cancelBooking: ToolDef = {
@@ -902,7 +959,7 @@ const cancelBooking: ToolDef = {
       p.keyId,
       p.eventTypeIds,
     );
-    const summary = await summarize(deps, p.accountId, b, args.time_zone);
+    const summary = await summarize(deps, p.accountId, b, args.time_zone ?? (await hostZone(deps.db, p.accountId, b.uid)));
     return { data: { booking: summary }, summary: `Cancelled. ${line(summary)}`, affected: [b.uid] };
   },
 };
