@@ -46,7 +46,12 @@ async function visitorFetch(url: string, init: RequestInit = {}): Promise<Respon
     });
   const res = await send();
   if (res.status !== 429) return res;
-  const wait = retryAfterMsOf(res.headers.get('retry-after'));
+  // Only a 429 that names its wait is waited out: the limiter always sends
+  // Retry-After, while the cap on a host's live holds does not, and asking
+  // that one again in a moment changes nothing.
+  const header = res.headers.get('retry-after');
+  if (!header) return res;
+  const wait = retryAfterMsOf(header);
   if (wait > SERVER_RETRY_MAX_WAIT_MS) return res;
   await res.body?.cancel().catch(() => undefined);
   // A little jitter, so the visitors one burst refused do not all come back together.

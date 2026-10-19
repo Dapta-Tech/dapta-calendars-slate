@@ -55,6 +55,15 @@ describe('the web API client on a busy API (429)', () => {
     });
   });
 
+  it('a 429 that names no wait (the cap on a host\'s live holds) is not retried: asking again changes nothing', async () => {
+    fetchMock.mockImplementation(async () => answer(429, { error: 'RATE_LIMITED', message: 'Too many active holds.' }));
+    expect(await postReservation({ accountCode: 'a', handle: 'b', slug: 'c', startUtc: 'd' })).toMatchObject({
+      ok: false,
+      status: 429,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('other failures are what they always were', async () => {
     fetchMock.mockResolvedValueOnce(answer(503, {}));
     await expect(getProfile('acme', 'down')).rejects.toThrow('503');
