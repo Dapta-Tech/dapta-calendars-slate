@@ -1230,6 +1230,16 @@ export interface BookingMessages {
       copyPrompt: string;
       /** Under the prompt: where to read what a key allows. */
       guideTryNote: string;
+      /**
+       * Under the three steps: the way in for an agent without MCP, a zip that
+       * teaches it the REST API. `{product}` is the product's name. The
+       * unavailable line replaces the button when the installation has no
+       * public API address to write into the skill.
+       */
+      guideSkillTitle: string;
+      guideSkillBody: string;
+      guideSkillButton: string;
+      guideSkillUnavailable: string;
     };
     /**
      * The OAuth consent page (`/auth/consent`): an app asks to act on the
@@ -2616,6 +2626,11 @@ export const en: BookingMessages = {
       guidePrompt: 'Use the {product} MCP to tell me which workspace you are connected to and what you are allowed to do there.',
       copyPrompt: 'Copy prompt',
       guideTryNote: 'An agent can only do what its key allows. What each tool needs is listed in',
+      guideSkillTitle: 'No MCP in your agent?',
+      guideSkillBody:
+        'Download the skill: a zip that teaches any agent with a terminal to use the {product} API with the same key.',
+      guideSkillButton: 'Download the skill',
+      guideSkillUnavailable: 'The skill is not available on this installation: it has no public API address yet.',
     },
     oauthConsent: {
       pageTitle: 'Connect an app',
@@ -3944,6 +3959,11 @@ export const es: BookingMessages = {
       guidePrompt: 'Usa el MCP de {product} para decirme a qué espacio de trabajo estás conectado y qué puedes hacer ahí.',
       copyPrompt: 'Copiar prompt',
       guideTryNote: 'Un agente solo puede hacer lo que su clave permite. Lo que necesita cada herramienta está en',
+      guideSkillTitle: '¿Tu agente no tiene MCP?',
+      guideSkillBody:
+        'Descarga el skill: un zip que le enseña a cualquier agente con terminal a usar la API de {product} con la misma clave API.',
+      guideSkillButton: 'Descargar el skill',
+      guideSkillUnavailable: 'El skill no está disponible en esta instalación: todavía no tiene una dirección pública de la API.',
     },
     oauthConsent: {
       pageTitle: 'Conectar una app',

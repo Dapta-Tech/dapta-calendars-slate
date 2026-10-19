@@ -45,6 +45,7 @@ const MAP = {
   clock: 'clock',
   cog: 'settings',
   copy: 'copy',
+  download: 'download',
   'external-link': 'arrow-up-right',
   'file-code': 'file-code',
   'file-edit': 'file-pen-line',

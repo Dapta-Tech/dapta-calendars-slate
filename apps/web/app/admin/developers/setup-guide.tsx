@@ -3,9 +3,10 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { t, type BookingMessages } from '@slate/shared';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DEVELOPERS_DOCS_HREF } from '@/lib/admin-nav';
 import { cn } from '@/lib/cn';
+import { SKILL_ROUTE } from '@/lib/developer-skill/skill-names';
 import { CodeBlock, ConnectAgent, type ConnectSnippets } from './connect-agent';
 
 type DevMessages = BookingMessages['admin']['developer'];
@@ -21,6 +22,11 @@ type DevMessages = BookingMessages['admin']['developer'];
  * blocks a step. Step 1's button opens the key list's own create dialog, so
  * there is one way to make a key, and it is the page's only Create while there
  * is no key (R30: one create action per screen).
+ *
+ * Under the steps, the way in for an agent without MCP: the skill zip, which
+ * teaches it the REST API with the same key. It is built on the server for this
+ * installation; with no public API address there is nothing to write into it,
+ * so the guide says so instead of offering a download that would fail.
  */
 export function SetupGuide({
   m,
@@ -32,6 +38,7 @@ export function SetupGuide({
   agentConnected,
   productName,
   docsLabel,
+  skillAvailable,
   onCreate,
 }: {
   m: DevMessages;
@@ -50,6 +57,8 @@ export function SetupGuide({
   productName: string;
   /** The API docs page's name in the rail, the link under the prompt. */
   docsLabel: string;
+  /** The installation has a public API address, so the skill can be built. */
+  skillAvailable: boolean;
   onCreate: () => void;
 }) {
   if (!mcpAvailable) {
@@ -114,6 +123,32 @@ export function SetupGuide({
           </p>
         </Step>
       </ol>
+
+      <div data-testid="setup-skill" className="mt-group border-t border-border pt-group">
+        <h3 className="text-base font-semibold">{m.guideSkillTitle}</h3>
+        <p className="mt-tight max-w-prose text-sm text-muted-foreground">
+          {t(m.guideSkillBody, { product: productName })}
+        </p>
+        {skillAvailable ? (
+          <div className="mt-field">
+            {/* A plain link with `download`: the route answers with the file and
+                its name, so the browser saves it without leaving the page. */}
+            <a
+              href={SKILL_ROUTE}
+              download
+              data-testid="setup-skill-download"
+              className={buttonVariants({ variant: 'outline', size: 'lg' })}
+            >
+              <i aria-hidden className="pi pi-download" style={{ fontSize: 14 }} />
+              {m.guideSkillButton}
+            </a>
+          </div>
+        ) : (
+          <p data-testid="setup-skill-unavailable" className="mt-field max-w-prose text-sm text-muted-foreground">
+            {m.guideSkillUnavailable}
+          </p>
+        )}
+      </div>
     </section>
   );
 }
