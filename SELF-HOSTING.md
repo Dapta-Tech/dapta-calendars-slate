@@ -284,9 +284,13 @@ can run with analytics on, off, or pointed at a different project per
 environment. Set them on **both** apps; the names are the same.
 
 `posthog` is the one adapter in this repository. The host may be PostHog's own
-(`https://us.i.posthog.com`, the default) or your reverse proxy in front of it;
-the browser loads the library from `<host>/static/array.js` and sends events to
-the same host.
+(`https://us.i.posthog.com`, the default) or your reverse proxy in front of it.
+The browser loads the library from `<host>/static/array.js` (for PostHog's own
+hosts, from their assets host: `https://us-assets.i.posthog.com/static/array.js`)
+and sends events to the host itself; allow both in a Content-Security-Policy
+(`script-src` and `connect-src`). No inline script is added. The vendor sees
+the client's IP address from the request itself: if your policy calls for it,
+turn on your project's "discard client IP" setting.
 
 | Var | Default | Required when | Secret? |
 |---|---|---|---|
@@ -300,10 +304,11 @@ boot; it never stops either app from starting. Turning analytics off later
 leaves any queued rows to drain as `skipped`.
 
 **What a visitor's browser stores.** Nothing, from analytics itself. The one
-cookie this feature adds is `slate.ph_id`: when a link arrives carrying
+cookie this feature adds is `slate.ph_id`: when a link to one of the product's
+own entry points (`/`, `/login`, `/onboarding`, `/admin`) arrives carrying
 `?ph_id=` (a marketing landing's anonymous id), the middleware parks it for ten
 minutes, httpOnly, beside the campaign cookie above, so the host who signs up
-can be joined to their landing visit. It is set only from that parameter, only
+can be joined to their landing visit. It is never set on a booking page, only
 when the value looks like an analytics id, and never read unless analytics is on.
 
 ### CRM write-out (optional)

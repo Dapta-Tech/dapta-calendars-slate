@@ -15,10 +15,34 @@ the event catalogue and the privacy model behind it.
 
 What is **never** sent, on any surface: a visitor's name, email, phone or
 answers; anything typed into a form; a query string or fragment of any URL; a
-paid click id (`gclid`, `fbclid`, reduced to a `has_click_id` flag); a full
-referrer URL (reduced to its domain on server events and to its origin on
-visitor events). Session recording, autocapture, heatmaps, dead-click and
-exception capture are switched off in the browser on every surface.
+paid click id (`gclid`, `fbclid`, ...; reduced to a `has_click_id` flag on the
+server's `attribution_captured`); a full referrer URL (reduced to its domain on
+server events and to its origin on visitor events). Session recording,
+autocapture, heatmaps, dead-click and exception capture, surveys and remote
+configuration are switched off in the browser on every surface.
+
+How the browser half holds that, whatever the vendor library adds on its own
+(it adds more than one would guess: the session's full entry URL and entry
+referrer, every campaign tag on the page's URL, copies of both on the person):
+
+- **Visitor events keep an allowlist** of properties and drop everything else:
+  device and session basics the vendor needs to accept and count an event, the
+  page with its query cut, the referring domain, and this app's own properties.
+  A future vendor release that starts sending something new sends it nowhere.
+- **Host events** drop every campaign tag and click id (the signup source is
+  the API's, claimed write-once), and the library collects none of its own.
+- **Every URL** left in any property, on either audience, loses its query and
+  fragment.
+- This is tested against the real library (`apps/web/lib/analytics/posthog.vendor.spec.ts`,
+  the pinned `posthog-js` devDependency) and end to end in the browser suite,
+  whose stand-in host serves that same library.
+
+Two things the vendor sees that no property controls: the client's IP address
+(which a vendor typically turns into a location) and the user agent, both
+carried by the HTTP request itself. If your policy calls for it, turn on your
+analytics project's own "discard client IP" setting. The vendor library also
+drops traffic it recognizes as automated (`navigator.webdriver`, a headless
+browser brand), so bots never reach the funnel.
 
 A visitor's email is read in exactly one place, on the server, to compute two
 booleans for `booking_created` (`invitee_is_member`, `invitee_is_internal`); it
@@ -46,8 +70,11 @@ is not serialized.
 ### Server (API, through the outbox)
 
 Emitted where the change is committed, so they are true whatever the client
-(dashboard, API key, agent). Delivered by the outbox worker with retry; an
-event the vendor refuses is recorded `skipped` once.
+(dashboard, API key, agent). Delivered by the outbox worker: a 3 second
+timeout and at most 3 attempts, so a slow vendor never holds booking mail for
+long; an event the vendor refuses is recorded `skipped` once. Delivered rows
+stay in the `outbox` table like every other kind, host email included, until
+the deployment prunes it.
 
 | Event | When | Properties |
 |---|---|---|
@@ -55,11 +82,11 @@ event the vendor refuses is recorded `skipped` once.
 | `calendars_attribution_captured` | The first-touch campaign tags are claimed onto a new account (the existing ten-minute cookie) | `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `referrer_domain`, `has_click_id`. The same tags (without the flag) are set on the account |
 | `calendars_template_chosen` | The wizard creates the first event type from a template | `template` |
 | `calendars_calendar_connected` | A new calendar connection is stored | `provider`, `method` (`connect_flow` or `manual`) |
-| `calendars_hours_set` | A schedule is saved with availability rules | `rule_count`, `created` |
+| `calendars_hours_set` | A schedule is created with availability rules, or saved with rules that changed (a rename is not) | `rule_count`, `created` |
 | `calendars_event_type_published` | An event type becomes visible on the booking page (created visible, a hidden one made visible, or the wizard's template) | `source` (`dashboard` or `onboarding`), `is_team`, `requires_confirmation` |
 | `calendars_branding_changed` | The booking page look or the workspace brand kit changes | `change` (`page_style`, `look_applied`, `brand_kit`, `kit_applied`, `reverted`), `fields` (names of the settings saved, never their values) |
-| `calendars_hide_branding_toggled` | The Dapta branding switch changes | `hidden` |
-| `calendars_booking_created` | A booking is created (not on an idempotent replay). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
+| `calendars_hide_branding_toggled` | The Dapta branding switch changes (a save that keeps it is not) | `hidden` |
+| `calendars_booking_created` | A booking is created (not on an idempotent replay, nor a seat taken on an existing group booking). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
 
 ### Browser, host (dashboard and wizard only)
 
@@ -67,14 +94,15 @@ event the vendor refuses is recorded `skipped` once.
 |---|---|---|
 | `$pageview` | Each dashboard navigation | the vendor's own, URLs without query |
 | `calendars_template_skipped` | "Skip for now" on the template step | none |
-| `calendars_link_copied` | A booking link is copied | none |
+| `calendars_link_copied` | A booking link is copied | `link` (`page`, `event_type`, `one_off`) |
 
 A host is identified on the dashboard with `email`, `member_id`, `role` and
 `is_internal`, and joins the `calendars_account` group. When a marketing
-landing handed over its anonymous id as `?ph_id=`, the middleware parks it in a
-ten-minute httpOnly cookie (`slate.ph_id`) beside the campaign cookie, and the
-first dashboard or wizard page joins that landing visit to the host, once.
-Signing out resets the identity.
+landing handed over its anonymous id as `?ph_id=` on one of the product's own
+entry points (`/`, `/login`, `/onboarding`, `/admin`), the middleware parks it
+in a ten-minute httpOnly cookie (`slate.ph_id`) beside the campaign cookie, and
+the first dashboard or wizard page joins that landing visit to the host, once.
+A booking page never parks it. Signing out resets the identity.
 
 ### Browser, visitor (public booking pages)
 
@@ -84,7 +112,7 @@ manage page or on one-off links, whose URLs carry a token.
 | Event | When | Properties |
 |---|---|---|
 | `calendars_booking_page_viewed` | The page renders | `page` (`profile`, `event`, `team`, `team_event`) |
-| `calendars_day_picked` | A day is chosen | `mode` |
+| `calendars_day_picked` | A day becomes the visitor's, once per day: a click, the "next day" button, or a time picked on the day the page opened on | `mode`, `preselected` (true when the day was not clicked: the opening day, or one reached with the arrow keys) |
 | `calendars_slot_picked` | A time is chosen | `mode` |
 | `calendars_booking_submitted` | The details form passes validation and is sent | `mode` |
 | `calendars_booking_confirmed` | The booking is answered, once per booking | `status` (`accepted` or `pending`), `mode` |
@@ -96,8 +124,9 @@ and `embed`.
 ## The seams
 
 - **Contract** (`@slate/shared`, `analytics.ts`): event names, the prefix, the
-  group type, config resolution, the internal-email matcher, the landing id
-  sanitizer. Vendor-neutral and pure.
+  group type, config resolution (a read credential such as a `phx_` personal
+  key is refused, since the key is published to every page), the
+  internal-email matcher, the landing id sanitizer. Vendor-neutral and pure.
 - **API port** (`apps/api/src/analytics.provider.ts`): `AnalyticsProvider`,
   with the committed PostHog adapter (one JSON POST per event to `/capture/`,
   no SDK). `AnalyticsEffects` enqueues; the outbox worker delivers.
