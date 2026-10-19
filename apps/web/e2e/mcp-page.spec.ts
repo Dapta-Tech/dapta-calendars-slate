@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
+import { E2E, HOST, answerWith, clearThrottle, signIn, throttle } from './stack';
 
 /**
  * MCP, Connect and keys shows how to connect an agent only when the API says it
@@ -22,8 +22,7 @@ const UNAVAILABLE = 'Agent connections are not turned on for this installation.'
 
 async function openAsOwner(page: Page): Promise<void> {
   await page.goto(`/login?next=${encodeURIComponent(PAGE)}`);
-  await page.getByLabel('Email').fill(HOST.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await signIn(page, HOST.email);
   await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
   // Exact: with MCP on it is step 2's title, under "Connect your agent in 3 steps".
   await expect(page.getByRole('heading', { name: 'Connect your agent', exact: true })).toBeVisible();
