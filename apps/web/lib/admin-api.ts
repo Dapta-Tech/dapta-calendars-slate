@@ -28,6 +28,7 @@ import {
   SessionUnavailableError,
   signOutKeepingPlace,
 } from './auth-session';
+import type { KeyDetails } from './mcp-connect';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -478,7 +479,12 @@ export interface CalendarSummary {
   primaryEmail: string | null;
   isPrimary?: boolean;
 }
-export interface ApiKeyRow {
+/**
+ * The scope, allowlist, expiry and last-used fields come from `KeyDetails`: every
+ * one may be absent (an older API) or null (never used / no expiry / all event
+ * types), and the page renders both.
+ */
+export interface ApiKeyRow extends KeyDetails {
   id: string;
   name: string;
   prefix: string;

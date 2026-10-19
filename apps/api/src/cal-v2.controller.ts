@@ -22,6 +22,7 @@ import {
   UseFilters,
   UseInterceptors,
 } from "@nestjs/common";
+import type { ApiScope } from "@slate/types";
 import { ZodError } from "zod";
 import {
   AuthService,
@@ -166,12 +167,7 @@ export class CalV2Controller {
 
   private async principal(
     req: ReqLike,
-    scope:
-      | "availability:read"
-      | "bookings:read"
-      | "bookings:write"
-      | "calendars:read"
-      | "event-types:read",
+    scope: ApiScope | readonly ApiScope[],
   ): Promise<MachinePrincipal> {
     const authorization = req.headers.authorization;
     const value = Array.isArray(authorization)
@@ -196,9 +192,10 @@ export class CalV2Controller {
         v2Error(
           403,
           "INSUFFICIENT_SCOPE",
-          `The API key requires scope ${scope}.`,
+          `The API key requires scope ${[scope].flat().join(" or ")}.`,
           {
-            requiredScope: scope,
+            requiredScope: Array.isArray(scope) ? scope[0] : scope,
+            ...(Array.isArray(scope) ? { acceptedScopes: scope } : {}),
           },
         );
       v2Error(
@@ -314,7 +311,7 @@ export class CalV2Controller {
     @Body() body: unknown,
   ) {
     requireVersion(apiVersion, [CAL_V2_BOOKINGS_VERSION]);
-    const principal = await this.principal(req, "bookings:write");
+    const principal = await this.principal(req, ["bookings:cancel", "bookings:write"]);
     return {
       status: "success" as const,
       data: await this.pilot.cancel(
