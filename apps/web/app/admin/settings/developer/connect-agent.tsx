@@ -17,6 +17,8 @@ export interface ConnectSnippets {
   codexToml: string;
   exportKey: string;
   header: string;
+  /** Claude's add-connector dialog, pre-filled (used when OAuth is on). */
+  claudeConnector: string;
 }
 
 type TabId = 'cursor' | 'claude-code' | 'codex' | 'other' | 'chat';
@@ -55,14 +57,23 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
   );
 }
 
-export function ConnectAgent({ snippets, messages: m }: { snippets: ConnectSnippets | null; messages: DevMessages }) {
+export function ConnectAgent({
+  snippets,
+  oauth = false,
+  messages: m,
+}: {
+  snippets: ConnectSnippets | null;
+  /** The API runs its own OAuth server: chat apps connect with a sign-in. */
+  oauth?: boolean;
+  messages: DevMessages;
+}) {
   const base = useId();
   const tabs: { id: TabId; label: string }[] = [
     { id: 'cursor', label: m.tabCursor },
     { id: 'claude-code', label: m.tabClaudeCode },
     { id: 'codex', label: m.tabCodex },
     { id: 'other', label: m.tabOther },
-    { id: 'chat', label: m.tabChat },
+    { id: 'chat', label: oauth ? m.chatOAuthTitle : m.tabChat },
   ];
   const [active, setActive] = useState<TabId>('cursor');
 
@@ -121,7 +132,9 @@ export function ConnectAgent({ snippets, messages: m }: { snippets: ConnectSnipp
         aria-labelledby={`${base}-tab-${active}`}
         className="flex flex-col gap-field rounded-xl border border-border bg-card p-field"
       >
-        {active === 'chat' ? (
+        {active === 'chat' && oauth && snippets ? (
+          <ChatOAuth snippets={snippets} m={m} />
+        ) : active === 'chat' ? (
           <div className="flex flex-col gap-tight">
             <h3 className="text-base font-semibold">{m.chatTitle}</h3>
             <p className="max-w-prose text-sm text-muted-foreground">{m.chatBody}</p>
@@ -158,6 +171,38 @@ export function ConnectAgent({ snippets, messages: m }: { snippets: ConnectSnipp
         )}
       </div>
     </section>
+  );
+}
+
+/** The chat-app tab when OAuth is on: real "add custom connector" steps, no key. */
+function ChatOAuth({ snippets, m }: { snippets: ConnectSnippets; m: DevMessages }) {
+  const copy = { copyLabel: m.copy, copiedLabel: m.copied };
+  const steps = (items: string[]) => (
+    <ol className="flex list-decimal flex-col gap-tight pl-group text-sm text-muted-foreground">
+      {items.map((step) => (
+        <li key={step}>{step}</li>
+      ))}
+    </ol>
+  );
+  return (
+    <>
+      <p className="max-w-prose text-sm text-muted-foreground">{m.chatOAuthLead}</p>
+      <div>
+        <a href={snippets.claudeConnector} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size: 'lg' })}>
+          {m.addToClaude}
+        </a>
+      </div>
+      <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
+      <div className="flex flex-col gap-tight">
+        <h3 className="text-base font-semibold">{m.chatClaudeHeading}</h3>
+        {steps([m.chatClaudeStep1, m.chatClaudeStep2, m.chatClaudeStep3])}
+      </div>
+      <div className="flex flex-col gap-tight">
+        <h3 className="text-base font-semibold">{m.chatGptHeading}</h3>
+        {steps([m.chatGptStep1, m.chatGptStep2, m.chatGptStep3])}
+      </div>
+      <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>
+    </>
   );
 }
 

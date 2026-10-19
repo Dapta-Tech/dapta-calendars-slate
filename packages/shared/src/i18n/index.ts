@@ -1115,6 +1115,60 @@ export interface BookingMessages {
       apiDocs: string;
       apiOpenApi: string;
       apiRefMissing: string;
+      /** OAuth on (the API serves its own authorization server): the chat-app tab. */
+      chatOAuthTitle: string;
+      chatOAuthLead: string;
+      addToClaude: string;
+      chatClaudeHeading: string;
+      chatClaudeStep1: string;
+      chatClaudeStep2: string;
+      chatClaudeStep3: string;
+      chatGptHeading: string;
+      chatGptStep1: string;
+      chatGptStep2: string;
+      chatGptStep3: string;
+      chatScopesNote: string;
+      /** Connected apps: OAuth grants with revoke. */
+      connectedTitle: string;
+      connectedLead: string;
+      connectedNone: string;
+      connectedUnnamed: string;
+      connectedFrom: string;
+      connectedApprovedBy: string;
+      connectedSince: string;
+      connectedLastUsed: string;
+      connectedNeverUsed: string;
+      connectedRevoke: string;
+      connectedRevokeTitle: string;
+      connectedRevokeBody: string;
+      connectedRevokedToast: string;
+      connectedExpiryNote: string;
+    };
+    /**
+     * The OAuth consent page (`/auth/consent`): an app asks to act on the
+     * workspace. Client names are self-asserted, so the host it is identified
+     * by is shown beside them, never instead.
+     */
+    oauthConsent: {
+      pageTitle: string;
+      heading: string;
+      unnamed: string;
+      identifiedAs: string;
+      returnsTo: string;
+      loopbackWarning: string;
+      workspace: string;
+      signedInAs: string;
+      scopesLead: string;
+      staysConnected: string;
+      shortLived: string;
+      approve: string;
+      deny: string;
+      working: string;
+      notAdminTitle: string;
+      notAdminBody: string;
+      expiredTitle: string;
+      expiredBody: string;
+      errorBody: string;
     };
     /**
      * Integrations tab (H1b / #93) — connect one CRM credential per account.
@@ -2385,6 +2439,60 @@ export const en: BookingMessages = {
       apiDocs: 'API docs',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
+      chatOAuthTitle: 'Claude, Claude Desktop and ChatGPT',
+      chatOAuthLead:
+        'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in here and choose what the app may do.',
+      addToClaude: 'Add to Claude',
+      chatClaudeHeading: 'In Claude',
+      chatClaudeStep1: 'Click Add to Claude, or open Settings, then Connectors, and choose Add custom connector.',
+      chatClaudeStep2: 'Use the MCP address below as the server URL and click Add.',
+      chatClaudeStep3: 'Click Connect. You come back here to sign in and approve.',
+      chatGptHeading: 'In ChatGPT',
+      chatGptStep1: 'Open Plugins, choose the plus button and Add custom MCP server.',
+      chatGptStep2: 'Use the MCP address below as the server URL and choose OAuth for authentication.',
+      chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
+      chatScopesNote:
+        'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
+      connectedTitle: 'Connected apps',
+      connectedLead:
+        'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
+      connectedNone: 'No connected apps.',
+      connectedUnnamed: 'Unnamed app',
+      connectedFrom: 'Identified as {host}',
+      connectedApprovedBy: 'Approved by {who}',
+      connectedSince: 'Connected {date}',
+      connectedLastUsed: 'Last used {date}',
+      connectedNeverUsed: 'Not used yet',
+      connectedRevoke: 'Disconnect',
+      connectedRevokeTitle: 'Disconnect this app?',
+      connectedRevokeBody:
+        '“{name}” can no longer renew its access. Access it already holds keeps working for up to {minutes} min, then stops.',
+      connectedRevokedToast: 'App disconnected.',
+      connectedExpiryNote:
+        'Disconnecting stops an app from renewing its access right away. Access it already holds runs out within {minutes} min.',
+    },
+    oauthConsent: {
+      pageTitle: 'Connect an app',
+      heading: '{client} wants to use your {product} workspace',
+      unnamed: 'An app',
+      identifiedAs: 'Identified as {host}',
+      returnsTo: 'After you answer you go back to {host}.',
+      loopbackWarning:
+        'This app runs on your own computer. Only allow it if you started this connection yourself, just now.',
+      workspace: 'Workspace',
+      signedInAs: 'Signed in as {who}',
+      scopesLead: 'It will be able to',
+      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it in Settings, MCP and API.',
+      shortLived: 'Its access lasts about an hour; after that it has to ask again.',
+      approve: 'Allow',
+      deny: 'Deny',
+      working: 'One moment…',
+      notAdminTitle: 'Only an owner or admin can connect apps',
+      notAdminBody:
+        'A connected app acts for the whole workspace, so an owner or admin has to connect it. You can still deny this request.',
+      expiredTitle: 'This request has expired',
+      expiredBody: 'Go back to the app you were connecting and start again.',
+      errorBody: 'Something went wrong. Go back to the app you were connecting and try again.',
     },
     integrations: {
       pageLead:
@@ -3601,6 +3709,60 @@ export const es: BookingMessages = {
       apiDocs: 'Documentación de la API',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
+      chatOAuthTitle: 'Claude, Claude Desktop y ChatGPT',
+      chatOAuthLead:
+        'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión aquí y eliges qué puede hacer la app.',
+      addToClaude: 'Agregar a Claude',
+      chatClaudeHeading: 'En Claude',
+      chatClaudeStep1: 'Haz clic en Agregar a Claude, o abre Configuración, luego Conectores, y elige Agregar conector personalizado.',
+      chatClaudeStep2: 'Usa la dirección MCP de abajo como URL del servidor y haz clic en Agregar.',
+      chatClaudeStep3: 'Haz clic en Conectar. Vuelves aquí para iniciar sesión y aprobar.',
+      chatGptHeading: 'En ChatGPT',
+      chatGptStep1: 'Abre Plugins, elige el botón más y Agregar servidor MCP personalizado.',
+      chatGptStep2: 'Usa la dirección MCP de abajo como URL del servidor y elige OAuth como autenticación.',
+      chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
+      chatScopesNote:
+        'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
+      connectedTitle: 'Apps conectadas',
+      connectedLead:
+        'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',
+      connectedNone: 'No hay apps conectadas.',
+      connectedUnnamed: 'App sin nombre',
+      connectedFrom: 'Identificada como {host}',
+      connectedApprovedBy: 'Aprobada por {who}',
+      connectedSince: 'Conectada el {date}',
+      connectedLastUsed: 'Último uso {date}',
+      connectedNeverUsed: 'Sin usar todavía',
+      connectedRevoke: 'Desconectar',
+      connectedRevokeTitle: '¿Desconectar esta app?',
+      connectedRevokeBody:
+        '«{name}» ya no podrá renovar su acceso. El acceso que ya tiene sigue funcionando hasta {minutes} min y luego se detiene.',
+      connectedRevokedToast: 'App desconectada.',
+      connectedExpiryNote:
+        'Desconectar impide de inmediato que la app renueve su acceso. El acceso que ya tiene se agota en menos de {minutes} min.',
+    },
+    oauthConsent: {
+      pageTitle: 'Conectar una app',
+      heading: '{client} quiere usar tu espacio de trabajo de {product}',
+      unnamed: 'Una app',
+      identifiedAs: 'Identificada como {host}',
+      returnsTo: 'Después de responder vuelves a {host}.',
+      loopbackWarning:
+        'Esta app se ejecuta en tu propio computador. Permítela solo si tú mismo iniciaste esta conexión, ahora mismo.',
+      workspace: 'Espacio de trabajo',
+      signedInAs: 'Sesión iniciada como {who}',
+      scopesLead: 'Podrá',
+      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en Configuración, MCP y API.',
+      shortLived: 'Su acceso dura cerca de una hora; después tendrá que pedirlo de nuevo.',
+      approve: 'Permitir',
+      deny: 'Rechazar',
+      working: 'Un momento…',
+      notAdminTitle: 'Solo un propietario o administrador puede conectar apps',
+      notAdminBody:
+        'Una app conectada actúa por todo el espacio de trabajo, así que debe conectarla un propietario o administrador. Aun así puedes rechazar esta solicitud.',
+      expiredTitle: 'Esta solicitud venció',
+      expiredBody: 'Vuelve a la app que estabas conectando y empieza de nuevo.',
+      errorBody: 'Algo salió mal. Vuelve a la app que estabas conectando e inténtalo de nuevo.',
     },
     integrations: {
       pageLead:

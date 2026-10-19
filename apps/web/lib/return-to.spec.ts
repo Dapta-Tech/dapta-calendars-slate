@@ -13,6 +13,18 @@ describe('safeReturnTo: only a dashboard page of this app', () => {
     expect(safeReturnTo('/admin/bookings/a%20b')).toBe('/admin/bookings/a%20b');
   });
 
+  it('also keeps the OAuth consent page, exactly that path, with its request id', () => {
+    expect(safeReturnTo('/auth/consent?uid=abc_DEF-123')).toBe('/auth/consent?uid=abc_DEF-123');
+    expect(safeReturnTo('/auth/consent')).toBe('/auth/consent');
+    // Nothing else under /auth, and no way out of it through dot segments.
+    expect(safeReturnTo('/auth/consent/extra')).toBeNull();
+    expect(safeReturnTo('/auth')).toBeNull();
+    expect(safeReturnTo('/auth/other')).toBeNull();
+    expect(safeReturnTo('/auth/consent/../../api/auth/logout')).toBeNull();
+    expect(safeReturnTo('/auth/%2e%2e/api/auth/logout')).toBeNull();
+    expect(safeReturnTo('//evil.com/auth/consent')).toBeNull();
+  });
+
   it('drops the fragment, and the flight parameter Next adds to its own requests', () => {
     expect(safeReturnTo('/admin/bookings#booking-x')).toBe('/admin/bookings');
     expect(safeReturnTo(`/admin/bookings/${UID}?_rsc=1x2y3`)).toBe(`/admin/bookings/${UID}`);

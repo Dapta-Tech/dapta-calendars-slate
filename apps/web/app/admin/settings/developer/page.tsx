@@ -3,6 +3,7 @@ import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import {
   claudeCodeCommand,
+  claudeConnectorLink,
   codexConfigToml,
   cursorDeeplink,
   cursorMcpJson,
@@ -14,6 +15,12 @@ import { NoAccess } from '@/components/no-access';
 import { ApiReference } from './api-reference';
 import { AgentTools, ConnectAgent, type ConnectSnippets } from './connect-agent';
 import { ApiKeys, Webhooks } from './developer-client';
+import { ConnectedApps } from './connected-apps';
+import { PRODUCT_NAME } from '@/lib/product-name';
+import type { ConnectedApps as ConnectedAppsList } from '@/lib/admin-api';
+
+/** An API without OAuth (or older than it) reads as "OAuth off". */
+const NO_OAUTH: ConnectedAppsList = { enabled: false, accessTokenTtlSeconds: null, grants: [] };
 
 // Read per request: the MCP address comes from the server's runtime env, which a
 // prerender at build time would freeze to whatever the build machine had.
@@ -46,11 +53,12 @@ export default async function DeveloperSettings() {
     const nm = getMessages(locale).admin.members;
     return <NoAccess title={nm.noAccessTitle} body={nm.noAccessBody} />;
   }
-  const [keys, webhooks, eventTypes] = await Promise.all([
+  const [keys, webhooks, eventTypes, oauth] = await Promise.all([
     adminApi.listApiKeys(),
     adminApi.listWebhooks(),
     // The allowlist picker is optional: a failure here must not take the page down.
     allowlistEventTypes().catch(() => []),
+    adminApi.connectedApps().catch(() => NO_OAUTH),
   ]);
   const m = getMessages(locale).admin.developer;
   const { mcpUrl, apiOrigin } = resolveMcpConfig();
@@ -63,13 +71,14 @@ export default async function DeveloperSettings() {
         codexToml: codexConfigToml(mcpUrl),
         exportKey: exportKeyCommand(),
         header: genericConnection(mcpUrl).header,
+        claudeConnector: claudeConnectorLink(mcpUrl, PRODUCT_NAME),
       }
     : null;
   return (
     <div className="flex max-w-3xl flex-col gap-section">
       {/* Page-level lead: who this page is for (QA2 fix 4). */}
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
-      <ConnectAgent snippets={snippets} messages={m} />
+      <ConnectAgent snippets={snippets} oauth={oauth.enabled} messages={m} />
       <ApiKeys
         keys={keys}
         eventTypes={eventTypes}
@@ -77,6 +86,9 @@ export default async function DeveloperSettings() {
         messages={m}
         locale={locale}
       />
+      {oauth.enabled ? (
+        <ConnectedApps apps={oauth.grants} accessTokenTtlSeconds={oauth.accessTokenTtlSeconds ?? 3600} messages={m} locale={locale} />
+      ) : null}
       <AgentTools messages={m} />
       <Webhooks webhooks={webhooks} messages={m} locale={locale} />
       <ApiReference apiOrigin={apiOrigin} messages={m} />
