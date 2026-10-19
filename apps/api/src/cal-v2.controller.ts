@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NestInterceptor,
@@ -154,10 +155,13 @@ function requireVersion(
 @UseFilters(CalV2ExceptionFilter)
 @Controller("v2")
 export class CalV2Controller {
+  // Explicit tokens: the API runs on tsx (esbuild), which emits no decorator
+  // metadata, so Nest cannot infer constructor types. Without them every
+  // dependency is undefined and each /v2 call with a valid key answered 401.
   constructor(
-    private readonly service: CalV2Service,
-    private readonly pilot: CalV2PilotService,
-    private readonly auth: AuthService,
+    @Inject(CalV2Service) private readonly service: CalV2Service,
+    @Inject(CalV2PilotService) private readonly pilot: CalV2PilotService,
+    @Inject(AuthService) private readonly auth: AuthService,
   ) {}
 
   private async principal(
