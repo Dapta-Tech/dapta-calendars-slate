@@ -38,6 +38,12 @@ describe('negotiateLocale', () => {
 
   it('never picks a language the browser refuses (q=0)', () => {
     expect(negotiateLocale('es;q=0, en;q=0.1')).toBe('en');
+    expect(negotiateLocale('es;q=0.0')).toBe('en');
+  });
+
+  it('ignores a weight it cannot read instead of taking it as a refusal', () => {
+    expect(negotiateLocale('es;q=banana')).toBe('es');
+    expect(negotiateLocale('es;q=, en;q=0.5')).toBe('es');
   });
 
   it('is English for a header that names neither, or none at all', () => {
@@ -45,7 +51,6 @@ describe('negotiateLocale', () => {
     expect(negotiateLocale('*')).toBe('en');
     expect(negotiateLocale('')).toBe('en');
     expect(negotiateLocale(null)).toBe('en');
-    expect(negotiateLocale('es;q=banana')).toBe('en');
   });
 });
 

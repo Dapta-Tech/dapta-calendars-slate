@@ -14,7 +14,8 @@ const SUPPORTED: readonly Locale[] = ['en', 'es'];
  * Weights are honored, so `fr-FR, es;q=0.8, en;q=0.5` answers Spanish: the
  * reader prefers Spanish over English even though neither is their first
  * choice. Between equal weights the earlier tag wins, as the header orders them.
- * A tag weighted `q=0` is a refusal and never chosen. Anything unreadable, or a
+ * A tag weighted `q=0` is a refusal and never chosen; a weight that cannot be
+ * read is ignored rather than taken as one. Anything unreadable, or a
  * header that names neither language, is English, so a bare request renders
  * exactly as it always has.
  */
@@ -26,8 +27,12 @@ export function negotiateLocale(header: string | null | undefined): Locale {
     const locale = SUPPORTED.find((l) => l === primary);
     if (!locale) continue;
     const qParam = params.map((p) => p.trim().toLowerCase()).find((p) => p.startsWith('q='));
-    const q = qParam === undefined ? 1 : Number(qParam.slice(2));
-    if (!Number.isFinite(q) || q <= 0) continue;
+    // An unreadable weight (`q=`, `q=abc`) is ignored, not read as a refusal:
+    // only a weight that says 0 turns a language down.
+    const raw = qParam?.slice(2).trim() ?? '';
+    const parsed = raw === '' ? NaN : Number(raw);
+    const q = Number.isFinite(parsed) ? parsed : 1;
+    if (q <= 0) continue;
     if (!best || q > best.q) best = { locale, q };
   }
   return best?.locale ?? 'en';
