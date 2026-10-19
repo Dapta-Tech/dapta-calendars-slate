@@ -2273,9 +2273,13 @@ export async function createApiKey(
 
 export interface ApiKeyPrincipal {
   keyId: string;
+  /** Public, non-secret `dcl_<8hex>` handle (what the UI shows); safe to log. */
+  prefix: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
+  /** Epoch ms, or null for a key that never expires. */
+  expiresAtMs: number | null;
 }
 
 /** Verify a presented plaintext key: hash → lookup → not revoked/expired. */
@@ -2284,13 +2288,14 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
   const keyHash = createHash('sha256').update(plaintext).digest('hex');
   const row = await db.get<{
     id: string;
+    prefix: string;
     account_id: string;
     scopes: unknown;
     event_type_ids: unknown;
     revoked_at_ms: number | null;
     expires_at_ms: number | null;
   }>(
-    sql`SELECT id, account_id, scopes, event_type_ids, revoked_at_ms, expires_at_ms
+    sql`SELECT id, prefix, account_id, scopes, event_type_ids, revoked_at_ms, expires_at_ms
         FROM api_key WHERE key_hash = ${keyHash} LIMIT 1`,
   );
   if (!row) return null;
@@ -2300,23 +2305,49 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
   await db.run(sql`UPDATE api_key SET last_used_at_ms = ${now} WHERE id = ${row.id}`);
   return {
     keyId: row.id,
+    prefix: row.prefix,
     accountId: row.account_id,
     scopes: parseJsonColumn<string[]>(row.scopes, []),
     eventTypeIds: parseJsonColumn<string[] | null>(row.event_type_ids, null),
+    expiresAtMs: row.expires_at_ms == null ? null : Number(row.expires_at_ms),
   };
 }
 
+/**
+ * The key list the Developer / MCP & API page shows. Never the hash or the
+ * plaintext: `prefix` + `last4` identify a key, and the rest says what it can
+ * do (`scopes`, `eventTypeIds` allowlist, `expiresAt`) and whether it is in use
+ * (`lastUsedAt`). Times are ISO strings, null when unset. `revoked_at_ms` keeps
+ * its original snake_case name so existing readers do not break.
+ */
 export async function listApiKeys(db: Db, accountId: string) {
-  return db.all<{
+  const rows = await db.all<{
     id: string;
     name: string;
     prefix: string;
     last4: string;
+    scopes: unknown;
+    event_type_ids: unknown;
+    expires_at_ms: number | null;
+    last_used_at_ms: number | null;
     revoked_at_ms: number | null;
   }>(
-    sql`SELECT id, name, prefix, last4, revoked_at_ms FROM api_key WHERE account_id = ${accountId}
+    sql`SELECT id, name, prefix, last4, scopes, event_type_ids, expires_at_ms, last_used_at_ms,
+               revoked_at_ms FROM api_key WHERE account_id = ${accountId}
         ORDER BY created_at DESC`,
   );
+  const iso = (ms: number | null): string | null => (ms == null ? null : new Date(Number(ms)).toISOString());
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    prefix: r.prefix,
+    last4: r.last4,
+    scopes: parseJsonColumn<string[]>(r.scopes, []),
+    eventTypeIds: parseJsonColumn<string[] | null>(r.event_type_ids, null),
+    expiresAt: iso(r.expires_at_ms),
+    lastUsedAt: iso(r.last_used_at_ms),
+    revoked_at_ms: r.revoked_at_ms,
+  }));
 }
 
 export async function revokeApiKey(db: Db, accountId: string, id: string): Promise<void> {

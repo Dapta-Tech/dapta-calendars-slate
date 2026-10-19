@@ -54,10 +54,17 @@ export type AccountRole = (typeof accountRole)[number];
 export const memberStatus = ['active', 'invited', 'disabled'] as const;
 export type MemberStatus = (typeof memberStatus)[number];
 
+/**
+ * What an API key may do. `bookings:cancel` is separate from `bookings:write` on
+ * purpose: cancelling is destructive and emails the invitee, so an agent that
+ * only books and moves meetings does not get it by default. The REST cancel
+ * routes accept either scope; the MCP `cancel_booking` tool needs `bookings:cancel`.
+ */
 export const apiScope = [
   'availability:read',
   'bookings:read',
   'bookings:write',
+  'bookings:cancel',
   'calendars:read',
   'event-types:read',
 ] as const;
