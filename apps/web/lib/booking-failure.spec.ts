@@ -67,4 +67,10 @@ describe('classifyBookingFailure', () => {
       'conflict',
     );
   });
+
+  it('a 429 is busy, not a generic failure and not a conflict', () => {
+    // Nothing was written; the form stays and Confirm is the retry.
+    expect(classifyBookingFailure({ status: 429, error: 'RATE_LIMITED' }, false)).toBe('busy');
+    expect(classifyBookingFailure({ status: 429 }, true)).toBe('busy');
+  });
 });

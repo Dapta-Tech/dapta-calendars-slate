@@ -11,6 +11,7 @@ import {
   type Span,
 } from '@/lib/availability-window';
 import { availabilityUrl, type AvailabilityChunk, type AvailabilitySource } from '@/lib/availability-source';
+import { MAX_RETRY_AFTER_MS, retryAfterMsOf } from '@/lib/busy';
 
 /**
  * A booking page's availability, read the month on screen first.
@@ -48,6 +49,8 @@ const fetchWindow: WindowLoader = async (source, span) => {
   try {
     const res = await fetch(availabilityUrl(source, span), { cache: 'no-store' });
     if (res.ok) return (await res.json()) as AvailabilityChunk;
+    // Busy, not broken: ask again, but no sooner than the service asked.
+    if (res.status === 429) return { ok: false, busy: true, retryAfterMs: retryAfterMsOf(res.headers.get('retry-after')) };
     return res.status === 400 || res.status === 404 ? { ok: false, final: true } : { ok: false };
   } catch {
     return { ok: false };
@@ -65,6 +68,8 @@ interface State {
   emptyReason?: string;
   /** A read did not answer before any time was known: the page says so. */
   unavailable: boolean;
+  /** ...and the reason it did not answer is that the service was busy (429). */
+  busy: boolean;
   bookingFields?: BookingField[];
 }
 
@@ -109,6 +114,7 @@ export function useProgressiveSlots({
     slots: staticSlots ?? [],
     known: progressive ? [] : [whole],
     unavailable: false,
+    busy: false,
   }));
   // Spans asked for and not yet answered, so two quick moves never read one
   // window twice. A ref: it gates fetching and is never rendered. Each read is
@@ -146,10 +152,12 @@ export function useProgressiveSlots({
   // visitor moved: a failed visible month left the "times unavailable" sentence
   // in place of the calendar for good, and a failed month on screen stayed
   // unsettled. It reads only refs, so it is made once.
-  const retryLater = useRef((span: Span, attempt: number) => {
+  const retryLater = useRef((span: Span, attempt: number, notBeforeMs = 0) => {
     const key = spanKey(span);
-    const delay = retryDelay(attempt);
-    if (delay === undefined || waiting.current.has(key)) return;
+    const backoff = retryDelay(attempt);
+    if (backoff === undefined || waiting.current.has(key)) return;
+    // A busy service named its wait: never ask sooner than that.
+    const delay = Math.max(backoff, Math.min(MAX_RETRY_AFTER_MS, notBeforeMs));
     const timer = setTimeout(() => {
       waiting.current.delete(key);
       if (alive.current) void fetchNow.current(span, knownNow.current, attempt + 1);
@@ -161,7 +169,9 @@ export function useProgressiveSlots({
     inflightDone.current.delete(spanKey(span));
     if (!alive.current) return;
     const failed = !chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE';
-    if (failed && !(!chunk.ok && chunk.final)) retryLater.current(span, attempt);
+    if (failed && !(!chunk.ok && chunk.final)) {
+      retryLater.current(span, attempt, !chunk.ok && chunk.busy ? (chunk.retryAfterMs ?? 0) : 0);
+    }
     setState((s) => {
       // A window that could not be read is not a window with no times. Only
       // when nothing at all has been read does the page say so; once any
@@ -169,7 +179,7 @@ export function useProgressiveSlots({
       // "not yet known". Either way it is asked again (`retryLater` above), and
       // the first window that answers takes the sentence back.
       if (!chunk.ok || chunk.emptyReason === 'CALENDAR_UNAVAILABLE') {
-        return s.known.length === 0 ? { ...s, unavailable: true } : s;
+        return s.known.length === 0 ? { ...s, unavailable: true, busy: !chunk.ok && !!chunk.busy } : s;
       }
       // A configuration reason (no schedule, no hours) holds for every window.
       // It is an answer, so it also takes back an earlier "unavailable": a
@@ -181,6 +191,7 @@ export function useProgressiveSlots({
           emptyReason: chunk.emptyReason,
           known: [whole],
           unavailable: false,
+          busy: false,
           bookingFields: s.bookingFields ?? chunk.bookingFields,
         };
       }
@@ -189,6 +200,7 @@ export function useProgressiveSlots({
         known: addSpan(s.known, span),
         // A later window answering clears an earlier one that did not.
         unavailable: false,
+        busy: false,
         emptyReason: s.emptyReason,
         bookingFields: s.bookingFields ?? chunk.bookingFields,
       };
@@ -272,6 +284,7 @@ export function useProgressiveSlots({
     slots: state.slots,
     emptyReason: state.emptyReason,
     unavailable: state.unavailable,
+    busy: state.busy,
     bookingFields: state.bookingFields,
     everythingKnown,
     isKnown,

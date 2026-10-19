@@ -17,6 +17,9 @@ import { BookingStage, BookingSummary } from '@/components/booking-page-parts';
 import { BrandedShell } from '@/components/branded-shell';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { brandingShown } from '@/lib/growth';
+import { ApiBusyError, isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
+import type { AvailabilityResponse } from '@slate/types';
 
 // Token-gated personal page: never indexed, and the title stays generic so no
 // booking detail leaks into link previews or crawlers.
@@ -89,7 +92,11 @@ export default async function ManagePage({
   const { token } = await searchParams;
   if (!token) notFound();
 
-  const result = await getManageView(uid, token);
+  const read = await orBusy(getManageView(uid, token));
+  // The service was too busy to answer (429): say so and retry, never the
+  // error boundary (which would read as if the booking itself were in trouble).
+  if (isBusy(read)) return <BusyPage locale={await publicLocale()} retryAfterMs={read.retryAfterMs} />;
+  const result = read;
   // A booking that does not exist is a 404. A link that no longer opens one is
   // NOT: the manage token rotates on every reschedule, so an older emailed link
   // is expected to stop working, and saying so beats both a bare 404 and the
@@ -143,14 +150,23 @@ export default async function ManagePage({
     to: new Date(now.getTime() + 21 * 86_400_000).toISOString(),
   };
   const rs = booking.status === 'accepted' ? booking.reschedule : undefined;
-  const [avail, branding] = await Promise.all([
-    !rs
-      ? null
-      : rs.kind === 'team'
-        ? getRescheduleAvailability({ uid, token, ...range })
-        : getAvailability({ accountCode: rs.accountCode, handle: rs.handle, slug: rs.slug, ...range }),
-    hostBranding(booking),
-  ]);
+  // The picker's times. A read that fails costs the picker, never the page: the
+  // booking is still shown and can still be cancelled, and the picker says why
+  // it is empty (busy, or the calendar cannot be read) with a way to ask again.
+  const readTimes = async (): Promise<{ avail: AvailabilityResponse | null; note?: 'busy' | 'unavailable' }> => {
+    if (!rs) return { avail: null };
+    try {
+      const avail =
+        rs.kind === 'team'
+          ? await getRescheduleAvailability({ uid, token, ...range })
+          : await getAvailability({ accountCode: rs.accountCode, handle: rs.handle, slug: rs.slug, ...range });
+      return avail?.emptyReason === 'CALENDAR_UNAVAILABLE' ? { avail, note: 'unavailable' } : { avail };
+    } catch (err) {
+      return { avail: null, note: err instanceof ApiBusyError ? 'busy' : 'unavailable' };
+    }
+  };
+  const [times, branding] = await Promise.all([readTimes(), hostBranding(booking)]);
+  const avail = times.avail;
 
   // Granular gate (see `manageMode`): an accepted booking still ahead can be
   // moved or cancelled; a request still waiting on the host can be withdrawn;
@@ -196,6 +212,7 @@ export default async function ManagePage({
             canReschedule={mode === 'full'}
             token={token}
             slots={avail?.slots ?? []}
+            timesNote={times.note}
             timeZone={tz}
             locale={locale}
             messages={messages}

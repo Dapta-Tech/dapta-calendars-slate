@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({ getAvailability: vi.fn(), getTeamAvailability: v
 vi.mock('@/lib/api', () => api);
 
 import { GET } from './route';
+import { ApiBusyError } from '@/lib/busy';
 
 const FROM = '2026-04-01T04:00:00.000Z';
 const TO = '2026-05-01T04:00:00.000Z';
@@ -72,6 +73,22 @@ describe('one window of a public event, for the booking island', () => {
     api.getAvailability.mockResolvedValueOnce(null);
     expect((await GET(personal())).status).toBe(404);
     api.getAvailability.mockRejectedValueOnce(new Error('API /v1/availability failed: 503'));
+    const res = await GET(personal());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false });
+  });
+
+  it('a busy API (429) is passed on as busy with its wait, never as a 502 outage', async () => {
+    api.getAvailability.mockRejectedValue(new ApiBusyError(4_000));
+    const res = await GET(personal());
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('4');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ ok: false, busy: true, retryAfterMs: 4_000 });
+  });
+
+  it('any other API failure is still a plain 502', async () => {
+    api.getAvailability.mockRejectedValue(new Error('API /v1/availability failed: 500'));
     const res = await GET(personal());
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ ok: false });

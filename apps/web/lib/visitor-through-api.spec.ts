@@ -61,7 +61,13 @@ async function fortyVisitorsThroughTheWeb(apiEnv: Record<string, string>, webSec
       // What the load balancer hands the web: whatever the visitor sent, then
       // the address it saw.
       request.run(new Headers({ 'x-forwarded-for': `10.9.9.9, 198.51.100.${i + 1}` }), async () => {
-        const settle = (p: Promise<unknown>) => p.then(() => 'ok', (e: Error) => e.message);
+        // A 429 reaches the page as ApiBusyError (a busy notice, never the
+        // outage page), after the one short retry `visitorFetch` makes.
+        const settle = (p: Promise<unknown>) =>
+          p.then(
+            () => 'ok',
+            (e: Error) => (e.name === 'ApiBusyError' ? 'busy (429)' : e.message),
+          );
         return [
           await settle(getProfile('acme', `alex-${i}`)),
           await settle(
@@ -78,17 +84,24 @@ async function fortyVisitorsThroughTheWeb(apiEnv: Record<string, string>, webSec
     ),
   );
   const all = outcomes.flat();
-  return { ok: all.filter((o) => o === 'ok').length, throttled: all.filter((o) => /429/.test(o)).length };
+  return {
+    ok: all.filter((o) => o === 'ok').length,
+    throttled: all.filter((o) => /429/.test(o)).length,
+    other: all.filter((o) => o !== 'ok' && !/429/.test(o)).length,
+  };
 }
 
 describe('40 visitors through the web client against the rate-limited API (F1)', { timeout: 30_000 }, () => {
   it('with the secret on both apps, every call is answered', async () => {
     const out = await fortyVisitorsThroughTheWeb({ INTERNAL_API_SECRET: SECRET }, SECRET);
-    expect(out).toEqual({ ok: 2 * VISITORS, throttled: 0 });
+    expect(out).toEqual({ ok: 2 * VISITORS, throttled: 0, other: 0 });
   });
 
   it('without it, the visitors share the web server bucket and some are throttled', async () => {
     const out = await fortyVisitorsThroughTheWeb({}, undefined);
-    expect(out.throttled).toBeGreaterThanOrEqual(2 * VISITORS - 60 - 2);
+    // The one short retry after Retry-After wins back the token or two that
+    // refill meanwhile (1/s), no more: the shared bucket is still the problem.
+    expect(out.throttled).toBeGreaterThanOrEqual(2 * VISITORS - 60 - 4);
+    expect(out.other).toBe(0);
   });
 });

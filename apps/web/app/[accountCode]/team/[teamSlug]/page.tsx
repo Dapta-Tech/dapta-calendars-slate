@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { getMessages, readableZone, t } from '@slate/shared';
 import { getTeamProfile } from '@/lib/api';
+import { isBusy, orBusy } from '@/lib/busy';
+import { BusyPage } from '@/components/busy-page';
 import { publicLocale } from '@/lib/locale';
 import { BrandedShell } from '@/components/branded-shell';
 import { logoOf, teamBranding } from '@/lib/brand-kit';
@@ -29,7 +31,8 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, teamSlug } = await params;
   const query = await searchParams;
-  const team = await getTeamProfile(accountCode, teamSlug);
+  const team = await orBusy(getTeamProfile(accountCode, teamSlug));
+  if (isBusy(team)) return { robots: { index: false, follow: false } };
   if (!team) return {};
   // The workspace rides along only when it says something the team's name does
   // not (`profileEyebrow`, the rule for the line over the name on the page), and
@@ -61,7 +64,9 @@ export default async function TeamPage({
 }) {
   const { accountCode, teamSlug } = await params;
   const query = await searchParams;
-  const [team, locale] = await Promise.all([getTeamProfile(accountCode, teamSlug), publicLocale()]);
+  const [read, locale] = await Promise.all([orBusy(getTeamProfile(accountCode, teamSlug)), publicLocale()]);
+  if (isBusy(read)) return <BusyPage locale={locale} retryAfterMs={read.retryAfterMs} />;
+  const team = read;
   if (!team) notFound();
   const msg = getMessages(locale);
 

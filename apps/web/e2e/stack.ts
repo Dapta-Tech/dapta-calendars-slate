@@ -10,13 +10,17 @@ const webPort = port('E2E_WEB_PORT', 3411);
 const apiPort = port('E2E_API_PORT', 4411);
 const limitedApiPort = port('E2E_LIMITED_API_PORT', 4412);
 const calendarPort = port('E2E_CALENDAR_PORT', 4519);
+const proxyPort = port('E2E_PROXY_PORT', 4413);
 
 export const E2E = {
   webPort,
   apiPort,
   limitedApiPort,
   calendarPort,
+  proxyPort,
   web: `http://localhost:${webPort}`,
+  /** The web app's API_URL: a pass-through to `api` that can answer 429 on cue (fault-proxy.mjs). */
+  proxy: `http://localhost:${proxyPort}`,
   api: `http://localhost:${apiPort}`,
   limitedApi: `http://localhost:${limitedApiPort}`,
   calendar: `http://127.0.0.1:${calendarPort}`,
@@ -94,3 +98,26 @@ export function parseIcs(text: string): Record<string, string> {
 
 /** An address this run alone uses, so bookings never trip the duplicate guard. */
 export const visitorEmail = (tag: string) => `visitor-${tag}-${Date.now().toString(36)}@example.test`;
+
+/**
+ * Make the API look busy to the web app: the next `times` requests whose path
+ * contains `match` are answered 429 with `Retry-After: retryAfter` seconds by
+ * the proxy in front of the API (fault-proxy.mjs). Undo with `clearThrottle`.
+ */
+export async function throttle(rule: { match: string; times: number; retryAfter: number; method?: string }): Promise<void> {
+  await fetch(`${E2E.proxy}/__qa/throttle`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(rule),
+  });
+}
+
+export async function clearThrottle(): Promise<void> {
+  await fetch(`${E2E.proxy}/__qa/reset`, { method: 'POST' });
+}
+
+/** How many 429s the proxy has answered since the suite started. */
+export async function throttledCount(): Promise<number> {
+  const r = await fetch(`${E2E.proxy}/__qa/served`);
+  return ((await r.json()) as { served: number }).served;
+}

@@ -480,7 +480,7 @@ export function BookingFlow({
       return;
     }
     if (r.ok && r.reservationUid) setHold({ uid: r.reservationUid, expiresAt: r.expiresAt! });
-    else setHoldError(r.message ?? 'Could not hold this time.');
+    else setHoldError(holdFailureCopy(r, messages.trouble));
   }
 
   /**
@@ -709,6 +709,11 @@ export function BookingFlow({
   const oneOffGone = kind === 'one-off-gone';
   const conflict = kind === 'conflict';
   const intakeError = kind === 'intake';
+  // Neither a conflict nor an intake answer: the booking did not go through and
+  // nothing was written, so the form stays exactly as it was with a line above
+  // Confirm saying so. Without it a failed submit used to look ignored.
+  const submitTrouble =
+    kind === 'busy' ? messages.trouble.bookBusy : kind === 'generic' ? messages.trouble.bookFailed : null;
 
   // --- Duplicate booking (409 DUPLICATE_BOOKING) --------------------------
   // The copy names NO date, time or host: revealing the existing slot would
@@ -762,9 +767,11 @@ export function BookingFlow({
   const reason = progress.unavailable ? 'CALENDAR_UNAVAILABLE' : (progress.emptyReason ?? emptyReason);
   const emptyCopy =
     reason === 'CALENDAR_UNAVAILABLE'
-      ? askFailed
-        ? m.timesStillUnavailable
-        : m.timesUnavailable
+      ? progress.busy
+        ? messages.trouble.busyTimes
+        : askFailed
+          ? m.timesStillUnavailable
+          : m.timesUnavailable
       : reason
         ? m.noTimesNow
         : m.noSlots;
@@ -992,6 +999,11 @@ export function BookingFlow({
               </label>
 
               {intakeError ? <p className="bp-error">{result!.message}</p> : null}
+              {submitTrouble && !pending ? (
+                <p role="alert" className="bp-error">
+                  {submitTrouble}
+                </p>
+              ) : null}
 
               <button
                 type="submit"
@@ -1080,4 +1092,20 @@ export function BookingFlow({
       }
     />,
   );
+}
+
+/**
+ * The line under the chosen time when its hold was refused, in the visitor's
+ * language rather than the API's English. A refused hold does not stop the
+ * booking (it re-checks the time itself), so the copy says what happened and
+ * whether booking can still go ahead.
+ */
+function holdFailureCopy(
+  r: { status: number; error?: string },
+  copy: { holdBusy: string; holdUnconfirmed: string; holdGone: string; holdFailed: string },
+): string {
+  if (r.status === 429) return copy.holdBusy;
+  if (r.error === 'CALENDAR_UNAVAILABLE') return copy.holdUnconfirmed;
+  if (r.error === 'INVALID_SLOT' || r.status === 400) return copy.holdGone;
+  return copy.holdFailed;
 }
