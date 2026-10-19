@@ -392,7 +392,9 @@ export type OneOffLinkResult =
   | { ok: true; target: OneOffLinkTargetView }
   | { ok: false; reason: 'gone' | 'not-found' };
 
-export async function getOneOffLink(token: string): Promise<OneOffLinkResult> {
+// cache(): the route's layout (which turns an unknown token into a real 404)
+// and its page share one read per request.
+export const getOneOffLink = cache(async (token: string): Promise<OneOffLinkResult> => {
   const res = await visitorFetch(`${API_URL}/v1/public/one-off/${encodeURIComponent(token)}`, {
     cache: 'no-store',
   });
@@ -413,7 +415,7 @@ export async function getOneOffLink(token: string): Promise<OneOffLinkResult> {
     return { ok: false, reason: 'not-found' };
   }
   return { ok: true, target: parsed.data };
-}
+});
 
 /**
  * Availability for the event a one-off link opens.

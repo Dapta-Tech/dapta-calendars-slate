@@ -193,7 +193,7 @@ export function AdminShell({
           assistive tech hears the product once either way. */}
       <BrandMark className="h-6 w-auto text-foreground" labelled={railCollapsed} />
       {!railCollapsed ? <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span> : null}
-      <AppSwitcher messages={c.switcher} collapsed={railCollapsed} />
+      <AppSwitcher messages={c.switcher} />
       {/* The rail toggle is a desktop pref; hidden on the studio route where the
           rail is force-collapsed for canvas. */}
       {!studio ? (
@@ -341,7 +341,7 @@ export function AdminShell({
         <div className="flex items-center gap-inline px-inline">
           <BrandMark className="h-6 w-auto text-foreground" />
           <span className="text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
-          <AppSwitcher messages={c.switcher} />
+          <AppSwitcher messages={c.switcher} inDrawer />
         </div>
         <nav>
           <NavLinks collapsed={false} nav={messages.nav} onNavigate={() => setDrawerOpen(false)} />

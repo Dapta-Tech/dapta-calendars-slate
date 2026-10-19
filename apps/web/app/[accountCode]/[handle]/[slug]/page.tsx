@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import { getMessages, t } from '@slate/shared';
+import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
 import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
 import { firstWindow } from '@/lib/availability-window';
@@ -35,16 +35,18 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { accountCode, handle, slug } = await params;
   const query = await searchParams;
-  const lang = typeof query.lang === 'string' ? query.lang : undefined;
   const profile = await getProfile(accountCode, handle);
   const event = profile?.eventTypes.find((e) => e.slug === slug);
   if (!profile || !event) return {};
   const name = profile.member.displayName ?? profile.member.handle;
   // Title and description say what the card says: the event, the host, the
   // length. The image is `opengraph-image.tsx` beside this file, so no
-  // `images` here: an explicit list would replace the host's card.
-  const growth = getMessages(await publicLocale(lang)).growth;
-  const title = t(growth.seoEventTitle, { event: event.title, name });
+  // `images` here: an explicit list would replace the host's card. A title that
+  // already names the host is not told who it is with a second time.
+  // `publicLocale()` reads `?lang=` from the same forwarded query `<html lang>`
+  // does, so the title and the document never disagree.
+  const growth = getMessages(await publicLocale()).growth;
+  const title = eventPageTitle(growth.seoEventTitle, event.title, name);
   const description =
     event.description ||
     t(growth.seoEvent, {
@@ -78,8 +80,9 @@ export default async function BookingPage({
 }) {
   const { accountCode, handle, slug } = await params;
   const query = await searchParams;
-  const lang = typeof query.lang === 'string' ? query.lang : undefined;
-  const locale = await publicLocale(lang);
+  // One source for the language: the same `publicLocale()` the root layout's
+  // `<html lang>` asks, `?lang=` included.
+  const locale = await publicLocale();
   // Inline embed (E): the mode plus any appearance overrides the snippet
   // carries. Outside embed mode the overrides are empty by construction.
   const { embed, brandColor: accentOverride, style: styleOverrides } = parseEmbedParams(query);

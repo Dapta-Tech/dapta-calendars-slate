@@ -9,6 +9,7 @@ import {
 } from '@slate/shared';
 import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
 import { framingHeaders } from '@/lib/framing';
+import { NOINDEX_HEADER_VALUE, deploymentNoindex } from '@/lib/indexing';
 import { requestOrigin } from '@/lib/request-origin';
 
 /**
@@ -153,6 +154,13 @@ export function middleware(req: NextRequest) {
   for (const [name, value] of Object.entries(framingHeaders(req.nextUrl.pathname))) {
     res.headers.set(name, value);
   }
+
+  // A deployment marked NOINDEX (lib/indexing.ts) says so in a header on every
+  // response this runs for, not only in the HTML: the header is what covers the
+  // link-preview images, `robots.txt` itself and anything else that is not a
+  // page with a `<head>`. (The matcher skips `_next` build assets and the icons,
+  // which are nothing a search engine lists.)
+  if (deploymentNoindex()) res.headers.set('X-Robots-Tag', NOINDEX_HEADER_VALUE);
 
   return parkLandingId(req, parkAttribution(req, res));
 }

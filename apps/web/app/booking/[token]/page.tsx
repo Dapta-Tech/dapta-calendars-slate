@@ -85,18 +85,13 @@ import {
  * — and this one says only "Not found.". What must not leak is the EXISTENCE
  * of invite links, and none of them mentions one.)
  *
- * ON THE WEB the requirement is met as WRITTEN — "indistinguishable from any
- * other missing route" — but not by the status line, and the difference is
- * worth stating rather than discovering. An unknown token calls `notFound()`
- * and renders the app's own not-found page; that page arrives with a 200 in
- * this app, because `notFound()` from ANY dynamic route here does (an unknown
- * event, an unknown handle and an unknown manage uid all behave the same way,
- * in dev and in a production build alike — only a path that matches no route at
- * all gets a 404 status). So a guessed token is genuinely indistinguishable
- * from a missing booking page, which is the property that matters; it is just
- * that both are 200 pages rather than both being 404s. That is pre-existing
- * app-wide behaviour, not something this route introduced, and changing it is
- * out of scope for #110.
+ * ON THE WEB the requirement is met by the status line too. An unknown token
+ * is turned away by this route's layout (`layout.tsx`), above its loading
+ * boundary, so it answers a real 404 with the app's own not-found page: the
+ * same status and the same page as an unknown host, team or event, whose
+ * layouts do the same. (Until the launch hygiene change every one of them
+ * answered 200, because a root loading boundary committed the status first;
+ * the property held then as both-200 and holds now as both-404.)
  *
  * The spent-link state renders at 200 for a second, independent reason: the App
  * Router has no supported way for a page render to set an arbitrary status —
@@ -133,8 +128,9 @@ export default async function OneOffBookingPage({
 }) {
   const { token } = await params;
   const query = await searchParams;
-  const lang = typeof query.lang === 'string' ? query.lang : undefined;
-  const locale = await publicLocale(lang);
+  // One source for the language: the same `publicLocale()` the root layout's
+  // `<html lang>` asks, `?lang=` included.
+  const locale = await publicLocale();
   const messages = getMessages(locale);
   // Inline embed (E) works here exactly as on the public routes — see point 2
   // in the header comment for why this path keeps its `*` frame-ancestors.
@@ -143,11 +139,9 @@ export default async function OneOffBookingPage({
   const resolved = await getOneOffLink(token);
 
   // An unknown or malformed token IS a missing route: the same not-found page,
-  // reached the same way, with nothing on it that hints this deployment mints
-  // invite links. See the header for what that does and does not mean about the
-  // status line — `notFound()` renders at 200 here, as it does on every dynamic
-  // route in this app, which is precisely why a guess is indistinguishable from
-  // an unknown booking page.
+  // with nothing on it that hints this deployment mints invite links. The
+  // layout has already answered it with a 404 on a full load (the read is
+  // `cache()`d, so this is the same one); this keeps a client navigation honest.
   if (!resolved.ok && resolved.reason === 'not-found') notFound();
 
   const shellClass = embed ? EMBED_ROOT_CLASS : 'bp-viewport';

@@ -3,7 +3,11 @@ import { NextRequest } from 'next/server';
 
 // The retryable branch renders the i18n copy, which reads the locale cookie.
 const localeCookie = vi.fn(() => undefined as { value: string } | undefined);
-vi.mock('next/headers', () => ({ cookies: async () => ({ get: localeCookie }) }));
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ get: localeCookie }),
+  // No Accept-Language: with no language cookie either, the copy is English.
+  headers: async () => ({ get: () => null }),
+}));
 
 const getSession = vi.fn();
 const setSession = vi.fn();

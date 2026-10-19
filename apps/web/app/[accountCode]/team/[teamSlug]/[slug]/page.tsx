@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
-import { getMessages, schedulingMethodLabel, t } from '@slate/shared';
+import { eventPageTitle, getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
 import { toChunk, type AvailabilityChunk } from '@/lib/availability-source';
 import { firstWindow } from '@/lib/availability-window';
@@ -36,10 +36,14 @@ export async function generateMetadata({
   const team = await getTeamProfile(accountCode, teamSlug);
   const event = team?.eventTypes.find((e) => e.slug === slug);
   if (!team || !event) return {};
-  const title = `${event.title} — ${team.team.name}`;
+  // The same title rule as a person's event page, with the team as the host,
+  // matched on its whole name only: "The Growth Team" opens with a word that
+  // half the event titles in the world contain.
+  const growth = getMessages(await publicLocale()).growth;
+  const title = eventPageTitle(growth.seoEventTitle, event.title, team.team.name, { firstName: false });
   const description =
     event.description ||
-    t(getMessages(await publicLocale()).growth.seoEvent, {
+    t(growth.seoEvent, {
       event: event.title,
       name: team.team.name,
       minutes: event.lengthMinutes,
