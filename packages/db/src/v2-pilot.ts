@@ -580,7 +580,9 @@ export async function rescheduleBookingV2(
   // here (H1a): a still-pending CRM write-out left pointing at the predecessor
   // would drain against a booking this transaction just cancelled and create a
   // SECOND meeting, at the old time, that nothing ever cancels.
-  const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, updated_at = ${now}
+  // The order key follows too: these rows are ordered by their booking, and the
+  // successor's own write-out must queue behind them, not beside them.
+  const repointCalendarJobs = sql`UPDATE outbox SET booking_uid = ${newUid}, order_key = ${newUid}, updated_at = ${now}
     WHERE booking_uid = ${source.uid} AND kind IN ('calendar', 'crm') AND status = 'pending'`;
 
   type TxResult = 'ok' | 'gone' | 'conflict';
