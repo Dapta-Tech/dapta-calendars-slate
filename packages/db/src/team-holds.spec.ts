@@ -4,7 +4,7 @@ import type { BusyInterval, CalendarProvider, CalendarSummary, ConnectionHealth,
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { createBooking, getAvailability } from './repository';
-import { createTeamBooking, getTeamAvailability, insertHoldGuarded } from './parity';
+import { cancelBooking, createTeamBooking, getTeamAvailability, insertHoldGuarded, rescheduleBooking } from './parity';
 import { rescheduleBookingV2 } from './v2-pilot';
 import { createEventType, createTeam } from './crud';
 
@@ -174,18 +174,57 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
   };
 
   /** A personal booking on Alex's own event, as the REST routes make it unless `refuseHeld` is set. */
+  type Seat = { name: string; email: string; timeZone: string };
   const bookOwn = (
     startMs: number,
     email: string,
-    opts: { refuseHeld?: boolean; reservationUid?: string } = {},
+    opts: { refuseHeld?: boolean; reservationUid?: string; additionalAttendees?: Seat[] } = {},
     calendar?: CalendarProvider,
     slug = 'own',
+    on: Db = db,
   ) =>
     createBooking(
-      db,
+      on,
       { accountCode, handle: `alex-${tag}`, slug, startMs, attendee: { name: 'Own Invitee', email, timeZone: 'UTC' }, ...opts },
       calendar,
     );
+  const guests = (n: number, tag2: string): Seat[] =>
+    Array.from({ length: n }, (_, i) => ({ name: `Guest ${i}`, email: `${tag2}-${i}@example.org`, timeZone: 'UTC' }));
+  const seatsAt = async (startMs: number) =>
+    Number(
+      (await db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id
+            WHERE b.event_type_id = ${await group()} AND b.start_ms = ${startMs} AND b.status IN ('accepted','pending')`,
+      ))!.n,
+    );
+
+  /** The text of a drizzle query, enough to recognise one. */
+  const sqlText = (q: unknown) =>
+    ((q as { queryChunks?: unknown[] }).queryChunks ?? [])
+      .map((c) => (c && typeof c === 'object' && Array.isArray((c as { value?: unknown }).value) ? (c as { value: string[] }).value.join('') : ''))
+      .join('');
+
+  /**
+   * `db`, except that `onRead` runs once, right after the group-seat branch has
+   * read the existing group booking and before its locked write: the window a
+   * cancel or a move (neither takes the member lock) can fall into.
+   */
+  function afterSeatRead(onRead: () => Promise<void>): Db {
+    let fired = false;
+    return new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop !== 'get') return Reflect.get(target, prop, receiver);
+        return async (q: unknown) => {
+          const row = await (target.get as (query: unknown) => Promise<unknown>).call(target, q);
+          if (!fired && sqlText(q).includes('SELECT id, uid, status, start_ms, end_ms FROM booking')) {
+            fired = true;
+            await onRead();
+          }
+          return row;
+        };
+      },
+    });
+  }
 
   /** Alex's group event (four seats per time), made once. */
   let groupId: string | undefined;
@@ -358,5 +397,49 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
       sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id WHERE b.event_type_id = ${g} AND b.start_ms = ${at}`,
     );
     expect(Number(seats!.n)).toBe(3);
+  });
+
+  it('a group request takes all its seats or none, and a first booking cannot ask for more seats than the time has', async () => {
+    await clearHolds();
+    const [at, fresh] = [(await alexFree())[36]!, (await alexFree())[40]!];
+    expect((await bookOwn(at, 'pair@example.org', { additionalAttendees: guests(1, 'pair') }, undefined, 'group')).ok).toBe(true);
+    expect(await seatsAt(at)).toBe(2);
+    // Three more would make five of four.
+    expect(await bookOwn(at, 'trio@example.org', { additionalAttendees: guests(2, 'trio') }, undefined, 'group')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    expect(await seatsAt(at)).toBe(2);
+    // Two more fit exactly.
+    expect((await bookOwn(at, 'duo@example.org', { additionalAttendees: guests(1, 'duo') }, undefined, 'group')).ok).toBe(true);
+    expect(await seatsAt(at)).toBe(4);
+    // Five on an empty time of a four-seat event never fit.
+    expect(await bookOwn(fresh, 'five@example.org', { additionalAttendees: guests(4, 'five') }, undefined, 'group')).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect(await seatsAt(fresh)).toBe(0);
+  });
+
+  it('a seat does not land on a group booking cancelled or moved after it was read', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [cancelledAt, movedAt, movedTo] = [free[44]!, free[48]!, free[52]!];
+    const first = await bookOwn(cancelledAt, 'first-cancel@example.org', {}, undefined, 'group');
+    const second = await bookOwn(movedAt, 'first-move@example.org', {}, undefined, 'group');
+    if (!first.ok || !second.ok) throw new Error('setup booking failed');
+    // The host cancels the group booking between the seat's read and its write.
+    const onCancelled = afterSeatRead(async () => {
+      expect((await cancelBooking(db, { uid: first.booking.uid, byHost: true, accountId })).ok).toBe(true);
+    });
+    expect(await bookOwn(cancelledAt, 'late-cancel@example.org', {}, undefined, 'group', onCancelled)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const onCancelledSeats = await db.get<{ n: number | string }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id WHERE b.uid = ${first.booking.uid}`,
+    );
+    expect(Number(onCancelledSeats!.n)).toBe(1);
+    // The host moves it instead.
+    const onMoved = afterSeatRead(async () => {
+      expect((await rescheduleBooking(db, { uid: second.booking.uid, newStartMs: movedTo, byHost: true, accountId })).ok).toBe(true);
+    });
+    expect(await bookOwn(movedAt, 'late-move@example.org', {}, undefined, 'group', onMoved)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const moved = await db.get<{ start_ms: number | string; n: number | string }>(
+      sql`SELECT b.start_ms, (SELECT COUNT(*) FROM booking_attendee ba WHERE ba.booking_id = b.id) AS n FROM booking b WHERE b.uid = ${second.booking.uid}`,
+    );
+    expect(Number(moved!.start_ms)).toBe(movedTo);
+    expect(Number(moved!.n)).toBe(1);
   });
 });

@@ -1097,47 +1097,63 @@ export async function createBooking(
                 AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
     );
     if (existing) {
-      // The seat count and (with `refuseHeld`) other callers' holds are read
-      // under the host's lock, the one every guarded booking write and the hold
-      // write take, so neither a concurrent seat nor a hold that lands after
-      // the caller's own checks can slip in between the read and the insert.
+      // Seats, holds and the booking itself are read again under the host's
+      // lock (the one every guarded booking write and the hold write take),
+      // then the booking's own row (member first, booking second, the order a
+      // confirmation takes them in). Everything read above is a snapshot: a
+      // concurrent seat, a hold landing after the caller's own checks, or a
+      // cancel or move of this booking (those do not take the member lock)
+      // must not slip in between the read and the insert.
       const seatTime = Date.now();
       const seatInserts = [args.attendee, ...(args.additionalAttendees ?? [])].map(
-        (attendee) => sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
+        (attendee, i) => sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
               ${normalizeAttendeeEmail(attendee.email)},
               ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
-              ${attendee.language ?? null}, ${seatTime})`,
+              ${attendee.language ?? null}, ${seatTime + i})`,
       );
-      const full = sql`SELECT 1 AS hit WHERE (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${existing.id}) >= ${capacity}`;
+      // Every seat this request asks for must fit, not only the first.
+      const full = sql`SELECT 1 AS hit WHERE (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${existing.id}) + ${seatInserts.length} > ${capacity}`;
       const heldElsewhere = args.refuseHeld
         ? memberHeldSql(member.id, startMs, endMs, seatTime, args.reservationUid)
         : null;
-      let seated: boolean;
+      const stillThere = (row: { status: string; start_ms: number | string } | undefined) =>
+        !!row && (row.status === 'accepted' || row.status === 'pending') && Number(row.start_ms) === startMs;
+      // The booking's status as it stands under the lock, or null when no seat was taken.
+      let seated: string | null;
       if (db.dialect === 'sqlite') {
-        seated = db.sqlite!.txn<boolean>(() => {
-          if (db.sqlite!.drizzle.get(full)) return false;
-          if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return false;
+        seated = db.sqlite!.txn<string | null>(() => {
+          const now = db.sqlite!.drizzle.get<{ status: string; start_ms: number }>(
+            sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} LIMIT 1`,
+          );
+          if (!stillThere(now)) return null;
+          if (db.sqlite!.drizzle.get(full)) return null;
+          if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return null;
           for (const insert of seatInserts) db.sqlite!.drizzle.run(insert);
-          return true;
+          return now!.status;
         }, { immediate: true });
       } else {
         seated = await db.pg!.drizzle.transaction(async (tx) => {
           await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
-          if (((await tx.execute(full)) as unknown as unknown[]).length > 0) return false;
-          if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return false;
+          const now = (await tx.execute(
+            sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} FOR UPDATE`,
+          )) as unknown as Array<{ status: string; start_ms: number | string }>;
+          if (!stillThere(now[0])) return null;
+          if (((await tx.execute(full)) as unknown as unknown[]).length > 0) return null;
+          if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return null;
           for (const insert of seatInserts) await tx.execute(insert);
-          return true;
+          return now[0]!.status;
         });
       }
       if (!seated) return { ok: false, reason: 'SLOT_TAKEN' };
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
+      // Times and status as checked under the lock, never the earlier snapshot.
       const rec: BookingRecord = {
         uid: existing.uid,
-        status: existing.status,
+        status: seated,
         title: eventType.title,
-        startMs: Number(existing.start_ms),
+        startMs,
         endMs: Number(existing.end_ms),
         hostHandle: member.handle,
         hostName: member.display_name,
@@ -1152,6 +1168,11 @@ export async function createBooking(
       return { ok: true, booking: rec, manageToken: '' };
     }
   }
+
+  // The first booking of a group slot takes a seat per attendee too: a request
+  // for more seats than the time has is refused, as a seat request is above.
+  if (capacity > 1 && 1 + (args.additionalAttendees?.length ?? 0) > capacity)
+    return { ok: false, reason: 'INVALID', message: `This time has ${capacity} seats; the booking asks for ${1 + (args.additionalAttendees?.length ?? 0)}.` };
 
   // External-calendar conflict check at CREATE time (error-visibility §5).
   // Availability reads already subtract external busy, but the create path
