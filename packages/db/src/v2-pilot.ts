@@ -4,6 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import { applyCalendarTemplates } from './calendar-text';
 import {
   bookingStartOutOfRange,
   isSlotBookable,
@@ -412,6 +413,10 @@ interface RescheduleSource {
   attendee_time_zone: string | null;
   /** The language the invitee booked in; carried to the new row, NULL included. */
   locale: string | null;
+  /** The rendered calendar body; carried, then rendered again at the new time. */
+  calendar_description: string | null;
+  /** Someone took a seat: the new booking's calendar text stays shared too. */
+  seated: number | null;
   responses: unknown;
   metadata: unknown;
   recurring_event_id: string | null;
@@ -472,7 +477,7 @@ export async function rescheduleBookingV2(
   const source = await db.get<RescheduleSource>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, team_id, title,
                start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
-               responses, metadata, recurring_event_id
+               calendar_description, seated, responses, metadata, recurring_event_id
         FROM booking
         WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
   );
@@ -576,14 +581,15 @@ export async function rescheduleBookingV2(
   const insertNew = sql`INSERT INTO booking
     (id, account_id, uid, event_type_id, host_member_id, team_id, title,
      start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
-     responses, metadata, cancellation_reason, cancelled_by, rescheduled,
+     calendar_description, seated, responses, metadata, cancellation_reason, cancelled_by, rescheduled,
      from_reschedule, rescheduled_from_uid, rescheduled_to_uid,
      rescheduling_reason, rescheduled_by_email, recurring_event_id,
      idempotency_key, created_at, updated_at)
     VALUES (${newId}, ${source.account_id}, ${newUid}, ${source.event_type_id},
       ${source.host_member_id}, ${source.team_id}, ${source.title},
       ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location},
-      ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null}, ${responsesExpr},
+      ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null},
+      ${source.calendar_description ?? null}, ${source.seated ?? null}, ${responsesExpr},
       ${metadataExpr}, NULL, NULL, 1, ${previousStartUtc}, ${source.uid}, NULL,
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
       ${source.recurring_event_id},
@@ -707,6 +713,9 @@ export async function rescheduleBookingV2(
     return { ok: false, reason: 'GONE' };
   }
   if (result === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+  // The copy carried the old title and body; a template renders them again at
+  // the new time.
+  await applyCalendarTemplates(db, newUid);
   return {
     ok: true,
     uid: newUid,

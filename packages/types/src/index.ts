@@ -134,6 +134,14 @@ export const MIN_REMINDER_LEAD_MINUTES = 5;
 export const MAX_REMINDER_LEAD_MINUTES = 28 * 24 * 60;
 export const MAX_REMINDER_SUBJECT = 200;
 export const MAX_REMINDER_BODY = 5000;
+/**
+ * The longest calendar title and description TEMPLATES a host may store. The
+ * rendered text has its own, smaller caps (`MAX_CALENDAR_TITLE` and
+ * `MAX_CALENDAR_DESCRIPTION` in @slate/engine); a template is longer than what
+ * it prints because its `{{#if}}` branches do not all print.
+ */
+export const MAX_CALENDAR_TITLE_TEMPLATE = 500;
+export const MAX_CALENDAR_DESCRIPTION_TEMPLATE = 5000;
 
 /**
  * ONE reminder on an event type: its own switch, its own lead time, its own
@@ -722,6 +730,10 @@ export const bookingViewSchema = z.object({
    *  before it existed — the render falls back to `location` unchanged. */
   locationKind: z.enum(LOCATION_KINDS).nullable().optional(),
   meetingUrl: z.string().nullable().optional(),
+  /** The calendar event's body, rendered from the event type's description
+   *  template; the confirmation's "Add to calendar" file carries it. Absent
+   *  when there is none. */
+  calendarDescription: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
   /** The organizer a TEAM booking's scheduling method resolved to (#102).
@@ -1127,6 +1139,12 @@ export const eventTypeInputSchema = z.object({
    *  unchanged; `null` ⇒ cleared. Every already-saved event type reads as
    *  null, which is "never configured" and delivers exactly as it does today. */
   crmPropertyMappings: crmPropertyMappingsSchema.nullable().optional(),
+  /** The calendar event's own title and description, as templates
+   *  (`Meeting Felipe - {{name}}`), rendered onto each booking. Omitted ⇒
+   *  unchanged; null or blank ⇒ none (the event's name, no description).
+   *  Checked by the API against the variables catalog before they are stored. */
+  calendarTitleTemplate: z.string().max(MAX_CALENDAR_TITLE_TEMPLATE).nullable().optional(),
+  calendarDescriptionTemplate: z.string().max(MAX_CALENDAR_DESCRIPTION_TEMPLATE).nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

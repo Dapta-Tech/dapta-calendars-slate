@@ -206,6 +206,26 @@ describe('BookingNotifier: the footer line and the invite', () => {
     expect(String(hidden.sent[0]!.attachments?.[0]?.content)).toContain('UID:bk_footer_1');
   });
 
+  it('the invite carries the calendar description, escaped and unfolded as written', async () => {
+    const { sent, provider } = capture();
+    await new BookingNotifier(provider as never).sendConfirmation({
+      ...booking,
+      calendarDescription: 'Company: Acme, Inc.\nNotes; see you',
+    });
+    const ics = String(sent[0]!.attachments?.[0]?.content).replace(/\r\n /g, '');
+    expect(ics).toContain('DESCRIPTION:Company: Acme\\, Inc.\\nNotes\\; see you\r\n');
+    const separators = capture();
+    await new BookingNotifier(separators.provider as never).sendConfirmation({
+      ...booking,
+      calendarDescription: 'a\u2028X-INJ:1\u2029b',
+    });
+    expect(String(separators.sent[0]!.attachments?.[0]?.content)).toContain('DESCRIPTION:a\\nX-INJ:1\\nb\r\n');
+    // Without one, as before: no DESCRIPTION at all.
+    const plain = capture();
+    await new BookingNotifier(plain.provider as never).sendConfirmation(booking);
+    expect(String(plain.sent[0]!.attachments?.[0]?.content)).not.toContain('DESCRIPTION');
+  });
+
   it('a bare fork (no destination): no product in the email at all', async () => {
     const { sent, provider } = capture();
     await new BookingNotifier(provider as never).sendConfirmation(booking);

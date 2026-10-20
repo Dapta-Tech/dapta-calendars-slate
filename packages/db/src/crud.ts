@@ -75,6 +75,10 @@ export interface EventTypeView {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. NULL ⇒ never
    *  configured, which is what every event type predating this reads as. */
   crmPropertyMappings: CrmPropertyMappings | null;
+  /** The calendar event title and description templates (`Meeting Felipe - {{name}}`).
+   *  NULL ⇒ none: the title is the event's name and there is no description. */
+  calendarTitleTemplate: string | null;
+  calendarDescriptionTemplate: string | null;
 }
 
 interface EventTypeDbRow {
@@ -100,13 +104,20 @@ interface EventTypeDbRow {
   reminders: unknown;
   destination_calendar_id: string | null;
   crm_property_mappings: unknown;
+  calendar_title_template: string | null;
+  calendar_description_template: string | null;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
-  crm_property_mappings`;
+  crm_property_mappings, calendar_title_template, calendar_description_template`;
+
+/** A template as stored: blank is "none" (NULL), so the booking keeps today's text. */
+function templateOrNull(text: string | null | undefined): string | null {
+  return text?.trim() ? text : null;
+}
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
@@ -146,6 +157,8 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     conflictCalendarIds: conflictCalendars.map((c) => c.connected_calendar_id),
     destinationCalendarId: r.destination_calendar_id,
     crmPropertyMappings: parseJsonColumn<CrmPropertyMappings | null>(r.crm_property_mappings, null),
+    calendarTitleTemplate: templateOrNull(r.calendar_title_template),
+    calendarDescriptionTemplate: templateOrNull(r.calendar_description_template),
   };
 }
 
@@ -264,6 +277,10 @@ export interface EventTypeInputRepo {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. UNDEFINED ⇒
    *  unchanged; `null` ⇒ cleared back to "never configured". */
   crmPropertyMappings?: CrmPropertyMappings | null;
+  /** Calendar title and description templates. UNDEFINED ⇒ unchanged; null
+   *  or blank ⇒ none. Validated by the API before they reach this layer. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -302,7 +319,8 @@ export async function createEventType(
           length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
-          destination_calendar_id, crm_property_mappings, created_at)
+          destination_calendar_id, crm_property_mappings, calendar_title_template,
+          calendar_description_template, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -313,7 +331,9 @@ export async function createEventType(
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
-          ${jsonParam(db, input.crmPropertyMappings ?? null)}, ${now})`,
+          ${jsonParam(db, input.crmPropertyMappings ?? null)},
+          ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
+          ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -359,6 +379,10 @@ export async function updateEventType(
   // never-configured; UNDEFINED leaves whatever the event already had.
   if (input.crmPropertyMappings !== undefined)
     set('crm_property_mappings', jsonParam(db, input.crmPropertyMappings ?? null));
+  if (input.calendarTitleTemplate !== undefined)
+    set('calendar_title_template', sql`${templateOrNull(input.calendarTitleTemplate)}`);
+  if (input.calendarDescriptionTemplate !== undefined)
+    set('calendar_description_template', sql`${templateOrNull(input.calendarDescriptionTemplate)}`);
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
   // back the reminder they just deleted.

@@ -25,6 +25,13 @@ export interface BookingNotification {
   accountId: string;
   uid: string;
   title: string;
+  /**
+   * The calendar event's body, rendered from the event type's description
+   * template when the booking was placed or moved: the attached .ics carries
+   * it as DESCRIPTION, so the invite reads like the event in the host's
+   * calendar. Absent when there is none, and on rows queued before it was carried.
+   */
+  calendarDescription?: string | null;
   startUtc: string;
   endUtc: string;
   /**
@@ -451,6 +458,7 @@ export class BookingNotifier {
         startUtc: n.startUtc,
         endUtc: n.endUtc,
         title: n.title,
+        description: n.calendarDescription,
         location: n.location,
         url: n.meetingUrl,
         organizer: n.host,

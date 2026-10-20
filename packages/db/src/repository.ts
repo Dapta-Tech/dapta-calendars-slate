@@ -16,6 +16,7 @@ import {
   isExclusionViolation,
   isUniqueViolation,
   parseEventLocation,
+  plainCalendarTitle,
   type AvailabilityEmptyReason,
   type AvailabilityRule,
   type EventLocation,
@@ -24,6 +25,7 @@ import {
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
 import { canonicalPublicCode } from './short-links';
 import {
   duplicateGuardApplies,
@@ -106,7 +108,19 @@ export interface EventTypeRow {
 }
 
 export type BookingOutcome =
-  | { ok: true; booking: BookingRecord; manageToken: string; deduplicated?: boolean }
+  | {
+      ok: true;
+      booking: BookingRecord;
+      manageToken: string;
+      deduplicated?: boolean;
+      /**
+       * A seat was added to an existing group booking (no manage token is
+       * minted for it). Its calendar event already exists and now has one more
+       * guest and, possibly, a re-rendered shared title and body: the caller
+       * rewrites it (`afterGuestsChanged`), which a fresh booking never needs.
+       */
+      seatTaken?: true;
+    }
   | {
       ok: false;
       reason:
@@ -140,6 +154,8 @@ export interface BookingRecord {
   uid: string;
   status: string;
   title: string;
+  /** The calendar event's body, when the event type's description template wrote one. */
+  calendarDescription?: string | null;
   startMs: number;
   endMs: number;
   hostHandle: string | null;
@@ -1091,12 +1107,45 @@ export async function createBooking(
   // FIRST booker falls through to the normal create below.
   const capacity = eventType.seats_per_time_slot ?? 1;
   if (capacity > 1) {
-    const existing = await db.get<{ id: string; uid: string; status: string; start_ms: number; end_ms: number }>(
+    const existing = await db.get<{
+      id: string;
+      uid: string;
+      status: string;
+      start_ms: number;
+      end_ms: number;
+    }>(
       sql`SELECT id, uid, status, start_ms, end_ms FROM booking
           WHERE event_type_id = ${eventType.id} AND host_member_id = ${member.id}
                 AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
     );
     if (existing) {
+      // A seat this address already holds (a retried request, or the same
+      // person again) is answered as a replay: nothing is inserted twice, no
+      // seat is spent twice and the calendar event is not rewritten again. It
+      // carries the event's name only, never the slot's stored text, which an
+      // address alone must not be enough to read. Checked here and again under
+      // the lock below, where a concurrent repeat would otherwise slip in.
+      const repeatSql = sql`SELECT 1 AS hit FROM booking_attendee
+          WHERE booking_id = ${existing.id}
+            AND COALESCE(email_normalized, lower(trim(email))) = ${normalizeAttendeeEmail(args.attendee.email)}
+          LIMIT 1`;
+      const replay = (): BookingOutcome => ({
+        ok: true,
+        booking: {
+          uid: existing.uid,
+          status: existing.status,
+          title: plainCalendarTitle(eventType.title),
+          calendarDescription: null,
+          startMs: Number(existing.start_ms),
+          endMs: Number(existing.end_ms),
+          hostHandle: member.handle,
+          hostName: member.display_name,
+          attendee: { name: args.attendee.name, email: args.attendee.email, timeZone: args.attendee.timeZone },
+        },
+        manageToken: '',
+        deduplicated: true,
+      });
+      if (await db.get(repeatSql)) return replay();
       // Seats, holds and the booking itself are read again under the host's
       // lock (the one every guarded booking write and the hold write take),
       // then the booking's own row (member first, booking second, the order a
@@ -1112,6 +1161,10 @@ export async function createBooking(
               ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
               ${attendee.language ?? null}, ${seatTime + i})`,
       );
+      // The slot is now shared by people who booked separately: its calendar
+      // title and description must never carry one of them, whatever the
+      // event type's seats become. Marked with the seat, in one transaction.
+      const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${existing.id}`;
       // Every seat this request asks for must fit, not only the first.
       const full = sql`SELECT 1 AS hit WHERE (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${existing.id}) + ${seatInserts.length} > ${capacity}`;
       const heldElsewhere = args.refuseHeld
@@ -1119,40 +1172,57 @@ export async function createBooking(
         : null;
       const stillThere = (row: { status: string; start_ms: number | string } | undefined) =>
         !!row && (row.status === 'accepted' || row.status === 'pending') && Number(row.start_ms) === startMs;
-      // The booking's status as it stands under the lock, or null when no seat was taken.
-      let seated: string | null;
+      // The booking's status as it stands under the lock; 'repeat' when this
+      // address took its seat meanwhile; null when no seat was taken.
+      type SeatResult = { status: string } | 'repeat' | null;
+      let seated: SeatResult;
       if (db.dialect === 'sqlite') {
-        seated = db.sqlite!.txn<string | null>(() => {
+        seated = db.sqlite!.txn<SeatResult>(() => {
           const now = db.sqlite!.drizzle.get<{ status: string; start_ms: number }>(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} LIMIT 1`,
           );
           if (!stillThere(now)) return null;
+          if (db.sqlite!.drizzle.get(repeatSql)) return 'repeat';
           if (db.sqlite!.drizzle.get(full)) return null;
           if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return null;
           for (const insert of seatInserts) db.sqlite!.drizzle.run(insert);
-          return now!.status;
+          db.sqlite!.drizzle.run(markShared);
+          return { status: now!.status };
         }, { immediate: true });
       } else {
-        seated = await db.pg!.drizzle.transaction(async (tx) => {
+        seated = await db.pg!.drizzle.transaction(async (tx): Promise<SeatResult> => {
           await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
           const now = (await tx.execute(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} FOR UPDATE`,
           )) as unknown as Array<{ status: string; start_ms: number | string }>;
           if (!stillThere(now[0])) return null;
+          if (((await tx.execute(repeatSql)) as unknown as unknown[]).length > 0) return 'repeat';
           if (((await tx.execute(full)) as unknown as unknown[]).length > 0) return null;
           if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return null;
           for (const insert of seatInserts) await tx.execute(insert);
-          return now[0]!.status;
+          await tx.execute(markShared);
+          return { status: now[0]!.status };
         });
       }
+      if (seated === 'repeat') return replay();
       if (!seated) return { ok: false, reason: 'SLOT_TAKEN' };
+      // Rendered again as shared now, since the stored text may be the first
+      // booker's own from before the seats; reset to the event's name when
+      // that render did not land.
+      const shared =
+        (await applyCalendarTemplates(db, existing.uid)) ??
+        (await applySharedFallback(db, { id: existing.id, startMs, endMs: Number(existing.end_ms) }, eventType.title));
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       // Times and status as checked under the lock, never the earlier snapshot.
       const rec: BookingRecord = {
         uid: existing.uid,
-        status: seated,
-        title: eventType.title,
+        status: seated.status,
+        // The slot's one calendar event, as just rendered for everyone on it
+        // (or reset to the event's name); never the stored text, which may
+        // name the first booker.
+        title: shared?.title ?? plainCalendarTitle(eventType.title),
+        calendarDescription: shared?.description || null,
         startMs,
         endMs: Number(existing.end_ms),
         hostHandle: member.handle,
@@ -1164,8 +1234,9 @@ export async function createBooking(
       // a single link fill every seat, which is the opposite of what it is for.
       if (live) await consumeOneOffLink(db, live.id, existing.id);
       // Seat-takers join the shared group booking; the manage link stays with
-      // the first booker (per-seat manage tokens are a follow-up).
-      return { ok: true, booking: rec, manageToken: '' };
+      // the first booker (per-seat manage tokens are a follow-up). The event
+      // is rewritten for them only once its stored text is the shared one.
+      return { ok: true, booking: rec, manageToken: '', ...(shared ? { seatTaken: true as const } : {}) };
     }
   }
 
@@ -1273,7 +1344,7 @@ export async function createBooking(
     // before: burning first would kill the link on every SLOT_TAKEN and strand
     // the invitee with a dead link and no booking. See `consumeOneOffLink`.
     if (live) await consumeOneOffLink(db, live.id, bookingId);
-    return { ok: true, booking: record, manageToken: token };
+    return { ok: true, booking: await withCalendarText(db, record), manageToken: token };
   }
 
   // Postgres: async transaction; the EXCLUDE constraint is the ultimate backstop.
@@ -1299,13 +1370,24 @@ export async function createBooking(
     if (args.reservationUid) await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
     // Committed — burn the link (#110), same ordering as the SQLite branch.
     if (live) await consumeOneOffLink(db, live.id, bookingId);
-    return { ok: true, booking: record, manageToken: token };
+    return { ok: true, booking: await withCalendarText(db, record), manageToken: token };
   } catch (err) {
     if (isExclusionViolation(err) || isUniqueViolation(err)) {
       return { ok: false, reason: 'SLOT_TAKEN' };
     }
     throw err;
   }
+}
+
+/** The booking as just stored: with the calendar title and body its event type's templates rendered, if any. */
+async function withCalendarText(db: Db, record: BookingRecord): Promise<BookingRecord> {
+  const text = await applyCalendarTemplates(db, record.uid);
+  return {
+    ...record,
+    ...(text?.title !== undefined ? { title: text.title } : {}),
+    // An emptied description ('') is none, as far as anyone reading the booking goes.
+    ...(text?.description !== undefined ? { calendarDescription: text.description || null } : {}),
+  };
 }
 
 /**
@@ -1324,6 +1406,7 @@ async function findBookingByIdempotencyKey(
     uid: string;
     status: string;
     title: string;
+    calendar_description: string | null;
     start_ms: number;
     end_ms: number;
     host_handle: string | null;
@@ -1332,7 +1415,7 @@ async function findBookingByIdempotencyKey(
     att_email: string | null;
     att_tz: string | null;
   }>(
-    sql`SELECT b.uid, b.status, b.title, b.start_ms, b.end_ms,
+    sql`SELECT b.uid, b.status, b.title, b.calendar_description, b.start_ms, b.end_ms,
                m.handle AS host_handle, m.display_name AS host_name,
                a.name AS att_name, a.email AS att_email, a.time_zone AS att_tz
         FROM booking b
@@ -1347,6 +1430,7 @@ async function findBookingByIdempotencyKey(
       uid: row.uid,
       status: row.status,
       title: row.title,
+      calendarDescription: row.calendar_description,
       startMs: Number(row.start_ms),
       endMs: Number(row.end_ms),
       hostHandle: row.host_handle,

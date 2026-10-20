@@ -193,6 +193,9 @@ export const eventType = sqliteTable('event_type', {
   /** H2 (#108): CRM contact property mappings, keyed by provider, as JSON text.
    *  NULL = never configured. The Postgres twin is `jsonb`. */
   crmPropertyMappings: text('crm_property_mappings'),
+  /** The calendar title and description templates; NULL = none. See schema.pg.ts. */
+  calendarTitleTemplate: text('calendar_title_template'),
+  calendarDescriptionTemplate: text('calendar_description_template'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -248,6 +251,10 @@ export const booking = sqliteTable('booking', {
    * `booking_attendee.language`, which the v2 surface fills with a default.
    */
   locale: text('locale'),
+  /** The rendered calendar event body; NULL = none, '' = cleared. See schema.pg.ts. */
+  calendarDescription: text('calendar_description'),
+  /** 1 once someone took a seat on this booking. See schema.pg.ts. */
+  seated: integer('seated'),
   responses: text('responses'),
   metadata: text('metadata'),
   cancellationReason: text('cancellation_reason'),

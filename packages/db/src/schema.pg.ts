@@ -200,6 +200,14 @@ export const eventType = pgTable('event_type', {
    * rewrites it wholesale anyway.
    */
   crmPropertyMappings: jsonb('crm_property_mappings'),
+  /**
+   * The calendar event's own title and description, as templates
+   * (`Meeting Felipe - {{name}}`; `@slate/engine` template-calendar). Rendered
+   * onto each booking when it is placed or moved. NULL = none: the title is the
+   * event's name and the event has no description, as before these existed.
+   */
+  calendarTitleTemplate: text('calendar_title_template'),
+  calendarDescriptionTemplate: text('calendar_description_template'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -255,6 +263,21 @@ export const booking = pgTable('booking', {
    * `booking_attendee.language`, which the v2 surface fills with a default.
    */
   locale: text('locale'),
+  /**
+   * The calendar event's body, rendered from the event type's description
+   * template when the booking was placed (or last moved), like `title` is from
+   * its title template. Every calendar write and both .ics files read it. NULL
+   * = no description, which is every booking made without a template; '' = one
+   * it had, cleared since (the next move clears it on the calendar too).
+   */
+  calendarDescription: text('calendar_description'),
+  /**
+   * 1 once someone took a seat on this booking: people who booked separately
+   * share its one calendar event, so its title and description never carry one
+   * invitee's data, even after the event type's seats are turned off. NULL =
+   * nobody took a seat.
+   */
+  seated: integer('seated'),
   responses: jsonb('responses'),
   metadata: jsonb('metadata'),
   cancellationReason: text('cancellation_reason'),

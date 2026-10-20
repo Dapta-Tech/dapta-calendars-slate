@@ -18,8 +18,12 @@
 import {
   FORM_VARIABLE_PREFIX,
   formVariable,
+  formatTemplateDuration,
+  formatTemplateTime,
   renderTemplate as renderWithEngine,
   stripUnsafeText,
+  templateFirstName,
+  templateFormValues,
   templateVariableNames,
   type TemplateAudience,
   type TemplateLocale,
@@ -169,22 +173,8 @@ export function unknownTokens(text: string, formFields?: readonly string[]): str
   return extractTokens(text).filter((t) => !known.has(t));
 }
 
-/** Locale-aware "Sat, Aug 1, 11:00 AM EDT" in the given time zone. */
-export function formatWhen(iso: string, tz: string, locale: TemplateLocale = 'en'): string {
-  try {
-    return new Intl.DateTimeFormat(locale === 'es' ? 'es' : 'en-US', {
-      timeZone: tz,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
+/** Locale-aware "Sat, Aug 1, 11:00 AM EDT" in the given time zone (the engine's formatter). */
+export const formatWhen = formatTemplateTime;
 
 /** "in 24 hour(s)" / "en 30 minutos" — the reminder lead phrase. */
 export function formatLead(leadMinutes: number | undefined, locale: TemplateLocale): string {
@@ -201,44 +191,16 @@ export function formatLead(leadMinutes: number | undefined, locale: TemplateLoca
   return locale === 'es' ? `en ${leadMinutes} minutos` : `in ${leadMinutes} minutes`;
 }
 
-/** "30 min", "1 h", "1 h 30 min": the meeting length, the same in EN and ES. */
-export function formatDuration(startIso: string, endIso: string): string {
-  const minutes = Math.round((Date.parse(endIso) - Date.parse(startIso)) / 60_000);
-  if (!Number.isFinite(minutes) || minutes <= 0) return '';
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m} min`;
-  return m === 0 ? `${h} h` : `${h} h ${m} min`;
-}
-
-/**
- * One intake answer as the engine reads it. Text, numbers and yes/no stay as
- * they are and lists keep their items, so the engine can word a boolean in the
- * reader's language and test a list item by item. Anything else (an object, a
- * nested list) is not an answer a form produces and reads as empty.
- */
-function answerValue(value: unknown): TemplateValue {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) {
-    return value.filter(
-      (v): v is string | number | boolean => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
-    );
-  }
-  return null;
-}
+/** "30 min", "1 h", "1 h 30 min": the meeting length (the engine's formatter). */
+export const formatDuration = formatTemplateDuration;
 
 /**
  * The `{{form.<field name>}}` half of the variable map, built from the
- * booking's own intake answers. Own properties only, and every key is
- * `form.`-prefixed, so an answer can never collide with a built-in.
+ * booking's own intake answers (the engine's builder: own properties only,
+ * every key `form.`-prefixed, so an answer can never collide with a built-in).
  */
 export function formVars(answers: Record<string, unknown> | null | undefined): Record<string, TemplateValue> {
-  const out: Record<string, TemplateValue> = Object.create(null) as Record<string, TemplateValue>;
-  if (!answers) return out;
-  for (const [name, value] of Object.entries(answers)) {
-    out[formVariable(name)] = answerValue(value);
-  }
-  return out;
+  return templateFormValues(answers);
 }
 
 /**
@@ -303,7 +265,7 @@ export function templateVars(
   // top without being able to shadow one (every key is `form.`-prefixed).
   const builtIn: Record<TemplateVariable, string> = {
     attendee_name: attendeeName,
-    attendee_first_name: attendeeName.trim().split(/\s+/)[0] ?? '',
+    attendee_first_name: templateFirstName(attendeeName),
     attendee_email: n.attendee.email ?? '',
     attendee_phone: n.attendee.phone?.trim() ?? '',
     // The other people on the booking are the host's to read: on a group

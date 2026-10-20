@@ -670,6 +670,7 @@ export function BookingFlow({
         ? calendarFileHref({
             uid: b.uid,
             title: b.title,
+            description: b.calendarDescription,
             startUtc: b.startUtc,
             endUtc: b.endUtc,
             location: bookedLocation,

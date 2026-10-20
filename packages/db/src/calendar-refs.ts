@@ -153,6 +153,15 @@ export interface CalendarWriteContext {
   bookingId: string;
   uid: string;
   title: string;
+  /**
+   * The event's body, rendered from the event type's description template
+   * (`booking.calendar_description`). Null when there is none: the organizer's
+   * event then has no description, as before templates existed, and a move
+   * leaves the body alone. An empty string is a body this booking had and no
+   * longer has (the template was removed or now renders nothing): a create
+   * writes none, and a move clears it.
+   */
+  description: string | null;
   startUtc: string;
   endUtc: string;
   /** The human detail of the Where (address, number, custom label). */
@@ -234,6 +243,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     id: string;
     uid: string;
     title: string;
+    calendar_description: string | null;
     start_ms: number;
     end_ms: number;
     location: string | null;
@@ -245,7 +255,8 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     host_locale: string | null;
     metadata: unknown;
   }>(
-    sql`SELECT b.id, b.uid, b.title, b.start_ms, b.end_ms, b.location, b.location_kind, b.attendee_time_zone,
+    sql`SELECT b.id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms, b.location,
+               b.location_kind, b.attendee_time_zone,
                b.host_member_id, b.event_type_id, b.metadata, m.email AS host_email, m.locale AS host_locale
         FROM booking b
         LEFT JOIN member m ON m.id = b.host_member_id
@@ -339,6 +350,7 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
     bookingId: b.id,
     uid: b.uid,
     title: b.title,
+    description: b.calendar_description,
     startUtc: new Date(Number(b.start_ms)).toISOString(),
     endUtc: new Date(Number(b.end_ms)).toISOString(),
     location: b.location,

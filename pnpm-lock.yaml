@@ -261,6 +261,9 @@ importers:
       '@slate/engine':
         specifier: workspace:*
         version: link:../engine
+      '@slate/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@slate/types':
         specifier: workspace:*
         version: link:../types
