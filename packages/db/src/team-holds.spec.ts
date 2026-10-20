@@ -136,6 +136,24 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
       now: Date.now(),
     });
 
+  /** A booking that makes `memberId` busy at `startMs`, as any accepted meeting does. */
+  async function busy(memberId: string, startMs: number) {
+    await db.run(
+      sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata, created_at, updated_at)
+          VALUES (${randomUUID()}, ${accountId}, ${randomUUID()}, ${alexOwn}, ${memberId}, 'Busy', ${startMs}, ${startMs + HALF_HOUR}, 'accepted', ${null}, ${Date.now()}, ${Date.now()})`,
+    );
+  }
+
+  /** What a team booking came to: the hosts it assigned (sorted), or why it was refused. */
+  async function outcome(out: Awaited<ReturnType<typeof createTeamBooking>>) {
+    if (!out.ok) return out.reason;
+    const rows = await db.all<{ member_id: string }>(
+      sql`SELECT b.host_member_id AS member_id FROM booking b WHERE b.uid = ${out.uid}
+          UNION SELECT bh.member_id FROM booking_host bh JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${out.uid}`,
+    );
+    return rows.map((r) => (r.member_id === alex ? 'alex' : r.member_id === bea ? 'bea' : r.member_id)).sort();
+  }
+
   /** Alex's open times right now (bookings and holds from earlier cases subtracted). */
   const alexFree = async () =>
     (await getAvailability(db, { accountCode, handle: `alex-${tag}`, slug: 'own', fromMs: Date.now() + 86_400_000, toMs: Date.now() + 8 * 86_400_000 }))!.slots.map((x) =>
@@ -220,21 +238,26 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
     expect(await all.book(at, 'collective@example.org')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
 
-  it('fixed round-robin: a held fixed host makes the time SLOT_TAKEN, never assigned around; a held rotating host is left out', async () => {
-    const fixed = await teamEvent('fixed_round_robin', true);
-    const at = fixed.slots[22]!;
-    expect(await hold(alex, at)).toBe('ok');
-    expect(await fixed.book(at, 'fixed@example.org')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
-    // A held rotating host is treated like a busy one: left out, the fixed host still attends.
-    const other = fixed.slots[26]!;
-    expect(await hold(bea, other)).toBe('ok');
-    const out = await fixed.book(other, 'rotating@example.org');
-    expect(out.ok && out.hostMemberId).toBe(alex);
-    if (!out.ok) return;
-    const beaSeat = await db.get<{ id: string }>(
-      sql`SELECT bh.id FROM booking_host bh JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${out.uid} AND bh.member_id = ${bea}`,
-    );
-    expect(beaSeat).toBeUndefined();
+  it('a held host is treated exactly like a booked host, in every scheduling method', async () => {
+    const cases = [
+      { method: 'round_robin', fixedAlex: false, who: () => alex, at: [30, 32] },
+      { method: 'collective', fixedAlex: false, who: () => alex, at: [34, 36] },
+      { method: 'fixed_round_robin', fixedAlex: true, who: () => alex, at: [38, 40] },
+      { method: 'fixed_round_robin', fixedAlex: true, who: () => bea, at: [42, 44] },
+    ] as const;
+    const seen: Array<{ method: string; booked: unknown; held: unknown }> = [];
+    for (const c of cases) {
+      const ev = await teamEvent(c.method, c.fixedAlex);
+      const [bookedAt, heldAt] = [ev.slots[c.at[0]]!, ev.slots[c.at[1]]!];
+      await busy(c.who(), bookedAt);
+      expect(await hold(c.who(), heldAt)).toBe('ok');
+      const booked = await outcome(await ev.book(bookedAt, `booked-${c.method}-${c.at[0]}@example.org`));
+      const held = await outcome(await ev.book(heldAt, `held-${c.method}-${c.at[1]}@example.org`));
+      expect(held, `${c.method}, ${c.who() === alex ? 'Alex' : 'Bea'} held`).toEqual(booked);
+      seen.push({ method: c.method, booked, held });
+    }
+    // What the core does with a busy (so a held) host, method by method:
+    expect(seen.map((x) => x.held)).toEqual([['bea'], 'SLOT_TAKEN', 'SLOT_TAKEN', ['alex']]);
   });
 
   it('a hold that commits while hosts are being picked is still respected: the locked insert refuses, nothing is booked', async () => {
