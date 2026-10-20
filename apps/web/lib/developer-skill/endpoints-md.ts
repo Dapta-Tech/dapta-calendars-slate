@@ -82,7 +82,7 @@ function parametersTable(doc: OpenApiDocument, { op }: Operation): string {
   if (params.length === 0) return '';
   const rows = params.map(
     (p) =>
-      `| ${code(p.name)} | ${p.in} | ${p.required ? 'yes' : 'no'} | ${cell(describeType(doc, p.schema))} | ${notes(derefSchema(doc, p.schema), p.description)} |`,
+      `| ${tableCell(code(p.name))} | ${tableCell(p.in)} | ${p.required ? 'yes' : 'no'} | ${cell(describeType(doc, p.schema))} | ${notes(derefSchema(doc, p.schema), p.description)} |`,
   );
   return ['| Parameter | In | Required | Type | Notes |', '|---|---|---|---|---|', ...rows].join('\n');
 }
@@ -105,7 +105,7 @@ function bodySection(doc: OpenApiDocument, { op }: Operation): string {
       '|---|---|---|---|',
       ...Object.entries(properties).map(
         ([name, s]) =>
-          `| ${code(name)} | ${mustHave.has(name) ? 'yes' : 'no'} | ${cell(describeType(doc, s))} | ${notes(derefSchema(doc, s))} |`,
+          `| ${tableCell(code(name))} | ${mustHave.has(name) ? 'yes' : 'no'} | ${cell(describeType(doc, s))} | ${notes(derefSchema(doc, s))} |`,
       ),
     );
     const sets = (Array.isArray(schema!.anyOf) ? schema!.anyOf : [])

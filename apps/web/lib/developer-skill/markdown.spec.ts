@@ -24,8 +24,15 @@ const cells = (row: string): string[] => {
   return out.slice(1, -1).map((c) => c.trim());
 };
 
-/** What a reader gets back from a cell: each escaped backslash or pipe as the one character. */
+/** What a reader gets back from prose in a cell: each escaped backslash or pipe as the one character. */
 const unescape = (cell: string): string => cell.replace(/\\([\\|])/g, '$1');
+
+/**
+ * What a reader gets back from a code span in a cell. GFM drops the backslash
+ * of a `\|` before it reads the cell, but backslash escapes do nothing inside a
+ * code span, so a doubled backslash there stays doubled.
+ */
+const unescapePipes = (cell: string): string => cell.replace(/\\\|/g, '|');
 
 /** The text of an inline code span, read as CommonMark reads one. */
 const spanText = (span: string): string | null => {
@@ -70,6 +77,12 @@ describe('tableCell', () => {
     expect(tableCell('first line\n  second line\r\n\nthird')).toBe('first line second line third');
     expect(tableCell('\n trimmed \n')).toBe('trimmed');
   });
+
+  it('treats a lone carriage return as the line ending it is', () => {
+    expect(tableCell('a\rb')).toBe('a b');
+    expect(tableCell('a \r\r b\r')).toBe('a b');
+    expect(row('a\rb')).not.toMatch(/\r/);
+  });
 });
 
 describe('code', () => {
@@ -88,6 +101,16 @@ describe('code', () => {
   it('pads a value that starts or ends with a backtick', () => {
     expect(code('`x')).toBe('`` `x ``');
     expect(code('x`')).toBe('`` x` ``');
+  });
+
+  it('turns each line ending in the value into a space, so the span stays on its line', () => {
+    expect(code('a\nb')).toBe('`a b`');
+    expect(code('a\r\nb\rc')).toBe('`a b c`');
+    expect(code('`x\n')).toBe('`` `x  ``');
+  });
+
+  it('measures any number of backtick runs', () => {
+    expect(code('a`'.repeat(200_000))).toBe(`\`\` ${'a`'.repeat(200_000)} \`\``);
   });
 
   it('reads back as the value it was given', () => {
@@ -112,31 +135,63 @@ describe('the endpoint reference tables', () => {
             { name: 'trailing', in: 'query', description: 'ends with \\' },
             { name: 'lines', in: 'query', description: 'first\nsecond' },
             { name: 'tick', in: 'query', schema: { enum: ['a`b', 'c|d'], default: 'x\\' } },
+            { name: 'cr', in: 'query', description: 'a\rb' },
+            { name: 'x|y', in: 'query|header' },
           ],
           responses: { 200: { description: 'ok' } },
+        },
+        post: {
+          summary: 'Add a thing',
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    'a|b': { type: 'string', description: 'A field with a pipe in its name.' },
+                    plain: { type: 'string', description: 'one\rtwo' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 201: { description: 'made' } },
         },
       },
     },
   })!;
   const md = endpointsMd(doc, { apiUrl: 'https://api.example.test' });
-  const rows = md.split('\n').filter((l) => /^\| `/.test(l));
+  const [listing, adding] = md.split('### `POST /things`');
+  const rowsOf = (part: string | undefined) => part!.split('\n').filter((l) => /^\| `/.test(l));
+  const params = rowsOf(listing);
+  const fields = rowsOf(adding);
 
-  it('keeps every row at five cells, whatever a description holds', () => {
-    expect(rows).toHaveLength(6);
-    for (const r of rows) expect(cells(r), r).toHaveLength(5);
+  it('keeps every row at the cells of its header, whatever a name or a description holds', () => {
+    expect(md).not.toMatch(/\r/);
+    expect(params).toHaveLength(8);
+    for (const r of params) expect(cells(r), r).toHaveLength(5);
+    expect(fields).toHaveLength(2);
+    for (const r of fields) expect(cells(r), r).toHaveLength(4);
   });
 
   it('reads each value back as the document wrote it', () => {
-    const notes = Object.fromEntries(rows.map((r) => [cells(r)[0], unescape(cells(r)[4]!)]));
+    const notes = Object.fromEntries(params.map((r) => [cells(r)[0], unescape(cells(r)[4]!)]));
     expect(notes).toMatchObject({
       '`pipe`': 'ok | degraded',
       '`slash`': 'C:\\temp',
       '`both`': 'a\\|b',
       '`trailing`': 'ends with \\',
       '`lines`': 'first second',
+      '`cr`': 'a b',
     });
-    const tick = cells(rows[5]!);
-    expect(unescape(tick[3]!)).toBe('``a`b`` or `c|d`');
-    expect(unescape(tick[4]!)).toBe('Default `x\\`.');
+    const tick = cells(params[5]!);
+    expect(unescapePipes(tick[3]!)).toBe('``a`b`` or `c|d`');
+    // The default is a code span: its backslash stays doubled, the trade-off `tableCell` names.
+    expect(unescapePipes(tick[4]!)).toBe('Default `x\\\\`.');
+    const piped = cells(params[7]!);
+    expect(unescapePipes(piped[0]!)).toBe('`x|y`');
+    expect(unescape(piped[1]!)).toBe('query|header');
+    expect(fields.map((r) => unescapePipes(cells(r)[0]!))).toEqual(['`a|b`', '`plain`']);
+    expect(unescape(cells(fields[1]!)[3]!)).toBe('one two');
   });
 });
