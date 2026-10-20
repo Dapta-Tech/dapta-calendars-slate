@@ -18,7 +18,7 @@ import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
 import { isServiceError } from '../http';
 import { queryBookings } from './bookings-query';
-import { bindHold, findHold, heldByAnother } from './holds';
+import { bindHold, findHold, heldByAnother, holdOwner } from './holds';
 import {
   type McpCall,
   ToolFailure,
@@ -306,16 +306,18 @@ type Resolved = Awaited<ReturnType<CalV2Service['resolveEvent']>>;
 
 /**
  * The reservation behind a caller's `hold_id`, checked against what is being
- * booked. Unknown, expired-and-swept, malformed and someone else's holds all
- * read the same, so the answer says nothing about holds this caller did not make.
+ * booked. Unknown, expired-and-swept, malformed and other owners' holds all
+ * read the same, so the answer says nothing about holds this caller cannot use.
  */
 async function useHold(deps: McpToolDeps, accountId: string, call: McpCall, holdId: string, eventTypeId: string, startUtc: string): Promise<string> {
-  const hold = await findHold(deps.db, accountId, callerId(call), holdId);
+  const hold = await findHold(deps.db, accountId, holdOwner(call), holdId);
   if (!hold)
     throw new ToolFailure(
       'HOLD_NOT_FOUND',
-      'No hold with that hold_id for this caller.',
-      'A hold works only for the key, connection, sign-in or address that made it. Call hold_slot again, or book without hold_id.',
+      'No hold with that hold_id that this caller can use.',
+      // Never "book without hold_id": if the hold is the caller's own, made
+      // with another credential, that would only meet its own hold.
+      'A hold made with an API key, connection or sign-in works only with that same key, connection or person; an anonymous hold works for whoever has its hold_id. Book with the credential that made it, or, if it expired, call find_available_slots and hold_slot again.',
     );
   if (hold.eventTypeId !== eventTypeId || Date.parse(hold.startUtc) !== Date.parse(startUtc))
     throw new ToolFailure(
@@ -326,7 +328,10 @@ async function useHold(deps: McpToolDeps, accountId: string, call: McpCall, hold
   return hold.reservationUid;
 }
 
-/** Refuse a time someone else is holding (see `heldByAnother`). */
+/**
+ * Refuse a time held by any hold this call is not consuming (see
+ * `heldByAnother`). Team events are left to the core, which skips held hosts.
+ */
 async function refuseIfHeld(deps: McpToolDeps, resolved: Resolved, startUtc: string, ownReservationUid?: string): Promise<void> {
   if (resolved.kind !== 'personal' || !resolved.member) return;
   const startMs = Date.parse(startUtc);
@@ -334,8 +339,8 @@ async function refuseIfHeld(deps: McpToolDeps, resolved: Resolved, startUtc: str
   if (await heldByAnother(deps.db, resolved.member.id, startMs, endMs, ownReservationUid))
     throw new ToolFailure(
       'SLOT_TAKEN',
-      'Someone else is holding that time right now.',
-      'Call find_available_slots for current openings, then retry with a new start and a NEW idempotency_key.',
+      'That time is being held right now, by someone else or by a hold this call did not pass as hold_id.',
+      'If you held it, book again with its hold_id. Otherwise call find_available_slots for current openings, then retry with a new start and a NEW idempotency_key.',
     );
 }
 
@@ -676,7 +681,7 @@ const holdId = z
   .string()
   .max(64)
   .optional()
-  .describe('The hold_id from hold_slot, to book the exact time you held. Only the caller that made the hold can use it.');
+  .describe('The hold_id from hold_slot, to book the exact time you held. A hold made with an API key or sign-in works only with that same key or person; an anonymous hold works for whoever has its hold_id.');
 
 const bookMeetingInput = z.object({
   ...pageAddress,
@@ -894,7 +899,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while you confirm the details with the person: nobody else is offered or can book it meanwhile. Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. Only the caller that made the hold can use it; an unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
+    'Keep one offered slot for about 10 minutes while you confirm the details with the person: nobody else is offered or can book it meanwhile. Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. A hold made with an API key or sign-in can be used only with that same key or person; the hold_id of an anonymous hold works for whoever presents it, so pass it on to nobody else. An unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -903,7 +908,9 @@ const holdSlot: ToolDef = {
   input: holdInput,
   output: z.object({
     hold: z.object({
-      hold_id: z.string().describe('Pass this to book_meeting or create_booking. Opaque; usable only by this caller.'),
+      hold_id: z
+        .string()
+        .describe('Pass this to book_meeting or create_booking. Opaque. Made with a key or sign-in, only that key or person can use it; made anonymously, whoever has it can.'),
       expires_at: z.string().describe('When the hold lapses, in time_zone.'),
       expires_at_utc: z.string(),
       start: z.string(),
@@ -938,7 +945,7 @@ const holdSlot: ToolDef = {
       );
     const tz = args.time_zone;
     const startUtc = instantFrom(args.start, tz).toISOString();
-    const caller = callerId(call);
+    const owner = holdOwner(call);
     const { data, replayed } = await keyedWrite(
       deps,
       call,
@@ -966,7 +973,7 @@ const holdSlot: ToolDef = {
           );
         }
         const endUtc = new Date(Date.parse(startUtc) + resolved.eventType.length_minutes * 60_000).toISOString();
-        const hold = await bindHold(deps.db, accountId, caller, {
+        const hold = await bindHold(deps.db, accountId, owner, {
           reservationUid: held.reservationUid,
           eventTypeId: resolved.eventType.id,
           startUtc,

@@ -5,7 +5,8 @@
  * which emits no decorator metadata) on a throwaway SQLite file, then drives it
  * over HTTP with the official MCP client: list tools, find slots, book,
  * reschedule, cancel, plus a legacy `initialize` handshake; then the newer
- * tools: hold a slot and book it with the hold (a second key cannot), confirm
+ * tools: hold a slot and book it with the hold (an anonymous hold's id from
+ * any address; a key's hold only by that key, never a second one), confirm
  * and decline requests that wait for the host, and a round-robin team booking.
  * Unit specs build classes by hand and cannot see a missing `@Inject`; this can.
  *
@@ -174,7 +175,8 @@ try {
   if (!clash.isError || !clash.content[0].text.includes('SLOT_TAKEN')) fail('second booking of a taken slot was not SLOT_TAKEN');
   say(`double booking -> ${clash.content[0].text.slice(0, 60)}...`);
 
-  // 5. Hold, then book with the hold. Another key cannot use it.
+  // 5. Hold, then book with the hold. An anonymous hold_id is the capability
+  // itself (the address may change between calls); a key's hold is that key's.
   const page = 'https://calendar.example.test/acme/alex-rivera/intro-call';
   const holdArgs = { booking_page_url: page, start: all[11].start, time_zone: 'America/Bogota', idempotency_key: idem('e2e-hold-00001') };
   const held = await anon.callTool({ name: 'hold_slot', arguments: holdArgs });
@@ -184,20 +186,28 @@ try {
   const after = (await anon.callTool({ name: 'find_available_slots', arguments: { booking_page_url: page, time_zone: 'America/Bogota' } })).structuredContent;
   if (after.days.flatMap((d) => d.slots).some((x) => x.start_utc === hold.start_utc)) fail('a held slot was still offered');
   say('the held time is no longer offered');
-  const o = new Client({ name: 'e2e-other-key', version: '1' });
-  await o.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${otherKey}` } } }));
-  const stolen = await o.callTool({
-    name: 'create_booking',
-    arguments: { event_type_id: intro.id, start: all[11].start, attendee: { name: 'Thief', email: 'thief@example.org', time_zone: 'UTC' }, answers: { company: 'T' }, hold_id: hold.hold_id, idempotency_key: idem('e2e-steal-0001') },
-  });
-  if (!stolen.isError || !stolen.content[0].text.includes('HOLD_NOT_FOUND')) fail(`another key used the hold: ${JSON.stringify(stolen.content)}`);
-  say(`another key with that hold_id -> ${stolen.content[0].text.slice(0, 40)}...`);
   const withHold = await anon.callTool({
     name: 'book_meeting',
     arguments: { booking_page_url: page, start: all[11].start, attendee: { name: 'Held Invitee', email: 'held@example.org', time_zone: 'America/Bogota' }, answers: { company: 'Held Co' }, hold_id: hold.hold_id, idempotency_key: idem('e2e-held-00001') },
   });
   if (withHold.isError) fail(`book_meeting with hold: ${withHold.content[0].text}`);
   say(`book_meeting with hold_id -> ${withHold.structuredContent.booking.uid} ${withHold.structuredContent.booking.status}`);
+  const keyHeld = await c.callTool({ name: 'hold_slot', arguments: { event_type_id: intro.id, start: all[13].start, time_zone: 'UTC', idempotency_key: idem('e2e-hold-00002') } });
+  if (keyHeld.isError) fail(`hold_slot with a key: ${keyHeld.content[0].text}`);
+  const keyHold = keyHeld.structuredContent.hold;
+  const o = new Client({ name: 'e2e-other-key', version: '1' });
+  await o.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${otherKey}` } } }));
+  const byKey = (client, name, key) =>
+    client.callTool({
+      name: 'create_booking',
+      arguments: { event_type_id: intro.id, start: all[13].start, attendee: { name, email: `${name.toLowerCase()}@example.org`, time_zone: 'UTC' }, answers: { company: 'K' }, hold_id: keyHold.hold_id, idempotency_key: idem(key) },
+    });
+  const stolen = await byKey(o, 'Thief', 'e2e-steal-0001');
+  if (!stolen.isError || !stolen.content[0].text.includes('HOLD_NOT_FOUND')) fail(`another key used the hold: ${JSON.stringify(stolen.content)}`);
+  say(`another key with a key's hold_id -> ${stolen.content[0].text.slice(0, 40)}...`);
+  const keyBooked = await byKey(c, 'Owner', 'e2e-held-00002');
+  if (keyBooked.isError) fail(`create_booking with its own hold: ${keyBooked.content[0].text}`);
+  say(`the key that held it books it -> ${keyBooked.structuredContent.booking.uid}`);
 
   // 6. Requests that wait for the host: list, confirm (twice), decline.
   const approval = 'https://calendar.example.test/acme/jordan-lee/approval-call';
@@ -242,7 +252,7 @@ try {
   const audit = logs.join('').split('\n').filter((l) => l.includes('mcp.tool_call'));
   say(`${audit.length} audit lines on stdout; sample: ${audit[0]}`);
   if (logs.join('').includes(key) || logs.join('').includes(otherKey)) fail('an API key appeared in the server output');
-  if (logs.join('').includes(hold.hold_id)) fail('a hold id appeared in the server output');
+  if (logs.join('').includes(hold.hold_id) || logs.join('').includes(keyHold.hold_id)) fail('a hold id appeared in the server output');
   if (audit.length < 20) fail('missing audit lines');
   ok = true;
   say('PASS');

@@ -128,6 +128,62 @@ describe('hold_slot', () => {
     expect(structured<{ booking: { uid: string } }>(await create(keyA, 'hold-bound-0004')).booking.uid).toBe(mine.booking.uid);
   });
 
+  it('an anonymous hold_id is the capability: it books from another address, and a key may present it', async () => {
+    const here = await h.connect(undefined, { 'x-forwarded-for': '203.0.113.10' });
+    const there = await h.connect(undefined, { 'x-forwarded-for': '198.51.100.20' });
+    const [a, b] = (await slots(here, { booking_page_url: PAGE })).slice(44, 46);
+    const held = structured<Hold>(
+      await here.callTool({ name: 'hold_slot', arguments: { booking_page_url: PAGE, start: a!.start, time_zone: 'UTC', idempotency_key: idem('hold-bearer-0001') } }),
+    );
+    // The same agent, its next call arriving from another address (a hosted connector, a CDN).
+    const booked = structured<{ booking: { status: string; start_utc: string } }>(
+      await there.callTool({
+        name: 'book_meeting',
+        arguments: { booking_page_url: PAGE, start: a!.start, attendee: who('Moved Address'), answers: { company: 'M' }, hold_id: held.hold.hold_id, idempotency_key: idem('hold-bearer-0002') },
+      }),
+    );
+    expect(booked.booking).toMatchObject({ status: 'accepted', start_utc: a!.start_utc });
+    const second = structured<Hold>(
+      await here.callTool({ name: 'hold_slot', arguments: { booking_page_url: PAGE, start: b!.start, time_zone: 'UTC', idempotency_key: idem('hold-bearer-0003') } }),
+    );
+    const keyed = await h.connect(await h.key(ALL));
+    const made = structured<{ booking: { start_utc: string } }>(
+      await keyed.callTool({
+        name: 'create_booking',
+        arguments: { event_type_id: introId, start: b!.start, attendee: who('Key Bearer'), answers: { company: 'K' }, hold_id: second.hold.hold_id, idempotency_key: idem('hold-bearer-0004') },
+      }),
+    );
+    expect(made.booking.start_utc).toBe(b!.start_utc);
+  });
+
+  it('a refusal never sends the caller into its own hold', async () => {
+    const keyA = await h.connect(await h.key(ALL));
+    const slot = (await slots(keyA, { event_type_id: introId }))[48]!;
+    const held = structured<Hold>(
+      await keyA.callTool({ name: 'hold_slot', arguments: { event_type_id: introId, start: slot.start, time_zone: 'UTC', idempotency_key: idem('hold-hint-00001') } }),
+    );
+    // Presented anonymously, a key's hold is not found, and the hint does not say "book without hold_id".
+    const anon = await h.connect();
+    const notFound = errorText(
+      await anon.callTool({
+        name: 'book_meeting',
+        arguments: { booking_page_url: PAGE, start: slot.start, attendee: who('Hint Reader'), answers: { company: 'H' }, hold_id: held.hold.hold_id, idempotency_key: idem('hold-hint-00002') },
+      }),
+    );
+    expect(notFound).toContain('HOLD_NOT_FOUND');
+    expect(notFound).not.toMatch(/without hold_id/i);
+    // Booking its own held time without the hold_id says to pass it, not that someone else holds it.
+    const taken = errorText(
+      await keyA.callTool({
+        name: 'create_booking',
+        arguments: { event_type_id: introId, start: slot.start, attendee: who('Hint Reader'), answers: { company: 'H' }, idempotency_key: idem('hold-hint-00003') },
+      }),
+    );
+    expect(taken).toContain('SLOT_TAKEN');
+    expect(taken).toContain('hold_id');
+    expect(taken).not.toMatch(/^SLOT_TAKEN: Someone else/);
+  });
+
   it('an expired hold books nothing and says to hold again', async () => {
     const c = await h.connect(await h.key(ALL));
     const slot = (await slots(c, { event_type_id: introId }))[9]!;

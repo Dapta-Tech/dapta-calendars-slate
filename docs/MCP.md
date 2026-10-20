@@ -92,14 +92,16 @@ tools refuse it to anyone but the holder (`SLOT_TAKEN`). Book it with
 `book_meeting` or `create_booking`, passing the `hold_id` and the same `start`;
 the booking consumes the hold. An unused hold simply expires.
 
-- **Bound to its caller.** A hold made with one API key or OAuth connection is
+- **Who can use it.** A hold made with one API key or OAuth connection is
   usable only by that key or connection; a hold made with a sign-in through an
   external authorization server only by the same person (whichever `account_id`
-  the hold named, so `book_meeting`, which never names one, still books it); an
-  anonymous hold only from the same client address. Anyone else gets `HOLD_NOT_FOUND`, the same answer as an
-  unknown id, so a `hold_id` is useless to anyone who did not make it. The
-  booking core's reservation uid (a bearer handle on the public REST routes)
-  never leaves the server.
+  the hold named, so `book_meeting`, which never names one, still books it).
+  Anyone else gets `HOLD_NOT_FOUND`, the same answer as an unknown id. An
+  anonymous hold has nothing stable to bind to (a hosted client's address can
+  change between two calls), so its `hold_id` (144 random bits, never logged)
+  is the capability: whoever presents it may book it, like the reservation uid
+  the public booking page uses. Keep it between the agent and the person. The
+  booking core's reservation uid never leaves the server.
 - **Same caps as the booking page.** At most 10 open holds per host, a fresh
   calendar check, and only offered times can be held (`INVALID_SLOT` otherwise,
   `TOO_MANY_HOLDS` when the page is full).
@@ -421,8 +423,9 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 `pnpm run build:packages && cd apps/api && pnpm e2e:mcp` boots the API the way the
 production image does (tsx with `tsconfig.runtime.json`) on a throwaway SQLite
 file and drives it with the official client: tool list, slots, book, reschedule,
-cancel, an anonymous public booking, a legacy `initialize` handshake, a hold
-booked with its `hold_id` (and refused to a second key), pending requests
+cancel, an anonymous public booking, a legacy `initialize` handshake, an
+anonymous hold booked with its `hold_id`, a key's hold refused to a second key
+and booked by its own, pending requests
 confirmed (twice) and declined, and a round-robin team booking.
 
 `pnpm e2e:mcp-login` does the same with an external authorization server: a
