@@ -240,6 +240,30 @@ describe('team event, fixed round robin: every fixed host is on every booking', 
     });
     expect(warning(el)).toBe(one(en, 'Taylor Brooks'));
   });
+
+  it('every host fixed and none with a calendar: warns, as collective does (the engine books fixed-only)', async () => {
+    const el = await mount({
+      initial: event({ schedulingType: 'fixed_round_robin', hosts: [fixedHost('m-casey'), fixedHost('m-taylor')] }),
+      teamMembers: [CASEY, TAYLOR],
+    });
+    expect(warning(el)).toBe(en.locationTeamNoDestinationAll);
+  });
+
+  it('every host fixed and one with a calendar: no warning', async () => {
+    const el = await mount({
+      initial: event({ schedulingType: 'fixed_round_robin', hosts: [fixedHost('m-ana'), fixedHost('m-casey')] }),
+      teamMembers: [ANA, CASEY],
+    });
+    expect(warning(el)).toBeNull();
+  });
+
+  it('no host fixed reads as plain round robin: names each host with no calendar', async () => {
+    const el = await mount({
+      initial: event({ schedulingType: 'fixed_round_robin', hosts: [] }),
+      teamMembers: [ANA, CASEY],
+    });
+    expect(warning(el)).toBe(one(en, 'Casey Morgan'));
+  });
 });
 
 describe('personal event, online meeting', () => {

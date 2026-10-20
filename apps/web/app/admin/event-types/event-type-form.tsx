@@ -549,19 +549,23 @@ function LocationField({
   //  - round robin: one host, so each host without one is a gap;
   //  - collective: every host, so one calendar among them is enough;
   //  - fixed round robin: every fixed host, so one fixed calendar is enough;
-  //    without it, each rotating host without one is a gap.
+  //    without it, each rotating host without one is a gap. Read the hosts the
+  //    way the engine does (`combineTeamSlots` in parity.ts): no fixed host is
+  //    plain round robin, no rotating host is collective over the fixed ones.
   // Strictly `false`: an API that predates the field sends nothing, and an
   // unknown is not a gap.
   const lacksCalendar = (h: TeamMemberOption) => h.hasDestinationCalendar === false;
   let gapHosts: TeamMemberOption[] = [];
   let noHostHasCalendar = false;
   if (kind === 'conferencing' && teamHosts) {
-    if (schedulingType === 'collective') {
-      noHostHasCalendar = teamHosts.length > 0 && teamHosts.every(lacksCalendar);
-    } else if (schedulingType === 'fixed_round_robin') {
-      const isFixed = (h: TeamMemberOption) => fixedHostIds.includes(h.memberId);
-      if (teamHosts.filter(isFixed).every(lacksCalendar))
-        gapHosts = teamHosts.filter((h) => !isFixed(h) && lacksCalendar(h));
+    const isFixed = (h: TeamMemberOption) => fixedHostIds.includes(h.memberId);
+    const fixed = schedulingType === 'fixed_round_robin' ? teamHosts.filter(isFixed) : [];
+    const rotating = schedulingType === 'fixed_round_robin' ? teamHosts.filter((h) => !isFixed(h)) : [];
+    if (schedulingType === 'collective' || (fixed.length > 0 && rotating.length === 0)) {
+      const attending = schedulingType === 'collective' ? teamHosts : fixed;
+      noHostHasCalendar = attending.length > 0 && attending.every(lacksCalendar);
+    } else if (fixed.length > 0) {
+      if (fixed.every(lacksCalendar)) gapHosts = rotating.filter(lacksCalendar);
     } else {
       gapHosts = teamHosts.filter(lacksCalendar);
     }
