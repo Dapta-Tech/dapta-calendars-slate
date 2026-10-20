@@ -137,6 +137,12 @@ describe('the calendar title and description, from the booking to the invite', (
     if ('error' in out) throw new Error(`book failed: ${out.error}`);
     expect(out.title).toBe('Reunión Felipe - Ana, López');
     expect(out.calendarDescription).toBe('Empresa: Acme; Inc.\nCorreo: ana@example.com');
+    // The manage page reads the same text.
+    const token = new URL(out.manageUrl!).searchParams.get('token')!;
+    expect(await booking.manageView(out.uid, token)).toMatchObject({
+      title: 'Reunión Felipe - Ana, López',
+      calendarDescription: 'Empresa: Acme; Inc.\nCorreo: ana@example.com',
+    });
 
     await settle();
     await worker.drainOnce(Date.now());

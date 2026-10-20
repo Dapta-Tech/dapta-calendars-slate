@@ -125,4 +125,29 @@ describe('a seat taken on a group slot', () => {
     );
     expect(Number(count!.n)).toBe(2);
   });
+
+  it('a seat request with several attendees takes one seat per new address, and counts only those', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    await db.run(sql`UPDATE event_type SET seats_per_time_slot = 3 WHERE slug = 'office'`);
+    const seat = (attendee: string, others: string[]) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'office',
+        startMs,
+        attendee: { name: attendee, email: `${attendee}@example.com`, timeZone: 'UTC' },
+        additionalAttendees: others.map((o) => ({ name: o, email: `${o}@example.com`, timeZone: 'UTC' })),
+      });
+    const emails = async () =>
+      (
+        await db.all<{ email: string }>(
+          sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid}) ORDER BY created_at`,
+        )
+      ).map((r) => r.email.toLowerCase());
+    // Three new people do not fit beside Alice in three seats.
+    expect(await seat('bob', ['carl', 'dana'])).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // Alice already holds hers and Carl is named twice: two new seats, which fit.
+    expect(await seat('bob', ['alice', 'carl', 'CARL'])).toMatchObject({ ok: true, seatTaken: true });
+    expect(await emails()).toEqual(['alice@example.com', 'bob@example.com', 'carl@example.com']);
+  });
 });

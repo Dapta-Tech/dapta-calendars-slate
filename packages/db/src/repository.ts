@@ -1125,10 +1125,8 @@ export async function createBooking(
       // carries the event's name only, never the slot's stored text, which an
       // address alone must not be enough to read. Checked here and again under
       // the lock below, where a concurrent repeat would otherwise slip in.
-      const repeatSql = sql`SELECT 1 AS hit FROM booking_attendee
-          WHERE booking_id = ${existing.id}
-            AND COALESCE(email_normalized, lower(trim(email))) = ${normalizeAttendeeEmail(args.attendee.email)}
-          LIMIT 1`;
+      const takenSql = sql`SELECT COALESCE(email_normalized, lower(trim(email))) AS email
+          FROM booking_attendee WHERE booking_id = ${existing.id}`;
       const replay = (): BookingOutcome => ({
         ok: true,
         booking: {
@@ -1145,7 +1143,8 @@ export async function createBooking(
         manageToken: '',
         deduplicated: true,
       });
-      if (await db.get(repeatSql)) return replay();
+      const primaryKey = normalizeAttendeeEmail(args.attendee.email);
+      if ((await db.all<{ email: string | null }>(takenSql)).some((r) => r.email === primaryKey)) return replay();
       // Seats, holds and the booking itself are read again under the host's
       // lock (the one every guarded booking write and the hold write take),
       // then the booking's own row (member first, booking second, the order a
@@ -1154,19 +1153,28 @@ export async function createBooking(
       // cancel or move of this booking (those do not take the member lock)
       // must not slip in between the read and the insert.
       const seatTime = Date.now();
-      const seatInserts = [args.attendee, ...(args.additionalAttendees ?? [])].map(
-        (attendee, i) => sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
+      // One seat per address: the request's attendees, each address once
+      // (the invitee first), less those that already hold a seat on the slot.
+      // Only those are inserted and counted against the seats left.
+      const requested = [args.attendee, ...(args.additionalAttendees ?? [])].filter(
+        (attendee, i, all) => all.findIndex((a) => normalizeAttendeeEmail(a.email) === normalizeAttendeeEmail(attendee.email)) === i,
+      );
+      const seatInserts = (taken: ReadonlyArray<{ email: string | null }>) => {
+        const held = new Set(taken.map((r) => r.email));
+        return requested
+          .filter((attendee) => !held.has(normalizeAttendeeEmail(attendee.email)))
+          .map(
+            (attendee, i) => sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
             VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
               ${normalizeAttendeeEmail(attendee.email)},
               ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
               ${attendee.language ?? null}, ${seatTime + i})`,
-      );
+          );
+      };
       // The slot is now shared by people who booked separately: its calendar
       // title and description must never carry one of them, whatever the
       // event type's seats become. Marked with the seat, in one transaction.
       const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${existing.id}`;
-      // Every seat this request asks for must fit, not only the first.
-      const full = sql`SELECT 1 AS hit WHERE (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${existing.id}) + ${seatInserts.length} > ${capacity}`;
       const heldElsewhere = args.refuseHeld
         ? memberHeldSql(member.id, startMs, endMs, seatTime, args.reservationUid)
         : null;
@@ -1182,10 +1190,13 @@ export async function createBooking(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} LIMIT 1`,
           );
           if (!stillThere(now)) return null;
-          if (db.sqlite!.drizzle.get(repeatSql)) return 'repeat';
-          if (db.sqlite!.drizzle.get(full)) return null;
+          const taken = db.sqlite!.drizzle.all<{ email: string | null }>(takenSql);
+          if (taken.some((r) => r.email === primaryKey)) return 'repeat';
+          const inserts = seatInserts(taken);
+          // Every seat this request takes must fit, not only the first.
+          if (taken.length + inserts.length > capacity) return null;
           if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return null;
-          for (const insert of seatInserts) db.sqlite!.drizzle.run(insert);
+          for (const insert of inserts) db.sqlite!.drizzle.run(insert);
           db.sqlite!.drizzle.run(markShared);
           return { status: now!.status };
         }, { immediate: true });
@@ -1196,10 +1207,13 @@ export async function createBooking(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} FOR UPDATE`,
           )) as unknown as Array<{ status: string; start_ms: number | string }>;
           if (!stillThere(now[0])) return null;
-          if (((await tx.execute(repeatSql)) as unknown as unknown[]).length > 0) return 'repeat';
-          if (((await tx.execute(full)) as unknown as unknown[]).length > 0) return null;
+          const taken = (await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>;
+          if (taken.some((r) => r.email === primaryKey)) return 'repeat';
+          const inserts = seatInserts(taken);
+          // Every seat this request takes must fit, not only the first.
+          if (taken.length + inserts.length > capacity) return null;
           if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return null;
-          for (const insert of seatInserts) await tx.execute(insert);
+          for (const insert of inserts) await tx.execute(insert);
           await tx.execute(markShared);
           return { status: now[0]!.status };
         });
