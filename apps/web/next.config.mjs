@@ -43,6 +43,18 @@ const nextConfig = {
   turbopack: {
     root: join(here, '..', '..'),
   },
+  // "MCP & API" moved from a Settings tab to the rail's MCP group. The old
+  // address is in bookmarks and older docs, so it keeps working as a real HTTP
+  // redirect, answered before any page renders (the pages at both addresses
+  // redirect too, for anything that reaches them anyway). `/admin/developers`
+  // is the group, not a page. Temporary, not permanent: a browser caches a 308
+  // forever, and either path may hold a page of its own one day.
+  async redirects() {
+    return [
+      { source: '/admin/settings/developer', destination: '/admin/developers/keys', permanent: false },
+      { source: '/admin/developers', destination: '/admin/developers/keys', permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

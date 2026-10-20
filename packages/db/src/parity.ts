@@ -2427,7 +2427,7 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
 }
 
 /**
- * The key list the Developer / MCP & API page shows. Never the hash or the
+ * The key list the MCP group's Connect and keys page shows. Never the hash or the
  * plaintext: `prefix` + `last4` identify a key, and the rest says what it can
  * do (`scopes`, `eventTypeIds` allowlist, `expiresAt`) and whether it is in use
  * (`lastUsedAt`). Times are ISO strings, null when unset. `revoked_at_ms` keeps

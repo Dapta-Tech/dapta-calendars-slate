@@ -6,10 +6,11 @@ import type { BookingMessages } from '@slate/shared';
 
 type SettingsMessages = BookingMessages['admin']['settings'];
 
-// Second-level settings nav: General · Booking Page · Members · Integrations ·
-// Developer. (Calendars is a top-level nav item at /admin/connections, not a
+// Second-level settings nav: General · Booking Page · Notifications · Members ·
+// Integrations. (Calendars is a top-level nav item at /admin/connections, not a
 // settings tab; a CRM is NOT one either until there is more than one of them —
-// #63.) Labels resolve per-locale. Members, Integrations and Developer are
+// #63. The old "MCP & API" tab is the rail's MCP group now, /admin/developers.)
+// Labels resolve per-locale. Notifications, Members and Integrations are
 // admin/owner-only: the CRM credential is an account-level resource.
 const TABS: {
   key: keyof Omit<SettingsMessages, 'title' | 'subtitle'>;
@@ -21,7 +22,6 @@ const TABS: {
   { key: 'notifications', href: '/admin/settings/notifications', adminOnly: true },
   { key: 'members', href: '/admin/settings/members', adminOnly: true },
   { key: 'integrations', href: '/admin/settings/integrations', adminOnly: true },
-  { key: 'developer', href: '/admin/settings/developer', adminOnly: true },
 ];
 
 export function SettingsTabs({ messages, isAdmin }: { messages: SettingsMessages; isAdmin: boolean }) {

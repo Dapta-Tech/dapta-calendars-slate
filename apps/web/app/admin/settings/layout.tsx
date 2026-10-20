@@ -7,7 +7,7 @@ import { SettingsChrome } from './settings-chrome';
 export default async function SettingsLayout({ children }: { children: ReactNode }) {
   const [me, locale] = await Promise.all([adminApi.me(), getLocale()]);
   const messages = getMessages(locale).admin.settings;
-  // Admin-only tabs (Members, Developer) are hidden from plain members.
+  // Admin-only tabs (Notifications, Members, Integrations) are hidden from plain members.
   return (
     <SettingsChrome messages={messages} isAdmin={isAdminRole(me.role)}>
       {children}

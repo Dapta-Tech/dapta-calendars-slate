@@ -659,7 +659,7 @@ const whoami: ToolDef = {
   }),
   async run(_args: z.infer<typeof whoamiInput>, call, deps) {
     if (!call.principal)
-      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (Settings, MCP & API).');
+      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (MCP, then Connect and keys).');
     const p = call.principal;
     const account = await deps.db.get<{ code: string; name: string }>(
       sql`SELECT code, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
@@ -709,7 +709,7 @@ const listMyAccounts: ToolDef = {
       if (!row) throw notFound('Account');
       accounts = [{ id: call.principal.accountId, name: untrusted(row.name, 120) }];
     } else {
-      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (Settings, MCP & API).');
+      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (MCP, then Connect and keys).');
     }
     return {
       data: { accounts, count: accounts.length },

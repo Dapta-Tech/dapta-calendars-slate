@@ -87,6 +87,11 @@ const ALLOW = [
     why: "Clears the icon column so the action lines up with the text beside it — the icon's width, not a rhythm step.",
   },
   {
+    file: 'apps/web/components/admin-shell.tsx',
+    utility: 'pl-11',
+    why: "Sets a page under the rail's MCP group on its parent's label column: the row's padding, the 20px icon and the gap after it. It tracks the icon's width, not a rhythm step.",
+  },
+  {
     file: 'apps/web/components/field-help.tsx',
     utility: '-m-3.5',
     why: 'Half of (the 44px tap target minus the 16px mark), so the control keeps a 16px layout footprint. It tracks those two, not the rhythm — a rounded value moves every caller.',

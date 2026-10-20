@@ -179,7 +179,7 @@ export class OAuthHostController {
   }
 
   /**
-   * The Connected apps list, with the switches the MCP & API page reads:
+   * The Connected apps list, with the switches the dashboard's MCP pages read:
    * `enabled` (OAuth through this API's own server, whose connections are
    * listed here), `external` (present, true, when an external authorization
    * server signs connections in instead: they live there, so the list stays

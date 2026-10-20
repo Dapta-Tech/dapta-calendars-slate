@@ -36,8 +36,8 @@ const fill = (template: string, vars: Record<string, string>): string =>
  */
 const PROVIDERS = [{ id: 'hubspot', nameKey: 'hubspotName', descKey: 'hubspotDesc' }] as const;
 
-// 44px minimum on every touch target (mobile bar). Matches the members and
-// developer tabs, which already inline this recipe rather than importing one.
+// 44px minimum on every touch target (mobile bar). Matches the members tab and
+// the MCP pages, which already inline this recipe rather than importing one.
 const TOUCH = 'min-h-control';
 
 export function IntegrationsPanel({

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getMessages, t } from '@slate/shared';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, isAdminRole } from '@/lib/admin-api';
+import { DEVELOPERS_KEYS_HREF } from '@/lib/admin-nav';
 import { getLocale } from '@/lib/locale';
 import { CopyLink } from '@/components/copy-link';
 import { SetupChecklist } from '@/components/setup-checklist';
@@ -65,7 +66,11 @@ export default async function AdminHome() {
         <Shortcut href="/admin/event-types" title={h.createEvent} desc={h.createEventDesc} />
         <Shortcut href="/admin/availability" title={h.setAvailability} desc={h.setAvailabilityDesc} />
         <Shortcut href="/admin/settings/booking-page" title={h.stylePage} desc={h.stylePageDesc} />
-        <Shortcut href="/admin/settings/developer" title={h.apiKeys} desc={h.apiKeysDesc} />
+        {/* Keys and webhooks are admin/owner-only, like the rail's MCP item:
+            a member is not shown a door that opens on "no access". */}
+        {isAdminRole(me.role) ? (
+          <Shortcut href={DEVELOPERS_KEYS_HREF} title={h.apiKeys} desc={h.apiKeysDesc} />
+        ) : null}
       </div>
     </div>
   );

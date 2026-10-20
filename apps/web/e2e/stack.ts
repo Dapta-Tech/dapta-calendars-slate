@@ -4,6 +4,7 @@
  * a stand-in calendar backend on loopback.
  */
 import { resolve } from 'node:path';
+import { expect, type Page } from '@playwright/test';
 
 const port = (name: string, fallback: number) => Number(process.env[name] ?? fallback);
 const webPort = port('E2E_WEB_PORT', 3411);
@@ -33,6 +34,9 @@ export const E2E = {
   /** The stand-in analytics host (scripts/qa/stand-in-analytics.mjs). */
   analytics: `http://127.0.0.1:${analyticsPort}`,
   signupUrl: 'https://signup.example.test/start',
+  /** The deployment's docs, per language: the rail's Docs item (rail-mcp.spec.ts). */
+  docsUrl: 'https://docs.example.test/',
+  docsUrlEs: 'https://docs.example.test/es/',
   /** Where start-api.mjs tees each API's stdout, for the log assertions. */
   logDir: resolve(__dirname, '.results-logs'),
 };
@@ -45,6 +49,19 @@ export interface StandInCall {
   op?: 'listBusy' | 'createEvent' | 'updateEvent' | 'deleteEvent' | 'listCalendars' | 'checkConnection';
   body?: Record<string, unknown>;
   at: number;
+}
+
+/**
+ * Sign in through the real login form, from a page the app has already sent to
+ * `/login` (with or without a `next`). The dev login makes the account on first
+ * use. The selectors name the form's controls by type, not by their words, so
+ * the helper works in every language the login renders (a Spanish browser gets
+ * "Correo" and "Continuar"), the way language.spec.ts already reads it.
+ */
+export async function signIn(page: Page, email: string): Promise<void> {
+  await expect(page).toHaveURL(/\/login/);
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('button[type="submit"]').click();
 }
 
 export async function standInCalls(op?: StandInCall['op']): Promise<StandInCall[]> {

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { t, type BookingMessages, type Locale } from '@slate/shared';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
+import { PageHeader } from '@/components/ui/page-header';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
@@ -78,6 +79,9 @@ export function ApiKeys({
   now,
   messages: m,
   locale,
+  createOpen,
+  onCreateOpenChange,
+  showCreate = true,
 }: {
   keys: ApiKeyRow[];
   /** For the optional allowlist; empty hides the picker. */
@@ -87,8 +91,15 @@ export function ApiKeys({
   messages: DevMessages;
   /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
   locale?: Locale;
+  /** The create dialog, when something else on the page opens it too (the setup guide). */
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
+  /** Off while the setup guide's first step holds the page's one Create (R30). */
+  showCreate?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = createOpen ?? ownOpen;
+  const setOpen = onCreateOpenChange ?? setOwnOpen;
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(DEFAULT_SCOPES);
   const [limitTypes, setLimitTypes] = useState(false);
@@ -96,9 +107,21 @@ export function ApiKeys({
   const [expiryDays, setExpiryDays] = useState(0);
   const eventTypeTitles = new Map(eventTypes.map((e) => [e.id, e.title]));
   const [reveal, setReveal] = useState<string | null>(null);
+  const revealRef = useRef<HTMLDivElement>(null);
   const [pending, start] = useTransition();
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
+
+  // The new key is shown once, here, below the setup guide: from the guide's
+  // step 1 that is a screen or more away, and the button that opened the dialog
+  // is gone as soon as a key exists, so the dialog has nothing to hand focus
+  // back to. Bring the key into view and put focus on it instead. Runs after
+  // the dialog's own focus restore (cleanups first), so it wins.
+  useEffect(() => {
+    if (!reveal) return;
+    revealRef.current?.scrollIntoView({ block: 'center' });
+    revealRef.current?.focus();
+  }, [reveal]);
 
   const submit = () =>
     start(async () => {
@@ -145,15 +168,22 @@ export function ApiKeys({
     <section className="mb-section">
       <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
-        <Button size="lg" onClick={() => setOpen(true)}>
-          {m.createKey}
-        </Button>
+        {showCreate ? (
+          <Button size="lg" onClick={() => setOpen(true)}>
+            {m.createKey}
+          </Button>
+        ) : null}
       </div>
       {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
       <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>
 
       {reveal ? (
-        <div className="mb-card rounded-xl border border-primary-edge bg-card p-field">
+        <div
+          ref={revealRef}
+          tabIndex={-1}
+          data-testid="api-key-reveal"
+          className="mb-card rounded-xl border border-primary-edge bg-card p-field focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <p className="mb-tight text-sm text-muted-foreground">{m.copyOnce}</p>
           <code className="break-all font-mono text-sm">{reveal}</code>
         </div>
@@ -453,13 +483,18 @@ export function Webhooks({
 
   return (
     <section>
-      <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
-        <h2 className="text-xl font-semibold">{m.webhooks}</h2>
-        <Button size="lg" onClick={() => setOpen(true)}>
-          {m.addWebhook}
-        </Button>
-      </div>
-      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.webhooksLead}</p>
+      {/* The whole of MCP, Webhooks: the title and lead are the page header,
+          with Add webhook top-right where a list page keeps its create action. */}
+      <PageHeader
+        title={m.webhooks}
+        subtitle={m.webhooksLead}
+        longSubtitle
+        action={
+          <Button size="lg" onClick={() => setOpen(true)}>
+            {m.addWebhook}
+          </Button>
+        }
+      />
 
       {/* The one and only chance to read this secret — it is encrypted at rest
           from here on, and no endpoint gives it back (W / #75). */}

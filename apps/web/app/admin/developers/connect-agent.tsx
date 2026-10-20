@@ -23,7 +23,20 @@ export interface ConnectSnippets {
 
 type TabId = 'cursor' | 'claude-code' | 'codex' | 'other' | 'chat';
 
-function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; label?: string; copyLabel: string; copiedLabel: string }) {
+export function CodeBlock({
+  value,
+  label,
+  copyLabel,
+  copiedLabel,
+  wrap = false,
+}: {
+  value: string;
+  label?: string;
+  copyLabel: string;
+  copiedLabel: string;
+  /** Prose to paste (a prompt), not code: it wraps instead of scrolling sideways. */
+  wrap?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -39,7 +52,11 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
       {label ? <span className="text-xs text-muted-foreground">{label}</span> : null}
       {/* Copy sits top-right inside the block, so a one-line value takes one line. */}
       <div className="flex items-start gap-inline rounded-md border border-border bg-muted p-inline pl-field">
-        <pre className="min-w-0 flex-1 self-center overflow-x-auto whitespace-pre font-mono text-xs">
+        <pre
+          className={`min-w-0 flex-1 self-center font-mono text-xs ${
+            wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto whitespace-pre'
+          }`}
+        >
           <code>{value}</code>
         </pre>
         <Button
@@ -50,22 +67,27 @@ function CodeBlock({ value, label, copyLabel, copiedLabel }: { value: string; la
           aria-label={`${copyLabel} · ${label ?? value.slice(0, 24)}`}
         >
           <i aria-hidden className={`pi ${copied ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 12 }} />
-          {copied ? copiedLabel : copyLabel}
+          {/* Icon only under 640px, where the block sits in the guide's step
+              column and the word would take half its width; the aria-label
+              names the button either way. */}
+          <span className="hidden sm:inline">{copied ? copiedLabel : copyLabel}</span>
         </Button>
       </div>
     </div>
   );
 }
 
+/**
+ * The agent tabs: the MCP address and the exact setup for each agent. Step 2 of
+ * the setup guide (`setup-guide.tsx`), which carries the title and, in step 1,
+ * the key, and which shows none of this while the API does not serve MCP.
+ */
 export function ConnectAgent({
-  available,
   snippets,
   oauth = false,
   external = false,
   messages: m,
 }: {
-  /** The API serves MCP. Off: one plain sentence, no tabs and no address (the page also drops the tool list). */
-  available: boolean;
   snippets: ConnectSnippets | null;
   /** OAuth is on: chat apps connect with a sign-in. */
   oauth?: boolean;
@@ -100,32 +122,13 @@ export function ConnectAgent({
 
   const copy = { copyLabel: m.copy, copiedLabel: m.copied };
 
-  if (!available) {
-    return (
-      <section className="mb-section" aria-labelledby={`${base}-title`}>
-        <h2 id={`${base}-title`} className="mb-tight text-xl font-semibold">
-          {m.connectTitle}
-        </h2>
-        <div className="rounded-xl border border-border bg-card p-field">
-          <p className="max-w-prose text-sm text-muted-foreground">{m.mcpUnavailable}</p>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section className="mb-section" aria-labelledby={`${base}-title`}>
-      <h2 id={`${base}-title`} className="mb-tight text-xl font-semibold">
-        {m.connectTitle}
-      </h2>
-      <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.connectLead}</p>
+    <div>
       {external ? <SignInNote m={m} /> : null}
-
-      <div
-        role="tablist"
-        aria-label={m.connectTitle}
-        className="-mx-gutter mb-field flex gap-tight overflow-x-auto px-gutter sm:mx-0 sm:px-0"
-      >
+      {/* Wraps rather than scrolls: in the guide's step column a scrolling strip
+          hid two of the five agents at 360px with nothing to say they were
+          there, and the old bleed to the page gutter ran into the step numbers. */}
+      <div role="tablist" aria-label={m.connectTitle} className="mb-field flex flex-wrap gap-tight">
         {tabs.map((tab, i) => (
           <button
             key={tab.id}
@@ -167,7 +170,6 @@ export function ConnectAgent({
         ) : (
           <>
             <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
-            <p className="max-w-prose text-sm text-muted-foreground">{m.stepKey}</p>
             <CodeBlock value={snippets.exportKey} label={m.stepKeyEnv} {...copy} />
             {active === 'cursor' ? (
               <>
@@ -193,7 +195,7 @@ export function ConnectAgent({
           </>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 

@@ -20,7 +20,7 @@ without a custom integration.
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
 | OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
 
-A key is created by a workspace admin (Settings, then API keys). Send it only in
+A key is created by a workspace admin (MCP, then Connect and keys). Send it only in
 the `Authorization` header. A key in the URL (`?api_key=`, `?access_token=`) is
 refused with 400 so it never lands in an access log. A wrong, expired or revoked
 key answers 401; it is never quietly treated as anonymous. The account always
@@ -209,7 +209,7 @@ every scope it needs, and asks the person to approve again (step-up). API keys
 keep their scope errors as tool results, because a key's scopes cannot be
 stepped up.
 
-**Connected apps.** Settings, MCP and API lists every connection of the
+**Connected apps.** MCP, Connect and keys lists every connection of the
 workspace (app, host, scopes, who approved it, when, last used) with
 **Disconnect**. Disconnecting revokes the connection: its refresh token stops
 working at once; an access token it already holds keeps working until it
@@ -218,7 +218,7 @@ removed or no longer an owner or admin can no longer refresh either.
 
 **Add it in Claude** (claude.ai, Desktop, mobile): Settings, then Connectors,
 then Add custom connector; paste the MCP URL; click Add, then Connect. The page
-in Settings, MCP and API has an **Add to Claude** button that pre-fills the
+in MCP, Connect and keys has an **Add to Claude** button that pre-fills the
 dialog. In Claude Code:
 
 ```bash

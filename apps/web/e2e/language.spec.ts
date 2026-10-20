@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { E2E, HOST } from './stack';
+import { E2E, HOST, signIn } from './stack';
 
 /**
  * A Spanish speaker's first visit, with no language saved yet: the sign-in and
@@ -23,8 +23,7 @@ test('sign-in and dashboard follow the browser language when nothing is saved', 
   await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
   await expect(page).toHaveTitle(/^Iniciar sesión · /);
 
-  await page.locator('input[type="email"]').fill(HOST.email);
-  await page.locator('button[type="submit"]').click();
+  await signIn(page, HOST.email);
   await expect(page).toHaveURL(/\/admin/);
   await expect(page.locator('html')).toHaveAttribute('lang', 'es');
   await expect(page.getByRole('link', { name: 'Reservas' }).first()).toBeVisible();
@@ -72,8 +71,7 @@ test.describe('in English', () => {
     page,
   }) => {
     await page.goto('/login');
-    await page.locator('input[type="email"]').fill(HOST.email);
-    await page.locator('button[type="submit"]').click();
+    await signIn(page, HOST.email);
     await expect(page).toHaveURL(/\/admin/);
     await page.goto('/admin/teams/00000000-0000-0000-0000-000000000000');
     await expect(page.getByRole('heading', { level: 1, name: 'Not found' })).toBeVisible();

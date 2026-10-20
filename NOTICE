@@ -16,6 +16,10 @@ components, each under its own license:
 - zod — MIT License
 - Turborepo, Changesets — MIT License
 - Lucide icon outlines, generated into apps/web/app/icons.css: ISC License
+- Claude, OpenAI and Cursor marks in apps/web/public/mcp/logos/, from Simple
+  Icons: CC0 1.0. The marks are trademarks of their owners, shown only to say
+  which AI apps connect to the MCP server, and are not covered by this
+  repository's license.
 
 The design tokens and scheduling engine originate from Dapta's internal
 Calendars codebase and are released here under the MIT License.
