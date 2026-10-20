@@ -19,12 +19,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: `changeset status` diffs against `baseBranch` (main).
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Reads and validates every changeset, so a malformed one or one that
+      # mixes ignored and versioned packages fails here. It does not ask a PR
+      # for a new changeset. git resolves `main` only as a local branch, which
+      # a pull_request checkout does not have, so create it from origin first.
+      - name: Changesets are valid
+        run: |
+          git rev-parse --verify --quiet refs/heads/main >/dev/null || git branch main origin/main
+          pnpm exec changeset status
       - run: pnpm glyph-gate
       - run: pnpm spacing-gate
       - run: pnpm build:packages

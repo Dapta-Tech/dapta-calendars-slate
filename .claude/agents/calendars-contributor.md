@@ -50,7 +50,7 @@ header; mint a WorkOS-style token offline with
 
 1. `pnpm typecheck && pnpm lint && pnpm test` (and the Postgres DB test if you
    touched `packages/db`).
-2. `pnpm changeset` if a published package's behavior changed.
+2. `pnpm changeset` if a package's behavior changed.
 3. Commit with a Conventional-Commit message and DCO sign-off: `git commit -s`.
 4. Ask the **calendars-reviewer** agent to review the diff, and fix what it flags,
    before opening the PR (against `main`).
