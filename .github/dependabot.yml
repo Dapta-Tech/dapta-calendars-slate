@@ -16,6 +16,11 @@ updates:
           - "*"
     commit-message:
       prefix: "chore(deps)"
+    # A release must be 3 days old before a version update proposes it. This is
+    # Dependabot's documented default, written out so it stays a decision here.
+    # Security updates are not delayed by it.
+    cooldown:
+      default-days: 3
     # Version lines held back from the group, so one migration does not keep the
     # routine bumps red. Each needs its own PR with the code changes done; that
     # PR deletes its rule here. Patches and minors on the current line still flow.
@@ -54,8 +59,8 @@ updates:
       # The MCP SDK already gets 4.x through the `zod4` alias in apps/api.
       - dependency-name: "zod"
         versions: [">=4.0.0"]
-      # Node types track the oldest Node we run (20 on CI and in the web image,
-      # 22 in the API image), so they never describe an API those lack.
+      # Stay on the 22 line, the Node the API image runs. Newer lines describe
+      # APIs none of our runtimes have (CI and the web image are on Node 20).
       - dependency-name: "@types/node"
         versions: [">=23.0.0"]
       # 10.x needs Node 20.19+, above .nvmrc's 20.18.0, and its recommended set
@@ -94,3 +99,6 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(ci)"
+    # Same 3-day wait as the npm updates above.
+    cooldown:
+      default-days: 3
