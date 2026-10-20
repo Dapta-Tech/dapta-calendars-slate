@@ -309,7 +309,7 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
     hint: 'Call find_available_slots and hold_slot again, then book with the new hold_id and a NEW idempotency_key.',
   },
   TOO_MANY_HOLDS: {
-    message: 'This booking page has too many holds open right now.',
+    message: 'This host has too many holds open right now (at most 10 at a time, across all of their event types).',
     hint: 'Book without a hold, or retry in a few minutes (a hold lasts about 10 minutes).',
   },
   FEATURE_NOT_SUPPORTED: { hint: 'This event type uses a feature the MCP tools do not support yet; book it from its public page.' },

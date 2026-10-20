@@ -84,13 +84,20 @@ and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
 - Intake questions are listed by `find_available_slots` and `list_event_types`;
   answers go in `answers`.
 
-### Holds: no race between finding and booking
+### Holds: keep a time while the person decides
 
 `hold_slot` places the same soft hold the booking page takes when a visitor picks
-a time: for about 10 minutes the time is offered to nobody else, and the booking
-tools refuse it to anyone but the holder (`SLOT_TAKEN`). Book it with
-`book_meeting` or `create_booking`, passing the `hold_id` and the same `start`;
-the booking consumes the hold. An unused hold simply expires.
+a time. For about 10 minutes no slot list offers the time (booking pages, the
+MCP slot tools, the REST slot routes), the MCP booking tools refuse it to anyone
+but the holder (`SLOT_TAKEN`), and team bookings leave the held host out. Book it
+with `book_meeting` or `create_booking`, passing the `hold_id` and the same
+`start`; the booking consumes the hold. An unused hold simply expires.
+
+What a hold does not promise yet: a booking made straight through the REST API
+(`/v2/bookings`, the public booking route, the machine API) is not checked
+against holds, and the MCP tools check just before the booking write rather
+than inside it, so such a booking can still take a held time. Moving the check
+into the booking core's guarded write is planned.
 
 - **Who can use it.** A hold made with one API key or OAuth connection is
   usable only by that key or connection; a hold made with a sign-in through an
@@ -104,10 +111,14 @@ the booking consumes the hold. An unused hold simply expires.
   booking core's reservation uid never leaves the server.
 - **Same caps as the booking page.** At most 10 open holds per host, a fresh
   calendar check, and only offered times can be held (`INVALID_SLOT` otherwise,
-  `TOO_MANY_HOLDS` when the page is full).
+  `TOO_MANY_HOLDS` when the host already has 10 open, across all of their event
+  types).
 - **Expiry.** `expires_at` (in your `time_zone`) and `expires_at_utc` say when it
   lapses. Booking with an expired hold books nothing and answers `HOLD_EXPIRED`.
   A hold for another event or time is `HOLD_MISMATCH`.
+- **Retries.** `hold_slot` with the same `idempotency_key` answers the same
+  hold. A hold that could not be handed out is given back at once, and after a
+  `TIMEOUT` the same key returns the hold the first call placed.
 - **One-host events only.** A team event picks its host when it is booked, so
   call `book_team_meeting` directly.
 

@@ -899,7 +899,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while you confirm the details with the person: nobody else is offered or can book it meanwhile. Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. A hold made with an API key or sign-in can be used only with that same key or person; the hold_id of an anonymous hold works for whoever presents it, so pass it on to nobody else. An unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
+    'Keep one offered slot for about 10 minutes while you confirm the details with the person: meanwhile no slot list offers it and the MCP booking tools will not book it for anyone else (a booking made straight through the REST API is not checked against holds yet). Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. A hold made with an API key or sign-in can be used only with that same key or person; the hold_id of an anonymous hold works for whoever presents it, so pass it on to nobody else. An unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -961,7 +961,7 @@ const holdSlot: ToolDef = {
       args.idempotency_key,
       { eventTypeId: resolved.eventType.id, startUtc },
       async ({ resumed }): Promise<HoldData> => {
-        // The booking page's own hold: same per-page cap, same fresh calendar
+        // The booking page's own hold: same per-host cap, same fresh calendar
         // check, same refusal of a time that is not offered or already held.
         const held = await deps.bookings.reserve({
           accountCode: resolved.accountCode,

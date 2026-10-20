@@ -71,7 +71,7 @@ import { enqueueOutbox } from './outbox';
 // --- Reservation holds ----------------------------------------------------
 
 const DEFAULT_HOLD_MS = 10 * 60_000;
-/** Cap on concurrent unexpired holds per booking page (per host member). */
+/** Cap on concurrent unexpired holds per host member, across all of their event types. */
 const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
 /**
@@ -119,7 +119,8 @@ export type ReserveOutcome =
  *  - opportunistically sweeps expired holds so rows can't accrete;
  *  - validates the requested start is a REAL, currently-bookable slot (no
  *    holding arbitrary/blocked instants to blank out a page's availability);
- *  - caps concurrent unexpired holds per page to blunt hold-spam DoS.
+ *  - caps concurrent unexpired holds per host (across their event types) to
+ *    blunt hold-spam DoS.
  *
  * The slot check reads the host's connected calendar through `calendar`, the
  * same provider `createBooking` re-checks at create time. Without it a hold was
@@ -198,7 +199,7 @@ export async function reserveSlot(
  * The hold write, serialised per host. The availability read above is a
  * snapshot: twenty visitors who pick the same time at once all see it free, and
  * a plain check-then-insert let every one of them hold it (the QA battery saw 18
- * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-page cap be
+ * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-host cap be
  * overrun the same way. Each loser then filled in the form and was refused only
  * at the last step.
  *
