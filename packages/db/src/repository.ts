@@ -1101,6 +1101,16 @@ export async function createBooking(
   const startMs = args.startMs;
   const endMs = startMs + eventType.length_minutes * 60_000;
 
+  // One attendee row per address: the invitee first, then each additional
+  // attendee whose address is new. The request's own repeats, and the
+  // invitee's address named again, are dropped, so a seat is never taken (or
+  // counted) twice for one person, on the first booking of a slot or a later one.
+  const requested = [args.attendee, ...(args.additionalAttendees ?? [])].filter(
+    (attendee, i, all) =>
+      all.findIndex((a) => normalizeAttendeeEmail(a.email) === normalizeAttendeeEmail(attendee.email)) === i,
+  );
+  const additionalAttendees = requested.slice(1);
+
   // R23 group events (seats > 1): a slot is ONE booking row that accrues up to
   // `capacity` attendees. A second+ booker adds a seat to the existing row
   // (so it never trips the one-accepted-per-slot overlap/EXCLUDE guard); the
@@ -1153,12 +1163,9 @@ export async function createBooking(
       // cancel or move of this booking (those do not take the member lock)
       // must not slip in between the read and the insert.
       const seatTime = Date.now();
-      // One seat per address: the request's attendees, each address once
-      // (the invitee first), less those that already hold a seat on the slot.
-      // Only those are inserted and counted against the seats left.
-      const requested = [args.attendee, ...(args.additionalAttendees ?? [])].filter(
-        (attendee, i, all) => all.findIndex((a) => normalizeAttendeeEmail(a.email) === normalizeAttendeeEmail(attendee.email)) === i,
-      );
+      // One seat per address: the request's attendees (`requested`, each
+      // address once) less those that already hold a seat on the slot. Only
+      // those are inserted and counted against the seats left.
       const seatInserts = (taken: ReadonlyArray<{ email: string | null }>) => {
         const held = new Set(taken.map((r) => r.email));
         return requested
@@ -1256,8 +1263,8 @@ export async function createBooking(
 
   // The first booking of a group slot takes a seat per attendee too: a request
   // for more seats than the time has is refused, as a seat request is above.
-  if (capacity > 1 && 1 + (args.additionalAttendees?.length ?? 0) > capacity)
-    return { ok: false, reason: 'INVALID', message: `This time has ${capacity} seats; the booking asks for ${1 + (args.additionalAttendees?.length ?? 0)}.` };
+  if (capacity > 1 && requested.length > capacity)
+    return { ok: false, reason: 'INVALID', message: `This time has ${capacity} seats; the booking asks for ${requested.length}.` };
 
   // External-calendar conflict check at CREATE time (error-visibility §5).
   // Availability reads already subtract external busy, but the create path
@@ -1313,7 +1320,7 @@ export async function createBooking(
   // Extra attendees are written a millisecond apart, after the invitee, so
   // "the first attendee row" names the one who booked without relying on the
   // database's physical row order (see loadBookingNotificationContext).
-  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+  const insertAdditionalAttendees = additionalAttendees.map(
     (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},

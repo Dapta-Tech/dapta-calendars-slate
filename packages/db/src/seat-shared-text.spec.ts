@@ -150,4 +150,35 @@ describe('a seat taken on a group slot', () => {
     expect(await seat('bob', ['alice', 'carl', 'CARL'])).toMatchObject({ ok: true, seatTaken: true });
     expect(await emails()).toEqual(['alice@example.com', 'bob@example.com', 'carl@example.com']);
   });
+
+  it("the slot's first booking counts and writes each address once too", async () => {
+    const out = await createEventType(db, accountId, alexId, {
+      slug: 'pair',
+      title: 'Pair session',
+      lengthMinutes: 30,
+      seatsPerTimeSlot: 2,
+    });
+    if (!out.ok) throw new Error('event type failed');
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pair',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const first = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pair',
+      startMs: new Date(a!.slots[0]!.startUtc).getTime(),
+      attendee: { name: 'Ana', email: 'ana@example.com', timeZone: 'UTC' },
+      // Ana again, and Bob twice: two people, which fit in two seats.
+      additionalAttendees: ['ANA', 'bob', 'Bob'].map((n) => ({ name: n, email: `${n}@example.com`, timeZone: 'UTC' })),
+    });
+    if (!first.ok) throw new Error(`first booking failed: ${'reason' in first ? first.reason : ''}`);
+    const rows = await db.all<{ email: string }>(
+      sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${first.booking.uid}) ORDER BY created_at`,
+    );
+    expect(rows.map((r) => r.email)).toEqual(['ana@example.com', 'bob@example.com']);
+  });
 });
