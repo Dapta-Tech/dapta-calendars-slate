@@ -11,6 +11,7 @@ import {
   type ToolKind,
 } from '../mcp-connect';
 import { endpointsMd } from './endpoints-md';
+import { code, tableCell } from './markdown';
 import {
   declaresResponseHeader,
   derefSchema,
@@ -77,7 +78,7 @@ const KIND_LABEL = { read: en.kindRead, write: en.kindWrite, destructive: en.kin
  * gets a skill without that sentence, never one pointing at a missing route.
  */
 const has = (doc: OpenApiDocument, method: HttpMethod, path: string): boolean => findOperation(doc, method, path) !== null;
-const ref = (method: HttpMethod, path: string): string => `\`${operationLabel(method, path)}\``;
+const ref = (method: HttpMethod, path: string): string => code(operationLabel(method, path));
 
 /** A `/v2` route's fixed `cal-api-version`, from the document. */
 const version = (doc: OpenApiDocument, method: HttpMethod, path: string): string | null => {
@@ -207,7 +208,7 @@ function versionTable(doc: OpenApiDocument): string {
   const rows = listOperations(doc)
     .map(({ method, path, op }) => ({ method, path, value: fixedHeaderValue(doc, op, 'cal-api-version') }))
     .filter((r) => r.value !== null)
-    .map((r) => `   | ${ref(r.method, r.path)} | \`${r.value}\` |`);
+    .map((r) => `   | ${tableCell(ref(r.method, r.path))} | ${tableCell(code(r.value))} |`);
   return rows.length ? ['   | Route | `cal-api-version` |', '   |---|---|', ...rows].join('\n') : '';
 }
 
@@ -347,7 +348,7 @@ function skillMd({ apiUrl, mcpUrl, appUrl, productName, openapi: doc }: SkillInp
         }
 
 Act on \`error.code\`, not on the message.${requestId}${
-          codes.length ? ` The codes: ${codes.map((c) => `\`${c}\``).join(', ')}.` : ''
+          codes.length ? ` The codes: ${codes.map((c) => code(c)).join(', ')}.` : ''
         }
 
 Other routes answer \`{ "error": "CODE", "message": "..." }\`.`

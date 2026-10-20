@@ -1,4 +1,5 @@
 import { API_KEY_ENV } from '../mcp-connect';
+import { code, tableCell } from './markdown';
 import {
   authKind,
   derefSchema,
@@ -30,10 +31,8 @@ const json = (value: unknown): string => JSON.stringify(value, null, 2);
 /** The document's words, with a dash between clauses read as a colon. */
 const prose = (text: string): string => text.replace(/\s*\u2014\s*|\s+\u2013\s+/g, ': ');
 
-/** One line, safe inside a table cell. */
-const cell = (text: string): string => prose(text).replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|').trim();
-
-const code = (value: unknown): string => `\`${value === null ? 'null' : String(value)}\``;
+/** The document's words on one line, safe inside a table cell. */
+const cell = (text: string): string => tableCell(prose(text));
 
 /** A short, readable type: `string (date-time)`, `array of Attendee`, `"en" or "es"`. */
 export function describeType(doc: OpenApiDocument, schema: unknown, depth = 0): string {
@@ -132,7 +131,7 @@ function responsesList({ op }: Operation): string {
 function operationSection(doc: OpenApiDocument, operation: Operation): string {
   const { method, path, op } = operation;
   const blocks = [
-    `### \`${operationLabel(method, path)}\``,
+    `### ${code(operationLabel(method, path))}`,
     op.summary ? prose(`${op.summary}.`.replace(/\.\.$/, '.')) : '',
     prose(op.description ?? ''),
     parametersTable(doc, operation),
