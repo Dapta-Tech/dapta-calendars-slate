@@ -769,26 +769,47 @@ const bookMeeting: ToolDef = {
     }
     const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
     const storedKey = `mcp:${namespaceHash}`;
-    const finish = async (data: BookMeetingData) => {
-      await completeApiIdempotency(deps.db, claim.id, 201, data);
-      return { data, summary: line(data.booking), affected: [data.booking.uid] } satisfies ToolResult;
+    const answer = (data: BookMeetingData): ToolResult => ({
+      data,
+      summary: data.replayed ? `${line(data.booking)} (replay of an earlier identical call)` : line(data.booking),
+      affected: [data.booking.uid],
+    });
+    // Two calls with this key can run at once (a retry after a timeout, a
+    // client that sends twice), so several attempts can hold this open record.
+    // A success is stored only on a record that holds no result yet; a stored
+    // success always wins (it names the same booking, the key being unique on
+    // bookings); a stored refusal gives way, because a booking under this key
+    // proves it wrong.
+    const finish = async (data: BookMeetingData): Promise<ToolResult> => {
+      if (await completeApiIdempotency(deps.db, claim.id, 201, data, { onlyOpen: true })) return answer(data);
+      const now = await deps.db.get<{ id: string; status_code: number | string | null; request_hash: string; response_body: unknown }>(
+        sql`SELECT id, status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
+      );
+      if (now && now.request_hash === requestHash && now.status_code != null && Number(now.status_code) < 400) {
+        const stored = parseJsonColumn<BookMeetingData | null>(now.response_body, null);
+        if (stored) return answer({ ...stored, replayed: true });
+      }
+      if (now && now.request_hash === requestHash && now.status_code != null)
+        await completeApiIdempotency(deps.db, now.id, 201, data);
+      return answer(data);
     };
-    // The claim row can be "in progress" because an earlier attempt timed out or
-    // was cut off AFTER it committed the booking. Ask the bookings table (the
-    // key is unique there, for personal and team events alike) before booking.
-    const prior = await deps.db.get<{ uid: string; start_ms: number; email: string | null }>(
-      sql`SELECT b.uid, b.start_ms,
-                 (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
-                    ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS email
-          FROM booking b
-          WHERE b.account_id = ${accountId}
-            AND b.idempotency_key = ${scopedIdempotencyKey(accountId, storedKey)} LIMIT 1`,
-    );
-    if (prior) {
+    // The booking this key already made, if any: by an earlier attempt that
+    // timed out or was cut off AFTER it committed, or by a twin running now.
+    // The key is unique on bookings, for personal and team events alike.
+    const bookedUnderKey = async (): Promise<ToolResult | null> => {
+      const prior = await deps.db.get<{ uid: string; start_ms: number; email: string | null }>(
+        sql`SELECT b.uid, b.start_ms,
+                   (SELECT ba.email FROM booking_attendee ba WHERE ba.booking_id = b.id
+                      ORDER BY ba.created_at ASC, ba.id ASC LIMIT 1) AS email
+            FROM booking b
+            WHERE b.account_id = ${accountId}
+              AND b.idempotency_key = ${scopedIdempotencyKey(accountId, storedKey)} LIMIT 1`,
+      );
+      if (!prior) return null;
       if (Number(prior.start_ms) !== Date.parse(startUtc) || (prior.email ?? '').toLowerCase() !== args.attendee.email.toLowerCase())
         throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
       const b = await deps.calV2.bookingResponse(accountId, prior.uid);
-      const done = await finish({
+      return finish({
         booking: {
           uid: b.uid,
           status: b.status,
@@ -803,8 +824,9 @@ const bookMeeting: ToolDef = {
         replayed: true,
         next_step: 'This request had already been booked; nothing was sent again.',
       });
-      return { ...done, summary: `${done.summary} (replay of an earlier identical call)` };
-    }
+    };
+    const earlier = await bookedUnderKey();
+    if (earlier) return earlier;
     // Booked with this workspace's own credential (API key or OAuth token), it is
     // an API booking for product analytics, like the REST machine API. A keyless
     // call, or one with another workspace's credential, books like the public
@@ -835,11 +857,17 @@ const bookMeeting: ToolDef = {
           );
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;
+      // A twin with this key may have booked while this attempt ran (the core
+      // then refuses this one as taken): that booking is the answer.
+      const twin = await bookedUnderKey();
+      if (twin) return twin;
       // A definite refusal (taken slot, bad answers) is the answer to this exact
       // request, so a retry gets it back instead of trying again. A transient one
       // (the host calendar could not confirm) stays open for the retry to run.
-      if (code !== 'CALENDAR_UNAVAILABLE')
-        await completeApiIdempotency(deps.db, claim.id, outcome.status, { error: code, message: outcome.message });
+      // Only the attempt that opened the record stores it, and only while the
+      // record holds no result: never over a twin's stored booking.
+      if (code !== 'CALENDAR_UNAVAILABLE' && claim.inserted)
+        await completeApiIdempotency(deps.db, claim.id, outcome.status, { error: code, message: outcome.message }, { onlyOpen: true });
       try {
         throw failureFor(code, outcome.message);
       } catch (error) {
