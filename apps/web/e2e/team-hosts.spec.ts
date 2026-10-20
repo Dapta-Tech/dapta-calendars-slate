@@ -34,12 +34,12 @@ test('a personal event points at team events, and a team event says who hosts it
   expect(teamId).toBeTruthy();
   const note = page.getByTestId('team-hosts-note');
   await expect(note).toHaveText(
-    'Every member of Sales hosts this event. Add or remove members on the team page.',
+    'Every member of Sales hosts this event once you save it. Add or remove members on the team page, then save this event.',
   );
   await expect(page.getByTestId('personal-hosts-card')).toHaveCount(0);
 
   const toTeam = note.getByRole('link', {
-    name: 'Add or remove members on the team page.',
+    name: 'Add or remove members on the team page, then save this event.',
     exact: true,
   });
   await expect(toTeam).toHaveAttribute('href', `/admin/teams/${teamId}`);

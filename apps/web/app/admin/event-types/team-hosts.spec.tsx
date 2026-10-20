@@ -132,23 +132,23 @@ describe('TeamHostsNote', () => {
   it('names the team as the hosts and links to where its members are managed', () => {
     const el = note('en');
     expect(el.textContent).toBe(
-      'Every member of Sales hosts this event. Add or remove members on the team page.',
+      'Every member of Sales hosts this event once you save it. Add or remove members on the team page, then save this event.',
     );
     expect(links(el)).toEqual([
-      { text: 'Add or remove members on the team page.', href: '/admin/teams/team-1' },
+      { text: 'Add or remove members on the team page, then save this event.', href: '/admin/teams/team-1' },
     ]);
   });
 
   it('a plain member reads who hosts it, without the roster link', () => {
     const el = note('en', false);
-    expect(el.textContent).toBe('Every member of Sales hosts this event.');
+    expect(el.textContent).toBe('Every member of Sales hosts this event once you save it.');
     expect(links(el)).toEqual([]);
   });
 
   it('in Spanish', () => {
     const el = note('es');
     expect(el.textContent).toBe(
-      'Todos los miembros de Sales son anfitriones de este evento. Agrega o quita miembros en la página del equipo.',
+      'Todos los miembros de Sales quedan como anfitriones de este evento al guardarlo. Agrega o quita miembros en la página del equipo y luego guarda este evento.',
     );
     expect(links(el)[0]?.href).toBe('/admin/teams/team-1');
   });
