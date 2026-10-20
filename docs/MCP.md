@@ -127,8 +127,9 @@ booking still needs `cancel_booking` and its own scope.
 `find_team_slots` offers a time when the event's scheduling method can staff it:
 round-robin when **any** host is free, collective when **every** host is, fixed
 round-robin when every fixed host and at least one other is. `book_team_meeting`
-checks each candidate host again at booking time (bookings and connected
-calendars), picks one fairly (round-robin: highest priority, then the lowest load for
+checks each candidate host again at booking time (bookings, connected calendars,
+and holds: a host someone is holding the time with is left out, and a held
+collective or fixed host makes the time unbookable), picks one fairly (round-robin: highest priority, then the lowest load for
 its weight, then the least recently booked) and returns `assigned_hosts`. A time no host can take any more
 is `SLOT_TAKEN`.
 

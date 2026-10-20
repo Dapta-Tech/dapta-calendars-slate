@@ -224,9 +224,7 @@ export async function insertHoldGuarded(
     now: number;
   },
 ): Promise<'ok' | 'INVALID_SLOT' | 'RATE_LIMITED'> {
-  const overlap = sql`SELECT 1 AS hit FROM slot_reservation
-      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}
-        AND slot_start_ms < ${h.endMs} AND slot_end_ms > ${h.startMs} LIMIT 1`;
+  const overlap = memberHeldSql(h.memberId, h.startMs, h.endMs, h.now);
   const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
       WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}`;
   const insert = sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
@@ -259,6 +257,18 @@ export async function insertHoldGuarded(
     await tx.execute(insert);
     return 'ok' as const;
   });
+}
+
+/**
+ * True (as a 1-row SELECT) if `memberId` has an unexpired soft hold overlapping
+ * the time: the overlap `loadReservationBusy` subtracts from availability,
+ * shared by the hold write and team host assignment so a held host is busy to
+ * both exactly as the slot lists say.
+ */
+function memberHeldSql(memberId: string, startMs: number, endMs: number, now: number) {
+  return sql`SELECT 1 AS hit FROM slot_reservation
+      WHERE member_id = ${memberId} AND release_at_ms > ${now}
+        AND slot_start_ms < ${endMs} AND slot_end_ms > ${startMs} LIMIT 1`;
 }
 
 // --- Identity / multi-tenant ----------------------------------------------
@@ -958,9 +968,18 @@ export async function createTeamBooking(
   // Which hosts are actually free at this instant (busy whether primary or co-host)?
   const candidates: HostCandidate[] = [];
   let sawCalendarFailure = false;
+  const heldAt = Date.now();
   for (const host of hosts) {
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
+    // A host somebody is holding this time with (a soft hold on one of their
+    // own events, from a booking page or the MCP hold tool) is busy here too,
+    // as the team slot list already treats them: assigning them would hand the
+    // held time to this booking and leave the holder's booking SLOT_TAKEN. A
+    // collective or fixed host who is held makes the time unbookable below
+    // (never assigned around). Team events take no holds of their own, so no
+    // hold is ever this booking's to consume.
+    if (await db.get<{ hit: number }>(memberHeldSql(host.member_id, args.startMs, endMs, heldAt))) continue;
     // External-calendar conflict check at CREATE time, fail-closed per host: a
     // busy external calendar disqualifies the host, and so does an UNREADABLE
     // one (never assign a host we couldn't verify). If NO verifiable host

@@ -400,6 +400,35 @@ describe('team tools', () => {
     expect(structured<TeamBooking>(await book(open[2]!, 'Rob Robin')).assigned_hosts).toEqual(['Alex Rivera']);
   });
 
+  it('a host somebody holds is not assigned, so the holder still books the held time', async () => {
+    // Alex outranks Jordan here, so only the hold keeps Alex from being picked.
+    await h.db.run(
+      sql`UPDATE event_type_host SET priority = ${2} WHERE event_type_id = ${teamId}
+          AND member_id = (SELECT id FROM member WHERE handle = 'alex-rivera' AND account_id = ${h.accountId})`,
+    );
+    try {
+      const anon = await h.connect();
+      const personal = new Set((await slots(anon, { booking_page_url: PAGE })).map((s) => s.start_utc));
+      const shared = (await slots(anon, { booking_page_url: TEAM }, 'find_team_slots')).filter((s) => personal.has(s.start_utc))[25]!;
+      const held = structured<Hold>(
+        await anon.callTool({ name: 'hold_slot', arguments: { booking_page_url: PAGE, start: shared.start, time_zone: 'America/Bogota', idempotency_key: idem('team-held-00001') } }),
+      );
+      const team = structured<TeamBooking>(
+        await anon.callTool({ name: 'book_team_meeting', arguments: { booking_page_url: TEAM, start: shared.start, attendee: who('Tess Team'), idempotency_key: idem('team-held-00002') } }),
+      );
+      expect(team.assigned_hosts).toEqual(['Jordan Lee']);
+      const mine = structured<{ booking: { status: string; start_utc: string } }>(
+        await anon.callTool({
+          name: 'book_meeting',
+          arguments: { booking_page_url: PAGE, start: shared.start, attendee: who('Hana Holder'), answers: { company: 'H' }, hold_id: held.hold.hold_id, idempotency_key: idem('team-held-00003') },
+        }),
+      );
+      expect(mine.booking).toMatchObject({ status: 'accepted', start_utc: shared.start_utc });
+    } finally {
+      await h.db.run(sql`UPDATE event_type_host SET priority = NULL WHERE event_type_id = ${teamId}`);
+    }
+  });
+
   it('by event type id it needs bookings:write, refuses a personal event, honours the allowlist and replays a retry', async () => {
     const c = await h.connect(await h.key(ALL));
     const slot = (await slots(c, { event_type_id: teamId }, 'find_team_slots'))[50]!;
