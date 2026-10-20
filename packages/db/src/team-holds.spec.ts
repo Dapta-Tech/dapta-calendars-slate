@@ -174,12 +174,29 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
   };
 
   /** A personal booking on Alex's own event, as the REST routes make it unless `refuseHeld` is set. */
-  const bookOwn = (startMs: number, email: string, opts: { refuseHeld?: boolean; reservationUid?: string } = {}, calendar?: CalendarProvider) =>
+  const bookOwn = (
+    startMs: number,
+    email: string,
+    opts: { refuseHeld?: boolean; reservationUid?: string } = {},
+    calendar?: CalendarProvider,
+    slug = 'own',
+  ) =>
     createBooking(
       db,
-      { accountCode, handle: `alex-${tag}`, slug: 'own', startMs, attendee: { name: 'Own Invitee', email, timeZone: 'UTC' }, ...opts },
+      { accountCode, handle: `alex-${tag}`, slug, startMs, attendee: { name: 'Own Invitee', email, timeZone: 'UTC' }, ...opts },
       calendar,
     );
+
+  /** Alex's group event (four seats per time), made once. */
+  let groupId: string | undefined;
+  async function group(): Promise<string> {
+    if (groupId) return groupId;
+    const ev = await createEventType(db, accountId, alex, { slug: 'group', title: 'Group', lengthMinutes: 30, scheduleId: null, seatsPerTimeSlot: 4 });
+    if (!ev.ok) throw new Error('group event create failed');
+    return (groupId = ev.value.id);
+  }
+  const holdOn = (eventTypeId: string, startMs: number, uid = randomUUID()) =>
+    insertHoldGuarded(db, { accountId, eventTypeId, memberId: alex, startMs, endMs: startMs + HALF_HOUR, uid, releaseAtMs: Date.now() + 600_000, now: Date.now() });
 
   beforeAll(async () => {
     db = await createDb(dbUrl);
@@ -302,5 +319,24 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
     expect(refused).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
     const moved = await rescheduleBookingV2(db, { accountId, uid: second.booking.uid, newStartMs: to2 }, racing(alex, to2));
     expect(moved).toMatchObject({ ok: true });
+  });
+
+  it('a hold is refused on a time a booking took after the availability read; a group event keeps its seats rule', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    // One host, one seat: the booking lands between the read and the hold's lock.
+    const [one, many] = [free[24]!, free[28]!];
+    expect((await bookOwn(one, 'took-it@example.org')).ok).toBe(true);
+    expect(await holdOn(alexOwn, one)).toBe('INVALID_SLOT');
+    // A group booking at this start still has seats: a hold there is fine...
+    const g = await group();
+    expect((await bookOwn(many, 'seat-1@example.org', {}, undefined, 'group')).ok).toBe(true);
+    expect(await holdOn(g, many)).toBe('ok');
+    // ...but not one on another event of the same host over that time,
+    expect(await holdOn(alexOwn, many)).toBe('INVALID_SLOT');
+    // ...and not once its seats are taken.
+    await clearHolds();
+    for (const n of [2, 3, 4]) expect((await bookOwn(many, `seat-${n}@example.org`, {}, undefined, 'group')).ok).toBe(true);
+    expect(await holdOn(g, many)).toBe('INVALID_SLOT');
   });
 });
