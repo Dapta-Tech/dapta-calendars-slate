@@ -1097,28 +1097,40 @@ export async function createBooking(
                 AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
     );
     if (existing) {
-      // NOTE: check-then-insert can transiently over-fill by one under a rare
-      // concurrent race; acceptable for v1 (one row, no EXCLUDE involved).
-      const seats = await db.get<{ n: number }>(
-        sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = ${existing.id}`,
+      // The seat count and (with `refuseHeld`) other callers' holds are read
+      // under the host's lock, the one every guarded booking write and the hold
+      // write take, so neither a concurrent seat nor a hold that lands after
+      // the caller's own checks can slip in between the read and the insert.
+      const seatTime = Date.now();
+      const seatInserts = [args.attendee, ...(args.additionalAttendees ?? [])].map(
+        (attendee) => sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
+            VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
+              ${normalizeAttendeeEmail(attendee.email)},
+              ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
+              ${attendee.language ?? null}, ${seatTime})`,
       );
-      if (Number(seats?.n ?? 0) >= capacity) return { ok: false, reason: 'SLOT_TAKEN' };
-      await db.run(
-        sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
-            VALUES (${randomUUID()}, ${existing.id}, ${args.attendee.name}, ${args.attendee.email},
-              ${normalizeAttendeeEmail(args.attendee.email)},
-              ${args.attendee.timeZone}, ${args.attendee.phone ?? null}, ${args.attendee.notes ?? null},
-              ${args.attendee.language ?? null}, ${Date.now()})`,
-      );
-      for (const attendee of args.additionalAttendees ?? []) {
-        await db.run(
-          sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
-              VALUES (${randomUUID()}, ${existing.id}, ${attendee.name}, ${attendee.email},
-                ${normalizeAttendeeEmail(attendee.email)},
-                ${attendee.timeZone}, ${attendee.phone ?? null}, ${attendee.notes ?? null},
-                ${attendee.language ?? null}, ${Date.now()})`,
-        );
+      const full = sql`SELECT 1 AS hit WHERE (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${existing.id}) >= ${capacity}`;
+      const heldElsewhere = args.refuseHeld
+        ? memberHeldSql(member.id, startMs, endMs, seatTime, args.reservationUid)
+        : null;
+      let seated: boolean;
+      if (db.dialect === 'sqlite') {
+        seated = db.sqlite!.txn<boolean>(() => {
+          if (db.sqlite!.drizzle.get(full)) return false;
+          if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return false;
+          for (const insert of seatInserts) db.sqlite!.drizzle.run(insert);
+          return true;
+        }, { immediate: true });
+      } else {
+        seated = await db.pg!.drizzle.transaction(async (tx) => {
+          await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
+          if (((await tx.execute(full)) as unknown as unknown[]).length > 0) return false;
+          if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return false;
+          for (const insert of seatInserts) await tx.execute(insert);
+          return true;
+        });
       }
+      if (!seated) return { ok: false, reason: 'SLOT_TAKEN' };
       if (args.reservationUid)
         await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${args.reservationUid}`);
       const rec: BookingRecord = {

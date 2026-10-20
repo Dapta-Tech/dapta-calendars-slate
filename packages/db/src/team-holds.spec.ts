@@ -339,4 +339,24 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
     for (const n of [2, 3, 4]) expect((await bookOwn(many, `seat-${n}@example.org`, {}, undefined, 'group')).ok).toBe(true);
     expect(await holdOn(g, many)).toBe('INVALID_SLOT');
   });
+
+  it('a group seat that asks for holds to count is refused when another caller holds the time; its own hold and the REST default still seat', async () => {
+    await clearHolds();
+    const g = await group();
+    const at = (await alexFree())[32]!;
+    expect((await bookOwn(at, 'first-seat@example.org', {}, undefined, 'group')).ok).toBe(true);
+    const theirs = randomUUID();
+    expect(await holdOn(g, at, theirs)).toBe('ok');
+    // The MCP path: another caller's hold, landed after the tool's own check.
+    expect(await bookOwn(at, 'mcp-seat@example.org', { refuseHeld: true }, undefined, 'group')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // The holder consuming its own hold takes the seat.
+    expect((await bookOwn(at, 'holder-seat@example.org', { refuseHeld: true, reservationUid: theirs }, undefined, 'group')).ok).toBe(true);
+    // REST: holds are not looked at, as before.
+    expect(await holdOn(g, at)).toBe('ok');
+    expect((await bookOwn(at, 'rest-seat@example.org', {}, undefined, 'group')).ok).toBe(true);
+    const seats = await db.get<{ n: number | string }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id WHERE b.event_type_id = ${g} AND b.start_ms = ${at}`,
+    );
+    expect(Number(seats!.n)).toBe(3);
+  });
 });
