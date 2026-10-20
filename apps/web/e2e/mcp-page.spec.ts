@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
+import { E2E, HOST, answerWith, clearThrottle, signIn, throttle } from './stack';
 
 /**
- * Settings, MCP & API shows how to connect an agent only when the API says it
+ * MCP, Connect and keys shows how to connect an agent only when the API says it
  * serves MCP. The web is started with MCP_PUBLIC_URL set (playwright.config.ts),
  * so the address alone would always be there; what decides is the API's own
  * `mcpEnabled` on the Connected apps read.
@@ -13,34 +13,40 @@ import { E2E, HOST, answerWith, clearThrottle, throttle } from './stack';
  *   API's oauth.integration.spec.ts), served by the proxy in front of the API.
  * - A read that fails (429 here) fails closed to the same state.
  */
-const PAGE = '/admin/settings/developer';
+const PAGE = '/admin/developers/keys';
+/** The MCP group's page that lists the tools. */
+const DOCS = '/admin/developers/docs';
 const MCP_URL = `${E2E.api}/mcp`;
 const GRANTS = '/v1/oauth/grants';
 const UNAVAILABLE = 'Agent connections are not turned on for this installation.';
 
 async function openAsOwner(page: Page): Promise<void> {
   await page.goto(`/login?next=${encodeURIComponent(PAGE)}`);
-  await page.getByLabel('Email').fill(HOST.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await signIn(page, HOST.email);
   await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
-  await expect(page.getByRole('heading', { name: 'Connect your agent' })).toBeVisible();
+  // Exact: with MCP on it is step 2's title, under "Connect your agent in 3 steps".
+  await expect(page.getByRole('heading', { name: 'Connect your agent', exact: true })).toBeVisible();
 }
 
-/** The sections that do not depend on MCP render the same in every state. */
+/** The keys do not depend on MCP and render the same in every state. */
 async function expectOtherSections(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'API keys' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Webhooks' })).toBeVisible();
 }
 
 async function expectUnavailable(page: Page): Promise<void> {
   await expect(page.getByText(UNAVAILABLE)).toBeVisible();
   await expect(page.getByRole('tablist', { name: 'Connect your agent' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveCount(0);
-  // The tool list describes the endpoint that is off.
-  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toHaveCount(0);
   // No address anywhere on the page, not even in a copy block or a link.
   expect(await page.content()).not.toContain(MCP_URL);
   await expectOtherSections(page);
+  // The tool list (API docs) describes the endpoint that is off: the same
+  // sentence stands in for it, and the API reference stays.
+  await page.goto(DOCS);
+  await expect(page.getByText(UNAVAILABLE)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'API reference' })).toBeVisible();
+  expect(await page.content()).not.toContain(MCP_URL);
 }
 
 test.afterEach(async () => {
@@ -57,8 +63,10 @@ test('MCP on: the steps show the configured address, and that address answers', 
   await expect(page.getByText(MCP_URL, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Add to Cursor' })).toHaveAttribute('href', /^cursor:\/\//);
   await expect(page.getByText(UNAVAILABLE)).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
   await expectOtherSections(page);
+  await page.goto(DOCS);
+  await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
+  await expect(page.getByText(UNAVAILABLE)).toHaveCount(0);
 
   // The page only names an address that is really serving MCP.
   const mcp = await request.post(MCP_URL, {

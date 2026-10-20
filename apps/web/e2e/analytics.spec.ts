@@ -3,6 +3,7 @@ import {
   E2E,
   analyticsRecorded,
   analyticsRequests,
+  signIn,
   visitorEmail,
   waitForAnalytics,
   type RecordedAnalytics,
@@ -176,8 +177,7 @@ test('a new host is identified by email, joins their account, and their signup i
 
   // Arrives from a landing that handed over its anonymous id.
   await page.goto(`/login?ph_id=${landingId}`);
-  await page.getByLabel('Email').fill(email);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await signIn(page, email);
   // A brand-new account owes the first-run wizard.
   await expect(page).toHaveURL(/\/onboarding/);
 

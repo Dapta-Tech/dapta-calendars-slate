@@ -1,0 +1,445 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { BusyInterval, CalendarProvider, CalendarSummary, ConnectionHealth, CreatedEvent } from '@slate/calendar';
+import { createDb, sql, type Db } from './client';
+import { migrate } from './migrate';
+import { createBooking, getAvailability } from './repository';
+import { cancelBooking, createTeamBooking, getTeamAvailability, insertHoldGuarded, rescheduleBooking } from './parity';
+import { rescheduleBookingV2 } from './v2-pilot';
+import { createEventType, createTeam } from './crud';
+
+/**
+ * A connected calendar whose busy read first runs `onRead`: the window in which
+ * a booking has done its checks but not yet its locked write (team host
+ * selection, the personal create path and a move all read the calendar there).
+ * A hold placed from `onRead` is a hold that commits in exactly that window.
+ */
+class RacingCalendar implements CalendarProvider {
+  readonly enabled = true;
+  constructor(private readonly onRead: () => Promise<void>) {}
+  async listBusy(): Promise<BusyInterval[]> {
+    await this.onRead();
+    return [];
+  }
+  createEvent(): Promise<CreatedEvent> {
+    return Promise.reject(new Error('not used'));
+  }
+  updateEvent(): Promise<CreatedEvent> {
+    return Promise.reject(new Error('not used'));
+  }
+  deleteEvent(): Promise<void> {
+    return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true });
+  }
+}
+
+/**
+ * A soft hold on one of a host's own events (a booking page's pick, or the MCP
+ * hold tool) keeps that host out of team assignment at that time, as it already
+ * keeps the time out of the team's slot list. Before, round-robin could assign
+ * the held host, and the holder's own booking then answered SLOT_TAKEN.
+ * Collective and fixed hosts are never assigned around: a held one makes the
+ * time unbookable. Runs on SQLite, and on Postgres too when DATABASE_URL names one
+ * (its own account and members, since that database is shared between files).
+ */
+const url = process.env.DATABASE_URL ?? '';
+const isPg = url.startsWith('postgres://') || url.startsWith('postgresql://');
+const engines: Array<[string, string]> = [['SQLite', 'file::memory:'], ...(isPg ? [['Postgres', url] as [string, string]] : [])];
+
+describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl) => {
+  let db: Db;
+  const tag = randomUUID().slice(0, 8);
+  const accountCode = `holds-${tag}`;
+  let accountId: string;
+  let alex: string;
+  let bea: string;
+  let alexOwn: string;
+  const HALF_HOUR = 30 * 60_000;
+
+  async function member(handle: string): Promise<string> {
+    const id = randomUUID();
+    const scheduleId = randomUUID();
+    const now = Date.now();
+    await db.run(
+      sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
+          VALUES (${id}, ${accountId}, ${handle}, ${handle}, ${`${handle}@example.test`}, 'UTC', ${scheduleId}, ${now})`,
+    );
+    await db.run(sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at) VALUES (${scheduleId}, ${accountId}, ${id}, 'Hours', 'UTC', ${now})`);
+    await db.run(
+      sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+          VALUES (${randomUUID()}, ${scheduleId}, ${JSON.stringify([0, 1, 2, 3, 4, 5, 6])}, '08:00', '20:00', ${null})`,
+    );
+    return id;
+  }
+
+  /** A team event with these hosts; Alex outranks Bea, so round-robin picks Alex whenever both are free. */
+  async function teamEvent(method: 'round_robin' | 'collective' | 'fixed_round_robin', fixedAlex = false) {
+    const slug = `${method.replace(/_/g, '-')}-${randomUUID().slice(0, 6)}`;
+    const team = await createTeam(db, accountId, { name: slug, slug: `${slug}-team` });
+    if (!team.ok) throw new Error('team create failed');
+    const ev = await createEventType(db, accountId, null, {
+      slug,
+      title: slug,
+      lengthMinutes: 30,
+      schedulingType: method,
+      scheduleId: null,
+      teamId: team.value.id,
+      minimumBookingNotice: 0,
+    });
+    if (!ev.ok) throw new Error('event create failed');
+    for (const [memberId, priority, fixed] of [
+      [alex, 2, fixedAlex],
+      [bea, 1, false],
+    ] as const) {
+      await db.run(
+        sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${ev.value.id}, ${memberId}, ${fixed ? 1 : 0}, ${priority}, ${100}, ${null}, ${Date.now()})`,
+      );
+    }
+    const slots = (await getTeamAvailability(db, {
+      accountCode,
+      teamSlug: `${slug}-team`,
+      slug,
+      fromMs: Date.now() + 86_400_000,
+      toMs: Date.now() + 8 * 86_400_000,
+    }))!.slots.map((s) => new Date(s).getTime());
+    const book = (startMs: number, email: string, calendar?: CalendarProvider) =>
+      createTeamBooking(
+        db,
+        {
+          accountCode,
+          teamSlug: `${slug}-team`,
+          slug,
+          startMs,
+          attendee: { name: 'Team Invitee', email, timeZone: 'UTC' },
+        },
+        calendar,
+      );
+    return { slots, book };
+  }
+
+  /** Alex's own soft hold on their personal event, as the booking page or hold_slot places it. */
+  const hold = (memberId: string, startMs: number, releaseAtMs = Date.now() + 10 * 60_000) =>
+    insertHoldGuarded(db, {
+      accountId,
+      eventTypeId: alexOwn,
+      memberId,
+      startMs,
+      endMs: startMs + HALF_HOUR,
+      uid: randomUUID(),
+      releaseAtMs,
+      now: Date.now(),
+    });
+
+  /** A booking that makes `memberId` busy at `startMs`, as any accepted meeting does. */
+  async function busy(memberId: string, startMs: number) {
+    await db.run(
+      sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata, created_at, updated_at)
+          VALUES (${randomUUID()}, ${accountId}, ${randomUUID()}, ${alexOwn}, ${memberId}, 'Busy', ${startMs}, ${startMs + HALF_HOUR}, 'accepted', ${null}, ${Date.now()}, ${Date.now()})`,
+    );
+  }
+
+  /** What a team booking came to: the hosts it assigned (sorted), or why it was refused. */
+  async function outcome(out: Awaited<ReturnType<typeof createTeamBooking>>) {
+    if (!out.ok) return out.reason;
+    const rows = await db.all<{ member_id: string }>(
+      sql`SELECT b.host_member_id AS member_id FROM booking b WHERE b.uid = ${out.uid}
+          UNION SELECT bh.member_id FROM booking_host bh JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${out.uid}`,
+    );
+    return rows.map((r) => (r.member_id === alex ? 'alex' : r.member_id === bea ? 'bea' : r.member_id)).sort();
+  }
+
+  /** Alex's open times right now (bookings and holds from earlier cases subtracted). */
+  const alexFree = async () =>
+    (await getAvailability(db, { accountCode, handle: `alex-${tag}`, slug: 'own', fromMs: Date.now() + 86_400_000, toMs: Date.now() + 8 * 86_400_000 }))!.slots.map((x) =>
+      new Date(x.startUtc).getTime(),
+    );
+
+  /** Earlier cases' holds out of the way: a host takes at most ten at a time. */
+  const clearHolds = () => db.run(sql`DELETE FROM slot_reservation WHERE account_id = ${accountId}`);
+
+  /** One hold placed by the first calendar read only. */
+  const racing = (memberId: string, startMs: number) => {
+    let fired = false;
+    return new RacingCalendar(async () => {
+      if (fired) return;
+      fired = true;
+      expect(await hold(memberId, startMs)).toBe('ok');
+    });
+  };
+
+  /** A personal booking on Alex's own event, as the REST routes make it unless `refuseHeld` is set. */
+  type Seat = { name: string; email: string; timeZone: string };
+  const bookOwn = (
+    startMs: number,
+    email: string,
+    opts: { refuseHeld?: boolean; reservationUid?: string; additionalAttendees?: Seat[] } = {},
+    calendar?: CalendarProvider,
+    slug = 'own',
+    on: Db = db,
+  ) =>
+    createBooking(
+      on,
+      { accountCode, handle: `alex-${tag}`, slug, startMs, attendee: { name: 'Own Invitee', email, timeZone: 'UTC' }, ...opts },
+      calendar,
+    );
+  const guests = (n: number, tag2: string): Seat[] =>
+    Array.from({ length: n }, (_, i) => ({ name: `Guest ${i}`, email: `${tag2}-${i}@example.org`, timeZone: 'UTC' }));
+  const seatsAt = async (startMs: number) =>
+    Number(
+      (await db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id
+            WHERE b.event_type_id = ${await group()} AND b.start_ms = ${startMs} AND b.status IN ('accepted','pending')`,
+      ))!.n,
+    );
+
+  /** The text of a drizzle query, enough to recognise one. */
+  const sqlText = (q: unknown) =>
+    ((q as { queryChunks?: unknown[] }).queryChunks ?? [])
+      .map((c) => (c && typeof c === 'object' && Array.isArray((c as { value?: unknown }).value) ? (c as { value: string[] }).value.join('') : ''))
+      .join('');
+
+  /**
+   * `db`, except that `onRead` runs once, right after the group-seat branch has
+   * read the existing group booking and before its locked write: the window a
+   * cancel or a move (neither takes the member lock) can fall into.
+   */
+  function afterSeatRead(onRead: () => Promise<void>): Db {
+    let fired = false;
+    return new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop !== 'get') return Reflect.get(target, prop, receiver);
+        return async (q: unknown) => {
+          const row = await (target.get as (query: unknown) => Promise<unknown>).call(target, q);
+          if (!fired && sqlText(q).includes('SELECT id, uid, status, start_ms, end_ms FROM booking')) {
+            fired = true;
+            await onRead();
+          }
+          return row;
+        };
+      },
+    });
+  }
+
+  /** Alex's group event (four seats per time), made once. */
+  let groupId: string | undefined;
+  async function group(): Promise<string> {
+    if (groupId) return groupId;
+    const ev = await createEventType(db, accountId, alex, { slug: 'group', title: 'Group', lengthMinutes: 30, scheduleId: null, seatsPerTimeSlot: 4 });
+    if (!ev.ok) throw new Error('group event create failed');
+    return (groupId = ev.value.id);
+  }
+  const holdOn = (eventTypeId: string, startMs: number, uid = randomUUID()) =>
+    insertHoldGuarded(db, { accountId, eventTypeId, memberId: alex, startMs, endMs: startMs + HALF_HOUR, uid, releaseAtMs: Date.now() + 600_000, now: Date.now() });
+
+  beforeAll(async () => {
+    db = await createDb(dbUrl);
+    await migrate(db);
+    accountId = randomUUID();
+    await db.run(
+      sql`INSERT INTO account (id, code, name, onboarding_completed_at, created_at) VALUES (${accountId}, ${accountCode}, 'Holds Co', ${Date.now()}, ${Date.now()})`,
+    );
+    alex = await member(`alex-${tag}`);
+    bea = await member(`bea-${tag}`);
+    const own = await createEventType(db, accountId, alex, { slug: 'own', title: 'Own', lengthMinutes: 30, scheduleId: null });
+    if (!own.ok) throw new Error('personal event create failed');
+    alexOwn = own.value.id;
+    // Alex's calendar is conflict-checked, so every booking path reads it (see RacingCalendar).
+    await db.run(
+      sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${alex}, 'google', ${`cal-${tag}`}, 0, 1, ${Date.now()})`,
+    );
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('round-robin assigns the free host when the preferred one is held, and Alex again once the hold has lapsed', async () => {
+    const rr = await teamEvent('round_robin');
+    const [free, held, lapsed] = [rr.slots[2]!, rr.slots[6]!, rr.slots[10]!];
+    // Control: with nothing held, Alex (higher priority) is the pick.
+    const control = await rr.book(free, 'control@example.org');
+    expect(control.ok && control.hostMemberId).toBe(alex);
+
+    expect(await hold(alex, held)).toBe('ok');
+    const around = await rr.book(held, 'around@example.org');
+    expect(around.ok && around.hostMemberId).toBe(bea);
+
+    expect(await hold(alex, lapsed, Date.now() - 1)).toBe('ok');
+    const after = await rr.book(lapsed, 'lapsed@example.org');
+    expect(after.ok && after.hostMemberId).toBe(alex);
+  });
+
+  it('round-robin with every host held is SLOT_TAKEN and writes nothing', async () => {
+    const rr = await teamEvent('round_robin');
+    const at = rr.slots[14]!;
+    expect(await hold(alex, at)).toBe('ok');
+    expect(await hold(bea, at)).toBe('ok');
+    const out = await rr.book(at, 'nobody@example.org');
+    expect(out).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const n = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM booking WHERE account_id = ${accountId} AND start_ms = ${at}`);
+    expect(Number(n!.n)).toBe(0);
+  });
+
+  it('collective: one held host makes the time SLOT_TAKEN, never a booking without them', async () => {
+    const all = await teamEvent('collective');
+    const at = all.slots[18]!;
+    expect(await hold(alex, at)).toBe('ok');
+    expect(await all.book(at, 'collective@example.org')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+  });
+
+  it('a held host is treated exactly like a booked host, in every scheduling method', async () => {
+    const cases = [
+      { method: 'round_robin', fixedAlex: false, who: () => alex, at: [30, 32] },
+      { method: 'collective', fixedAlex: false, who: () => alex, at: [34, 36] },
+      { method: 'fixed_round_robin', fixedAlex: true, who: () => alex, at: [38, 40] },
+      { method: 'fixed_round_robin', fixedAlex: true, who: () => bea, at: [42, 44] },
+    ] as const;
+    const seen: Array<{ method: string; booked: unknown; held: unknown }> = [];
+    for (const c of cases) {
+      const ev = await teamEvent(c.method, c.fixedAlex);
+      const [bookedAt, heldAt] = [ev.slots[c.at[0]]!, ev.slots[c.at[1]]!];
+      await busy(c.who(), bookedAt);
+      expect(await hold(c.who(), heldAt)).toBe('ok');
+      const booked = await outcome(await ev.book(bookedAt, `booked-${c.method}-${c.at[0]}@example.org`));
+      const held = await outcome(await ev.book(heldAt, `held-${c.method}-${c.at[1]}@example.org`));
+      expect(held, `${c.method}, ${c.who() === alex ? 'Alex' : 'Bea'} held`).toEqual(booked);
+      seen.push({ method: c.method, booked, held });
+    }
+    // What the core does with a busy (so a held) host, method by method:
+    expect(seen.map((x) => x.held)).toEqual([['bea'], 'SLOT_TAKEN', 'SLOT_TAKEN', ['alex']]);
+  });
+
+  it('a hold that commits while hosts are being picked is still respected: the locked insert refuses, nothing is booked', async () => {
+    await clearHolds();
+    const rr = await teamEvent('round_robin');
+    const at = rr.slots[48]!;
+    // Alex passes the hold check, then the hold lands during Alex's calendar read.
+    const out = await rr.book(at, 'race@example.org', racing(alex, at));
+    expect(out).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const n = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM booking WHERE account_id = ${accountId} AND start_ms = ${at}`);
+    expect(Number(n!.n)).toBe(0);
+  });
+
+  it('a personal booking that asks for holds to count refuses one that lands before its write; the REST default still books', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [a, b] = [free[2]!, free[6]!];
+    expect(await bookOwn(a, 'mcp-race@example.org', { refuseHeld: true }, racing(alex, a))).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // Without the option (every REST route), holds are not looked at, exactly as before.
+    expect((await bookOwn(b, 'rest-race@example.org', {}, racing(alex, b))).ok).toBe(true);
+  });
+
+  it('the hold a personal booking consumes is its own: refuseHeld never refuses it', async () => {
+    await clearHolds();
+    const at = (await alexFree())[10]!;
+    const uid = randomUUID();
+    expect(
+      await insertHoldGuarded(db, { accountId, eventTypeId: alexOwn, memberId: alex, startMs: at, endMs: at + HALF_HOUR, uid, releaseAtMs: Date.now() + 600_000, now: Date.now() }),
+    ).toBe('ok');
+    const out = await bookOwn(at, 'own-hold@example.org', { refuseHeld: true, reservationUid: uid });
+    expect(out.ok).toBe(true);
+  });
+
+  it('a move that asks for holds to count refuses one that lands before its write; the /v2 default still moves', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [from1, to1, from2, to2] = [free[14]!, free[16]!, free[18]!, free[20]!];
+    const first = await bookOwn(from1, 'move-one@example.org');
+    const second = await bookOwn(from2, 'move-two@example.org');
+    if (!first.ok || !second.ok) throw new Error('setup booking failed');
+    const refused = await rescheduleBookingV2(db, { accountId, uid: first.booking.uid, newStartMs: to1, refuseHeld: true }, racing(alex, to1));
+    expect(refused).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const moved = await rescheduleBookingV2(db, { accountId, uid: second.booking.uid, newStartMs: to2 }, racing(alex, to2));
+    expect(moved).toMatchObject({ ok: true });
+  });
+
+  it('a hold is refused on a time a booking took after the availability read; a group event keeps its seats rule', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    // One host, one seat: the booking lands between the read and the hold's lock.
+    const [one, many] = [free[24]!, free[28]!];
+    expect((await bookOwn(one, 'took-it@example.org')).ok).toBe(true);
+    expect(await holdOn(alexOwn, one)).toBe('INVALID_SLOT');
+    // A group booking at this start still has seats: a hold there is fine...
+    const g = await group();
+    expect((await bookOwn(many, 'seat-1@example.org', {}, undefined, 'group')).ok).toBe(true);
+    expect(await holdOn(g, many)).toBe('ok');
+    // ...but not one on another event of the same host over that time,
+    expect(await holdOn(alexOwn, many)).toBe('INVALID_SLOT');
+    // ...and not once its seats are taken.
+    await clearHolds();
+    for (const n of [2, 3, 4]) expect((await bookOwn(many, `seat-${n}@example.org`, {}, undefined, 'group')).ok).toBe(true);
+    expect(await holdOn(g, many)).toBe('INVALID_SLOT');
+  });
+
+  it('a group seat that asks for holds to count is refused when another caller holds the time; its own hold and the REST default still seat', async () => {
+    await clearHolds();
+    const g = await group();
+    const at = (await alexFree())[32]!;
+    expect((await bookOwn(at, 'first-seat@example.org', {}, undefined, 'group')).ok).toBe(true);
+    const theirs = randomUUID();
+    expect(await holdOn(g, at, theirs)).toBe('ok');
+    // The MCP path: another caller's hold, landed after the tool's own check.
+    expect(await bookOwn(at, 'mcp-seat@example.org', { refuseHeld: true }, undefined, 'group')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // The holder consuming its own hold takes the seat.
+    expect((await bookOwn(at, 'holder-seat@example.org', { refuseHeld: true, reservationUid: theirs }, undefined, 'group')).ok).toBe(true);
+    // REST: holds are not looked at, as before.
+    expect(await holdOn(g, at)).toBe('ok');
+    expect((await bookOwn(at, 'rest-seat@example.org', {}, undefined, 'group')).ok).toBe(true);
+    const seats = await db.get<{ n: number | string }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id WHERE b.event_type_id = ${g} AND b.start_ms = ${at}`,
+    );
+    expect(Number(seats!.n)).toBe(3);
+  });
+
+  it('a group request takes all its seats or none, and a first booking cannot ask for more seats than the time has', async () => {
+    await clearHolds();
+    const [at, fresh] = [(await alexFree())[36]!, (await alexFree())[40]!];
+    expect((await bookOwn(at, 'pair@example.org', { additionalAttendees: guests(1, 'pair') }, undefined, 'group')).ok).toBe(true);
+    expect(await seatsAt(at)).toBe(2);
+    // Three more would make five of four.
+    expect(await bookOwn(at, 'trio@example.org', { additionalAttendees: guests(2, 'trio') }, undefined, 'group')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    expect(await seatsAt(at)).toBe(2);
+    // Two more fit exactly.
+    expect((await bookOwn(at, 'duo@example.org', { additionalAttendees: guests(1, 'duo') }, undefined, 'group')).ok).toBe(true);
+    expect(await seatsAt(at)).toBe(4);
+    // Five on an empty time of a four-seat event never fit.
+    expect(await bookOwn(fresh, 'five@example.org', { additionalAttendees: guests(4, 'five') }, undefined, 'group')).toMatchObject({ ok: false, reason: 'INVALID' });
+    expect(await seatsAt(fresh)).toBe(0);
+  });
+
+  it('a seat does not land on a group booking cancelled or moved after it was read', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [cancelledAt, movedAt, movedTo] = [free[44]!, free[48]!, free[52]!];
+    const first = await bookOwn(cancelledAt, 'first-cancel@example.org', {}, undefined, 'group');
+    const second = await bookOwn(movedAt, 'first-move@example.org', {}, undefined, 'group');
+    if (!first.ok || !second.ok) throw new Error('setup booking failed');
+    // The host cancels the group booking between the seat's read and its write.
+    const onCancelled = afterSeatRead(async () => {
+      expect((await cancelBooking(db, { uid: first.booking.uid, byHost: true, accountId })).ok).toBe(true);
+    });
+    expect(await bookOwn(cancelledAt, 'late-cancel@example.org', {}, undefined, 'group', onCancelled)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const onCancelledSeats = await db.get<{ n: number | string }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee ba JOIN booking b ON b.id = ba.booking_id WHERE b.uid = ${first.booking.uid}`,
+    );
+    expect(Number(onCancelledSeats!.n)).toBe(1);
+    // The host moves it instead.
+    const onMoved = afterSeatRead(async () => {
+      expect((await rescheduleBooking(db, { uid: second.booking.uid, newStartMs: movedTo, byHost: true, accountId })).ok).toBe(true);
+    });
+    expect(await bookOwn(movedAt, 'late-move@example.org', {}, undefined, 'group', onMoved)).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const moved = await db.get<{ start_ms: number | string; n: number | string }>(
+      sql`SELECT b.start_ms, (SELECT COUNT(*) FROM booking_attendee ba WHERE ba.booking_id = b.id) AS n FROM booking b WHERE b.uid = ${second.booking.uid}`,
+    );
+    expect(Number(moved!.start_ms)).toBe(movedTo);
+    expect(Number(moved!.n)).toBe(1);
+  });
+});

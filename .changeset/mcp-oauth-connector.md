@@ -1,6 +1,4 @@
 ---
-"@slate/api": minor
-"@slate/web": minor
 "@slate/db": minor
 "@slate/config": minor
 "@slate/shared": minor

@@ -333,6 +333,18 @@ export interface BookingMessages {
       calendars: string;
       settings: string;
       bookingPage: string;
+      /** The MCP group in the rail: connecting an agent, keys, webhooks, API docs. */
+      developers: string;
+      /** The product documentation, an EXTERNAL link (see `lib/docs-url.ts`). */
+      docs: string;
+      /** The door to the wider platform, EXTERNAL, only with NEXT_PUBLIC_PLATFORM_URL. */
+      agents: string;
+    };
+    /** The pages under the rail's MCP group, in its accordion and its flyout. */
+    developerNav: {
+      keys: string;
+      webhooks: string;
+      docs: string;
     };
     common: {
       save: string;
@@ -354,6 +366,8 @@ export interface BookingMessages {
       none: string;
       signOut: string;
       viewPublic: string;
+      /** The profile button at the foot of the rail, and the menu it opens. */
+      accountMenu: string;
       language: string;
       collapse: string;
       expand: string;
@@ -420,7 +434,6 @@ export interface BookingMessages {
       general: string;
       bookingPage: string;
       members: string;
-      developer: string;
       notifications: string;
       /** Tab label. The tab's own copy lives at `admin.integrations`. */
       integrations: string;
@@ -1101,15 +1114,13 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
-      /** "MCP & API" page: connect-your-agent guide, tool list, key details. */
+      /** The MCP pages (Connect and keys, API docs): the agent tabs, tool list, key details. */
       connectTitle: string;
-      connectLead: string;
       tabCursor: string;
       tabClaudeCode: string;
       tabCodex: string;
       tabOther: string;
       tabChat: string;
-      stepKey: string;
       stepKeyEnv: string;
       mcpUrlLabel: string;
       mcpUrlMissing: string;
@@ -1172,6 +1183,18 @@ export interface BookingMessages {
       chatGptStep2: string;
       chatGptStep3: string;
       chatScopesNote: string;
+      /**
+       * OAuth through an external authorization server: people sign in with
+       * the account they use here, there is no consent page or Connected apps
+       * list of ours, and a connection acts with the member's admin role.
+       */
+      signInTitle: string;
+      signInBody: string;
+      signInAccess: string;
+      signInDisconnect: string;
+      chatSignInLead: string;
+      chatSignInClaudeStep3: string;
+      chatSignInGptStep3: string;
       /** Connected apps: OAuth grants with revoke. */
       connectedTitle: string;
       connectedLead: string;
@@ -1187,6 +1210,50 @@ export interface BookingMessages {
       connectedRevokeBody: string;
       connectedRevokedToast: string;
       connectedExpiryNote: string;
+      /** Page headers of the MCP group's pages (Connect and keys reuses `pageLead`). */
+      docsPageLead: string;
+      /**
+       * The three steps above the keys: create a key, connect the agent (the
+       * tabs of `connect*`), ask it something. Same shape as the dForms guide.
+       */
+      guideTitle: string;
+      guideIntro: string;
+      /** Screen-reader suffix of a finished step. */
+      guideStepDone: string;
+      guideKeyTitle: string;
+      guideKeyBody: string;
+      /** Step 1 once the workspace has a working key. */
+      guideKeyDone: string;
+      guideAgentBody: string;
+      /** Step 2 once a key has been used or an app has signed in. */
+      guideAgentDone: string;
+      guideTryTitle: string;
+      guideTryHint: string;
+      /** A first request to paste into the agent. `{product}` is the product's name. */
+      guidePrompt: string;
+      copyPrompt: string;
+      /** Under the prompt: where to read what a key allows. */
+      guideTryNote: string;
+      /**
+       * Under the three steps: the way in for an agent without MCP, a zip that
+       * teaches it the REST API. `{product}` is the product's name. The
+       * unavailable line replaces the button when the installation has no
+       * public API address to write into the skill.
+       */
+      guideSkillTitle: string;
+      guideSkillBody: string;
+      guideSkillButton: string;
+      /** The button while the zip is being built. */
+      guideSkillPending: string;
+      guideSkillUnavailable: string;
+      /**
+       * A download that failed, by the route's `error` code: the session ended,
+       * a member asked, or anything else (the network included). A missing
+       * public address reuses `guideSkillUnavailable`.
+       */
+      guideSkillErrorSession: string;
+      guideSkillErrorForbidden: string;
+      guideSkillErrorGeneric: string;
     };
     /**
      * The OAuth consent page (`/auth/consent`): an app asks to act on the
@@ -1735,6 +1802,14 @@ export const en: BookingMessages = {
       calendars: 'Calendars',
       settings: 'Settings',
       bookingPage: 'Booking page',
+      developers: 'MCP',
+      docs: 'Docs',
+      agents: 'Dapta Agents',
+    },
+    developerNav: {
+      keys: 'Connect and keys',
+      webhooks: 'Webhooks',
+      docs: 'API docs',
     },
     common: {
       save: 'Save',
@@ -1756,6 +1831,7 @@ export const en: BookingMessages = {
       none: 'None',
       signOut: 'Sign out',
       viewPublic: 'View public page',
+      accountMenu: 'Account menu',
       language: 'Language',
       notFoundTitle: 'Not found',
       notFoundBody: 'This workspace has nothing at this address. It may have been deleted.',
@@ -1792,8 +1868,8 @@ export const en: BookingMessages = {
       setAvailabilityDesc: 'Weekly hours + date overrides.',
       stylePage: 'Style your booking page',
       stylePageDesc: 'Brand + 9-axis studio.',
-      apiKeys: 'API keys & webhooks',
-      apiKeysDesc: 'Integrate agents & automations.',
+      apiKeys: 'Connect an agent',
+      apiKeysDesc: 'The MCP server and the API keys your AI agent uses.',
       setupTitle: 'Get bookable',
       setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
       setupConnectTitle: 'Connect a calendar',
@@ -1813,7 +1889,6 @@ export const en: BookingMessages = {
       general: 'General',
       bookingPage: 'Booking Page',
       members: 'Members',
-      developer: 'MCP & API',
       notifications: 'Notifications',
       integrations: 'Integrations',
     },
@@ -2434,14 +2509,11 @@ export const en: BookingMessages = {
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
       connectTitle: 'Connect your agent',
-      connectLead:
-        'Run Dapta Calendars from your own AI agent: find a free slot, book, reschedule and cancel without opening this dashboard. Create an API key below, then pick your agent.',
       tabCursor: 'Cursor',
       tabClaudeCode: 'Claude Code',
       tabCodex: 'Codex',
       tabOther: 'Other agents',
       tabChat: 'Claude.ai and ChatGPT',
-      stepKey: 'Create an API key below and copy it when it is shown. Give it only the access the agent needs.',
       stepKeyEnv: 'Set the key in the terminal you start your agent from, so it is never pasted into a config:',
       mcpUrlLabel: 'MCP address',
       mcpUrlMissing:
@@ -2464,7 +2536,7 @@ export const en: BookingMessages = {
       chatBody:
         'One-click sign-in for the Claude and ChatGPT apps is coming. Until then, the public booking tools work with no key: an agent can find a time and book on any public booking page. Everything else needs an API key from a terminal-based agent.',
       toolsTitle: 'What an agent can do',
-      toolsLead: 'A key grants only the tools whose access you tick. Read tools only look; write tools change your calendar; cancelling cannot be undone.',
+      toolsLead: 'A key grants only the tools whose access you tick. Read tools only look; write tools change your calendar; cancelling or declining cannot be undone.',
       kindRead: 'Read',
       kindWrite: 'Write',
       kindDestructive: 'Destructive',
@@ -2474,21 +2546,28 @@ export const en: BookingMessages = {
       toolNeeds: 'Needs: {scope}',
       toolDescriptions: {
         find_available_slots: 'Find free times for an event type.',
+        find_team_slots: 'Find free times with a team, and how it assigns hosts.',
+        hold_slot: 'Keep a time for about 10 minutes while the person decides.',
         book_meeting: 'Book a time on a public booking page and email the invitee.',
+        book_team_meeting: 'Book with a team; a free host is picked for you.',
         whoami: 'Show which account and access the key has.',
+        list_my_accounts: 'List the accounts this connection can act in.',
         list_event_types: 'List your event types.',
         get_booking_page_link: 'Get the public booking link for an event type.',
         list_bookings: 'List bookings with the minimum fields.',
+        list_pending_bookings: 'List booking requests waiting for your answer.',
         get_booking: 'Read one booking, including what the invitee wrote.',
         create_booking: 'Book a meeting on your behalf. Safe to retry.',
         reschedule_booking: 'Move a booking to another time. Safe to retry.',
+        confirm_booking: 'Accept a booking request and tell the invitee.',
+        decline_booking: 'Turn down a booking request and tell the invitee.',
         cancel_booking: 'Cancel a booking and tell the invitee.',
       },
       scopeLabels: {
         'event-types:read': 'See event types',
         'availability:read': 'Check free times',
         'bookings:read': 'Read bookings',
-        'bookings:write': 'Create and reschedule bookings',
+        'bookings:write': 'Create, hold, reschedule, confirm and decline bookings',
         'bookings:cancel': 'Cancel bookings',
         'calendars:read': 'See connected calendars',
       },
@@ -2509,7 +2588,7 @@ export const en: BookingMessages = {
       keyNeverUsed: 'Never used',
       apiRefTitle: 'API reference',
       apiRefLead: 'Every route a key can call, with a try-it console and the machine-readable spec.',
-      apiDocs: 'API docs',
+      apiDocs: 'Interactive reference',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
       chatOAuthTitle: 'Claude, Claude Desktop and ChatGPT',
@@ -2526,6 +2605,16 @@ export const en: BookingMessages = {
       chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
       chatScopesNote:
         'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
+      signInTitle: 'Sign in instead of a key',
+      signInBody:
+        'Claude, ChatGPT, Cursor and other apps that support sign-in connect with no key: add the MCP address as a connector, then sign in with the same account you use for Dapta Calendars.',
+      signInAccess:
+        'A connection acts with your owner or admin access, so it can use every tool. For narrower access, such as read-only or a single event type, create an API key instead.',
+      signInDisconnect:
+        "To disconnect, remove the connector in the app. An owner can also cut a connection off at once by removing that person's admin role.",
+      chatSignInLead: 'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in with your account.',
+      chatSignInClaudeStep3: 'Click Connect and sign in with your Dapta Calendars account.',
+      chatSignInGptStep3: 'Create it, then sign in with your Dapta Calendars account when ChatGPT asks.',
       connectedTitle: 'Connected apps',
       connectedLead:
         'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
@@ -2543,6 +2632,31 @@ export const en: BookingMessages = {
       connectedRevokedToast: 'App disconnected.',
       connectedExpiryNote:
         'Disconnecting stops an app from renewing its access right away. Access it already holds runs out within {minutes} min.',
+      docsPageLead: 'Every tool an agent can call through the MCP server, and the reference for the API behind it.',
+      guideTitle: 'Connect your agent in 3 steps',
+      guideIntro:
+        'Your AI agent can find a free slot, book, reschedule and cancel for you through the MCP server, without opening this dashboard.',
+      guideStepDone: 'done',
+      guideKeyTitle: 'Create an API key',
+      guideKeyBody:
+        'The key connects the agent to this workspace. It is shown only once, so copy it when you create it, and give it only the access the agent needs.',
+      guideKeyDone: 'You already have a key. Create one per agent so you can revoke each on its own.',
+      guideAgentBody: 'Pick your agent. Each tab has the address and the exact setup it needs.',
+      guideAgentDone: 'A key has been used or an app has signed in: your agent is connected.',
+      guideTryTitle: 'Ask it for something',
+      guideTryHint: 'Open your agent and paste this to check that everything works.',
+      guidePrompt: 'Use the {product} MCP to tell me which workspace you are connected to and what you are allowed to do there.',
+      copyPrompt: 'Copy prompt',
+      guideTryNote: 'An agent can only do what its key allows. What each tool needs is listed in',
+      guideSkillTitle: 'No MCP in your agent?',
+      guideSkillBody:
+        'Download the skill: a zip that teaches any agent with a terminal to use the {product} API with the same key.',
+      guideSkillButton: 'Download the skill',
+      guideSkillPending: 'Preparing the skill…',
+      guideSkillUnavailable: 'The skill is not available on this installation: it has no public API address yet.',
+      guideSkillErrorSession: 'Your session has ended. Sign in again, then download the skill.',
+      guideSkillErrorForbidden: 'Only owners and admins can download the skill.',
+      guideSkillErrorGeneric: 'The skill could not be downloaded. Try again.',
     },
     oauthConsent: {
       pageTitle: 'Connect an app',
@@ -2555,7 +2669,7 @@ export const en: BookingMessages = {
       workspace: 'Workspace',
       signedInAs: 'Signed in as {who}',
       scopesLead: 'It will be able to',
-      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it in Settings, MCP and API.',
+      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it under MCP, in Connect and keys.',
       shortLived: 'Its access lasts about an hour; after that it has to ask again.',
       approve: 'Allow',
       deny: 'Deny',
@@ -3031,6 +3145,14 @@ export const es: BookingMessages = {
       calendars: 'Calendarios',
       settings: 'Ajustes',
       bookingPage: 'Página de reservas',
+      developers: 'MCP',
+      docs: 'Documentación',
+      agents: 'Dapta Agents',
+    },
+    developerNav: {
+      keys: 'Conexión y claves',
+      webhooks: 'Webhooks',
+      docs: 'Docs de la API',
     },
     common: {
       save: 'Guardar',
@@ -3052,6 +3174,7 @@ export const es: BookingMessages = {
       none: 'Ninguno',
       signOut: 'Cerrar sesión',
       viewPublic: 'Ver página pública',
+      accountMenu: 'Menú de la cuenta',
       language: 'Idioma',
       notFoundTitle: 'No encontrado',
       notFoundBody: 'Este espacio no tiene nada en esta dirección. Puede que se haya eliminado.',
@@ -3088,8 +3211,8 @@ export const es: BookingMessages = {
       setAvailabilityDesc: 'Horas semanales + excepciones por fecha.',
       stylePage: 'Personaliza tu página de reservas',
       stylePageDesc: 'Marca + estudio de 9 ejes.',
-      apiKeys: 'Claves API y webhooks',
-      apiKeysDesc: 'Integra agentes y automatizaciones.',
+      apiKeys: 'Conecta un agente',
+      apiKeysDesc: 'El servidor MCP y las claves API que usa tu agente de IA.',
       setupTitle: 'Queda lista para reservas',
       setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
       setupConnectTitle: 'Conecta un calendario',
@@ -3109,7 +3232,6 @@ export const es: BookingMessages = {
       general: 'General',
       bookingPage: 'Página de reservas',
       members: 'Miembros',
-      developer: 'MCP y API',
       notifications: 'Notificaciones',
       integrations: 'Integraciones',
     },
@@ -3732,14 +3854,11 @@ export const es: BookingMessages = {
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
       connectTitle: 'Conecta tu agente',
-      connectLead:
-        'Maneja Dapta Calendars desde tu propio agente de IA: busca un espacio libre, reserva, reagenda y cancela sin abrir este panel. Crea una clave API abajo y elige tu agente.',
       tabCursor: 'Cursor',
       tabClaudeCode: 'Claude Code',
       tabCodex: 'Codex',
       tabOther: 'Otros agentes',
       tabChat: 'Claude.ai y ChatGPT',
-      stepKey: 'Crea una clave API abajo y cópiala cuando aparezca. Dale solo el acceso que el agente necesita.',
       stepKeyEnv: 'Define la clave en la terminal desde la que abres tu agente, así nunca queda pegada en una configuración:',
       mcpUrlLabel: 'Dirección MCP',
       mcpUrlMissing:
@@ -3762,7 +3881,7 @@ export const es: BookingMessages = {
       chatBody:
         'Pronto habrá inicio de sesión con un clic para las apps de Claude y ChatGPT. Mientras tanto, las herramientas de reserva pública funcionan sin clave: un agente puede buscar un horario y reservar en cualquier página pública. Todo lo demás necesita una clave API desde un agente de terminal.',
       toolsTitle: 'Qué puede hacer un agente',
-      toolsLead: 'Una clave solo da las herramientas cuyo acceso marques. Las de lectura solo miran; las de escritura cambian tu agenda; cancelar no se puede deshacer.',
+      toolsLead: 'Una clave solo da las herramientas cuyo acceso marques. Las de lectura solo miran; las de escritura cambian tu agenda; cancelar o rechazar no se puede deshacer.',
       kindRead: 'Lectura',
       kindWrite: 'Escritura',
       kindDestructive: 'Destructiva',
@@ -3772,21 +3891,28 @@ export const es: BookingMessages = {
       toolNeeds: 'Requiere: {scope}',
       toolDescriptions: {
         find_available_slots: 'Busca horarios libres de un tipo de evento.',
+        find_team_slots: 'Busca horarios libres con un equipo y cómo asigna anfitriones.',
+        hold_slot: 'Aparta un horario unos 10 minutos mientras la persona decide.',
         book_meeting: 'Reserva un horario en una página pública y avisa al invitado por correo.',
+        book_team_meeting: 'Reserva con un equipo; se asigna un anfitrión libre.',
         whoami: 'Muestra a qué cuenta y acceso corresponde la clave.',
+        list_my_accounts: 'Lista las cuentas en las que puede actuar esta conexión.',
         list_event_types: 'Lista tus tipos de evento.',
         get_booking_page_link: 'Obtiene el enlace público de reservas de un tipo de evento.',
         list_bookings: 'Lista reservas con los campos mínimos.',
+        list_pending_bookings: 'Lista las solicitudes de reserva que esperan tu respuesta.',
         get_booking: 'Lee una reserva, incluido lo que escribió el invitado.',
         create_booking: 'Reserva una reunión en tu nombre. Se puede reintentar sin riesgo.',
         reschedule_booking: 'Mueve una reserva a otro horario. Se puede reintentar sin riesgo.',
+        confirm_booking: 'Acepta una solicitud de reserva y avisa al invitado.',
+        decline_booking: 'Rechaza una solicitud de reserva y avisa al invitado.',
         cancel_booking: 'Cancela una reserva y avisa al invitado.',
       },
       scopeLabels: {
         'event-types:read': 'Ver tipos de evento',
         'availability:read': 'Consultar horarios libres',
         'bookings:read': 'Leer reservas',
-        'bookings:write': 'Crear y reagendar reservas',
+        'bookings:write': 'Crear, apartar, reagendar, confirmar y rechazar reservas',
         'bookings:cancel': 'Cancelar reservas',
         'calendars:read': 'Ver calendarios conectados',
       },
@@ -3807,7 +3933,7 @@ export const es: BookingMessages = {
       keyNeverUsed: 'Sin usar',
       apiRefTitle: 'Referencia de la API',
       apiRefLead: 'Todas las rutas que una clave puede llamar, con consola de pruebas y la especificación legible por máquinas.',
-      apiDocs: 'Documentación de la API',
+      apiDocs: 'Referencia interactiva',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
       chatOAuthTitle: 'Claude, Claude Desktop y ChatGPT',
@@ -3824,6 +3950,16 @@ export const es: BookingMessages = {
       chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
       chatScopesNote:
         'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
+      signInTitle: 'Inicia sesión en lugar de usar una clave',
+      signInBody:
+        'Claude, ChatGPT, Cursor y otras apps que admiten inicio de sesión se conectan sin clave: agrega la dirección MCP como conector y luego inicia sesión con la misma cuenta que usas en Dapta Calendars.',
+      signInAccess:
+        'Una conexión actúa con tu acceso de propietario o administrador, así que puede usar todas las herramientas. Para un acceso más acotado, como solo lectura o un único tipo de evento, crea una clave de API.',
+      signInDisconnect:
+        'Para desconectar, elimina el conector en la app. Un propietario también puede cortar una conexión al instante quitándole a esa persona el rol de administrador.',
+      chatSignInLead: 'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión con tu cuenta.',
+      chatSignInClaudeStep3: 'Haz clic en Conectar e inicia sesión con tu cuenta de Dapta Calendars.',
+      chatSignInGptStep3: 'Créalo e inicia sesión con tu cuenta de Dapta Calendars cuando ChatGPT te lo pida.',
       connectedTitle: 'Apps conectadas',
       connectedLead:
         'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',
@@ -3841,6 +3977,31 @@ export const es: BookingMessages = {
       connectedRevokedToast: 'App desconectada.',
       connectedExpiryNote:
         'Desconectar impide de inmediato que la app renueve su acceso. El acceso que ya tiene se agota en menos de {minutes} min.',
+      docsPageLead: 'Cada herramienta que un agente puede usar a través del servidor MCP, y la referencia de la API que hay detrás.',
+      guideTitle: 'Conecta tu agente en 3 pasos',
+      guideIntro:
+        'Tu agente de IA puede buscar un espacio libre, reservar, reagendar y cancelar por ti a través del servidor MCP, sin abrir este panel.',
+      guideStepDone: 'hecho',
+      guideKeyTitle: 'Crea una clave API',
+      guideKeyBody:
+        'La clave conecta al agente con este espacio de trabajo. Solo se muestra una vez, así que cópiala al crearla, y dale solo el acceso que el agente necesita.',
+      guideKeyDone: 'Ya tienes una clave. Crea una por agente para poder revocar cada una por separado.',
+      guideAgentBody: 'Elige tu agente. Cada pestaña tiene la dirección y la configuración exacta que necesita.',
+      guideAgentDone: 'Ya se usó una clave o una app inició sesión: tu agente está conectado.',
+      guideTryTitle: 'Pídele algo',
+      guideTryHint: 'Abre tu agente y pega esto para comprobar que todo funciona.',
+      guidePrompt: 'Usa el MCP de {product} para decirme a qué espacio de trabajo estás conectado y qué puedes hacer ahí.',
+      copyPrompt: 'Copiar prompt',
+      guideTryNote: 'Un agente solo puede hacer lo que su clave permite. Lo que necesita cada herramienta está en',
+      guideSkillTitle: '¿Tu agente no tiene MCP?',
+      guideSkillBody:
+        'Descarga el skill: un zip que le enseña a cualquier agente con terminal a usar la API de {product} con la misma clave API.',
+      guideSkillButton: 'Descargar el skill',
+      guideSkillPending: 'Preparando el skill…',
+      guideSkillUnavailable: 'El skill no está disponible en esta instalación: todavía no tiene una dirección pública de la API.',
+      guideSkillErrorSession: 'Tu sesión terminó. Vuelve a iniciar sesión y descarga el skill.',
+      guideSkillErrorForbidden: 'Solo los propietarios y administradores pueden descargar el skill.',
+      guideSkillErrorGeneric: 'No se pudo descargar el skill. Inténtalo de nuevo.',
     },
     oauthConsent: {
       pageTitle: 'Conectar una app',
@@ -3853,7 +4014,7 @@ export const es: BookingMessages = {
       workspace: 'Espacio de trabajo',
       signedInAs: 'Sesión iniciada como {who}',
       scopesLead: 'Podrá',
-      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en Configuración, MCP y API.',
+      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en MCP, en Conexión y claves.',
       shortLived: 'Su acceso dura cerca de una hora; después tendrá que pedirlo de nuevo.',
       approve: 'Permitir',
       deny: 'Rechazar',

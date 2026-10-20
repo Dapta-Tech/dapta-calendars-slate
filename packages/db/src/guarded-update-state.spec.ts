@@ -6,7 +6,7 @@ import { createDb, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
-import { confirmBooking, rescheduleBooking } from './parity';
+import { confirmBooking, declineBooking, rescheduleBooking } from './parity';
 
 /**
  * A confirmation or a move reads the booking, checks the calendars and the
@@ -98,6 +98,24 @@ describe('a guarded update answers GONE when the booking changed under it', () =
     ))!;
     expect(row.status).toBe('cancelled');
     expect(Number(row.start_ms)).toBe(first);
+  });
+
+  it('a decline of a request confirmed meanwhile declines nothing and says GONE', async () => {
+    await db.run(sql`UPDATE event_type SET requires_confirmation = 1 WHERE slug = 'intro-call'`);
+    const [first] = await slots();
+    const { uid } = await book(first!, 'decline');
+    // The host confirms in another tab (or an agent does) right after the
+    // decline read the request as pending, before the decline writes.
+    let reads = 0;
+    const racing = Object.create(db) as Db;
+    racing.get = (async (query: Parameters<Db['get']>[0]) => {
+      reads += 1;
+      if (reads === 2) await db.run(sql`UPDATE booking SET status = 'accepted' WHERE uid = ${uid}`);
+      return db.get(query);
+    }) as Db['get'];
+    expect(await declineBooking(racing, uid, 'no room', accountId)).toEqual({ ok: false, reason: 'GONE' });
+    expect((await db.get<{ status: string }>(sql`SELECT status FROM booking WHERE uid = ${uid}`))!.status).toBe('accepted');
+    expect(await declineBooking(db, uid, 'no room', accountId)).toEqual({ ok: false, reason: 'GONE' });
   });
 
   it('a second confirmation of one request says GONE instead of confirming it twice', async () => {

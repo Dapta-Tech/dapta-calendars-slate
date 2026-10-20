@@ -4,6 +4,7 @@ import { unstable_rethrow } from 'next/navigation';
 
 import { revalidatePath } from 'next/cache';
 import { adminApi, ApiError } from '@/lib/admin-api';
+import { DEVELOPERS_KEYS_HREF, DEVELOPERS_WEBHOOKS_HREF } from '@/lib/admin-nav';
 import { expiresAtMsFromDays } from '@/lib/mcp-connect';
 
 export interface CreateApiKeyInput {
@@ -26,7 +27,7 @@ export async function createApiKeyAction(input: CreateApiKeyInput): Promise<{ pl
       ...(input.eventTypeIds && input.eventTypeIds.length > 0 ? { eventTypeIds: input.eventTypeIds } : {}),
       ...(expiresAtMs !== undefined ? { expiresAtMs } : {}),
     });
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_KEYS_HREF);
     return { plaintext: r.plaintext };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
@@ -37,7 +38,7 @@ export async function createApiKeyAction(input: CreateApiKeyInput): Promise<{ pl
 export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await adminApi.revokeApiKey(id);
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_KEYS_HREF);
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
@@ -49,7 +50,7 @@ export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; err
 export async function revokeConnectedAppAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await adminApi.revokeConnectedApp(id);
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_KEYS_HREF);
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
@@ -76,7 +77,7 @@ export async function createWebhookAction(
 ): Promise<{ ok: boolean; secret?: string; error?: string; code?: string }> {
   try {
     const created = await adminApi.createWebhook({ subscriberUrl, eventTriggers: triggers });
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_WEBHOOKS_HREF);
     const secret = (created as { secret?: unknown } | null)?.secret;
     return { ok: true, secret: typeof secret === 'string' ? secret : undefined };
   } catch (e) {
@@ -92,7 +93,7 @@ export async function createWebhookAction(
 export async function deleteWebhookAction(id: string): Promise<{ ok: boolean; error?: string }> {
   try {
     await adminApi.deleteWebhook(id);
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_WEBHOOKS_HREF);
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
@@ -103,7 +104,7 @@ export async function deleteWebhookAction(id: string): Promise<{ ok: boolean; er
 export async function toggleWebhookAction(id: string, active: boolean): Promise<{ ok: boolean; error?: string }> {
   try {
     await adminApi.updateWebhook(id, active);
-    revalidatePath('/admin/settings/developer');
+    revalidatePath(DEVELOPERS_WEBHOOKS_HREF);
     return { ok: true };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through

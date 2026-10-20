@@ -9,6 +9,7 @@ import {
   isSlotBookable,
   jsonParam,
   lockMembers,
+  memberHeldSql,
   parseJsonColumn,
   scopedIdempotencyKey,
 } from './repository';
@@ -260,6 +261,12 @@ export interface ApiIdempotencyRecord {
   requestHash: string;
   statusCode: number | null;
   responseBody: unknown;
+  /**
+   * True when THIS call opened the record (its insert won); false when it
+   * found one another call had opened. Lets a caller act only on its own open
+   * record (delete it after a refusal) and never on another attempt's.
+   */
+  inserted: boolean;
 }
 
 export async function claimApiIdempotency(
@@ -301,20 +308,36 @@ export async function claimApiIdempotency(
     requestHash: row.request_hash,
     statusCode: row.status_code == null ? null : Number(row.status_code),
     responseBody: parseJsonColumn(row.response_body, null),
+    inserted: row.id === id,
   };
 }
 
+/**
+ * Store the result on a record. True when a row was written; false when the
+ * record is gone (expired and swept, or removed), or, with `onlyOpen`, already
+ * holds a result, or, with `replaceRefusal`, already holds a success (status
+ * below 400), so a caller can tell a stored result from a lost one instead of
+ * losing it silently. The condition is part of the UPDATE, so it is atomic.
+ */
 export async function completeApiIdempotency(
   db: Db,
   id: string,
   statusCode: number,
   responseBody: unknown,
-): Promise<void> {
-  await db.run(
+  opts: { onlyOpen?: boolean; replaceRefusal?: boolean } = {},
+): Promise<boolean> {
+  const open = opts.onlyOpen
+    ? sql` AND status_code IS NULL`
+    : opts.replaceRefusal
+      ? sql` AND (status_code IS NULL OR status_code >= 400)`
+      : sql``;
+  const row = await db.get<{ id: string }>(
     sql`UPDATE api_idempotency
         SET status_code = ${statusCode}, response_body = ${jsonParam(db, responseBody)}
-        WHERE id = ${id}`,
+        WHERE id = ${id}${open}
+        RETURNING id`,
   );
+  return !!row;
 }
 
 export async function addGuestsToBooking(
@@ -422,6 +445,12 @@ export async function rescheduleBookingV2(
     rescheduledBy?: string;
     reason?: string;
     idempotencyKey?: string;
+    /**
+     * Refuse the new time when a hold covers it for any assigned host, checked
+     * inside the locked write. In-process callers only (the MCP reschedule
+     * tool); the `/v2` route leaves it off and keeps its pre-check alone.
+     */
+    refuseHeld?: boolean;
   },
   calendar?: CalendarProvider,
 ): Promise<V2RescheduleOutcome> {
@@ -538,6 +567,10 @@ export async function rescheduleBookingV2(
           ))
       LIMIT 1`,
   );
+  if (args.refuseHeld) {
+    const heldAt = Date.now();
+    for (const hostMemberId of hostIds) hostConflictQueries.push(memberHeldSql(hostMemberId, args.newStartMs, newEndMs, heldAt));
+  }
   const updateOld = sql`UPDATE booking
     SET status = 'cancelled', rescheduled = 1, rescheduled_to_uid = ${newUid},
         rescheduling_reason = ${args.reason ?? null},
@@ -590,6 +623,10 @@ export async function rescheduleBookingV2(
   let result: TxResult;
   try {
     if (db.dialect === 'sqlite') {
+      // IMMEDIATE, like every other guarded write and the hold write: a
+      // deferred transaction that reads first and then writes can fail to
+      // upgrade (SQLITE_BUSY_SNAPSHOT) when another process on the same WAL
+      // file wrote meanwhile, which would surface as a false SLOT_TAKEN.
       result = db.sqlite!.txn<TxResult>(() => {
         const current = db.sqlite!.drizzle.get<{ status: string }>(
           sql`SELECT status FROM booking WHERE id = ${source.id} LIMIT 1`,
@@ -607,7 +644,7 @@ export async function rescheduleBookingV2(
         ])
           db.sqlite!.drizzle.run(statement);
         return 'ok';
-      });
+      }, { immediate: true });
     } else {
       result = await db.pg!.drizzle.transaction(async (tx) => {
         // The hosts' rows first, then the booking's: the order every other

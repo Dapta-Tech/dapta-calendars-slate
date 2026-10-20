@@ -427,6 +427,12 @@ export class BookingService {
        * the payload's own `attendee.language` is the invitee's choice.
        */
       locale?: 'en' | 'es' | null;
+      /**
+       * Refuse a time another caller's hold covers, inside the locked write
+       * (`CreateBookingArgs.refuseHeld`). CONTEXT, in-process only: the MCP
+       * booking tools set it; the public and REST routes never do.
+       */
+      refuseHeld?: boolean;
     },
   ): Promise<BookingView | ServiceError> {
     const input = createBookingSchema.parse(raw);
@@ -451,6 +457,7 @@ export class BookingService {
         onBehalf,
         apiKeyWrite: context?.apiKeyWrite,
         oneOffToken: context?.oneOffToken,
+        refuseHeld: context?.refuseHeld,
       },
       // Fail-closed external conflict check at create time (no-op when disabled).
       // FRESH, never the display cache (ADR 0009).

@@ -78,7 +78,7 @@ export default defineConfig({
     {
       // Between the web and the API: passes everything through, and answers
       // 429 on cue for the busy-state tests (busy.spec.ts), or a canned JSON
-      // reply for the MCP & API states (mcp-page.spec.ts).
+      // reply for the MCP page states (mcp-page.spec.ts).
       command: 'node e2e/fault-proxy.mjs',
       url: `${E2E.proxy}/__qa/health`,
       reuseExistingServer: false,
@@ -100,10 +100,17 @@ export default defineConfig({
         // The web's server-side API base goes through the fault proxy, which
         // is transparent unless a test tells it to answer 429 or a canned reply.
         API_URL: E2E.proxy,
+        // The API's public address, as a deployment sets it: the MCP snippets
+        // and the skill zip (skill-zip.spec.ts) are written for it. Without it a
+        // production build has no public address and offers no download.
+        API_PUBLIC_URL: E2E.api,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
-        // Runtime, like on a deployment: the address MCP & API shows when the
+        // Runtime, like on a deployment: the address Connect and keys shows when the
         // API reports MCP on (mcp-page.spec.ts). The suite's API serves it.
         MCP_PUBLIC_URL: `${E2E.api}/mcp`,
+        // Runtime, like on a deployment: the rail's Docs item, per language.
+        DOCS_URL: E2E.docsUrl,
+        DOCS_URL_ES: E2E.docsUrlEs,
         ...ANALYTICS_ENV,
       },
     },

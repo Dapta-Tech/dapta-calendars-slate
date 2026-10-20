@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { LANDING_ID_COOKIE, getMessages } from '@slate/shared';
-import { adminApi, ApiError } from '@/lib/admin-api';
+import { adminApi, ApiError, isAdminRole } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
 import { HostAnalytics } from '@/components/analytics/host-analytics';
 import { analyticsConfig, hostAnalyticsIdentity } from '@/lib/analytics/config';
@@ -11,6 +11,7 @@ import { TimeZoneSync } from '@/components/timezone-sync';
 import { currentReturnTo, getSession } from '@/lib/auth-session';
 import { withReturnTo } from '@/lib/return-to';
 import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
+import { docsNavHref } from '@/lib/docs-url';
 import { getLocale } from '@/lib/locale';
 import { getProductTheme } from '@/lib/theme.server';
 import { ONBOARDING_SKIP_COOKIE } from '@/lib/onboarding';
@@ -59,7 +60,8 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // the document back to the cookie's theme. Seeding from the cookie is what
   // keeps the toggle agreeing with where the page actually lands.
   const initialTheme = await getProductTheme();
-  const messages = getMessages(await getLocale()).admin;
+  const locale = await getLocale();
+  const messages = getMessages(locale).admin;
 
   // The account picker, for operator staff only — see `mayPickAccount`. Asked
   // for here rather than inside the shell because the token must not reach the
@@ -89,7 +91,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         initialCollapsed={initialCollapsed}
         initialTheme={initialTheme}
         messages={messages}
-        user={{ displayName: me.displayName, handle: me.handle, accountCode: me.accountCode }}
+        isAdmin={isAdminRole(me.role)}
+        // Runtime env, in the reader's language; null on a deployment with no
+        // docs configured, and the rail then has no Docs item.
+        docsHref={docsNavHref(locale)}
+        user={{ displayName: me.displayName, email: me.email, handle: me.handle, accountCode: me.accountCode }}
         accounts={accounts.items}
         accountsHasMore={accounts.hasMore}
         currentAccountId={

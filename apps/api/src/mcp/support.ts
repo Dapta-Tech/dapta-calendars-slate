@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import { HttpException } from '@nestjs/common';
 import { ZodError } from 'zod';
+import { hashApiValue } from '@slate/db';
 import { zoneOffsetMinutes } from '@slate/shared';
 import type { ApiScope } from '@slate/types';
 import type { MachinePrincipal } from '../auth.service';
+import type { ExternalLogin, LoginAccount } from '../oauth/external.service';
+import { OAUTH_SCOPES } from '../oauth/oauth.settings';
 
 /**
  * Shared plumbing for the MCP door: how a tool says "no", how untrusted text is
@@ -36,13 +39,75 @@ export interface McpCall {
   protocolVersion: string;
   /** Client address (rate-limit key for anonymous calls). Never logged. */
   ip: string;
-  /** Null: no credential presented, only the public tools are callable. */
+  /**
+   * Null: no credential presented, only the public tools are callable; or a
+   * sign-in that reaches several accounts, until a tool call names one.
+   */
   principal: MachinePrincipal | null;
+  /**
+   * A sign-in through an external authorization server: the verified token and
+   * every account it may act in (at least one). With one account `principal`
+   * is already that account's; with several the call picks one (`account_id`).
+   */
+  login?: { token: ExternalLogin; accounts: LoginAccount[] };
 }
 
-/** `dcl_<8hex>` or `anonymous`: the only identity that reaches a log line. */
+/** `dcl_<8hex>`, `login:<8 chars>` or `anonymous`: the only identity that reaches a log line. */
 export function callerLabel(call: McpCall): string {
-  return call.principal?.prefix ?? 'anonymous';
+  return call.principal?.prefix ?? (call.login ? 'login' : 'anonymous');
+}
+
+/**
+ * Who a sign-in is while it has not picked an account (a public page tool
+ * called by a sign-in reaching several): one key per person, so it never
+ * shares the anonymous per-address bucket or idempotency namespace.
+ */
+export function signInKey(login: NonNullable<McpCall['login']>): string {
+  return `login:${createHash('sha256').update(login.token.subject).digest('hex').slice(0, 32)}`;
+}
+
+/**
+ * The principal of a sign-in acting in one account, as the member it is
+ * there. An external server has no scopes of ours, so a sign-in holds every
+ * MCP scope: it acts with the member's admin rights, checked on every request.
+ * Narrow access (read-only, one event type) stays with scoped API keys.
+ */
+export function loginPrincipal(account: LoginAccount, token: ExternalLogin): MachinePrincipal {
+  return {
+    kind: 'oauth',
+    keyId: `login:${account.memberId}`,
+    prefix: `login:${account.memberId.slice(0, 8)}`,
+    accountId: account.accountId,
+    memberId: account.memberId,
+    scopes: [...OAUTH_SCOPES],
+    eventTypeIds: null,
+    expiresAtMs: token.expiresAtMs,
+    ...(token.clientId ? { clientId: token.clientId } : {}),
+    ...(token.sessionId ? { sessionId: token.sessionId } : {}),
+  };
+}
+
+/**
+ * Who owns what a call leaves behind (an idempotency record, a hold): the key
+ * or OAuth connection; a sign-in through an external server as the person
+ * (`signInKey`), whichever account the call named, because the account is
+ * already part of every namespace and `book_meeting`, which never names one,
+ * must still find a hold made while naming it; or for an anonymous call a
+ * digest of its address. Never logged; a namespace, not an identity.
+ */
+export function callerId(call: McpCall): string {
+  if (call.login) return signInKey(call.login);
+  return call.principal ? `key:${call.principal.keyId}` : `anon:${hashApiValue(call.ip)}`;
+}
+
+/**
+ * Whether this connection may act in `accountId`: a key or connection in its
+ * own account, a sign-in in any account it reaches, whichever one (if any) this
+ * call named.
+ */
+export function reachesAccount(call: McpCall, accountId: string): boolean {
+  if (call.login) return call.login.accounts.some((a) => a.accountId === accountId);
+  return call.principal?.accountId === accountId;
 }
 
 /**
@@ -58,7 +123,7 @@ export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[
     throw new ToolFailure(
       'AUTH_REQUIRED',
       `This tool needs an API key with scope \`${accepted.join('` or `')}\`.`,
-      'Create a key in the Calendars web app (Settings, MCP & API) and send it as the header `Authorization: Bearer dcl_...`. Without a key only find_available_slots (public booking pages) and book_meeting work.',
+      'Create a key in the Calendars web app (MCP, then Connect and keys) and send it as the header `Authorization: Bearer dcl_...`. Without a key only find_available_slots (public booking pages) and book_meeting work.',
     );
   }
   if (!accepted.some((s) => call.principal!.scopes.includes(s))) {
@@ -177,6 +242,7 @@ const REDACT_KEYS = new Set([
   'guests',
   'attendee',
   'idempotency_key',
+  'hold_id',
   'cursor',
 ]);
 
@@ -198,17 +264,7 @@ export function argsHash(args: unknown): string {
   return createHash('sha256').update(JSON.stringify(redactArgs(args))).digest('hex').slice(0, 16);
 }
 
-/** JSON with sorted keys, so equal requests hash equally whatever their key order. */
-export function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  if (value && typeof value === 'object')
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`)
-      .join(',')}}`;
-  return JSON.stringify(value);
-}
+export { stableStringify } from '../stable-stringify';
 
 // --- Errors ---------------------------------------------------------------
 
@@ -238,6 +294,14 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
     message: 'That booking can no longer be changed (it is cancelled, declined or finished).',
     hint: 'Use get_booking to check its status.',
   },
+  HOLD_EXPIRED: {
+    message: 'The hold on that time expired, so nothing was booked.',
+    hint: 'Call find_available_slots and hold_slot again, then book with the new hold_id and a NEW idempotency_key.',
+  },
+  TOO_MANY_HOLDS: {
+    message: 'This host has too many holds open right now (at most 10 at a time, across all of their event types).',
+    hint: 'Book without a hold, or retry in a few minutes (a hold lasts about 10 minutes).',
+  },
   FEATURE_NOT_SUPPORTED: { hint: 'This event type uses a feature the MCP tools do not support yet; book it from its public page.' },
 };
 
@@ -245,6 +309,8 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
 export function failureFor(code: string, message: string): ToolFailure {
   // The booking core reports a bad start time under its intake-validation code.
   if (code === 'BOOKING_FIELDS_INVALID' && /time is not available|start time/i.test(message)) code = 'INVALID_SLOT';
+  // The core calls a hold a reservation; the tools call it a hold.
+  if (code === 'RESERVATION_EXPIRED') code = 'HOLD_EXPIRED';
   const known = ACTIONABLE[code];
   return new ToolFailure(code, known?.message ?? message, known?.hint);
 }

@@ -8,10 +8,11 @@ import { RateLimitGuard } from '../rate-limit';
 import { ENV, RATE_LIMITER } from '../tokens';
 import type { RateLimiter } from '../rate-limit';
 import { OAuthService } from '../oauth/oauth.service';
+import { ExternalOAuthService, type ExternalLogin, type LoginAccount } from '../oauth/external.service';
 import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
-import type { McpCall } from './support';
+import { loginPrincipal, type McpCall } from './support';
 import { TOOLS, accessOf } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
@@ -43,6 +44,14 @@ export function toolCallNeeds(body: unknown): { credential: boolean; scopes: Api
   }
   return { credential, scopes: [...scopes] };
 }
+
+/**
+ * A valid sign-in that may act in no account: never linked (the person has
+ * not opened the web app since the link was introduced), not seen on the web
+ * within OAUTH_LINK_MAX_AGE_DAYS, or not an active owner or admin anywhere.
+ */
+export const NOT_LINKED_MESSAGE =
+  'This sign-in is not an owner or admin of any account on this server yet. Open the app on the web once, then reconnect.';
 
 /** Credentials in the URL end up in access logs and proxies; refuse them outright. */
 const URL_CREDENTIAL_PARAMS = ['key', 'api_key', 'apikey', 'access_token', 'token', 'authorization'];
@@ -88,14 +97,19 @@ function protocolVersionOf(req: Request): string {
  *
  * Two kinds of Bearer, told apart by prefix and checked against their own
  * store, never forwarded anywhere: `dcl_` API keys (unchanged), and, when
- * OAUTH_ENABLED, this server's own OAuth access tokens. With OAuth on, a
+ * OAUTH_ENABLED, OAuth access tokens: this server's own, or, with an external
+ * authorization server, that server's (verified against its keys, then mapped
+ * to the members the person may act as, on every request). With OAuth on, a
  * protected tool called with no credential gets the spec's HTTP 401 with
  * `WWW-Authenticate: Bearer resource_metadata=...` (what makes a chat app show
- * its Connect button), and an OAuth token lacking a scope gets 403
+ * its Connect button), and a built-in OAuth token lacking a scope gets 403
  * `insufficient_scope` naming every scope the call needs (step-up). Both are
  * decided here, before the SDK runs: a 200 carrying a tool error would never
  * trigger the client's sign-in. API keys keep their tool-level scope errors,
- * because a key's scopes cannot be stepped up.
+ * because a key's scopes cannot be stepped up, and an external sign-in has no
+ * step-up at all: it holds every scope its member's admin role allows. A valid
+ * external sign-in that may act nowhere gets 403, never 401, so a client does
+ * not loop back into its sign-in.
  */
 @Controller('mcp')
 export class McpController {
@@ -110,6 +124,7 @@ export class McpController {
     @Inject(RATE_LIMITER) private readonly limiter: RateLimiter,
     @Inject(RateLimitGuard) private readonly clientKeys: RateLimitGuard,
     @Inject(OAuthService) private readonly oauth: OAuthService,
+    @Inject(ExternalOAuthService) private readonly external: ExternalOAuthService,
   ) {
     this.node = toNodeHandler(gateway.handler);
     this.origins = new Set(csv(env.MCP_ALLOWED_ORIGINS));
@@ -151,6 +166,7 @@ export class McpController {
     const ip = this.clientKeys.keyFor(req);
     const header = req.headers.authorization;
     let principal: MachinePrincipal | null = null;
+    let login: { token: ExternalLogin; accounts: LoginAccount[] } | null = null;
     if (header === undefined) {
       // Anonymous: nothing proves who is calling, so the address is the identity.
       const { allowed, retryAfterMs } = this.limiter.take(`mcp:${ip}`);
@@ -158,12 +174,22 @@ export class McpController {
     } else {
       const bearer = /^Bearer\s+(\S+)$/i.exec(header)?.[1];
       const isKey = !!bearer?.startsWith('dcl_');
+      let token: ExternalLogin | null = null;
       if (isKey) principal = await this.auth.authenticateKey(bearer!);
+      else if (bearer && this.external.enabled) token = await this.external.verify(bearer);
       else if (bearer && this.oauth.enabled) principal = await this.oauth.verifyAccessToken(bearer);
-      if (!principal) {
+      if (!principal && !token) {
         // A wrong credential costs a lookup: count the attempt against the address.
         const { allowed, retryAfterMs } = this.limiter.take(`mcp-auth:${ip}`);
         if (!allowed) return this.tooMany(res, retryAfterMs);
+        if (this.external.enabled && !isKey) {
+          // Expired, another audience or issuer, a key we cannot fetch, or not
+          // a token at all. The client refreshes or signs in again.
+          rpcError(res, 401, -32001, 'Invalid or expired access token.', {
+            'WWW-Authenticate': this.external.challenge('invalid_token', 'The access token is invalid or expired.'),
+          });
+          return;
+        }
         if (this.oauth.enabled && !isKey) {
           // Expired, revoked-and-expired, another audience, another issuer, or
           // not ours at all. The client refreshes or signs in again.
@@ -175,8 +201,26 @@ export class McpController {
         rpcError(res, 401, -32001, 'Invalid, expired or revoked API key.', { 'WWW-Authenticate': 'Bearer error="invalid_token"' });
         return;
       }
-      annotateRequestAccount(req, principal.accountId);
-      if (principal.kind === 'oauth' && principal.grantId) this.oauth.noteUse(principal.grantId);
+      if (token) {
+        const accounts = await this.external.accountsFor(token.subject);
+        if (accounts.length === 0) {
+          // Each one costs a lookup too.
+          const { allowed, retryAfterMs } = this.limiter.take(`mcp-auth:${ip}`);
+          if (!allowed) return this.tooMany(res, retryAfterMs);
+          rpcError(res, 403, -32001, NOT_LINKED_MESSAGE);
+          return;
+        }
+        login = { token, accounts };
+        if (accounts.length === 1) principal = loginPrincipal(accounts[0]!, token);
+      }
+      if (principal) annotateRequestAccount(req, principal.accountId);
+      if (principal?.kind === 'oauth' && principal.grantId) this.oauth.noteUse(principal.grantId);
+    }
+
+    if (this.external.enabled && principal === null && login === null && toolCallNeeds(req.body).credential) {
+      // No scope in the challenge: the external server's scopes are not ours.
+      rpcError(res, 401, -32001, 'Sign-in required for this tool.', { 'WWW-Authenticate': this.external.challenge() });
+      return;
     }
 
     if (this.oauth.enabled && (principal === null || principal.kind === 'oauth')) {
@@ -202,11 +246,11 @@ export class McpController {
       }
     }
 
-    const call: McpCall = { requestId, protocolVersion: protocolVersionOf(req), ip, principal };
+    const call: McpCall = { requestId, protocolVersion: protocolVersionOf(req), ip, principal, ...(login ? { login } : {}) };
     // The plaintext credential is never handed on: the handler gets the prefix and scopes.
     (req as Request & { auth?: unknown }).auth = {
       token: '[redacted]',
-      clientId: principal?.prefix ?? 'anonymous',
+      clientId: principal?.prefix ?? (login ? 'login' : 'anonymous'),
       scopes: principal?.scopes ?? [],
       extra: { [CALL_KEY]: call },
     };

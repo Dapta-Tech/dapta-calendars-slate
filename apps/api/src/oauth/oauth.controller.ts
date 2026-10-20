@@ -13,23 +13,36 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { ServerEnv } from '@slate/config/env';
+import { oauthMode, type ServerEnv } from '@slate/config/env';
 import { AuthService, type ReqLike } from '../auth.service';
 import { assertAdmin } from '../permissions';
 import { ENV } from '../tokens';
+import { ExternalOAuthService } from './external.service';
 import { OAuthService, oauthErrorPage } from './oauth.service';
 
 /**
  * The HTTP surface of the OAuth authorization server, in four controllers.
  * Their ORDER in `AppModule.controllers` matters: the interaction routes are
  * registered before the catch-all mount, or oidc-provider would answer them.
- * Every route answers 404 while OAUTH_ENABLED is off.
+ * Every route answers 404 while OAUTH_ENABLED is off. With an external
+ * authorization server only the discovery documents answer: everything else
+ * belongs to that server.
  */
 
 function notEnabled(): never {
   throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+}
+
+/**
+ * The consent page's 404 while an external authorization server signs people
+ * in. Its own code, so the web app answers the page with a 404 instead of the
+ * "this request expired" card it shows for a stale built-in request.
+ */
+function externalSignIn(): never {
+  throw new NotFoundException({ error: 'EXTERNAL_AUTHORIZATION_SERVER', message: 'Sign-in happens at the external authorization server.' });
 }
 
 /**
@@ -39,10 +52,29 @@ function notEnabled(): never {
  */
 @Controller('.well-known')
 export class OAuthMetadataController {
-  constructor(@Inject(OAuthService) private readonly oauth: OAuthService) {}
+  constructor(
+    @Inject(OAuthService) private readonly oauth: OAuthService,
+    @Inject(ExternalOAuthService) private readonly external: ExternalOAuthService,
+  ) {}
 
+  /**
+   * With an external server: ITS metadata, for clients that still read it from
+   * the resource's origin (fetched server-side from the configured issuer,
+   * cached; never a header of this request). 503 while it cannot be fetched.
+   */
   @Get('oauth-authorization-server')
-  authorizationServer(@Res({ passthrough: true }) res: Response) {
+  async authorizationServer(@Res({ passthrough: true }) res: Response) {
+    if (this.external.enabled) {
+      let metadata: Record<string, unknown>;
+      try {
+        metadata = await this.external.authorizationServerMetadata();
+      } catch {
+        res.setHeader('Cache-Control', 'no-store');
+        throw new ServiceUnavailableException({ error: 'UNAVAILABLE', message: 'The authorization server metadata could not be fetched. Try again shortly.' });
+      }
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return metadata;
+    }
     if (!this.oauth.enabled) notEnabled();
     res.setHeader('Cache-Control', 'public, max-age=300');
     return this.oauth.authorizationServerMetadata();
@@ -50,6 +82,10 @@ export class OAuthMetadataController {
 
   @Get('oauth-protected-resource')
   protectedResource(@Res({ passthrough: true }) res: Response) {
+    if (this.external.enabled) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return this.external.protectedResourceMetadata();
+    }
     if (!this.oauth.enabled) notEnabled();
     res.setHeader('Cache-Control', 'public, max-age=300');
     return this.oauth.protectedResourceMetadata();
@@ -108,8 +144,23 @@ export class OAuthHostController {
     @Inject(ENV) private readonly env: ServerEnv,
   ) {}
 
+  /**
+   * The consent page with no request to show (no `uid`, or a malformed one):
+   * always 404, coded for an external authorization server so the page is a
+   * 404 too. No session needed; the mode is public anyway (the
+   * protected-resource metadata names the server).
+   */
+  @Get('consent')
+  consentWithoutRequest() {
+    if (oauthMode(this.env) === 'external') externalSignIn();
+    notEnabled();
+  }
+
+  // With an external server the mode decides before the session does: a
+  // signed-out visitor gets the 404 straight away, not a login first.
   @Get('consent/:uid')
   async consent(@Req() req: ReqLike, @Param('uid') uid: string) {
+    if (oauthMode(this.env) === 'external') externalSignIn();
     const host = await this.auth.resolveHost(req);
     if (!this.oauth.enabled) notEnabled();
     return this.oauth.consentDetails(uid, host);
@@ -118,6 +169,7 @@ export class OAuthHostController {
   @Post('consent/:uid')
   @HttpCode(200)
   async decide(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { decision?: unknown }) {
+    if (oauthMode(this.env) === 'external') externalSignIn();
     const host = await this.auth.resolveHost(req);
     if (!this.oauth.enabled) notEnabled();
     const decision = body?.decision;
@@ -127,16 +179,20 @@ export class OAuthHostController {
   }
 
   /**
-   * The Connected apps list, with the two switches the MCP & API page reads:
-   * `enabled` (OAuth) and `mcpEnabled` (MCP_ENABLED: whether this API serves
-   * `/mcp` at all). The page shows how to connect an agent only on
-   * `mcpEnabled: true`, so nobody is handed an address that answers 404.
+   * The Connected apps list, with the switches the dashboard's MCP pages read:
+   * `enabled` (OAuth through this API's own server, whose connections are
+   * listed here), `external` (present, true, when an external authorization
+   * server signs connections in instead: they live there, so the list stays
+   * empty) and `mcpEnabled` (MCP_ENABLED: whether this API serves `/mcp` at
+   * all). The page shows how to connect an agent only on `mcpEnabled: true`,
+   * so nobody is handed an address that answers 404.
    */
   @Get('grants')
   async grants(@Req() req: ReqLike) {
     const host = await this.auth.resolveHost(req);
     assertAdmin(host);
     const mcpEnabled = this.env.MCP_ENABLED;
+    if (oauthMode(this.env) === 'external') return { enabled: false, external: true, mcpEnabled, accessTokenTtlSeconds: null, grants: [] };
     if (!this.oauth.enabled) return { enabled: false, mcpEnabled, accessTokenTtlSeconds: null, grants: [] };
     return {
       enabled: true,

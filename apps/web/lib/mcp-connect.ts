@@ -1,5 +1,5 @@
 /**
- * Pure builders for the "MCP & API" page: the Cursor deeplink, the config
+ * Pure builders for the MCP pages: the Cursor deeplink, the config
  * snippets for each agent, the scope catalog and the tool list.
  *
  * Nothing here reads the environment or the DOM, so the same functions run on the
@@ -13,6 +13,9 @@
 
 /** The environment variable every snippet reads the API key from. */
 export const API_KEY_ENV = 'DAPTA_CALENDARS_API_KEY';
+
+/** How every API key this product mints begins (`dcl_<8 hex>_<secret>`). */
+export const KEY_PREFIX = 'dcl_';
 
 /** The name the server is registered under in the agent's config. */
 export const SERVER_NAME = 'dapta-calendars';
@@ -74,7 +77,7 @@ export function claudeConnectorLink(mcpUrl: string, name: string): string {
 }
 
 export function exportKeyCommand(): string {
-  return `export ${API_KEY_ENV}="dcl_your_key_here"`;
+  return `export ${API_KEY_ENV}="${KEY_PREFIX}your_key_here"`;
 }
 
 // --- Scopes -----------------------------------------------------------------
@@ -117,17 +120,24 @@ export interface ToolInfo {
   publicOk: boolean;
 }
 
-/** The ten launch tools (plan section 3). */
+/** Every MCP tool, in the server's catalog order (`apps/api/src/mcp/tools.ts`). */
 export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'find_available_slots', kind: 'read', scope: 'availability:read', publicOk: true },
+  { name: 'find_team_slots', kind: 'read', scope: 'availability:read', publicOk: true },
+  { name: 'hold_slot', kind: 'write', scope: 'bookings:write', publicOk: true },
   { name: 'book_meeting', kind: 'write', scope: null, publicOk: true },
+  { name: 'book_team_meeting', kind: 'write', scope: 'bookings:write', publicOk: true },
   { name: 'whoami', kind: 'read', scope: null, publicOk: false },
+  { name: 'list_my_accounts', kind: 'read', scope: null, publicOk: false },
   { name: 'list_event_types', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'get_booking_page_link', kind: 'read', scope: 'event-types:read', publicOk: false },
   { name: 'list_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },
+  { name: 'list_pending_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'get_booking', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'create_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
   { name: 'reschedule_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
+  { name: 'confirm_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
+  { name: 'decline_booking', kind: 'destructive', scope: 'bookings:write', publicOk: false },
   { name: 'cancel_booking', kind: 'destructive', scope: 'bookings:cancel', publicOk: false },
 ];
 

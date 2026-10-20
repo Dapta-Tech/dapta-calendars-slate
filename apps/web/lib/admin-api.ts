@@ -318,6 +318,8 @@ export const adminApi = {
   // `/auth/consent` page with the signed-in host's session; the API refuses an
   // approval from anyone but an owner or admin.
   oauthConsent: (uid: string) => req<OAuthConsent>('GET', `/v1/oauth/consent/${encodeURIComponent(uid)}`),
+  /** The consent read with no request: always a 404, coded when an external server signs people in. */
+  oauthConsentWithoutRequest: () => req<void>('GET', '/v1/oauth/consent'),
   oauthDecide: (uid: string, decision: 'approve' | 'deny') =>
     req<{ redirectTo: string }>('POST', `/v1/oauth/consent/${encodeURIComponent(uid)}`, { decision }),
   connectedApps: () => req<ConnectedApps>('GET', '/v1/oauth/grants'),
@@ -532,6 +534,12 @@ export interface ConnectedApp {
 /** `enabled: false` when the deployment runs without OAuth (the list is then empty). */
 export interface ConnectedApps {
   enabled: boolean;
+  /**
+   * True when an external authorization server signs connections in: people
+   * connect by signing in with their account, and the connections live there,
+   * so `grants` stays empty and `enabled` false. Absent on an older API.
+   */
+  external?: boolean;
   /**
    * Whether the API serves the MCP endpoint at all (its MCP_ENABLED). Absent on
    * an older API, which the page treats as off: it never shows an agent an

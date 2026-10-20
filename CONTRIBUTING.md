@@ -25,7 +25,7 @@ pnpm-workspaces monorepo.
    ```bash
    pnpm typecheck && pnpm lint && pnpm test
    ```
-3. If your change affects a published package's behavior, add a changeset:
+3. If your change affects a package's behavior, add a changeset:
    ```bash
    pnpm changeset
    ```
@@ -40,7 +40,7 @@ Do not open feature/fix PRs directly into `main`.
 ## Commit conventions
 
 - **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
-  `chore:`, … (enforced by commitlint).
+  `chore:`, … This is the convention, and reviewers check it; no tool enforces it.
 - **DCO sign-off** — we use the [Developer Certificate of Origin](https://developercertificate.org/),
   not a CLA. Sign every commit:
   ```bash

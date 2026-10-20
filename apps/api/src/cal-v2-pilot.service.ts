@@ -21,6 +21,7 @@ import { z } from "zod";
 import { BookingService } from "./booking.service";
 import { CalendarEffects } from "./calendar-effects";
 import { CalV2Service, compatibilityId, v2Error } from "./cal-v2.service";
+import { stableStringify } from "./stable-stringify";
 import { DB } from "./tokens";
 
 const eventTypesQuerySchema = z
@@ -76,16 +77,6 @@ const addGuestsSchema = z
   .strict();
 
 const idempotencyKeySchema = z.string().min(1).max(128);
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
-  return JSON.stringify(value);
-}
 
 function requestHash(value: unknown): string {
   return createHash("sha256").update(stableStringify(value)).digest("hex");
@@ -504,6 +495,8 @@ export class CalV2PilotService {
     idempotencyKey: string | undefined,
     keyId: string,
     allowedEventTypeIds?: string[] | null,
+    /** In-process only (the MCP reschedule tool): refuse a new time a hold covers, inside the locked write. */
+    internal: { refuseHeld?: boolean } = {},
   ) {
     const body = rescheduleSchema.parse(raw);
     await this.cal.bookingResponse(accountId, uid, allowedEventTypeIds);
@@ -527,6 +520,7 @@ export class CalV2PilotService {
             rescheduledBy: body.rescheduledBy,
             reason: body.reschedulingReason,
             idempotencyKey: storedKey,
+            ...(internal.refuseHeld ? { refuseHeld: true } : {}),
           },
           this.calendar.provider,
         );

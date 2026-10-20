@@ -263,7 +263,7 @@ try {
   }
 
   // --- Disconnect from Connected apps -----------------------------------------
-  await page.goto(`${web}/admin/settings/developer`);
+  await page.goto(`${web}/admin/developers/keys`);
   await page.getByRole('heading', { name: 'Connected apps' }).waitFor();
   await page.screenshot({ path: join(evidence, 'connected-apps.png'), fullPage: true });
   const disconnect = page.getByRole('button', { name: 'Disconnect · E2E Agent' }).first();

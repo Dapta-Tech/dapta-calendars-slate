@@ -47,6 +47,7 @@ import {
   scopedIdempotencyKey,
   type BookingFieldDef,
   lockMembers,
+  memberHeldSql,
 } from './repository';
 import { effectiveReminders, parseEventReminders, type EventReminder } from './reminders';
 import {
@@ -71,7 +72,7 @@ import { enqueueOutbox } from './outbox';
 // --- Reservation holds ----------------------------------------------------
 
 const DEFAULT_HOLD_MS = 10 * 60_000;
-/** Cap on concurrent unexpired holds per booking page (per host member). */
+/** Cap on concurrent unexpired holds per host member, across all of their event types. */
 const MAX_ACTIVE_HOLDS_PER_MEMBER = 10;
 
 /**
@@ -119,7 +120,8 @@ export type ReserveOutcome =
  *  - opportunistically sweeps expired holds so rows can't accrete;
  *  - validates the requested start is a REAL, currently-bookable slot (no
  *    holding arbitrary/blocked instants to blank out a page's availability);
- *  - caps concurrent unexpired holds per page to blunt hold-spam DoS.
+ *  - caps concurrent unexpired holds per host (across their event types) to
+ *    blunt hold-spam DoS.
  *
  * The slot check reads the host's connected calendar through `calendar`, the
  * same provider `createBooking` re-checks at create time. Without it a hold was
@@ -198,7 +200,7 @@ export async function reserveSlot(
  * The hold write, serialised per host. The availability read above is a
  * snapshot: twenty visitors who pick the same time at once all see it free, and
  * a plain check-then-insert let every one of them hold it (the QA battery saw 18
- * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-page cap be
+ * of 20 win on Postgres, 20 of 20 on SQLite), and let the per-host cap be
  * overrun the same way. Each loser then filled in the form and was refused only
  * at the last step.
  *
@@ -208,6 +210,13 @@ export async function reserveSlot(
  * takes `SELECT ... FOR UPDATE` on the member, the same lock the brand backup
  * write uses. The overlap test is the one `loadReservationBusy` applies, so a
  * time this refuses is a time the next availability read would not offer.
+ *
+ * Bookings are checked again there too: a booking committed between the
+ * availability read and this lock would otherwise leave a hold on a booked
+ * time, and its holder would only learn so (SLOT_TAKEN) when booking. Every
+ * guarded booking write takes the same member lock, so one of the two waits.
+ * A group event (seats > 1) keeps its rule: its own booking at this very start
+ * blocks a hold only once its seats are taken.
  *
  * @internal Exported for the cross-process spec; callers use `reserveSlot`.
  */
@@ -224,9 +233,18 @@ export async function insertHoldGuarded(
     now: number;
   },
 ): Promise<'ok' | 'INVALID_SLOT' | 'RATE_LIMITED'> {
-  const overlap = sql`SELECT 1 AS hit FROM slot_reservation
-      WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}
-        AND slot_start_ms < ${h.endMs} AND slot_end_ms > ${h.startMs} LIMIT 1`;
+  const overlap = memberHeldSql(h.memberId, h.startMs, h.endMs, h.now);
+  // Any booking of this host over the time (as organizer or co-host), except
+  // this event's own group booking at this start while it still has a seat.
+  const booked = sql`SELECT b.id FROM booking b
+      WHERE b.status IN ('accepted','pending')
+        AND b.start_ms < ${h.endMs} AND b.end_ms > ${h.startMs}
+        AND (b.host_member_id = ${h.memberId}
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${h.memberId}))
+        AND NOT (b.event_type_id = ${h.eventTypeId} AND b.start_ms = ${h.startMs}
+             AND (SELECT COUNT(*) FROM booking_attendee ba WHERE ba.booking_id = b.id)
+               < (SELECT COALESCE(et.seats_per_time_slot, 1) FROM event_type et WHERE et.id = ${h.eventTypeId}))
+      LIMIT 1`;
   const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
       WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}`;
   const insert = sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
@@ -242,6 +260,7 @@ export async function insertHoldGuarded(
     return native.txn(
       () => {
         if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
+        if (native.drizzle.get(booked)) return 'INVALID_SLOT' as const;
         const n = native.drizzle.get<{ n: number }>(active);
         if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
         native.drizzle.run(insert);
@@ -254,6 +273,7 @@ export async function insertHoldGuarded(
     await tx.execute(sql`SELECT id FROM member WHERE id = ${h.memberId} FOR UPDATE`);
     const hit = (await tx.execute(overlap)) as unknown as unknown[];
     if (hit.length > 0) return 'INVALID_SLOT' as const;
+    if (((await tx.execute(booked)) as unknown as unknown[]).length > 0) return 'INVALID_SLOT' as const;
     const rows = (await tx.execute(active)) as unknown as Array<{ n: number | string }>;
     if (Number(rows[0]?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
     await tx.execute(insert);
@@ -958,9 +978,19 @@ export async function createTeamBooking(
   // Which hosts are actually free at this instant (busy whether primary or co-host)?
   const candidates: HostCandidate[] = [];
   let sawCalendarFailure = false;
+  const heldAt = Date.now();
   for (const host of hosts) {
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
+    // A host somebody is holding this time with (a soft hold on one of their
+    // own events, from a booking page or the MCP hold tool) is busy here too,
+    // exactly like a host with a booking, as the team slot list already treats
+    // them: assigning them would hand the held time to this booking and leave
+    // the holder's booking SLOT_TAKEN. A held collective or fixed host makes
+    // the time unbookable below (never assigned around). Team events take no
+    // holds of their own, so no hold is ever this booking's to consume. This
+    // read picks hosts; the guarded insert checks again under the lock.
+    if (await db.get<{ hit: number }>(memberHeldSql(host.member_id, args.startMs, endMs, heldAt))) continue;
     // External-calendar conflict check at CREATE time, fail-closed per host: a
     // busy external calendar disqualifies the host, and so does an UNREADABLE
     // one (never assign a host we couldn't verify). If NO verifiable host
@@ -1158,7 +1188,10 @@ async function runGuarded(
 /**
  * Insert a booking, re-checking overlap for EVERY assigned host inside the
  * transaction so a collective/fixed-RR booking can't slip past a co-host who
- * got booked concurrently.
+ * got booked concurrently, and a hold for the same reason: host selection reads
+ * holds outside the lock (with an external-calendar read per host in between),
+ * so a hold committed meanwhile would otherwise still get its host assigned.
+ * The hold write takes the same member lock, so one of the two waits.
  */
 function insertBookingGuarded(
   db: Db,
@@ -1167,10 +1200,14 @@ function insertBookingGuarded(
   endMs: number,
   statements: Array<ReturnType<typeof sql>>,
 ): Promise<boolean> {
+  const now = Date.now();
   return runGuarded(
     db,
     hostMemberIds,
-    hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
+    [
+      ...hostMemberIds.map((id) => memberOverlapSql(id, startMs, endMs)),
+      ...hostMemberIds.map((id) => memberHeldSql(id, startMs, endMs, now)),
+    ],
     statements,
   );
 }
@@ -1723,10 +1760,15 @@ export async function declineBooking(
   const b = await resolveBooking(db, uid, accountId);
   if (!b) return { ok: false, reason: 'NOT_FOUND' };
   if (b.status !== 'pending') return { ok: false, reason: 'GONE' };
-  await db.run(
+  // Guarded on the CURRENT status, as `confirmBooking` is: a confirmation (or a
+  // second decline) that lands between the read above and this write must not
+  // be overwritten into a rejection, and must not be announced twice.
+  const declined = await db.get<{ id: string }>(
     sql`UPDATE booking SET status = 'rejected', cancellation_reason = ${reason ?? null},
-        updated_at = ${Date.now()} WHERE id = ${b.id}`,
+        updated_at = ${Date.now()} WHERE id = ${b.id} AND status = 'pending'
+        RETURNING id`,
   );
+  if (!declined) return { ok: false, reason: 'GONE' };
   return {
     ok: true,
     uid: b.uid,
@@ -2427,7 +2469,7 @@ export async function verifyApiKey(db: Db, plaintext: string): Promise<ApiKeyPri
 }
 
 /**
- * The key list the Developer / MCP & API page shows. Never the hash or the
+ * The key list the MCP group's Connect and keys page shows. Never the hash or the
  * plaintext: `prefix` + `last4` identify a key, and the rest says what it can
  * do (`scopes`, `eventTypeIds` allowlist, `expiresAt`) and whether it is in use
  * (`lastUsedAt`). Times are ISO strings, null when unset. `revoked_at_ms` keeps

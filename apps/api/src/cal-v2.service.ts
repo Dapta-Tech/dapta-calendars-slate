@@ -15,6 +15,7 @@ import { isValidTimeZone, zoneOffsetMinutes, zonedDayKey } from "@slate/shared";
 import { z } from "zod";
 import { BookingService } from "./booking.service";
 import { isServiceError } from "./http";
+import { stableStringify } from "./stable-stringify";
 import { DB } from "./tokens";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -213,17 +214,6 @@ function zonedIso(utcIso: string, timeZone: string): string {
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part(
     "second",
   )}.${String(instant.getUTCMilliseconds()).padStart(3, "0")}${offset}`;
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /** Fixed-length one-way digest for non-credential idempotency inputs. */
@@ -653,6 +643,14 @@ export class CalV2Service {
     idempotencyKey?: string,
     allowedEventTypeIds?: string[] | null,
     keyIdentity = accountId,
+    /**
+     * In-process callers only, never the HTTP body (which still refuses
+     * `reservationUid`): a hold the caller has already proven is its own, to
+     * be consumed by this booking, and `refuseHeld`, so a personal booking
+     * refuses a time someone else holds inside the locked write. The MCP
+     * booking tools are the only callers; `/v2/bookings` passes neither.
+     */
+    internal: { reservationUid?: string; refuseHeld?: boolean } = {},
   ) {
     const input = createBookingSchema.parse(raw);
     const resolved = await this.resolveEvent(accountId, input);
@@ -662,6 +660,9 @@ export class CalV2Service {
     )
       v2Error(404, "RESOURCE_NOT_FOUND", "Event type not found.");
     this.rejectUnsupportedBookingFields(input, resolved.eventType);
+    // Holds exist for one-host events only (the core reserves per host).
+    if (internal.reservationUid && resolved.kind !== "personal")
+      featureNotSupported("reservationUid");
 
     let destinationCalendar:
       { id: string; connectionRef: string; externalId: string } | undefined;
@@ -783,6 +784,9 @@ export class CalV2Service {
                 language: input.attendee.language as "en" | "es",
               },
               answers: input.bookingFieldsResponses,
+              ...(internal.reservationUid
+                ? { reservationUid: internal.reservationUid }
+                : {}),
             },
             false,
             // `onBehalf: false` above is deliberate (these bookings are
@@ -797,6 +801,7 @@ export class CalV2Service {
               apiKeyWrite: true,
               idempotencyKey: storedKey,
               locale: bookerLocale,
+              ...(internal.refuseHeld ? { refuseHeld: true } : {}),
             },
           );
 
