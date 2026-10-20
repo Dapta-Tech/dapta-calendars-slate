@@ -52,6 +52,7 @@ describe('MCP, API docs: the tool list follows the API', () => {
     const html = await render();
     expect(html).toContain(m.toolsTitle);
     expect(html).toContain('find_available_slots');
+    expect(html).toContain('list_my_accounts');
     expect(html).not.toContain(m.mcpUnavailable);
     expectReference(html);
   });

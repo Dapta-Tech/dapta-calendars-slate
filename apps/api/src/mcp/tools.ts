@@ -709,7 +709,7 @@ const listMyAccounts: ToolDef = {
       if (!row) throw notFound('Account');
       accounts = [{ id: call.principal.accountId, name: untrusted(row.name, 120) }];
     } else {
-      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (Settings, MCP & API).');
+      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (MCP, then Connect and keys).');
     }
     return {
       data: { accounts, count: accounts.length },

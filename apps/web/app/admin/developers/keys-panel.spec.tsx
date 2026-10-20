@@ -87,6 +87,7 @@ async function mount(
         mcpAvailable={opts.mcpAvailable ?? true}
         snippets={opts.snippets === undefined ? SNIPPETS : opts.snippets}
         oauth={false}
+        external={false}
         appsConnected={opts.appsConnected ?? false}
         productName="Dapta Calendars"
         docsLabel="API docs"

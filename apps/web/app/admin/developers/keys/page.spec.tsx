@@ -132,7 +132,6 @@ describe('MCP, Connect and keys: the setup guide follows the API', () => {
     expect(html).toContain(m.signInDisconnect.replace(/'/g, '&#x27;'));
     expect(html).toContain(m.chatOAuthTitle);
     expect(html).not.toContain('data-testid="connected-apps"');
-    expect(html).toContain('list_my_accounts');
     expectOtherSectionsUnchanged(html);
   });
 

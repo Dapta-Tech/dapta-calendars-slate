@@ -69,6 +69,9 @@ export default async function DeveloperKeysPage() {
   // only the API knows that (MCP_ENABLED). No connection steps, and no address,
   // unless it says yes; an older API without the field reads as no.
   const mcpEnabled = oauth.mcpEnabled === true;
+  // Sign-in through an external authorization server: no consent page or
+  // Connected apps of ours (the list below only holds this API's own grants).
+  const external = oauth.external === true;
   const { mcpUrl } = resolveMcpConfig();
   const snippets: ConnectSnippets | null = mcpEnabled && mcpUrl
     ? {
@@ -90,14 +93,15 @@ export default async function DeveloperKeysPage() {
         now={Date.now()}
         mcpAvailable={mcpEnabled}
         snippets={snippets}
-        oauth={oauth.enabled}
+        oauth={oauth.enabled || external}
+        external={external}
         appsConnected={oauth.grants.length > 0}
         productName={PRODUCT_NAME}
         docsLabel={admin.developerNav.docs}
         messages={m}
         locale={locale}
       />
-      {oauth.enabled ? (
+      {oauth.enabled && !external ? (
         <ConnectedApps apps={oauth.grants} accessTokenTtlSeconds={oauth.accessTokenTtlSeconds ?? 3600} messages={m} locale={locale} />
       ) : null}
     </DeveloperPage>

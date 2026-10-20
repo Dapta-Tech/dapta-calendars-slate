@@ -28,6 +28,7 @@ export function KeysPanel({
   mcpAvailable,
   snippets,
   oauth,
+  external,
   appsConnected,
   productName,
   docsLabel,
@@ -41,6 +42,8 @@ export function KeysPanel({
   mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
   oauth: boolean;
+  /** People sign in through an external authorization server (see ConnectAgent). */
+  external: boolean;
   /** Some app has signed in through OAuth: an agent is connected without a key. */
   appsConnected: boolean;
   productName: string;
@@ -59,6 +62,7 @@ export function KeysPanel({
         mcpAvailable={mcpAvailable}
         snippets={snippets}
         oauth={oauth}
+        external={external}
         hasKey={hasKey}
         agentConnected={agentConnected}
         productName={productName}
