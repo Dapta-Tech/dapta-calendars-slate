@@ -4,6 +4,9 @@ updates:
   # lockfile). Grouped so routine bumps arrive as one reviewable PR.
   - package-ecosystem: npm
     directory: "/"
+    # Every change lands on develop first and reaches main only through the
+    # develop to main release PR, so update PRs target develop too.
+    target-branch: develop
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -17,6 +20,7 @@ updates:
   # Keep the GitHub Actions we pin in .github/workflows up to date.
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: develop
     schedule:
       interval: weekly
     commit-message:
