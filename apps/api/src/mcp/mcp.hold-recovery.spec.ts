@@ -9,9 +9,10 @@ import { bootHarness, errorText, idem, structured, type Harness } from './mcp-ha
  * handing out its hold_id: the binding write fails, or the call times out and
  * the caller retries while the first attempt is still running. Neither may
  * leave the time blocked for ten minutes against the caller's own retry.
- * `bindHold` is wrapped so a test can make it fail once or wait on a gate.
+ * `bindHold` is wrapped so a test can make it fail once, or make the next calls
+ * wait on gates, one gate per call in order.
  */
-const control = vi.hoisted(() => ({ failNext: false, gate: null as Promise<void> | null, loseSavedReply: false }));
+const control = vi.hoisted(() => ({ failNext: false, gates: [] as Array<Promise<void>>, loseSavedReply: false }));
 // A keyed write's result record (status 200) that commits, then loses its reply.
 vi.mock('@slate/db', async (importOriginal) => {
   const real = await importOriginal<typeof import('@slate/db')>();
@@ -36,7 +37,8 @@ vi.mock('./holds', async (importOriginal) => {
         control.failNext = false;
         throw new Error('binding write failed');
       }
-      if (control.gate) await control.gate;
+      const gate = control.gates.shift();
+      if (gate) await gate;
       return real.bindHold(...args);
     },
   };
@@ -89,9 +91,11 @@ describe('hold_slot recovery', () => {
     const s = await slot(c, 8);
     const args = { event_type_id: introId, start: s.start, time_zone: 'UTC', idempotency_key: idem('recover-slow-0001') };
     let open!: () => void;
-    control.gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
+    control.gates.push(
+      new Promise<void>((resolve) => {
+        open = resolve;
+      }),
+    );
     try {
       expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
       // The first attempt holds the reservation and waits; the retry meets it.
@@ -99,7 +103,7 @@ describe('hold_slot recovery', () => {
       expect(early).toMatch(/^INVALID_SLOT/);
       expect(early).toContain('SAME idempotency_key');
     } finally {
-      control.gate = null;
+      control.gates.length = 0;
       open();
     }
     let replay: Hold | undefined;
@@ -156,9 +160,11 @@ describe('hold_slot recovery', () => {
     const s1 = await slot(c, 16);
     const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-stale-001') };
     let open!: () => void;
-    control.gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
+    control.gates.push(
+      new Promise<void>((resolve) => {
+        open = resolve;
+      }),
+    );
     try {
       // A: reserves, then waits on the gate past its timeout.
       expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
@@ -170,7 +176,7 @@ describe('hold_slot recovery', () => {
       expect(text).toContain('SAME idempotency_key');
       expect(await openClaims()).toBe(1);
     } finally {
-      control.gate = null;
+      control.gates.length = 0;
       open();
     }
     // A completes; C gets A's hold, and it books.
@@ -198,21 +204,58 @@ describe('hold_slot recovery', () => {
     const s1 = await slot(c, 18);
     const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-gone-0001') };
     let open!: () => void;
-    control.gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
+    control.gates.push(
+      new Promise<void>((resolve) => {
+        open = resolve;
+      }),
+    );
     try {
       expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
       // The open record disappears (swept, or removed) while A still runs.
       await h.db.run(sql`DELETE FROM api_idempotency WHERE path = 'hold_slot' AND status_code IS NULL`);
     } finally {
-      control.gate = null;
+      control.gates.length = 0;
       open();
     }
     // A's store writes no row, so it opens the record again and stores there.
     const replay = await replayOf(c, args);
     expect(replay).toMatchObject({ replayed: true, hold: { start_utc: s1.start_utc } });
     expect(await heldAt(s1.start_utc)).toBe(1);
+  });
+
+  it('a result never lands on a record a call with other arguments opened: that call keeps its own answer', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const [early, late] = [await slot(c, 22), await slot(c, 26)];
+    const ask = (at: { start: string }) => ({ event_type_id: introId, start: at.start, time_zone: 'UTC', idempotency_key: idem('recover-swap-0001') });
+    let openA!: () => void;
+    let openB!: () => void;
+    control.gates.push(
+      new Promise<void>((resolve) => {
+        openA = resolve;
+      }),
+      new Promise<void>((resolve) => {
+        openB = resolve;
+      }),
+    );
+    try {
+      // A asks for the early time and stalls past its timeout.
+      expect(errorText(await c.callTool({ name: 'hold_slot', arguments: ask(early) }))).toMatch(/^TIMEOUT/);
+      // A's record vanishes; B, the same key with other arguments, opens a new one and stalls too.
+      await h.db.run(sql`DELETE FROM api_idempotency WHERE path = 'hold_slot' AND status_code IS NULL`);
+      expect(errorText(await c.callTool({ name: 'hold_slot', arguments: ask(late) }))).toMatch(/^TIMEOUT/);
+      // A finishes while B's record is open: it must not store its result there, and gives its hold back.
+      openA();
+      for (let i = 0; i < 50 && (await heldAt(early.start_utc)) > 0; i += 1) await new Promise((done) => setTimeout(done, 20));
+    } finally {
+      control.gates.length = 0;
+      openA();
+      openB();
+    }
+    expect(await heldAt(early.start_utc)).toBe(0);
+    // B finishes, and the key answers B's own time; A's arguments are refused.
+    const replay = await replayOf(c, ask(late));
+    expect(replay).toMatchObject({ replayed: true, hold: { start_utc: late.start_utc } });
+    expect(errorText(await c.callTool({ name: 'hold_slot', arguments: ask(early) }))).toContain('IDEMPOTENCY_KEY_REUSED');
   });
 
   it('a result that was saved but whose reply was lost is kept: the hold stands and books', async () => {

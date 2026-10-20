@@ -1630,10 +1630,12 @@ const cancelBooking: ToolDef = {
  *    and a retry never removes a running attempt's record;
  *  - every attempt that fails reads the record back first and answers a
  *    result another attempt stored meanwhile;
- *  - a result is stored only on a record still open, and a store that wrote
- *    nothing (the record gone, or another attempt's result already there) is
- *    noticed: the stored result wins and this attempt's work is given back
- *    (`undo`), or, the record being gone, it is opened again and stored.
+ *  - a result is stored only on a record still open, and only on one of this
+ *    attempt's own generation: the record it read, or one it opens itself for
+ *    the same request after that one vanished. A store that wrote nothing is
+ *    noticed: a stored result for this request wins and this attempt's work is
+ *    given back (`undo`); a record opened by a call with other arguments makes
+ *    this attempt IDEMPOTENCY_KEY_REUSED, its work given back too.
  * `work` learns whether another attempt holds the record open (`resumed`).
  */
 async function keyedWrite<T extends Record<string, unknown>>(
@@ -1655,55 +1657,75 @@ async function keyedWrite<T extends Record<string, unknown>>(
   if (claim.requestHash !== requestHash)
     throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
   if (claim.statusCode != null) return { data: claim.responseBody as T, replayed: true };
-  /** The result stored under this key by any attempt, if one is. */
-  const storedResult = async (): Promise<T | null> => {
-    const row = await deps.db.get<{ status_code: number | string | null; request_hash: string; response_body: unknown }>(
-      sql`SELECT status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
+  /** The record under this key now, whichever generation it is. */
+  const current = async () => {
+    const row = await deps.db.get<{ id: string; status_code: number | string | null; request_hash: string; response_body: unknown }>(
+      sql`SELECT id, status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
     );
-    if (!row || row.status_code == null || row.request_hash !== requestHash) return null;
-    return parseJsonColumn<T | null>(row.response_body, null);
+    if (!row) return { kind: 'none' as const };
+    if (row.request_hash !== requestHash) return { kind: 'other' as const };
+    if (row.status_code == null) return { kind: 'open' as const, id: row.id };
+    return { kind: 'stored' as const, id: row.id, data: parseJsonColumn<T | null>(row.response_body, null) };
   };
+  const reused = () => failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
   let data: T;
   try {
     data = await work({ resumed: !claim.inserted });
   } catch (error) {
-    const landed = await storedResult().catch(() => null);
-    if (landed) return { data: landed, replayed: true };
+    const now = await current().catch(() => null);
+    if (now?.kind === 'stored' && now.data) return { data: now.data, replayed: true };
     if (claim.inserted)
       await deps.db.run(sql`DELETE FROM api_idempotency WHERE id = ${claim.id} AND status_code IS NULL`).catch(() => undefined);
     throw error;
   }
+  // The records this attempt may write its result on: the one it read, and one
+  // it opens itself if that one is gone. Never a later generation another call
+  // opened, for this request or for other arguments.
+  const mine = [claim.id];
   let saved = false;
   let failure: unknown;
+  let otherArguments = false;
   try {
     saved = await completeApiIdempotency(deps.db, claim.id, 200, data, { onlyOpen: true });
     if (!saved) {
-      // Nothing written: the record is gone, or another attempt's result is
-      // already on it. Gone: open it again and store this result there.
+      // Nothing written: the record is gone, or a result is already on it.
+      // Gone: open it again and store there, but only on a record this very
+      // call opens for this very request.
       const again = await open();
-      if (again.statusCode == null) saved = await completeApiIdempotency(deps.db, again.id, 200, data, { onlyOpen: true });
+      if (again.inserted && again.requestHash === requestHash && again.statusCode == null) {
+        mine.push(again.id);
+        saved = await completeApiIdempotency(deps.db, again.id, 200, data, { onlyOpen: true });
+      } else if (again.requestHash !== requestHash) {
+        otherArguments = true;
+      }
     }
   } catch (error) {
     failure = error;
   }
   if (saved) return { data, replayed: false };
-  // Not known to be stored by this attempt. Whatever is stored now is the answer.
-  let stored: T | null | undefined;
-  try {
-    stored = await storedResult();
-  } catch {
-    stored = undefined;
-  }
-  if (stored) {
-    // A write that committed and only lost its reply stored exactly this result.
-    if (stableStringify(stored) === stableStringify(JSON.parse(JSON.stringify(data)))) return { data, replayed: false };
+  if (otherArguments) {
+    // The key now belongs to a call with other arguments: this attempt's work
+    // stands on nothing, so give it back.
     if (undo) await undo().catch(() => undefined);
-    return { data: stored, replayed: true };
+    throw reused();
+  }
+  // Not known to be stored by this attempt. Whatever is stored now is the answer.
+  const now = await current().catch(() => undefined);
+  if (now?.kind === 'stored' && now.data) {
+    // A write of this attempt that committed and only lost its reply.
+    if (mine.includes(now.id) && stableStringify(now.data) === stableStringify(JSON.parse(JSON.stringify(data))))
+      return { data, replayed: false };
+    if (undo) await undo().catch(() => undefined);
+    return { data: now.data, replayed: true };
+  }
+  if (now?.kind === 'other') {
+    if (undo) await undo().catch(() => undefined);
+    throw reused();
   }
   // Known not stored: give back what this attempt took. Unknown (the record
   // cannot even be read): keep it; a stray hold lapses on its own, a stored
   // hold without its reservation would not.
-  if (stored === null && undo) await undo().catch(() => undefined);
+  if (now && undo) await undo().catch(() => undefined);
   throw failure ?? new Error('The result could not be stored; retry with the same idempotency_key.');
 }
 
