@@ -16,6 +16,80 @@ updates:
           - "*"
     commit-message:
       prefix: "chore(deps)"
+    # A release must be 3 days old before a version update proposes it. This is
+    # Dependabot's documented default, written out so it stays a decision here.
+    # Security updates are not delayed by it.
+    cooldown:
+      default-days: 3
+    # Version lines held back from the group, so one migration does not keep the
+    # routine bumps red. Each needs its own PR with the code changes done; that
+    # PR deletes its rule here. Patches and minors on the current line still flow.
+    ignore:
+      # 3.x needs Node 22.11+ (it calls module.enableCompileCache) and CI, .nvmrc
+      # and the web image run Node 20, so `changeset status` crashes on start.
+      - dependency-name: "@changesets/cli"
+        versions: [">=3.0.0"]
+      # 2.x to 5.x is three majors of config, mocking and coverage changes; 4.x
+      # needs vite 6+ and 5.x needs Node 22.12+. Move both together.
+      - dependency-name: "vitest"
+        versions: [">=3.0.0"]
+      - dependency-name: "@vitest/coverage-v8"
+        versions: [">=3.0.0"]
+      # 6.x is the transition release that deprecates what 7.x (the native
+      # compiler) removes, including `baseUrl`, which apps/web/tsconfig.json uses.
+      # typescript-eslint supports TypeScript below 6.1 only.
+      - dependency-name: "typescript"
+        versions: [">=6.0.0"]
+      # 11+ moves Nest onto Express 5 (new route path syntax, body parsing and
+      # query changes), under every controller, guard and pipe in apps/api.
+      - dependency-name: "@nestjs/common"
+        versions: [">=11.0.0"]
+      - dependency-name: "@nestjs/core"
+        versions: [">=11.0.0"]
+      - dependency-name: "@nestjs/platform-express"
+        versions: [">=11.0.0"]
+      # Express 5 lands with the Nest major above, never ahead of it.
+      - dependency-name: "express"
+        versions: [">=5.0.0"]
+      - dependency-name: "@types/express"
+        versions: [">=5.0.0"]
+      # 4.x changes .default() on transformed schemas (the env schema in
+      # @slate/config stops compiling, and a default would skip the transform)
+      # and rewrites issue messages, which the API returns as error text.
+      # The MCP SDK already gets 4.x through the `zod4` alias in apps/api.
+      - dependency-name: "zod"
+        versions: [">=4.0.0"]
+      # Stay on the 22 line, the Node the API image runs. Newer lines describe
+      # APIs none of our runtimes have (CI and the web image are on Node 20).
+      - dependency-name: "@types/node"
+        versions: [">=23.0.0"]
+      # 10.x needs Node 20.19+, above .nvmrc's 20.18.0, and its recommended set
+      # adds error-level rules. Move it with @eslint/js and a Node floor bump.
+      - dependency-name: "eslint"
+        versions: [">=10.0.0"]
+      - dependency-name: "@eslint/js"
+        versions: [">=10.0.0"]
+      # From 27.x jsdom raises its Node floor (27.4+ needs 20.19+, 30.x needs
+      # 22.22+) and CI runs the web tests on Node 20. Its types move with it.
+      - dependency-name: "jsdom"
+        versions: [">=27.0.0"]
+      - dependency-name: "@types/jsdom"
+        versions: [">=27.0.0"]
+      # The SQLite driver (a native module) and the ORM (pre-1.0, where a minor
+      # can break) sit under the double-booking guarantees. Each moves in its own
+      # PR with the Postgres parity job watched.
+      - dependency-name: "better-sqlite3"
+        versions: [">=12.0.0"]
+      - dependency-name: "@types/better-sqlite3"
+        versions: [">=8.0.0"]
+      - dependency-name: "drizzle-orm"
+        versions: [">=0.39.0"]
+      # The mail transport (SMTP auth and TLS) is four majors behind; it gets
+      # its own review against the notifications adapters.
+      - dependency-name: "nodemailer"
+        versions: [">=7.0.0"]
+      - dependency-name: "@types/nodemailer"
+        versions: [">=7.0.0"]
 
   # Keep the GitHub Actions we pin in .github/workflows up to date.
   - package-ecosystem: github-actions
@@ -25,3 +99,6 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(ci)"
+    # Same 3-day wait as the npm updates above.
+    cooldown:
+      default-days: 3
