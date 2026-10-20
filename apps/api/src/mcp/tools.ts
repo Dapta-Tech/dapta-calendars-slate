@@ -980,7 +980,7 @@ const holdSlot: ToolDef = {
             'INVALID_SLOT',
             'That time cannot be held: it is not offered, or someone is already holding or booking it.',
             resumed
-              ? 'An earlier call with this idempotency_key has not finished; if it timed out it may still be placing this very hold. Retry with the SAME idempotency_key in a few seconds to get its hold_id. If that keeps failing, call find_available_slots and hold another start with a NEW idempotency_key.'
+              ? 'An earlier call with this idempotency_key never stored a result. If it is still running (it may have timed out), it may be placing this very hold: retry with the SAME idempotency_key in a few seconds to get its hold_id. A hold it placed keeps this time until it is booked or lapses, about 10 minutes after it was made; after that the time can be held again. To move on now, call find_available_slots and hold another start with a NEW idempotency_key.'
               : 'Call find_available_slots for current openings and hold one of those starts with a NEW idempotency_key.',
           );
         }
