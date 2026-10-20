@@ -129,7 +129,12 @@ test.describe('a browser that hides its zone', () => {
   test("the times stay in the host's zone", async ({ page }) => {
     await page.goto(PAGE);
     await openFirstDay(page);
-    await expect(page.getByRole('button', { name: /time ?zone/i }).first()).toContainText(/new york/i);
+    const zone = page.getByRole('button', { name: /time ?zone/i }).first();
+    // Opening the picker needs the page hydrated, so the zone effect has run
+    // by the time the label is read (the server HTML already says New York).
+    await zone.click();
+    await expect(zone).toHaveAttribute('aria-expanded', 'true');
+    await expect(zone).toContainText(/new york/i);
   });
 });
 

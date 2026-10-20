@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
-// One clock zone for every run, the one CI runners have. The booking page
+// One clock zone for every run, the one GitHub-hosted runners use. The booking page
 // opens in the visitor's (the process's) zone, so specs that pin times in a
 // fixture zone would otherwise move with the machine they run on.
 process.env.TZ = 'UTC';

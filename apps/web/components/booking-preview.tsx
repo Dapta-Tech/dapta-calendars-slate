@@ -88,6 +88,7 @@ export function previewFlowProps({
     slots: previewSlots(),
     bookingFields: [] as BookingField[],
     initialTimeZone: 'UTC',
+    followBrowserZone: false,
     locale,
     eventTitle,
     lengthMinutes: 30,

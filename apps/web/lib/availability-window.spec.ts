@@ -39,8 +39,18 @@ describe('the windows a booking page reads', () => {
   it('the first read is the visible month: from now to its end, never the whole window', () => {
     const now = at('2026-10-12T15:30:00.000Z');
     const w = firstWindow(NY, now);
-    expect(w).toEqual({ fromMs: now, toMs: at('2026-11-01T04:00:00.000Z') });
+    // The host's month ends at 2026-11-01T04:00Z; the read runs 26 hours past
+    // it so a visitor in any zone west of the host has their month whole.
+    expect(w).toEqual({ fromMs: now, toMs: at('2026-11-02T06:00:00.000Z') });
     expect(w.toMs - w.fromMs).toBeLessThan(MAX_AVAILABILITY_WINDOW_MS);
+  });
+
+  it('the first read covers the visible month of a visitor west of the host', () => {
+    const now = at('2026-10-12T15:30:00.000Z');
+    const w = firstWindow('America/Bogota', now);
+    for (const zone of ['America/Mexico_City', 'America/Los_Angeles', 'Pacific/Honolulu', 'Etc/GMT+12']) {
+      expect(missingSpans([w], monthWindow('2026-10', zone, now, bookingHorizonMs(now))!)).toEqual([]);
+    }
   });
 
   it('a month is clipped to now and to the booking horizon, and is nothing outside them', () => {
