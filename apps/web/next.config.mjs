@@ -38,6 +38,16 @@ const nextConfig = {
      * held together by a test (`lib/body-limit.spec.ts`).
      */
     serverActions: { bodySizeLimit: '3mb' },
+    /**
+     * Next 16.4 added upgrade reminders to `next dev` and `next build`. When a
+     * coding agent runs either one and a reminder is due (by default, when the
+     * installed Next has a security advisory), the command STOPS until the
+     * agent reports the upgrade, so a build or test run halts on a notice
+     * instead of on our code. Upgrades arrive here through Dependabot
+     * and a reviewed PR, so the reminders are off. This changes only those CLI
+     * reminders, not the server.
+     */
+    agentUpgrade: false,
   },
   // Anchor Turbopack to this monorepo (a stray lockfile elsewhere can mislead it).
   turbopack: {
