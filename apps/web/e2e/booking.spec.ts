@@ -37,8 +37,8 @@ async function pickTime(page: Page, which: 'first' | 'last' = 'first'): Promise<
 
 /**
  * The zone the manage page reads times in: the booking's, which is the zone
- * the booking page opened in, the host's. The browser runs in the same one
- * (`timezoneId` in playwright.config.ts), so it is also the visitor's clock.
+ * the booking page opened in, the visitor's own (`timezoneId` in
+ * playwright.config.ts). The seeded host lives in the same one.
  */
 const ZONE = 'America/New_York';
 

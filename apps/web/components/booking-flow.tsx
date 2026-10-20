@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  detectTimeZone,
   formatBookingLocation,
   formatDayLong,
   formatLocation,
@@ -9,6 +10,7 @@ import {
   getMessages,
   readableZone,
   isReservedFieldName,
+  isValidTimeZone,
   monthKeyOf,
   shiftMonth,
   t,
@@ -203,6 +205,20 @@ export function BookingFlow({
     [fields],
   );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
+  /**
+   * The visitor reads the times in their OWN zone from the start, never in
+   * the host's: someone in Miami booking a host in Bogota should not have to
+   * find the picker. The server cannot know the browser's zone, so it renders
+   * the host's (which is also the fallback) and the first effect after
+   * hydration swaps in the browser's. A browser that hides its zone reports
+   * UTC or nothing; that keeps the host's. A zone the visitor already picked
+   * is never overwritten.
+   */
+  useEffect(() => {
+    const own = detectTimeZone();
+    if (own === 'UTC' || own === 'Etc/UTC' || !isValidTimeZone(own)) return;
+    setTimeZone((current) => (current === initialTimeZone ? own : current));
+  }, [initialTimeZone]);
   /**
    * 12h/24h, defaulted from the LOCALE rather than from the browser. Reading
    * `Intl.DateTimeFormat().resolvedOptions().hourCycle` on the client would

@@ -1,6 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+// One clock zone for every run, the one CI runners have. The booking page
+// opens in the visitor's (the process's) zone, so specs that pin times in a
+// fixture zone would otherwise move with the machine they run on.
+process.env.TZ = 'UTC';
+
 // Unit tests for the web app run in plain node (no DOM): what is tested here is
 // server-side session and route-handler logic, which never touches a document.
 export default defineConfig({

@@ -1,0 +1,9 @@
+---
+'@slate/web': patch
+---
+
+The booking page opens in the visitor's own time zone, read from the browser, instead of the host's. A visitor in Miami booking a host in Bogota used to see Bogota times and had to find the zone picker before choosing one; the page listed "Your time zone" there but never applied it. Now the times, the details step, the confirmation and the booking's stored zone (which drives the invitee's emails and the manage page) are in the visitor's zone from the first look. Same on personal and team pages, one-off links and the embed.
+
+The server cannot know the browser's zone, so the page still renders the host's zone and the first effect after hydration swaps in the browser's. A browser that hides its zone (it reports UTC) or reports one the runtime cannot use keeps the host's, so the control is never blank. A zone the visitor already picked is never overwritten, and the picker still changes it. The "{zone}, the host's time" line beside the event is unchanged.
+
+The web unit tests now pin `TZ=UTC` in `vitest.config.ts`, the zone CI runners have, so specs that read times in a fixture zone do not move with the machine they run on.

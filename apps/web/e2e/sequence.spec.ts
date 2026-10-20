@@ -101,6 +101,38 @@ test('keyboard only: arrows to a day, Enter, Tab to a time, type, submit', async
   await expect(page.getByRole('region', { name: /booking confirmed/i })).toBeVisible();
 });
 
+test.describe('a visitor in another zone than the host', () => {
+  // The host is seeded in America/New_York (packages/db/src/seed.ts); this
+  // browser lives in Madrid.
+  test.use({ timezoneId: 'Europe/Madrid' });
+  test('the times open in the browser zone, with no picker opened, and the booking keeps it', async ({ page }) => {
+    const email = visitorEmail('tz-own');
+    await page.goto(PAGE);
+    // The host's zone stays a fact about the host, beside the event.
+    await expect(page.getByText(/new york, the host's time/i)).toBeVisible();
+    // On a phone the times (and their zone) show once a day is chosen.
+    await openFirstDay(page);
+    await expect(page.getByRole('button', { name: /time ?zone/i }).first()).toContainText(/madrid/i);
+    await timesRegion(page).getByRole('button', { name: TIME }).first().click();
+    await expect(details(page).getByRole('button', { name: /time ?zone/i })).toContainText(/madrid/i);
+    await fill(page, email);
+    await page.getByRole('button', { name: /confirm booking/i }).click();
+    await expect(page.getByRole('region', { name: /booking confirmed/i })).toContainText(/madrid/i);
+    const created = await waitForCall('createEvent', (c) => (c.body?.['attendeeEmails'] as string[]).includes(email));
+    expect(created.body?.['timeZone']).toBe('Europe/Madrid');
+  });
+});
+
+test.describe('a browser that hides its zone', () => {
+  // Privacy modes report UTC: the page keeps the host's zone, never a blank.
+  test.use({ timezoneId: 'UTC' });
+  test("the times stay in the host's zone", async ({ page }) => {
+    await page.goto(PAGE);
+    await openFirstDay(page);
+    await expect(page.getByRole('button', { name: /time ?zone/i }).first()).toContainText(/new york/i);
+  });
+});
+
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' });
   test('the sequence runs with transitions cut to nothing', async ({ page }) => {
