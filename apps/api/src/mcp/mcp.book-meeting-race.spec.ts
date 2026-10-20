@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { sql } from '@slate/db';
 import { BookingService } from '../booking.service';
 import { bootHarness, idem, structured, type Harness } from './mcp-harness';
 
@@ -24,6 +25,7 @@ vi.mock('@slate/db', async (importOriginal) => {
 });
 
 const PAGE = 'https://calendar.example.test/acme/alex-rivera/intro-call';
+const TEAM = 'https://calendar.example.test/acme/team/sales/team-demo';
 type Booked = { booking: { uid: string; status: string; start_utc: string }; replayed: boolean };
 
 let h: Harness;
@@ -40,11 +42,23 @@ const book = vi.spyOn(BookingService.prototype, 'book').mockImplementation(async
   return realBook.apply(this, args);
 });
 
+const realTeamBook = BookingService.prototype.teamBook;
+const teamBook = vi.spyOn(BookingService.prototype, 'teamBook').mockImplementation(async function (this: BookingService, ...args: Parameters<BookingService['teamBook']>) {
+  if (twin) {
+    const run = twin;
+    twin = null;
+    await run();
+    return { error: 'SLOT_TAKEN', message: 'That time is no longer available.', status: 409 };
+  }
+  return realTeamBook.apply(this, args);
+});
+
 beforeAll(async () => {
   h = await bootHarness({ MCP_WRITE_RATE_LIMIT_CAPACITY: '100', MCP_RATE_LIMIT_CAPACITY: '200' });
 });
 afterAll(async () => {
   book.mockRestore();
+  teamBook.mockRestore();
   await h.close();
 });
 afterEach(() => {
@@ -52,10 +66,10 @@ afterEach(() => {
   writes.book_meeting = 0;
 });
 
-async function start(nth: number): Promise<string> {
+async function start(nth: number, page = PAGE): Promise<string> {
   const c = await h.connect();
   const r = structured<{ days: { slots: { start: string }[] }[] }>(
-    await c.callTool({ name: 'find_available_slots', arguments: { booking_page_url: PAGE, time_zone: 'UTC' } }),
+    await c.callTool({ name: page === TEAM ? 'find_team_slots' : 'find_available_slots', arguments: { booking_page_url: page, time_zone: 'UTC' } }),
   );
   return r.days.flatMap((d) => d.slots)[nth]!.start;
 }
@@ -98,5 +112,40 @@ describe('book_meeting with two calls on one key', () => {
     expect(late.booking.uid).toBe(winner!.booking.uid);
     expect(late.replayed).toBe(true);
     expect(writes.book_meeting).toBe(1);
+  });
+
+  it('a refusal stored on a key never hides the booking made under it: the booking answers and the record heals', async () => {
+    const c = await h.connect();
+    const args = meeting(await start(14), 'race-key-0003');
+    const booked = structured<Booked>(await c.callTool({ name: 'book_meeting', arguments: args }));
+    // As if a losing twin had stored its refusal after the booking was made.
+    await h.db.run(
+      sql`UPDATE api_idempotency SET status_code = ${409}, response_body = ${JSON.stringify({ error: 'SLOT_TAKEN', message: 'That time is no longer available.' })}
+          WHERE path = 'book_meeting' AND response_body LIKE ${`%${booked.booking.uid}%`}`,
+    );
+    const retry = structured<Booked>(await c.callTool({ name: 'book_meeting', arguments: args }));
+    expect(retry).toMatchObject({ replayed: true, booking: { uid: booked.booking.uid } });
+    const record = await h.db.get<{ status_code: number | string }>(
+      sql`SELECT status_code FROM api_idempotency WHERE path = 'book_meeting' AND response_body LIKE ${`%${booked.booking.uid}%`}`,
+    );
+    expect(Number(record!.status_code)).toBe(201);
+  });
+
+  it('book_team_meeting on a team page: the losing twin answers the twin\'s booking and says nothing was sent', async () => {
+    const [first, second] = [await h.connect(), await h.connect()];
+    const at = await start(8, TEAM);
+    const args = {
+      booking_page_url: TEAM,
+      start: at,
+      attendee: { name: 'Team Race', email: 'team-race@example.org', time_zone: 'UTC' },
+      idempotency_key: idem('race-key-0004'),
+    };
+    let winner: { booking: { uid: string } } | undefined;
+    twin = async () => {
+      winner = structured<{ booking: { uid: string } }>(await second.callTool({ name: 'book_team_meeting', arguments: args }));
+    };
+    const loser = structured<{ booking: { uid: string }; next_step: string }>(await first.callTool({ name: 'book_team_meeting', arguments: args }));
+    expect(loser.booking.uid).toBe(winner!.booking.uid);
+    expect(loser.next_step).toContain('nothing was sent again');
   });
 });

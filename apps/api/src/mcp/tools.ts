@@ -755,11 +755,7 @@ const bookMeeting: ToolDef = {
     });
     if (claim.requestHash !== requestHash)
       throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
-    if (claim.statusCode != null && claim.statusCode >= 400) {
-      const stored = claim.responseBody as { error: string; message: string };
-      throw failureFor(stored.error, stored.message);
-    }
-    if (claim.statusCode != null) {
+    if (claim.statusCode != null && claim.statusCode < 400) {
       const prior = claim.responseBody as BookMeetingData;
       return {
         data: { ...prior, replayed: true },
@@ -775,22 +771,22 @@ const bookMeeting: ToolDef = {
       affected: [data.booking.uid],
     });
     // Two calls with this key can run at once (a retry after a timeout, a
-    // client that sends twice), so several attempts can hold this open record.
-    // A success is stored only on a record that holds no result yet; a stored
-    // success always wins (it names the same booking, the key being unique on
-    // bookings); a stored refusal gives way, because a booking under this key
-    // proves it wrong.
+    // client that sends twice), so several attempts can hold this record. A
+    // booking under the key is the truth: its success is stored over an open
+    // record or a stored refusal (which it proves wrong), in one conditional
+    // UPDATE, and never over a stored success, which wins and is replayed (it
+    // names the same booking, the key being unique on bookings).
     const finish = async (data: BookMeetingData): Promise<ToolResult> => {
-      if (await completeApiIdempotency(deps.db, claim.id, 201, data, { onlyOpen: true })) return answer(data);
-      const now = await deps.db.get<{ id: string; status_code: number | string | null; request_hash: string; response_body: unknown }>(
-        sql`SELECT id, status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
+      if (await completeApiIdempotency(deps.db, claim.id, 201, data, { replaceRefusal: true })) return answer(data);
+      const now = await deps.db.get<{ status_code: number | string | null; request_hash: string; response_body: unknown }>(
+        sql`SELECT status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
       );
       if (now && now.request_hash === requestHash && now.status_code != null && Number(now.status_code) < 400) {
         const stored = parseJsonColumn<BookMeetingData | null>(now.response_body, null);
         if (stored) return answer({ ...stored, replayed: true });
       }
-      if (now && now.request_hash === requestHash && now.status_code != null)
-        await completeApiIdempotency(deps.db, now.id, 201, data);
+      // The record is gone or now belongs to other arguments: the booking
+      // itself still answers every retry (see bookedUnderKey).
       return answer(data);
     };
     // The booking this key already made, if any: by an earlier attempt that
@@ -825,8 +821,14 @@ const bookMeeting: ToolDef = {
         next_step: 'This request had already been booked; nothing was sent again.',
       });
     };
+    // A booking under the key answers ahead of a stored refusal: a twin can
+    // have booked after that refusal was stored.
     const earlier = await bookedUnderKey();
     if (earlier) return earlier;
+    if (claim.statusCode != null) {
+      const stored = claim.responseBody as { error: string; message: string };
+      throw failureFor(stored.error, stored.message);
+    }
     // Booked with this workspace's own credential (API key or OAuth token), it is
     // an API booking for product analytics, like the REST machine API. A keyless
     // call, or one with another workspace's credential, books like the public
@@ -858,15 +860,21 @@ const bookMeeting: ToolDef = {
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;
       // A twin with this key may have booked while this attempt ran (the core
-      // then refuses this one as taken): that booking is the answer.
-      const twin = await bookedUnderKey();
+      // then refuses this one as taken): that booking is the answer. If the
+      // lookup itself fails, the refusal stands.
+      let twin: ToolResult | null = null;
+      try {
+        twin = await bookedUnderKey();
+      } catch (error) {
+        if (error instanceof ToolFailure) throw error;
+      }
       if (twin) return twin;
       // A definite refusal (taken slot, bad answers) is the answer to this exact
       // request, so a retry gets it back instead of trying again. A transient one
       // (the host calendar could not confirm) stays open for the retry to run.
-      // Only the attempt that opened the record stores it, and only while the
-      // record holds no result: never over a twin's stored booking.
-      if (code !== 'CALENDAR_UNAVAILABLE' && claim.inserted)
+      // Stored only while the record holds no result, so never over a twin's
+      // booking; and a booking under the key still overrides it (see above).
+      if (code !== 'CALENDAR_UNAVAILABLE')
         await completeApiIdempotency(deps.db, claim.id, outcome.status, { error: code, message: outcome.message }, { onlyOpen: true });
       try {
         throw failureFor(code, outcome.message);
@@ -886,9 +894,12 @@ const bookMeeting: ToolDef = {
         event_type_title: untrusted(resolved.eventType.title, 200),
         host: outcome.host?.name ? untrusted(outcome.host.name, 100) : null,
       },
-      replayed: false,
-      next_step:
-        outcome.status === 'pending'
+      // The core answers a twin's booking under this key as a duplicate: then
+      // this call sent nothing.
+      replayed: !!outcome.deduplicated,
+      next_step: outcome.deduplicated
+        ? 'This request had already been booked; nothing was sent again.'
+        : outcome.status === 'pending'
           ? 'The host must confirm this request; the invitee was emailed.'
           : 'Confirmed. A confirmation email with a link to reschedule or cancel was sent to the invitee.',
     };
@@ -1103,6 +1114,7 @@ const bookTeamMeeting: ToolDef = {
     let accountId: string;
     let resolved: Resolved;
     let booking: { uid: string; status: string; start: string; end: string; start_utc: string; end_utc: string; time_zone: string; event_type_title: string };
+    let replayed = false;
     if (args.event_type_id) {
       const p = requireScope(call, 'bookings:write');
       accountId = p.accountId;
@@ -1159,6 +1171,7 @@ const bookTeamMeeting: ToolDef = {
         deps,
       );
       const b = (done.data as BookMeetingData).booking;
+      replayed = (done.data as BookMeetingData).replayed;
       booking = {
         uid: b.uid,
         status: b.status,
@@ -1179,9 +1192,11 @@ const bookTeamMeeting: ToolDef = {
         booking,
         team,
         assigned_hosts: assigned,
-        next_step: 'Booked. The invitee was emailed a confirmation with a link to reschedule or cancel.',
+        next_step: replayed
+          ? 'This request had already been booked; nothing was sent again.'
+          : 'Booked. The invitee was emailed a confirmation with a link to reschedule or cancel.',
       },
-      summary: `${line(booking)} Assigned to ${assigned.join(', ') || 'the team'}.`,
+      summary: `${line(booking)} Assigned to ${assigned.join(', ') || 'the team'}.${replayed ? ' (replay of an earlier identical call)' : ''}`,
       affected: [booking.uid],
     };
   },

@@ -315,17 +315,22 @@ export async function claimApiIdempotency(
 /**
  * Store the result on a record. True when a row was written; false when the
  * record is gone (expired and swept, or removed), or, with `onlyOpen`, already
- * holds a result, so a caller can tell a stored result from a lost one instead
- * of losing it silently.
+ * holds a result, or, with `replaceRefusal`, already holds a success (status
+ * below 400), so a caller can tell a stored result from a lost one instead of
+ * losing it silently. The condition is part of the UPDATE, so it is atomic.
  */
 export async function completeApiIdempotency(
   db: Db,
   id: string,
   statusCode: number,
   responseBody: unknown,
-  opts: { onlyOpen?: boolean } = {},
+  opts: { onlyOpen?: boolean; replaceRefusal?: boolean } = {},
 ): Promise<boolean> {
-  const open = opts.onlyOpen ? sql` AND status_code IS NULL` : sql``;
+  const open = opts.onlyOpen
+    ? sql` AND status_code IS NULL`
+    : opts.replaceRefusal
+      ? sql` AND (status_code IS NULL OR status_code >= 400)`
+      : sql``;
   const row = await db.get<{ id: string }>(
     sql`UPDATE api_idempotency
         SET status_code = ${statusCode}, response_body = ${jsonParam(db, responseBody)}
