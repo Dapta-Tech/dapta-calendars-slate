@@ -7,7 +7,6 @@ import { json, type NextFunction, type Request, type Response } from 'express';
 import { AppModule } from './app.module';
 import { securityHeaders } from './security-headers';
 import { requestLogger } from './request-log';
-import { oidcOwnsBody } from './oauth/oauth.settings';
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -53,10 +52,6 @@ async function bootstrap() {
   const large = json({ limit: MAX_REQUEST_BODY });
   const small = json({ limit: DEFAULT_BODY_LIMIT });
   app.use((req: Request, res: Response, next: NextFunction) => {
-    // The OAuth server reads its own bodies (form-encoded token requests, JSON
-    // registrations) with its own 56kb cap; a body parsed here first is one it
-    // can only fall back on with a warning.
-    if (oidcOwnsBody(req.path)) return next();
     const parse = INLINE_IMAGE_ROUTES.some((re) => re.test(req.path)) ? large : small;
     return parse(req, res, next);
   });

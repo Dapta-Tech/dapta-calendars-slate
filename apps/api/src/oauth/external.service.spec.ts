@@ -5,7 +5,6 @@ import { createDb, migrate, seed, type Db } from '@slate/db';
 import { loadServerEnv, oauthConfigProblems, oauthMode, serverEnvSchema } from '@slate/config/env';
 import { ExternalOAuthService, resolveExternalSettings } from './external.service';
 import { startFakeAs, type FakeAs } from './fake-as';
-import { resolveOAuthSettings } from './oauth.settings';
 
 const RESOURCE = 'https://calendar.example.test/mcp';
 
@@ -44,11 +43,10 @@ describe('configuration', () => {
     serverEnvSchema.parse({ OAUTH_ENABLED: 'true', MCP_PUBLIC_URL: RESOURCE, OAUTH_AUTHORIZATION_SERVER: 'https://auth.example.test', ...extra });
   const problems = (extra: Record<string, string> = {}) => oauthConfigProblems(on(extra)).join(' | ');
 
-  it('needs no issuer or signing key of its own, and the built-in server stays unbuilt even when they are set', () => {
+  it('needs no issuer or signing key of its own, and ignores them when a deployment still sets them', () => {
     expect(problems()).toBe('');
     const env = on({ OAUTH_ISSUER: 'https://calendar.example.test', OAUTH_SIGNING_JWK: JSON.stringify(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' })) });
     expect(oauthMode(env)).toBe('external');
-    expect(resolveOAuthSettings(env)).toBeNull();
     expect(resolveExternalSettings(env)).toMatchObject({ issuer: 'https://auth.example.test', resource: RESOURCE });
   });
 

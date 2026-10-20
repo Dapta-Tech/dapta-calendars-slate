@@ -11,18 +11,17 @@ import {
 } from '@/lib/mcp-connect';
 import { resolveMcpConfig } from '@/lib/mcp-config';
 import type { ConnectSnippets } from '../connect-agent';
-import { ConnectedApps } from '../connected-apps';
 import { DeveloperNoAccess, DeveloperPage, developerAccess } from '../developer-page';
 import { KeysPanel } from '../keys-panel';
 import { PRODUCT_NAME } from '@/lib/product-name';
-import type { ConnectedApps as ConnectedAppsList } from '@/lib/admin-api';
+import type { McpSwitches } from '@/lib/admin-api';
 
 /**
  * What the page assumes when it cannot ask the API: OAuth off and MCP off. An
  * API older than OAuth answers 404 here, and one that errors is no proof that
  * `/mcp` answers either, so both fail closed.
  */
-const NO_OAUTH: ConnectedAppsList = { enabled: false, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] };
+const NO_OAUTH: McpSwitches = { mcpEnabled: false };
 
 // Read per request: the MCP address comes from the server's runtime env, which a
 // prerender at build time would freeze to whatever the build machine had.
@@ -48,10 +47,10 @@ async function allowlistEventTypes(): Promise<{ id: string; title: string }[]> {
 
 /**
  * MCP, Connect and keys: the three-step guide that connects an agent (create a
- * key, connect the agent, ask it something), the keys themselves, and the apps
- * that signed in through OAuth. Keys and connected apps share the page because
- * they are the two ways an agent gets in: everything that can act on this
- * workspace from outside is listed, and revoked, in one place.
+ * key, connect the agent, ask it something) and the keys themselves. A sign-in
+ * through the external authorization server is the other way in; that server
+ * keeps those connections, and an owner removes the member or their admin role
+ * to cut one off.
  */
 export default async function DeveloperKeysPage() {
   const { locale, allowed } = await developerAccess();
@@ -62,15 +61,14 @@ export default async function DeveloperKeysPage() {
     adminApi.listApiKeys(),
     // The allowlist picker is optional: a failure here must not take the page down.
     allowlistEventTypes().catch(() => []),
-    adminApi.connectedApps().catch(() => NO_OAUTH),
+    adminApi.mcpSwitches().catch(() => NO_OAUTH),
   ]);
   const m = admin.developer;
   // The web's MCP_PUBLIC_URL says where MCP would answer, not whether it does:
   // only the API knows that (MCP_ENABLED). No connection steps, and no address,
   // unless it says yes; an older API without the field reads as no.
   const mcpEnabled = oauth.mcpEnabled === true;
-  // Sign-in through an external authorization server: no consent page or
-  // Connected apps of ours (the list below only holds this API's own grants).
+  // Sign-in through the external authorization server (OAuth on).
   const external = oauth.external === true;
   // The API's public origin is also what the skill zip is written for: with
   // none, the guide shows a line instead of a download that would fail.
@@ -95,18 +93,13 @@ export default async function DeveloperKeysPage() {
         now={Date.now()}
         mcpAvailable={mcpEnabled}
         snippets={snippets}
-        oauth={oauth.enabled || external}
-        external={external}
-        appsConnected={oauth.grants.length > 0}
+        oauth={external}
         productName={PRODUCT_NAME}
         docsLabel={admin.developerNav.docs}
         skillAvailable={apiOrigin !== null}
         messages={m}
         locale={locale}
       />
-      {oauth.enabled && !external ? (
-        <ConnectedApps apps={oauth.grants} accessTokenTtlSeconds={oauth.accessTokenTtlSeconds ?? 3600} messages={m} locale={locale} />
-      ) : null}
     </DeveloperPage>
   );
 }

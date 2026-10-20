@@ -24,7 +24,7 @@ export default async function DeveloperDocsPage() {
   const title = admin.developerNav.docs;
   if (!allowed) return <DeveloperNoAccess locale={locale} title={title} />;
   const m = admin.developer;
-  const mcpEnabled = await adminApi.connectedApps().then(
+  const mcpEnabled = await adminApi.mcpSwitches().then(
     (r) => r.mcpEnabled === true,
     () => false,
   );

@@ -7,7 +7,7 @@
  * the access tokens a real one would.
  *
  *   discovery (protected-resource metadata, the server's metadata served from
- *   this origin), the built-in server staying dormant with its settings still
+ *   this origin), no /oauth/* route even with the removed built-in server's settings still
  *   present, the 401 challenge, 403 for a sign-in linked to no member, then
  *   with a sign-in: tools/list, whoami, list_my_accounts, list_event_types,
  *   find_available_slots, create_booking, get_booking and cancel_booking, a
@@ -94,7 +94,7 @@ const child = spawn('node', ['node_modules/tsx/dist/cli.mjs', '--tsconfig', 'tsc
     OAUTH_ENABLED: 'true',
     OAUTH_AUTHORIZATION_SERVER: as.issuer,
     MCP_PUBLIC_URL: resource,
-    // The built-in server's settings, still present (as on dev during the switch): ignored.
+    // Settings of the removed built-in server that deployments may still carry: ignored.
     OAUTH_ISSUER: base,
     OAUTH_SIGNING_JWK: JSON.stringify(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' })),
   },
@@ -138,7 +138,7 @@ try {
   check(Array.isArray(prm.scopes_supported) && prm.scopes_supported.length === 0, 'no scopes advertised');
   const asMeta = await (await fetch(`${base}/.well-known/oauth-authorization-server`)).json();
   check(asMeta.issuer === as.issuer && asMeta.jwks_uri === as.jwksUrl, 'the external server metadata is served from this origin');
-  check((await fetch(`${base}/oauth/jwks`)).status === 404, 'the built-in server is not mounted (/oauth/jwks 404)');
+  check((await fetch(`${base}/oauth/jwks`)).status === 404, 'no built-in server routes (/oauth/jwks 404)');
 
   // --- The door without and with a bad sign-in --------------------------------
   const anon = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_bookings', arguments: {} } });

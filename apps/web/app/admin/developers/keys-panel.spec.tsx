@@ -24,7 +24,6 @@ vi.mock('./actions', () => ({
   pingWebhookAction: vi.fn(),
   webhookDeliveriesAction: vi.fn(),
   toggleWebhookAction: vi.fn(),
-  revokeConnectedAppAction: vi.fn(),
 }));
 
 import { createApiKeyAction } from './actions';
@@ -75,7 +74,6 @@ afterEach(() => {
 async function mount(
   opts: {
     keys?: ApiKeyRow[];
-    appsConnected?: boolean;
     snippets?: ConnectSnippets | null;
     mcpAvailable?: boolean;
     skillAvailable?: boolean;
@@ -93,8 +91,6 @@ async function mount(
         mcpAvailable={opts.mcpAvailable ?? true}
         snippets={opts.snippets === undefined ? SNIPPETS : opts.snippets}
         oauth={false}
-        external={false}
-        appsConnected={opts.appsConnected ?? false}
         productName="Dapta Calendars"
         docsLabel="API docs"
         skillAvailable={opts.skillAvailable ?? true}
@@ -189,11 +185,6 @@ describe('KeysPanel', () => {
     // A revoked key that was used once says nothing about today.
     el = await mount({ keys: [key({ lastUsedAt: NOW - DAY, revoked_at_ms: NOW })] });
     expect(step(el, 'agent').hasAttribute('data-done')).toBe(false);
-    act(() => root?.unmount());
-    host?.remove();
-
-    el = await mount({ appsConnected: true });
-    expect(step(el, 'agent').hasAttribute('data-done')).toBe(true);
   });
 
   it('puts the agent tabs in step 2, with the deployment’s MCP address', async () => {

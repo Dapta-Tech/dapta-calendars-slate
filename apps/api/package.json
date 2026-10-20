@@ -13,7 +13,6 @@
     "lint": "eslint src",
     "test": "vitest run",
     "e2e:mcp": "tsx scripts/mcp-e2e.mjs",
-    "e2e:oauth": "tsx scripts/oauth-e2e.mjs",
     "e2e:mcp-login": "tsx scripts/mcp-login-e2e.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -33,7 +32,6 @@
     "@slate/types": "workspace:*",
     "express": "4.22.1",
     "jose": "^6.2.12",
-    "oidc-provider": "9.12.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "tsx": "^4.19.2",
@@ -44,7 +42,6 @@
     "@modelcontextprotocol/client": "^2.3.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.2",
-    "@types/oidc-provider": "^9.12.1",
     "eslint": "^9.17.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

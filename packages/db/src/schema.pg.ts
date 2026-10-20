@@ -574,14 +574,10 @@ export const oneOffLink = pgTable('one_off_link', {
 });
 
 /**
- * The embedded OAuth authorization server's storage (MCP connector, opt-in via
- * OAUTH_ENABLED). One row per artifact in the shape every oidc-provider adapter
- * uses, keyed by (kind, id): grants, refresh tokens, authorization codes,
- * dynamically registered clients, interactions and sessions, plus two kinds of
- * ours, `GrantMeta` (what Connected apps lists) and `ConsentTicket` (the
- * single-use proof of a consent decision). Bearer ids are stored as their
- * SHA-256. `payload` is JSON as TEXT on both dialects: it is never queried
- * inside. Indexes live in migration `…_oauth_record.sql`.
+ * The storage of the removed built-in OAuth authorization server: nothing
+ * reads or writes it any more. It stays declared so the schema matches the
+ * migrations until a later migration drops it. Indexes live in migration
+ * `…_oauth_record.sql`.
  */
 export const oauthRecord = pgTable(
   'oauth_record',

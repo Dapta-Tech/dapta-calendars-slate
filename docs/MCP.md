@@ -18,7 +18,7 @@ without a custom integration.
 |---|---|---|
 | No credential | Just call it | `find_available_slots`, `hold_slot` and `book_meeting` on a **public** booking page; `find_team_slots` and `book_team_meeting` on a **public** team page |
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
-| OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
+| OAuth (opt-in, `OAUTH_ENABLED` with an external authorization server) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the person's owner or admin role |
 
 A key is created by a workspace admin (MCP, then Connect and keys). Send it only in
 the `Authorization` header. A key in the URL (`?api_key=`, `?access_token=`) is
@@ -220,84 +220,14 @@ Leave the header out to use only the public tools.
 
 ## OAuth: connect Claude, ChatGPT, Cursor or VS Code with a sign-in
 
-With `OAUTH_ENABLED=true` (and no `OAUTH_AUTHORIZATION_SERVER`, see the next
-section) the API is also its own OAuth 2.1 authorization
-server, so chat apps and IDEs connect with one click and a consent screen
-instead of a pasted key. It is built on
-[oidc-provider](https://github.com/panva/node-oidc-provider) (no hand-rolled
-protocol code) and asks no identity vendor for anything: the person signs in
-the way the dashboard already signs them in (the configured `AUTH_PROVIDER`).
-Setup is in `SELF-HOSTING.md` ("OAuth for the MCP endpoint").
-
-**What a client sees**
-
-| Endpoint | Path |
-|---|---|
-| Protected resource metadata (RFC 9728) | `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` |
-| Authorization server metadata (RFC 8414) | `/.well-known/oauth-authorization-server` |
-| Authorize, token, register (DCR), revoke (RFC 7009), JWKS | `/oauth/authorize`, `/oauth/token`, `/oauth/register`, `/oauth/revoke`, `/oauth/jwks` |
-
-- **PKCE S256 is required** for every client; `plain` is refused.
-- **Redirects match exactly.** A loopback redirect (`http://localhost`,
-  `http://127.0.0.1`) may use any port, as RFC 8252 requires for native apps.
-- **Resource indicators (RFC 8707).** The only resource is the MCP URL
-  (`MCP_PUBLIC_URL`); access tokens carry it as their audience, and a request
-  for any other resource is `invalid_target`.
-- **`iss` in the authorization response (RFC 9207)**, advertised in the metadata.
-- **Clients identify themselves two ways.** By a Client ID Metadata Document
-  (CIMD: the `client_id` is an https URL this server fetches; what Claude and
-  ChatGPT prefer), or by Dynamic Client Registration (what Cursor and VS Code
-  use), which only accepts these redirect URIs: `https://claude.ai/api/mcp/auth_callback`,
-  `https://claude.com/api/mcp/auth_callback`, `https://www.cursor.com/agents/mcp/oauth/callback`,
-  `https://vscode.dev/redirect`, `https://chatgpt.com/connector_platform_oauth_redirect`,
-  `http://localhost:<port>/callback`, `http://127.0.0.1:<port>/<path>`, plus any
-  the operator adds (`OAUTH_DCR_EXTRA_REDIRECT_URIS`). A registration nobody
-  connects with expires after a day.
-- **Metadata documents are fetched carefully:** https on the default port only,
-  every resolved address must be public (private, loopback, link-local and other
-  special-use ranges are refused before connecting, and refused again on the
-  connected socket against DNS rebinding), 5 KB and 2.5 s caps, a bounded cache,
-  and rate limits per client address and overall.
-- **Tokens.** Access tokens are ES256 JWTs (`typ: at+jwt`) signed with
-  `OAUTH_SIGNING_JWK`, one hour by default, checked on every replica without a
-  database read (signature, `iss`, `aud`, expiry). Refresh tokens rotate on every
-  use; presenting a spent one revokes the whole connection (after a short retry
-  grace, `OAUTH_REFRESH_REUSE_GRACE_SECONDS`, default 10 s). A connection lives
-  at most `OAUTH_GRANT_TTL_DAYS` (90) however often it refreshes. Refresh tokens
-  and codes are stored hashed.
-
-**Signing in, step by step**
-
-1. The app calls a protected tool with no token and gets **HTTP 401** with
-   `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="event-types:read availability:read bookings:read"`
-   (plus the tool's own scope). Public tools, `initialize` and `tools/list`
-   still work with no token.
-2. The app sends the person to `/oauth/authorize`. The browser lands on the web
-   app's consent page (`/auth/consent`), through the normal login if they are
-   signed out.
-3. The page shows the app's name **next to the host it is identified by** (the
-   metadata document's host, or the redirect's for a registered client), where
-   the answer goes, the workspace, and the access in plain words. Loopback
-   redirects carry a warning. Only an **owner or admin** can allow, the same
-   people who can create an API key, because a connection acts for the whole
-   workspace. Anyone signed in can deny.
-4. Allow or Deny goes back through this server, which checks that the same
-   browser started the request; the app receives a code (or `access_denied`)
-   with `iss`, and exchanges it with its PKCE verifier.
-
-Every authorization shows the consent screen; nothing is remembered between
-requests. A new connection gets the read scopes. When the app first calls a
-write or cancel tool it gets **HTTP 403** `error="insufficient_scope"` listing
-every scope it needs, and asks the person to approve again (step-up). API keys
-keep their scope errors as tool results, because a key's scopes cannot be
-stepped up.
-
-**Connected apps.** MCP, Connect and keys lists every connection of the
-workspace (app, host, scopes, who approved it, when, last used) with
-**Disconnect**. Disconnecting revokes the connection: its refresh token stops
-working at once; an access token it already holds keeps working until it
-expires (at most `OAUTH_ACCESS_TOKEN_TTL_SECONDS`). A member who is disabled,
-removed or no longer an owner or admin can no longer refresh either.
+Set `OAUTH_ENABLED=true` and `OAUTH_AUTHORIZATION_SERVER` and chat apps and
+IDEs connect with a sign-in instead of a pasted key. The API is an OAuth
+**resource server** only: sign-in, consent, client registration (CIMD, DCR) and
+tokens all belong to that external authorization server. This API runs no
+authorization server of its own (an earlier built-in one was removed): there is
+no `/oauth/*`, no consent page and no Connected apps list here, and a deployment
+that still sets `OAUTH_ISSUER` or `OAUTH_SIGNING_JWK` is unaffected, they are
+ignored. Setup is in `SELF-HOSTING.md` ("OAuth for the MCP endpoint").
 
 **Add it in Claude** (claude.ai, Desktop, mobile): Settings, then Connectors,
 then Add custom connector; paste the MCP URL; click Add, then Connect. The page
@@ -310,8 +240,8 @@ claude mcp add --transport http calendars https://api.example.com/mcp
 ```
 
 **Add it in Cursor** (`~/.cursor/mcp.json`): give only the URL, no headers.
-Cursor registers itself (DCR), shows the server as needing sign-in, and opens
-the consent page when you click it.
+Cursor registers itself with the authorization server and shows the server as
+needing sign-in.
 
 ```json
 { "mcpServers": { "calendars": { "url": "https://api.example.com/mcp" } } }
@@ -320,14 +250,7 @@ the consent page when you click it.
 **ChatGPT:** Plugins, then the plus button, then Add custom MCP server; paste the
 MCP URL and choose OAuth.
 
-## OAuth with an external authorization server
-
-Set `OAUTH_AUTHORIZATION_SERVER` (with `OAUTH_ENABLED=true`) and the API is an
-OAuth **resource server** only: sign-in, consent, client registration (CIMD,
-DCR) and tokens all belong to that server. The built-in server above is not
-mounted (`/oauth/*` and the consent page answer 404, Connected apps is hidden,
-and `OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are not needed, nor read). Unset, the
-built-in server runs exactly as described above.
+### The authorization server
 
 Any OAuth 2.1 authorization server works if it supports **RFC 8707 resource
 indicators** (its access tokens for `MCP_PUBLIC_URL` carry that URL as their
@@ -365,8 +288,8 @@ token.
   switching). Of those, only members the identity service vouched for within
   `OAUTH_LINK_MAX_AGE_DAYS` (default 30: the issue time of the last token it
   minted for them, seen at a web login) count, the linking member included,
-  and only active owners and admins (the same rule as the built-in server's
-  consent). Checked on every request. None: **HTTP 403** with a plain message
+  and only active owners and admins (the same people who may create an API
+  key). Checked on every request. None: **HTTP 403** with a plain message
   (open the web app once, then reconnect), never a 401, so the client does not
   loop back into its sign-in.
 - **What it may do.** An external server has no scopes of ours, so a sign-in
@@ -410,9 +333,9 @@ token.
   replicas the effective limit is up to N times higher. A shared limiter can be
   plugged in later behind the same `RateLimiter` interface.
 - **Audit.** One JSON line on stdout per tool call: time, request id, protocol
-  version, caller (key prefix such as `dcl_1a2b3c4d`, `oauth:<connection id>`
-  plus the OAuth `client`, `login:<member id prefix>` plus the `client` and
-  `sid` an external server's token carries, or `anonymous`), account id,
+  version, caller (key prefix such as `dcl_1a2b3c4d`, `login:<member id
+  prefix>` plus the `client` and `sid` a sign-in's token carries, or
+  `anonymous`), account id,
   tool, a hash of the redacted arguments, affected booking uids, result and
   latency. It never contains the key, names, emails, notes, answers or
   idempotency keys. Refused validation (a malformed call the SDK rejects before
@@ -433,12 +356,8 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `MCP_RATE_LIMIT_CAPACITY` / `MCP_RATE_LIMIT_REFILL_PER_SEC` | `30` / `1` |
 | `MCP_WRITE_RATE_LIMIT_CAPACITY` / `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `10` / `0.2` |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` |
-| `OAUTH_ENABLED` | `false` (on requires `MCP_PUBLIC_URL`, `OAUTH_ISSUER`, `OAUTH_SIGNING_JWK`) |
-| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` / `OAUTH_GRANT_TTL_DAYS` | `3600` / `90` |
-| `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` |
-| `OAUTH_CIMD_ENABLED` / `OAUTH_DCR_ENABLED` | `true` / `true` |
-| `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset |
-| `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
+| `OAUTH_ENABLED` | `false` (on requires `MCP_ENABLED`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`) |
+| `OAUTH_AUTHORIZATION_SERVER` | unset (set: the external server's issuer; this API is then a resource server only) |
 | `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
 | `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after the identity service last vouched for someone in an account a sign-in still reaches it) |
 
@@ -454,15 +373,8 @@ confirmed (twice) and declined, and a round-robin team booking.
 
 `pnpm e2e:mcp-login` does the same with an external authorization server: a
 stand-in server (RS256 keys made by the script, its metadata and JWKS on a
-loopback port) mints the tokens, and the script checks discovery, the dormant
-built-in server, the 401 challenge, the 403 for a sign-in linked to no member,
+loopback port) mints the tokens, and the script checks discovery, that no
+`/oauth/*` route exists, the 401 challenge, the 403 for a sign-in linked to no member,
 whoami, list_my_accounts, list_event_types, a booking, a hold booked with its
 `hold_id` and the pending requests with a sign-in, and a sign-in reaching two
 accounts (including a hold made naming one account, booked by `book_meeting`).
-
-`pnpm e2e:oauth` does the same for OAuth with the web app built for production
-and a headless browser: discovery, the 401 challenge, registration, the real
-login and consent pages, the code exchange with PKCE, tool calls with the token,
-the 403 step-up, refresh rotation, a denied request, Claude Code's real metadata
-document (when the network allows), Disconnect from Connected apps, and the 401
-once the access token expires.

@@ -1208,7 +1208,7 @@ const whoamiInput = z.object({});
 const whoami: ToolDef = {
   name: 'whoami',
   title: 'Show the account and key behind this connection',
-  description: 'Returns the workspace this API key or connected app belongs to, the owner\'s name and time zone, and what it is allowed to do. Needs any valid API key or connection.',
+  description: 'Returns the workspace this API key or sign-in belongs to, the owner\'s name and time zone, and what it is allowed to do. Needs any valid API key or sign-in.',
   scope: null,
   access: () => ({ scope: null }),
   write: false,
@@ -1250,7 +1250,7 @@ const whoami: ToolDef = {
         },
         server_time_utc: new Date().toISOString(),
       },
-      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); ${p.kind === 'oauth' ? `${p.grantId ? 'connected app' : 'sign-in'} ${p.prefix}` : `key ${p.prefix}`} with scopes ${p.scopes.join(', ') || 'none'}.`,
+      summary: `Workspace "${untrusted(account.name, 80)}" (${account.code}); ${p.kind === 'oauth' ? `sign-in ${p.prefix}` : `key ${p.prefix}`} with scopes ${p.scopes.join(', ') || 'none'}.`,
     };
   },
 };

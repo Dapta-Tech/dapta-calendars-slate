@@ -5,7 +5,7 @@ import { E2E, HOST, answerWith, clearThrottle, signIn, throttle } from './stack'
  * MCP, Connect and keys shows how to connect an agent only when the API says it
  * serves MCP. The web is started with MCP_PUBLIC_URL set (playwright.config.ts),
  * so the address alone would always be there; what decides is the API's own
- * `mcpEnabled` on the Connected apps read.
+ * `mcpEnabled` on the MCP switches read.
  *
  * - The suite's API runs with MCP on (the default), so the page shows the real
  *   address, and that address really answers.

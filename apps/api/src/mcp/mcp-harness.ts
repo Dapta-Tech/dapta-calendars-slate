@@ -11,7 +11,6 @@ import { json, type NextFunction, type Request as ExpressRequest, type Response 
 import { createApiKey, createDb, migrate, seed, sql, type Db } from '@slate/db';
 import { AppModule } from '../app.module';
 import { McpGateway } from './mcp.gateway';
-import { oidcOwnsBody } from '../oauth/oauth.settings';
 
 /**
  * A real API for specs: the whole `AppModule` (so every `@Inject` is exercised
@@ -56,14 +55,10 @@ const ENV_KEYS = [
   'PUBLIC_APP_URL',
   'MCP_PUBLIC_URL',
   'OAUTH_ENABLED',
+  // Settings of the removed built-in server that deployments may still carry:
+  // set here only to prove they are ignored.
   'OAUTH_ISSUER',
   'OAUTH_SIGNING_JWK',
-  'OAUTH_ACCESS_TOKEN_TTL_SECONDS',
-  'OAUTH_GRANT_TTL_DAYS',
-  'OAUTH_REFRESH_REUSE_GRACE_SECONDS',
-  'OAUTH_CIMD_ENABLED',
-  'OAUTH_DCR_ENABLED',
-  'OAUTH_DCR_EXTRA_REDIRECT_URIS',
   'OAUTH_AUTHORIZATION_SERVER',
   'OAUTH_JWKS_URL',
   'OAUTH_LINK_MAX_AGE_DAYS',
@@ -92,9 +87,9 @@ export async function bootHarness(env: HarnessEnv = {}, opts: { port?: number } 
   const other = await seedOtherTenant(db);
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false, bodyParser: false });
-  // Same split as main.ts: the OAuth server parses its own bodies.
+  // Body parsing owned here, as in main.ts.
   const parse = json({ limit: '100kb' });
-  app.use((req: ExpressRequest, res: ExpressResponse, next: NextFunction) => (oidcOwnsBody(req.path) ? next() : parse(req, res, next)));
+  app.use((req: ExpressRequest, res: ExpressResponse, next: NextFunction) => parse(req, res, next));
   await app.listen(opts.port ?? 0, '127.0.0.1');
   // Providers read the environment while the app is built; put it back at once
   // so harnesses booted side by side do not leak settings into each other.

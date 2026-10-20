@@ -10,8 +10,8 @@ import { startFakeAs, type FakeAs } from './fake-as';
  * The MCP endpoint as a resource server for an external authorization server,
  * end to end over HTTP on the whole AppModule: discovery, the 401 challenge,
  * token checks, the person-to-member mapping (403 when there is none), one and
- * several accounts, and the built-in server staying dormant even with its
- * issuer and key still configured (the dev rollout state).
+ * several accounts, and no built-in server routes even with its old issuer
+ * and key still configured (what dev still carries).
  */
 
 const RESOURCE = 'https://calendar.example.test/mcp';
@@ -121,28 +121,17 @@ describe('discovery', () => {
     expect(m.registration_endpoint).toBe(`${as.issuer}/oauth2/register`);
   });
 
-  it('the built-in server is not mounted, even with its issuer and key still set', async () => {
-    for (const path of ['/oauth/jwks', '/oauth/authorize?client_id=x', '/oauth/interaction/abc']) expect((await fetch(`${h.base}${path}`)).status).toBe(404);
+  it('no built-in server routes exist, even with its old issuer and key still set', async () => {
+    for (const path of ['/oauth/jwks', '/oauth/authorize?client_id=x', '/oauth/interaction/abc', '/v1/oauth/consent', '/v1/oauth/consent/abc'])
+      expect((await fetch(`${h.base}${path}`)).status, path).toBe(404);
     const reg = await fetch(`${h.base}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(reg.status).toBe(404);
   });
 
-  it('the consent API answers 404 with its own code, and Connected apps says external with nothing listed', async () => {
+  it('the MCP switches the dashboard reads: external, MCP on, nothing listed', async () => {
     const owner = { 'x-slate-account': h.accountId, 'x-slate-member': await memberId(h, 'alex-rivera') };
-    const consent = await fetch(`${h.base}/v1/oauth/consent/abc`, { headers: owner });
-    expect(consent.status).toBe(404);
-    expect(((await consent.json()) as { error: string }).error).toBe('EXTERNAL_AUTHORIZATION_SERVER');
-    const decide = await fetch(`${h.base}/v1/oauth/consent/abc`, { method: 'POST', headers: { ...owner, 'content-type': 'application/json' }, body: '{"decision":"approve"}' });
-    expect(decide.status).toBe(404);
     const grants = await fetch(`${h.base}/v1/oauth/grants`, { headers: owner });
     expect(await grants.json()).toEqual({ enabled: false, external: true, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
-    // The mode decides before the session: signed out, and with no request at all, the same 404.
-    const signedOut = await setup({ AUTH_LOCAL_STRICT: 'true' });
-    for (const [method, path] of [['GET', '/v1/oauth/consent/abc'], ['POST', '/v1/oauth/consent/abc'], ['GET', '/v1/oauth/consent']] as const) {
-      const res = await fetch(`${signedOut.h.base}${path}`, { method, headers: { 'content-type': 'application/json' }, ...(method === 'POST' ? { body: '{}' } : {}) });
-      expect(res.status).toBe(404);
-      expect(((await res.json()) as { error: string }).error).toBe('EXTERNAL_AUTHORIZATION_SERVER');
-    }
   });
 
   it('answers 503, never 500, while the external metadata cannot be fetched', async () => {

@@ -28,8 +28,6 @@ export function KeysPanel({
   mcpAvailable,
   snippets,
   oauth,
-  external,
-  appsConnected,
   productName,
   docsLabel,
   skillAvailable,
@@ -42,11 +40,8 @@ export function KeysPanel({
   /** The API says it serves MCP; off, the guide has no steps (see SetupGuide). */
   mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
+  /** People can also sign in through the external authorization server (see ConnectAgent). */
   oauth: boolean;
-  /** People sign in through an external authorization server (see ConnectAgent). */
-  external: boolean;
-  /** Some app has signed in through OAuth: an agent is connected without a key. */
-  appsConnected: boolean;
   productName: string;
   docsLabel: string;
   /** The skill zip can be built here (the installation has a public API address). */
@@ -57,7 +52,7 @@ export function KeysPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const working = keys.filter((k) => isWorkingKey(k, now));
   const hasKey = working.length > 0;
-  const agentConnected = appsConnected || working.some((k) => toMs(k.lastUsedAt) !== null);
+  const agentConnected = working.some((k) => toMs(k.lastUsedAt) !== null);
   return (
     <>
       <SetupGuide
@@ -65,7 +60,6 @@ export function KeysPanel({
         mcpAvailable={mcpAvailable}
         snippets={snippets}
         oauth={oauth}
-        external={external}
         hasKey={hasKey}
         agentConnected={agentConnected}
         productName={productName}

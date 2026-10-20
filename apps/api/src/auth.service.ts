@@ -23,26 +23,23 @@ export function loginSeenRefreshMs(maxAgeDays: number): number {
 
 export interface MachinePrincipal {
   /**
-   * For an OAuth connection, `oauth:<grantId>`; for a sign-in through an
-   * external authorization server, `login:<memberId>`: the idempotency and
-   * rate-limit namespace.
+   * For a sign-in through the external authorization server,
+   * `login:<memberId>`: the idempotency and rate-limit namespace.
    */
   keyId: string;
-  /** The key's public `dcl_<8hex>` handle (`oauth:<grantId>` for OAuth, `login:<8 chars>` for a sign-in); safe to log. */
+  /** The key's public `dcl_<8hex>` handle (`login:<8 chars>` for a sign-in); safe to log. */
   prefix: string;
   accountId: string;
   scopes: string[];
   eventTypeIds: string[] | null;
-  /** Epoch ms, or null when the key never expires (an OAuth token always expires). */
+  /** Epoch ms, or null when the key never expires (a sign-in's token always expires). */
   expiresAtMs: number | null;
   /** How the caller authenticated. Absent means an API key (every pre-OAuth call site). */
   kind?: 'api_key' | 'oauth';
-  /** OAuth only: the member who approved the connection (the token's `sub`), or the member a sign-in acts as. */
+  /** Sign-in only: the member it acts as. */
   memberId?: string;
-  /** OAuth only: the client the token was issued to (a URL for CIMD clients). */
+  /** Sign-in only: the client the token was issued to (a URL for CIMD clients), when the token says. */
   clientId?: string;
-  /** OAuth only: the connection (grant) the token belongs to. Absent on a sign-in through an external server. */
-  grantId?: string;
   /** External sign-in only: the authorization server's session (`sid`), when the token carries one. Logged, never trusted. */
   sessionId?: string;
 }

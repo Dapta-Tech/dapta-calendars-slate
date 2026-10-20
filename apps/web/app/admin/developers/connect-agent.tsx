@@ -85,17 +85,15 @@ export function CodeBlock({
 export function ConnectAgent({
   snippets,
   oauth = false,
-  external = false,
   messages: m,
 }: {
   snippets: ConnectSnippets | null;
-  /** OAuth is on: chat apps connect with a sign-in. */
-  oauth?: boolean;
   /**
-   * The sign-in is an external authorization server's: people sign in with the
-   * account they use here, and a connection acts with their admin role.
+   * OAuth is on: chat apps connect with a sign-in through the external
+   * authorization server, with the account people use here, and a connection
+   * acts with their admin role.
    */
-  external?: boolean;
+  oauth?: boolean;
   messages: DevMessages;
 }) {
   const base = useId();
@@ -124,7 +122,7 @@ export function ConnectAgent({
 
   return (
     <div>
-      {external ? <SignInNote m={m} /> : null}
+      {oauth ? <SignInNote m={m} /> : null}
       {/* Wraps rather than scrolls: in the guide's step column a scrolling strip
           hid two of the five agents at 360px with nothing to say they were
           there, and the old bleed to the page gutter ran into the step numbers. */}
@@ -159,7 +157,7 @@ export function ConnectAgent({
         className="flex flex-col gap-field rounded-xl border border-border bg-card p-field"
       >
         {active === 'chat' && oauth && snippets ? (
-          <ChatOAuth snippets={snippets} external={external} m={m} />
+          <ChatOAuth snippets={snippets} m={m} />
         ) : active === 'chat' ? (
           <div className="flex flex-col gap-tight">
             <h3 className="text-base font-semibold">{m.chatTitle}</h3>
@@ -200,9 +198,9 @@ export function ConnectAgent({
 }
 
 /**
- * Signing in through an external authorization server, said once above the
- * tabs: with which account, what a connection may do, and how it ends. There
- * is no consent page or Connected apps list here to say it instead.
+ * Signing in through the external authorization server, said once above the
+ * tabs: with which account, what a connection may do, and how it ends. That
+ * server shows the consent screen and keeps the connections.
  */
 function SignInNote({ m }: { m: DevMessages }) {
   return (
@@ -216,7 +214,7 @@ function SignInNote({ m }: { m: DevMessages }) {
 }
 
 /** The chat-app tab when OAuth is on: real "add custom connector" steps, no key. */
-function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; external: boolean; m: DevMessages }) {
+function ChatOAuth({ snippets, m }: { snippets: ConnectSnippets; m: DevMessages }) {
   const copy = { copyLabel: m.copy, copiedLabel: m.copied };
   const steps = (items: string[]) => (
     <ol className="flex list-decimal flex-col gap-tight pl-group text-sm text-muted-foreground">
@@ -227,7 +225,7 @@ function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; exter
   );
   return (
     <>
-      <p className="max-w-prose text-sm text-muted-foreground">{external ? m.chatSignInLead : m.chatOAuthLead}</p>
+      <p className="max-w-prose text-sm text-muted-foreground">{m.chatSignInLead}</p>
       <div>
         <a href={snippets.claudeConnector} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size: 'lg' })}>
           {m.addToClaude}
@@ -236,14 +234,12 @@ function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; exter
       <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
       <div className="flex flex-col gap-tight">
         <h3 className="text-base font-semibold">{m.chatClaudeHeading}</h3>
-        {steps([m.chatClaudeStep1, m.chatClaudeStep2, external ? m.chatSignInClaudeStep3 : m.chatClaudeStep3])}
+        {steps([m.chatClaudeStep1, m.chatClaudeStep2, m.chatSignInClaudeStep3])}
       </div>
       <div className="flex flex-col gap-tight">
         <h3 className="text-base font-semibold">{m.chatGptHeading}</h3>
-        {steps([m.chatGptStep1, m.chatGptStep2, external ? m.chatSignInGptStep3 : m.chatGptStep3])}
+        {steps([m.chatGptStep1, m.chatGptStep2, m.chatSignInGptStep3])}
       </div>
-      {/* A sign-in has no step-up: what it may do is said above the tabs. */}
-      {external ? null : <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>}
     </>
   );
 }

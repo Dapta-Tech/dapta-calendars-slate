@@ -314,16 +314,10 @@ export const adminApi = {
   createApiKey: (b: unknown) => req<{ plaintext: string; prefix: string }>('POST', '/v1/api-keys', b),
   revokeApiKey: (id: string) => req<void>('DELETE', `/v1/api-keys/${id}`),
 
-  // OAuth connections (the MCP connector). The consent pair is called by the
-  // `/auth/consent` page with the signed-in host's session; the API refuses an
-  // approval from anyone but an owner or admin.
-  oauthConsent: (uid: string) => req<OAuthConsent>('GET', `/v1/oauth/consent/${encodeURIComponent(uid)}`),
-  /** The consent read with no request: always a 404, coded when an external server signs people in. */
-  oauthConsentWithoutRequest: () => req<void>('GET', '/v1/oauth/consent'),
-  oauthDecide: (uid: string, decision: 'approve' | 'deny') =>
-    req<{ redirectTo: string }>('POST', `/v1/oauth/consent/${encodeURIComponent(uid)}`, { decision }),
-  connectedApps: () => req<ConnectedApps>('GET', '/v1/oauth/grants'),
-  revokeConnectedApp: (id: string) => req<void>('DELETE', `/v1/oauth/grants/${encodeURIComponent(id)}`),
+  // The MCP switches (whether the API serves MCP, and whether people sign in
+  // through an external authorization server), at the address the removed
+  // Connected apps list used to live.
+  mcpSwitches: () => req<McpSwitches>('GET', '/v1/oauth/grants'),
 
   // Webhooks
   listWebhooks: () => req<WebhookRow[]>('GET', '/v1/webhooks'),
@@ -495,49 +489,12 @@ export interface CalendarSummary {
  * one may be absent (an older API) or null (never used / no expiry / all event
  * types), and the page renders both.
  */
-/** What the consent page shows for one authorization request. */
-export interface OAuthConsent {
-  uid: string;
-  expiresAt: number;
-  client: {
-    id: string;
-    /** Self-asserted by the app; always shown next to `host`. */
-    name: string | null;
-    /** What to trust: the client_id URL's host (CIMD) or the redirect's. */
-    host: string;
-    via: 'cimd' | 'dcr';
-    redirectUri: string;
-    redirectHost: string;
-    loopback: boolean;
-  };
-  scopes: string[];
-  staysConnected: boolean;
-  grantDays: number;
-  account: { name: string; code: string };
-  member: { email: string | null; displayName: string | null };
-  canApprove: boolean;
-}
-
-export interface ConnectedApp {
-  id: string;
-  clientName: string | null;
-  clientHost: string;
-  redirectHost: string;
-  via: 'cimd' | 'dcr';
-  scopes: string[];
-  approvedBy: string | null;
-  createdAt: number;
-  lastUsedAt: number | null;
-  expiresAt: number | null;
-}
-
-/** `enabled: false` when the deployment runs without OAuth (the list is then empty). */
-export interface ConnectedApps {
-  enabled: boolean;
+/** What the MCP pages read from the API before they show how to connect an agent. */
+export interface McpSwitches {
   /**
    * True when an external authorization server signs connections in: people
-   * connect by signing in with their account, and the connections live there,
-   * so `grants` stays empty and `enabled` false. Absent on an older API.
+   * connect by signing in with their account. Absent on an older API or with
+   * OAuth off.
    */
   external?: boolean;
   /**
@@ -546,8 +503,6 @@ export interface ConnectedApps {
    * address it has not been told is answering.
    */
   mcpEnabled?: boolean;
-  accessTokenTtlSeconds: number | null;
-  grants: ConnectedApp[];
 }
 
 export interface ApiKeyRow extends KeyDetails {

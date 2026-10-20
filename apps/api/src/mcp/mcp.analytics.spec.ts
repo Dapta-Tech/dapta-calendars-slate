@@ -2,11 +2,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, idem, structured, type Harness } from './mcp-harness';
-import { bootOAuth, callTool, connect, publicClient, toolResult, type OAuthHarness } from '../oauth/oauth-harness';
 
 /**
  * Which channel product analytics records for a booking made over the MCP. A
- * call that carries the page's own workspace credential (API key or OAuth token)
+ * call that carries the page's own workspace credential (API key or sign-in)
  * is the `api` channel, like the REST machine API; a keyless `book_meeting`, or
  * one with another workspace's credential, stays `booking_page`, like the public
  * booking route it wraps. Replays record nothing new.
@@ -110,39 +109,6 @@ describe('booking analytics channel over the MCP', () => {
     };
     structured(await c.callTool({ name: 'create_booking', arguments: args }));
     structured(await c.callTool({ name: 'create_booking', arguments: args }));
-    expect(channels()).toEqual(['api']);
-  });
-});
-
-describe('booking analytics channel over OAuth', () => {
-  let o: OAuthHarness;
-  beforeAll(async () => {
-    o = await bootOAuth();
-  });
-  afterAll(async () => {
-    await o.close();
-  });
-
-  it('book_meeting with an OAuth token of the page\'s workspace records api', async () => {
-    const token = (await connect(o, await publicClient(o))).access_token;
-    const found = await toolResult<Slots>(await callTool(o, 'find_available_slots', { booking_page_url: PAGE, time_zone: 'UTC' }));
-    const start = found.structuredContent!.days.flatMap((d) => d.slots)[34]!.start;
-    created.mockClear();
-    const booked = await toolResult(
-      await callTool(
-        o,
-        'book_meeting',
-        {
-          booking_page_url: PAGE,
-          start,
-          attendee: { name: 'OAuth', email: 'oauth@example.org', time_zone: 'UTC' },
-          answers: { company: 'c' },
-          idempotency_key: idem('chan-oauth-0001'),
-        },
-        token,
-      ),
-    );
-    expect(booked.isError).toBeFalsy();
     expect(channels()).toEqual(['api']);
   });
 });

@@ -1,6 +1,6 @@
 /**
  * MCP, API docs lists the MCP tools only when the API says it serves MCP
- * (`mcpEnabled` on the Connected apps read): the list describes an endpoint, and
+ * (`mcpEnabled` on the MCP switches read): the list describes an endpoint, and
  * a deployment can set MCP_PUBLIC_URL while the API answers `/mcp` with 404. MCP
  * off, an older API without the field, and a failed read all land on one
  * sentence instead. The API reference does not depend on MCP and shows in
@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 import { getMessages } from '@slate/shared';
 
-const admin = vi.hoisted(() => ({ me: vi.fn(), connectedApps: vi.fn() }));
+const admin = vi.hoisted(() => ({ me: vi.fn(), mcpSwitches: vi.fn() }));
 vi.mock('@/lib/admin-api', () => ({
   adminApi: admin,
   isAdminRole: (role: string) => role === 'owner' || role === 'admin',
@@ -48,7 +48,7 @@ describe('MCP, API docs: the tool list follows the API', () => {
   });
 
   it('MCP on: the tools, then the reference', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: true });
     const html = await render();
     expect(html).toContain(m.toolsTitle);
     expect(html).toContain('find_available_slots');
@@ -58,21 +58,21 @@ describe('MCP, API docs: the tool list follows the API', () => {
   });
 
   it('MCP off: one sentence instead of the tools, and the reference', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: false });
     const html = await render();
     expectNoTools(html);
     expectReference(html);
   });
 
   it('an older API that does not report MCP reads as off', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({});
     const html = await render();
     expectNoTools(html);
     expectReference(html);
   });
 
   it('a failed read fails closed, and the reference still renders', async () => {
-    admin.connectedApps.mockRejectedValue(new Error('503 Service Unavailable'));
+    admin.mcpSwitches.mockRejectedValue(new Error('503 Service Unavailable'));
     const html = await render();
     expectNoTools(html);
     expectReference(html);
@@ -83,6 +83,6 @@ describe('MCP, API docs: the tool list follows the API', () => {
     const html = await render();
     expect(html).toContain(getMessages('en').admin.members.noAccessTitle);
     expect(html).not.toContain(m.apiRefTitle);
-    expect(admin.connectedApps).not.toHaveBeenCalled();
+    expect(admin.mcpSwitches).not.toHaveBeenCalled();
   });
 });

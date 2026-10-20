@@ -1,6 +1,6 @@
 /**
  * MCP, Connect and keys shows how to connect an agent only when the API says it
- * serves MCP (`mcpEnabled` on the Connected apps read). The web's
+ * serves MCP (`mcpEnabled` on the MCP switches read). The web's
  * MCP_PUBLIC_URL alone is not enough: a deployment can set it while the API
  * answers `/mcp` with 404. MCP off, an older API without the field, and a
  * failed read all land on the same honest state: one sentence, no steps, no
@@ -19,7 +19,7 @@ const admin = vi.hoisted(() => ({
   listEventTypes: vi.fn(),
   listTeams: vi.fn(),
   teamEventTypes: vi.fn(),
-  connectedApps: vi.fn(),
+  mcpSwitches: vi.fn(),
 }));
 vi.mock('@/lib/admin-api', () => ({
   adminApi: admin,
@@ -36,7 +36,6 @@ vi.mock('../developer-client', () => ({
   ApiKeys: () => <div data-testid="api-keys" />,
   Webhooks: () => <div data-testid="webhooks" />,
 }));
-vi.mock('../connected-apps', () => ({ ConnectedApps: () => <div data-testid="connected-apps" /> }));
 
 import DeveloperKeysPage from './page';
 
@@ -80,7 +79,7 @@ describe('MCP, Connect and keys: the setup guide follows the API', () => {
   });
 
   it('MCP on: shows the steps with the configured address', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: true });
     const html = await render();
     expect(html).toContain(m.guideTitle);
     expect(html).toContain('role="tablist"');
@@ -92,58 +91,56 @@ describe('MCP, Connect and keys: the setup guide follows the API', () => {
   });
 
   it('MCP off: the honest state, and no address', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: false });
     const html = await render();
     expectUnavailable(html);
     expectOtherSectionsUnchanged(html);
   });
 
   it('an older API that does not report MCP reads as off', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({});
     const html = await render();
     expectUnavailable(html);
     expectOtherSectionsUnchanged(html);
   });
 
   it('a failed read fails closed: MCP off, and the rest of the page still renders', async () => {
-    admin.connectedApps.mockRejectedValue(new Error('503 Service Unavailable'));
+    admin.mcpSwitches.mockRejectedValue(new Error('503 Service Unavailable'));
     const html = await render();
     expectUnavailable(html);
     expectOtherSectionsUnchanged(html);
-    expect(html).not.toContain('data-testid="connected-apps"');
   });
 
   it('MCP on without a public address keeps the existing "set MCP_PUBLIC_URL" note', async () => {
     vi.stubEnv('MCP_PUBLIC_URL', '');
     vi.stubEnv('API_PUBLIC_URL', '');
     vi.stubEnv('NODE_ENV', 'production');
-    admin.connectedApps.mockResolvedValue({ enabled: false, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: true });
     const html = await render();
     expect(html).toContain(m.mcpUrlMissing);
     expect(html).not.toContain(m.mcpUnavailable);
   });
 
-  it('sign-in through an external authorization server: says how it signs in, what it may do and how to disconnect; no Connected apps', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, external: true, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] });
+  it('sign-in through an external authorization server: says how it signs in, what it may do and how to disconnect', async () => {
+    admin.mcpSwitches.mockResolvedValue({ external: true, mcpEnabled: true });
     const html = await render();
     expect(html).toContain(m.signInTitle);
     expect(html).toContain(m.signInBody);
     expect(html).toContain(m.signInAccess.replace(/'/g, '&#x27;'));
     expect(html).toContain(m.signInDisconnect.replace(/'/g, '&#x27;'));
     expect(html).toContain(m.chatOAuthTitle);
-    expect(html).not.toContain('data-testid="connected-apps"');
     expectOtherSectionsUnchanged(html);
   });
 
-  it("this API's own OAuth server keeps its Connected apps and says nothing about an external sign-in", async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: true, mcpEnabled: true, accessTokenTtlSeconds: 3600, grants: [] });
+  it('OAuth off: API keys only, nothing about a sign-in', async () => {
+    admin.mcpSwitches.mockResolvedValue({ mcpEnabled: true });
     const html = await render();
-    expect(html).toContain('data-testid="connected-apps"');
     expect(html).not.toContain(m.signInTitle);
+    expect(html).not.toContain(m.chatOAuthTitle);
   });
 
   it('MCP off with an external sign-in still shows only the honest state', async () => {
-    admin.connectedApps.mockResolvedValue({ enabled: false, external: true, mcpEnabled: false, accessTokenTtlSeconds: null, grants: [] });
+    admin.mcpSwitches.mockResolvedValue({ external: true, mcpEnabled: false });
     const html = await render();
     expectUnavailable(html);
     expect(html).not.toContain(m.signInTitle);

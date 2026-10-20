@@ -35,7 +35,6 @@ export function SetupGuide({
   mcpAvailable,
   snippets,
   oauth,
-  external,
   hasKey,
   agentConnected,
   productName,
@@ -51,9 +50,8 @@ export function SetupGuide({
    */
   mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
+  /** People can also sign in through the external authorization server (see ConnectAgent). */
   oauth: boolean;
-  /** People sign in through an external authorization server (see ConnectAgent). */
-  external: boolean;
   hasKey: boolean;
   agentConnected: boolean;
   productName: string;
@@ -123,7 +121,7 @@ export function SetupGuide({
           <p className="mb-field max-w-prose text-sm text-muted-foreground">
             {agentConnected ? m.guideAgentDone : m.guideAgentBody}
           </p>
-          <ConnectAgent snippets={snippets} oauth={oauth} external={external} messages={m} />
+          <ConnectAgent snippets={snippets} oauth={oauth} messages={m} />
         </Step>
 
         <Step n={3} title={m.guideTryTitle} done={false} doneLabel={m.guideStepDone} last testId="setup-step-try">

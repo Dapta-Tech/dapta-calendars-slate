@@ -53,13 +53,7 @@ import { CalV2PilotService } from './cal-v2-pilot.service';
 import { McpController } from './mcp/mcp.controller';
 import { McpGateway } from './mcp/mcp.gateway';
 import { CalendarRetryAfterInterceptor } from './retry-after';
-import {
-  OAuthHostController,
-  OAuthInteractionController,
-  OAuthMetadataController,
-  OAuthProviderController,
-} from './oauth/oauth.controller';
-import { OAuthService } from './oauth/oauth.service';
+import { OAuthHostController, OAuthMetadataController } from './oauth/oauth.controller';
 import { ExternalOAuthService } from './oauth/external.service';
 
 @Module({
@@ -71,12 +65,10 @@ import { ExternalOAuthService } from './oauth/external.service';
     MachineController,
     CalV2Controller,
     McpController,
-    // OAuth for the MCP endpoint (off unless OAUTH_ENABLED). The interaction
-    // routes MUST stay before the provider's catch-all mount under /oauth.
+    // OAuth for the MCP endpoint (off unless OAUTH_ENABLED): discovery for the
+    // external authorization server, and the switches the dashboard reads.
     OAuthMetadataController,
-    OAuthInteractionController,
     OAuthHostController,
-    OAuthProviderController,
     AdminCrudController,
   ],
   providers: [
@@ -208,7 +200,6 @@ import { ExternalOAuthService } from './oauth/external.service';
     CalV2PilotService,
     CalV2RequestIdInterceptor,
     McpGateway,
-    OAuthService,
     ExternalOAuthService,
     AdminService,
     OnboardingService,

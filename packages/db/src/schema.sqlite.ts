@@ -536,6 +536,7 @@ export const oneOffLink = sqliteTable('one_off_link', {
   revokedAt: integer('revoked_at'),
 });
 
+/** The removed built-in OAuth server's storage, unused until a later migration drops it (see schema.pg.ts). */
 export const oauthRecord = sqliteTable(
   'oauth_record',
   {

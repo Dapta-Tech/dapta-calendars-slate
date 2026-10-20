@@ -1,9 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createRemoteJWKSet, customFetch, jwtVerify, type JWTVerifyGetKey } from 'jose';
-import { membershipsBySubject, type Db } from '@slate/db';
+import { membershipsBySubject, type AccountRole, type Db } from '@slate/db';
 import { oauthMode, type ServerEnv } from '@slate/config/env';
+import { isAdmin } from '../permissions';
 import { DB, ENV } from '../tokens';
-import { mayHoldGrant } from './oauth.service';
 import { resourceMetadataUrlFor, trimSlash } from './oauth.settings';
 
 /**
@@ -21,8 +21,8 @@ import { resourceMetadataUrlFor, trimSlash } from './oauth.settings';
  *  - MAPS the token's `sub` to the members it may act as: the person whose
  *    `idp_subject` the host login provider recorded, in every account they
  *    belong to, among members whose web login was verified within
- *    OAUTH_LINK_MAX_AGE_DAYS, active owners and admins only (`mayHoldGrant`,
- *    the built-in server's rule), read on every request.
+ *    OAUTH_LINK_MAX_AGE_DAYS, active owners and admins only (`mayAct`, the
+ *    tier that may create an API key), read on every request.
  *
  * Every outbound request is to a configured URL (never one built from a
  * request header), carries no header of the caller's, and is bounded in time,
@@ -38,7 +38,7 @@ const METADATA_TTL_MS = 60 * 60_000;
 const METADATA_RETRY_MS = 30_000;
 /** Seconds of clock skew allowed on `exp` and `nbf`. */
 const CLOCK_TOLERANCE_S = 30;
-/** What `resource_name` says in the protected-resource metadata (the built-in server's value). */
+/** What `resource_name` says in the protected-resource metadata. */
 const RESOURCE_NAME = 'Dapta Calendars';
 
 export interface ExternalOAuthSettings {
@@ -103,6 +103,16 @@ function logValue(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value) return undefined;
   // eslint-disable-next-line no-control-regex
   return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 200) || undefined;
+}
+
+
+/**
+ * A member a sign-in may act as: active, and owner or admin (`isAdmin`, the
+ * same tier that may create an API key), because a sign-in acts for the whole
+ * account exactly like a key does.
+ */
+function mayAct(member: { role: string; status: string }): boolean {
+  return member.status === 'active' && isAdmin(member.role as AccountRole);
 }
 
 @Injectable()
@@ -299,7 +309,7 @@ export class ExternalOAuthService {
   async accountsFor(subject: string): Promise<LoginAccount[]> {
     const memberships = await membershipsBySubject(this.db, subject, Date.now() - this.settings!.linkMaxAgeMs);
     return memberships
-      .filter((m) => mayHoldGrant(m))
+      .filter((m) => mayAct(m))
       .map((m) => ({ accountId: m.accountId, accountName: m.accountName, memberId: m.memberId }));
   }
 }

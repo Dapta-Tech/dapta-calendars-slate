@@ -7,18 +7,14 @@ import { annotateRequestAccount, requestIdFrom } from '../request-log';
 import { RateLimitGuard } from '../rate-limit';
 import { ENV, RATE_LIMITER } from '../tokens';
 import type { RateLimiter } from '../rate-limit';
-import { OAuthService } from '../oauth/oauth.service';
 import { ExternalOAuthService, type ExternalLogin, type LoginAccount } from '../oauth/external.service';
-import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
+import { trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
 import { loginPrincipal, type McpCall } from './support';
 import { TOOLS, accessOf } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
-
-/** Scopes as a challenge lists them: deduplicated, stable order. */
-const scopeList = (...groups: readonly (readonly string[])[]): string[] => [...new Set(groups.flat())];
 
 /**
  * What the `tools/call` messages in a body need before they may run: whether
@@ -97,19 +93,16 @@ function protocolVersionOf(req: Request): string {
  *
  * Two kinds of Bearer, told apart by prefix and checked against their own
  * store, never forwarded anywhere: `dcl_` API keys (unchanged), and, when
- * OAUTH_ENABLED, OAuth access tokens: this server's own, or, with an external
- * authorization server, that server's (verified against its keys, then mapped
- * to the members the person may act as, on every request). With OAuth on, a
- * protected tool called with no credential gets the spec's HTTP 401 with
- * `WWW-Authenticate: Bearer resource_metadata=...` (what makes a chat app show
- * its Connect button), and a built-in OAuth token lacking a scope gets 403
- * `insufficient_scope` naming every scope the call needs (step-up). Both are
- * decided here, before the SDK runs: a 200 carrying a tool error would never
- * trigger the client's sign-in. API keys keep their tool-level scope errors,
- * because a key's scopes cannot be stepped up, and an external sign-in has no
- * step-up at all: it holds every scope its member's admin role allows. A valid
- * external sign-in that may act nowhere gets 403, never 401, so a client does
- * not loop back into its sign-in.
+ * OAUTH_ENABLED, the external authorization server's access tokens (verified
+ * against its keys, then mapped to the members the person may act as, on every
+ * request). With OAuth on, a protected tool called with no credential gets the
+ * spec's HTTP 401 with `WWW-Authenticate: Bearer resource_metadata=...` (what
+ * makes a chat app show its Connect button), decided here, before the SDK runs:
+ * a 200 carrying a tool error would never trigger the client's sign-in. API
+ * keys keep their tool-level scope errors, because a key's scopes cannot be
+ * stepped up, and a sign-in has no step-up at all: it holds every scope its
+ * member's admin role allows. A valid sign-in that may act nowhere gets 403,
+ * never 401, so a client does not loop back into its sign-in.
  */
 @Controller('mcp')
 export class McpController {
@@ -123,7 +116,6 @@ export class McpController {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(RATE_LIMITER) private readonly limiter: RateLimiter,
     @Inject(RateLimitGuard) private readonly clientKeys: RateLimitGuard,
-    @Inject(OAuthService) private readonly oauth: OAuthService,
     @Inject(ExternalOAuthService) private readonly external: ExternalOAuthService,
   ) {
     this.node = toNodeHandler(gateway.handler);
@@ -177,7 +169,6 @@ export class McpController {
       let token: ExternalLogin | null = null;
       if (isKey) principal = await this.auth.authenticateKey(bearer!);
       else if (bearer && this.external.enabled) token = await this.external.verify(bearer);
-      else if (bearer && this.oauth.enabled) principal = await this.oauth.verifyAccessToken(bearer);
       if (!principal && !token) {
         // A wrong credential costs a lookup: count the attempt against the address.
         const { allowed, retryAfterMs } = this.limiter.take(`mcp-auth:${ip}`);
@@ -187,14 +178,6 @@ export class McpController {
           // a token at all. The client refreshes or signs in again.
           rpcError(res, 401, -32001, 'Invalid or expired access token.', {
             'WWW-Authenticate': this.external.challenge('invalid_token', 'The access token is invalid or expired.'),
-          });
-          return;
-        }
-        if (this.oauth.enabled && !isKey) {
-          // Expired, revoked-and-expired, another audience, another issuer, or
-          // not ours at all. The client refreshes or signs in again.
-          rpcError(res, 401, -32001, 'Invalid or expired access token.', {
-            'WWW-Authenticate': this.oauth.challenge([], 'invalid_token', 'The access token is invalid or expired.'),
           });
           return;
         }
@@ -214,36 +197,12 @@ export class McpController {
         if (accounts.length === 1) principal = loginPrincipal(accounts[0]!, token);
       }
       if (principal) annotateRequestAccount(req, principal.accountId);
-      if (principal?.kind === 'oauth' && principal.grantId) this.oauth.noteUse(principal.grantId);
     }
 
     if (this.external.enabled && principal === null && login === null && toolCallNeeds(req.body).credential) {
       // No scope in the challenge: the external server's scopes are not ours.
       rpcError(res, 401, -32001, 'Sign-in required for this tool.', { 'WWW-Authenticate': this.external.challenge() });
       return;
-    }
-
-    if (this.oauth.enabled && (principal === null || principal.kind === 'oauth')) {
-      const needs = toolCallNeeds(req.body);
-      if (needs.credential && principal === null) {
-        rpcError(res, 401, -32001, 'Sign-in required for this tool.', {
-          'WWW-Authenticate': this.oauth.challenge(scopeList(BASELINE_SCOPES, needs.scopes)),
-        });
-        return;
-      }
-      const missing = principal ? needs.scopes.filter((scope) => !principal!.scopes.includes(scope)) : [];
-      if (principal && missing.length > 0) {
-        // Every scope the connection needs, not just the missing one: the
-        // client re-authorizes with exactly this list.
-        rpcError(res, 403, -32001, `This connection needs: ${missing.join(', ')}.`, {
-          'WWW-Authenticate': this.oauth.challenge(
-            scopeList(principal.scopes, needs.scopes),
-            'insufficient_scope',
-            `This call needs ${missing.join(' ')}.`,
-          ),
-        });
-        return;
-      }
     }
 
     const call: McpCall = { requestId, protocolVersion: protocolVersionOf(req), ip, principal, ...(login ? { login } : {}) };

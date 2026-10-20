@@ -13,7 +13,7 @@ vi.mock('@/lib/admin-api', () => ({
     listEventTypes: async () => [],
     listTeams: async () => [],
     teamEventTypes: async () => [],
-    connectedApps: async () => ({ enabled: false, accessTokenTtlSeconds: null, grants: [] }),
+    mcpSwitches: async () => ({}),
   },
 }));
 vi.mock('../developer-page', () => ({
@@ -22,7 +22,6 @@ vi.mock('../developer-page', () => ({
   DeveloperNoAccess: () => null,
 }));
 vi.mock('../keys-panel', () => ({ KeysPanel: () => null }));
-vi.mock('../connected-apps', () => ({ ConnectedApps: () => null }));
 
 import { KeysPanel } from '../keys-panel';
 import DeveloperKeysPage from './page';

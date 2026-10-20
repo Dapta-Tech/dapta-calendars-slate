@@ -370,56 +370,24 @@ export const serverEnvSchema = z.object({
   // How long one tool call may run before the caller gets a timeout error.
   MCP_TOOL_TIMEOUT_MS: blankIsDefault(z.coerce.number().int().min(1000).max(120_000).default(20_000)),
 
-  // --- OAuth for the MCP endpoint (this API as its own authorization server) --
-  // OFF by default, and a bare fork never needs it: API keys and the public
-  // booking tools work without it. ON, the API serves an OAuth 2.1
-  // authorization server under `/oauth` so chat apps (Claude, ChatGPT) and IDEs
-  // connect with a sign-in and a consent screen instead of a pasted key. The
-  // person signs in the way the dashboard already signs them in (the configured
-  // AUTH_PROVIDER); nothing is registered with any identity vendor.
-  //
-  // Turning it on REQUIRES MCP_PUBLIC_URL (it becomes the token audience),
-  // OAUTH_ISSUER and OAUTH_SIGNING_JWK; the API refuses to boot without them
-  // rather than serve a half-configured authorization server.
-  OAUTH_ENABLED: boolish.default('false'),
-  // The public ORIGIN that serves `/oauth/*` and
-  // `/.well-known/oauth-authorization-server` (scheme + host, no path), e.g.
-  // https://calendar.example.com. It is the `iss` of every token and of every
-  // authorization response, so it must never change once apps are connected.
-  OAUTH_ISSUER: blankIsDefault(z.string().url().optional()),
-  // The private signing key for access tokens: one EC P-256 JWK (ES256) as a
-  // JSON string, with its private part `d`. Every replica holds the same key and
-  // verifies tokens without a database read. A secret: deploy it like one.
-  OAUTH_SIGNING_JWK: optionalSecret(1),
-  // Access-token lifetime. Short on purpose: a revoked connection keeps working
-  // until its last access token expires.
-  OAUTH_ACCESS_TOKEN_TTL_SECONDS: blankIsDefault(z.coerce.number().int().min(60).max(86_400).default(3600)),
-  // Absolute lifetime of a connection (its grant and refresh tokens). Refresh
-  // rotation never extends it; after this the person connects again.
-  OAUTH_GRANT_TTL_DAYS: blankIsDefault(z.coerce.number().int().min(1).max(365).default(90)),
-  // A rotated refresh token presented again within this many seconds is treated
-  // as a client retry (a lost response), not a theft. Later than that, reuse
-  // revokes the whole connection. 0 = strict.
-  OAUTH_REFRESH_REUSE_GRACE_SECONDS: blankIsDefault(z.coerce.number().int().min(0).max(60).default(10)),
-  // Client ID Metadata Documents (the client's id is an https URL we fetch).
-  // What Claude and ChatGPT prefer. On by default when OAuth is on.
-  OAUTH_CIMD_ENABLED: boolish.default('true'),
-  // Dynamic Client Registration (`POST /oauth/register`), the fallback Cursor
-  // and VS Code still need. Restricted to a fixed list of redirect addresses.
-  OAUTH_DCR_ENABLED: boolish.default('true'),
-  // Comma-separated EXACT redirect URIs added to the registration allowlist,
-  // for a client this deployment trusts that is not on the built-in list.
-  OAUTH_DCR_EXTRA_REDIRECT_URIS: z.string().optional(),
-
   // --- OAuth for the MCP endpoint (an external authorization server) ---------
-  // With OAUTH_ENABLED=true and this set, the API is a resource server ONLY:
-  // sign-in, consent and tokens belong to this external OAuth 2.1 authorization
-  // server, and the built-in one above is not mounted (its routes answer 404,
-  // and OAUTH_ISSUER / OAUTH_SIGNING_JWK are not needed). The value is the
-  // server's issuer, an origin (scheme and host, lowercase, no trailing slash),
-  // exactly as its metadata and its tokens write it. The server must support
-  // RFC 8707 resource indicators (tokens for MCP_PUBLIC_URL carry it as their
-  // audience) and publish a JWKS. Unset: the built-in server runs as above.
+  // OFF by default, and a bare fork never needs it: API keys and the public
+  // booking tools work without it. ON (OAUTH_ENABLED=true plus
+  // OAUTH_AUTHORIZATION_SERVER), the API is an OAuth resource server ONLY, so
+  // chat apps (Claude, ChatGPT) and IDEs connect with a sign-in instead of a
+  // pasted key: sign-in, consent and tokens belong to that external OAuth 2.1
+  // authorization server (WorkOS AuthKit, Auth0, Keycloak...). This API runs no
+  // authorization server of its own: the built-in one (and its OAUTH_ISSUER,
+  // OAUTH_SIGNING_JWK and other settings) was removed, and a deployment that
+  // still sets those is unaffected, they are ignored.
+  //
+  // Turning it on REQUIRES MCP_ENABLED, MCP_PUBLIC_URL (the token audience) and
+  // OAUTH_AUTHORIZATION_SERVER; the API refuses to boot without them.
+  OAUTH_ENABLED: boolish.default('false'),
+  // The external server's issuer, an origin (scheme and host, lowercase, no
+  // trailing slash), exactly as its metadata and its tokens write it. The server
+  // must support RFC 8707 resource indicators (tokens for MCP_PUBLIC_URL carry
+  // it as their audience) and publish a JWKS.
   OAUTH_AUTHORIZATION_SERVER: blankIsDefault(z.string().url().optional()),
   // Where that server publishes its signing keys. Unset: the `jwks_uri` of its
   // metadata (`<issuer>/.well-known/oauth-authorization-server`).
@@ -461,7 +429,7 @@ export function loadServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEn
   }
   const oauth = oauthConfigProblems(parsed.data);
   if (oauth.length > 0) {
-    throw new Error(`Refusing to boot: OAUTH_ENABLED=true but the authorization server is not configured:\n${oauth.map((p) => `  - ${p}`).join('\n')}`);
+    throw new Error(`Refusing to boot: OAUTH_ENABLED=true but OAuth is not configured:\n${oauth.map((p) => `  - ${p}`).join('\n')}`);
   }
   return parsed.data;
 }
@@ -476,27 +444,25 @@ function secureEnough(url: URL, env: Pick<ServerEnv, 'NODE_ENV'>): boolean {
 }
 
 /**
- * Who signs MCP connections in: nobody (OAuth off), this API's own
- * authorization server, or an external one this API only checks tokens from.
+ * Who signs MCP connections in: nobody (OAuth off), or an external
+ * authorization server this API only checks tokens from. OAUTH_ENABLED without
+ * one never boots (see `oauthConfigProblems`).
  */
-export type OAuthMode = 'off' | 'builtin' | 'external';
+export type OAuthMode = 'off' | 'external';
 
 export function oauthMode(env: Pick<ServerEnv, 'OAUTH_ENABLED' | 'OAUTH_AUTHORIZATION_SERVER'>): OAuthMode {
-  if (!env.OAUTH_ENABLED) return 'off';
-  return env.OAUTH_AUTHORIZATION_SERVER ? 'external' : 'builtin';
+  return env.OAUTH_ENABLED && env.OAUTH_AUTHORIZATION_SERVER ? 'external' : 'off';
 }
 
 /**
  * Everything wrong with the OAuth settings, as sentences an operator can act
  * on; empty when OAuth is off or correctly configured. Fail-fast lives in
  * `loadServerEnv`; this is split out so it can be tested without throwing.
- * The signing key is checked for SHAPE here (config stays dependency-free);
- * the API imports it at boot and refuses a key that does not load.
  */
 export function oauthConfigProblems(env: ServerEnv): string[] {
   if (!env.OAUTH_ENABLED) return [];
   const problems: string[] = [];
-  if (!env.MCP_ENABLED) problems.push('MCP_ENABLED must be true: the authorization server only protects the MCP endpoint.');
+  if (!env.MCP_ENABLED) problems.push('MCP_ENABLED must be true: OAuth only protects the MCP endpoint.');
   if (!env.MCP_PUBLIC_URL) {
     problems.push('MCP_PUBLIC_URL is required: it is the resource every access token is issued for (its audience).');
   } else {
@@ -504,44 +470,24 @@ export function oauthConfigProblems(env: ServerEnv): string[] {
     if (!secureEnough(mcp, env)) problems.push('MCP_PUBLIC_URL must use https (http only on localhost outside production).');
     if (mcp.search || mcp.hash) problems.push('MCP_PUBLIC_URL must not carry a query string or a fragment.');
   }
-  if (env.OAUTH_AUTHORIZATION_SERVER) {
-    // Resource server only: the built-in server's issuer and key are unused.
-    const as = new URL(env.OAUTH_AUTHORIZATION_SERVER);
-    if (!secureEnough(as, env)) problems.push('OAUTH_AUTHORIZATION_SERVER must use https (http only on localhost outside production).');
-    if ((as.pathname !== '/' && as.pathname !== '') || as.search || as.hash || as.username || as.password)
-      problems.push('OAUTH_AUTHORIZATION_SERVER must be an origin only (scheme and host, no path, query, fragment or credentials).');
-    // It is compared character for character with every token's `iss`: a
-    // trailing slash or an uppercase letter would refuse every sign-in.
-    else if (env.OAUTH_AUTHORIZATION_SERVER !== as.origin)
-      problems.push(`OAUTH_AUTHORIZATION_SERVER must be written exactly as the origin ${as.origin} (it is compared with every token's iss).`);
-    if (env.OAUTH_JWKS_URL) {
-      const jwks = new URL(env.OAUTH_JWKS_URL);
-      if (!secureEnough(jwks, env)) problems.push('OAUTH_JWKS_URL must use https (http only on localhost outside production).');
-      if (jwks.hash || jwks.username || jwks.password) problems.push('OAUTH_JWKS_URL must not carry a fragment or credentials.');
-    }
+  if (!env.OAUTH_AUTHORIZATION_SERVER) {
+    problems.push(
+      'OAUTH_AUTHORIZATION_SERVER is required: the issuer of the external OAuth authorization server that signs people in (this API no longer runs one of its own; OAUTH_ISSUER and OAUTH_SIGNING_JWK are ignored).',
+    );
     return problems;
   }
-  if (!env.OAUTH_ISSUER) {
-    problems.push('OAUTH_ISSUER is required: the public origin that serves /oauth/* (for example https://calendar.example.com).');
-  } else {
-    const issuer = new URL(env.OAUTH_ISSUER);
-    if (!secureEnough(issuer, env)) problems.push('OAUTH_ISSUER must use https (http only on localhost outside production).');
-    if ((issuer.pathname !== '/' && issuer.pathname !== '') || issuer.search || issuer.hash)
-      problems.push('OAUTH_ISSUER must be an origin only (scheme and host, no path, query or fragment).');
-  }
-  if (!env.OAUTH_SIGNING_JWK) {
-    problems.push('OAUTH_SIGNING_JWK is required: an EC P-256 private JWK (ES256) as a JSON string.');
-  } else {
-    let jwk: Record<string, unknown> | null = null;
-    try {
-      const value: unknown = JSON.parse(env.OAUTH_SIGNING_JWK);
-      if (value && typeof value === 'object' && !Array.isArray(value)) jwk = value as Record<string, unknown>;
-    } catch {
-      /* reported below */
-    }
-    if (!jwk) problems.push('OAUTH_SIGNING_JWK is not a JSON object.');
-    else if (jwk.kty !== 'EC' || jwk.crv !== 'P-256' || typeof jwk.d !== 'string' || typeof jwk.x !== 'string' || typeof jwk.y !== 'string')
-      problems.push('OAUTH_SIGNING_JWK must be an EC P-256 PRIVATE key (kty "EC", crv "P-256", with x, y and d).');
+  const as = new URL(env.OAUTH_AUTHORIZATION_SERVER);
+  if (!secureEnough(as, env)) problems.push('OAUTH_AUTHORIZATION_SERVER must use https (http only on localhost outside production).');
+  if ((as.pathname !== '/' && as.pathname !== '') || as.search || as.hash || as.username || as.password)
+    problems.push('OAUTH_AUTHORIZATION_SERVER must be an origin only (scheme and host, no path, query, fragment or credentials).');
+  // It is compared character for character with every token's `iss`: a
+  // trailing slash or an uppercase letter would refuse every sign-in.
+  else if (env.OAUTH_AUTHORIZATION_SERVER !== as.origin)
+    problems.push(`OAUTH_AUTHORIZATION_SERVER must be written exactly as the origin ${as.origin} (it is compared with every token's iss).`);
+  if (env.OAUTH_JWKS_URL) {
+    const jwks = new URL(env.OAUTH_JWKS_URL);
+    if (!secureEnough(jwks, env)) problems.push('OAUTH_JWKS_URL must use https (http only on localhost outside production).');
+    if (jwks.hash || jwks.username || jwks.password) problems.push('OAUTH_JWKS_URL must not carry a fragment or credentials.');
   }
   return problems;
 }

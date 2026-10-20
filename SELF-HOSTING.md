@@ -441,52 +441,23 @@ delivery is given up, the webhook's delivery log in the dashboard says so.
 
 ### OAuth for the MCP endpoint (optional)
 
-Off by default; API keys and the public tools need none of this. On, the API is
-its own OAuth 2.1 authorization server for `/mcp`, so Claude, ChatGPT, Cursor
-and VS Code connect with a sign-in and a consent screen (see
+Off by default; API keys and the public tools need none of this. On, Claude,
+ChatGPT, Cursor and VS Code connect to `/mcp` with a sign-in instead of a pasted
+key, through an OAuth 2.1 authorization server you already have (see
 [docs/MCP.md](docs/MCP.md#oauth-connect-claude-chatgpt-cursor-or-vs-code-with-a-sign-in)).
-The API refuses to boot with `OAUTH_ENABLED=true` and any required value missing.
+The API is a resource server only and runs no authorization server of its own.
+Set `OAUTH_ENABLED=true`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`; the
+API refuses to boot with `OAUTH_ENABLED=true` and any of them missing.
 
-| Var | Default | Notes | Secret? |
-|---|---|---|---|
-| `OAUTH_ENABLED` | `false` | serve the authorization server under `/oauth` and its metadata under `/.well-known/` | no |
-| `OAUTH_ISSUER` | unset | **required when on.** The public origin that serves `/oauth/*` and `/.well-known/oauth-authorization-server` (scheme and host only, `https`). It is the `iss` of every token and authorization response: never change it once apps are connected | no |
-| `OAUTH_SIGNING_JWK` | unset | **required when on.** The access-token signing key: one EC P-256 private JWK (ES256) as a JSON string. Every replica uses the same key and verifies tokens offline. Rotating it signs every connected app out of its current access token; refresh tokens keep working, so clients recover on their own | **yes** |
-| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `3600` | access-token lifetime (60 to 86400). After a Disconnect, an access token already handed out keeps working at most this long | no |
-| `OAUTH_GRANT_TTL_DAYS` | `90` | absolute lifetime of a connection; refreshing never extends it | no |
-| `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` | a rotated refresh token presented again within this window rotates again (a client retry after a lost response); later, reuse revokes the whole connection. `0` = strict | no |
-| `OAUTH_CIMD_ENABLED` | `true` | accept clients identified by a Client ID Metadata Document (an https `client_id` this server fetches) | no |
-| `OAUTH_DCR_ENABLED` | `true` | accept Dynamic Client Registration at `/oauth/register`, restricted to a fixed redirect allowlist | no |
-| `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset | comma-separated exact redirect URIs added to that allowlist | no |
-
-Make the key once and store it in your secret manager:
-
-```bash
-node -e "const {generateKeyPairSync}=require('node:crypto');console.log(JSON.stringify(generateKeyPairSync('ec',{namedCurve:'P-256'}).privateKey.export({format:'jwk'})))"
-```
-
-Routing: the browser and the apps reach these paths on the API, so route them to
-the API from whatever host `OAUTH_ISSUER` and `MCP_PUBLIC_URL` name:
-`/oauth/*`, `/.well-known/oauth-authorization-server`,
-`/.well-known/oauth-protected-resource*` and `/mcp`. The web app needs nothing
-new: its consent page lives at `/auth/consent` (keep that path on the web) and
-uses `PUBLIC_APP_URL`. The person signs in through your normal `AUTH_PROVIDER`;
-nothing is registered with any identity vendor. Only owners and admins can
-approve a connection.
-
-Storage is one additive table, `oauth_record` (migration `0026_oauth_record.sql`
-on Postgres, `0025_oauth_record.sql` on SQLite): a new table, no change to
-existing ones. It stays empty while OAuth is off; expired rows are purged in
-the background.
-
-#### Or: sign in through an external authorization server
-
-Instead of running its own, the API can be a resource server for an OAuth 2.1
-authorization server you already have (see
-[docs/MCP.md](docs/MCP.md#oauth-with-an-external-authorization-server)). Set
-`OAUTH_ENABLED=true`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`; the
-built-in server's vars above are then not needed, its routes and consent page
-answer 404, and Connected apps is hidden.
+An earlier release could also run its own authorization server. It is gone:
+`OAUTH_ISSUER`, `OAUTH_SIGNING_JWK`, `OAUTH_ACCESS_TOKEN_TTL_SECONDS`,
+`OAUTH_GRANT_TTL_DAYS`, `OAUTH_REFRESH_REUSE_GRACE_SECONDS`,
+`OAUTH_CIMD_ENABLED`, `OAUTH_DCR_ENABLED` and `OAUTH_DCR_EXTRA_REDIRECT_URIS`
+are ignored if a deployment still sets them (remove them at your leisure), and
+`/oauth/*`, the consent page and Connected apps no longer exist. A deployment
+that ran that server with `OAUTH_ENABLED=true` and no
+`OAUTH_AUTHORIZATION_SERVER` now refuses to boot until it sets one or turns
+OAuth off. Its `oauth_record` table stays in place, unused.
 
 | Var | Default | Notes | Secret? |
 |---|---|---|---|
