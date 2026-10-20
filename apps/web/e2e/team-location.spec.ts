@@ -75,14 +75,14 @@ test('a team event on an online meeting names the host with no calendar', async 
 
   await expect(
     page.getByText(
-      'This location applies to every host. Each booking’s meeting link comes from the assigned host’s connected calendar.',
+      'This location applies to every host. Each booking’s meeting link comes from the calendar where the assigned host receives new events.',
     ),
   ).toBeVisible();
-  const warning = page.getByText(/^No meeting link for: /);
+  // Exact text, so Alex (who has a calendar) is not in it either.
+  const warning = page.getByText(/^Bookings assigned to /);
   await expect(warning).toHaveText(
-    `No meeting link for: ${invitee}. They need to connect a calendar.`,
+    `Bookings assigned to ${invitee} won’t get a meeting link. They need to set their own calendar to receive new events, in Calendars.`,
   );
-  await expect(warning).not.toContainText('Alex Rivera');
 
   // Another kind of location has no link to warn about.
   const kind = page.locator('select', { has: page.locator('option[value="in_person"]') });

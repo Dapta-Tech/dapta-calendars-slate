@@ -456,12 +456,18 @@ export interface BookingMessages {
       locationDetailCustom: string;
       locationConferencingHint: string;
       locationNoDestinationWarning: string;
-      /** Team events only: one location for every host, the link from the
-       *  assigned host's own calendar. */
+      /** Team events only: one location for every host. Round robin: the
+       *  link comes from the assigned host's calendar for new events. */
       locationTeamConferencingHint: string;
-      /** Team events only. `{names}` is the comma-separated list of hosts with
-       *  no destination calendar connected. */
-      locationTeamNoDestinationWarning: string;
+      /** Collective and fixed round robin: several hosts are on each booking,
+       *  and the link comes from one of their calendars. */
+      locationTeamSharedConferencingHint: string;
+      /** `{names}` is one host with no calendar set to receive new events. */
+      locationTeamNoDestinationOne: string;
+      /** `{names}` is a list of them, joined for the language ("A and B"). */
+      locationTeamNoDestinationMany: string;
+      /** Collective: no host has one, so no booking gets a link. */
+      locationTeamNoDestinationAll: string;
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
@@ -1918,9 +1924,15 @@ export const en: BookingMessages = {
       locationNoDestinationWarning:
         'No calendar is connected yet, so no meeting link can be created. Connect one in Connections — bookings still work in the meantime.',
       locationTeamConferencingHint:
-        'This location applies to every host. Each booking’s meeting link comes from the assigned host’s connected calendar.',
-      locationTeamNoDestinationWarning:
-        'No meeting link for: {names}. They need to connect a calendar.',
+        'This location applies to every host. Each booking’s meeting link comes from the calendar where the assigned host receives new events.',
+      locationTeamSharedConferencingHint:
+        'This location applies to every host. Each booking’s meeting link comes from the calendar where one of its hosts receives new events.',
+      locationTeamNoDestinationOne:
+        'Bookings assigned to {names} won’t get a meeting link. They need to set their own calendar to receive new events, in Calendars.',
+      locationTeamNoDestinationMany:
+        'Bookings assigned to {names} won’t get a meeting link. Each of them needs to set their own calendar to receive new events, in Calendars.',
+      locationTeamNoDestinationAll:
+        'No host has a calendar set to receive new events, so bookings won’t get a meeting link. One of them can set theirs, in Calendars.',
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
@@ -3265,9 +3277,15 @@ export const es: BookingMessages = {
       locationNoDestinationWarning:
         'Aún no hay ningún calendario conectado, así que no se puede crear el enlace. Conecta uno en Conexiones — las reservas siguen funcionando mientras tanto.',
       locationTeamConferencingHint:
-        'Esta ubicación aplica a todos los anfitriones. El enlace de cada reunión se crea con el calendario conectado del anfitrión asignado.',
-      locationTeamNoDestinationWarning:
-        'Sin enlace de reunión para: {names}. Falta conectar su calendario.',
+        'Esta ubicación aplica a todos los anfitriones. El enlace de cada reunión se crea en el calendario donde el anfitrión asignado recibe eventos nuevos.',
+      locationTeamSharedConferencingHint:
+        'Esta ubicación aplica a todos los anfitriones. El enlace de cada reunión se crea en el calendario donde uno de sus anfitriones recibe eventos nuevos.',
+      locationTeamNoDestinationOne:
+        'Las reservas asignadas a {names} no tendrán enlace de reunión. Debe elegir su propio calendario para recibir eventos nuevos, en Calendarios.',
+      locationTeamNoDestinationMany:
+        'Las reservas asignadas a {names} no tendrán enlace de reunión. Cada uno debe elegir su propio calendario para recibir eventos nuevos, en Calendarios.',
+      locationTeamNoDestinationAll:
+        'Ningún anfitrión tiene un calendario para recibir eventos nuevos, así que las reservas no tendrán enlace de reunión. Basta con que uno elija el suyo, en Calendarios.',
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',

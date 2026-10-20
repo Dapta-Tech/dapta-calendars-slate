@@ -127,41 +127,71 @@ async function mount(opts: {
 
 const en = getMessages('en').admin.eventTypes;
 const es = getMessages('es').admin.eventTypes;
-const warningFor = (m: typeof en, names: string) =>
-  m.locationTeamNoDestinationWarning.replace('{names}', names);
-/** The words before the names: present in the text if and only if the warning is. */
-const warningLead = en.locationTeamNoDestinationWarning.split('{names}')[0]!;
+type Copy = typeof en;
+const one = (m: Copy, names: string) => m.locationTeamNoDestinationOne.replace('{names}', names);
+const many = (m: Copy, names: string) => m.locationTeamNoDestinationMany.replace('{names}', names);
 const text = (el: HTMLElement) => el.textContent ?? '';
+/** The team warning's own paragraph, or null when there is none. */
+const warning = (el: HTMLElement, m: Copy = en) => {
+  const lead = m.locationTeamNoDestinationOne.split('{names}')[0]!;
+  return (
+    [...el.querySelectorAll('p')]
+      .map((p) => p.textContent ?? '')
+      .find((t) => t.startsWith(lead) || t === m.locationTeamNoDestinationAll) ?? null
+  );
+};
+const fixedHost = (memberId: string) => ({ memberId, priority: 0, weight: 100, isFixed: true });
 
-describe('team event, online meeting', () => {
+describe('team event, round robin, online meeting', () => {
   it('says the location applies to every host, and names the hosts with no calendar', async () => {
     // Out of order on purpose: the roster has no set order, the warning does.
     const el = await mount({ teamMembers: [TAYLOR, ANA, CASEY] });
     expect(text(el)).toContain(en.locationTeamConferencingHint);
     expect(text(el)).not.toContain(en.locationConferencingHint);
-    expect(text(el)).toContain(warningFor(en, 'Casey Morgan, Taylor Brooks'));
+    expect(warning(el)).toBe(many(en, 'Casey Morgan and Taylor Brooks'));
     // Ana has a calendar: never named.
-    expect(text(el)).not.toContain(warningFor(en, 'Ana Ruiz'));
+    expect(warning(el)).not.toContain('Ana Ruiz');
     // The personal warning, with its connect button, is not the team's.
     expect(text(el)).not.toContain(en.locationNoDestinationWarning);
   });
 
   it('in Spanish', async () => {
-    const el = await mount({ teamMembers: [ANA, CASEY], locale: 'es' });
+    const el = await mount({ teamMembers: [ANA, TAYLOR, CASEY], locale: 'es' });
     expect(text(el)).toContain(es.locationTeamConferencingHint);
-    expect(text(el)).toContain(warningFor(es, 'Casey Morgan'));
+    expect(text(el)).not.toContain(es.locationConferencingHint);
+    expect(warning(el, es)).toBe(many(es, 'Casey Morgan y Taylor Brooks'));
+  });
+
+  it('says it of one host in the singular', async () => {
+    const el = await mount({ teamMembers: [ANA, CASEY] });
+    expect(warning(el)).toBe(one(en, 'Casey Morgan'));
+  });
+
+  it('names a host by email, then by id, when they have no display name', async () => {
+    const el = await mount({
+      teamMembers: [
+        {
+          memberId: 'm-mail',
+          displayName: null,
+          email: 'mail@example.test',
+          hasDestinationCalendar: false,
+        },
+        { memberId: 'm-bare', displayName: null, email: null, hasDestinationCalendar: false },
+      ],
+    });
+    expect(warning(el)).toBe(many(en, 'm-bare and mail@example.test'));
   });
 
   it('shows the helper but no warning when every host has a calendar', async () => {
     const el = await mount({ teamMembers: [ANA] });
     expect(text(el)).toContain(en.locationTeamConferencingHint);
-    expect(text(el)).not.toContain(warningLead);
+    expect(warning(el)).toBeNull();
   });
 
   it('warns about nobody when the API does not report calendars (an older API)', async () => {
     const el = await mount({ teamMembers: [{ memberId: 'm-old', displayName: 'Old Api' }] });
     expect(text(el)).toContain(en.locationTeamConferencingHint);
-    expect(text(el)).not.toContain(warningLead);
+    expect(warning(el)).toBeNull();
   });
 
   it('drops the helper and the warning once another kind is chosen', async () => {
@@ -173,7 +203,42 @@ describe('team event, online meeting', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     expect(text(el)).not.toContain(en.locationTeamConferencingHint);
-    expect(text(el)).not.toContain(warningLead);
+    expect(warning(el)).toBeNull();
+  });
+});
+
+describe('team event, collective: every host is on every booking', () => {
+  const collective = event({ schedulingType: 'collective' });
+
+  it('one host with a calendar is enough: no warning', async () => {
+    const el = await mount({ initial: collective, teamMembers: [ANA, CASEY] });
+    expect(text(el)).toContain(en.locationTeamSharedConferencingHint);
+    expect(text(el)).not.toContain(en.locationTeamConferencingHint);
+    expect(warning(el)).toBeNull();
+  });
+
+  it('warns when no host has one', async () => {
+    const el = await mount({ initial: collective, teamMembers: [CASEY, TAYLOR] });
+    expect(warning(el)).toBe(en.locationTeamNoDestinationAll);
+  });
+});
+
+describe('team event, fixed round robin: every fixed host is on every booking', () => {
+  it('a fixed host with a calendar is enough: no warning', async () => {
+    const el = await mount({
+      initial: event({ schedulingType: 'fixed_round_robin', hosts: [fixedHost('m-ana')] }),
+      teamMembers: [ANA, CASEY],
+    });
+    expect(text(el)).toContain(en.locationTeamSharedConferencingHint);
+    expect(warning(el)).toBeNull();
+  });
+
+  it('without one, names the rotating hosts with no calendar, never the fixed ones', async () => {
+    const el = await mount({
+      initial: event({ schedulingType: 'fixed_round_robin', hosts: [fixedHost('m-casey')] }),
+      teamMembers: [ANA, CASEY, TAYLOR],
+    });
+    expect(warning(el)).toBe(one(en, 'Taylor Brooks'));
   });
 });
 
@@ -186,6 +251,6 @@ describe('personal event, online meeting', () => {
     expect(text(el)).toContain(en.locationConferencingHint);
     expect(text(el)).toContain(en.locationNoDestinationWarning);
     expect(text(el)).not.toContain(en.locationTeamConferencingHint);
-    expect(text(el)).not.toContain(warningLead);
+    expect(warning(el)).toBeNull();
   });
 });
