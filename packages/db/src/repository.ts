@@ -188,6 +188,14 @@ export interface CreateBookingArgs {
   metadata?: Record<string, unknown>;
   /** A held reservation to consume (deleted on success). */
   reservationUid?: string;
+  /**
+   * Refuse the time when another unexpired hold covers it, checked inside the
+   * locked write (see `memberHeldSql`); the hold this booking consumes
+   * (`reservationUid`) is its own and never counts. In-process callers only:
+   * the MCP booking tools set it. Off, as on every REST route, a personal
+   * booking does not look at holds, exactly as before.
+   */
+  refuseHeld?: boolean;
   idempotencyKey?: string;
   /** True when a host/agent booked on behalf (attribution; skips manage-token gating upstream). */
   onBehalf?: boolean;
@@ -849,6 +857,23 @@ export async function lockMembers(
   );
 }
 
+/**
+ * True (as a 1-row SELECT) if `memberId` has an unexpired soft hold overlapping
+ * the time, other than `exceptUid` (the hold a booking consumes): the overlap
+ * `loadReservationBusy` subtracts from availability. The guarded writes run it
+ * after the member's row lock (Postgres) or inside their IMMEDIATE transaction
+ * (SQLite), where the hold write (`insertHoldGuarded`) runs too, so a hold and
+ * a booking over one host can never both pass their checks.
+ *
+ * @internal Shared by the guarded writes; not a query for callers.
+ */
+export function memberHeldSql(memberId: string, startMs: number, endMs: number, now: number, exceptUid?: string) {
+  const except = exceptUid ? sql` AND uid <> ${exceptUid}` : sql``;
+  return sql`SELECT 1 AS hit FROM slot_reservation
+      WHERE member_id = ${memberId} AND release_at_ms > ${now}
+        AND slot_start_ms < ${endMs} AND slot_end_ms > ${startMs}${except} LIMIT 1`;
+}
+
 function overlapExists(db: Db, hostMemberId: string, startMs: number, endMs: number): boolean {
   // SQLite synchronous read via the native drizzle instance (inside a txn).
   return !!db.sqlite!.drizzle.get<{ id: string }>(hostOverlapSql(hostMemberId, startMs, endMs));
@@ -1194,11 +1219,16 @@ export async function createBooking(
     },
   };
 
+  // Another caller's hold over this time, when the caller asked for holds to
+  // count (`refuseHeld`), checked under the same lock as the overlap below.
+  const heldByOthers = args.refuseHeld ? memberHeldSql(member.id, startMs, endMs, now, args.reservationUid) : null;
+
   if (db.dialect === 'sqlite') {
     // IMMEDIATE: a second API process on the same file waits for this write
     // lock and then sees this booking, as the hold write does.
     const outcome = db.sqlite!.txn<'ok' | 'conflict'>(() => {
       if (overlapExists(db, member.id, startMs, endMs)) return 'conflict';
+      if (heldByOthers && db.sqlite!.drizzle.get(heldByOthers)) return 'conflict';
       db.sqlite!.drizzle.run(insertBooking);
       db.sqlite!.drizzle.run(insertAttendee);
       for (const attendee of insertAdditionalAttendees) db.sqlite!.drizzle.run(attendee);
@@ -1226,6 +1256,7 @@ export async function createBooking(
         id: string;
       }>;
       if (rows.length > 0) return true;
+      if (heldByOthers && ((await tx.execute(heldByOthers)) as unknown as unknown[]).length > 0) return true;
       await tx.execute(insertBooking);
       await tx.execute(insertAttendee);
       for (const attendee of insertAdditionalAttendees) await tx.execute(attendee);

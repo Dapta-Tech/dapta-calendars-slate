@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '@slate/db';
+import { BookingService } from '../booking.service';
+import { CalV2PilotService } from '../cal-v2-pilot.service';
 import { bootHarness, errorText, idem, structured, type Harness } from './mcp-harness';
 
 /**
@@ -38,6 +40,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await h.close();
 });
+
+const PAGE = 'https://calendar.example.test/acme/alex-rivera/intro-call';
 
 const heldAt = async (startUtc: string) =>
   Number((await h.db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE slot_start_ms = ${Date.parse(startUtc)}`))!.n);
@@ -104,5 +108,28 @@ describe('hold_slot recovery', () => {
       }),
     );
     expect(booked.booking.start_utc).toBe(s.start_utc);
+  });
+});
+
+describe('the MCP booking writes count holds under the lock', () => {
+  it('book_meeting and create_booking ask the core for refuseHeld, and reschedule_booking too', async () => {
+    const book = vi.spyOn(BookingService.prototype, 'book');
+    const move = vi.spyOn(CalV2PilotService.prototype, 'reschedule');
+    try {
+      const anon = await h.connect();
+      const c = await h.connect(await h.key(ALL));
+      const [a, b, m] = [await slot(c, 24), await slot(c, 26), await slot(c, 28)];
+      const who = (name: string) => ({ name, email: `${name.toLowerCase().replace(/\W+/g, '.')}@example.org`, time_zone: 'UTC' });
+      structured(await anon.callTool({ name: 'book_meeting', arguments: { booking_page_url: PAGE, start: a.start, attendee: who('Page Lock'), answers: { company: 'P' }, idempotency_key: idem('lock-page-00001') } }));
+      const made = structured<{ booking: { uid: string } }>(
+        await c.callTool({ name: 'create_booking', arguments: { event_type_id: introId, start: b.start, attendee: who('Key Lock'), answers: { company: 'K' }, idempotency_key: idem('lock-key-000001') } }),
+      );
+      expect(book.mock.calls.map((call) => call[2]?.refuseHeld)).toEqual([true, true]);
+      structured(await c.callTool({ name: 'reschedule_booking', arguments: { booking_uid: made.booking.uid, start: m.start, idempotency_key: idem('lock-move-00001') } }));
+      expect(move.mock.calls.map((call) => call[6])).toEqual([{ refuseHeld: true }]);
+    } finally {
+      book.mockRestore();
+      move.mockRestore();
+    }
   });
 });

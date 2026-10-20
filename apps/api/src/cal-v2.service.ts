@@ -656,9 +656,11 @@ export class CalV2Service {
     /**
      * In-process callers only, never the HTTP body (which still refuses
      * `reservationUid`): a hold the caller has already proven is its own, to
-     * be consumed by this booking. The MCP `hold_slot` tool is the one caller.
+     * be consumed by this booking, and `refuseHeld`, so a personal booking
+     * refuses a time someone else holds inside the locked write. The MCP
+     * booking tools are the only callers; `/v2/bookings` passes neither.
      */
-    internal: { reservationUid?: string } = {},
+    internal: { reservationUid?: string; refuseHeld?: boolean } = {},
   ) {
     const input = createBookingSchema.parse(raw);
     const resolved = await this.resolveEvent(accountId, input);
@@ -809,6 +811,7 @@ export class CalV2Service {
               apiKeyWrite: true,
               idempotencyKey: storedKey,
               locale: bookerLocale,
+              ...(internal.refuseHeld ? { refuseHeld: true } : {}),
             },
           );
 

@@ -504,6 +504,8 @@ export class CalV2PilotService {
     idempotencyKey: string | undefined,
     keyId: string,
     allowedEventTypeIds?: string[] | null,
+    /** In-process only (the MCP reschedule tool): refuse a new time a hold covers, inside the locked write. */
+    internal: { refuseHeld?: boolean } = {},
   ) {
     const body = rescheduleSchema.parse(raw);
     await this.cal.bookingResponse(accountId, uid, allowedEventTypeIds);
@@ -527,6 +529,7 @@ export class CalV2PilotService {
             rescheduledBy: body.rescheduledBy,
             reason: body.reschedulingReason,
             idempotencyKey: storedKey,
+            ...(internal.refuseHeld ? { refuseHeld: true } : {}),
           },
           this.calendar.provider,
         );

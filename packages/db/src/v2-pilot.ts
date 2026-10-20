@@ -9,6 +9,7 @@ import {
   isSlotBookable,
   jsonParam,
   lockMembers,
+  memberHeldSql,
   parseJsonColumn,
   scopedIdempotencyKey,
 } from './repository';
@@ -422,6 +423,12 @@ export async function rescheduleBookingV2(
     rescheduledBy?: string;
     reason?: string;
     idempotencyKey?: string;
+    /**
+     * Refuse the new time when a hold covers it for any assigned host, checked
+     * inside the locked write. In-process callers only (the MCP reschedule
+     * tool); the `/v2` route leaves it off and keeps its pre-check alone.
+     */
+    refuseHeld?: boolean;
   },
   calendar?: CalendarProvider,
 ): Promise<V2RescheduleOutcome> {
@@ -538,6 +545,10 @@ export async function rescheduleBookingV2(
           ))
       LIMIT 1`,
   );
+  if (args.refuseHeld) {
+    const heldAt = Date.now();
+    for (const hostMemberId of hostIds) hostConflictQueries.push(memberHeldSql(hostMemberId, args.newStartMs, newEndMs, heldAt));
+  }
   const updateOld = sql`UPDATE booking
     SET status = 'cancelled', rescheduled = 1, rescheduled_to_uid = ${newUid},
         rescheduling_reason = ${args.reason ?? null},

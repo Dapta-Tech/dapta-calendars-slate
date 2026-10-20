@@ -1,9 +1,42 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { BusyInterval, CalendarProvider, CalendarSummary, ConnectionHealth, CreatedEvent } from '@slate/calendar';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
+import { createBooking, getAvailability } from './repository';
 import { createTeamBooking, getTeamAvailability, insertHoldGuarded } from './parity';
+import { rescheduleBookingV2 } from './v2-pilot';
 import { createEventType, createTeam } from './crud';
+
+/**
+ * A connected calendar whose busy read first runs `onRead`: the window in which
+ * a booking has done its checks but not yet its locked write (team host
+ * selection, the personal create path and a move all read the calendar there).
+ * A hold placed from `onRead` is a hold that commits in exactly that window.
+ */
+class RacingCalendar implements CalendarProvider {
+  readonly enabled = true;
+  constructor(private readonly onRead: () => Promise<void>) {}
+  async listBusy(): Promise<BusyInterval[]> {
+    await this.onRead();
+    return [];
+  }
+  createEvent(): Promise<CreatedEvent> {
+    return Promise.reject(new Error('not used'));
+  }
+  updateEvent(): Promise<CreatedEvent> {
+    return Promise.reject(new Error('not used'));
+  }
+  deleteEvent(): Promise<void> {
+    return Promise.resolve();
+  }
+  listCalendars(): Promise<CalendarSummary[]> {
+    return Promise.resolve([]);
+  }
+  checkConnection(): Promise<ConnectionHealth> {
+    return Promise.resolve({ ok: true });
+  }
+}
 
 /**
  * A soft hold on one of a host's own events (a booking page's pick, or the MCP
@@ -75,14 +108,18 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
       fromMs: Date.now() + 86_400_000,
       toMs: Date.now() + 8 * 86_400_000,
     }))!.slots.map((s) => new Date(s).getTime());
-    const book = (startMs: number, email: string) =>
-      createTeamBooking(db, {
-        accountCode,
-        teamSlug: `${slug}-team`,
-        slug,
-        startMs,
-        attendee: { name: 'Team Invitee', email, timeZone: 'UTC' },
-      });
+    const book = (startMs: number, email: string, calendar?: CalendarProvider) =>
+      createTeamBooking(
+        db,
+        {
+          accountCode,
+          teamSlug: `${slug}-team`,
+          slug,
+          startMs,
+          attendee: { name: 'Team Invitee', email, timeZone: 'UTC' },
+        },
+        calendar,
+      );
     return { slots, book };
   }
 
@@ -99,6 +136,33 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
       now: Date.now(),
     });
 
+  /** Alex's open times right now (bookings and holds from earlier cases subtracted). */
+  const alexFree = async () =>
+    (await getAvailability(db, { accountCode, handle: `alex-${tag}`, slug: 'own', fromMs: Date.now() + 86_400_000, toMs: Date.now() + 8 * 86_400_000 }))!.slots.map((x) =>
+      new Date(x.startUtc).getTime(),
+    );
+
+  /** Earlier cases' holds out of the way: a host takes at most ten at a time. */
+  const clearHolds = () => db.run(sql`DELETE FROM slot_reservation WHERE account_id = ${accountId}`);
+
+  /** One hold placed by the first calendar read only. */
+  const racing = (memberId: string, startMs: number) => {
+    let fired = false;
+    return new RacingCalendar(async () => {
+      if (fired) return;
+      fired = true;
+      expect(await hold(memberId, startMs)).toBe('ok');
+    });
+  };
+
+  /** A personal booking on Alex's own event, as the REST routes make it unless `refuseHeld` is set. */
+  const bookOwn = (startMs: number, email: string, opts: { refuseHeld?: boolean; reservationUid?: string } = {}, calendar?: CalendarProvider) =>
+    createBooking(
+      db,
+      { accountCode, handle: `alex-${tag}`, slug: 'own', startMs, attendee: { name: 'Own Invitee', email, timeZone: 'UTC' }, ...opts },
+      calendar,
+    );
+
   beforeAll(async () => {
     db = await createDb(dbUrl);
     await migrate(db);
@@ -111,6 +175,11 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
     const own = await createEventType(db, accountId, alex, { slug: 'own', title: 'Own', lengthMinutes: 30, scheduleId: null });
     if (!own.ok) throw new Error('personal event create failed');
     alexOwn = own.value.id;
+    // Alex's calendar is conflict-checked, so every booking path reads it (see RacingCalendar).
+    await db.run(
+      sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${alex}, 'google', ${`cal-${tag}`}, 0, 1, ${Date.now()})`,
+    );
   });
 
   afterAll(async () => {
@@ -166,5 +235,49 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
       sql`SELECT bh.id FROM booking_host bh JOIN booking b ON b.id = bh.booking_id WHERE b.uid = ${out.uid} AND bh.member_id = ${bea}`,
     );
     expect(beaSeat).toBeUndefined();
+  });
+
+  it('a hold that commits while hosts are being picked is still respected: the locked insert refuses, nothing is booked', async () => {
+    await clearHolds();
+    const rr = await teamEvent('round_robin');
+    const at = rr.slots[48]!;
+    // Alex passes the hold check, then the hold lands during Alex's calendar read.
+    const out = await rr.book(at, 'race@example.org', racing(alex, at));
+    expect(out).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const n = await db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM booking WHERE account_id = ${accountId} AND start_ms = ${at}`);
+    expect(Number(n!.n)).toBe(0);
+  });
+
+  it('a personal booking that asks for holds to count refuses one that lands before its write; the REST default still books', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [a, b] = [free[2]!, free[6]!];
+    expect(await bookOwn(a, 'mcp-race@example.org', { refuseHeld: true }, racing(alex, a))).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // Without the option (every REST route), holds are not looked at, exactly as before.
+    expect((await bookOwn(b, 'rest-race@example.org', {}, racing(alex, b))).ok).toBe(true);
+  });
+
+  it('the hold a personal booking consumes is its own: refuseHeld never refuses it', async () => {
+    await clearHolds();
+    const at = (await alexFree())[10]!;
+    const uid = randomUUID();
+    expect(
+      await insertHoldGuarded(db, { accountId, eventTypeId: alexOwn, memberId: alex, startMs: at, endMs: at + HALF_HOUR, uid, releaseAtMs: Date.now() + 600_000, now: Date.now() }),
+    ).toBe('ok');
+    const out = await bookOwn(at, 'own-hold@example.org', { refuseHeld: true, reservationUid: uid });
+    expect(out.ok).toBe(true);
+  });
+
+  it('a move that asks for holds to count refuses one that lands before its write; the /v2 default still moves', async () => {
+    await clearHolds();
+    const free = await alexFree();
+    const [from1, to1, from2, to2] = [free[14]!, free[16]!, free[18]!, free[20]!];
+    const first = await bookOwn(from1, 'move-one@example.org');
+    const second = await bookOwn(from2, 'move-two@example.org');
+    if (!first.ok || !second.ok) throw new Error('setup booking failed');
+    const refused = await rescheduleBookingV2(db, { accountId, uid: first.booking.uid, newStartMs: to1, refuseHeld: true }, racing(alex, to1));
+    expect(refused).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    const moved = await rescheduleBookingV2(db, { accountId, uid: second.booking.uid, newStartMs: to2 }, racing(alex, to2));
+    expect(moved).toMatchObject({ ok: true });
   });
 });

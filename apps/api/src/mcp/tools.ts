@@ -830,7 +830,8 @@ const bookMeeting: ToolDef = {
         : await deps.bookings.book(
             { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers, reservationUid },
             false,
-            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
+            // refuseHeld: the check above, again under the booking's own lock.
+            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel, refuseHeld: true },
           );
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;
@@ -899,7 +900,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while you confirm the details with the person: meanwhile no slot list offers it and the MCP booking tools will not book it for anyone else (a booking made straight through the REST API is not checked against holds yet). Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. A hold made with an API key or sign-in can be used only with that same key or person; the hold_id of an anonymous hold works for whoever presents it, so pass it on to nobody else. An unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
+    'Keep one offered slot for about 10 minutes while you confirm the details with the person: meanwhile no slot list offers it, the MCP booking tools will not book it for anyone else, and team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). Then book it with book_meeting (public page) or create_booking (event_type_id) passing the returned hold_id and the same start. A hold made with an API key or sign-in can be used only with that same key or person; the hold_id of an anonymous hold works for whoever presents it, so pass it on to nobody else. An unused hold just expires. One-host events only: a team event picks its host at booking time, so call book_team_meeting directly. Works with no API key on a public booking page, or with a key holding bookings:write (event_type_id).',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -1516,7 +1517,7 @@ const createBooking: ToolDef = {
       args.idempotency_key,
       p.eventTypeIds,
       p.keyId,
-      { reservationUid },
+      { reservationUid, refuseHeld: true },
     ).catch(async (error: unknown) => {
       const failure = toFailure(error);
       const et = failure.code === 'BOOKING_FIELDS_INVALID' ? await deps.calV2.resolveEvent(p.accountId, { eventTypeId: args.event_type_id }).catch(() => null) : null;
@@ -1555,6 +1556,7 @@ const rescheduleBooking: ToolDef = {
       args.idempotency_key,
       p.keyId,
       p.eventTypeIds,
+      { refuseHeld: true },
     );
     const summary = await summarize(deps, p.accountId, b, zone);
     return { data: { booking: summary, previous_uid: args.booking_uid }, summary: `Moved. ${line(summary)}`, affected: [args.booking_uid, b.uid] };
