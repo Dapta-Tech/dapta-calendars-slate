@@ -204,11 +204,11 @@ DB layer, run this before you push.
 - **DCO sign-off** on every commit: `git commit -s` (adds `Signed-off-by:`). Not a
   CLA. Enforced by `.github/workflows/dco.yml`.
 - **Conventional Commit** title (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
-  `chore:` …) — enforced by commitlint.
+  `chore:` …). This is the convention, and reviewers check it; no tool enforces it.
 - **CI green**: lint + typecheck + `pnpm test` on **SQLite**, a **Postgres** parity
   job (the `booking_no_overlap` EXCLUDE / double-booking assertion), a full
   `pnpm build`, and the **publish-gate** secret scan. See `.github/workflows/ci.yml`.
-- **Changeset** if you changed a published package's behavior: `pnpm changeset`.
+- **Changeset** if you changed a package's behavior: `pnpm changeset`.
 - **OptiBot triage**: the repo runs automated PR review (OptiBot). Address every
   comment before merge — fix it, or reply explaining why it does not apply. Do not
   merge over unresolved review comments.

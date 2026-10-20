@@ -81,6 +81,6 @@ strangers; a fork with nothing configured must still run.
 - **Conventional Commit** titles.
 - **Tests + types + lint** pass, and the **Postgres parity** DB test passes if the
   DB layer changed (see `CLAUDE.md` → How to test).
-- A **changeset** exists if a published package's behavior changed.
+- A **changeset** exists if a package's behavior changed.
 
 Read `CLAUDE.md` and `ARCHITECTURE.md` for the full context before reviewing.

@@ -8,6 +8,7 @@ human-readable release notes for each change. Every package in this repo is
 private and nothing is published, so no workflow versions packages or writes a
 changelog from them.
 
-Check them with `pnpm changeset status`. One changeset may not mix the ignored
-apps (`@slate/web`, `@slate/api`, see `config.json`) with the other packages:
-when a change touches both, write one file for each group with the same summary.
+CI runs `changeset status` on every PR; run `pnpm changeset status` to check
+them first. One changeset may not mix the ignored apps (`@slate/web`,
+`@slate/api`, see `config.json`) with the other packages: when a change touches
+both, write one file for each group with the same summary.
