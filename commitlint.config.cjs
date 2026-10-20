@@ -1,6 +1,5 @@
 /**
- * Conventional Commits — enforced in CI so history stays legible and
- * Changesets/release automation can hook off commit types.
+ * Conventional Commits, enforced in CI so history stays legible.
  */
 module.exports = {
   extends: ['@commitlint/config-conventional'],
