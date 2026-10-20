@@ -96,7 +96,8 @@ test('a plain member reads where hosts come from, without links the API would re
  * seeded round robin Team Demo, every host starts at Medium (priority 0, the
  * value assignment already used). Jordan is set to Highest, saved, and still
  * Highest after a reload, stored as 2. Jordan is set back to Medium and saved
- * at the end, so the stack is left as the booking tests expect it.
+ * at the end, even after a failure, so round robin assignment on the shared
+ * stack behaves as the booking tests expect (the seed's null reads as 0).
  */
 test('a round robin host keeps the priority level they are given', async ({ page, request }) => {
   await page.goto('/admin/event-types');
@@ -108,7 +109,8 @@ test('a round robin host keeps the priority level they are given', async ({ page
     .getByRole('link', { name: 'Edit', exact: true })
     .click();
   await expect(page).toHaveURL(/\/admin\/event-types\/[^/?]+$/);
-  const eventId = new URL(page.url()).pathname.split('/').pop()!;
+  const editUrl = page.url();
+  const eventId = new URL(editUrl).pathname.split('/').pop()!;
   await expect(
     page.getByText('Each booking goes to the free host with the highest priority;'),
   ).toBeVisible();
@@ -134,13 +136,18 @@ test('a round robin host keeps the priority level they are given', async ({ page
     return (et.hosts ?? []).map((h) => h.priority).sort((a, b) => (a ?? 0) - (b ?? 0));
   };
 
-  await setJordan('Highest');
-  await page.reload();
-  await expect(jordan).toHaveText('Highest');
-  await expect(alex).toHaveText('Medium');
-  expect(await storedPriorities()).toEqual([0, 2]);
-
-  await setJordan('Medium');
+  try {
+    await setJordan('Highest');
+    await page.reload();
+    await expect(jordan).toHaveText('Highest');
+    await expect(alex).toHaveText('Medium');
+    expect(await storedPriorities()).toEqual([0, 2]);
+  } finally {
+    // Back to Medium even when a check above fails: a Highest Jordan would
+    // take every later round robin booking on this shared stack.
+    await page.goto(editUrl);
+    await setJordan('Medium');
+  }
   await page.reload();
   await expect(jordan).toHaveText('Medium');
   expect(await storedPriorities()).toEqual([0, 0]);

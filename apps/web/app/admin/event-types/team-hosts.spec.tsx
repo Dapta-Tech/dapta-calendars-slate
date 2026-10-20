@@ -358,7 +358,7 @@ describe('the team event editor saves each host priority', () => {
     expect(priorityOf(el, 'Jordan Lee: Priority')!.textContent).toBe('Medium');
     expect(priorityOf(el, 'Riley Chen: Priority')!.textContent).toBe('Low');
     // Weight is still a number per host.
-    expect(el.querySelector<HTMLInputElement>('input[aria-label="Riley Chen \u2014 Weight"]')!.value).toBe('50');
+    expect(el.querySelector<HTMLInputElement>('input[aria-label="Riley Chen: Weight"]')!.value).toBe('50');
   });
 
   it('keeps a value outside the levels until a level is picked', async () => {

@@ -1227,7 +1227,7 @@ export function EventTypeForm({
                         <input
                           type="number"
                           min={1}
-                          aria-label={`${name} — ${m.weight}`}
+                          aria-label={`${name}: ${m.weight}`}
                           value={h.weight ?? 100}
                           onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
                           className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
@@ -1237,6 +1237,7 @@ export function EventTypeForm({
                         <HostCell label={m.fixedHost}>
                           <label className="flex w-16 cursor-pointer justify-end sm:justify-center" title={m.fixedHostHint}>
                             <Checkbox
+                              aria-label={`${name}: ${m.fixedHost}`}
                               checked={h.isFixed}
                               onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
                             />
