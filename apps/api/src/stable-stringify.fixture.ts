@@ -3,10 +3,13 @@
  * frozen exactly as they were on `develop` up to ace0b31 (only the MCP copy's
  * `export` keyword is dropped), for specs only. Every request hash stored before
  * the shared helper existed was made by one of these, so the specs check the
- * shared helper against them. Never edit them: they are the record.
+ * shared helper against them. Never edit them, by hand or by a formatter: they
+ * are the record. Each one carries `// prettier-ignore` so `pnpm format` leaves
+ * its quotes, braces and line breaks exactly as they were.
  */
 
 /** From `apps/api/src/cal-v2.service.ts` (the `/v2` booking create hash). */
+// prettier-ignore
 export const legacyCalV2Stringify = (() => {
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
@@ -22,6 +25,7 @@ function stableStringify(value: unknown): string {
 })();
 
 /** From `apps/api/src/cal-v2-pilot.service.ts` (the `/v2` cancel, reschedule and add-guests hash). */
+// prettier-ignore
 export const legacyPilotStringify = (() => {
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
@@ -36,6 +40,7 @@ function stableStringify(value: unknown): string {
 })();
 
 /** From `apps/api/src/mcp/support.ts` (the MCP `book_meeting` hash). */
+// prettier-ignore
 export const legacyMcpStringify = (() => {
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;

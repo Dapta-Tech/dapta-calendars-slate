@@ -23,8 +23,13 @@ vi.mock('./stable-stringify', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./stable-stringify')>();
   return {
     stableStringify: (value: unknown) => {
-      // The first frame in the API's own source outside this module is the caller.
-      const frame = (new Error().stack ?? '').split('\n').find((line) => /apps\/api\/src\/(?!stable-stringify)/.test(line)) ?? '';
+      // The first frame in the API's own source outside this module is the
+      // caller. Separators are normalized so Windows paths match too.
+      const frame =
+        (new Error().stack ?? '')
+          .replace(/\\/g, '/')
+          .split('\n')
+          .find((line) => /apps\/api\/src\/(?!stable-stringify)/.test(line)) ?? '';
       const site = /cal-v2-pilot\.service\.ts/.test(frame)
         ? 'cal-v2-pilot.service.ts'
         : /cal-v2\.service\.ts/.test(frame)
@@ -216,6 +221,13 @@ describe('every value the real callers hash', () => {
       attendee: attendee(8),
       idempotency_key: idem('mcp-create-2'),
     });
+    // book_team_meeting by event_type_id books through the same cal-v2 path.
+    await tool('book_team_meeting', {
+      event_type_id: teamId,
+      start: (await openSlot(TEAM_PAGE)).start,
+      attendee: attendee(9),
+      idempotency_key: idem('mcp-team-1'),
+    });
     const toolMoved = await tool<{ booking: { uid: string } }>('reschedule_booking', {
       booking_uid: created.booking.uid,
       start: (await openSlot(PAGE)).start,
@@ -231,10 +243,11 @@ describe('every value the real callers hash', () => {
     await tool('cancel_booking', { booking_uid: createdTeam.booking.uid, idempotency_key: idem('mcp-cancel-2') });
 
     // REST: 3 creates and 5 pilot writes. MCP: 2 book_meeting, plus 2
-    // create_booking (cal-v2) and 2 + 2 reschedule_booking / cancel_booking (pilot).
+    // create_booking and 1 book_team_meeting (cal-v2) and 2 + 2
+    // reschedule_booking / cancel_booking (pilot).
     const of = (site: Site) => hashed.filter((h) => h.site === site).map((h) => h.value);
     expect(hashed.map((h) => h.site).filter((site) => !(site in LEGACY_STRINGIFIERS))).toEqual([]);
-    expect(of('cal-v2.service.ts')).toHaveLength(5);
+    expect(of('cal-v2.service.ts')).toHaveLength(6);
     expect(of('cal-v2-pilot.service.ts')).toHaveLength(9);
     expect(of('mcp/support.ts')).toHaveLength(2);
     const { stableStringify } = await vi.importActual<typeof import('./stable-stringify')>('./stable-stringify');
@@ -265,7 +278,7 @@ describe('every value the real callers hash', () => {
         .map((b) => parseJsonColumn<{ _idempotency?: { requestHash?: string } }>(b.metadata, {})._idempotency?.requestHash)
         .filter((x): x is string => !!x),
     );
-    expect(createHashes.size).toBe(5);
+    expect(createHashes.size).toBe(6);
     for (const stored of createHashes) expect(byCopy('cal-v2.service.ts').has(stored)).toBe(true);
   });
 });

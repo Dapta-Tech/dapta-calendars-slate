@@ -159,10 +159,58 @@ const MCP_GOLDEN: { name: string; input: unknown; expected: string; sha256: stri
   },
 ];
 
+/**
+ * Keys a caller chooses (`metadata`, `bookingFieldsResponses`) are ordered by
+ * `localeCompare`, which follows the runtime's default ICU locale. Every stored
+ * hash was made under en-US (also what Node falls back to under `LANG=C`).
+ * These keys sort differently under another locale or under code-unit order,
+ * so a container or CI `LANG` change that would invalidate stored hashes fails
+ * here (each name says where the order would differ).
+ */
+const LOCALE_GOLDEN: { name: string; input: unknown; expected: string; sha256?: string }[] = [
+  {
+    name: 'locale: ñ sorts with n (en-US), not after it (es)',
+    input: { nz: 1, 'ño': 2, oa: 3 },
+    expected: '{"\u00f1o":2,"nz":1,"oa":3}',
+  },
+  {
+    name: 'locale: lower case first on a case tie (en-US), not upper first (da)',
+    input: { A: 1, a: 2 },
+    expected: '{"a":2,"A":1}',
+  },
+  {
+    name: 'locale: case is ignored first (en-US), not upper before lower (code units)',
+    input: { a: 1, B: 2 },
+    expected: '{"a":1,"B":2}',
+  },
+  {
+    name: 'locale: an accent is a secondary difference (en-US), not after z (code units)',
+    input: { f: 1, 'é': 2 },
+    expected: '{"\u00e9":2,"f":1}',
+  },
+  {
+    name: 'locale: ä sorts with a (en-US), not after z (sv, da)',
+    input: { z: 1, 'ä': 2, b: 3 },
+    expected: '{"\u00e4":2,"b":3,"z":1}',
+  },
+  {
+    name: 'v2 create with caller-chosen metadata and answer keys',
+    input: { eventTypeId: '0b6f3c1e-8d2a-4f7b-9c3d-5e6f7a8b9c0d', start: '2026-11-02T15:00:00.000Z', attendee: { name: 'Ana Pérez', email: 'ana@example.com', timeZone: 'America/Bogota', language: 'es' }, guests: [], bookingFieldsResponses: { 'ñame': 'Ana', nz: 'Bogotá', empresa: 'Acme' }, metadata: { Zeta: '1', 'ä': '2', b: '3', 'é': '4', f: '5', A: '6', a: '7' } },
+    expected: '{"attendee":{"email":"ana@example.com","language":"es","name":"Ana P\u00e9rez","timeZone":"America/Bogota"},"bookingFieldsResponses":{"empresa":"Acme","\u00f1ame":"Ana","nz":"Bogot\u00e1"},"eventTypeId":"0b6f3c1e-8d2a-4f7b-9c3d-5e6f7a8b9c0d","guests":[],"metadata":{"a":"7","A":"6","\u00e4":"2","b":"3","\u00e9":"4","f":"5","Zeta":"1"},"start":"2026-11-02T15:00:00.000Z"}',
+    sha256: 'f95bc1ab18099ec36c358d087e4a876b4c29458eaba33f5e456f1cd3ca6d6408',
+  },
+];
+
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
 describe('stableStringify golden output', () => {
   it.each(GOLDEN)('$name', ({ input, expected, sha256: digest }) => {
+    expect(stableStringify(input)).toBe(expected);
+    for (const legacy of Object.values(LEGACY_STRINGIFIERS)) expect(legacy(input)).toBe(expected);
+    if (digest) expect(sha256(stableStringify(input))).toBe(digest);
+  });
+
+  it.each(LOCALE_GOLDEN)('$name', ({ input, expected, sha256: digest }) => {
     expect(stableStringify(input)).toBe(expected);
     for (const legacy of Object.values(LEGACY_STRINGIFIERS)) expect(legacy(input)).toBe(expected);
     if (digest) expect(sha256(stableStringify(input))).toBe(digest);

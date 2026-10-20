@@ -264,7 +264,6 @@ export function argsHash(args: unknown): string {
   return createHash('sha256').update(JSON.stringify(redactArgs(args))).digest('hex').slice(0, 16);
 }
 
-/** JSON with sorted keys, so equal requests hash equally whatever their key order. */
 export { stableStringify } from '../stable-stringify';
 
 // --- Errors ---------------------------------------------------------------
