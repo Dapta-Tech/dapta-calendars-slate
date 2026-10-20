@@ -326,7 +326,7 @@ describe('pending bookings', () => {
     expect(after.bookings.map((b) => b.uid)).not.toContain(uid);
   });
 
-  it('lists a request whose time has passed by default (it still needs an answer), and leaves it out with from', async () => {
+  it('lists a request whose time has passed by default (it still needs an answer), latest first, and leaves it out with from', async () => {
     const jordan = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee' AND account_id = ${h.accountId}`))!.id;
     const uid = randomUUID();
     const start = Date.now() - 2 * 86_400_000;
@@ -339,6 +339,14 @@ describe('pending bookings', () => {
       structured<{ bookings: { uid: string }[] }>(await reader.callTool({ name: tool, arguments: { limit: 50, ...args } })).bookings.map((b) => b.uid);
     expect(await uids({})).toContain(uid);
     expect(await uids({ status: 'pending' }, 'list_bookings')).toContain(uid);
+    // With no from, latest start first: an upcoming request comes before the stale one.
+    const upcoming = await pendingBooking(6, 'Una Upcoming');
+    const latestFirst = await uids({});
+    expect(latestFirst.indexOf(upcoming)).toBeGreaterThanOrEqual(0);
+    expect(latestFirst.indexOf(upcoming)).toBeLessThan(latestFirst.indexOf(uid));
+    const oldestFirst = await uids({ order: 'asc' });
+    expect(oldestFirst.indexOf(uid)).toBeLessThan(oldestFirst.indexOf(upcoming));
+    expect((await uids({ from: new Date(Date.now() - 3 * 86_400_000).toISOString() })).indexOf(uid)).toBe(0);
     expect(await uids({ from: new Date().toISOString() })).not.toContain(uid);
     // Plain list_bookings still starts from now.
     expect(await uids({}, 'list_bookings')).not.toContain(uid);

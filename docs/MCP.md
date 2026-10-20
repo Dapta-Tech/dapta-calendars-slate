@@ -135,7 +135,9 @@ Either can still take a held time.
 
 Event types that require confirmation create **pending** bookings.
 `list_pending_bookings` lists them, including requests whose time has already
-passed (they still wait for an answer; pass `from` to leave them out);
+passed (they still wait for an answer; pass `from` to leave them out). With no
+`from` the list runs latest start first, so upcoming requests come before stale
+ones; `order: "asc"` turns that around.
 `confirm_booking` and `decline_booking` are
 the machine version of the host's Confirm and Decline buttons, with the same
 rules: only the key's own workspace and event-type allowlist, the host's calendar

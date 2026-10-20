@@ -1321,7 +1321,10 @@ const listBookingsInput = z.object({
   to: z.string().max(40).optional().describe('Exclusive latest start (ISO with offset, or a bare date in time_zone).'),
   status: z.enum(['accepted', 'pending', 'cancelled', 'rejected']).optional(),
   event_type_id: z.string().max(64).optional(),
-  order: z.enum(['asc', 'desc']).default('asc').describe('asc = soonest first.'),
+  order: z
+    .enum(['asc', 'desc'])
+    .optional()
+    .describe('asc = soonest first, desc = latest first. Default asc, except for pending requests listed with no from: desc, so upcoming requests come before stale ones.'),
   limit: z.number().int().min(1).max(50).default(25),
   cursor: z.string().max(300).optional().describe('next_cursor from the previous page; keep the other arguments identical.'),
   time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
@@ -1356,6 +1359,10 @@ async function bookingPage(
   // whose time has passed still needs the host's decision, so hiding it from
   // "from now" would hide it for good. Everything else starts from now.
   const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to || status === 'pending' ? undefined : Date.now();
+  // Pending requests never expire, so with no lower bound oldest-first would
+  // fill the first page with stale ones; latest-first keeps upcoming requests
+  // on top and the stale ones last, still one cursor away.
+  const order = args.order ?? (status === 'pending' && !args.from ? 'desc' : 'asc');
   const page = await queryBookings(deps.db, {
     accountId: p.accountId,
     fromMs,
@@ -1365,7 +1372,7 @@ async function bookingPage(
     eventTypeId: args.event_type_id,
     limit: args.limit,
     cursor: args.cursor,
-    order: args.order,
+    order,
   });
   const bookings = page.items.map((b) => ({
     uid: b.uid,
@@ -1411,7 +1418,7 @@ const listPendingBookings: ToolDef = {
   name: 'list_pending_bookings',
   title: 'List bookings waiting for confirmation',
   description:
-    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), in start order, with minimal fields (no names, notes or answers). Requests whose time has already passed are included: they still wait for an answer (pass from to leave them out). Needs scope bookings:read and respects the key\'s event-type allowlist. Answer each with confirm_booking or decline_booking; read one with get_booking.',
+    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), in start order, with minimal fields (no names, notes or answers). Requests whose time has already passed are included, since they still wait for an answer; with no from the list runs latest start first, so upcoming requests come before stale ones (pass from, or order asc, to change that). Needs scope bookings:read and respects the key\'s event-type allowlist. Answer each with confirm_booking or decline_booking; read one with get_booking.',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
