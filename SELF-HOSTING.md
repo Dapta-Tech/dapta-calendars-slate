@@ -427,7 +427,7 @@ marks queued write-out `skipped`, and deletes nothing in the CRM.
 | `MCP_ALLOWED_HOSTS` | unset | comma-separated hostnames `/mcp` answers to (DNS-rebinding guard). Unset = no Host check | no |
 | `MCP_RATE_LIMIT_CAPACITY` | `30` | tool-call burst per API key (per client address when anonymous). Per process, so N replicas allow up to N times this | no |
 | `MCP_RATE_LIMIT_REFILL_PER_SEC` | `1` | sustained refill for the above | no |
-| `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for `book_meeting`, `create_booking`, `reschedule_booking`, `cancel_booking` | no |
+| `MCP_WRITE_RATE_LIMIT_CAPACITY` | `10` | tighter burst for the write tools (`hold_slot`, `book_meeting`, `book_team_meeting`, `create_booking`, `reschedule_booking`, `confirm_booking`, `decline_booking`, `cancel_booking`) | no |
 | `MCP_WRITE_RATE_LIMIT_REFILL_PER_SEC` | `0.2` | sustained refill for write tools | no |
 | `MCP_TOOL_TIMEOUT_MS` | `20000` | how long one tool call may run before the caller gets a timeout error | no |
 

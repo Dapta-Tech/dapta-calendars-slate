@@ -38,20 +38,26 @@ async function firstSlot(client: Awaited<ReturnType<Harness['connect']>>, nth = 
 }
 
 describe('catalog', () => {
-  it('lists eleven tools with titles, annotations and output schemas, in a stable order', async () => {
+  it('lists seventeen tools with titles, annotations and output schemas, in a stable order', async () => {
     const client = await h.connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([
       'find_available_slots',
+      'find_team_slots',
+      'hold_slot',
       'book_meeting',
+      'book_team_meeting',
       'whoami',
       'list_my_accounts',
       'list_event_types',
       'get_booking_page_link',
       'list_bookings',
+      'list_pending_bookings',
       'get_booking',
       'create_booking',
       'reschedule_booking',
+      'confirm_booking',
+      'decline_booking',
       'cancel_booking',
     ]);
     for (const t of tools) {
@@ -62,6 +68,12 @@ describe('catalog', () => {
     }
     const by = Object.fromEntries(tools.map((t) => [t.name, t.annotations!]));
     expect(by['cancel_booking']!.destructiveHint).toBe(true);
+    expect(by['decline_booking']!.destructiveHint).toBe(true);
+    expect(by['confirm_booking']!.destructiveHint).toBe(false);
+    expect(by['hold_slot']!.readOnlyHint).toBe(false);
+    expect(by['list_pending_bookings']!.readOnlyHint).toBe(true);
+    expect(by['find_team_slots']!.readOnlyHint).toBe(true);
+    expect(by['book_team_meeting']!.openWorldHint).toBe(true);
     expect(by['list_bookings']!.readOnlyHint).toBe(true);
     expect(by['create_booking']!.idempotentHint).toBe(true);
     expect(by['book_meeting']!.openWorldHint).toBe(true);
@@ -69,8 +81,24 @@ describe('catalog', () => {
     // Every tool that acts on the caller's account takes `account_id`; the
     // public booking tool and the account list do not.
     const props = (name: string) => Object.keys((tools.find((t) => t.name === name)!.inputSchema as { properties?: object }).properties ?? {});
-    for (const name of ['find_available_slots', 'whoami', 'list_event_types', 'get_booking_page_link', 'list_bookings', 'get_booking', 'create_booking', 'reschedule_booking', 'cancel_booking'])
-      expect(props(name)).toContain('account_id');
+    for (const name of [
+      'find_available_slots',
+      'find_team_slots',
+      'hold_slot',
+      'book_team_meeting',
+      'whoami',
+      'list_event_types',
+      'get_booking_page_link',
+      'list_bookings',
+      'list_pending_bookings',
+      'get_booking',
+      'create_booking',
+      'reschedule_booking',
+      'confirm_booking',
+      'decline_booking',
+      'cancel_booking',
+    ])
+      expect(props(name), name).toContain('account_id');
     expect(props('book_meeting')).not.toContain('account_id');
     expect(props('list_my_accounts')).not.toContain('account_id');
   });

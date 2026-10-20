@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { HttpException } from '@nestjs/common';
 import { ZodError } from 'zod';
+import { hashApiValue } from '@slate/db';
 import { zoneOffsetMinutes } from '@slate/shared';
 import type { ApiScope } from '@slate/types';
 import type { MachinePrincipal } from '../auth.service';
@@ -84,6 +85,29 @@ export function loginPrincipal(account: LoginAccount, token: ExternalLogin): Mac
     ...(token.clientId ? { clientId: token.clientId } : {}),
     ...(token.sessionId ? { sessionId: token.sessionId } : {}),
   };
+}
+
+/**
+ * Who owns what a call leaves behind (an idempotency record, a hold): the key
+ * or OAuth connection; a sign-in through an external server as the person
+ * (`signInKey`), whichever account the call named, because the account is
+ * already part of every namespace and `book_meeting`, which never names one,
+ * must still find a hold made while naming it; or for an anonymous call a
+ * digest of its address. Never logged; a namespace, not an identity.
+ */
+export function callerId(call: McpCall): string {
+  if (call.login) return signInKey(call.login);
+  return call.principal ? `key:${call.principal.keyId}` : `anon:${hashApiValue(call.ip)}`;
+}
+
+/**
+ * Whether this connection may act in `accountId`: a key or connection in its
+ * own account, a sign-in in any account it reaches, whichever one (if any) this
+ * call named.
+ */
+export function reachesAccount(call: McpCall, accountId: string): boolean {
+  if (call.login) return call.login.accounts.some((a) => a.accountId === accountId);
+  return call.principal?.accountId === accountId;
 }
 
 /**
@@ -218,6 +242,7 @@ const REDACT_KEYS = new Set([
   'guests',
   'attendee',
   'idempotency_key',
+  'hold_id',
   'cursor',
 ]);
 
@@ -279,6 +304,14 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
     message: 'That booking can no longer be changed (it is cancelled, declined or finished).',
     hint: 'Use get_booking to check its status.',
   },
+  HOLD_EXPIRED: {
+    message: 'The hold on that time expired, so nothing was booked.',
+    hint: 'Call find_available_slots and hold_slot again, then book with the new hold_id and a NEW idempotency_key.',
+  },
+  TOO_MANY_HOLDS: {
+    message: 'This host has too many holds open right now (at most 10 at a time, across all of their event types).',
+    hint: 'Book without a hold, or retry in a few minutes (a hold lasts about 10 minutes).',
+  },
   FEATURE_NOT_SUPPORTED: { hint: 'This event type uses a feature the MCP tools do not support yet; book it from its public page.' },
 };
 
@@ -286,6 +319,8 @@ const ACTIONABLE: Record<string, { message?: string; hint: string }> = {
 export function failureFor(code: string, message: string): ToolFailure {
   // The booking core reports a bad start time under its intake-validation code.
   if (code === 'BOOKING_FIELDS_INVALID' && /time is not available|start time/i.test(message)) code = 'INVALID_SLOT';
+  // The core calls a hold a reservation; the tools call it a hold.
+  if (code === 'RESERVATION_EXPIRED') code = 'HOLD_EXPIRED';
   const known = ACTIONABLE[code];
   return new ToolFailure(code, known?.message ?? message, known?.hint);
 }

@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createApiKey, sql } from '@slate/db';
+import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
 import { NOT_LINKED_MESSAGE } from '../mcp/mcp.controller';
 import { startFakeAs, type FakeAs } from './fake-as';
@@ -376,6 +377,189 @@ describe('several accounts', () => {
     expect((await tool(h, key, 'list_event_types', { account_id: h.accountId })).isError).toBeFalsy();
     expect((await tool(h, key, 'list_event_types', { account_id: h.other.accountId })).content![0]!.text).toMatch(/^NOT_FOUND/);
     expect((await tool(h, key, 'get_booking', { booking_uid: h.other.bookingUid, account_id: h.other.accountId })).content![0]!.text).toMatch(/^NOT_FOUND/);
+  });
+});
+
+describe('the hold, pending-request and team tools with several accounts', () => {
+  let as: FakeAs;
+  let h: Harness;
+  let token: string;
+  let teamId: string;
+  const ACME_PAGE = 'https://x.test/acme/alex-rivera/intro-call';
+  const GLOBEX_PAGE = 'https://x.test/globex/bo/chat';
+  const TEAM = 'https://x.test/acme/team/sales/team-demo';
+  const invitee = (name: string) => ({ name, email: `${name.toLowerCase().replace(/\W+/g, '.')}@example.org`, time_zone: 'UTC' });
+  const text = (r: { content?: { text: string }[] }) => r.content![0]!.text;
+  const starts = async (args: Record<string, unknown>, name = 'find_available_slots') =>
+    structured<{ days: { slots: { start: string }[] }[] }>(await tool(h, token, name, { time_zone: 'UTC', ...args }))
+      .days.flatMap((d) => d.slots)
+      .map((s) => s.start);
+  beforeAll(async () => {
+    ({ as, h } = await setup({ MCP_RATE_LIMIT_CAPACITY: '200', MCP_WRITE_RATE_LIMIT_CAPACITY: '200' }));
+    await link(h, await memberId(h, 'alex-rivera'), 'user_more');
+    await link(h, await memberId(h, 'bo'), 'user_more');
+    token = await as.mint({ sub: 'user_more' });
+    teamId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} AND slug = 'team-demo'`))!.id;
+    // Globex's event waits for its host, so a booking there arrives as a request.
+    await h.db.run(sql`UPDATE event_type SET requires_confirmation = 1 WHERE id = ${h.other.eventTypeId}`);
+  });
+
+  it('by id or account-wide each must name an account, and one it cannot reach (or the wrong one of its own) is not found', async () => {
+    const start = '2031-01-06T15:00:00Z';
+    const calls: [string, Record<string, unknown>][] = [
+      ['list_pending_bookings', {}],
+      ['confirm_booking', { booking_uid: h.other.bookingUid, idempotency_key: idem('more-confirm-0001') }],
+      ['decline_booking', { booking_uid: h.other.bookingUid, idempotency_key: idem('more-decline-0001') }],
+      ['hold_slot', { event_type_id: h.other.eventTypeId, start, time_zone: 'UTC', idempotency_key: idem('more-hold-00001') }],
+      ['find_team_slots', { event_type_id: teamId, time_zone: 'UTC' }],
+      ['book_team_meeting', { event_type_id: teamId, start, attendee: invitee('Team Unnamed'), idempotency_key: idem('more-team-00001') }],
+    ];
+    for (const [name, args] of calls) {
+      expect(text(await tool(h, token, name, args)), name).toMatch(/^ACCOUNT_REQUIRED/);
+      expect(text(await tool(h, token, name, { ...args, account_id: randomUUID() })), name).toMatch(/^NOT_FOUND/);
+    }
+    expect(text(await tool(h, token, 'decline_booking', { booking_uid: h.other.bookingUid, idempotency_key: idem('more-decline-0002'), account_id: h.accountId }))).toMatch(/^NOT_FOUND/);
+    expect(text(await tool(h, token, 'find_team_slots', { event_type_id: teamId, time_zone: 'UTC', account_id: h.other.accountId }))).toMatch(/^NOT_FOUND/);
+    // An API key may name only its own account here too.
+    const key = (await createApiKey(h.db, { accountId: h.accountId, name: 'spec', scopes: ALL_SCOPES })).plaintext;
+    expect((await tool(h, key, 'list_pending_bookings', { account_id: h.accountId })).isError).toBeFalsy();
+    expect(text(await tool(h, key, 'list_pending_bookings', { account_id: h.other.accountId }))).toMatch(/^NOT_FOUND/);
+  });
+
+  it('pending requests are listed, confirmed and declined in the account named, as its member', async () => {
+    // Requested on Globex's public page, which needs no account.
+    const open = await starts({ booking_page_url: GLOBEX_PAGE });
+    const request = async (start: string, name: string, key: string) =>
+      structured<{ booking: { uid: string; status: string } }>(
+        await tool(h, token, 'book_meeting', { booking_page_url: GLOBEX_PAGE, start, attendee: invitee(name), idempotency_key: idem(key) }),
+      ).booking;
+    const first = await request(open[0]!, 'Rae Request', 'more-request-001');
+    const second = await request(open[2]!, 'Dee Request', 'more-request-002');
+    expect([first.status, second.status]).toEqual(['pending', 'pending']);
+
+    const listed = structured<{ bookings: { uid: string }[] }>(await tool(h, token, 'list_pending_bookings', { account_id: h.other.accountId }));
+    expect(listed.bookings.map((b) => b.uid).sort()).toEqual([first.uid, second.uid].sort());
+    const acme = structured<{ bookings: { uid: string }[] }>(await tool(h, token, 'list_pending_bookings', { account_id: h.accountId }));
+    expect(acme.bookings.map((b) => b.uid)).not.toContain(first.uid);
+
+    type Decision = { booking: { uid: string; status: string }; already_applied: boolean };
+    const confirm = { booking_uid: first.uid, idempotency_key: idem('more-confirm-0002'), account_id: h.other.accountId };
+    expect(structured<Decision>(await tool(h, token, 'confirm_booking', confirm))).toMatchObject({ already_applied: false, booking: { status: 'accepted' } });
+    // The same key in the same account replays; the decision is not made twice.
+    expect(structured<Decision>(await tool(h, token, 'confirm_booking', confirm)).already_applied).toBe(true);
+    const declined = structured<Decision>(
+      await tool(h, token, 'decline_booking', { booking_uid: second.uid, reason: 'Full', idempotency_key: idem('more-decline-0003'), account_id: h.other.accountId }),
+    );
+    expect(declined).toMatchObject({ already_applied: false, booking: { status: 'rejected' } });
+    const line = h.audit.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.tool === 'decline_booking' && l.result === 'ok')!;
+    expect(line).toMatchObject({ caller: `login:${(await memberId(h, 'bo')).slice(0, 8)}`, accountId: h.other.accountId });
+  });
+
+  it('a hold made while naming an account is still booked by book_meeting, which names none; by id it is booked in that account only', async () => {
+    const page = await starts({ booking_page_url: ACME_PAGE });
+    const held = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { booking_page_url: ACME_PAGE, start: page[5]!, time_zone: 'UTC', idempotency_key: idem('more-hold-00002'), account_id: h.accountId }),
+    );
+    const booked = structured<{ booking: { status: string; start_utc: string } }>(
+      await tool(h, token, 'book_meeting', {
+        booking_page_url: ACME_PAGE,
+        start: page[5]!,
+        attendee: invitee('Hal Held'),
+        answers: { company: 'Co' },
+        hold_id: held.hold.hold_id,
+        idempotency_key: idem('more-book-00001'),
+      }),
+    );
+    expect(booked.booking.status).toBe('accepted');
+    expect(booked.booking.start_utc).toBe(new Date(page[5]!).toISOString());
+
+    const start = (await starts({ event_type_id: h.other.eventTypeId, account_id: h.other.accountId }))[4]!;
+    const byId = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { event_type_id: h.other.eventTypeId, start, time_zone: 'UTC', idempotency_key: idem('more-hold-00003'), account_id: h.other.accountId }),
+    );
+    const create = (credential: string, key: string, accountId?: string) =>
+      tool(h, credential, 'create_booking', {
+        event_type_id: h.other.eventTypeId,
+        start,
+        attendee: invitee('Ida Id'),
+        hold_id: byId.hold.hold_id,
+        idempotency_key: idem(key),
+        ...(accountId ? { account_id: accountId } : {}),
+      });
+    // A key of that same account did not make the hold, so it has no such hold.
+    expect(text(await create(await h.otherKey(ALL_SCOPES), 'more-create-0001'))).toMatch(/^HOLD_NOT_FOUND/);
+    const made = structured<{ booking: { uid: string; status: string } }>(await create(token, 'more-create-0002', h.other.accountId));
+    expect(made.booking.status).toBe('pending');
+  });
+
+  it('a public-page booking retried without the account_id it first named replays: one booking, one analytics channel', async () => {
+    const created = vi.spyOn(AnalyticsEffects.prototype, 'bookingCreated');
+    try {
+      const start = (await starts({ booking_page_url: TEAM }, 'find_team_slots'))[36]!;
+      const args = { booking_page_url: TEAM, start, attendee: invitee('Ray Retry'), idempotency_key: idem('more-team-retry-01') };
+      const first = structured<{ booking: { uid: string } }>(await tool(h, token, 'book_team_meeting', { ...args, account_id: h.accountId }));
+      // What a TIMEOUT tells the agent to do: the same key again, here without account_id.
+      const again = structured<{ booking: { uid: string } }>(await tool(h, token, 'book_team_meeting', args));
+      expect(again.booking.uid).toBe(first.booking.uid);
+      // book_meeting on the same team page is the same action under the same record.
+      const direct = structured<{ booking: { uid: string }; replayed: boolean }>(await tool(h, token, 'book_meeting', args));
+      expect(direct).toMatchObject({ replayed: true, booking: { uid: first.booking.uid } });
+      const n = await h.db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking b JOIN booking_attendee ba ON ba.booking_id = b.id WHERE ba.email = 'ray.retry@example.org'`,
+      );
+      expect(Number(n!.n)).toBe(1);
+      expect(created.mock.calls.map(([b]) => b.channel)).toEqual(['api']);
+    } finally {
+      created.mockRestore();
+    }
+  });
+
+  it("a sign-in's hold is not usable by an anonymous call from the same address, nor by another person in the same account", async () => {
+    const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} AND slug = 'intro-call'`))!.id;
+    const other = await addMember(h, 'admin');
+    await link(h, other, 'user_more_second');
+    const second = await as.mint({ sub: 'user_more_second' });
+    const page = await starts({ booking_page_url: ACME_PAGE });
+    const onPage = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { booking_page_url: ACME_PAGE, start: page[9]!, time_zone: 'UTC', idempotency_key: idem('more-hold-00004') }),
+    );
+    const bookPage = (credential: string | undefined, key: string) => {
+      const args = { booking_page_url: ACME_PAGE, start: page[9]!, attendee: invitee('Nora Nothold'), answers: { company: 'Co' }, hold_id: onPage.hold.hold_id, idempotency_key: idem(key) };
+      return credential ? tool(h, credential, 'book_meeting', args) : rpc(h, 'tools/call', { name: 'book_meeting', arguments: args }).then(async (r) => (await body(r)).result as { content?: { text: string }[] });
+    };
+    // Same machine, no credential: the anonymous door does not reach a sign-in's hold.
+    expect(text(await bookPage(undefined, 'more-steal-00001'))).toMatch(/^HOLD_NOT_FOUND/);
+    // Another person, admin of the same account: not theirs either.
+    expect(text(await bookPage(second, 'more-steal-00002'))).toMatch(/^HOLD_NOT_FOUND/);
+    const byId = await starts({ event_type_id: intro, account_id: h.accountId });
+    const idHold = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { event_type_id: intro, start: byId[11]!, time_zone: 'UTC', idempotency_key: idem('more-hold-00005'), account_id: h.accountId }),
+    );
+    const stolen = await tool(h, second, 'create_booking', {
+      event_type_id: intro,
+      start: byId[11]!,
+      attendee: invitee('Nate Nothold'),
+      answers: { company: 'Co' },
+      hold_id: idHold.hold.hold_id,
+      idempotency_key: idem('more-steal-00003'),
+    });
+    expect(text(stolen)).toMatch(/^HOLD_NOT_FOUND/);
+    // The person who made it still books it.
+    expect(structured<{ booking: { status: string } }>(await bookPage(token, 'more-book-00002')).booking.status).toBe('accepted');
+  });
+
+  it('team tools: a public team page needs no account; by id the named account books and reports its host', async () => {
+    const onPage = structured<{ team: { slug: string } }>(await tool(h, token, 'find_team_slots', { booking_page_url: TEAM, time_zone: 'UTC' }));
+    expect(onPage.team.slug).toBe('sales');
+    const open = await starts({ event_type_id: teamId, account_id: h.accountId }, 'find_team_slots');
+    const booked = structured<{ booking: { status: string }; assigned_hosts: string[] }>(
+      await tool(h, token, 'book_team_meeting', { event_type_id: teamId, start: open[30]!, attendee: invitee('Tim Team'), idempotency_key: idem('more-team-00002'), account_id: h.accountId }),
+    );
+    expect(booked.assigned_hosts).toHaveLength(1);
+    const publicBooked = structured<{ booking: { status: string } }>(
+      await tool(h, token, 'book_team_meeting', { booking_page_url: TEAM, start: open[32]!, attendee: invitee('Pat Public'), idempotency_key: idem('more-team-00003') }),
+    );
+    expect(publicBooked.booking.status).toBe('accepted');
   });
 });
 

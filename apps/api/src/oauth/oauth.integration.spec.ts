@@ -492,6 +492,32 @@ describe('the MCP door with OAuth on', () => {
     expect(cancel.headers.get('www-authenticate')).toContain(`scope="${READ} bookings:cancel"`);
   });
 
+  it('the newer tools step up the same way: public on a page, 403 with the scope by id or for a decision', async () => {
+    for (const [name, args, scope] of [
+      ['hold_slot', { event_type_id: 'x', start: '2031-01-06T15:00:00Z', time_zone: 'UTC', idempotency_key: 'k-hold-1' }, 'bookings:write'],
+      ['book_team_meeting', { event_type_id: 'x' }, 'bookings:write'],
+      ['confirm_booking', { booking_uid: 'x', idempotency_key: 'k-confirm-1' }, 'bookings:write'],
+      ['decline_booking', { booking_uid: 'x', idempotency_key: 'k-decline-1' }, 'bookings:write'],
+    ] as const) {
+      const res = await callTool(h, name, args, reader);
+      expect(res.status, name).toBe(403);
+      const challenge = res.headers.get('www-authenticate')!;
+      expect(challenge).toContain('error="insufficient_scope"');
+      expect(challenge).toContain(`scope="${READ} ${scope}"`);
+      expect((await callTool(h, name, args)).status, `${name} anonymous`).toBe(401);
+    }
+    // Reads the connection already has pass the door.
+    expect((await callTool(h, 'list_pending_bookings', {}, reader)).status).toBe(200);
+    expect((await callTool(h, 'find_team_slots', { event_type_id: 'x', time_zone: 'UTC' }, reader)).status).toBe(200);
+    // On a public page, no token is needed at all.
+    const team = await callTool(h, 'find_team_slots', { booking_page_url: 'https://x.test/acme/team/sales/team-demo', time_zone: 'UTC' });
+    expect(team.status).toBe(200);
+    expect((await toolResult(team)).isError).toBeFalsy();
+    const hold = await callTool(h, 'hold_slot', { booking_page_url: 'https://x.test/acme/alex-rivera/intro-call', start: '2031-01-06T15:00:00Z', time_zone: 'UTC', idempotency_key: 'k-hold-public-1' });
+    expect(hold.status).toBe(200);
+    expect((await toolResult(hold)).content?.[0]?.text).not.toContain('AUTH_REQUIRED');
+  });
+
   it('after step-up the write works', async () => {
     const writer = (await connect(h, client, { scope: `${READ} bookings:write` })).access_token;
     const res = await callTool(h, 'create_booking', { event_type_id: 'nope', start: '2030-01-01T10:00:00Z', attendee: { name: 'A', email: 'a@x.test', time_zone: 'UTC' }, idempotency_key: 'k-1' }, writer);

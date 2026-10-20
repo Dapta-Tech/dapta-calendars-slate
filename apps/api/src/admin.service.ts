@@ -373,7 +373,12 @@ export class AdminService {
     return out;
   }
 
-  async confirm(p: HostPrincipal, uid: string) {
+  /**
+   * Account-scoped, nothing more: the host routes and the MCP machine path
+   * (an API key with `bookings:write`, allowlist checked by the caller) both
+   * land here, so the confirmation and its side effects cannot drift apart.
+   */
+  async confirm(p: Pick<HostPrincipal, 'accountId'>, uid: string) {
     // The confirmation is the moment the request becomes a meeting, so the
     // host's calendar is read FRESH for its time (ADR 0009): busy there refuses
     // it, and a calendar that cannot be read refuses it too (retry later).
@@ -395,7 +400,8 @@ export class AdminService {
     return out;
   }
 
-  async decline(p: HostPrincipal, uid: string, reason?: string) {
+  /** Account-scoped like `confirm`, and shared with the MCP machine path the same way. */
+  async decline(p: Pick<HostPrincipal, 'accountId'>, uid: string, reason?: string) {
     const out = await declineBooking(this.db, uid, reason, p.accountId);
     if (out.ok) {
       this.calendar.onBookingChanged(uid);
