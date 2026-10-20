@@ -18,7 +18,7 @@ export default async function EditEventType({
   const { id } = await params;
   const { from } = await searchParams;
   // getEventType throws ApiError on 404 (stale/deleted id) — render a clean 404.
-  const [et, schedules, connections, crm, locale] = await Promise.all([
+  const [et, schedules, connections, crm, locale, teams] = await Promise.all([
     adminApi.getEventType(id).catch((e) => {
       if (e instanceof ApiError && e.status === 404) notFound();
       throw e;
@@ -27,8 +27,12 @@ export default async function EditEventType({
     adminApi.listConnections(),
     crmCatalog(),
     getLocale(),
+    // Team events read their team's name and slug from it; personal events
+    // list it in the card that points at team events.
+    adminApi.listTeams(),
   ]);
   if (!et) notFound();
+  const team = et.teamId ? teams.find((t) => t.id === et.teamId) : undefined;
   const msgs = getMessages(locale);
   const m = msgs.admin.eventTypes;
 
@@ -53,7 +57,6 @@ export default async function EditEventType({
   let publicPath: string | null = null;
   if (me?.accountCode) {
     if (et.teamId) {
-      const team = (await adminApi.listTeams()).find((t) => t.id === et.teamId);
       publicPath = team?.slug ? `/${me.accountCode}/team/${team.slug}/${et.slug}` : null;
     } else if (me.handle) {
       publicPath = `/${me.accountCode}/${me.handle}/${et.slug}`;
@@ -69,6 +72,8 @@ export default async function EditEventType({
         locationLabels={msgs.location}
         scheduling={et.teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
+        teamName={team?.name}
+        teams={et.teamId ? undefined : teams.map((t) => ({ id: t.id, name: t.name }))}
         connections={et.teamId ? undefined : connections}
         backHref={backToTeam ? `/admin/teams/${fromTeamId}` : '/admin/event-types'}
         backLabel={backToTeam ? msgs.admin.teams.title : m.title}

@@ -709,6 +709,10 @@ export async function listTeamMembers(db: Db, accountId: string, teamId: string)
  * Add a member to a team. Both the team and the member being added must belong
  * to the caller's account — a foreign team or member is NOT_FOUND (no
  * cross-tenant roster reads or writes).
+ *
+ * The member also becomes a host of every event the team already has (see
+ * `addTeamEventHosts`). That runs on the "already a member" path too, so a
+ * retry after a half-finished add completes it.
  */
 export async function addTeamMember(
   db: Db,
@@ -728,12 +732,16 @@ export async function addTeamMember(
   const existing = await db.get<{ id: string }>(
     sql`SELECT id FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId} LIMIT 1`,
   );
-  if (existing) return { ok: true, value: { id: existing.id } };
+  if (existing) {
+    await addTeamEventHosts(db, accountId, teamId, memberId);
+    return { ok: true, value: { id: existing.id } };
+  }
   const id = randomUUID();
   await db.run(
     sql`INSERT INTO team_membership (id, account_id, team_id, member_id, role, accepted, created_at)
         VALUES (${id}, ${accountId}, ${teamId}, ${memberId}, ${role}, 1, ${Date.now()})`,
   );
+  await addTeamEventHosts(db, accountId, teamId, memberId);
   return { ok: true, value: { id } };
 }
 
@@ -741,6 +749,11 @@ export async function addTeamMember(
  * Remove a member — scoped so only teams in `accountId` can be altered. Guards
  * the LAST owner: a team must always keep at least one owner (F14/DL6), so
  * removing the sole owner is refused.
+ *
+ * The member also stops hosting the team's events: booking reads the host rows
+ * without checking membership, so a row left behind kept handing bookings to
+ * someone no longer on the team. Cleared on the "already gone" path too, which
+ * mends rows a removal left behind before this ran.
  */
 export async function removeTeamMember(
   db: Db,
@@ -753,7 +766,10 @@ export async function removeTeamMember(
         WHERE tm.team_id = ${teamId} AND tm.member_id = ${memberId}
           AND tm.team_id IN (SELECT id FROM team WHERE account_id = ${accountId}) LIMIT 1`,
   );
-  if (!row) return { ok: true, value: { id: memberId } }; // already gone — idempotent
+  if (!row) {
+    await removeTeamEventHosts(db, accountId, teamId, memberId);
+    return { ok: true, value: { id: memberId } }; // already gone: idempotent
+  }
   if (row.role === 'owner') {
     const owners = await db.get<{ n: number }>(
       sql`SELECT COUNT(*) AS n FROM team_membership
@@ -766,7 +782,44 @@ export async function removeTeamMember(
     sql`DELETE FROM team_membership WHERE team_id = ${teamId} AND member_id = ${memberId}
         AND team_id IN (SELECT id FROM team WHERE account_id = ${accountId})`,
   );
+  await removeTeamEventHosts(db, accountId, teamId, memberId);
   return { ok: true, value: { id: memberId } };
+}
+
+/**
+ * Make a team member a host of each of the team's events that does not have
+ * them yet, with the values the editor saves for a host it has not been told
+ * about (priority 0, weight 100, not fixed, no own schedule). The editor lists
+ * every member as a host, so before this a new member showed there but took no
+ * bookings until someone saved the event again.
+ *
+ * Events that already have the member are skipped, so it is safe to repeat and
+ * never touches a host's own priority or weight. One INSERT per event, like
+ * `setEventTypeHostsDetailed`: ids are minted here, and the two dialects share
+ * no UUID function an INSERT ... SELECT could call.
+ */
+async function addTeamEventHosts(db: Db, accountId: string, teamId: string, memberId: string): Promise<void> {
+  const missing = await db.all<{ id: string }>(
+    sql`SELECT et.id FROM event_type et
+        WHERE et.account_id = ${accountId} AND et.team_id = ${teamId}
+          AND NOT EXISTS (SELECT 1 FROM event_type_host h
+                          WHERE h.event_type_id = et.id AND h.member_id = ${memberId})`,
+  );
+  const now = Date.now();
+  for (const et of missing) {
+    await db.run(
+      sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${et.id}, ${memberId}, 0, 0, 100, ${null}, ${now})`,
+    );
+  }
+}
+
+/** The other half: the member stops hosting every event of this team (only). */
+async function removeTeamEventHosts(db: Db, accountId: string, teamId: string, memberId: string): Promise<void> {
+  await db.run(
+    sql`DELETE FROM event_type_host WHERE account_id = ${accountId} AND member_id = ${memberId}
+        AND event_type_id IN (SELECT id FROM event_type WHERE account_id = ${accountId} AND team_id = ${teamId})`,
+  );
 }
 
 /** Change a member's role (owner|member), scoped to the account. */
