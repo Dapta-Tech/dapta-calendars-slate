@@ -89,10 +89,14 @@ export function loginPrincipal(account: LoginAccount, token: ExternalLogin): Mac
 
 /**
  * Who owns what a call leaves behind (an idempotency record, a hold): the key
- * or OAuth connection, or for an anonymous call a digest of its address. Never
- * logged; a namespace, not an identity.
+ * or OAuth connection; a sign-in through an external server as the person
+ * (`signInKey`), whichever account the call named, because the account is
+ * already part of every namespace and `book_meeting`, which never names one,
+ * must still find a hold made while naming it; or for an anonymous call a
+ * digest of its address. Never logged; a namespace, not an identity.
  */
 export function callerId(call: McpCall): string {
+  if (call.login) return signInKey(call.login);
   return call.principal ? `key:${call.principal.keyId}` : `anon:${hashApiValue(call.ip)}`;
 }
 

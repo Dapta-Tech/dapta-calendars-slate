@@ -81,8 +81,24 @@ describe('catalog', () => {
     // Every tool that acts on the caller's account takes `account_id`; the
     // public booking tool and the account list do not.
     const props = (name: string) => Object.keys((tools.find((t) => t.name === name)!.inputSchema as { properties?: object }).properties ?? {});
-    for (const name of ['find_available_slots', 'whoami', 'list_event_types', 'get_booking_page_link', 'list_bookings', 'get_booking', 'create_booking', 'reschedule_booking', 'cancel_booking'])
-      expect(props(name)).toContain('account_id');
+    for (const name of [
+      'find_available_slots',
+      'find_team_slots',
+      'hold_slot',
+      'book_team_meeting',
+      'whoami',
+      'list_event_types',
+      'get_booking_page_link',
+      'list_bookings',
+      'list_pending_bookings',
+      'get_booking',
+      'create_booking',
+      'reschedule_booking',
+      'confirm_booking',
+      'decline_booking',
+      'cancel_booking',
+    ])
+      expect(props(name), name).toContain('account_id');
     expect(props('book_meeting')).not.toContain('account_id');
     expect(props('list_my_accounts')).not.toContain('account_id');
   });

@@ -11,4 +11,8 @@ time someone else is holding. `list_pending_bookings` (`bookings:read`) and
 answer requests that wait for the host, with the host routes' rules and side
 effects and idempotent by state. `find_team_slots` and `book_team_meeting` cover
 round-robin, collective and fixed round-robin teams and return the assigned
-host. No new scopes, env vars or tables. See `docs/MCP.md`.
+host. Like every tool that acts on the caller's account, each takes the optional
+`account_id` of a sign-in that reaches several accounts (public-page calls need
+none), and a sign-in's hold belongs to the person, so `book_meeting` books a hold
+made while naming an account. No new scopes, env vars or tables. See
+`docs/MCP.md`.

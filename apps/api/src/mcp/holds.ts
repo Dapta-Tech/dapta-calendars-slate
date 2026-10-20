@@ -13,8 +13,8 @@ import { claimApiIdempotency, completeApiIdempotency, hashApiValue, parseJsonCol
  * made by one key must not be usable by another. The agent gets an opaque
  * `hold_id` instead, and the only way back from it to the reservation is a
  * binding row namespaced by the account, the caller and the hold id together.
- * Another caller (a different key, connection or anonymous address) computes
- * another namespace and finds nothing.
+ * Another caller (a different key, connection, signed-in person or anonymous
+ * address) computes another namespace and finds nothing.
  *
  * The binding lives in `api_idempotency`, which already stores hashed,
  * caller-scoped records with an expiry and sweeps expired ones, so this needs

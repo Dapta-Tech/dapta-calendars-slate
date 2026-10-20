@@ -10,9 +10,11 @@
  *   this origin), the built-in server staying dormant with its settings still
  *   present, the 401 challenge, 403 for a sign-in linked to no member, then
  *   with a sign-in: tools/list, whoami, list_my_accounts, list_event_types,
- *   find_available_slots, create_booking, get_booking and cancel_booking; a
- *   sign-in reaching two accounts picks one with account_id; an account reached
- *   by switching; a link not seen for too long refused; the audit lines.
+ *   find_available_slots, create_booking, get_booking and cancel_booking, a
+ *   hold booked with its hold_id and the pending requests; a sign-in reaching
+ *   two accounts picks one with account_id (a hold made naming one is still
+ *   booked by book_meeting, which names none); an account reached by
+ *   switching; a link not seen for too long refused; the audit lines.
  *
  *   pnpm run build:packages              # workspace packages, once
  *   cd apps/api && pnpm e2e:mcp-login    # port 4798, or: pnpm e2e:mcp-login 4800
@@ -155,7 +157,7 @@ try {
   const c = await connect(token);
   clients.push(c);
   const tools = (await c.listTools()).tools.map((t) => t.name);
-  check(tools.length === 11 && tools.includes('list_my_accounts'), `tools/list -> ${tools.length} tools`);
+  check(tools.length === 17 && tools.includes('list_my_accounts') && tools.includes('hold_slot'), `tools/list -> ${tools.length} tools`);
   const who = (await c.callTool({ name: 'whoami', arguments: {} })).structuredContent;
   check(who.account.code === 'acme' && who.key.prefix === `login:${alex.slice(0, 8)}` && who.key.scopes.length === 5, `whoami -> ${who.account.code}, ${who.key.prefix}, ${who.key.scopes.length} scopes`);
   const mine = (await c.callTool({ name: 'list_my_accounts', arguments: {} })).structuredContent.accounts;
@@ -185,6 +187,29 @@ try {
   check(!cancelled.isError && cancelled.structuredContent.booking.status === 'cancelled', 'cancel_booking -> cancelled');
   const foreign = await c.callTool({ name: 'list_event_types', arguments: { account_id: globex } });
   check(foreign.isError && foreign.content[0].text.startsWith('NOT_FOUND'), 'another account by account_id -> NOT_FOUND');
+  // The newer tools act as the member too: a hold by id, booked with its hold_id; the pending requests.
+  const held = await c.callTool({
+    name: 'hold_slot',
+    arguments: { event_type_id: intro.id, start: all[5].start, time_zone: 'America/Bogota', idempotency_key: idem('login-e2e-hold-0001') },
+  });
+  if (held.isError) fail(`hold_slot: ${held.content[0].text}`);
+  const heldBooking = await c.callTool({
+    name: 'create_booking',
+    arguments: {
+      event_type_id: intro.id,
+      start: all[5].start,
+      attendee: { name: 'Held Invitee', email: 'held-e2e@example.org', time_zone: 'America/Bogota' },
+      answers: { company: 'Login Co' },
+      hold_id: held.structuredContent.hold.hold_id,
+      idempotency_key: idem('login-e2e-create-02'),
+    },
+  });
+  if (heldBooking.isError) fail(`create_booking with hold_id: ${heldBooking.content[0].text}`);
+  check(heldBooking.structuredContent.booking.status === 'accepted', `hold_slot then create_booking with its hold_id -> ${heldBooking.structuredContent.booking.uid}`);
+  const pending = await c.callTool({ name: 'list_pending_bookings', arguments: {} });
+  check(!pending.isError && Array.isArray(pending.structuredContent.bookings), `list_pending_bookings -> ${pending.structuredContent?.bookings?.length} request(s)`);
+  const pendingForeign = await c.callTool({ name: 'list_pending_bookings', arguments: { account_id: globex } });
+  check(pendingForeign.isError && pendingForeign.content[0].text.startsWith('NOT_FOUND'), 'list_pending_bookings in another account -> NOT_FOUND');
 
   // --- Two accounts ----------------------------------------------------------
   const multi = await connect(await as.mint({ sub: 'user_01E2EMULTI' }));
@@ -195,6 +220,29 @@ try {
   check(unnamed.isError && unnamed.content[0].text.startsWith('ACCOUNT_REQUIRED'), 'two accounts, no account_id -> ACCOUNT_REQUIRED');
   const named = (await multi.callTool({ name: 'whoami', arguments: { account_id: globex } })).structuredContent;
   check(named.account.code === 'globex' && named.key.prefix === `login:${bo.slice(0, 8)}`, `account_id picks the account -> ${named.account.code} as ${named.key.prefix}`);
+  const pendingUnnamed = await multi.callTool({ name: 'list_pending_bookings', arguments: {} });
+  check(pendingUnnamed.isError && pendingUnnamed.content[0].text.startsWith('ACCOUNT_REQUIRED'), 'two accounts, list_pending_bookings without account_id -> ACCOUNT_REQUIRED');
+  // A hold on a public page made while naming an account, booked by book_meeting, which never names one.
+  const page = 'https://calendar.example.test/acme/alex-rivera/intro-call';
+  const open = (await multi.callTool({ name: 'find_available_slots', arguments: { booking_page_url: page, time_zone: 'UTC' } })).structuredContent.days.flatMap((d) => d.slots);
+  const pageHold = await multi.callTool({
+    name: 'hold_slot',
+    arguments: { booking_page_url: page, start: open[7].start, time_zone: 'UTC', idempotency_key: idem('login-e2e-hold-0002'), account_id: acme },
+  });
+  if (pageHold.isError) fail(`hold_slot on a page: ${pageHold.content[0].text}`);
+  const pageBooking = await multi.callTool({
+    name: 'book_meeting',
+    arguments: {
+      booking_page_url: page,
+      start: open[7].start,
+      attendee: { name: 'Multi Invitee', email: 'multi-e2e@example.org', time_zone: 'UTC' },
+      answers: { company: 'Multi Co' },
+      hold_id: pageHold.structuredContent.hold.hold_id,
+      idempotency_key: idem('login-e2e-book-0001'),
+    },
+  });
+  if (pageBooking.isError) fail(`book_meeting with a hold made naming an account: ${pageBooking.content[0].text}`);
+  check(pageBooking.structuredContent.booking.status === 'accepted', 'a hold made naming an account, booked by book_meeting with its hold_id -> accepted');
 
   // --- An account reached by switching -------------------------------------------
   const dana = await connect(await as.mint({ sub: 'user_01E2EDANA' }));

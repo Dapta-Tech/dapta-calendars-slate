@@ -315,7 +315,7 @@ async function useHold(deps: McpToolDeps, accountId: string, call: McpCall, hold
     throw new ToolFailure(
       'HOLD_NOT_FOUND',
       'No hold with that hold_id for this caller.',
-      'A hold works only for the key, connection or address that made it. Call hold_slot again, or book without hold_id.',
+      'A hold works only for the key, connection, sign-in or address that made it. Call hold_slot again, or book without hold_id.',
     );
   if (hold.eventTypeId !== eventTypeId || Date.parse(hold.startUtc) !== Date.parse(startUtc))
     throw new ToolFailure(

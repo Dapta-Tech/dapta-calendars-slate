@@ -61,8 +61,9 @@ Every tool that acts on the caller's account (all but `book_meeting` and
 reaches one account never needs it, and may name only that account. A sign-in
 that reaches several accounts must name one on each call; without it the call
 fails with `ACCOUNT_REQUIRED` listing the accounts; `list_my_accounts` returns the same list.
-A public booking page needs no account: `find_available_slots` and `book_meeting`
-on a page link take theirs from the link.
+A public booking page needs no account: `find_available_slots`, `hold_slot` and
+`book_meeting` on a page link, and `find_team_slots` and `book_team_meeting` on a
+team link, take theirs from the link.
 
 `bookings:cancel` is a new scope. The REST cancel routes (`/v2/bookings/:uid/cancel`
 and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
@@ -92,8 +93,10 @@ tools refuse it to anyone but the holder (`SLOT_TAKEN`). Book it with
 the booking consumes the hold. An unused hold simply expires.
 
 - **Bound to its caller.** A hold made with one API key or OAuth connection is
-  usable only by that key or connection; an anonymous hold only from the same
-  client address. Anyone else gets `HOLD_NOT_FOUND`, the same answer as an
+  usable only by that key or connection; a hold made with a sign-in through an
+  external authorization server only by the same person (whichever `account_id`
+  the hold named, so `book_meeting`, which never names one, still books it); an
+  anonymous hold only from the same client address. Anyone else gets `HOLD_NOT_FOUND`, the same answer as an
   unknown id, so a `hold_id` is useless to anyone who did not make it. The
   booking core's reservation uid (a bearer handle on the public REST routes)
   never leaves the server.
@@ -425,8 +428,9 @@ confirmed (twice) and declined, and a round-robin team booking.
 stand-in server (RS256 keys made by the script, its metadata and JWKS on a
 loopback port) mints the tokens, and the script checks discovery, the dormant
 built-in server, the 401 challenge, the 403 for a sign-in linked to no member,
-whoami, list_my_accounts, list_event_types and a booking with a sign-in, and a
-sign-in reaching two accounts.
+whoami, list_my_accounts, list_event_types, a booking, a hold booked with its
+`hold_id` and the pending requests with a sign-in, and a sign-in reaching two
+accounts (including a hold made naming one account, booked by `book_meeting`).
 
 `pnpm e2e:oauth` does the same for OAuth with the web app built for production
 and a headless browser: discovery, the 401 challenge, registration, the real
