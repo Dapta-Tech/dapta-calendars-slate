@@ -1,6 +1,5 @@
 ---
 "@slate/shared": patch
-"@slate/web": patch
 ---
 
 A round robin host's priority is now a level, not a bare number. The team
