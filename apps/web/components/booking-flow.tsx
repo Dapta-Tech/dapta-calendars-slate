@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  detectTimeZone,
   formatBookingLocation,
   formatDayLong,
   formatLocation,
@@ -9,6 +10,7 @@ import {
   getMessages,
   readableZone,
   isReservedFieldName,
+  isValidTimeZone,
   monthKeyOf,
   shiftMonth,
   t,
@@ -138,7 +140,23 @@ interface Props {
    * customer, and the confirmation then carries no free-calendar block.
    */
   showBranding: boolean;
+  /**
+   * Whether the times switch to the visitor's own zone after hydration (the
+   * default). The host's brand preview turns it off: its fixed sample is a
+   * picture that must render the same on the server and after hydration.
+   */
+  followBrowserZone?: boolean;
 }
+
+/**
+ * What a browser that hides its zone reports (privacy modes, locked-down
+ * machines): every spelling of UTC the IANA database has. None of them tells
+ * where the visitor is, so the page keeps the host's zone instead.
+ */
+const UTC_ZONES = new Set([
+  'UTC', 'Etc/UTC', 'UCT', 'Etc/UCT', 'Universal', 'Etc/Universal', 'Zulu', 'Etc/Zulu',
+  'GMT', 'Etc/GMT', 'GMT0', 'Etc/GMT0', 'GMT+0', 'Etc/GMT+0', 'GMT-0', 'Etc/GMT-0', 'Greenwich', 'Etc/Greenwich',
+]);
 
 interface Hold {
   uid: string;
@@ -188,6 +206,7 @@ export function BookingFlow({
   embed = false,
   oneOffToken,
   showBranding,
+  followBrowserZone = true,
 }: Props) {
   const messages = getMessages(locale);
   const m = messages.booking;
@@ -203,6 +222,21 @@ export function BookingFlow({
     [fields],
   );
   const [timeZone, setTimeZone] = useState(initialTimeZone);
+  /**
+   * The visitor reads the times in their OWN zone from the start, never in
+   * the host's: someone in Miami booking a host in Bogota should not have to
+   * find the picker. The server cannot know the browser's zone, so it renders
+   * the host's (which is also the fallback) and the first effect after
+   * hydration swaps in the browser's. A browser that hides its zone reports
+   * UTC (`UTC_ZONES`) or nothing; that keeps the host's. A zone the visitor
+   * already picked is never overwritten.
+   */
+  useEffect(() => {
+    if (!followBrowserZone) return;
+    const own = detectTimeZone();
+    if (UTC_ZONES.has(own) || !isValidTimeZone(own)) return;
+    setTimeZone((current) => (current === initialTimeZone ? own : current));
+  }, [followBrowserZone, initialTimeZone]);
   /**
    * 12h/24h, defaulted from the LOCALE rather than from the browser. Reading
    * `Intl.DateTimeFormat().resolvedOptions().hourCycle` on the client would
@@ -834,8 +868,8 @@ export function BookingFlow({
       location={location}
       locationLabel={locationLabel}
       methodLabel={methodLabel}
-      // The HOST's zone, which the page opened in: a fact about them that does
-      // not move when the visitor reads the times in their own zone.
+      // The HOST's zone: a fact about them that does not move with the zone
+      // the visitor reads the times in.
       timeZoneLabel={readableZone(initialTimeZone)}
       logoUrl={logoUrl}
     />

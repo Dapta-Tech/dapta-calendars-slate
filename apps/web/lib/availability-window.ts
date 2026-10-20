@@ -68,18 +68,21 @@ export function horizonMonthKey(timeZone: string, horizonMs: number): string {
   return monthKeyOf(zonedTodayKey(timeZone, new Date(horizonMs - 1)));
 }
 
+/** The widest gap between two zones' clocks: UTC-12 to UTC+14. */
+const MAX_ZONE_SPREAD_MS = 26 * 60 * 60 * 1000;
+
 /**
  * The window a page reads before anything else: the visible month, which is
- * the one holding today.
+ * the one holding today. The page opens in the visitor's zone, which the
+ * server cannot know, so the read runs past the end of `timeZone`'s month by
+ * the widest zone spread (within the horizon): a visitor west of the host
+ * sees a month that ends later, and gets it whole from this one read.
  */
 export function firstWindow(timeZone: string, nowMs: number): Span {
   const horizonMs = bookingHorizonMs(nowMs);
-  return (
-    monthWindow(currentMonthKey(timeZone, nowMs), timeZone, nowMs, horizonMs) ?? {
-      fromMs: nowMs,
-      toMs: horizonMs,
-    }
-  );
+  const month = monthWindow(currentMonthKey(timeZone, nowMs), timeZone, nowMs, horizonMs);
+  if (!month) return { fromMs: nowMs, toMs: horizonMs };
+  return { fromMs: month.fromMs, toMs: Math.min(month.toMs + MAX_ZONE_SPREAD_MS, horizonMs) };
 }
 
 /** Union a span into a sorted, non-overlapping list of spans. */
