@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { HOST, signIn } from './stack';
+import { E2E, HOST, signIn } from './stack';
 
 /**
  * "When editing an event, I can't find where to add team members." A personal
@@ -7,8 +7,8 @@ import { HOST, signIn } from './stack';
  * one host, and here is how to start one for your team. That link opens a team
  * event whose Hosts block names the team and links to the page where its
  * members are managed. Creating team events is admin-only, so a plain member
- * reads the explanation without the links. Nothing is saved, so the shared
- * stack is left as found.
+ * reads the explanation without the links. Only the priority test saves, and
+ * it puts the host back at Medium, so the shared stack is left as found.
  */
 const JORDAN = { email: 'jordan@example.com' };
 
@@ -89,4 +89,59 @@ test('a plain member reads where hosts come from, without links the API would re
   const card = page.getByTestId('personal-hosts-card');
   await expect(card).toContainText('A personal event has one host.');
   await expect(card.getByRole('link')).toHaveCount(0);
+});
+
+/**
+ * "Let us set a priority level for each host in the round robin." On the
+ * seeded round robin Team Demo, every host starts at Medium (priority 0, the
+ * value assignment already used). Jordan is set to Highest, saved, and still
+ * Highest after a reload, stored as 2. Jordan is set back to Medium and saved
+ * at the end, so the stack is left as the booking tests expect it.
+ */
+test('a round robin host keeps the priority level they are given', async ({ page, request }) => {
+  await page.goto('/admin/event-types');
+  await signIn(page, HOST.email);
+  await expect(page).toHaveURL(/\/admin\/event-types$/);
+  await page
+    .getByRole('listitem')
+    .filter({ hasText: 'Team Demo' })
+    .getByRole('link', { name: 'Edit', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/admin\/event-types\/[^/?]+$/);
+  const eventId = new URL(page.url()).pathname.split('/').pop()!;
+  await expect(
+    page.getByText('Each booking goes to the free host with the highest priority;'),
+  ).toBeVisible();
+
+  const jordan = page.getByRole('button', { name: 'Jordan Lee: Priority' });
+  const alex = page.getByRole('button', { name: 'Alex Rivera: Priority' });
+  await expect(jordan).toHaveText('Medium');
+  await expect(alex).toHaveText('Medium');
+
+  const setJordan = async (level: string) => {
+    await jordan.click();
+    await page.getByRole('option', { name: level, exact: true }).click();
+    await expect(jordan).toHaveText(level);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved successfully.' })).toBeVisible();
+  };
+  const storedPriorities = async () => {
+    const r = await request.get(`${E2E.api}/v1/event-types/${eventId}`, {
+      headers: { 'x-slate-email': HOST.email },
+    });
+    expect(r.ok()).toBe(true);
+    const et = (await r.json()) as { hosts?: Array<{ priority: number | null }> };
+    return (et.hosts ?? []).map((h) => h.priority).sort((a, b) => (a ?? 0) - (b ?? 0));
+  };
+
+  await setJordan('Highest');
+  await page.reload();
+  await expect(jordan).toHaveText('Highest');
+  await expect(alex).toHaveText('Medium');
+  expect(await storedPriorities()).toEqual([0, 2]);
+
+  await setJordan('Medium');
+  await page.reload();
+  await expect(jordan).toHaveText('Medium');
+  expect(await storedPriorities()).toEqual([0, 0]);
 });
