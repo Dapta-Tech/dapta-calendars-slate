@@ -15,6 +15,7 @@ import { isValidTimeZone, zoneOffsetMinutes, zonedDayKey } from "@slate/shared";
 import { z } from "zod";
 import { BookingService } from "./booking.service";
 import { isServiceError } from "./http";
+import { stableStringify } from "./stable-stringify";
 import { DB } from "./tokens";
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -213,17 +214,6 @@ function zonedIso(utcIso: string, timeZone: string): string {
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part(
     "second",
   )}.${String(instant.getUTCMilliseconds()).padStart(3, "0")}${offset}`;
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /** Fixed-length one-way digest for non-credential idempotency inputs. */
