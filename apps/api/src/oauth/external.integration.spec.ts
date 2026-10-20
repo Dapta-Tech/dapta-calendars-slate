@@ -514,6 +514,40 @@ describe('the hold, pending-request and team tools with several accounts', () =>
     }
   });
 
+  it("a sign-in's hold is not usable by an anonymous call from the same address, nor by another person in the same account", async () => {
+    const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} AND slug = 'intro-call'`))!.id;
+    const other = await addMember(h, 'admin');
+    await link(h, other, 'user_more_second');
+    const second = await as.mint({ sub: 'user_more_second' });
+    const page = await starts({ booking_page_url: ACME_PAGE });
+    const onPage = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { booking_page_url: ACME_PAGE, start: page[9]!, time_zone: 'UTC', idempotency_key: idem('more-hold-00004') }),
+    );
+    const bookPage = (credential: string | undefined, key: string) => {
+      const args = { booking_page_url: ACME_PAGE, start: page[9]!, attendee: invitee('Nora Nothold'), answers: { company: 'Co' }, hold_id: onPage.hold.hold_id, idempotency_key: idem(key) };
+      return credential ? tool(h, credential, 'book_meeting', args) : rpc(h, 'tools/call', { name: 'book_meeting', arguments: args }).then(async (r) => (await body(r)).result as { content?: { text: string }[] });
+    };
+    // Same machine, no credential: the anonymous door does not reach a sign-in's hold.
+    expect(text(await bookPage(undefined, 'more-steal-00001'))).toMatch(/^HOLD_NOT_FOUND/);
+    // Another person, admin of the same account: not theirs either.
+    expect(text(await bookPage(second, 'more-steal-00002'))).toMatch(/^HOLD_NOT_FOUND/);
+    const byId = await starts({ event_type_id: intro, account_id: h.accountId });
+    const idHold = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { event_type_id: intro, start: byId[11]!, time_zone: 'UTC', idempotency_key: idem('more-hold-00005'), account_id: h.accountId }),
+    );
+    const stolen = await tool(h, second, 'create_booking', {
+      event_type_id: intro,
+      start: byId[11]!,
+      attendee: invitee('Nate Nothold'),
+      answers: { company: 'Co' },
+      hold_id: idHold.hold.hold_id,
+      idempotency_key: idem('more-steal-00003'),
+    });
+    expect(text(stolen)).toMatch(/^HOLD_NOT_FOUND/);
+    // The person who made it still books it.
+    expect(structured<{ booking: { status: string } }>(await bookPage(token, 'more-book-00002')).booking.status).toBe('accepted');
+  });
+
   it('team tools: a public team page needs no account; by id the named account books and reports its host', async () => {
     const onPage = structured<{ team: { slug: string } }>(await tool(h, token, 'find_team_slots', { booking_page_url: TEAM, time_zone: 'UTC' }));
     expect(onPage.team.slug).toBe('sales');
