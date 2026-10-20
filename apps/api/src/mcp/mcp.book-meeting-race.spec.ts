@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '@slate/db';
 import { BookingService } from '../booking.service';
-import { bootHarness, idem, structured, type Harness } from './mcp-harness';
+import { CalV2Service } from '../cal-v2.service';
+import { bootHarness, errorText, idem, structured, type Harness } from './mcp-harness';
 
 /**
  * book_meeting and its idempotency record when two calls with the same key race
@@ -31,15 +32,38 @@ type Booked = { booking: { uid: string; status: string; start_utc: string }; rep
 let h: Harness;
 const realBook = BookingService.prototype.book;
 let twin: (() => Promise<void>) | null = null;
-let twinAnswer: 'taken' | 'real' = 'taken';
+/**
+ * What the first call's booking step does around its twin: `taken` runs the
+ * twin, then answers SLOT_TAKEN; `real` runs the twin, then books for real (the
+ * core finds the twin's booking by key); `throw` runs the twin, then fails the
+ * way a unique index on the key fails on SQLite; `after` books for real first
+ * and runs the twin before this call stores its result.
+ */
+let twinAnswer: 'taken' | 'real' | 'throw' | 'after' = 'taken';
 const book = vi.spyOn(BookingService.prototype, 'book').mockImplementation(async function (this: BookingService, ...args: Parameters<BookingService['book']>) {
   if (twin) {
     const run = twin;
     twin = null;
+    if (twinAnswer === 'after') {
+      const out = await realBook.apply(this, args);
+      await run();
+      return out;
+    }
     await run();
     if (twinAnswer === 'taken') return { error: 'SLOT_TAKEN', message: 'That time is no longer available.', status: 409 };
+    if (twinAnswer === 'throw') throw new Error('UNIQUE constraint failed: booking.idempotency_key');
   }
   return realBook.apply(this, args);
+});
+// One failing read of a booking, to stand for a transient database error.
+let failNextRead = false;
+const realRead = CalV2Service.prototype.bookingResponse;
+const read = vi.spyOn(CalV2Service.prototype, 'bookingResponse').mockImplementation(async function (this: CalV2Service, ...args: Parameters<CalV2Service['bookingResponse']>) {
+  if (failNextRead) {
+    failNextRead = false;
+    throw new Error('connection pool exhausted');
+  }
+  return realRead.apply(this, args);
 });
 
 const realTeamBook = BookingService.prototype.teamBook;
@@ -54,15 +78,18 @@ const teamBook = vi.spyOn(BookingService.prototype, 'teamBook').mockImplementati
 });
 
 beforeAll(async () => {
-  h = await bootHarness({ MCP_WRITE_RATE_LIMIT_CAPACITY: '100', MCP_RATE_LIMIT_CAPACITY: '200' });
+  h = await bootHarness({ MCP_WRITE_RATE_LIMIT_CAPACITY: '400', MCP_RATE_LIMIT_CAPACITY: '800', RATE_LIMIT_CAPACITY: '800' });
 });
 afterAll(async () => {
   book.mockRestore();
   teamBook.mockRestore();
+  read.mockRestore();
   await h.close();
 });
 afterEach(() => {
   twin = null;
+  failNextRead = false;
+  twinAnswer = 'taken';
   writes.book_meeting = 0;
 });
 
@@ -147,5 +174,44 @@ describe('book_meeting with two calls on one key', () => {
     const loser = structured<{ booking: { uid: string }; next_step: string }>(await first.callTool({ name: 'book_team_meeting', arguments: args }));
     expect(loser.booking.uid).toBe(winner!.booking.uid);
     expect(loser.next_step).toContain('nothing was sent again');
+  });
+
+  it('a booking step that fails outright (the key\'s unique index) still answers the twin\'s booking', async () => {
+    const [first, second] = [await h.connect(), await h.connect()];
+    const args = meeting(await start(18), 'race-key-0005');
+    let winner: Booked | undefined;
+    twinAnswer = 'throw';
+    twin = async () => {
+      winner = structured<Booked>(await second.callTool({ name: 'book_meeting', arguments: args }));
+    };
+    expect(structured<Booked>(await first.callTool({ name: 'book_meeting', arguments: args }))).toMatchObject({ replayed: true, booking: { uid: winner!.booking.uid } });
+  });
+
+  it('the call that made the booking says so, even when a twin that only found it stored first', async () => {
+    const [first, second] = [await h.connect(), await h.connect()];
+    const args = meeting(await start(22), 'race-key-0006');
+    let follower: Booked | undefined;
+    twinAnswer = 'after';
+    twin = async () => {
+      follower = structured<Booked>(await second.callTool({ name: 'book_meeting', arguments: args }));
+    };
+    const maker = structured<Booked & { next_step: string }>(await first.callTool({ name: 'book_meeting', arguments: args }));
+    expect(follower).toMatchObject({ replayed: true, booking: { uid: maker.booking.uid } });
+    expect(maker.replayed).toBe(false);
+    expect(maker.next_step).toMatch(/^Confirmed/);
+  });
+
+  it('when the lookup of the twin\'s booking fails, no refusal is stored or answered (a retry with the key settles it)', async () => {
+    const [first, second, third] = [await h.connect(), await h.connect(), await h.connect()];
+    const args = meeting(await start(26), 'race-key-0007');
+    let winner: Booked | undefined;
+    twinAnswer = 'taken';
+    twin = async () => {
+      winner = structured<Booked>(await second.callTool({ name: 'book_meeting', arguments: args }));
+      failNextRead = true;
+    };
+    const lost = errorText(await first.callTool({ name: 'book_meeting', arguments: args }));
+    expect(lost).not.toMatch(/^SLOT_TAKEN/);
+    expect(structured<Booked>(await third.callTool({ name: 'book_meeting', arguments: args }))).toMatchObject({ replayed: true, booking: { uid: winner!.booking.uid } });
   });
 });

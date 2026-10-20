@@ -755,21 +755,14 @@ const bookMeeting: ToolDef = {
     });
     if (claim.requestHash !== requestHash)
       throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
-    if (claim.statusCode != null && claim.statusCode < 400) {
-      const prior = claim.responseBody as BookMeetingData;
-      return {
-        data: { ...prior, replayed: true },
-        summary: `${line(prior.booking)} (replay of an earlier identical call)`,
-        affected: [prior.booking.uid],
-      };
-    }
-    const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
-    const storedKey = `mcp:${namespaceHash}`;
     const answer = (data: BookMeetingData): ToolResult => ({
       data,
       summary: data.replayed ? `${line(data.booking)} (replay of an earlier identical call)` : line(data.booking),
       affected: [data.booking.uid],
     });
+    if (claim.statusCode != null && claim.statusCode < 400) return answer({ ...(claim.responseBody as BookMeetingData), replayed: true });
+    const who = { name: args.attendee.name, email: args.attendee.email, timeZone: tz };
+    const storedKey = `mcp:${namespaceHash}`;
     // Two calls with this key can run at once (a retry after a timeout, a
     // client that sends twice), so several attempts can hold this record. A
     // booking under the key is the truth: its success is stored over an open
@@ -778,6 +771,9 @@ const bookMeeting: ToolDef = {
     // names the same booking, the key being unique on bookings).
     const finish = async (data: BookMeetingData): Promise<ToolResult> => {
       if (await completeApiIdempotency(deps.db, claim.id, 201, data, { replaceRefusal: true })) return answer(data);
+      // The call that made the booking answers as such even when a twin that
+      // only found it stored first: its invitee did get the email.
+      if (!data.replayed) return answer(data);
       const now = await deps.db.get<{ status_code: number | string | null; request_hash: string; response_body: unknown }>(
         sql`SELECT status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
       );
@@ -843,31 +839,37 @@ const bookMeeting: ToolDef = {
       ? await useHold(deps, accountId, call, args.hold_id, resolved.eventType.id, startUtc)
       : undefined;
     await refuseIfHeld(deps, resolved, startUtc, reservationUid);
-    const outcome =
-      resolved.kind === 'team'
-        ? await deps.bookings.teamBook(
-            page.accountCode,
-            page.owner,
-            { slug: page.slug, startUtc, attendee: who, answers: args.answers },
-            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
-          )
-        : await deps.bookings.book(
-            { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers, reservationUid },
-            false,
-            // refuseHeld: the check above, again under the booking's own lock.
-            { idempotencyKey: storedKey, locale: language, analyticsChannel: channel, refuseHeld: true },
-          );
+    let outcome: Awaited<ReturnType<BookingService['book']>>;
+    try {
+      outcome =
+        resolved.kind === 'team'
+          ? await deps.bookings.teamBook(
+              page.accountCode,
+              page.owner,
+              { slug: page.slug, startUtc, attendee: who, answers: args.answers },
+              { idempotencyKey: storedKey, locale: language, analyticsChannel: channel },
+            )
+          : await deps.bookings.book(
+              { accountCode: page.accountCode, handle: page.owner, slug: page.slug, startUtc, attendee: { ...who, language }, answers: args.answers, reservationUid },
+              false,
+              // refuseHeld: the check above, again under the booking's own lock.
+              { idempotencyKey: storedKey, locale: language, analyticsChannel: channel, refuseHeld: true },
+            );
+    } catch (error) {
+      // A twin that booked on another host can make this insert fail on the
+      // key's unique index (SQLite raises it as an error): its booking answers.
+      const twin = await bookedUnderKey();
+      if (twin) return twin;
+      throw error;
+    }
     if (isServiceError(outcome)) {
       const code = outcome.error === 'INTAKE_INVALID' ? 'BOOKING_FIELDS_INVALID' : outcome.error;
       // A twin with this key may have booked while this attempt ran (the core
       // then refuses this one as taken): that booking is the answer. If the
-      // lookup itself fails, the refusal stands.
-      let twin: ToolResult | null = null;
-      try {
-        twin = await bookedUnderKey();
-      } catch (error) {
-        if (error instanceof ToolFailure) throw error;
-      }
+      // lookup itself fails, its error is answered and nothing is stored: a
+      // refusal that may be false would send the agent to book again under a
+      // new key, while a retry with this key settles it.
+      const twin = await bookedUnderKey();
       if (twin) return twin;
       // A definite refusal (taken slot, bad answers) is the answer to this exact
       // request, so a retry gets it back instead of trying again. A transient one
