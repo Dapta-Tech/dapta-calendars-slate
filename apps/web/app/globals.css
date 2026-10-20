@@ -279,6 +279,28 @@ body {
   }
 }
 
+/* The rail's nav when it is taller than the window and scrolls on its own
+   (components/admin-shell.tsx): a soft shade at an edge that has rows behind
+   it, so a list that continues never reads as one that ends (Design Quality
+   Bar, Scroll & overflow, item 2). Pure CSS: the two `local` layers move with
+   the content and paint the rail's ground over the two `scroll` shades when
+   the list is at that edge, so a list that fits shows nothing. Each cover is
+   solid across the whole shade before it fades, or a sliver of shade would
+   show through a list that fits. */
+.rail-scroll {
+  background:
+    linear-gradient(var(--sidebar) var(--sp-field), transparent) top / 100% var(--sp-group) no-repeat local,
+    linear-gradient(to top, var(--sidebar) var(--sp-field), transparent) bottom / 100% var(--sp-group) no-repeat local,
+    linear-gradient(color-mix(in srgb, var(--foreground) 10%, transparent), transparent) top / 100% var(--sp-field)
+      no-repeat scroll,
+    linear-gradient(transparent, color-mix(in srgb, var(--foreground) 10%, transparent)) bottom / 100% var(--sp-field)
+      no-repeat scroll;
+  /* Inside the nav's 4px focus inset, so no sliver of shade shows beside a
+     highlighted row at an edge. */
+  background-origin: content-box;
+  background-clip: content-box;
+}
+
 /* The rail's MCP icon (components/mcp-logos.tsx): three stacked logos that
    take turns. Each is a mask filled with currentColor, so it takes the row's
    ink in both themes; Claude overrides it inline with its brand orange. The

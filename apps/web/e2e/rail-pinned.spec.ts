@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { E2E, HOST, signIn } from './stack';
+import { E2E, HOST, rail, signIn } from './stack';
 
 /**
  * The rail is pinned to the window, on both projects (the 1440 desktop rail and
@@ -16,20 +16,38 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);
 });
 
-/** The rail a person actually sees: the desktop aside, or the drawer, opened. */
-async function rail(page: Page, mobile: boolean) {
-  if (!mobile) return page.locator('aside').first();
-  await page.getByRole('button', { name: 'Open navigation' }).click();
-  return page.getByRole('dialog', { name: 'Primary' });
-}
-
-/** Wholly inside the window: nothing cut off at the top or the bottom. */
+/**
+ * Wholly inside the window, on both axes: the closed drawer is full height
+ * too, only slid off to the left, so the vertical check alone would pass it.
+ */
 async function expectOnScreen(page: Page, target: Locator) {
   const box = await target.boundingBox();
-  const height = page.viewportSize()!.height;
+  const { width, height } = page.viewportSize()!;
   expect(box, 'rendered').not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(width);
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.y + box!.height).toBeLessThanOrEqual(height);
+}
+
+/** Signed in on the long page, with its content rendered (not the loading skeleton). */
+async function openLongPage(page: Page) {
+  await page.goto(PAGE);
+  await signIn(page, HOST.email);
+  await expect(page).toHaveURL(/\/admin\/developers\/keys$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Connect and keys' })).toBeVisible();
+}
+
+/**
+ * Wholly inside a scroll box's visible part. The window is not enough: a row
+ * the nav has scrolled out of sight can still sit within the window's bounds.
+ */
+async function expectWithin(container: Locator, target: Locator) {
+  const [outer, inner] = [await container.boundingBox(), await target.boundingBox()];
+  expect(outer, 'container rendered').not.toBeNull();
+  expect(inner, 'target rendered').not.toBeNull();
+  expect(inner!.y).toBeGreaterThanOrEqual(outer!.y);
+  expect(inner!.y + inner!.height).toBeLessThanOrEqual(outer!.y + outer!.height);
 }
 
 /**
@@ -50,9 +68,7 @@ async function scrollPage(page: Page, at: number) {
 }
 
 test('the footer stays on screen at the top, the middle and the end of a long page', async ({ page, isMobile }) => {
-  await page.goto(PAGE);
-  await signIn(page, HOST.email);
-  await expect(page).toHaveURL(/\/admin\/developers\/keys$/);
+  await openLongPage(page);
 
   let nav: Locator | null = null;
   for (const at of STOPS) {
@@ -80,11 +96,9 @@ test('the footer stays on screen at the top, the middle and the end of a long pa
 test('the collapsed rail stays pinned, and its MCP menu opens beside it', async ({ page, context, isMobile }) => {
   test.skip(isMobile, 'The collapsed rail is the desktop rail.');
   await context.addCookies([{ name: 'slate.nav.collapsed', value: '1', url: E2E.web }]);
-  await page.goto(PAGE);
-  await signIn(page, HOST.email);
-  await expect(page).toHaveURL(/\/admin\/developers\/keys$/);
+  await openLongPage(page);
 
-  const nav = page.locator('aside').first();
+  const nav = page.getByTestId('rail');
   for (const at of STOPS) {
     await scrollPage(page, at);
     expect((await nav.boundingBox())!.y, `rail top at ${at}`).toBe(0);
@@ -102,19 +116,19 @@ test('the collapsed rail stays pinned, and its MCP menu opens beside it', async 
 
 test('in a short window only the nav scrolls, and the wordmark and footer stay', async ({ page, isMobile }) => {
   await page.setViewportSize({ width: isMobile ? 360 : 1440, height: 420 });
-  await page.goto(PAGE);
-  await signIn(page, HOST.email);
-  await expect(page).toHaveURL(/\/admin\/developers\/keys$/);
+  await openLongPage(page);
 
   const box = await rail(page, isMobile);
   const list = box.locator('nav');
   expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  // The page you are on opens in view, not scrolled out of sight under the fold.
+  await expectWithin(list, list.locator('[aria-current="page"]'));
   await list.evaluate((el) => el.scrollTo(0, el.scrollHeight));
 
   // The rail itself did not move; the last item came up within the list.
   expect(await box.evaluate((el) => el.scrollTop)).toBe(0);
-  // The brand row (the wordmark, or a fork's chip and name) is the rail's first.
-  await expectOnScreen(page, box.locator(':scope > *').first());
+  // The brand row: the wordmark, or a fork's chip and name.
+  await expectOnScreen(page, box.getByTestId('rail-brand'));
   await expectOnScreen(page, box.getByTestId('profile-menu-trigger'));
-  await expectOnScreen(page, list.locator('li').last());
+  await expectWithin(list, list.locator(':scope > ul > li').last());
 });

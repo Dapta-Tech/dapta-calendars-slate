@@ -339,7 +339,7 @@ describe('AdminShell: the dForms rail look', () => {
     const el = await mount({ pathname: '/admin/developers/keys' });
     for (const rail of Object.values(rails(el))) {
       const nav = rail.querySelector('nav')!;
-      for (const cls of ['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain']) {
+      for (const cls of ['min-h-control', 'flex-1', 'overflow-y-auto', 'overscroll-contain', 'rail-scroll']) {
         expect(nav.className.split(' ')).toContain(cls);
       }
       const foot = rail.querySelector('[data-testid="profile-menu-trigger"]')!.parentElement!;
@@ -349,6 +349,17 @@ describe('AdminShell: the dForms rail look', () => {
       // Wordmark, nav, footer: the footer comes after the list, not inside it.
       expect(nav.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
+  });
+
+  it('marks the MCP group as the current row when its page is folded inside it', async () => {
+    const collapsed = rails(await mount({ pathname: '/admin/developers/keys', collapsed: true })).desktop;
+    expect(collapsed.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(true);
+    act(() => root?.unmount());
+    host?.remove();
+    // Open in the wide rail, the page's own row is the current one, not the group.
+    const wide = rails(await mount({ pathname: '/admin/developers/keys' })).desktop;
+    expect(wide.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(false);
+    expect(wide.querySelector('[aria-current="page"]')!.textContent).toBe('Connect and keys');
   });
 
   it('marks the current row with the wash and the accent bar, and no other row', async () => {
