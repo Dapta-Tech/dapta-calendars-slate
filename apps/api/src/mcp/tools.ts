@@ -946,6 +946,13 @@ const holdSlot: ToolDef = {
     const tz = args.time_zone;
     const startUtc = instantFrom(args.start, tz).toISOString();
     const owner = holdOwner(call);
+    // The reservation this attempt placed, given back if the hold cannot be
+    // handed out after all, so it does not block the time (and the caller's
+    // own retry) for ten minutes.
+    let placed: string | undefined;
+    const giveBack = async () => {
+      if (placed) await deps.bookings.release({ reservationUid: placed });
+    };
     const { data, replayed } = await keyedWrite(
       deps,
       call,
@@ -953,7 +960,7 @@ const holdSlot: ToolDef = {
       'hold_slot',
       args.idempotency_key,
       { eventTypeId: resolved.eventType.id, startUtc },
-      async (): Promise<HoldData> => {
+      async ({ resumed }): Promise<HoldData> => {
         // The booking page's own hold: same per-page cap, same fresh calendar
         // check, same refusal of a time that is not offered or already held.
         const held = await deps.bookings.reserve({
@@ -966,20 +973,31 @@ const holdSlot: ToolDef = {
           if (held.error === 'NOT_FOUND') throw notFound('Booking page');
           if (held.error === 'RATE_LIMITED') throw failureFor('TOO_MANY_HOLDS', held.message);
           if (held.error === 'CALENDAR_UNAVAILABLE') throw failureFor('CALENDAR_UNAVAILABLE', held.message);
+          // With an earlier attempt still open, the hold in the way is most
+          // likely that attempt's own (it timed out and is still finishing).
           throw new ToolFailure(
             'INVALID_SLOT',
             'That time cannot be held: it is not offered, or someone is already holding or booking it.',
-            'Call find_available_slots for current openings and hold one of those starts with a NEW idempotency_key.',
+            resumed
+              ? 'An earlier call with this idempotency_key has not finished; if it timed out it may still be placing this very hold. Retry with the SAME idempotency_key in a few seconds to get its hold_id. If that keeps failing, call find_available_slots and hold another start with a NEW idempotency_key.'
+              : 'Call find_available_slots for current openings and hold one of those starts with a NEW idempotency_key.',
           );
         }
+        placed = held.reservationUid;
         const endUtc = new Date(Date.parse(startUtc) + resolved.eventType.length_minutes * 60_000).toISOString();
-        const hold = await bindHold(deps.db, accountId, owner, {
-          reservationUid: held.reservationUid,
-          eventTypeId: resolved.eventType.id,
-          startUtc,
-          endUtc,
-          expiresAt: held.expiresAt,
-        });
+        let hold: string;
+        try {
+          hold = await bindHold(deps.db, accountId, owner, {
+            reservationUid: held.reservationUid,
+            eventTypeId: resolved.eventType.id,
+            startUtc,
+            endUtc,
+            expiresAt: held.expiresAt,
+          });
+        } catch (error) {
+          await giveBack().catch(() => undefined);
+          throw error;
+        }
         // Whole seconds, rounded down: the zoned time cannot carry more, and
         // both forms must name the same instant (never later than the real one).
         const expires = new Date(Math.floor(Date.parse(held.expiresAt) / 1000) * 1000);
@@ -1003,6 +1021,7 @@ const holdSlot: ToolDef = {
           next_step: `Held until ${zonedIso(expires, tz)}. Book it with ${args.event_type_id ? 'create_booking' : 'book_meeting'} passing hold_id and start ${zonedIso(new Date(startUtc), tz)}.`,
         };
       },
+      giveBack,
     );
     const out = replayed ? { ...data, replayed: true } : data;
     return {
@@ -1579,6 +1598,13 @@ const cancelBooking: ToolDef = {
  * key answers what the first call answered; the same key with other arguments
  * is refused. Refusals are not stored, because every write that uses this is
  * safe to run again (a hold is re-checked, a decision is idempotent by state).
+ *
+ * A retry can meet an earlier attempt with the same key that never stored a
+ * result: it failed, or it TIMED OUT and is still running (the gateway stops
+ * waiting, not working). `work` is told so (`resumed`), and when this attempt
+ * fails, the earlier one's result is answered if it has landed meanwhile. A
+ * success that cannot be stored is given back through `undo`, so the retry the
+ * caller is about to make does not trip over what this attempt took.
  */
 async function keyedWrite<T extends Record<string, unknown>>(
   deps: McpToolDeps,
@@ -1587,10 +1613,12 @@ async function keyedWrite<T extends Record<string, unknown>>(
   tool: string,
   key: string,
   request: Record<string, unknown>,
-  work: () => Promise<T>,
+  work: (attempt: { resumed: boolean }) => Promise<T>,
+  undo?: () => Promise<void>,
 ): Promise<{ data: T; replayed: boolean }> {
   const caller = callerId(call);
   const requestHash = hashApiValue(stableStringify(request));
+  const started = Date.now();
   const claim = await claimApiIdempotency(deps.db, {
     namespaceHash: hashApiValue(`${accountId}:${caller}:${tool}:${key}`),
     accountId,
@@ -1598,12 +1626,33 @@ async function keyedWrite<T extends Record<string, unknown>>(
     method: 'MCP',
     path: tool,
     requestHash,
+    now: started,
   });
   if (claim.requestHash !== requestHash)
     throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
   if (claim.statusCode != null) return { data: claim.responseBody as T, replayed: true };
-  const data = await work();
-  await completeApiIdempotency(deps.db, claim.id, 200, data);
+  // An open claim from before this call is an earlier attempt with this key.
+  const opened = await deps.db.get<{ created_at: number | string }>(sql`SELECT created_at FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`);
+  const resumed = Number(opened?.created_at ?? started) < started;
+  let data: T;
+  try {
+    data = await work({ resumed });
+  } catch (error) {
+    if (resumed) {
+      const now = await deps.db.get<{ status_code: number | string | null; response_body: unknown }>(
+        sql`SELECT status_code, response_body FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`,
+      );
+      const stored = now?.status_code != null ? parseJsonColumn<T | null>(now.response_body, null) : null;
+      if (stored) return { data: stored, replayed: true };
+    }
+    throw error;
+  }
+  try {
+    await completeApiIdempotency(deps.db, claim.id, 200, data);
+  } catch (error) {
+    if (undo) await undo().catch(() => undefined);
+    throw error;
+  }
   return { data, replayed: false };
 }
 
