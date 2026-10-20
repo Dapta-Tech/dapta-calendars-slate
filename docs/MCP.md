@@ -18,13 +18,15 @@ without a custom integration.
 |---|---|---|
 | No credential | Just call it | `find_available_slots` and `book_meeting` on a **public** booking page |
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
-| OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved |
+| OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
 
 A key is created by a workspace admin (Settings, then API keys). Send it only in
 the `Authorization` header. A key in the URL (`?api_key=`, `?access_token=`) is
 refused with 400 so it never lands in an access log. A wrong, expired or revoked
 key answers 401; it is never quietly treated as anonymous. The account always
-comes from the key, never from a tool argument, and anything outside it (another
+comes from the credential: a key acts on its own account, and a sign-in that
+reaches several accounts names one per call with `account_id` (one of the
+accounts the credential reaches, never another). Anything outside it (another
 workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 
 ## Tools
@@ -34,6 +36,7 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `find_available_slots` | public page link, or `availability:read` (by `event_type_id`) | read | Open times for one event, grouped by local date, each with its offset in the `time_zone` you ask for plus UTC. Range capped at 31 days. |
 | `book_meeting` | nothing (public page) | write, emails the invitee | Books one offered slot. Same validation as the public booking page. |
 | `whoami` | any key or connection | read | Workspace, owner time zone, the key's (or connection's) scopes and allowlist. |
+| `list_my_accounts` | any key or connection | read | The accounts this connection can act in, by name and id. A key reaches only its own. |
 | `list_event_types` | `event-types:read` | read | Bookable event types (personal and team), respecting the allowlist. |
 | `get_booking_page_link` | `event-types:read` | read | Public URL of one event type. |
 | `list_bookings` | `bookings:read` | read | Minimal fields only: uid, status, times, event type, invitee email domain. Cursor pagination. |
@@ -46,6 +49,14 @@ Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
 (plus a short text summary). Not exposed over MCP: webhooks, API keys, team
 administration, event-type edits, confirm or decline.
+
+Every tool that acts on the caller's account (all but `book_meeting` and
+`list_my_accounts`) takes an optional `account_id`. A key or a sign-in that
+reaches one account never needs it, and may name only that account. A sign-in
+that reaches several accounts must name one on each call; without it the call
+fails with `ACCOUNT_REQUIRED` listing the accounts; `list_my_accounts` returns the same list.
+A public booking page needs no account: `find_available_slots` and `book_meeting`
+on a page link take theirs from the link.
 
 `bookings:cancel` is a new scope. The REST cancel routes (`/v2/bookings/:uid/cancel`
 and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
@@ -126,7 +137,8 @@ Leave the header out to use only the public tools.
 
 ## OAuth: connect Claude, ChatGPT, Cursor or VS Code with a sign-in
 
-With `OAUTH_ENABLED=true` the API is also its own OAuth 2.1 authorization
+With `OAUTH_ENABLED=true` (and no `OAUTH_AUTHORIZATION_SERVER`, see the next
+section) the API is also its own OAuth 2.1 authorization
 server, so chat apps and IDEs connect with one click and a consent screen
 instead of a pasted key. It is built on
 [oidc-provider](https://github.com/panva/node-oidc-provider) (no hand-rolled
@@ -225,6 +237,78 @@ the consent page when you click it.
 **ChatGPT:** Plugins, then the plus button, then Add custom MCP server; paste the
 MCP URL and choose OAuth.
 
+## OAuth with an external authorization server
+
+Set `OAUTH_AUTHORIZATION_SERVER` (with `OAUTH_ENABLED=true`) and the API is an
+OAuth **resource server** only: sign-in, consent, client registration (CIMD,
+DCR) and tokens all belong to that server. The built-in server above is not
+mounted (`/oauth/*` and the consent page answer 404, Connected apps is hidden,
+and `OAUTH_ISSUER` / `OAUTH_SIGNING_JWK` are not needed, nor read). Unset, the
+built-in server runs exactly as described above.
+
+Any OAuth 2.1 authorization server works if it supports **RFC 8707 resource
+indicators** (its access tokens for `MCP_PUBLIC_URL` carry that URL as their
+`aud`), signs them with **RS256 or ES256**, publishes a **JWKS**, and has an
+issuer that is a bare origin (`https://auth.example.com`, no trailing slash):
+for example WorkOS AuthKit. `OAUTH_AUTHORIZATION_SERVER` must be written exactly
+as that origin; anything else is refused at boot, because it is compared with
+every token's `iss`. Register `MCP_PUBLIC_URL` with the server as a resource (an
+API, an audience). The login provider of this deployment (`AUTH_PROVIDER`) must
+record that server's user id for the person, the `sub` of its tokens, on their
+member (`member.idp_subject`) when they sign in to the web app; the bundled
+`workos` provider does that with the `workos_user_id` claim of its platform
+token.
+
+| Endpoint | What it serves |
+|---|---|
+| `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` | `{resource: MCP_PUBLIC_URL, authorization_servers: [OAUTH_AUTHORIZATION_SERVER], bearer_methods_supported: ["header"], scopes_supported: [], resource_name}` |
+| `/.well-known/oauth-authorization-server` | The external server's own metadata, for clients that read it from the resource's origin: fetched server-side from the configured issuer (never with a header of the request), cached for an hour, 64 KB and 5 s caps, no redirects. 503 while it cannot be fetched. |
+
+- **The challenge.** A protected tool with no token, or any call with a bad
+  token, gets HTTP 401 and `WWW-Authenticate: Bearer resource_metadata="<MCP origin>/.well-known/oauth-protected-resource/mcp"`
+  (`error="invalid_token"` for a bad one), never a `scope`. Every URL comes from
+  configuration; the `Host` header changes none.
+- **Token checks**, on every request: signature against the server's JWKS (its
+  metadata's `jwks_uri`, whose `issuer` must equal `OAUTH_AUTHORIZATION_SERVER`
+  exactly, or `OAUTH_JWKS_URL`), algorithm RS256 or ES256 only, `iss` exactly
+  the configured issuer, `aud` containing `MCP_PUBLIC_URL`, `sub` and `exp`
+  present, 30 s of clock tolerance. Nothing else in the token is trusted;
+  `client_id`/`azp` and `sid` are only written to the audit line. Any failure,
+  a key-fetch outage included, is the same 401, never a 500.
+- **Who it acts as.** The token's `sub` finds the person: the members whose
+  `idp_subject` is that `sub`. The link is per person, so it reaches the
+  person's members in every account (the same upstream user, `external_id`),
+  also where their login never carried the `sub` (an account they reach by
+  switching). Of those, only members the identity service vouched for within
+  `OAUTH_LINK_MAX_AGE_DAYS` (default 30: the issue time of the last token it
+  minted for them, seen at a web login) count, the linking member included,
+  and only active owners and admins (the same rule as the built-in server's
+  consent). Checked on every request. None: **HTTP 403** with a plain message
+  (open the web app once, then reconnect), never a 401, so the client does not
+  loop back into its sign-in.
+- **What it may do.** An external server has no scopes of ours, so a sign-in
+  acts with the member's admin rights: every tool, no event-type allowlist, no
+  step-up. For narrow access (read-only, one event type), use a scoped API key.
+- **Several accounts.** One account is used automatically. With several, each
+  call names one with `account_id`; `list_my_accounts` lists them.
+- **The `resource` parameter.** A client that omits RFC 8707 `resource` when it
+  asks for a token gets the authorization server's default audience, which is
+  not `MCP_PUBLIC_URL`: every call is then a 401 and the client loops back into
+  its sign-in. Register `MCP_PUBLIC_URL` with the server as an additional
+  resource, not as its default (other resources may rely on the default), and
+  use clients that send `resource`, as current Claude and Cursor do.
+- **Disconnecting.** Remove the connector in the client. An owner can cut a
+  person off by removing their admin role or the member.
+- **Offboarding.** Removing the member here (or disabling them, or taking their
+  admin role) cuts MCP access on the next request. Removing someone only in the
+  upstream identity service, which this app is never told about, takes effect
+  within `OAUTH_LINK_MAX_AGE_DAYS` of the last token it issued them for that
+  account (its issue time, not when it was last used, so a token minted before
+  the removal cannot keep the link alive): after that the link is stale and
+  every call is the 403. Set it to the
+  upstream session lifetime, so MCP access never outlives what the web allows;
+  remove the member here too when it must end at once.
+
 ## Security
 
 - **Transport.** The SDK handler checks nothing by itself, so the door does: a
@@ -244,7 +328,8 @@ MCP URL and choose OAuth.
   plugged in later behind the same `RateLimiter` interface.
 - **Audit.** One JSON line on stdout per tool call: time, request id, protocol
   version, caller (key prefix such as `dcl_1a2b3c4d`, `oauth:<connection id>`
-  plus the OAuth `client`, or `anonymous`), account id,
+  plus the OAuth `client`, `login:<member id prefix>` plus the `client` and
+  `sid` an external server's token carries, or `anonymous`), account id,
   tool, a hash of the redacted arguments, affected booking uids, result and
   latency. It never contains the key, names, emails, notes, answers or
   idempotency keys. Refused validation (a malformed call the SDK rejects before
@@ -270,6 +355,9 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `OAUTH_REFRESH_REUSE_GRACE_SECONDS` | `10` |
 | `OAUTH_CIMD_ENABLED` / `OAUTH_DCR_ENABLED` | `true` / `true` |
 | `OAUTH_DCR_EXTRA_REDIRECT_URIS` | unset |
+| `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
+| `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
+| `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after the identity service last vouched for someone in an account a sign-in still reaches it) |
 
 ## Check it yourself
 
@@ -277,6 +365,13 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 production image does (tsx with `tsconfig.runtime.json`) on a throwaway SQLite
 file and drives it with the official client: tool list, slots, book, reschedule,
 cancel, an anonymous public booking, a legacy `initialize` handshake.
+
+`pnpm e2e:mcp-login` does the same with an external authorization server: a
+stand-in server (RS256 keys made by the script, its metadata and JWKS on a
+loopback port) mints the tokens, and the script checks discovery, the dormant
+built-in server, the 401 challenge, the 403 for a sign-in linked to no member,
+whoami, list_my_accounts, list_event_types and a booking with a sign-in, and a
+sign-in reaching two accounts.
 
 `pnpm e2e:oauth` does the same for OAuth with the web app built for production
 and a headless browser: discovery, the 401 challenge, registration, the real

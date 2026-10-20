@@ -69,6 +69,9 @@ export default async function DeveloperSettings() {
   // only the API knows that (MCP_ENABLED). No connection steps, and no address,
   // unless it says yes; an older API without the field reads as no.
   const mcpEnabled = oauth.mcpEnabled === true;
+  // Sign-in through an external authorization server: no consent page or
+  // Connected apps of ours (the list below only holds this API's own grants).
+  const external = oauth.external === true;
   const { mcpUrl, apiOrigin } = resolveMcpConfig();
   const snippets: ConnectSnippets | null = mcpEnabled && mcpUrl
     ? {
@@ -86,7 +89,7 @@ export default async function DeveloperSettings() {
     <div className="flex max-w-3xl flex-col gap-section">
       {/* Page-level lead: who this page is for (QA2 fix 4). */}
       <p className="max-w-prose text-sm text-muted-foreground">{m.pageLead}</p>
-      <ConnectAgent available={mcpEnabled} snippets={snippets} oauth={oauth.enabled} messages={m} />
+      <ConnectAgent available={mcpEnabled} snippets={snippets} oauth={oauth.enabled || external} external={external} messages={m} />
       <ApiKeys
         keys={keys}
         eventTypes={eventTypes}
@@ -94,7 +97,7 @@ export default async function DeveloperSettings() {
         messages={m}
         locale={locale}
       />
-      {oauth.enabled ? (
+      {oauth.enabled && !external ? (
         <ConnectedApps apps={oauth.grants} accessTokenTtlSeconds={oauth.accessTokenTtlSeconds ?? 3600} messages={m} locale={locale} />
       ) : null}
       {/* The tool list describes the MCP endpoint: nothing to list while it is off. */}

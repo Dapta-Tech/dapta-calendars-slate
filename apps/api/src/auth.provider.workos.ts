@@ -3,11 +3,14 @@
  *
  * It does NOT talk to WorkOS. Login (hosted AuthKit, social providers) lives in
  * the upstream identity service, which after login mints an HS256 platform JWT
- * (shared secret; claims `sub`, `account_id`, `email`, `name`). This provider is
- * the DOWNSTREAM validator only — it verifies that token and projects its claims
- * onto a local `{accountId, memberId}`. This is the exact split the predecessor
- * service used, and it is what makes local and remote behave identically: the
- * secret is symmetric, so there is nothing environment-specific to fetch.
+ * (shared secret; claims `sub`, `account_id`, `email`, `name`, and
+ * `workos_user_id` when the login came through WorkOS). This provider is the
+ * DOWNSTREAM validator only: it verifies that token and projects its claims
+ * onto a local `{accountId, memberId}`, recording `workos_user_id` on the
+ * member (`member.idp_subject`) so an MCP sign-in through the same identity can
+ * find it. This is the exact split the predecessor service used, and it is
+ * what makes local and remote behave identically: the secret is symmetric, so
+ * there is nothing environment-specific to fetch.
  *
  * Because it only ever *validates* tokens (never issues them, never calls the
  * identity service or WorkOS), it cannot affect the upstream login in any way —
@@ -18,10 +21,10 @@
  * `createAuthProvider` still fails loud without it. No vendor host/secret name
  * appears here — issuer/audience/secret all arrive via env.
  */
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Db, AccountRole } from '@slate/db';
-import { deriveUniqueHandle, insertAccountWithShortCode, jsonParam, sql } from '@slate/db';
+import { deriveUniqueHandle, insertAccountWithShortCode, jsonParam, recordMemberIdpSubject, sql } from '@slate/db';
 import { withNewHostBranding } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import {
@@ -45,9 +48,18 @@ function unauthenticated(message: string): UnauthorizedException {
 // URL. Idempotency across concurrent first-logins is anchored on external_id
 // (ON CONFLICT), so the code no longer needs to be deterministic.
 
+/** A resolved member and the authorization-server subject it carries now. */
+interface ResolvedMember {
+  id: string;
+  idpSubject: string | null;
+}
+
 export class WorkOsAuthProvider implements AuthProvider {
   readonly name = 'workos';
   private readonly secret: string;
+  private readonly logger = new Logger('Auth');
+  /** Where audit lines go (one JSON object per line). A field so specs can read it. */
+  auditSink: (line: string) => void = (line) => process.stdout.write(`${line}\n`);
 
   constructor(
     private readonly db: Db,
@@ -88,8 +100,43 @@ export class WorkOsAuthProvider implements AuthProvider {
     if (!sub) throw unauthenticated('Token missing sub.');
 
     const accountId = await this.resolveAccount(accountExtId, claims);
-    const memberId = await this.resolveMember(accountId, sub, claims);
-    return { accountId, memberId };
+    const member = await this.resolveMember(accountId, sub, claims);
+    // When the identity service minted this token: the last moment it vouched
+    // for this person in this account (never later than now, whatever the
+    // clock). A token without `iat` vouches for nothing: it still signs the
+    // person in, but stamps no freshness, so using it cannot extend MCP access.
+    const authenticatedAt =
+      typeof claims.iat === 'number' && Number.isFinite(claims.iat) ? Math.min(claims.iat * 1000, Date.now()) : null;
+    const subject = typeof claims.workos_user_id === 'string' && claims.workos_user_id ? claims.workos_user_id : undefined;
+    if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject, authenticatedAt);
+    return { accountId, memberId: member.id, authenticatedAt };
+  }
+
+  /**
+   * Record the person's WorkOS user id on the member: what an MCP sign-in
+   * token carries as its `sub`, so the MCP door can find this member. Written
+   * only when missing or different (this runs on every dashboard request); the
+   * latest web login takes it from any other member of the account, in one
+   * transaction. Never costs a login: a failure is logged and the next request
+   * tries again.
+   */
+  private async recordSubject(accountId: string, memberId: string, subject: string, authenticatedAt: number | null): Promise<void> {
+    try {
+      const out = await recordMemberIdpSubject(this.db, accountId, memberId, subject, authenticatedAt);
+      if (!out.written) return;
+      const line = { ts: new Date().toISOString(), level: 'info', msg: 'auth.idp_subject_recorded', accountId, memberId, takenFrom: out.clearedMemberIds };
+      try {
+        this.auditSink(JSON.stringify(line));
+      } catch {
+        /* logging must never break a login */
+      }
+    } catch (error) {
+      // The code only (the driver's, under the query builder's wrapper): a
+      // constraint message would carry the subject itself.
+      const e = error as { code?: unknown; cause?: { code?: unknown } } | undefined;
+      const code = e?.code ?? e?.cause?.code;
+      this.logger.warn(`could not record the sign-in subject for member ${memberId}: ${typeof code === 'string' ? code : 'error'}`);
+    }
   }
 
   /** Find (or JIT-create) the local account projected from the token's account_id. */
@@ -126,11 +173,11 @@ export class WorkOsAuthProvider implements AuthProvider {
   }
 
   /** Find (or JIT-create) the local member projected from the token's sub. */
-  private async resolveMember(accountId: string, sub: string, claims: JwtClaims): Promise<string> {
-    const existing = await this.db.get<{ id: string }>(
-      sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
+  private async resolveMember(accountId: string, sub: string, claims: JwtClaims): Promise<ResolvedMember> {
+    const existing = await this.db.get<{ id: string; idp_subject: string | null }>(
+      sql`SELECT id, idp_subject FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
     );
-    if (existing) return existing.id;
+    if (existing) return { id: existing.id, idpSubject: existing.idp_subject };
 
     const email = typeof claims.email === 'string' ? claims.email : null;
     const displayName = typeof claims.name === 'string' ? claims.name : null;
@@ -162,14 +209,15 @@ export class WorkOsAuthProvider implements AuthProvider {
             isFirstMember: false,
             fromInvite: true,
           });
-          return invited.id;
+          // An invite never carries a subject: the caller records this login's.
+          return { id: invited.id, idpSubject: null };
         }
         // Lost the race: answer with the member bound to THIS login, which is
         // the invite when the winner was the same person signing in twice.
-        const bound = await this.db.get<{ id: string }>(
-          sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
+        const bound = await this.db.get<{ id: string; idp_subject: string | null }>(
+          sql`SELECT id, idp_subject FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
         );
-        return bound?.id ?? invited.id;
+        return bound ? { id: bound.id, idpSubject: bound.idp_subject } : { id: invited.id, idpSubject: null };
       }
     }
 
@@ -197,8 +245,8 @@ export class WorkOsAuthProvider implements AuthProvider {
             ${born.brandColor}, ${jsonParam(this.db, born.style)}, ${Date.now()})
           ON CONFLICT (account_id, external_id) DO NOTHING`,
     );
-    const row = await this.db.get<{ id: string }>(
-      sql`SELECT id FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
+    const row = await this.db.get<{ id: string; idp_subject: string | null }>(
+      sql`SELECT id, idp_subject FROM member WHERE account_id = ${accountId} AND external_id = ${sub} LIMIT 1`,
     );
     if (!row) throw unauthenticated('Could not resolve member.');
     // Only the request whose INSERT won reports the signup: a concurrent first
@@ -207,6 +255,6 @@ export class WorkOsAuthProvider implements AuthProvider {
     if (row.id === id) {
       notifySignup(this.onSignup, { accountId, memberId: id, role, isFirstMember: !occupied, fromInvite: false });
     }
-    return row.id;
+    return { id: row.id, idpSubject: row.idp_subject };
   }
 }

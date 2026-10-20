@@ -70,6 +70,14 @@ export const member = pgTable('member', {
   // `sub`). Unique per account; the `workos` provider resolves/creates the
   // member projection by it. Nullable: seeded/local members have none.
   externalId: text('external_id'),
+  // This member's user id at the OAuth authorization server MCP clients sign in
+  // with (a token's `sub`), recorded by the host login provider at web login
+  // (0028). One member per subject within an account; NULL until then.
+  idpSubject: text('idp_subject'),
+  // Epoch ms the identity service last vouched for this member (its token's
+  // issue time at a web login), refreshed at most once a day (0028). An MCP
+  // sign-in reaches only members seen recently.
+  loginSeenAt: bigint('login_seen_at', { mode: 'number' }),
   handle: text('handle'),
   displayName: text('display_name'),
   email: text('email'),

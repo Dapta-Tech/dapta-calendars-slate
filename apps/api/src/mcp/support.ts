@@ -4,6 +4,8 @@ import { ZodError } from 'zod';
 import { zoneOffsetMinutes } from '@slate/shared';
 import type { ApiScope } from '@slate/types';
 import type { MachinePrincipal } from '../auth.service';
+import type { ExternalLogin, LoginAccount } from '../oauth/external.service';
+import { OAUTH_SCOPES } from '../oauth/oauth.settings';
 
 /**
  * Shared plumbing for the MCP door: how a tool says "no", how untrusted text is
@@ -36,13 +38,52 @@ export interface McpCall {
   protocolVersion: string;
   /** Client address (rate-limit key for anonymous calls). Never logged. */
   ip: string;
-  /** Null: no credential presented, only the public tools are callable. */
+  /**
+   * Null: no credential presented, only the public tools are callable; or a
+   * sign-in that reaches several accounts, until a tool call names one.
+   */
   principal: MachinePrincipal | null;
+  /**
+   * A sign-in through an external authorization server: the verified token and
+   * every account it may act in (at least one). With one account `principal`
+   * is already that account's; with several the call picks one (`account_id`).
+   */
+  login?: { token: ExternalLogin; accounts: LoginAccount[] };
 }
 
-/** `dcl_<8hex>` or `anonymous`: the only identity that reaches a log line. */
+/** `dcl_<8hex>`, `login:<8 chars>` or `anonymous`: the only identity that reaches a log line. */
 export function callerLabel(call: McpCall): string {
-  return call.principal?.prefix ?? 'anonymous';
+  return call.principal?.prefix ?? (call.login ? 'login' : 'anonymous');
+}
+
+/**
+ * Who a sign-in is while it has not picked an account (a public page tool
+ * called by a sign-in reaching several): one key per person, so it never
+ * shares the anonymous per-address bucket or idempotency namespace.
+ */
+export function signInKey(login: NonNullable<McpCall['login']>): string {
+  return `login:${createHash('sha256').update(login.token.subject).digest('hex').slice(0, 32)}`;
+}
+
+/**
+ * The principal of a sign-in acting in one account, as the member it is
+ * there. An external server has no scopes of ours, so a sign-in holds every
+ * MCP scope: it acts with the member's admin rights, checked on every request.
+ * Narrow access (read-only, one event type) stays with scoped API keys.
+ */
+export function loginPrincipal(account: LoginAccount, token: ExternalLogin): MachinePrincipal {
+  return {
+    kind: 'oauth',
+    keyId: `login:${account.memberId}`,
+    prefix: `login:${account.memberId.slice(0, 8)}`,
+    accountId: account.accountId,
+    memberId: account.memberId,
+    scopes: [...OAUTH_SCOPES],
+    eventTypeIds: null,
+    expiresAtMs: token.expiresAtMs,
+    ...(token.clientId ? { clientId: token.clientId } : {}),
+    ...(token.sessionId ? { sessionId: token.sessionId } : {}),
+  };
 }
 
 /**

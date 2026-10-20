@@ -92,7 +92,7 @@ describe('scope and tool catalogs', () => {
         if (tool.scope) expect(known.has(tool.scope)).toBe(true);
       }
     }
-    expect(MCP_TOOLS).toHaveLength(10);
+    expect(MCP_TOOLS).toHaveLength(11);
   });
   it('cancel is the only destructive tool', () => {
     expect(MCP_TOOLS.filter((t) => t.kind === 'destructive').map((t) => t.name)).toEqual(['cancel_booking']);

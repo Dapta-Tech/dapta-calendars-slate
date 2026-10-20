@@ -36,6 +36,15 @@ export interface ReqLike {
 export interface ResolvedHost {
   accountId: string;
   memberId: string;
+  /**
+   * When the upstream identity service last vouched for this session (the
+   * verified token's `iat`), epoch ms. What `member.login_seen_at` records, so
+   * a token issued before an upstream removal cannot keep it fresh by being
+   * used. Null: a verified token that does not say when it was issued, which
+   * vouches for nothing (no stamp). Absent (the local stub, which has no
+   * token): the request time.
+   */
+  authenticatedAt?: number | null;
 }
 
 /** The authenticated host, enriched with the account role for authorization. */

@@ -477,6 +477,57 @@ on Postgres, `0025_oauth_record.sql` on SQLite): a new table, no change to
 existing ones. It stays empty while OAuth is off; expired rows are purged in
 the background.
 
+#### Or: sign in through an external authorization server
+
+Instead of running its own, the API can be a resource server for an OAuth 2.1
+authorization server you already have (see
+[docs/MCP.md](docs/MCP.md#oauth-with-an-external-authorization-server)). Set
+`OAUTH_ENABLED=true`, `MCP_PUBLIC_URL` and `OAUTH_AUTHORIZATION_SERVER`; the
+built-in server's vars above are then not needed, its routes and consent page
+answer 404, and Connected apps is hidden.
+
+| Var | Default | Notes | Secret? |
+|---|---|---|---|
+| `OAUTH_AUTHORIZATION_SERVER` | unset | the external server's issuer, a bare origin (`https`; `http` only on localhost outside production), written exactly as `new URL(value).origin` gives it: lowercase, no trailing slash, no default port. Anything else is refused at boot, because it is compared with every token's `iss`. Set, the API checks that server's access tokens and runs no authorization server of its own | no |
+| `OAUTH_JWKS_URL` | unset | where that server publishes its signing keys; unset, the `jwks_uri` of its `/.well-known/oauth-authorization-server` metadata | no |
+| `OAUTH_LINK_MAX_AGE_DAYS` | `30` | how long after your identity service last vouched for a person in an account (the issue time of the last token it minted for them, seen at a web login) a sign-in may still act there (1 to 365). Match your identity service's session lifetime | no |
+
+What the external server must do:
+
+- Support **RFC 8707 resource indicators**: register `MCP_PUBLIC_URL` with it as
+  a resource (an API, an audience), so its access tokens carry it as `aud`.
+- Sign access tokens with **RS256 or ES256** and publish them in a **JWKS**.
+- Let MCP clients register: Client ID Metadata Documents and/or Dynamic Client
+  Registration, as Claude, ChatGPT and Cursor expect. That is configured there,
+  not here.
+
+What your login provider must do: record the external server's user id (the
+`sub` of its tokens) on the member when the person signs in to the web app, in
+`member.idp_subject`, and keep `member.external_id` the person's own user id in
+every account (the link is per person: it also reaches their members in
+accounts where their login carried no `sub`). The bundled `workos` provider does
+it from the `workos_user_id` claim of its platform token; with another provider,
+add the same call (`recordMemberIdpSubject`) where it resolves the member. Every
+verified web login also stamps `member.login_seen_at` with the issue time of
+its token (`authenticatedAt` from the provider: the token's `iat`; a provider
+with no tokens, like the local stub, gives the request time; a token without
+`iat` stamps nothing, so your login tokens must carry it). The stamp is renewed
+in steps of a day (a quarter of the window when that is shorter) and never moves
+backwards; a sign-in reaches only members stamped within
+`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
+403 ("open the app on the web once, then reconnect").
+
+Offboarding: removing the member in this app (or disabling them, or removing
+their admin role) cuts MCP access at once. Removing someone only in your
+identity service takes effect within `OAUTH_LINK_MAX_AGE_DAYS` of their last
+web login in that account, because this app is never told about it.
+
+Storage: two additive nullable columns, `member.idp_subject` (unique per
+account, index on (`idp_subject`, `account_id`)) and `member.login_seen_at`
+(migration `0028_member_idp_subject.sql` on Postgres,
+`0027_member_idp_subject.sql` on SQLite); the lookup by `member.external_id`
+uses its existing index. NULL everywhere until a login records them.
+
 > Secrets must come from your platform's secret manager / environment, **never** a
 > committed file. Only `NEXT_PUBLIC_*` values reach the browser bundle; keep every
 > other secret server-side.

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDb, migrate, seed, sql, type Db } from '@slate/db';
+import { createDb, membershipsBySubject, migrate, seed, sql, type Db } from '@slate/db';
 import { loadServerEnv } from '@slate/config/env';
 import { createAuthProvider, type ReqLike } from './auth.provider';
 import { WorkOsAuthProvider } from './auth.provider.workos';
+import { AuthService } from './auth.service';
 import { signJwtHs256 } from './jwt';
 
 const SECRET = 'workos-provider-test-secret';
@@ -15,7 +16,7 @@ function bearer(token: string): ReqLike {
 
 function mint(claims: Record<string, unknown>): string {
   const nowSec = Math.floor(Date.now() / 1000);
-  return signJwtHs256({ iss: ISS, aud: AUD, exp: nowSec + 3600, ...claims }, SECRET);
+  return signJwtHs256({ iss: ISS, aud: AUD, iat: nowSec, exp: nowSec + 3600, ...claims }, SECRET);
 }
 
 describe('WorkOsAuthProvider — validates the platform JWT and projects a principal', () => {
@@ -174,6 +175,142 @@ describe('WorkOsAuthProvider — the role a JIT member arrives with', () => {
       bearer(mint({ account_id: 'acct_bare', sub: 'u_later', email: 'anyone@operator.example' })),
     );
     expect(await roleOf(later.memberId)).toBe('member');
+  });
+});
+
+// What lets an MCP sign-in find the member: the platform JWT's
+// `workos_user_id`, recorded on the member at web login.
+describe('WorkOsAuthProvider: records the sign-in subject on the member', () => {
+  let db: Db;
+  const env = { JWT_SECRET: SECRET, JWT_ISSUER: ISS, JWT_AUDIENCE: AUD };
+
+  const subjectOf = async (memberId: string) =>
+    (await db.get<{ idp_subject: string | null }>(sql`SELECT idp_subject FROM member WHERE id = ${memberId}`))?.idp_subject;
+
+  function provider() {
+    const p = new WorkOsAuthProvider(db, env);
+    const lines: Record<string, unknown>[] = [];
+    p.auditSink = (line) => lines.push(JSON.parse(line) as Record<string, unknown>);
+    return { p, lines };
+  }
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+  });
+
+  it('records it on the first login, once, with an audit line, and counts the login as seen', async () => {
+    const { p, lines } = provider();
+    const t = mint({ account_id: 'acct_s1', sub: 'iam_1', workos_user_id: 'user_01ALPHA' });
+    const who = await p.resolveHost(bearer(t));
+    expect(await subjectOf(who.memberId)).toBe('user_01ALPHA');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBeGreaterThan(Date.now() - 60_000);
+    await p.resolveHost(bearer(t));
+    expect(lines).toEqual([expect.objectContaining({ msg: 'auth.idp_subject_recorded', accountId: who.accountId, memberId: who.memberId, takenFrom: [] })]);
+    expect(JSON.stringify(lines)).not.toContain('user_01ALPHA');
+  });
+
+  it('rewrites it when the login carries a different one', async () => {
+    const { p } = provider();
+    const who = await p.resolveHost(bearer(mint({ account_id: 'acct_s2', sub: 'iam_2', workos_user_id: 'user_01OLD' })));
+    await p.resolveHost(bearer(mint({ account_id: 'acct_s2', sub: 'iam_2', workos_user_id: 'user_01NEW' })));
+    expect(await subjectOf(who.memberId)).toBe('user_01NEW');
+  });
+
+  it('records it when a login adopts an invite', async () => {
+    const { p } = provider();
+    const owner = await p.resolveHost(bearer(mint({ account_id: 'acct_inv', sub: 'iam_owner', email: 'owner@x.io' })));
+    await db.run(
+      sql`INSERT INTO member (id, account_id, email, handle, role, status, created_at)
+          VALUES ('invited-1', ${owner.accountId}, 'guest@x.io', 'guest', 'admin', 'invited', ${Date.now()})`,
+    );
+    const guest = await p.resolveHost(bearer(mint({ account_id: 'acct_inv', sub: 'iam_guest', email: 'guest@x.io', workos_user_id: 'user_01GUEST' })));
+    expect(guest.memberId).toBe('invited-1');
+    expect(await subjectOf('invited-1')).toBe('user_01GUEST');
+  });
+
+  it('two members of one account with the same subject: the latest web login takes it', async () => {
+    const { p, lines } = provider();
+    const first = await p.resolveHost(bearer(mint({ account_id: 'acct_two', sub: 'iam_a', workos_user_id: 'user_01SHARED' })));
+    const second = await p.resolveHost(bearer(mint({ account_id: 'acct_two', sub: 'iam_b', workos_user_id: 'user_01SHARED' })));
+    expect(await subjectOf(first.memberId)).toBeNull();
+    expect(await subjectOf(second.memberId)).toBe('user_01SHARED');
+    expect(lines.at(-1)).toMatchObject({ memberId: second.memberId, takenFrom: [first.memberId] });
+    // And back again on the first one's next login.
+    await p.resolveHost(bearer(mint({ account_id: 'acct_two', sub: 'iam_a', workos_user_id: 'user_01SHARED' })));
+    expect(await subjectOf(first.memberId)).toBe('user_01SHARED');
+    expect(await subjectOf(second.memberId)).toBeNull();
+  });
+
+  it('leaves the member alone when the login carries none (a login that did not come through WorkOS)', async () => {
+    const { p, lines } = provider();
+    const who = await p.resolveHost(bearer(mint({ account_id: 'acct_none', sub: 'iam_none', workos_user_id: 'user_01KEEP' })));
+    await p.resolveHost(bearer(mint({ account_id: 'acct_none', sub: 'iam_none' })));
+    expect(await subjectOf(who.memberId)).toBe('user_01KEEP');
+    expect(lines).toHaveLength(1);
+  });
+
+  it('stamps the link as of the token issue time: a 40-day-old token links nothing usable', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const iat = Math.floor(Date.now() / 1000) - 40 * 86_400;
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_old', sub: 'iam_old', workos_user_id: 'user_01OLD40', iat })));
+    expect(who.authenticatedAt).toBe(iat * 1000);
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBe(iat * 1000);
+    expect(await membershipsBySubject(db, 'user_01OLD40', Date.now() - 30 * 86_400_000)).toEqual([]);
+    // A token minted now makes the same link usable.
+    await auth.resolveHost(bearer(mint({ account_id: 'acct_old', sub: 'iam_old', workos_user_id: 'user_01OLD40', iat: Math.floor(Date.now() / 1000) })));
+    expect(await membershipsBySubject(db, 'user_01OLD40', Date.now() - 30 * 86_400_000)).toHaveLength(1);
+  });
+
+  it('a token that does not say when it was issued signs in but stamps nothing', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_noiat', sub: 'iam_noiat', workos_user_id: 'user_01NOIAT', iat: undefined })));
+    expect(who.authenticatedAt).toBeNull();
+    expect(await subjectOf(who.memberId)).toBe('user_01NOIAT');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(seen).toBeNull();
+    expect(await membershipsBySubject(db, 'user_01NOIAT', Date.now() - 30 * 86_400_000)).toEqual([]);
+  });
+
+  it('a new subject recorded from an older token never moves the stamp backwards', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const who = await auth.resolveHost(bearer(mint({ account_id: 'acct_back', sub: 'iam_back', workos_user_id: 'user_01FIRST', iat: nowSec })));
+    await auth.resolveHost(bearer(mint({ account_id: 'acct_back', sub: 'iam_back', workos_user_id: 'user_01SECOND', iat: nowSec - 10 * 86_400 })));
+    expect(await subjectOf(who.memberId)).toBe('user_01SECOND');
+    const seen = (await db.get<{ login_seen_at: number | null }>(sql`SELECT login_seen_at FROM member WHERE id = ${who.memberId}`))!.login_seen_at;
+    expect(Number(seen)).toBe(nowSec * 1000);
+  });
+
+  it('an account reached by switching (no workos_user_id in its session) is reached through the first account\'s link', async () => {
+    const auth = new AuthService(db, new WorkOsAuthProvider(db, env));
+    // The first login carries the WorkOS user id; the switched-to account's session does not.
+    const first = await auth.resolveHost(bearer(mint({ account_id: 'acct_primary', sub: 'iam_person', workos_user_id: 'user_01PERSON' })));
+    const second = await auth.resolveHost(bearer(mint({ account_id: 'acct_switched', sub: 'iam_person' })));
+    expect(await subjectOf(second.memberId)).toBeNull();
+    // Both are owners (the first member of each account), both seen just now.
+    const reached = await membershipsBySubject(db, 'user_01PERSON', Date.now() - 30 * 86_400_000);
+    expect(reached.map((m) => m.memberId).sort()).toEqual([first.memberId, second.memberId].sort());
+    expect(reached.every((m) => m.role === 'owner' && m.status === 'active')).toBe(true);
+  });
+
+  it('a failed write never costs the login', async () => {
+    const broken = {
+      ...db,
+      sqlite: {
+        ...db.sqlite!,
+        txn: () => {
+          throw Object.assign(new Error('boom'), { code: 'SQLITE_BUSY' });
+        },
+      },
+    } as Db;
+    const p = new WorkOsAuthProvider(broken, env);
+    const who = await p.resolveHost(bearer(mint({ account_id: 'acct_fail', sub: 'iam_fail', workos_user_id: 'user_01FAIL' })));
+    expect(who.memberId).toBeTruthy();
+    expect(await subjectOf(who.memberId)).toBeNull();
   });
 });
 
