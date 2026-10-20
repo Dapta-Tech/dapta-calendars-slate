@@ -797,6 +797,7 @@ export function EventTypeForm({
   teamId,
   teamName,
   teams,
+  canManageTeams = false,
   connections,
   redirectOnSuccess,
   backHref,
@@ -824,6 +825,9 @@ export function EventTypeForm({
   /** PERSONAL events: the account's teams, for the card pointing at team
    *  events (a personal event has no hosts to add). */
   teams?: TeamOption[];
+  /** Owner or admin: the team links (new team event, team page) are theirs
+   *  alone; the API refuses them to a plain member. */
+  canManageTeams?: boolean;
   /** The host's connected calendars, for the editable "Calendars for this
    *  event" section (PHASE 2) — omitted for TEAM events (each host has their
    *  own connection; a single per-event picker here would be misleading). */
@@ -1148,7 +1152,12 @@ export function EventTypeForm({
           none and points at team events, so the question "where do I add my
           team?" has an answer in the same place in either editor. */}
       {!isTeamEvent && teams ? (
-        <PersonalHostsCard teams={teams} title={m.hostsTitle} m={m.teamHosts} />
+        <PersonalHostsCard
+          teams={teams}
+          title={m.hostsTitle}
+          canManageTeams={canManageTeams}
+          m={m.teamHosts}
+        />
       ) : null}
 
       {isTeamEvent && scheduling ? (
@@ -1171,7 +1180,12 @@ export function EventTypeForm({
           <div className="flex flex-col gap-inline">
             <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
             {eventTeamId && teamName ? (
-              <TeamHostsNote teamId={eventTeamId} teamName={teamName} m={m.teamHosts} />
+              <TeamHostsNote
+                teamId={eventTeamId}
+                teamName={teamName}
+                canManageTeams={canManageTeams}
+                m={m.teamHosts}
+              />
             ) : null}
             {/* Column header — only the fields the active method actually uses. */}
             {schedulingType !== 'collective' ? (

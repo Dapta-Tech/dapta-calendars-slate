@@ -8,6 +8,7 @@ import {
   createTeam,
   getEventTypeById,
   removeTeamMember,
+  setEventTypeHostsDetailed,
 } from './crud';
 
 /**
@@ -58,23 +59,25 @@ describe.each(engines)('team roster and event hosts (%s)', (_engine, dbUrl) => {
   /**
    * A fresh account: an owner who owns the team "Sales" and hosts its two
    * events (round-robin and collective, the owner with their own priority and
-   * weight), two more members, a second team "Support" with one event, and the
-   * owner's personal event.
+   * weight), Ana (signed in, so she has a schedule), Ben (invited, no schedule
+   * yet), a second team "Support" with one event, and the owner's personal
+   * event.
    */
   async function workspace() {
     const accountId = randomUUID();
     const tag = accountId.slice(0, 8);
-    const member = async (name: string) => {
+    const member = async (name: string, opts: { invited?: boolean } = {}) => {
       const id = randomUUID();
       await db.run(
         sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, created_at)
             VALUES (${id}, ${accountId}, ${`${name}-${tag}`}, ${name}, ${`${name}-${tag}@example.com`}, 'UTC', 0)`,
       );
+      if (!opts.invited) await giveSchedule(accountId, id);
       return id;
     };
     const owner = await member('owner');
     const ana = await member('ana');
-    const ben = await member('ben');
+    const ben = await member('ben', { invited: true });
 
     const team = async (name: string) => {
       const created = await createTeam(db, accountId, {
@@ -102,6 +105,7 @@ describe.each(engines)('team roster and event hosts (%s)', (_engine, dbUrl) => {
     const support = await team('Support');
     return {
       accountId,
+      member,
       owner,
       ana,
       ben,
@@ -112,6 +116,16 @@ describe.each(engines)('team roster and event hosts (%s)', (_engine, dbUrl) => {
       supportEvent: await event(support, 'help', 'round_robin'),
       personal: await event(null, 'intro', null),
     };
+  }
+
+  /** What a first sign-in does for an invited member: a default schedule. */
+  async function giveSchedule(accountId: string, memberId: string) {
+    const scheduleId = randomUUID();
+    await db.run(
+      sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+          VALUES (${scheduleId}, ${accountId}, ${memberId}, 'Working Hours', 'UTC', 0)`,
+    );
+    await db.run(sql`UPDATE member SET default_schedule_id = ${scheduleId} WHERE id = ${memberId}`);
   }
 
   it('adding a member makes them a host of every event the team has, with the editor defaults', async () => {
@@ -135,6 +149,80 @@ describe.each(engines)('team roster and event hosts (%s)', (_engine, dbUrl) => {
     // Another team's event and a personal event are not this team's.
     expect(await hostIds(w.supportEvent)).toEqual([w.owner]);
     expect(await hostIds(w.personal)).toEqual([]);
+  });
+
+  it('an invited member with no schedule yet joins round-robin events but not collective ones', async () => {
+    const w = await workspace();
+    expect((await addTeamMember(db, w.accountId, w.sales, w.ben)).ok).toBe(true);
+    expect(await hostIds(w.salesRoundRobin)).toEqual([w.ben, w.owner].sort());
+    // Everyone attends a collective event, so a host with no hours would
+    // empty it for the whole team.
+    expect(await hostIds(w.salesCollective)).toEqual([w.owner]);
+
+    // Once they have a schedule, adding them again completes it.
+    await giveSchedule(w.accountId, w.ben);
+    await addTeamMember(db, w.accountId, w.sales, w.ben);
+    expect(await hostIds(w.salesCollective)).toEqual([w.ben, w.owner].sort());
+  });
+
+  it('removal clears a collective host row whoever wrote it, schedule or not', async () => {
+    const w = await workspace();
+    await addTeamMember(db, w.accountId, w.sales, w.ben);
+    // An editor save writes every listed member, invited or not.
+    await setEventTypeHostsDetailed(db, w.accountId, w.salesCollective, [
+      { memberId: w.owner, priority: 0, weight: 100, isFixed: false },
+      { memberId: w.ben, priority: 0, weight: 100, isFixed: false },
+    ]);
+
+    expect((await removeTeamMember(db, w.accountId, w.sales, w.ben)).ok).toBe(true);
+    expect(await hostIds(w.salesCollective)).toEqual([w.owner]);
+    expect(await hostIds(w.salesRoundRobin)).toEqual([w.owner]);
+  });
+
+  it('two adds of one member at once write one row per event, and neither fails', async () => {
+    const w = await workspace();
+    await addTeamMember(db, w.accountId, w.sales, w.ana);
+    await db.run(sql`DELETE FROM event_type_host WHERE member_id = ${w.ana}`);
+
+    // Both read "missing" before either writes.
+    const results = await Promise.all([
+      addTeamMember(db, w.accountId, w.sales, w.ana),
+      addTeamMember(db, w.accountId, w.sales, w.ana),
+    ]);
+    expect(results.map((r) => r.ok)).toEqual([true, true]);
+    expect(await hostIds(w.salesRoundRobin)).toEqual([w.ana, w.owner].sort());
+    expect(await hostIds(w.salesCollective)).toEqual([w.ana, w.owner].sort());
+  });
+
+  it("an editor save that meets a team add's row mid-save keeps every host, with the editor's values", async () => {
+    const w = await workspace();
+    // Hosts the save writes before and after Ana, so the add lands in between.
+    const before = [];
+    for (const name of ['p', 'q', 'r', 's', 't', 'u']) before.push(await w.member(name));
+    const after = await w.member('v');
+    await addTeamMember(db, w.accountId, w.sales, w.ana);
+    await db.run(sql`DELETE FROM event_type_host WHERE member_id = ${w.ana}`);
+    const host = (memberId: string, priority = 0) => ({
+      memberId,
+      priority,
+      weight: 100,
+      isFixed: false,
+    });
+
+    // The add reads "Ana is missing" after the save's DELETE and writes her
+    // row before the save reaches her; the save must not fail on it, and the
+    // host after her must still be written.
+    await Promise.all([
+      setEventTypeHostsDetailed(db, w.accountId, w.salesRoundRobin, [
+        ...before.map((id) => host(id)),
+        host(w.ana, 7),
+        host(after),
+      ]),
+      addTeamMember(db, w.accountId, w.sales, w.ana),
+    ]);
+    expect(await hostIds(w.salesRoundRobin)).toEqual([...before, w.ana, after].sort());
+    const ana = (await hostsOf(w.salesRoundRobin)).find((h) => h.member_id === w.ana)!;
+    expect(ana.priority).toBe(7);
   });
 
   it('adding twice, or adding someone who already hosts, writes no second row and keeps their settings', async () => {

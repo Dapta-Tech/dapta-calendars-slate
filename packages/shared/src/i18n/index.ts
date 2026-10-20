@@ -2007,7 +2007,7 @@ export const en: BookingMessages = {
       calendarsManageLink: 'Manage calendars',
       teamHosts: {
         personalHint:
-          'This event is only yours. To share bookings with your team (round-robin or all together), create a team event.',
+          'A personal event has one host. To share bookings with your team (round-robin or collective), create a team event.',
         newEventFor: 'New event for {team}',
         createTeam: 'Create a team',
         everyMember: 'Every member of {team} hosts this event.',
@@ -3358,7 +3358,7 @@ export const es: BookingMessages = {
       calendarsManageLink: 'Administrar calendarios',
       teamHosts: {
         personalHint:
-          'Este evento es solo tuyo. Para compartir reservas con tu equipo (por turnos o todos juntos), crea un evento de equipo.',
+          'Un evento personal tiene un solo anfitrión. Para compartir reservas con tu equipo (por turnos o colectiva), crea un evento de equipo.',
         newEventFor: 'Nuevo evento para {team}',
         createTeam: 'Crear un equipo',
         everyMember: 'Todos los miembros de {team} son anfitriones de este evento.',

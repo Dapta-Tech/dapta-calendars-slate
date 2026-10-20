@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@slate/shared';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
 import { DeleteButton } from './delete-button';
@@ -107,15 +107,18 @@ export default async function EventTypesPage() {
             {teamEventGroups.map(({ team, eventTypes: teamEventTypes }) => (
               <section key={team.id}>
                 {/* The page's one primary CTA stays "New event" above; this is
-                    a secondary link in the row-action style, per team. */}
+                    a secondary link in the row-action style, per team, for
+                    those who may create team events (owners and admins). */}
                 <div className="mb-inline flex flex-wrap items-center justify-between gap-inline">
                   <h3 className="text-sm font-medium">{team.name}</h3>
-                  <Link
-                    href={`/admin/event-types/new?teamId=${team.id}`}
-                    className="rounded-md border border-border px-field py-tight text-sm hover:border-primary"
-                  >
-                    {m.teamHosts.newEventFor.replace('{team}', team.name)}
-                  </Link>
+                  {isAdminRole(me.role) ? (
+                    <Link
+                      href={`/admin/event-types/new?teamId=${team.id}`}
+                      className="rounded-md border border-border px-field py-tight text-sm hover:border-primary"
+                    >
+                      {m.teamHosts.newEventFor.replace('{team}', team.name)}
+                    </Link>
+                  ) : null}
                 </div>
                 {teamEventTypes.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{admin.teams.noTeamEventTypes}</p>

@@ -422,6 +422,11 @@ export async function setEventTypeHosts(
 /**
  * Replace the host pool with per-host round-robin detail (priority/weight/fixed).
  * Only members of `accountId` are inserted — a cross-tenant memberId is dropped.
+ *
+ * Each INSERT overwrites a row already there for that host rather than failing
+ * on the unique (event_type_id, member_id) index: a team add can write one
+ * between the DELETE and this loop, and a failed insert would drop every host
+ * after it. The values sent here win, as they would have without the race.
  */
 export async function setEventTypeHostsDetailed(
   db: Db,
@@ -440,7 +445,9 @@ export async function setEventTypeHostsDetailed(
     await db.run(
       sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
           VALUES (${randomUUID()}, ${accountId}, ${eventTypeId}, ${h.memberId}, ${h.isFixed ? 1 : 0},
-            ${h.priority ?? null}, ${h.weight ?? 100}, ${null}, ${now})`,
+            ${h.priority ?? null}, ${h.weight ?? 100}, ${null}, ${now})
+          ON CONFLICT (event_type_id, member_id) DO UPDATE SET is_fixed = excluded.is_fixed,
+            priority = excluded.priority, weight = excluded.weight, schedule_id = excluded.schedule_id`,
     );
   }
 }
@@ -796,25 +803,40 @@ export async function removeTeamMember(
  * Events that already have the member are skipped, so it is safe to repeat and
  * never touches a host's own priority or weight. One INSERT per event, like
  * `setEventTypeHostsDetailed`: ids are minted here, and the two dialects share
- * no UUID function an INSERT ... SELECT could call.
+ * no UUID function an INSERT ... SELECT could call. The skip is a read before
+ * the write, so the INSERT also yields to the unique (event_type_id,
+ * member_id) index: a second add, or an editor save, landing in between is
+ * not an error.
+ *
+ * COLLECTIVE events take only a member who already has a schedule. Everyone
+ * attends those, so one host with no hours empties the event, and an invited
+ * member has none until their first sign-in. Such a member joins the event
+ * when it is next saved, as before.
  */
 async function addTeamEventHosts(db: Db, accountId: string, teamId: string, memberId: string): Promise<void> {
   const missing = await db.all<{ id: string }>(
     sql`SELECT et.id FROM event_type et
         WHERE et.account_id = ${accountId} AND et.team_id = ${teamId}
           AND NOT EXISTS (SELECT 1 FROM event_type_host h
-                          WHERE h.event_type_id = et.id AND h.member_id = ${memberId})`,
+                          WHERE h.event_type_id = et.id AND h.member_id = ${memberId})
+          AND (COALESCE(et.scheduling_type, '') <> 'collective'
+            OR EXISTS (SELECT 1 FROM member m
+                       WHERE m.id = ${memberId} AND m.default_schedule_id IS NOT NULL))`,
   );
   const now = Date.now();
   for (const et of missing) {
     await db.run(
       sql`INSERT INTO event_type_host (id, account_id, event_type_id, member_id, is_fixed, priority, weight, schedule_id, created_at)
-          VALUES (${randomUUID()}, ${accountId}, ${et.id}, ${memberId}, 0, 0, 100, ${null}, ${now})`,
+          VALUES (${randomUUID()}, ${accountId}, ${et.id}, ${memberId}, 0, 0, 100, ${null}, ${now})
+          ON CONFLICT (event_type_id, member_id) DO NOTHING`,
     );
   }
 }
 
-/** The other half: the member stops hosting every event of this team (only). */
+/**
+ * The other half: the member stops hosting every event of this team (only).
+ * Also clears a host row an API client wrote for someone not on the team.
+ */
 async function removeTeamEventHosts(db: Db, accountId: string, teamId: string, memberId: string): Promise<void> {
   await db.run(
     sql`DELETE FROM event_type_host WHERE account_id = ${accountId} AND member_id = ${memberId}

@@ -1,7 +1,7 @@
 import { notFound, unstable_rethrow } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import type { CrmPropertyCatalog } from '@slate/types';
-import { adminApi, ApiError } from '@/lib/admin-api';
+import { adminApi, ApiError, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventRowActions } from '../event-row-actions';
 import { EventTypeForm } from '../event-type-form';
@@ -74,6 +74,7 @@ export default async function EditEventType({
         teamMembers={teamMembers}
         teamName={team?.name}
         teams={et.teamId ? undefined : teams.map((t) => ({ id: t.id, name: t.name }))}
+        canManageTeams={me ? isAdminRole(me.role) : false}
         connections={et.teamId ? undefined : connections}
         backHref={backToTeam ? `/admin/teams/${fromTeamId}` : '/admin/event-types'}
         backLabel={backToTeam ? msgs.admin.teams.title : m.title}
