@@ -160,6 +160,9 @@ function NavGroup({
         onBlur={() => setFocused(false)}
         aria-haspopup={collapsed ? 'menu' : undefined}
         aria-expanded={collapsed ? flyout : open}
+        // The current page is folded inside this group (collapsed rail, or the
+        // group closed): the row the shell keeps in view in a scrolling nav.
+        data-current={state === 'active' ? '' : undefined}
         aria-controls={!collapsed && open ? listId : undefined}
         title={collapsed ? label : undefined}
         className={navRowClass(collapsed, state)}
@@ -422,7 +425,7 @@ export function AdminShell({
   const brand = (
     // px-field matches the nav rows' own padding, so the wordmark's left edge
     // lands on the column of the nav icons below it.
-    <div className={`flex items-center gap-inline ${railCollapsed ? 'flex-col px-0' : 'px-field'}`}>
+    <div data-testid="rail-brand" className={`flex items-center gap-inline ${railCollapsed ? 'flex-col px-0' : 'px-field'}`}>
       {/* Inside the app the shell already says Dapta, so the rail carries the
           product wordmark alone, as the dForms rail does. Collapsed to 64px,
           only the mark fits. */}
@@ -465,18 +468,11 @@ export function AdminShell({
   // The foot of the rail, as on dForms: the theme switch on its own row (a 44px
   // target), then the person: initial, name, email and a menu with the public
   // page and Sign out. The mobile drawer is always full-width, so its footer
-  // renders expanded whatever the DESKTOP rail does, hence a param.
-  //
-  // Pinned to the bottom of its scrolling rail, so Sign out stays in view when
-  // the nav is taller than the screen, as it is in the 360px drawer with the MCP
-  // group open. It reaches down over the rail's bottom padding (`-mb-card
-  // pb-card`) on the rail's own ground, so rows scrolling under it disappear
-  // behind it instead of showing through the gap. The inset is `-bottom-card`,
-  // not `bottom-0`: a sticky box is kept inside its scroller's padding, and
-  // `bottom-0` would lift it out of the corner it already sits in.
+  // renders expanded whatever the DESKTOP rail does, hence a param. It never
+  // scrolls: the nav above it takes the free height and scrolls on its own.
   const renderFooter = (footerCollapsed: boolean, onNavigate?: () => void) => (
     <div
-      className={`sticky -bottom-card -mb-card mt-auto flex flex-col gap-tight border-t border-border bg-sidebar pb-card pt-field ${
+      className={`flex shrink-0 flex-col gap-tight border-t border-border pt-field ${
         footerCollapsed ? 'items-center' : ''
       }`}
     >
@@ -496,6 +492,37 @@ export function AdminShell({
       />
     </div>
   );
+
+  // The one part of a rail that scrolls. It takes the height the wordmark, the
+  // account card and the footer leave (`flex-1`), so when the nav is taller
+  // than the window only the list moves and Sign out stays put. It never
+  // shrinks below one row (`min-h-control`): in a window too short even for
+  // that, the rail itself scrolls instead of the list vanishing. Its own
+  // scroll box would clip the 2px focus outline (offset 2px) of the first and
+  // last rows and of every row's sides, so it carries a 4px inset that a
+  // matching negative margin cancels: the rows stay exactly where they were.
+  // `overscroll-contain`: reaching the end of the list does not hand the wheel
+  // to the page behind it. `rail-scroll` shades an edge with rows behind it.
+  const navScroll =
+    'rail-scroll -mx-tight -my-tight min-h-control flex-1 overflow-y-auto overscroll-contain px-tight py-tight';
+
+  // The current page's row in view: in a window shorter than the nav, the list
+  // would otherwise open on its first rows with the page you are on out of
+  // sight. Only the nav's own scrollTop moves (scrollIntoView would scroll the
+  // page too), and only as far as the row needs.
+  const railNavRef = useRef<HTMLElement>(null);
+  const drawerNavRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    for (const nav of [railNavRef.current, drawerNavRef.current]) {
+      const row =
+        nav?.querySelector<HTMLElement>('[aria-current="page"]') ?? nav?.querySelector<HTMLElement>('[data-current]');
+      if (!nav || !row) continue;
+      const box = nav.getBoundingClientRect();
+      const at = row.getBoundingClientRect();
+      if (at.top < box.top) nav.scrollTop -= box.top - at.top;
+      else if (at.bottom > box.bottom) nav.scrollTop += at.bottom - box.bottom;
+    }
+  }, [pathname, railCollapsed, drawerOpen]);
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
@@ -528,18 +555,23 @@ export function AdminShell({
       </header>
 
       {/* Desktop sidebar: flush, bordered, collapsible. Pinned to the viewport
-          (`sticky h-dvh`) rather than stretched with the page, so the footer
-          with the account and Sign out never sits a long page below the fold;
-          `overflow-y-auto` keeps it usable when the nav outgrows a short
-          window (which is why every rail popup is an AnchoredMenu). */}
+          (`sticky top-0`, the window's full height) rather than stretched with
+          the page, so the footer with the account and Sign out is always on
+          screen however long the page; the page scrolls on its own beside it.
+          The height is `100vh` where `dvh` is unknown and `100dvh` where it is
+          known (it tracks mobile browser chrome). Only the nav scrolls inside
+          it (see `navScroll`); `overflow-y-auto` here is the last resort for a
+          window too short for the wordmark, one nav row and the footer. A
+          scrolling rail is why every rail popup is an AnchoredMenu. */}
       <aside
-        className={`hidden shrink-0 flex-col gap-group border-r border-border bg-sidebar py-card transition-[width] md:sticky md:top-0 md:flex md:h-dvh md:overflow-y-auto ${
+        data-testid="rail"
+        className={`hidden shrink-0 flex-col gap-group border-r border-border bg-sidebar py-card transition-[width] md:sticky md:top-0 md:flex md:h-screen md:overflow-y-auto md:supports-[height:100dvh]:h-dvh ${
           railCollapsed ? 'w-[64px] px-inline' : 'w-60 px-card'
         }`}
       >
         {brand}
         {renderAccount(railCollapsed)}
-        <nav aria-label="Primary">
+        <nav ref={railNavRef} aria-label="Primary" className={navScroll}>
           <NavLinks
             items={items}
             collapsed={railCollapsed}
@@ -576,12 +608,12 @@ export function AdminShell({
         inert={!drawerOpen || undefined}
       >
         {/* The drawer is 82vw capped at 320px, so the wordmark always fits. */}
-        <div className="flex items-center gap-inline px-field">
+        <div data-testid="rail-brand" className="flex items-center gap-inline px-field">
           <BrandWordmark className="h-6 w-auto text-foreground" labelled />
           <AppSwitcher messages={c.switcher} />
         </div>
         {renderAccount(false)}
-        <nav>
+        <nav ref={drawerNavRef} className={navScroll}>
           <NavLinks
             items={items}
             collapsed={false}

@@ -64,6 +64,22 @@ export async function signIn(page: Page, email: string): Promise<void> {
   await page.locator('button[type="submit"]').click();
 }
 
+/**
+ * The rail a person actually sees: the desktop aside, or the drawer, opened.
+ * The drawer is in the markup (and in the accessibility tree) while closed,
+ * slid off to the side, so opening it is asserted, not assumed.
+ */
+export async function rail(page: Page, mobile: boolean) {
+  if (!mobile) return page.getByTestId('rail');
+  const toggle = page.getByRole('button', { name: 'Open navigation' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const drawer = page.getByRole('dialog', { name: 'Primary' });
+  // It slides in: wait until it rests at the left edge before measuring it.
+  await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
+  return drawer;
+}
+
 export async function standInCalls(op?: StandInCall['op']): Promise<StandInCall[]> {
   const r = await fetch(`${E2E.calendar}/__qa/calls`);
   const { calls } = (await r.json()) as { calls: StandInCall[] };

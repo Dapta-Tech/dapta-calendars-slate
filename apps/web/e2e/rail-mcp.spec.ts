@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { E2E, HOST, signIn } from './stack';
+import { expect, test } from '@playwright/test';
+import { E2E, HOST, rail, signIn } from './stack';
 
 /**
  * The rail's MCP group and Docs item, in the real app on both projects (the
@@ -10,13 +10,6 @@ import { E2E, HOST, signIn } from './stack';
  */
 
 const JORDAN = 'jordan@example.com';
-
-/** The rail a person actually sees: the desktop aside, or the drawer, opened. */
-async function rail(page: Page, mobile: boolean) {
-  if (!mobile) return page.locator('aside').first();
-  await page.getByRole('button', { name: 'Open navigation' }).click();
-  return page.getByRole('dialog', { name: 'Primary' });
-}
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);

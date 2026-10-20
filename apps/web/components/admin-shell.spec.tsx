@@ -323,15 +323,43 @@ describe('AdminShell: the Docs item', () => {
 });
 
 describe('AdminShell: the dForms rail look', () => {
-  it('sits on the sidebar ground, pinned to the viewport with its own scroll, in both rails', async () => {
+  it('sits on the sidebar ground, pinned to the window at its full height, in both rails', async () => {
     const el = await mount({});
     const { desktop, drawer } = rails(el);
-    for (const cls of ['bg-sidebar', 'md:sticky', 'md:top-0', 'md:h-dvh', 'md:overflow-y-auto']) {
-      expect(desktop.className).toContain(cls);
+    // 100vh first, 100dvh where the browser knows it.
+    for (const cls of ['bg-sidebar', 'md:sticky', 'md:top-0', 'md:h-screen', 'md:supports-[height:100dvh]:h-dvh']) {
+      expect(desktop.className.split(' ')).toContain(cls);
     }
     expect(drawer.className).toContain('bg-sidebar');
     // Containment is `inert`, not aria-modal: the rail's menus live at the end of <body>.
     expect(drawer.hasAttribute('aria-modal')).toBe(false);
+  });
+
+  it('scrolls only the nav: the wordmark above it and the footer below it never move', async () => {
+    const el = await mount({ pathname: '/admin/developers/keys' });
+    for (const rail of Object.values(rails(el))) {
+      const nav = rail.querySelector('nav')!;
+      for (const cls of ['min-h-control', 'flex-1', 'overflow-y-auto', 'overscroll-contain', 'rail-scroll']) {
+        expect(nav.className.split(' ')).toContain(cls);
+      }
+      const foot = rail.querySelector('[data-testid="profile-menu-trigger"]')!.parentElement!;
+      expect(nav.contains(foot)).toBe(false);
+      expect(foot.className.split(' ')).toContain('shrink-0');
+      expect(foot.className).not.toContain('sticky');
+      // Wordmark, nav, footer: the footer comes after the list, not inside it.
+      expect(nav.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it('marks the MCP group as the current row when its page is folded inside it', async () => {
+    const collapsed = rails(await mount({ pathname: '/admin/developers/keys', collapsed: true })).desktop;
+    expect(collapsed.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(true);
+    act(() => root?.unmount());
+    host?.remove();
+    // Open in the wide rail, the page's own row is the current one, not the group.
+    const wide = rails(await mount({ pathname: '/admin/developers/keys' })).desktop;
+    expect(wide.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(false);
+    expect(wide.querySelector('[aria-current="page"]')!.textContent).toBe('Connect and keys');
   });
 
   it('marks the current row with the wash and the accent bar, and no other row', async () => {
