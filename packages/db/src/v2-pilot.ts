@@ -618,6 +618,10 @@ export async function rescheduleBookingV2(
   let result: TxResult;
   try {
     if (db.dialect === 'sqlite') {
+      // IMMEDIATE, like every other guarded write and the hold write: a
+      // deferred transaction that reads first and then writes can fail to
+      // upgrade (SQLITE_BUSY_SNAPSHOT) when another process on the same WAL
+      // file wrote meanwhile, which would surface as a false SLOT_TAKEN.
       result = db.sqlite!.txn<TxResult>(() => {
         const current = db.sqlite!.drizzle.get<{ status: string }>(
           sql`SELECT status FROM booking WHERE id = ${source.id} LIMIT 1`,
@@ -635,7 +639,7 @@ export async function rescheduleBookingV2(
         ])
           db.sqlite!.drizzle.run(statement);
         return 'ok';
-      });
+      }, { immediate: true });
     } else {
       result = await db.pg!.drizzle.transaction(async (tx) => {
         // The hosts' rows first, then the booking's: the order every other
