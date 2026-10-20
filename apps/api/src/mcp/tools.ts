@@ -1313,7 +1313,11 @@ const getLink: ToolDef = {
 };
 
 const listBookingsInput = z.object({
-  from: z.string().max(40).optional().describe('Earliest start (ISO with offset, or a bare date in time_zone). Defaults to now when neither from nor to is given.'),
+  from: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('Earliest start (ISO with offset, or a bare date in time_zone). Defaults to now when neither from nor to is given, except with status pending, where requests whose time has passed are listed too.'),
   to: z.string().max(40).optional().describe('Exclusive latest start (ISO with offset, or a bare date in time_zone).'),
   status: z.enum(['accepted', 'pending', 'cancelled', 'rejected']).optional(),
   event_type_id: z.string().max(64).optional(),
@@ -1348,7 +1352,10 @@ async function bookingPage(
   status: string | undefined,
 ): Promise<ToolResult> {
   const tz = args.time_zone ?? (await hostZone(deps.db, p.accountId));
-  const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to ? undefined : Date.now();
+  // Requests still waiting for an answer have no lower bound by default: one
+  // whose time has passed still needs the host's decision, so hiding it from
+  // "from now" would hide it for good. Everything else starts from now.
+  const fromMs = args.from ? instantFrom(args.from, tz).getTime() : args.to || status === 'pending' ? undefined : Date.now();
   const page = await queryBookings(deps.db, {
     accountId: p.accountId,
     fromMs,
@@ -1393,12 +1400,18 @@ const listBookings: ToolDef = {
   },
 };
 
-const listPendingInput = listBookingsInput.omit({ status: true });
+const listPendingInput = listBookingsInput.omit({ status: true }).extend({
+  from: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('Earliest start (ISO with offset, or a bare date in time_zone). No default: requests whose time has passed still wait for an answer and are listed too.'),
+});
 const listPendingBookings: ToolDef = {
   name: 'list_pending_bookings',
   title: 'List bookings waiting for confirmation',
   description:
-    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), soonest first, with minimal fields (no names, notes or answers). Needs scope bookings:read and respects the key\'s event-type allowlist. Answer each with confirm_booking or decline_booking; read one with get_booking.',
+    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), in start order, with minimal fields (no names, notes or answers). Requests whose time has already passed are included: they still wait for an answer (pass from to leave them out). Needs scope bookings:read and respects the key\'s event-type allowlist. Answer each with confirm_booking or decline_booking; read one with get_booking.',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },

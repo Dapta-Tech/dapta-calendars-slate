@@ -326,6 +326,27 @@ describe('pending bookings', () => {
     expect(after.bookings.map((b) => b.uid)).not.toContain(uid);
   });
 
+  it('lists a request whose time has passed by default (it still needs an answer), and leaves it out with from', async () => {
+    const jordan = (await h.db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee' AND account_id = ${h.accountId}`))!.id;
+    const uid = randomUUID();
+    const start = Date.now() - 2 * 86_400_000;
+    await h.db.run(
+      sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, start_ms, end_ms, status, metadata, created_at, updated_at)
+          VALUES (${randomUUID()}, ${h.accountId}, ${uid}, ${approvalId}, ${jordan}, 'Approval Call', ${start}, ${start + 1_800_000}, 'pending', ${null}, ${Date.now()}, ${Date.now()})`,
+    );
+    const reader = await h.connect(await h.key(['bookings:read', 'bookings:write']));
+    const uids = async (args: Record<string, unknown>, tool = 'list_pending_bookings') =>
+      structured<{ bookings: { uid: string }[] }>(await reader.callTool({ name: tool, arguments: { limit: 50, ...args } })).bookings.map((b) => b.uid);
+    expect(await uids({})).toContain(uid);
+    expect(await uids({ status: 'pending' }, 'list_bookings')).toContain(uid);
+    expect(await uids({ from: new Date().toISOString() })).not.toContain(uid);
+    // Plain list_bookings still starts from now.
+    expect(await uids({}, 'list_bookings')).not.toContain(uid);
+    // The core does not refuse deciding a request for a past time.
+    const declined = structured<Decision>(await reader.callTool({ name: 'decline_booking', arguments: { booking_uid: uid, idempotency_key: idem('past-decline-001') } }));
+    expect(declined.booking.status).toBe('rejected');
+  });
+
   it('declines with a reason, twice without harm, and a declined request cannot be confirmed', async () => {
     const uid = await pendingBooking(2, 'Dee Declined');
     const writer = await h.connect(await h.key(['bookings:write', 'bookings:read']));

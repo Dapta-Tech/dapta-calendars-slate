@@ -127,7 +127,9 @@ are checked on every route.
 ### Requests that wait for the host
 
 Event types that require confirmation create **pending** bookings.
-`list_pending_bookings` lists them; `confirm_booking` and `decline_booking` are
+`list_pending_bookings` lists them, including requests whose time has already
+passed (they still wait for an answer; pass `from` to leave them out);
+`confirm_booking` and `decline_booking` are
 the machine version of the host's Confirm and Decline buttons, with the same
 rules: only the key's own workspace and event-type allowlist, the host's calendar
 read fresh before a confirmation (a time that filled up meanwhile is `SLOT_TAKEN`
