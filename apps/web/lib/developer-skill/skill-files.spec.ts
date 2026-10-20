@@ -129,6 +129,23 @@ describe('buildSkillFiles', () => {
       }
     });
 
+    it('keeps a version row on one line, whatever the pin holds', () => {
+      const pinned = parseOpenApi({
+        openapi: '3.1.0',
+        paths: {
+          '/v2/things': {
+            get: {
+              parameters: [{ name: 'cal-api-version', in: 'header', required: true, schema: { enum: ['a\rb|c'] } }],
+              responses: { 200: { description: 'ok' } },
+            },
+          },
+        },
+      })!;
+      const skill = build(pinned).get('SKILL.md')!;
+      expect(skill).not.toMatch(/\r/);
+      expect(skill).toContain('   | `GET /v2/things` | `a b\\|c` |');
+    });
+
     it('books with the parameters, fields and answers the document defines', () => {
       const skill = get('SKILL.md');
       const slots = openapiSpec.paths['/v2/slots'].get.parameters.map((p) => p.name);
