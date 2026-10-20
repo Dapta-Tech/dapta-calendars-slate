@@ -105,7 +105,6 @@ function logValue(value: unknown): string | undefined {
   return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 200) || undefined;
 }
 
-
 /**
  * A member a sign-in may act as: active, and owner or admin (`isAdmin`, the
  * same tier that may create an API key), because a sign-in acts for the whole

@@ -503,6 +503,24 @@ describe('the hold, pending-request and team tools with several accounts', () =>
     }
   });
 
+  it("book_meeting on a personal page of an account the sign-in reaches records api, like a key of that account", async () => {
+    const created = vi.spyOn(AnalyticsEffects.prototype, 'bookingCreated');
+    try {
+      const start = (await starts({ booking_page_url: ACME_PAGE }))[38]!;
+      const booked = await tool(h, token, 'book_meeting', {
+        booking_page_url: ACME_PAGE,
+        start,
+        attendee: invitee('Sign In Channel'),
+        answers: { company: 'c' },
+        idempotency_key: idem('more-chan-login-01'),
+      });
+      expect(booked.isError).toBeFalsy();
+      expect(created.mock.calls.map(([b]) => b.channel)).toEqual(['api']);
+    } finally {
+      created.mockRestore();
+    }
+  });
+
   it("a sign-in's hold is not usable by an anonymous call from the same address, nor by another person in the same account", async () => {
     const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} AND slug = 'intro-call'`))!.id;
     const other = await addMember(h, 'admin');

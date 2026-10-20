@@ -46,7 +46,6 @@ export async function revokeApiKeyAction(id: string): Promise<{ ok: boolean; err
   }
 }
 
-
 /**
  * Create a webhook, returning the signing secret ONCE (W / #75).
  *

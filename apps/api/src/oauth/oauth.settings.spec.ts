@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import { loadServerEnv, oauthConfigProblems, oauthMode, serverEnvSchema } from '@slate/config/env';
 import { resourceMetadataUrlFor, trimSlash } from './oauth.settings';
-import { toolCallNeeds } from '../mcp/mcp.controller';
+import { toolCallNeedsCredential } from '../mcp/mcp.controller';
 
 const on = (extra: Record<string, string> = {}) =>
   serverEnvSchema.parse({
@@ -67,33 +67,31 @@ describe('resources', () => {
 describe('which tool calls need a credential', () => {
   const call = (name: string, args: Record<string, unknown> = {}) => ({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
 
-  it('reads the scope each call needs, public tools need nothing, other methods are ignored', () => {
-    expect(toolCallNeeds(call('list_bookings'))).toEqual({ credential: true, scopes: ['bookings:read'] });
-    expect(toolCallNeeds(call('whoami'))).toEqual({ credential: true, scopes: [] });
-    expect(toolCallNeeds(call('book_meeting'))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('find_available_slots', { booking_page_url: 'https://x.test/a/b/c' }))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('find_available_slots', { event_type_id: 'e1' }))).toEqual({ credential: true, scopes: ['availability:read'] });
-    expect(toolCallNeeds({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('no_such_tool'))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(null)).toEqual({ credential: false, scopes: [] });
+  it('a scoped or account tool needs one; public tools, other methods and unknown names do not', () => {
+    expect(toolCallNeedsCredential(call('list_bookings'))).toBe(true);
+    expect(toolCallNeedsCredential(call('whoami'))).toBe(true);
+    expect(toolCallNeedsCredential(call('book_meeting'))).toBe(false);
+    expect(toolCallNeedsCredential(call('find_available_slots', { booking_page_url: 'https://x.test/a/b/c' }))).toBe(false);
+    expect(toolCallNeedsCredential(call('find_available_slots', { event_type_id: 'e1' }))).toBe(true);
+    expect(toolCallNeedsCredential({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).toBe(false);
+    expect(toolCallNeedsCredential(call('no_such_tool'))).toBe(false);
+    expect(toolCallNeedsCredential(null)).toBe(false);
   });
 
-  it('the newer tools: a public page needs nothing, an id or a decision needs its scope', () => {
-    expect(toolCallNeeds(call('hold_slot', { booking_page_url: 'https://x.test/a/b/c' }))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('hold_slot', { event_type_id: 'e1' }))).toEqual({ credential: true, scopes: ['bookings:write'] });
-    expect(toolCallNeeds(call('find_team_slots', { booking_page_url: 'https://x.test/a/team/t/e' }))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('find_team_slots', { event_type_id: 'e1' }))).toEqual({ credential: true, scopes: ['availability:read'] });
-    expect(toolCallNeeds(call('book_team_meeting', { booking_page_url: 'https://x.test/a/team/t/e' }))).toEqual({ credential: false, scopes: [] });
-    expect(toolCallNeeds(call('book_team_meeting', { event_type_id: 'e1' }))).toEqual({ credential: true, scopes: ['bookings:write'] });
-    expect(toolCallNeeds(call('list_pending_bookings'))).toEqual({ credential: true, scopes: ['bookings:read'] });
-    expect(toolCallNeeds(call('confirm_booking'))).toEqual({ credential: true, scopes: ['bookings:write'] });
-    expect(toolCallNeeds(call('decline_booking'))).toEqual({ credential: true, scopes: ['bookings:write'] });
+  it('the newer tools: a public page needs nothing, an id or a decision needs a credential', () => {
+    expect(toolCallNeedsCredential(call('hold_slot', { booking_page_url: 'https://x.test/a/b/c' }))).toBe(false);
+    expect(toolCallNeedsCredential(call('hold_slot', { event_type_id: 'e1' }))).toBe(true);
+    expect(toolCallNeedsCredential(call('find_team_slots', { booking_page_url: 'https://x.test/a/team/t/e' }))).toBe(false);
+    expect(toolCallNeedsCredential(call('find_team_slots', { event_type_id: 'e1' }))).toBe(true);
+    expect(toolCallNeedsCredential(call('book_team_meeting', { booking_page_url: 'https://x.test/a/team/t/e' }))).toBe(false);
+    expect(toolCallNeedsCredential(call('book_team_meeting', { event_type_id: 'e1' }))).toBe(true);
+    expect(toolCallNeedsCredential(call('list_pending_bookings'))).toBe(true);
+    expect(toolCallNeedsCredential(call('confirm_booking'))).toBe(true);
+    expect(toolCallNeedsCredential(call('decline_booking'))).toBe(true);
   });
 
-  it('collects every scope a batch needs', () => {
-    expect(toolCallNeeds([call('create_booking'), call('cancel_booking'), call('book_meeting')])).toEqual({
-      credential: true,
-      scopes: ['bookings:write', 'bookings:cancel'],
-    });
+  it('a batch needs one if any message does', () => {
+    expect(toolCallNeedsCredential([call('book_meeting'), call('cancel_booking')])).toBe(true);
+    expect(toolCallNeedsCredential([call('book_meeting'), { jsonrpc: '2.0', id: 2, method: 'tools/list' }])).toBe(false);
   });
 });

@@ -9,7 +9,6 @@ import { ENV, RATE_LIMITER } from '../tokens';
 import type { RateLimiter } from '../rate-limit';
 import { ExternalOAuthService, type ExternalLogin, type LoginAccount } from '../oauth/external.service';
 import { trimSlash } from '../oauth/oauth.settings';
-import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
 import { loginPrincipal, type McpCall } from './support';
 import { TOOLS, accessOf } from './tools';
@@ -17,15 +16,12 @@ import { TOOLS, accessOf } from './tools';
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
 
 /**
- * What the `tools/call` messages in a body need before they may run: whether
- * any needs a credential at all, and every scope they need. Read from the raw
- * JSON-RPC (a single message or a batch); anything malformed or unknown is
+ * Whether any `tools/call` message in a body needs a credential. Read from the
+ * raw JSON-RPC (a single message or a batch); anything malformed or unknown is
  * left to the SDK, which answers it with a protocol error.
  */
-export function toolCallNeeds(body: unknown): { credential: boolean; scopes: ApiScope[] } {
+export function toolCallNeedsCredential(body: unknown): boolean {
   const messages = Array.isArray(body) ? body : [body];
-  let credential = false;
-  const scopes = new Set<ApiScope>();
   for (const message of messages) {
     if (!message || typeof message !== 'object') continue;
     const { method, params } = message as { method?: unknown; params?: { name?: unknown; arguments?: unknown } };
@@ -33,12 +29,9 @@ export function toolCallNeeds(body: unknown): { credential: boolean; scopes: Api
     const def = TOOL_BY_NAME.get(params.name);
     if (!def) continue;
     const args = params.arguments && typeof params.arguments === 'object' ? (params.arguments as Record<string, unknown>) : {};
-    const access = accessOf(def, args);
-    if (access === 'public') continue;
-    credential = true;
-    if (access.scope) scopes.add(access.scope);
+    if (accessOf(def, args) !== 'public') return true;
   }
-  return { credential, scopes: [...scopes] };
+  return false;
 }
 
 /**
@@ -199,7 +192,7 @@ export class McpController {
       if (principal) annotateRequestAccount(req, principal.accountId);
     }
 
-    if (this.external.enabled && principal === null && login === null && toolCallNeeds(req.body).credential) {
+    if (this.external.enabled && principal === null && login === null && toolCallNeedsCredential(req.body)) {
       // No scope in the challenge: the external server's scopes are not ours.
       rpcError(res, 401, -32001, 'Sign-in required for this tool.', { 'WWW-Authenticate': this.external.challenge() });
       return;

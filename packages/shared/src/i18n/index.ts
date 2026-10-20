@@ -1170,7 +1170,7 @@ export interface BookingMessages {
       apiDocs: string;
       apiOpenApi: string;
       apiRefMissing: string;
-      /** OAuth on (the API serves its own authorization server): the chat-app tab. */
+      /** OAuth on (people sign in through the external authorization server): the chat-app tab. */
       chatOAuthTitle: string;
       addToClaude: string;
       chatClaudeHeading: string;
@@ -1180,9 +1180,9 @@ export interface BookingMessages {
       chatGptStep1: string;
       chatGptStep2: string;
       /**
-       * OAuth through an external authorization server: people sign in with
-       * the account they use here, there is no consent page or Connected apps
-       * list of ours, and a connection acts with the member's admin role.
+       * OAuth through the external authorization server: people sign in with
+       * the account they use here, that server shows the consent and keeps the
+       * connections, and a connection acts with the member's admin role.
        */
       signInTitle: string;
       signInBody: string;
@@ -1206,7 +1206,7 @@ export interface BookingMessages {
       /** Step 1 once the workspace has a working key. */
       guideKeyDone: string;
       guideAgentBody: string;
-      /** Step 2 once a key has been used or an app has signed in. */
+      /** Step 2 once a key has been used (a sign-in is not seen here: the external server keeps it). */
       guideAgentDone: string;
       guideTryTitle: string;
       guideTryHint: string;
@@ -2574,7 +2574,7 @@ export const en: BookingMessages = {
         'The key connects the agent to this workspace. It is shown only once, so copy it when you create it, and give it only the access the agent needs.',
       guideKeyDone: 'You already have a key. Create one per agent so you can revoke each on its own.',
       guideAgentBody: 'Pick your agent. Each tab has the address and the exact setup it needs.',
-      guideAgentDone: 'A key has been used or an app has signed in: your agent is connected.',
+      guideAgentDone: 'A key has been used: your agent is connected.',
       guideTryTitle: 'Ask it for something',
       guideTryHint: 'Open your agent and paste this to check that everything works.',
       guidePrompt: 'Use the {product} MCP to tell me which workspace you are connected to and what you are allowed to do there.',
@@ -3873,7 +3873,7 @@ export const es: BookingMessages = {
         'La clave conecta al agente con este espacio de trabajo. Solo se muestra una vez, así que cópiala al crearla, y dale solo el acceso que el agente necesita.',
       guideKeyDone: 'Ya tienes una clave. Crea una por agente para poder revocar cada una por separado.',
       guideAgentBody: 'Elige tu agente. Cada pestaña tiene la dirección y la configuración exacta que necesita.',
-      guideAgentDone: 'Ya se usó una clave o una app inició sesión: tu agente está conectado.',
+      guideAgentDone: 'Ya se usó una clave: tu agente está conectado.',
       guideTryTitle: 'Pídele algo',
       guideTryHint: 'Abre tu agente y pega esto para comprobar que todo funciona.',
       guidePrompt: 'Usa el MCP de {product} para decirme a qué espacio de trabajo estás conectado y qué puedes hacer ahí.',

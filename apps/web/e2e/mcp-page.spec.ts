@@ -10,7 +10,7 @@ import { E2E, HOST, answerWith, clearThrottle, signIn, throttle } from './stack'
  * - The suite's API runs with MCP on (the default), so the page shows the real
  *   address, and that address really answers.
  * - MCP off is the reply an API with MCP_ENABLED=false gives (pinned in the
- *   API's oauth.integration.spec.ts), served by the proxy in front of the API.
+ *   API's oauth/oauth.controller.spec.ts), served by the proxy in front of the API.
  * - A read that fails (429 here) fails closed to the same state.
  */
 const PAGE = '/admin/developers/keys';

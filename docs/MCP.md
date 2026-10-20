@@ -225,9 +225,12 @@ IDEs connect with a sign-in instead of a pasted key. The API is an OAuth
 **resource server** only: sign-in, consent, client registration (CIMD, DCR) and
 tokens all belong to that external authorization server. This API runs no
 authorization server of its own (an earlier built-in one was removed): there is
-no `/oauth/*`, no consent page and no Connected apps list here, and a deployment
-that still sets `OAUTH_ISSUER` or `OAUTH_SIGNING_JWK` is unaffected, they are
-ignored. Setup is in `SELF-HOSTING.md` ("OAuth for the MCP endpoint").
+no `/oauth/*`, no consent page and no Connected apps list here. Its settings
+(`OAUTH_ISSUER`, `OAUTH_SIGNING_JWK` and the rest) are ignored next to
+`OAUTH_AUTHORIZATION_SERVER`; a deployment that ran that server, with
+`OAUTH_ENABLED=true` and no `OAUTH_AUTHORIZATION_SERVER`, refuses to boot until
+it sets one or turns OAuth off. Setup is in `SELF-HOSTING.md` ("OAuth for the
+MCP endpoint").
 
 **Add it in Claude** (claude.ai, Desktop, mobile): Settings, then Connectors,
 then Add custom connector; paste the MCP URL; click Add, then Connect. The page

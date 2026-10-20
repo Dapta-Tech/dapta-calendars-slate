@@ -376,10 +376,11 @@ export const serverEnvSchema = z.object({
   // OAUTH_AUTHORIZATION_SERVER), the API is an OAuth resource server ONLY, so
   // chat apps (Claude, ChatGPT) and IDEs connect with a sign-in instead of a
   // pasted key: sign-in, consent and tokens belong to that external OAuth 2.1
-  // authorization server (WorkOS AuthKit, Auth0, Keycloak...). This API runs no
-  // authorization server of its own: the built-in one (and its OAUTH_ISSUER,
-  // OAUTH_SIGNING_JWK and other settings) was removed, and a deployment that
-  // still sets those is unaffected, they are ignored.
+  // authorization server. This API runs no authorization server of its own:
+  // the built-in one was removed. Its settings (OAUTH_ISSUER, OAUTH_SIGNING_JWK
+  // and the rest) are ignored next to OAUTH_AUTHORIZATION_SERVER; a deployment
+  // that ran it (OAUTH_ENABLED=true and no OAUTH_AUTHORIZATION_SERVER) refuses
+  // to boot, saying why.
   //
   // Turning it on REQUIRES MCP_ENABLED, MCP_PUBLIC_URL (the token audience) and
   // OAUTH_AUTHORIZATION_SERVER; the API refuses to boot without them.
