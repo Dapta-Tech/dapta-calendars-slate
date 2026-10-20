@@ -120,7 +120,11 @@ are checked on every route.
   A hold for another event or time is `HOLD_MISMATCH`.
 - **Retries.** `hold_slot` with the same `idempotency_key` answers the same
   hold. A hold that could not be handed out is given back at once, and after a
-  `TIMEOUT` the same key returns the hold the first call placed.
+  `TIMEOUT` the same key returns the hold the first call placed, for a call made
+  with an API key, connection or sign-in. An anonymous call's key belongs to its
+  client address, so an anonymous retry finds the first call's hold only from
+  the same address; from another one it is a new call (keep the `hold_id` of a
+  call that did answer).
 - **One-host events only.** A team event picks its host when it is booked, so
   call `book_team_meeting` directly.
 
