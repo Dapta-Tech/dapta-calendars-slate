@@ -72,7 +72,10 @@ export async function bindHold(db: Db, accountId: string, owner: string, binding
     path: BINDING_PATH,
     requestHash: hashApiValue(binding.reservationUid),
   });
-  if (!(await completeApiIdempotency(db, claim.id, 201, binding))) throw new Error('The hold binding was not stored.');
+  // The id is fresh, so this call must have opened the record, and the binding
+  // is written only while it is still open: never over another record.
+  if (!claim.inserted || !(await completeApiIdempotency(db, claim.id, 201, binding, { onlyOpen: true })))
+    throw new Error('The hold binding was not stored.');
   return holdId;
 }
 
