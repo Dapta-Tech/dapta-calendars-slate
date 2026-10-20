@@ -72,7 +72,7 @@ export async function bindHold(db: Db, accountId: string, owner: string, binding
     path: BINDING_PATH,
     requestHash: hashApiValue(binding.reservationUid),
   });
-  await completeApiIdempotency(db, claim.id, 201, binding);
+  if (!(await completeApiIdempotency(db, claim.id, 201, binding))) throw new Error('The hold binding was not stored.');
   return holdId;
 }
 

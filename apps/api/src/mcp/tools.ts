@@ -38,8 +38,6 @@ import {
 /** What the tools need from the app. Built once by the gateway. */
 export interface McpToolDeps {
   publicAppUrl: string;
-  /** MCP_TOOL_TIMEOUT_MS: how long the gateway waits for one tool call. */
-  toolTimeoutMs: number;
   db: Db;
   calV2: CalV2Service;
   pilot: CalV2PilotService;
@@ -1616,12 +1614,20 @@ const cancelBooking: ToolDef = {
  * is refused. Refusals are not stored, because every write that uses this is
  * safe to run again (a hold is re-checked, a decision is idempotent by state).
  *
- * A retry can meet an earlier attempt with the same key that never stored a
- * result: it failed, or it TIMED OUT and is still running (the gateway stops
- * waiting, not working). `work` is told so (`resumed`), and when this attempt
- * fails, the earlier one's result is answered if it has landed meanwhile. A
- * success that cannot be stored is given back through `undo`, so the retry the
- * caller is about to make does not trip over what this attempt took.
+ * Several attempts can share one open record: a call that TIMED OUT keeps
+ * running (the gateway stops waiting, not working) while the caller retries.
+ * Ownership, not age, decides what an attempt may do to it, so neither clocks
+ * nor slow attempts matter:
+ *  - only the attempt that opened the record (`inserted`) deletes it, and only
+ *    after its own refusal, so a refused first attempt leaves nothing behind
+ *    and a retry never removes a running attempt's record;
+ *  - every attempt that fails reads the record back first and answers a
+ *    result another attempt stored meanwhile;
+ *  - a result is stored only on a record still open, and a store that wrote
+ *    nothing (the record gone, or another attempt's result already there) is
+ *    noticed: the stored result wins and this attempt's work is given back
+ *    (`undo`), or, the record being gone, it is opened again and stored.
+ * `work` learns whether another attempt holds the record open (`resumed`).
  */
 async function keyedWrite<T extends Record<string, unknown>>(
   deps: McpToolDeps,
@@ -1635,61 +1641,63 @@ async function keyedWrite<T extends Record<string, unknown>>(
 ): Promise<{ data: T; replayed: boolean }> {
   const caller = callerId(call);
   const requestHash = hashApiValue(stableStringify(request));
-  const started = Date.now();
-  const claim = await claimApiIdempotency(deps.db, {
-    namespaceHash: hashApiValue(`${accountId}:${caller}:${tool}:${key}`),
-    accountId,
-    apiKeyId: caller,
-    method: 'MCP',
-    path: tool,
-    requestHash,
-    now: started,
-  });
+  const namespaceHash = hashApiValue(`${accountId}:${caller}:${tool}:${key}`);
+  const open = () =>
+    claimApiIdempotency(deps.db, { namespaceHash, accountId, apiKeyId: caller, method: 'MCP', path: tool, requestHash });
+  const claim = await open();
   if (claim.requestHash !== requestHash)
     throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
   if (claim.statusCode != null) return { data: claim.responseBody as T, replayed: true };
-  const stored = async (): Promise<{ statusCode: number | null; data: T | null }> => {
-    const row = await deps.db.get<{ status_code: number | string | null; response_body: unknown }>(
-      sql`SELECT status_code, response_body FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`,
+  /** The result stored under this key by any attempt, if one is. */
+  const storedResult = async (): Promise<T | null> => {
+    const row = await deps.db.get<{ status_code: number | string | null; request_hash: string; response_body: unknown }>(
+      sql`SELECT status_code, request_hash, response_body FROM api_idempotency WHERE namespace_hash = ${namespaceHash} LIMIT 1`,
     );
-    const statusCode = row?.status_code == null ? null : Number(row.status_code);
-    return { statusCode, data: statusCode == null ? null : parseJsonColumn<T | null>(row!.response_body, null) };
+    if (!row || row.status_code == null || row.request_hash !== requestHash) return null;
+    return parseJsonColumn<T | null>(row.response_body, null);
   };
-  // An open claim from before this call is an earlier attempt with this key,
-  // and it can still be running only within a couple of tool timeouts (the
-  // gateway stops waiting, not working). Older than that it died; a failed
-  // attempt deletes its own claim (below), so it never looks like one.
-  const opened = await deps.db.get<{ created_at: number | string }>(sql`SELECT created_at FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`);
-  const openedAt = Number(opened?.created_at ?? started);
-  const resumed = openedAt < started && started - openedAt <= 2 * deps.toolTimeoutMs;
   let data: T;
   try {
-    data = await work({ resumed });
+    data = await work({ resumed: !claim.inserted });
   } catch (error) {
-    if (resumed) {
-      const now = await stored();
-      if (now.data) return { data: now.data, replayed: true };
-    } else {
-      // Nothing of this attempt stays behind: a refusal is not stored, so its
-      // open claim would only make the next attempt think one is running.
+    const landed = await storedResult().catch(() => null);
+    if (landed) return { data: landed, replayed: true };
+    if (claim.inserted)
       await deps.db.run(sql`DELETE FROM api_idempotency WHERE id = ${claim.id} AND status_code IS NULL`).catch(() => undefined);
-    }
     throw error;
   }
+  let saved = false;
+  let failure: unknown;
   try {
-    await completeApiIdempotency(deps.db, claim.id, 200, data);
+    saved = await completeApiIdempotency(deps.db, claim.id, 200, data, { onlyOpen: true });
+    if (!saved) {
+      // Nothing written: the record is gone, or another attempt's result is
+      // already on it. Gone: open it again and store this result there.
+      const again = await open();
+      if (again.statusCode == null) saved = await completeApiIdempotency(deps.db, again.id, 200, data, { onlyOpen: true });
+    }
   } catch (error) {
-    // The write may have committed and only its reply been lost: then the
-    // result IS stored and this attempt succeeded. Give back what it took only
-    // when the record is known not to be there; when even that cannot be read,
-    // keep it (a stray hold lapses on its own; a stored hold without its
-    // reservation would not).
-    const now = await stored().catch(() => null);
-    if (now?.statusCode != null) return { data, replayed: false };
-    if (now && undo) await undo().catch(() => undefined);
-    throw error;
+    failure = error;
   }
-  return { data, replayed: false };
+  if (saved) return { data, replayed: false };
+  // Not known to be stored by this attempt. Whatever is stored now is the answer.
+  let stored: T | null | undefined;
+  try {
+    stored = await storedResult();
+  } catch {
+    stored = undefined;
+  }
+  if (stored) {
+    // A write that committed and only lost its reply stored exactly this result.
+    if (stableStringify(stored) === stableStringify(JSON.parse(JSON.stringify(data)))) return { data, replayed: false };
+    if (undo) await undo().catch(() => undefined);
+    return { data: stored, replayed: true };
+  }
+  // Known not stored: give back what this attempt took. Unknown (the record
+  // cannot even be read): keep it; a stray hold lapses on its own, a stored
+  // hold without its reservation would not.
+  if (stored === null && undo) await undo().catch(() => undefined);
+  throw failure ?? new Error('The result could not be stored; retry with the same idempotency_key.');
 }
 
 const decideInput = z.object({

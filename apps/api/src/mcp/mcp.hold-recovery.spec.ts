@@ -18,11 +18,12 @@ vi.mock('@slate/db', async (importOriginal) => {
   return {
     ...real,
     completeApiIdempotency: async (...args: Parameters<typeof real.completeApiIdempotency>) => {
-      await real.completeApiIdempotency(...args);
+      const written = await real.completeApiIdempotency(...args);
       if (control.loseSavedReply && args[2] === 200) {
         control.loseSavedReply = false;
         throw new Error('connection reset after commit');
       }
+      return written;
     },
   };
 });
@@ -140,7 +141,17 @@ describe('hold_slot recovery', () => {
     expect(await openClaims()).toBe(0);
   });
 
-  it('an open claim older than two tool timeouts is not taken for a running attempt', async () => {
+  /** Retry until the first attempt's stored hold comes back (it finishes in the background). */
+  async function replayOf(c: Awaited<ReturnType<Harness['connect']>>, args: Record<string, unknown>): Promise<Hold | undefined> {
+    for (let i = 0; i < 50; i += 1) {
+      const r = await c.callTool({ name: 'hold_slot', arguments: args });
+      if (!r.isError) return structured<Hold>(r);
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    return undefined;
+  }
+
+  it('a retry never removes a running attempt\'s record, however old it looks: the first attempt\'s hold is kept and replayed', async () => {
     const c = await h.connect(await h.key(ALL));
     const s1 = await slot(c, 16);
     const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-stale-001') };
@@ -149,16 +160,59 @@ describe('hold_slot recovery', () => {
       open = resolve;
     });
     try {
+      // A: reserves, then waits on the gate past its timeout.
       expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
-      // As if that attempt had started an hour ago (and so had died).
+      // As if A had started an hour ago, or on a pod with a skewed clock.
       await h.db.run(sql`UPDATE api_idempotency SET created_at = created_at - ${3_600_000} WHERE path = 'hold_slot' AND status_code IS NULL`);
+      // B: meets A's reservation, is refused, and leaves A's record alone.
       const text = errorText(await c.callTool({ name: 'hold_slot', arguments: args }));
       expect(text).toMatch(/^INVALID_SLOT/);
-      expect(text).not.toContain('SAME idempotency_key');
+      expect(text).toContain('SAME idempotency_key');
+      expect(await openClaims()).toBe(1);
     } finally {
       control.gate = null;
       open();
     }
+    // A completes; C gets A's hold, and it books.
+    const replay = await replayOf(c, args);
+    expect(replay).toMatchObject({ replayed: true, hold: { start_utc: s1.start_utc } });
+    expect(await heldAt(s1.start_utc)).toBe(1);
+    const booked = structured<{ booking: { start_utc: string } }>(
+      await c.callTool({
+        name: 'create_booking',
+        arguments: {
+          event_type_id: introId,
+          start: s1.start,
+          attendee: { name: 'Kept Record', email: 'kept.record@example.org', time_zone: 'UTC' },
+          answers: { company: 'K' },
+          hold_id: replay!.hold.hold_id,
+          idempotency_key: idem('recover-stale-002'),
+        },
+      }),
+    );
+    expect(booked.booking.start_utc).toBe(s1.start_utc);
+  });
+
+  it('a result whose record vanished meanwhile is stored again, never lost', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const s1 = await slot(c, 18);
+    const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-gone-0001') };
+    let open!: () => void;
+    control.gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    try {
+      expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
+      // The open record disappears (swept, or removed) while A still runs.
+      await h.db.run(sql`DELETE FROM api_idempotency WHERE path = 'hold_slot' AND status_code IS NULL`);
+    } finally {
+      control.gate = null;
+      open();
+    }
+    // A's store writes no row, so it opens the record again and stores there.
+    const replay = await replayOf(c, args);
+    expect(replay).toMatchObject({ replayed: true, hold: { start_utc: s1.start_utc } });
+    expect(await heldAt(s1.start_utc)).toBe(1);
   });
 
   it('a result that was saved but whose reply was lost is kept: the hold stands and books', async () => {

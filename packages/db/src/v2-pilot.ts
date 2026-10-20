@@ -261,6 +261,12 @@ export interface ApiIdempotencyRecord {
   requestHash: string;
   statusCode: number | null;
   responseBody: unknown;
+  /**
+   * True when THIS call opened the record (its insert won); false when it
+   * found one another call had opened. Lets a caller act only on its own open
+   * record (delete it after a refusal) and never on another attempt's.
+   */
+  inserted: boolean;
 }
 
 export async function claimApiIdempotency(
@@ -302,20 +308,31 @@ export async function claimApiIdempotency(
     requestHash: row.request_hash,
     statusCode: row.status_code == null ? null : Number(row.status_code),
     responseBody: parseJsonColumn(row.response_body, null),
+    inserted: row.id === id,
   };
 }
 
+/**
+ * Store the result on a record. True when a row was written; false when the
+ * record is gone (expired and swept, or removed), or, with `onlyOpen`, already
+ * holds a result, so a caller can tell a stored result from a lost one instead
+ * of losing it silently.
+ */
 export async function completeApiIdempotency(
   db: Db,
   id: string,
   statusCode: number,
   responseBody: unknown,
-): Promise<void> {
-  await db.run(
+  opts: { onlyOpen?: boolean } = {},
+): Promise<boolean> {
+  const open = opts.onlyOpen ? sql` AND status_code IS NULL` : sql``;
+  const row = await db.get<{ id: string }>(
     sql`UPDATE api_idempotency
         SET status_code = ${statusCode}, response_body = ${jsonParam(db, responseBody)}
-        WHERE id = ${id}`,
+        WHERE id = ${id}${open}
+        RETURNING id`,
   );
+  return !!row;
 }
 
 export async function addGuestsToBooking(

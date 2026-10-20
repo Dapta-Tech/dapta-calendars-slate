@@ -93,7 +93,7 @@ export class McpGateway {
     @Inject(BookingService) bookings: BookingService,
     @Inject(AdminService) admin: AdminService,
   ) {
-    this.deps = { publicAppUrl: env.PUBLIC_APP_URL, toolTimeoutMs: env.MCP_TOOL_TIMEOUT_MS, db, calV2, pilot, bookings, admin };
+    this.deps = { publicAppUrl: env.PUBLIC_APP_URL, db, calV2, pilot, bookings, admin };
     // Per pod, like the public limiter: a replica counts only what it served.
     this.readLimiter = env.RATE_LIMIT_ENABLED
       ? new TokenBucketRateLimiter(env.MCP_RATE_LIMIT_CAPACITY, env.MCP_RATE_LIMIT_REFILL_PER_SEC)
