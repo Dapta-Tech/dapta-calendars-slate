@@ -38,6 +38,8 @@ import {
 /** What the tools need from the app. Built once by the gateway. */
 export interface McpToolDeps {
   publicAppUrl: string;
+  /** MCP_TOOL_TIMEOUT_MS: how long the gateway waits for one tool call. */
+  toolTimeoutMs: number;
   db: Db;
   calV2: CalV2Service;
   pilot: CalV2PilotService;
@@ -1646,26 +1648,45 @@ async function keyedWrite<T extends Record<string, unknown>>(
   if (claim.requestHash !== requestHash)
     throw failureFor('IDEMPOTENCY_KEY_REUSED', 'That idempotency_key was already used with different arguments.');
   if (claim.statusCode != null) return { data: claim.responseBody as T, replayed: true };
-  // An open claim from before this call is an earlier attempt with this key.
+  const stored = async (): Promise<{ statusCode: number | null; data: T | null }> => {
+    const row = await deps.db.get<{ status_code: number | string | null; response_body: unknown }>(
+      sql`SELECT status_code, response_body FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`,
+    );
+    const statusCode = row?.status_code == null ? null : Number(row.status_code);
+    return { statusCode, data: statusCode == null ? null : parseJsonColumn<T | null>(row!.response_body, null) };
+  };
+  // An open claim from before this call is an earlier attempt with this key,
+  // and it can still be running only within a couple of tool timeouts (the
+  // gateway stops waiting, not working). Older than that it died; a failed
+  // attempt deletes its own claim (below), so it never looks like one.
   const opened = await deps.db.get<{ created_at: number | string }>(sql`SELECT created_at FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`);
-  const resumed = Number(opened?.created_at ?? started) < started;
+  const openedAt = Number(opened?.created_at ?? started);
+  const resumed = openedAt < started && started - openedAt <= 2 * deps.toolTimeoutMs;
   let data: T;
   try {
     data = await work({ resumed });
   } catch (error) {
     if (resumed) {
-      const now = await deps.db.get<{ status_code: number | string | null; response_body: unknown }>(
-        sql`SELECT status_code, response_body FROM api_idempotency WHERE id = ${claim.id} LIMIT 1`,
-      );
-      const stored = now?.status_code != null ? parseJsonColumn<T | null>(now.response_body, null) : null;
-      if (stored) return { data: stored, replayed: true };
+      const now = await stored();
+      if (now.data) return { data: now.data, replayed: true };
+    } else {
+      // Nothing of this attempt stays behind: a refusal is not stored, so its
+      // open claim would only make the next attempt think one is running.
+      await deps.db.run(sql`DELETE FROM api_idempotency WHERE id = ${claim.id} AND status_code IS NULL`).catch(() => undefined);
     }
     throw error;
   }
   try {
     await completeApiIdempotency(deps.db, claim.id, 200, data);
   } catch (error) {
-    if (undo) await undo().catch(() => undefined);
+    // The write may have committed and only its reply been lost: then the
+    // result IS stored and this attempt succeeded. Give back what it took only
+    // when the record is known not to be there; when even that cannot be read,
+    // keep it (a stray hold lapses on its own; a stored hold without its
+    // reservation would not).
+    const now = await stored().catch(() => null);
+    if (now?.statusCode != null) return { data, replayed: false };
+    if (now && undo) await undo().catch(() => undefined);
     throw error;
   }
   return { data, replayed: false };

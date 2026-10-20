@@ -11,7 +11,21 @@ import { bootHarness, errorText, idem, structured, type Harness } from './mcp-ha
  * leave the time blocked for ten minutes against the caller's own retry.
  * `bindHold` is wrapped so a test can make it fail once or wait on a gate.
  */
-const control = vi.hoisted(() => ({ failNext: false, gate: null as Promise<void> | null }));
+const control = vi.hoisted(() => ({ failNext: false, gate: null as Promise<void> | null, loseSavedReply: false }));
+// A keyed write's result record (status 200) that commits, then loses its reply.
+vi.mock('@slate/db', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@slate/db')>();
+  return {
+    ...real,
+    completeApiIdempotency: async (...args: Parameters<typeof real.completeApiIdempotency>) => {
+      await real.completeApiIdempotency(...args);
+      if (control.loseSavedReply && args[2] === 200) {
+        control.loseSavedReply = false;
+        throw new Error('connection reset after commit');
+      }
+    },
+  };
+});
 vi.mock('./holds', async (importOriginal) => {
   const real = await importOriginal<typeof import('./holds')>();
   return {
@@ -42,6 +56,8 @@ afterAll(async () => {
 });
 
 const PAGE = 'https://calendar.example.test/acme/alex-rivera/intro-call';
+const openClaims = async () =>
+  Number((await h.db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM api_idempotency WHERE path = 'hold_slot' AND status_code IS NULL`))!.n);
 
 const heldAt = async (startUtc: string) =>
   Number((await h.db.get<{ n: number | string }>(sql`SELECT COUNT(*) AS n FROM slot_reservation WHERE slot_start_ms = ${Date.parse(startUtc)}`))!.n);
@@ -108,6 +124,66 @@ describe('hold_slot recovery', () => {
       }),
     );
     expect(booked.booking.start_utc).toBe(s.start_utc);
+  });
+
+  it('a refused attempt leaves no open claim, so a retry with the same key gets the plain refusal, not "still running"', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const s1 = await slot(c, 12);
+    // Somebody else holds the time.
+    structured(await (await h.connect()).callTool({ name: 'hold_slot', arguments: { booking_page_url: PAGE, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-other-001') } }));
+    const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-refused-01') };
+    for (let i = 0; i < 2; i += 1) {
+      const text = errorText(await c.callTool({ name: 'hold_slot', arguments: args }));
+      expect(text).toMatch(/^INVALID_SLOT/);
+      expect(text).not.toContain('SAME idempotency_key');
+    }
+    expect(await openClaims()).toBe(0);
+  });
+
+  it('an open claim older than two tool timeouts is not taken for a running attempt', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const s1 = await slot(c, 16);
+    const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-stale-001') };
+    let open!: () => void;
+    control.gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    try {
+      expect(errorText(await c.callTool({ name: 'hold_slot', arguments: args }))).toMatch(/^TIMEOUT/);
+      // As if that attempt had started an hour ago (and so had died).
+      await h.db.run(sql`UPDATE api_idempotency SET created_at = created_at - ${3_600_000} WHERE path = 'hold_slot' AND status_code IS NULL`);
+      const text = errorText(await c.callTool({ name: 'hold_slot', arguments: args }));
+      expect(text).toMatch(/^INVALID_SLOT/);
+      expect(text).not.toContain('SAME idempotency_key');
+    } finally {
+      control.gate = null;
+      open();
+    }
+  });
+
+  it('a result that was saved but whose reply was lost is kept: the hold stands and books', async () => {
+    const c = await h.connect(await h.key(ALL));
+    const s1 = await slot(c, 20);
+    const args = { event_type_id: introId, start: s1.start, time_zone: 'UTC', idempotency_key: idem('recover-lost-0001') };
+    control.loseSavedReply = true;
+    const first = structured<Hold>(await c.callTool({ name: 'hold_slot', arguments: args }));
+    expect(await heldAt(s1.start_utc)).toBe(1);
+    const replay = structured<Hold>(await c.callTool({ name: 'hold_slot', arguments: args }));
+    expect(replay).toMatchObject({ replayed: true, hold: { hold_id: first.hold.hold_id } });
+    const booked = structured<{ booking: { start_utc: string } }>(
+      await c.callTool({
+        name: 'create_booking',
+        arguments: {
+          event_type_id: introId,
+          start: s1.start,
+          attendee: { name: 'Lost Reply', email: 'lost.reply@example.org', time_zone: 'UTC' },
+          answers: { company: 'L' },
+          hold_id: first.hold.hold_id,
+          idempotency_key: idem('recover-lost-0002'),
+        },
+      }),
+    );
+    expect(booked.booking.start_utc).toBe(s1.start_utc);
   });
 });
 
