@@ -1,5 +1,5 @@
 import { IS_DAPTA_BRAND, PRODUCT_NAME } from '@/lib/product-name';
-import { CalendarsMark } from './calendars-logo';
+import { CalendarsMark, CalendarsWordmark } from './calendars-logo';
 
 export { IS_DAPTA_BRAND, PRODUCT_NAME };
 
@@ -12,9 +12,28 @@ export { IS_DAPTA_BRAND, PRODUCT_NAME };
  * typographic brand built from whatever it called the product. Same principle
  * as `MadeWithBadge`: a fork is never forced to carry Dapta branding.
  *
- * Call sites use `<BrandMark>` and never the raw mark, so the gate cannot be
- * forgotten on a new surface.
+ * Call sites use `<BrandWordmark>` / `<BrandMark>` and never the raw marks, so
+ * the gate cannot be forgotten on a new surface.
  */
+
+/**
+ * `dCal.` without the company name: the in-app default (the wide rail, the
+ * mobile top bar), as `dForms.` is in the sibling product. Inside the app the
+ * shell already says Dapta, so the wordmark only has to say which product. Size
+ * it with a height class and let width follow (`h-6 w-auto`). A fork gets its
+ * initial chip and the name it set, on one line.
+ */
+export function BrandWordmark({ className, labelled }: { className?: string; labelled?: boolean }) {
+  if (IS_DAPTA_BRAND) {
+    return <CalendarsWordmark className={className} title={labelled ? PRODUCT_NAME : undefined} />;
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-inline">
+      <FallbackChip />
+      <span className="truncate text-sm font-semibold text-foreground">{PRODUCT_NAME}</span>
+    </span>
+  );
+}
 
 /**
  * Mark only: the collapsed rail, the top bar, the app switcher tile, narrow

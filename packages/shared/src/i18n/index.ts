@@ -337,6 +337,8 @@ export interface BookingMessages {
       developers: string;
       /** The product documentation, an EXTERNAL link (see `lib/docs-url.ts`). */
       docs: string;
+      /** The door to the wider platform, EXTERNAL, only with NEXT_PUBLIC_PLATFORM_URL. */
+      agents: string;
     };
     /** The pages under the rail's MCP group, in its accordion and its flyout. */
     developerNav: {
@@ -364,6 +366,8 @@ export interface BookingMessages {
       none: string;
       signOut: string;
       viewPublic: string;
+      /** The profile button at the foot of the rail, and the menu it opens. */
+      accountMenu: string;
       language: string;
       collapse: string;
       expand: string;
@@ -1800,6 +1804,7 @@ export const en: BookingMessages = {
       bookingPage: 'Booking page',
       developers: 'MCP',
       docs: 'Docs',
+      agents: 'Dapta Agents',
     },
     developerNav: {
       keys: 'Connect and keys',
@@ -1826,6 +1831,7 @@ export const en: BookingMessages = {
       none: 'None',
       signOut: 'Sign out',
       viewPublic: 'View public page',
+      accountMenu: 'Account menu',
       language: 'Language',
       notFoundTitle: 'Not found',
       notFoundBody: 'This workspace has nothing at this address. It may have been deleted.',
@@ -3141,6 +3147,7 @@ export const es: BookingMessages = {
       bookingPage: 'Página de reservas',
       developers: 'MCP',
       docs: 'Documentación',
+      agents: 'Dapta Agents',
     },
     developerNav: {
       keys: 'Conexión y claves',
@@ -3167,6 +3174,7 @@ export const es: BookingMessages = {
       none: 'Ninguno',
       signOut: 'Cerrar sesión',
       viewPublic: 'Ver página pública',
+      accountMenu: 'Menú de la cuenta',
       language: 'Idioma',
       notFoundTitle: 'No encontrado',
       notFoundBody: 'Este espacio no tiene nada en esta dirección. Puede que se haya eliminado.',

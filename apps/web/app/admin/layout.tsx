@@ -95,7 +95,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         // Runtime env, in the reader's language; null on a deployment with no
         // docs configured, and the rail then has no Docs item.
         docsHref={docsNavHref(locale)}
-        user={{ displayName: me.displayName, handle: me.handle, accountCode: me.accountCode }}
+        user={{ displayName: me.displayName, email: me.email, handle: me.handle, accountCode: me.accountCode }}
         accounts={accounts.items}
         accountsHasMore={accounts.hasMore}
         currentAccountId={

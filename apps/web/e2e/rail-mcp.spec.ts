@@ -129,3 +129,28 @@ test('a plain member gets Docs but no MCP item, and the address alone says no ac
     await expect(page.getByRole('heading', { name: 'You don’t have access' }), path).toBeVisible();
   }
 });
+
+test('the foot of the rail is the person: one menu with the public page and Sign out', async ({ page, isMobile }) => {
+  await page.goto('/admin');
+  await signIn(page, HOST.email);
+  await expect(page).toHaveURL(/\/admin$/);
+  const nav = await rail(page, isMobile);
+  const me = nav.getByTestId('profile-menu-trigger');
+  await expect(me).toContainText(HOST.email);
+  await me.click();
+  const menu = page.getByRole('menu', { name: 'Account menu' });
+  await expect(menu.getByRole('menuitem', { name: /View public page/ })).toHaveAttribute(
+    'href',
+    `/${HOST.accountCode}/${HOST.handle}`,
+  );
+  await expect(menu.getByRole('menuitem', { name: /View public page/ })).toBeFocused();
+  // Escape closes the menu and nothing else (on mobile, the drawer stays open).
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(me).toBeFocused();
+  if (isMobile) await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveAttribute('aria-expanded', 'true');
+
+  await me.click();
+  await menu.getByRole('menuitem', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/login/);
+});

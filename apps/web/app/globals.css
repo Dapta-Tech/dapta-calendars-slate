@@ -13,6 +13,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  /* The navigation rail's ground, one tonal step off the page (the dForms rail's). */
+  --color-sidebar: var(--sidebar);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
