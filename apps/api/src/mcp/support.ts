@@ -101,6 +101,16 @@ export function callerId(call: McpCall): string {
 }
 
 /**
+ * Whether this connection may act in `accountId`: a key or connection in its
+ * own account, a sign-in in any account it reaches, whichever one (if any) this
+ * call named.
+ */
+export function reachesAccount(call: McpCall, accountId: string): boolean {
+  if (call.login) return call.login.accounts.some((a) => a.accountId === accountId);
+  return call.principal?.accountId === accountId;
+}
+
+/**
  * The last word on scope, inside the tool. With OAuth on, the HTTP door has
  * already answered a missing credential with a 401 challenge and an OAuth
  * token lacking a scope with a 403 step-up, so reaching the throws below means

@@ -27,11 +27,11 @@ import {
   failureFor,
   instantFrom,
   notFound,
+  reachesAccount,
   requireScope,
   stableStringify,
   toFailure,
   untrusted,
-  signInKey,
   zonedIso,
 } from './support';
 
@@ -725,8 +725,10 @@ const bookMeeting: ToolDef = {
     // argument, so the same key with changed arguments is refused rather than
     // booking again. A replay answers from the stored result, so it never reaches
     // the booking core (no duplicate-guard or overlap error, no second email).
-    // A sign-in that has not picked an account keeps its own namespace too.
-    const caller = call.principal ? `key:${call.principal.keyId}` : call.login ? signInKey(call.login) : `anon:${hashApiValue(call.ip)}`;
+    // The owner is `callerId`, the one every keyed write uses: a sign-in is the
+    // person whichever account the call named, so a retry that drops or changes
+    // account_id replays instead of booking a second time.
+    const caller = callerId(call);
     const namespaceHash = hashApiValue(`${accountId}:${caller}:book_meeting:${args.idempotency_key}`);
     const requestHash = hashApiValue(
       stableStringify({
@@ -801,8 +803,10 @@ const bookMeeting: ToolDef = {
     // Booked with this workspace's own credential (API key or OAuth token), it is
     // an API booking for product analytics, like the REST machine API. A keyless
     // call, or one with another workspace's credential, books like the public
-    // page it wraps. The duplicate guard is untouched either way.
-    const channel = call.principal?.accountId === accountId ? 'api' : 'booking_page';
+    // page it wraps. A sign-in counts when it reaches this workspace at all, so
+    // naming an account or not does not change the channel. The duplicate guard
+    // is untouched either way.
+    const channel = reachesAccount(call, accountId) ? 'api' : 'booking_page';
     // A hold is checked only now, after both replay paths, so a retried booking
     // still finds its original result once the hold has been consumed. Neither
     // refusal is stored: a hold problem says nothing final about the slot.

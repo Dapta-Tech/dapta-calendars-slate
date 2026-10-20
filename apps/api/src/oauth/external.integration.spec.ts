@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createApiKey, sql } from '@slate/db';
+import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
 import { NOT_LINKED_MESSAGE } from '../mcp/mcp.controller';
 import { startFakeAs, type FakeAs } from './fake-as';
@@ -489,6 +490,28 @@ describe('the hold, pending-request and team tools with several accounts', () =>
     expect(text(await create(await h.otherKey(ALL_SCOPES), 'more-create-0001'))).toMatch(/^HOLD_NOT_FOUND/);
     const made = structured<{ booking: { uid: string; status: string } }>(await create(token, 'more-create-0002', h.other.accountId));
     expect(made.booking.status).toBe('pending');
+  });
+
+  it('a public-page booking retried without the account_id it first named replays: one booking, one analytics channel', async () => {
+    const created = vi.spyOn(AnalyticsEffects.prototype, 'bookingCreated');
+    try {
+      const start = (await starts({ booking_page_url: TEAM }, 'find_team_slots'))[36]!;
+      const args = { booking_page_url: TEAM, start, attendee: invitee('Ray Retry'), idempotency_key: idem('more-team-retry-01') };
+      const first = structured<{ booking: { uid: string } }>(await tool(h, token, 'book_team_meeting', { ...args, account_id: h.accountId }));
+      // What a TIMEOUT tells the agent to do: the same key again, here without account_id.
+      const again = structured<{ booking: { uid: string } }>(await tool(h, token, 'book_team_meeting', args));
+      expect(again.booking.uid).toBe(first.booking.uid);
+      // book_meeting on the same team page is the same action under the same record.
+      const direct = structured<{ booking: { uid: string }; replayed: boolean }>(await tool(h, token, 'book_meeting', args));
+      expect(direct).toMatchObject({ replayed: true, booking: { uid: first.booking.uid } });
+      const n = await h.db.get<{ n: number | string }>(
+        sql`SELECT COUNT(*) AS n FROM booking b JOIN booking_attendee ba ON ba.booking_id = b.id WHERE ba.email = 'ray.retry@example.org'`,
+      );
+      expect(Number(n!.n)).toBe(1);
+      expect(created.mock.calls.map(([b]) => b.channel)).toEqual(['api']);
+    } finally {
+      created.mockRestore();
+    }
   });
 
   it('team tools: a public team page needs no account; by id the named account books and reports its host', async () => {
