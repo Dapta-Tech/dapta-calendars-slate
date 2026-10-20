@@ -18,15 +18,18 @@ let container: HTMLElement | null = null;
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // The menu is an AnchoredMenu, which re-measures on resize; jsdom has none.
-  (globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
 });
 
 beforeEach(() => {
+  // The menu is an AnchoredMenu, which re-measures on resize; jsdom has none.
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   // No layout in jsdom: a menu whose trigger measures 0x0 closes itself.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     DOMRect.fromRect({ x: 10, y: 20, width: 36, height: 36 }),
@@ -43,6 +46,7 @@ afterEach(() => {
     else process.env[k] = saved[k];
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** Render the switcher as a build with this environment would, and open it. */
@@ -95,10 +99,32 @@ describe('AppSwitcher', () => {
     expect(row.textContent).toContain(messages.comingSoon);
   });
 
+  it('moves with the arrows, and closes on Tab with focus back on the trigger', async () => {
+    const el = await openSwitcher({
+      NEXT_PUBLIC_PLATFORM_URL: 'https://platform.example.test',
+      NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test',
+    });
+    const trigger = el.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    const menu = el.querySelector<HTMLElement>('[data-testid="app-switcher-menu"]')!;
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(document.activeElement).toBe(items[0]);
+    const key = (target: Element, k: string) =>
+      act(async () => {
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      });
+    await key(items[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(items[1]);
+    // The panel is the last thing in <body>: left to the browser, Tab would walk
+    // off the page with the menu still open.
+    await key(items[1]!, 'Tab');
+    expect(el.querySelector('[data-testid="app-switcher-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('opens with Forms alone when there is no platform to link', async () => {
     const el = await openSwitcher({ NEXT_PUBLIC_FORMS_URL: 'https://forms.example.test' });
     expect(formsRow(el)?.tagName).toBe('A');
-    expect(el.textContent).not.toContain('Dapta AI');
+    expect(el.textContent).not.toContain('Dapta Agents');
   });
 
   it('calls it dForms on Dapta\'s own build, and Forms on a fork', async () => {

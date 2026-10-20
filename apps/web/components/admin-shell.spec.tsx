@@ -32,10 +32,17 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }));
-// Server actions: never called here, only imported by the footer's controls.
+// Server actions: stubs, so Sign out can be pressed without leaving the page.
 vi.mock('@/app/login/actions', () => ({ signOutAction: vi.fn() }));
+// The analytics identity Sign out has to drop; the rest of the port stays real.
+const analytics = vi.hoisted(() => ({ resetAnalytics: vi.fn() }));
+vi.mock('@/lib/analytics/port', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/analytics/port')>()),
+  resetAnalytics: analytics.resetAnalytics,
+}));
 vi.mock('@/app/admin/account-actions', () => ({ searchAccountsAction: vi.fn(), switchAccountAction: vi.fn() }));
 
+import { signOutAction } from '@/app/login/actions';
 import { AdminShell } from './admin-shell';
 
 const DOCS = 'https://docs.example.test/?utm_source=calendars&utm_medium=sidebar';
@@ -45,15 +52,18 @@ let host: HTMLDivElement | null = null;
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  // The rail's menus are AnchoredMenus, which re-measure on resize; jsdom has none.
-  (globalThis as { ResizeObserver?: unknown }).ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
 });
 
 beforeEach(() => {
+  // The rail's menus are AnchoredMenus, which re-measure on resize; jsdom has none.
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   // No layout in jsdom: a menu whose trigger measures 0x0 closes itself (the
   // trigger is hidden), so every element gets a size, as dForms' rail specs do.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
@@ -67,6 +77,7 @@ afterEach(() => {
   root = null;
   host = null;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 interface ShellOpts {
@@ -417,5 +428,108 @@ describe('AdminShell: the dForms rail look', () => {
     // The module this file imported at the top read no platform: no door.
     const el = await mount({});
     expect(el.querySelector('[data-testid="nav-agents"]')).toBeNull();
+  });
+});
+
+describe('AdminShell: the rail menus by keyboard', () => {
+  async function openProfile() {
+    const el = await mount({});
+    const trigger = rails(el).desktop.querySelector<HTMLButtonElement>('[data-testid="profile-menu-trigger"]')!;
+    await act(async () => trigger.click());
+    const menu = document.querySelector<HTMLElement>('[data-testid="profile-menu"]')!;
+    return { trigger, menu };
+  }
+
+  it('moves between the profile menu items with the arrows, Home and End', async () => {
+    const { menu } = await openProfile();
+    const [view, signOut] = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(document.activeElement).toBe(view);
+    await press(view!, 'ArrowDown');
+    expect(document.activeElement).toBe(signOut);
+    await press(signOut!, 'ArrowDown');
+    expect(document.activeElement).toBe(view);
+    await press(view!, 'End');
+    expect(document.activeElement).toBe(signOut);
+    await press(signOut!, 'Home');
+    expect(document.activeElement).toBe(view);
+  });
+
+  it('closes the profile menu on Tab and hands focus to its button, so Tab moves on from the rail', async () => {
+    const { trigger, menu } = await openProfile();
+    const signOut = menu.querySelector<HTMLElement>('[data-testid="profile-sign-out"]')!;
+    signOut.focus();
+    await press(signOut, 'Tab');
+    expect(document.querySelector('[data-testid="profile-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps Tab inside the account picker (a dialog) until it steps off either end', async () => {
+    const el = await mount({
+      accounts: [
+        { id: '1', accountId: 'acc-1', name: 'Northwind' },
+        { id: '2', accountId: 'acc-2', name: 'Contoso' },
+      ],
+    });
+    const trigger = rails(el).desktop.querySelector<HTMLButtonElement>('[data-testid="account-switcher-trigger"]')!;
+    await act(async () => trigger.click());
+    const panel = document.querySelector<HTMLElement>('[data-testid="account-switcher-menu"]')!;
+    const tabbable = Array.from(
+      panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled])'),
+    );
+    expect(tabbable.length).toBeGreaterThan(1);
+    tabbable[0]!.focus();
+    await press(tabbable[0]!, 'Tab');
+    expect(document.querySelector('[data-testid="account-switcher-menu"]')).not.toBeNull();
+    const last = tabbable[tabbable.length - 1]!;
+    last.focus();
+    await press(last, 'Tab');
+    expect(document.querySelector('[data-testid="account-switcher-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('drops the analytics identity on Sign out, before the session goes', async () => {
+    const { menu } = await openProfile();
+    analytics.resetAnalytics.mockClear();
+    await act(async () => menu.querySelector<HTMLButtonElement>('[data-testid="profile-sign-out"]')!.click());
+    expect(analytics.resetAnalytics).toHaveBeenCalledTimes(1);
+    expect(signOutAction).toHaveBeenCalled();
+  });
+});
+
+describe('AdminShell: a fork', () => {
+  it('shows its chip and name once in the mobile top bar, with the classes on wrappers', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PRODUCT_NAME', 'Acme Booking');
+    vi.resetModules();
+    try {
+      const { AdminShell: Fork } = await import('./admin-shell');
+      nav.pathname = '/admin';
+      host = document.createElement('div');
+      document.body.append(host);
+      root = createRoot(host);
+      await act(async () =>
+        root!.render(
+          <Fork
+            user={{ displayName: 'Alex Rivera', email: null, handle: null, accountCode: 'acme' }}
+            messages={getMessages('en').admin}
+            initialTheme="light"
+            isAdmin
+            docsHref={DOCS}
+          >
+            <p>page</p>
+          </Fork>,
+        ),
+      );
+      const header = host.querySelector('header')!;
+      // The menu button, then exactly the two brand wrappers: nothing else.
+      const [, wide, narrow, ...rest] = Array.from(header.children) as HTMLElement[];
+      expect(rest).toHaveLength(0);
+      expect(wide!.className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'min-[360px]:flex']));
+      expect(narrow!.className.split(' ')).toEqual(expect.arrayContaining(['min-[360px]:hidden']));
+      expect(wide!.textContent).toBe('AAcme Booking');
+      expect(narrow!.textContent).toBe('A');
+      expect(header.querySelector('svg')).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

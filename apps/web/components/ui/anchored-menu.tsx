@@ -56,8 +56,15 @@ import { createPortal } from 'react-dom';
  * back into view, so anything that does not fit has to scroll inside itself.
  *
  * WAI-ARIA menu-button pattern: Escape and outside click dismiss, and focus
- * optionally lands on the first item when it opens.
+ * optionally lands on the first item when it opens. The keys the pattern gives
+ * a menu are wired here too, once for every caller: Up, Down, Home and End move
+ * between items, and Tab leaves. Left to the browser, Tab from the last item
+ * would walk off the end of `<body>` into the browser chrome (Shift+Tab, back
+ * into `<main>`) with the panel still open over the page.
  */
+
+/** What Tab can land on inside a dialog panel. */
+const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Gutter kept between the panel and the viewport edges. */
 const EDGE = 8;
@@ -256,6 +263,40 @@ export function AnchoredMenu({
     };
   }, [open, onClose, anchorRef]);
 
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    onKeyDown?.(e);
+    if (e.defaultPrevented) return;
+    if (e.key === 'Tab') {
+      // A dialog's own fields take Tab among themselves; only stepping off
+      // either end leaves it. A menu is one stop in the tab order: any Tab
+      // leaves.
+      if (role === 'dialog') {
+        const tabbable = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(TABBABLE));
+        const edge = e.shiftKey ? tabbable[0] : tabbable[tabbable.length - 1];
+        if (tabbable.length > 0 && document.activeElement !== edge) return;
+      }
+      // Focus goes back to the trigger first, with no preventDefault, so the
+      // browser's own Tab then moves on from the trigger: the place in the rail
+      // the person opened the panel from.
+      anchorRef.current?.focus();
+      onClose();
+      return;
+    }
+    if (role !== 'menu') return;
+    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? items.length - 1
+          : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
+
   // Focus lands on the first item only once the panel is actually placed:
   // until then it is `visibility: hidden`, where `.focus()` is a silent no-op
   // that never retries. `placed` flips exactly once per open.
@@ -290,7 +331,7 @@ export function AnchoredMenu({
       ref={menuRef}
       role={role}
       aria-label={label}
-      onKeyDown={onKeyDown}
+      onKeyDown={handleKeyDown}
       data-testid={testId}
       // A single DOM question the rest of the app can ask: "is one of these
       // panels open right now?". Every rail popup goes through this one

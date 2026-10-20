@@ -6,7 +6,6 @@ import {
   useId,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
@@ -130,7 +129,8 @@ function NavGroup({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
 
-  // Escape, a click elsewhere and focus handed back are AnchoredMenu's.
+  // The menu keys (arrows, Home, End, Tab, Escape), a click elsewhere and focus
+  // handed back are all AnchoredMenu's.
   const closeFlyout = useCallback(() => setFlyout(false), []);
 
   // Arriving on one of the pages opens the group, including after the person
@@ -146,29 +146,6 @@ function NavGroup({
   }, [collapsed]);
 
   const state = !inside ? 'idle' : collapsed || !open ? 'active' : 'parent';
-
-  const onFlyoutKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Tab') {
-      // Leaving the menu by Tab closes it. Focus goes back to the trigger first
-      // (no preventDefault), so the browser's own Tab then moves on from the
-      // MCP item, the place in the rail the person left from.
-      triggerRef.current?.focus();
-      setFlyout(false);
-      return;
-    }
-    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
-    if (!keys.includes(e.key)) return;
-    e.preventDefault();
-    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const next =
-      e.key === 'Home'
-        ? 0
-        : e.key === 'End'
-          ? items.length - 1
-          : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-    items[next]?.focus();
-  };
 
   return (
     <>
@@ -235,12 +212,11 @@ function NavGroup({
         side="right"
         width={208}
         autoFocus
-        onKeyDown={onFlyoutKeyDown}
         className="flex flex-col overflow-hidden py-tight"
         testId={`nav-${item.key}-flyout`}
       >
         {/* The group's name, for the eye: the icon alone said nothing. */}
-        <p aria-hidden className="px-field py-tight text-xs font-medium uppercase tracking-wide text-faint">
+        <p aria-hidden className="px-field py-tight text-2xs font-medium uppercase tracking-wide text-faint">
           {label}
         </p>
         {pages.map((page) => {
@@ -263,7 +239,7 @@ function NavGroup({
               <i
                 aria-hidden
                 className={`pi ${page.icon} ${active ? 'text-foreground' : 'text-muted-foreground'}`}
-                style={{ fontSize: 16 }}
+                style={{ fontSize: 14 }}
               />
               <span className="min-w-0 flex-1 truncate">{labels[page.key]}</span>
             </Link>
@@ -494,9 +470,17 @@ export function AdminShell({
   // target), then the person: initial, name, email and a menu with the public
   // page and Sign out. The mobile drawer is always full-width, so its footer
   // renders expanded whatever the DESKTOP rail does, hence a param.
+  //
+  // Pinned to the bottom of its scrolling rail, so Sign out stays in view when
+  // the nav is taller than the screen, as it is in the 360px drawer with the MCP
+  // group open. It reaches down over the rail's bottom padding (`-mb-card
+  // pb-card`) on the rail's own ground, so rows scrolling under it disappear
+  // behind it instead of showing through the gap. The inset is `-bottom-card`,
+  // not `bottom-0`: a sticky box is kept inside its scroller's padding, and
+  // `bottom-0` would lift it out of the corner it already sits in.
   const renderFooter = (footerCollapsed: boolean, onNavigate?: () => void) => (
     <div
-      className={`mt-auto flex flex-col gap-tight border-t border-border pt-field ${
+      className={`sticky -bottom-card -mb-card mt-auto flex flex-col gap-tight border-t border-border bg-sidebar pb-card pt-field ${
         footerCollapsed ? 'items-center' : ''
       }`}
     >
@@ -536,9 +520,15 @@ export function AdminShell({
         </button>
         {/* Under 360px the menu button plus the wordmark crowds the bar, so the
             mark takes over. Done in CSS (no flash, no resize listener); only
-            the visible one is displayed, so one name reaches the a11y tree. */}
-        <BrandWordmark className="hidden h-6 w-auto text-foreground min-[360px]:block" labelled />
-        <BrandMark className="h-6 w-auto text-foreground min-[360px]:hidden" labelled />
+            the visible one is displayed, so one name reaches the a11y tree.
+            The classes sit on wrappers, not on the marks: a fork's fallback
+            (chip and name) does not take a className, and would show twice. */}
+        <span className="hidden min-[360px]:flex">
+          <BrandWordmark className="h-6 w-auto text-foreground" labelled />
+        </span>
+        <span className="flex min-[360px]:hidden">
+          <BrandMark className="h-6 w-auto text-foreground" labelled />
+        </span>
       </header>
 
       {/* Desktop sidebar: flush, bordered, collapsible. Pinned to the viewport

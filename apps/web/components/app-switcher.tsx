@@ -73,7 +73,7 @@ export function AppSwitcher({ messages: m }: { messages: SwitcherMessages }) {
         aria-label={m.trigger}
         title={m.trigger}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
+        className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98] md:h-9 md:w-9"
       >
         <i aria-hidden className="pi pi-th-large" style={{ fontSize: 18 }} />
       </button>
@@ -88,11 +88,13 @@ export function AppSwitcher({ messages: m }: { messages: SwitcherMessages }) {
         className="p-inline"
         testId="app-switcher-menu"
       >
-        <p className="px-inline py-tight text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="px-inline py-tight text-2xs font-semibold uppercase tracking-wide text-faint">
           {m.eyebrow}
         </p>
 
-        {/* Dapta AI, the platform (external, new tab). First, per Felipe. */}
+        {/* Dapta Agents, the platform (external, new tab). First, per Felipe.
+            Same name and destination as the rail's own "Dapta Agents" item, as
+            on dForms: one place, one name. */}
         {PLATFORM_URL ? (
           <a
             role="menuitem"
@@ -110,7 +112,7 @@ export function AppSwitcher({ messages: m }: { messages: SwitcherMessages }) {
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-ink">
               <img src="/dapta-mark.png" alt="" width={16} height={16} className="h-4 w-4 object-contain" />
             </span>
-            <span className="flex-1 truncate">Dapta AI</span>
+            <span className="flex-1 truncate">Dapta Agents</span>
             <i aria-hidden className="pi pi-external-link text-muted-foreground" style={{ fontSize: 13 }} />
             <span className="sr-only">{m.opensNewTab}</span>
           </a>

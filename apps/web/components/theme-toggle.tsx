@@ -4,9 +4,9 @@ import { THEME_COOKIE, THEME_COOKIE_MAX_AGE, type Theme } from '@/lib/theme';
 
 /**
  * The product theme switch — the control that makes the light half of the token
- * sheet reachable (#90). Lives in the rail footer beside "View public page" and
- * "Sign out", and matches them exactly: same 44px hit target, same muted icon
- * treatment, same press feedback.
+ * sheet reachable (#90). Lives on its own row at the foot of the rail, above the
+ * profile button, with the rail's 44px hit target, muted icon treatment and
+ * press feedback.
  *
  * One click does three things and none of them is a navigation:
  *
@@ -29,7 +29,9 @@ import { THEME_COOKIE, THEME_COOKIE_MAX_AGE, type Theme } from '@/lib/theme';
  *
  * The label names the DESTINATION ("Switch to light theme") rather than the
  * state, because a button reading "Dark" is ambiguous about whether that is
- * where you are or where you are going.
+ * where you are or where you are going. The icon shows where you ARE, as the
+ * dForms rail's does: the two together say both, and an icon that repeated the
+ * label would leave the current theme unsaid.
  */
 export function ThemeToggle({
   theme,
@@ -63,7 +65,7 @@ export function ThemeToggle({
       aria-label={label}
       className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-[0.98]"
     >
-      <i aria-hidden className={`pi ${next === 'light' ? 'pi-sun' : 'pi-moon'}`} style={{ fontSize: 16 }} />
+      <i aria-hidden className={`pi ${theme === 'light' ? 'pi-sun' : 'pi-moon'}`} style={{ fontSize: 16 }} />
     </button>
   );
 }

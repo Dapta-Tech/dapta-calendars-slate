@@ -44,7 +44,10 @@ export function ProfileMenu({
   const primary = displayName ?? email ?? '';
   const secondary = displayName ? email : null;
   const initial = (primary.charAt(0) || 'A').toUpperCase();
-  const accessibleName = primary ? `${primary}. ${m.label}` : m.label;
+  // Everything the button shows, then what it opens: the visible name and email
+  // are part of the accessible name (WCAG 2.5.3), so "click Alex Rivera" works.
+  const shown = [primary, secondary].filter(Boolean).join(', ');
+  const accessibleName = shown ? `${shown}. ${m.label}` : m.label;
 
   const itemClass =
     'flex min-h-control w-full items-center gap-inline px-field text-left text-sm text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none';
