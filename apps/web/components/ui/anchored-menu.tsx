@@ -116,7 +116,10 @@ export function AnchoredMenu({
   width?: number | 'anchor';
   /** Floor for `width: 'anchor'` only: the collapsed rail's trigger is 44px. */
   minWidth?: number;
-  /** Move focus to the first `[role="menuitem"]` once the panel is placed. */
+  /**
+   * Move focus in once the panel is placed: to the first `[role="menuitem"]`,
+   * or, in a dialog with none, to its first field.
+   */
   autoFocus?: boolean;
   /** Padding/layout for the panel; the frame and z-index are fixed here. */
   className?: string;
@@ -153,6 +156,20 @@ export function AnchoredMenu({
   // asked for it; only the other exits reclaim it. See the focus effect below.
   const pointerDismissRef = useRef(false);
 
+  // Scroll and resize re-place on every frame; an unchanged box keeps the same
+  // object, so React skips the re-render instead of repainting each frame.
+  const commit = useCallback((next: Box) => {
+    setBox((prev) =>
+      prev &&
+      prev.top === next.top &&
+      prev.left === next.left &&
+      prev.width === next.width &&
+      prev.maxHeight === next.maxHeight
+        ? prev
+        : next,
+    );
+  }, []);
+
   const place = useCallback(() => {
     const anchor = anchorRef.current;
     if (!anchor) return;
@@ -184,7 +201,7 @@ export function AnchoredMenu({
       const maxHeight = viewport - EDGE * 2;
       const height = Math.min(natural, maxHeight);
       const top = Math.max(EDGE, Math.min(rect.top, viewport - EDGE - height));
-      setBox({ top, left: rect.right + GAP, width: w, maxHeight });
+      commit({ top, left: rect.right + GAP, width: w, maxHeight });
       return;
     }
 
@@ -195,7 +212,7 @@ export function AnchoredMenu({
       // A very short window, or a trigger stranded mid-viewport. Overlapping
       // the trigger beats both alternatives: a panel squeezed into a slit, or
       // one hanging off an edge that, being `fixed`, no scroll can recover.
-      setBox({ top: EDGE, left, width: w, maxHeight: viewport - EDGE * 2 });
+      commit({ top: EDGE, left, width: w, maxHeight: viewport - EDGE * 2 });
       return;
     }
 
@@ -205,18 +222,20 @@ export function AnchoredMenu({
     const flip = natural > spaceBelow && spaceAbove > spaceBelow;
     const maxHeight = flip ? spaceAbove : spaceBelow;
     const height = Math.min(natural, maxHeight);
-    setBox({
+    commit({
       top: flip ? rect.top - GAP - height : rect.bottom + GAP,
       left,
       width: w,
       maxHeight,
     });
-  }, [anchorRef, minWidth, side, width]);
+  }, [anchorRef, commit, minWidth, side, width]);
 
   // Re-place instead of closing on scroll: the rail itself scrolls
   // (`overflow-y-auto`), so a menu that closed on any scroll event was one
   // trackpad nudge away from vanishing. ResizeObserver covers the panel's own
-  // content changing height (e.g. a pending state swapping rows).
+  // content changing height (e.g. a pending state swapping rows) and the
+  // trigger changing size under an open panel (a `width="anchor"` panel
+  // follows it).
   useLayoutEffect(() => {
     if (!open) {
       setBox(null);
@@ -225,6 +244,7 @@ export function AnchoredMenu({
     place();
     const observer = new ResizeObserver(place);
     if (menuRef.current) observer.observe(menuRef.current);
+    if (anchorRef.current) observer.observe(anchorRef.current);
     window.addEventListener('resize', place);
     // Capture phase: scrolls inside the rail do not bubble to window.
     window.addEventListener('scroll', place, true);
@@ -233,7 +253,7 @@ export function AnchoredMenu({
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open, place]);
+  }, [open, place, anchorRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -303,8 +323,12 @@ export function AnchoredMenu({
   const placed = box !== null;
   useEffect(() => {
     if (!open || !placed || !autoFocus) return;
-    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-  }, [open, placed, autoFocus]);
+    const panel = menuRef.current;
+    const first =
+      panel?.querySelector<HTMLElement>('[role="menuitem"]') ??
+      (role === 'dialog' ? panel?.querySelector<HTMLElement>(TABBABLE) : null);
+    first?.focus();
+  }, [open, placed, autoFocus, role]);
 
   // Hand focus back on the way out. The panel is a portal at the end of
   // `<body>`, so when it unmounts the caret is left on the document instead of

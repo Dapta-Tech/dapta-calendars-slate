@@ -60,19 +60,10 @@ export function AccountSwitcher({
   const [page, setPage] = useState(1);
   const [pending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
   const close = useCallback(() => setOpen(false), []);
   // Which query the rows on screen belong to. A ref and not state: it is
   // bookkeeping for the fetch, and re-rendering on it would be noise.
   const shownQuery = useRef('');
-
-  // The panel is placed (and shown) in a layout effect, so by the next frame
-  // it is visible and the search box can take focus.
-  useEffect(() => {
-    if (!open) return;
-    const frame = requestAnimationFrame(() => searchRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [open]);
 
   // Search upstream once typing settles. The guard is what keeps opening the
   // menu free: the first page is already here from the server, and an unchanged
@@ -166,11 +157,12 @@ export function AccountSwitcher({
         label="Switch account"
         width="anchor"
         minWidth={256}
+        // The search field takes focus once the panel is placed and visible.
+        autoFocus
         className="p-inline"
         testId="account-switcher-menu"
       >
         <input
-          ref={searchRef}
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

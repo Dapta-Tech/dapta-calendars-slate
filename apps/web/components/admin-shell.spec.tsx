@@ -473,6 +473,8 @@ describe('AdminShell: the rail menus by keyboard', () => {
     const trigger = rails(el).desktop.querySelector<HTMLButtonElement>('[data-testid="account-switcher-trigger"]')!;
     await act(async () => trigger.click());
     const panel = document.querySelector<HTMLElement>('[data-testid="account-switcher-menu"]')!;
+    // A dialog has no menu items: focus goes to its first field once placed.
+    expect(document.activeElement).toBe(panel.querySelector('input[type="search"]'));
     const tabbable = Array.from(
       panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled])'),
     );

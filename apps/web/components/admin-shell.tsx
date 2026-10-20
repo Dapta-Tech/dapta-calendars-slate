@@ -16,7 +16,7 @@ import { AccountSwitcher, type AccountOption } from '@/components/account-switch
 import { AppSwitcher } from '@/components/app-switcher';
 import { BrandMark, BrandWordmark } from '@/components/brand/brand';
 import { McpLogos } from '@/components/mcp-logos';
-import { ProfileMenu } from '@/components/profile-menu';
+import { ProfileMenu, type ProfileUser } from '@/components/profile-menu';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AnchoredMenu } from '@/components/ui/anchored-menu';
 import type { Theme } from '@/lib/theme';
@@ -340,12 +340,8 @@ function NavLinks({
   );
 }
 
-interface ShellUser {
-  displayName: string | null;
-  email: string | null;
-  handle: string | null;
-  accountCode: string;
-}
+// One identity contract for the shell and the profile menu it renders.
+type ShellUser = ProfileUser;
 
 export function AdminShell({
   user,
