@@ -12,7 +12,7 @@ import { createEventType, updateEventType, type EventTypeInputRepo } from './cru
 
 /**
  * The calendar title and description templates on real Postgres: the three new
- * columns (migration 0029), the render on the personal, team and seat paths,
+ * columns (migrations 0029 and 0030), the render on the personal, team and seat paths,
  * both reschedules and the event type round trip. Every event type here is the
  * run's own, so the seeded ones other files book keep their plain titles. The
  * SQLite twin is `calendar-text.spec.ts`. Skipped on the SQLite dev default.

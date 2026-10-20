@@ -18,28 +18,22 @@
 --
 -- NULL on every existing row, which reads as "no template" and "no
 -- description": nothing changes for a host until they write one, and bookings
--- already made keep the title and calendar event they have. The one backfill
--- marks every booking that already holds more than one attendee: a slot shared
--- by seats looks like that whether or not its event type has seats today, and
--- a row cannot tell a seat-taker from a guest the booker brought. Marking a
--- booker's own guests too only keeps one person's data out of their shared
--- event's text, which is the safe side.
+-- already made keep the title and calendar event they have. The group slots
+-- that already exist are marked `seated` by the next migration
+-- (0030_booking_seated_backfill.sql), on purpose in a file of its own.
 --
 -- Migration safety: four ADD COLUMNs, nullable, no default: catalog-only in
--- Postgres (no rewrite, no scan), no index. The brief ACCESS EXCLUSIVE lock on
--- `booking` (the hot table) is bounded by lock_timeout so a long transaction
--- makes the boot fail fast and retry rather than queue every booking behind it.
--- The backfill touches only bookings with more than one attendee, with the
--- same bound on its row locks.
+-- Postgres (no rewrite, no scan), no index. Each takes an ACCESS EXCLUSIVE
+-- lock on its table, held until this file's transaction commits, so this file
+-- does nothing else: no data is read or written while `booking` (the hot
+-- table) is locked. lock_timeout bounds only the WAIT for that lock, so a long
+-- transaction makes the boot fail fast and retry rather than queue every
+-- booking behind it.
 SET lock_timeout = '5s';
 
 ALTER TABLE event_type ADD COLUMN IF NOT EXISTS calendar_title_template TEXT;
 ALTER TABLE event_type ADD COLUMN IF NOT EXISTS calendar_description_template TEXT;
 ALTER TABLE booking ADD COLUMN IF NOT EXISTS calendar_description TEXT;
 ALTER TABLE booking ADD COLUMN IF NOT EXISTS seated INTEGER;
-
-UPDATE booking SET seated = 1
-WHERE seated IS NULL
-  AND (SELECT COUNT(*) FROM booking_attendee a WHERE a.booking_id = booking.id) > 1;
 
 RESET lock_timeout;

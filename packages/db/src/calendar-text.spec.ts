@@ -322,13 +322,14 @@ Company: {{form.company}} {{email}}'
   });
 });
 
-describe('migration 0028 marks the shared slots that already exist', () => {
+describe('migration 0029 marks the shared slots that already exist', () => {
   it('flags every booking with more than one attendee, seats or not, and no single one', async () => {
     const source = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations', 'sqlite');
     const root = mkdtempSync(join(tmpdir(), 'slate-mig-'));
     mkdirSync(join(root, 'sqlite'));
     const files = readdirSync(source).filter((f) => f.endsWith('.sql')).sort();
-    const target = files.find((f) => f.startsWith('0028_'))!;
+    const target = files.find((f) => f.startsWith('0029_'))!;
+    expect(target).toBe('0029_booking_seated_backfill.sql');
     for (const f of files.filter((f) => f < target)) copyFileSync(join(source, f), join(root, 'sqlite', f));
 
     const db = await createDb('file::memory:');
