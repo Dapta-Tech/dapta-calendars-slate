@@ -465,18 +465,11 @@ export function AdminShell({
   // The foot of the rail, as on dForms: the theme switch on its own row (a 44px
   // target), then the person: initial, name, email and a menu with the public
   // page and Sign out. The mobile drawer is always full-width, so its footer
-  // renders expanded whatever the DESKTOP rail does, hence a param.
-  //
-  // Pinned to the bottom of its scrolling rail, so Sign out stays in view when
-  // the nav is taller than the screen, as it is in the 360px drawer with the MCP
-  // group open. It reaches down over the rail's bottom padding (`-mb-card
-  // pb-card`) on the rail's own ground, so rows scrolling under it disappear
-  // behind it instead of showing through the gap. The inset is `-bottom-card`,
-  // not `bottom-0`: a sticky box is kept inside its scroller's padding, and
-  // `bottom-0` would lift it out of the corner it already sits in.
+  // renders expanded whatever the DESKTOP rail does, hence a param. It never
+  // scrolls: the nav above it takes the free height and scrolls on its own.
   const renderFooter = (footerCollapsed: boolean, onNavigate?: () => void) => (
     <div
-      className={`sticky -bottom-card -mb-card mt-auto flex flex-col gap-tight border-t border-border bg-sidebar pb-card pt-field ${
+      className={`flex shrink-0 flex-col gap-tight border-t border-border pt-field ${
         footerCollapsed ? 'items-center' : ''
       }`}
     >
@@ -496,6 +489,16 @@ export function AdminShell({
       />
     </div>
   );
+
+  // The one part of a rail that scrolls. It takes the height the wordmark, the
+  // account card and the footer leave (`flex-1 min-h-0`), so when the nav is
+  // taller than the window only the list moves and Sign out stays put. Its own
+  // scroll box would clip the 2px focus outline (offset 2px) of the first and
+  // last rows and of every row's sides, so it carries a 4px inset that a
+  // matching negative margin cancels: the rows stay exactly where they were.
+  // `overscroll-contain`: reaching the end of the list does not hand the wheel
+  // to the page behind it.
+  const navScroll = '-mx-tight -my-tight min-h-0 flex-1 overflow-y-auto overscroll-contain px-tight py-tight';
 
   return (
     <div className="flex min-h-dvh flex-col md:flex-row">
@@ -528,18 +531,23 @@ export function AdminShell({
       </header>
 
       {/* Desktop sidebar: flush, bordered, collapsible. Pinned to the viewport
-          (`sticky h-dvh`) rather than stretched with the page, so the footer
-          with the account and Sign out never sits a long page below the fold;
-          `overflow-y-auto` keeps it usable when the nav outgrows a short
-          window (which is why every rail popup is an AnchoredMenu). */}
+          (`sticky top-0`, the window's full height) rather than stretched with
+          the page, so the footer with the account and Sign out is always on
+          screen however long the page; the page scrolls on its own beside it.
+          The height is `100vh` where `dvh` is unknown and `100dvh` where it is
+          known (it tracks mobile browser chrome). Only the nav scrolls inside
+          it (see `navScroll`); `overflow-y-auto` here is the last resort for a
+          window too short for even the wordmark and the footer. A scrolling
+          rail is why every rail popup is an AnchoredMenu. */}
       <aside
-        className={`hidden shrink-0 flex-col gap-group border-r border-border bg-sidebar py-card transition-[width] md:sticky md:top-0 md:flex md:h-dvh md:overflow-y-auto ${
+        data-testid="rail"
+        className={`hidden shrink-0 flex-col gap-group border-r border-border bg-sidebar py-card transition-[width] md:sticky md:top-0 md:flex md:h-screen md:overflow-y-auto md:supports-[height:100dvh]:h-dvh ${
           railCollapsed ? 'w-[64px] px-inline' : 'w-60 px-card'
         }`}
       >
         {brand}
         {renderAccount(railCollapsed)}
-        <nav aria-label="Primary">
+        <nav aria-label="Primary" className={navScroll}>
           <NavLinks
             items={items}
             collapsed={railCollapsed}
@@ -581,7 +589,7 @@ export function AdminShell({
           <AppSwitcher messages={c.switcher} />
         </div>
         {renderAccount(false)}
-        <nav>
+        <nav className={navScroll}>
           <NavLinks
             items={items}
             collapsed={false}
