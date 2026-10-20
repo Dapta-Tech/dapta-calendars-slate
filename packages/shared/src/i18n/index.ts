@@ -456,6 +456,12 @@ export interface BookingMessages {
       locationDetailCustom: string;
       locationConferencingHint: string;
       locationNoDestinationWarning: string;
+      /** Team events only: one location for every host, the link from the
+       *  assigned host's own calendar. */
+      locationTeamConferencingHint: string;
+      /** Team events only. `{names}` is the comma-separated list of hosts with
+       *  no destination calendar connected. */
+      locationTeamNoDestinationWarning: string;
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
@@ -1911,6 +1917,10 @@ export const en: BookingMessages = {
       locationConferencingHint: 'A meeting link is created automatically when the booking is confirmed.',
       locationNoDestinationWarning:
         'No calendar is connected yet, so no meeting link can be created. Connect one in Connections — bookings still work in the meantime.',
+      locationTeamConferencingHint:
+        'This location applies to every host. Each booking’s meeting link comes from the assigned host’s connected calendar.',
+      locationTeamNoDestinationWarning:
+        'No meeting link for: {names}. They need to connect a calendar.',
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
@@ -3254,6 +3264,10 @@ export const es: BookingMessages = {
       locationConferencingHint: 'El enlace de la reunión se crea automáticamente al confirmar la reserva.',
       locationNoDestinationWarning:
         'Aún no hay ningún calendario conectado, así que no se puede crear el enlace. Conecta uno en Conexiones — las reservas siguen funcionando mientras tanto.',
+      locationTeamConferencingHint:
+        'Esta ubicación aplica a todos los anfitriones. El enlace de cada reunión se crea con el calendario conectado del anfitrión asignado.',
+      locationTeamNoDestinationWarning:
+        'Sin enlace de reunión para: {names}. Falta conectar su calendario.',
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',

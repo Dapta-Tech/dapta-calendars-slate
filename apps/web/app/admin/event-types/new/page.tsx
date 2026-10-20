@@ -32,6 +32,7 @@ export default async function NewEventType({
     ? (await adminApi.teamMembers(teamId)).map((tm) => ({
         memberId: tm.member_id,
         displayName: tm.display_name,
+        hasDestinationCalendar: tm.has_destination_calendar,
       }))
     : undefined;
 

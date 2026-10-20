@@ -70,6 +70,8 @@ interface HostRow {
 export interface TeamMemberOption {
   memberId: string;
   displayName: string | null;
+  /** Undefined when the API predates the field: unknown, never "missing". */
+  hasDestinationCalendar?: boolean;
 }
 
 type ReminderMessages = EventTypeMessages['reminders'];
@@ -491,6 +493,7 @@ function LocationField({
   onKind,
   onDetail,
   connections,
+  teamHosts,
   m,
   locationLabels,
 }: {
@@ -499,6 +502,8 @@ function LocationField({
   onKind: (kind: LocationKind | '') => void;
   onDetail: (detail: string) => void;
   connections?: Connection[];
+  /** Present only for a TEAM event: every host the location applies to. */
+  teamHosts?: TeamMemberOption[];
   m: EventTypeMessages;
   locationLabels: BookingMessages['location'];
 }) {
@@ -523,10 +528,21 @@ function LocationField({
   };
   // Warn, never disable: a host must be able to configure conferencing BEFORE
   // connecting a calendar, or connecting later leaves a silently broken event.
-  // `connections === undefined` is a team event — each host has their own
-  // calendar, so there is nothing here to be sure about.
+  // `connections === undefined` is a team event, warned about per host below.
   const missingDestination =
     kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
+  // A team event has ONE location for every host, but its meeting link is
+  // minted on the ASSIGNED host's own destination calendar. Name the hosts who
+  // have none, so the gap shows up here and not on a booking with no link.
+  // Strictly `false`: an API that predates the field sends nothing, and an
+  // unknown is not a gap. Sorted, because the roster arrives in no set order.
+  const hostsWithoutCalendar =
+    kind === 'conferencing' && teamHosts
+      ? teamHosts
+          .filter((h) => h.hasDestinationCalendar === false)
+          .map((h) => h.displayName ?? h.memberId)
+          .sort((a, b) => a.localeCompare(b))
+      : [];
 
   return (
     <div className="flex flex-col gap-field">
@@ -563,7 +579,19 @@ function LocationField({
       ) : null}
 
       {kind === 'conferencing' ? (
-        <p className="text-xs text-muted-foreground">{m.locationConferencingHint}</p>
+        <p className="text-xs text-muted-foreground">
+          {teamHosts ? m.locationTeamConferencingHint : m.locationConferencingHint}
+        </p>
+      ) : null}
+
+      {/* No connect button, unlike the personal warning below: each host
+          connects their own calendar, so there is nothing to click for them. */}
+      {hostsWithoutCalendar.length > 0 ? (
+        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
+          <p>
+            {m.locationTeamNoDestinationWarning.replace('{names}', hostsWithoutCalendar.join(', '))}
+          </p>
+        </div>
       ) : null}
 
       {missingDestination ? (
@@ -1086,6 +1114,7 @@ export function EventTypeForm({
         onKind={setLocationKind}
         onDetail={setLocationDetail}
         connections={connections}
+        teamHosts={isTeamEvent ? teamMembers : undefined}
         m={m}
         locationLabels={locationLabels}
       />
