@@ -73,7 +73,13 @@ afterEach(() => {
 });
 
 async function mount(
-  opts: { keys?: ApiKeyRow[]; appsConnected?: boolean; snippets?: ConnectSnippets | null; mcpAvailable?: boolean } = {},
+  opts: {
+    keys?: ApiKeyRow[];
+    appsConnected?: boolean;
+    snippets?: ConnectSnippets | null;
+    mcpAvailable?: boolean;
+    skillAvailable?: boolean;
+  } = {},
 ) {
   host = document.createElement('div');
   document.body.append(host);
@@ -91,6 +97,7 @@ async function mount(
         appsConnected={opts.appsConnected ?? false}
         productName="Dapta Calendars"
         docsLabel="API docs"
+        skillAvailable={opts.skillAvailable ?? true}
         messages={m}
         locale="en"
       />,
@@ -209,6 +216,15 @@ describe('KeysPanel', () => {
     expect(createButtons(el)[0]!.closest('[data-testid="setup-guide"]')).toBeNull();
   });
 
+  it('with MCP off still offers the skill, the only way in, without the "No MCP?" question', async () => {
+    const el = await mount({ mcpAvailable: false, snippets: null });
+    const skill = el.querySelector<HTMLElement>('[data-testid="setup-guide"] [data-testid="setup-skill"]')!;
+    expect(skill).not.toBeNull();
+    expect(skill.querySelector('h3')).toBeNull();
+    expect(skill.textContent).not.toContain(m.guideSkillTitle);
+    expect(skill.querySelector('button, a')).not.toBeNull();
+  });
+
   it('says so in step 2 when the deployment has no public MCP address', async () => {
     const el = await mount({ snippets: null });
     expect(step(el, 'agent').textContent).toContain(m.mcpUrlMissing);
@@ -223,5 +239,30 @@ describe('KeysPanel', () => {
     expect(tryIt.querySelector('a')!.getAttribute('href')).toBe('/admin/developers/docs');
     // Step 3 is never "done": the page cannot know an agent was asked something.
     expect(tryIt.hasAttribute('data-done')).toBe(false);
+  });
+
+  it('closes the guide with the skill download, for an agent without MCP', async () => {
+    const el = await mount();
+    const guide = el.querySelector<HTMLElement>('[data-testid="setup-guide"]')!;
+    const skill = guide.querySelector<HTMLElement>('[data-testid="setup-skill"]')!;
+    // Under the three steps, the last thing in the guide's card.
+    expect(guide.lastElementChild).toBe(skill);
+    expect(skill.querySelector('h3')!.textContent).toBe(m.guideSkillTitle);
+    expect(skill.textContent).toContain(
+      'Download the skill: a zip that teaches any agent with a terminal to use the Dapta Calendars API with the same key.',
+    );
+    // A button that fetches the zip (skill-download.spec.tsx has its states), not a bare link.
+    const download = skill.querySelector<HTMLButtonElement>('button[data-testid="setup-skill-download"]')!;
+    expect(download.textContent).toBe(m.guideSkillButton);
+    expect(skill.querySelector('a')).toBeNull();
+    expect(skill.querySelector('[data-testid="setup-skill-unavailable"]')).toBeNull();
+  });
+
+  it('says the skill is not available instead of offering a download that would fail', async () => {
+    const el = await mount({ skillAvailable: false });
+    const skill = el.querySelector<HTMLElement>('[data-testid="setup-skill"]')!;
+    expect(skill.querySelector('[data-testid="setup-skill-download"]')).toBeNull();
+    expect(skill.querySelector('button, a')).toBeNull();
+    expect(skill.querySelector('[data-testid="setup-skill-unavailable"]')!.textContent).toBe(m.guideSkillUnavailable);
   });
 });

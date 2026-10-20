@@ -14,6 +14,9 @@
 /** The environment variable every snippet reads the API key from. */
 export const API_KEY_ENV = 'DAPTA_CALENDARS_API_KEY';
 
+/** How every API key this product mints begins (`dcl_<8 hex>_<secret>`). */
+export const KEY_PREFIX = 'dcl_';
+
 /** The name the server is registered under in the agent's config. */
 export const SERVER_NAME = 'dapta-calendars';
 
@@ -74,7 +77,7 @@ export function claudeConnectorLink(mcpUrl: string, name: string): string {
 }
 
 export function exportKeyCommand(): string {
-  return `export ${API_KEY_ENV}="dcl_your_key_here"`;
+  return `export ${API_KEY_ENV}="${KEY_PREFIX}your_key_here"`;
 }
 
 // --- Scopes -----------------------------------------------------------------

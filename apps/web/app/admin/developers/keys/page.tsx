@@ -72,7 +72,9 @@ export default async function DeveloperKeysPage() {
   // Sign-in through an external authorization server: no consent page or
   // Connected apps of ours (the list below only holds this API's own grants).
   const external = oauth.external === true;
-  const { mcpUrl } = resolveMcpConfig();
+  // The API's public origin is also what the skill zip is written for: with
+  // none, the guide shows a line instead of a download that would fail.
+  const { mcpUrl, apiOrigin } = resolveMcpConfig();
   const snippets: ConnectSnippets | null = mcpEnabled && mcpUrl
     ? {
         mcpUrl,
@@ -98,6 +100,7 @@ export default async function DeveloperKeysPage() {
         appsConnected={oauth.grants.length > 0}
         productName={PRODUCT_NAME}
         docsLabel={admin.developerNav.docs}
+        skillAvailable={apiOrigin !== null}
         messages={m}
         locale={locale}
       />

@@ -100,6 +100,10 @@ export default defineConfig({
         // The web's server-side API base goes through the fault proxy, which
         // is transparent unless a test tells it to answer 429 or a canned reply.
         API_URL: E2E.proxy,
+        // The API's public address, as a deployment sets it: the MCP snippets
+        // and the skill zip (skill-zip.spec.ts) are written for it. Without it a
+        // production build has no public address and offers no download.
+        API_PUBLIC_URL: E2E.api,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
         // Runtime, like on a deployment: the address Connect and keys shows when the
         // API reports MCP on (mcp-page.spec.ts). The suite's API serves it.

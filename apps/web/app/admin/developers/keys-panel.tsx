@@ -32,6 +32,7 @@ export function KeysPanel({
   appsConnected,
   productName,
   docsLabel,
+  skillAvailable,
   messages: m,
   locale,
 }: {
@@ -48,6 +49,8 @@ export function KeysPanel({
   appsConnected: boolean;
   productName: string;
   docsLabel: string;
+  /** The skill zip can be built here (the installation has a public API address). */
+  skillAvailable: boolean;
   messages: DevMessages;
   locale: Locale;
 }) {
@@ -67,6 +70,7 @@ export function KeysPanel({
         agentConnected={agentConnected}
         productName={productName}
         docsLabel={docsLabel}
+        skillAvailable={skillAvailable}
         onCreate={() => setCreateOpen(true)}
       />
       <ApiKeys
