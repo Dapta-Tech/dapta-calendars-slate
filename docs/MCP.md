@@ -88,18 +88,21 @@ and `/v1/machine/bookings/:uid/cancel`) accept `bookings:cancel` **or**
 
 `hold_slot` places the same soft hold the booking page takes when a visitor picks
 a time. For about 10 minutes no slot list offers the time (booking pages, the
-MCP slot tools, the REST slot routes), the MCP booking and reschedule tools
-refuse it to anyone but the holder (`SLOT_TAKEN`), and team bookings leave the
-held host out, on every route. Both checks run inside the booking's locked
-write, where the hold write runs too, so a hold and a booking over one host can
-never both get through. Book it with `book_meeting` or `create_booking`, passing
-the `hold_id` and the same `start`; the booking consumes the hold. An unused
-hold simply expires.
+MCP slot tools, the REST slot routes). `book_meeting` and `create_booking`
+refuse it to anyone but the holder (`SLOT_TAKEN`), who books it by passing its
+`hold_id`. `reschedule_booking` takes no `hold_id`, so it refuses to move a
+booking into any held time, the caller's own hold included. A new team booking
+leaves a held host out, on every route. These checks run inside the booking's
+locked write, where the hold write runs too and checks bookings again, so a hold
+and a booking over one host can never both get through. Book the held time with
+`book_meeting` or `create_booking`, passing the `hold_id` and the same `start`;
+the booking consumes the hold. An unused hold simply expires.
 
-What a hold does not promise yet: a personal (one-host) booking made straight
-through the REST API (`/v2/bookings`, the public booking route, the machine API)
-is not checked against holds, so it can still take a held time. Team bookings
-are checked on every route.
+What a hold does not promise yet: a one-host booking made straight through the
+REST API (`/v2/bookings`, the public booking route, the machine API) is not
+checked against holds, and a move through the REST API (`/v2` or v1 reschedule,
+team bookings included) checks holds only before its write, not under the lock.
+Either can still take a held time.
 
 - **Who can use it.** A hold made with one API key or OAuth connection is
   usable only by that key or connection; a hold made with a sign-in through an
