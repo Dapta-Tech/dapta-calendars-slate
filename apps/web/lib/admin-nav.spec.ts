@@ -7,6 +7,7 @@ import {
   DEVELOPERS_HREF,
   DEVELOPERS_KEYS_HREF,
   DEVELOPERS_WEBHOOKS_HREF,
+  platformNavHref,
 } from './admin-nav';
 
 /**
@@ -36,6 +37,15 @@ describe('adminNav', () => {
     expect(keys(items)).not.toContain('developers');
     // Docs is for everyone: reading the manual needs no role.
     expect(keys(items).at(-1)).toBe('docs');
+  });
+
+  it('ends with the Dapta Agents door, external, only when the deployment has a platform', () => {
+    const PLATFORM = 'https://platform.example.test/?utm_source=calendars&utm_medium=sidebar';
+    const items = adminNav({ isAdmin: false, docsHref: DOCS, platformHref: PLATFORM });
+    expect(keys(items).slice(-2)).toEqual(['docs', 'agents']);
+    expect(items.at(-1)).toMatchObject({ href: PLATFORM, external: true, icon: 'agents' });
+    expect(keys(adminNav({ isAdmin: true, docsHref: DOCS }))).not.toContain('agents');
+    expect(keys(adminNav({ isAdmin: true, docsHref: DOCS, platformHref: null }))).not.toContain('agents');
   });
 
   it('has no Docs item when the deployment configures no docs (a fork, by default)', () => {
@@ -72,6 +82,21 @@ describe('adminNav', () => {
       const admin = getMessages(locale).admin;
       for (const item of adminNav({ isAdmin: true, docsHref: DOCS })) expect(admin.nav[item.key]).toBeTruthy();
       for (const page of DEVELOPER_PAGES) expect(admin.developerNav[page.key]).toBeTruthy();
+    }
+  });
+});
+
+describe('platformNavHref', () => {
+  it('tags the platform address as a click from the sidebar', () => {
+    const url = new URL(platformNavHref('https://platform.example.test/app')!);
+    expect(url.origin + url.pathname).toBe('https://platform.example.test/app');
+    expect(url.searchParams.get('utm_source')).toBe('calendars');
+    expect(url.searchParams.get('utm_medium')).toBe('sidebar');
+  });
+
+  it('is null with no platform, or one that is not an http(s) URL', () => {
+    for (const v of [undefined, '', '   ', 'platform.example.test', 'javascript:alert(1)']) {
+      expect(platformNavHref(v)).toBeNull();
     }
   });
 });

@@ -17,7 +17,8 @@ export type NavIcon =
   | 'calendarPlus'
   | 'cog'
   | 'mcp'
-  | 'book';
+  | 'book'
+  | 'agents';
 
 /** The MCP group: the pages under it, and the prefix that marks it active. */
 export const DEVELOPERS_HREF = '/admin/developers';
@@ -79,17 +80,50 @@ const PRODUCT_NAV: readonly NavItem[] = [
  * get it: the API refuses keys and webhooks to a plain member, and an item that
  * leads to "no access" is worse than no item.
  *
- * Docs is the product documentation in the reader's language, external, last
+ * Docs is the product documentation in the reader's language, external,
  * because it leaves the app. It exists only when the deployment says where its
  * docs live (`docsHref`, resolved on the server from `DOCS_URL`): a fork with
  * nothing configured carries no dead link and no link to someone else's docs.
+ *
+ * Last, and only on a deployment that has a platform (`platformHref`, from
+ * NEXT_PUBLIC_PLATFORM_URL): "Dapta Agents", the door to the wider platform,
+ * exactly as the dForms rail ends. In the list rather than a separate block so
+ * the rail reads as one list, external like Docs, and absent on a fork.
  */
-export function adminNav({ isAdmin, docsHref }: { isAdmin: boolean; docsHref: string | null }): NavItem[] {
+export function adminNav({
+  isAdmin,
+  docsHref,
+  platformHref = null,
+}: {
+  isAdmin: boolean;
+  docsHref: string | null;
+  platformHref?: string | null;
+}): NavItem[] {
   return [
     ...PRODUCT_NAV,
     ...(isAdmin
       ? [{ key: 'developers', href: DEVELOPERS_HREF, icon: 'mcp', children: DEVELOPER_PAGES } as const]
       : []),
     ...(docsHref ? [{ key: 'docs', href: docsHref, icon: 'book', external: true } as const] : []),
+    ...(platformHref ? [{ key: 'agents', href: platformHref, icon: 'agents', external: true } as const] : []),
   ];
+}
+
+/**
+ * The platform door's address: the deployment's platform URL tagged as a click
+ * from this app's sidebar (`utm_source=calendars`, `utm_medium=sidebar`, the
+ * same tags as the Docs item), or null when there is no platform (a fork).
+ */
+export function platformNavHref(base: string | undefined): string | null {
+  const raw = base?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    url.searchParams.set('utm_source', 'calendars');
+    url.searchParams.set('utm_medium', 'sidebar');
+    return url.toString();
+  } catch {
+    return null;
+  }
 }

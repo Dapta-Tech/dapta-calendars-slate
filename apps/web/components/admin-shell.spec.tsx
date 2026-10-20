@@ -10,7 +10,7 @@
  */
 import { act, type AnchorHTMLAttributes, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getMessages, type Locale } from '@slate/shared';
 
 const nav = vi.hoisted(() => ({ pathname: '/admin' }));
@@ -32,10 +32,17 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }));
-// Server actions: never called here, only imported by the footer's controls.
+// Server actions: stubs, so Sign out can be pressed without leaving the page.
 vi.mock('@/app/login/actions', () => ({ signOutAction: vi.fn() }));
+// The analytics identity Sign out has to drop; the rest of the port stays real.
+const analytics = vi.hoisted(() => ({ resetAnalytics: vi.fn() }));
+vi.mock('@/lib/analytics/port', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/analytics/port')>()),
+  resetAnalytics: analytics.resetAnalytics,
+}));
 vi.mock('@/app/admin/account-actions', () => ({ searchAccountsAction: vi.fn(), switchAccountAction: vi.fn() }));
 
+import { signOutAction } from '@/app/login/actions';
 import { AdminShell } from './admin-shell';
 
 const DOCS = 'https://docs.example.test/?utm_source=calendars&utm_medium=sidebar';
@@ -47,11 +54,30 @@ beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
+beforeEach(() => {
+  // The rail's menus are AnchoredMenus, which re-measure on resize; jsdom has none.
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  // No layout in jsdom: a menu whose trigger measures 0x0 closes itself (the
+  // trigger is hidden), so every element gets a size, as dForms' rail specs do.
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ x: 10, y: 200, width: 44, height: 44 }),
+  );
+});
+
 afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 interface ShellOpts {
@@ -60,12 +86,15 @@ interface ShellOpts {
   docsHref?: string | null;
   collapsed?: boolean;
   locale?: Locale;
+  accounts?: { id: string; accountId: string; name: string }[];
 }
 
 function shell(opts: ShellOpts) {
   return (
     <AdminShell
-      user={{ displayName: 'Alex Rivera', handle: 'alex-rivera', accountCode: 'acme' }}
+      user={{ displayName: 'Alex Rivera', email: 'alex@example.com', handle: 'alex-rivera', accountCode: 'acme' }}
+      accounts={opts.accounts}
+      currentAccountId={opts.accounts?.[0]?.accountId ?? null}
       messages={getMessages(opts.locale ?? 'en').admin}
       initialTheme="light"
       initialCollapsed={opts.collapsed ?? false}
@@ -104,7 +133,7 @@ const trigger = (rail: Element) => rail.querySelector<HTMLButtonElement>('[data-
 const docsLink = (rail: Element) => rail.querySelector<HTMLAnchorElement>('[data-testid="nav-docs"]');
 const press = (el: Element, key: string) =>
   act(async () => {
-    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   });
 
 describe('AdminShell: the MCP group', () => {
@@ -168,7 +197,7 @@ describe('AdminShell: the MCP group', () => {
     expect(button.querySelector('.sr-only')!.textContent).toBe('MCP');
 
     await act(async () => button.click());
-    const menu = desktop.querySelector<HTMLElement>('[data-testid="nav-developers-flyout"]')!;
+    const menu = document.querySelector<HTMLElement>('[data-testid="nav-developers-flyout"]')!;
     expect(menu.getAttribute('role')).toBe('menu');
     expect(menu.getAttribute('aria-label')).toBe('MCP');
     expect(button.getAttribute('aria-expanded')).toBe('true');
@@ -187,7 +216,7 @@ describe('AdminShell: the MCP group', () => {
     expect(document.activeElement).toBe(items[2]);
 
     await press(document.activeElement!, 'Escape');
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
     expect(document.activeElement).toBe(button);
   });
 
@@ -196,9 +225,9 @@ describe('AdminShell: the MCP group', () => {
     const { desktop } = rails(el);
     const button = trigger(desktop)!;
     await act(async () => button.click());
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
     await press(document.activeElement!, 'Tab');
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
     expect(document.activeElement).toBe(button);
   });
 
@@ -242,15 +271,15 @@ describe('AdminShell: the MCP group', () => {
     const { desktop } = rails(el);
     const button = trigger(desktop)!;
     await act(async () => button.click());
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
     await act(async () => {
       el.querySelector('main')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
 
     await act(async () => button.click());
-    await act(async () => desktop.querySelector<HTMLElement>('[data-testid="nav-developers-flyout-docs"]')!.click());
-    expect(desktop.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    await act(async () => document.querySelector<HTMLElement>('[data-testid="nav-developers-flyout-docs"]')!.click());
+    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
   });
 
   it('reads in Spanish for a Spanish reader', async () => {
@@ -290,5 +319,219 @@ describe('AdminShell: the Docs item', () => {
     const a = docsLink(rails(el).desktop)!;
     expect(a.getAttribute('title')).toBe('Documentación');
     expect(a.querySelector('.sr-only')!.textContent).toBe('Documentación');
+  });
+});
+
+describe('AdminShell: the dForms rail look', () => {
+  it('sits on the sidebar ground, pinned to the viewport with its own scroll, in both rails', async () => {
+    const el = await mount({});
+    const { desktop, drawer } = rails(el);
+    for (const cls of ['bg-sidebar', 'md:sticky', 'md:top-0', 'md:h-dvh', 'md:overflow-y-auto']) {
+      expect(desktop.className).toContain(cls);
+    }
+    expect(drawer.className).toContain('bg-sidebar');
+    // Containment is `inert`, not aria-modal: the rail's menus live at the end of <body>.
+    expect(drawer.hasAttribute('aria-modal')).toBe(false);
+  });
+
+  it('marks the current row with the wash and the accent bar, and no other row', async () => {
+    const el = await mount({ pathname: '/admin/bookings' });
+    const links = Array.from(rails(el).desktop.querySelectorAll<HTMLAnchorElement>('nav a'));
+    const current = links.filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(current.map((a) => a.textContent)).toEqual(['Bookings']);
+    expect(current[0]!.className).toContain('before:bg-primary-edge');
+    expect(current[0]!.className).toContain('bg-muted');
+    for (const a of links.filter((x) => x !== current[0])) expect(a.className).not.toContain('before:bg-primary-edge');
+  });
+
+  it('ends with the person: name and email on one button whose menu holds the public page and Sign out', async () => {
+    const el = await mount({});
+    const { desktop } = rails(el);
+    const trigger = desktop.querySelector<HTMLButtonElement>('[data-testid="profile-menu-trigger"]')!;
+    expect(trigger.textContent).toContain('Alex Rivera');
+    expect(trigger.textContent).toContain('alex@example.com');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    // No loose icon actions beside the name any more.
+    expect(desktop.querySelector('a[href="/acme/alex-rivera"]')).toBeNull();
+    expect(desktop.querySelector('form button[type="submit"]')).toBeNull();
+
+    await act(async () => trigger.click());
+    const menu = document.querySelector<HTMLElement>('[data-testid="profile-menu"]')!;
+    expect(menu.getAttribute('aria-label')).toBe('Account menu');
+    const view = menu.querySelector<HTMLAnchorElement>('[data-testid="profile-view-public"]')!;
+    expect(view.getAttribute('href')).toBe('/acme/alex-rivera');
+    expect(view.getAttribute('target')).toBe('_blank');
+    expect(menu.querySelector('[data-testid="profile-sign-out"]')!.textContent).toBe('Sign out');
+    expect(document.activeElement).toBe(view);
+  });
+
+  it('puts the account card under the wordmark, above the nav, for staff who can switch', async () => {
+    const el = await mount({ accounts: [{ id: '1', accountId: 'acc-1', name: 'Northwind' }] });
+    const desktop = rails(el).desktop;
+    const card = desktop.querySelector('[data-testid="account-switcher-trigger"]')!;
+    expect(card.textContent).toContain('Northwind');
+    const nav = desktop.querySelector('nav')!;
+    expect(card.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Everyone else has no list to pick from, so nothing renders.
+    act(() => root?.unmount());
+    host?.remove();
+    const plain = await mount({});
+    expect(plain.querySelector('[data-testid="account-switcher-trigger"]')).toBeNull();
+  });
+
+  it('closes only the menu on Escape inside the open drawer', async () => {
+    const el = await mount({});
+    const hamburger = Array.from(el.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === 'Open navigation')!;
+    await act(async () => hamburger.click());
+    expect(hamburger.getAttribute('aria-expanded')).toBe('true');
+    const trigger = rails(el).drawer.querySelector<HTMLButtonElement>('[data-testid="profile-menu-trigger"]')!;
+    await act(async () => trigger.click());
+    expect(document.querySelector('[data-testid="profile-menu"]')).not.toBeNull();
+    await press(document.activeElement!, 'Escape');
+    expect(document.querySelector('[data-testid="profile-menu"]')).toBeNull();
+    expect(hamburger.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('ends the list with the Dapta Agents door when the deployment has a platform, and only then', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PLATFORM_URL', 'https://platform.example.test/');
+    vi.resetModules();
+    try {
+      const { AdminShell: WithPlatform } = await import('./admin-shell');
+      nav.pathname = '/admin';
+      host = document.createElement('div');
+      document.body.append(host);
+      root = createRoot(host);
+      await act(async () =>
+        root!.render(
+          <WithPlatform
+            user={{ displayName: 'Alex Rivera', email: null, handle: null, accountCode: 'acme' }}
+            messages={getMessages('en').admin}
+            initialTheme="light"
+            isAdmin
+            docsHref={DOCS}
+          >
+            <p>page</p>
+          </WithPlatform>,
+        ),
+      );
+      const items = rails(host).desktop.querySelectorAll('nav > ul > li');
+      const door = items[items.length - 1]!.querySelector<HTMLAnchorElement>('[data-testid="nav-agents"]')!;
+      expect(door.textContent).toContain('Dapta Agents');
+      expect(door.getAttribute('target')).toBe('_blank');
+      const href = new URL(door.getAttribute('href')!);
+      expect(href.origin).toBe('https://platform.example.test');
+      expect(href.searchParams.get('utm_source')).toBe('calendars');
+      expect(href.searchParams.get('utm_medium')).toBe('sidebar');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // The module this file imported at the top read no platform: no door.
+    const el = await mount({});
+    expect(el.querySelector('[data-testid="nav-agents"]')).toBeNull();
+  });
+});
+
+describe('AdminShell: the rail menus by keyboard', () => {
+  async function openProfile() {
+    const el = await mount({});
+    const trigger = rails(el).desktop.querySelector<HTMLButtonElement>('[data-testid="profile-menu-trigger"]')!;
+    await act(async () => trigger.click());
+    const menu = document.querySelector<HTMLElement>('[data-testid="profile-menu"]')!;
+    return { trigger, menu };
+  }
+
+  it('moves between the profile menu items with the arrows, Home and End', async () => {
+    const { menu } = await openProfile();
+    const [view, signOut] = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(document.activeElement).toBe(view);
+    await press(view!, 'ArrowDown');
+    expect(document.activeElement).toBe(signOut);
+    await press(signOut!, 'ArrowDown');
+    expect(document.activeElement).toBe(view);
+    await press(view!, 'End');
+    expect(document.activeElement).toBe(signOut);
+    await press(signOut!, 'Home');
+    expect(document.activeElement).toBe(view);
+  });
+
+  it('closes the profile menu on Tab and hands focus to its button, so Tab moves on from the rail', async () => {
+    const { trigger, menu } = await openProfile();
+    const signOut = menu.querySelector<HTMLElement>('[data-testid="profile-sign-out"]')!;
+    signOut.focus();
+    await press(signOut, 'Tab');
+    expect(document.querySelector('[data-testid="profile-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps Tab inside the account picker (a dialog) until it steps off either end', async () => {
+    const el = await mount({
+      accounts: [
+        { id: '1', accountId: 'acc-1', name: 'Northwind' },
+        { id: '2', accountId: 'acc-2', name: 'Contoso' },
+      ],
+    });
+    const trigger = rails(el).desktop.querySelector<HTMLButtonElement>('[data-testid="account-switcher-trigger"]')!;
+    await act(async () => trigger.click());
+    const panel = document.querySelector<HTMLElement>('[data-testid="account-switcher-menu"]')!;
+    // A dialog has no menu items: focus goes to its first field once placed.
+    expect(document.activeElement).toBe(panel.querySelector('input[type="search"]'));
+    const tabbable = Array.from(
+      panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled])'),
+    );
+    expect(tabbable.length).toBeGreaterThan(1);
+    tabbable[0]!.focus();
+    await press(tabbable[0]!, 'Tab');
+    expect(document.querySelector('[data-testid="account-switcher-menu"]')).not.toBeNull();
+    const last = tabbable[tabbable.length - 1]!;
+    last.focus();
+    await press(last, 'Tab');
+    expect(document.querySelector('[data-testid="account-switcher-menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('drops the analytics identity on Sign out, before the session goes', async () => {
+    const { menu } = await openProfile();
+    analytics.resetAnalytics.mockClear();
+    await act(async () => menu.querySelector<HTMLButtonElement>('[data-testid="profile-sign-out"]')!.click());
+    expect(analytics.resetAnalytics).toHaveBeenCalledTimes(1);
+    expect(signOutAction).toHaveBeenCalled();
+  });
+});
+
+describe('AdminShell: a fork', () => {
+  it('shows its chip and name once in the mobile top bar, with the classes on wrappers', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PRODUCT_NAME', 'Acme Booking');
+    vi.resetModules();
+    try {
+      const { AdminShell: Fork } = await import('./admin-shell');
+      nav.pathname = '/admin';
+      host = document.createElement('div');
+      document.body.append(host);
+      root = createRoot(host);
+      await act(async () =>
+        root!.render(
+          <Fork
+            user={{ displayName: 'Alex Rivera', email: null, handle: null, accountCode: 'acme' }}
+            messages={getMessages('en').admin}
+            initialTheme="light"
+            isAdmin
+            docsHref={DOCS}
+          >
+            <p>page</p>
+          </Fork>,
+        ),
+      );
+      const header = host.querySelector('header')!;
+      // The menu button, then exactly the two brand wrappers: nothing else.
+      const [, wide, narrow, ...rest] = Array.from(header.children) as HTMLElement[];
+      expect(rest).toHaveLength(0);
+      expect(wide!.className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'min-[360px]:flex']));
+      expect(narrow!.className.split(' ')).toEqual(expect.arrayContaining(['min-[360px]:hidden']));
+      expect(wide!.textContent).toBe('AAcme Booking');
+      expect(narrow!.textContent).toBe('A');
+      expect(header.querySelector('svg')).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
