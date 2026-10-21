@@ -258,10 +258,12 @@ export class AdminCrudController {
     // A shared daily cap: every invitation sends an email, and a free account
     // must not become a way to mail strangers. Taken before the member exists,
     // given back when the invite itself is refused (an address already there).
-    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY))) throw inviteLimit();
+    // One clock for the take and any refund, so both land on the same UTC day.
+    const now = Date.now();
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY, now))) throw inviteLimit();
     // An invited member is a new host: born with the new look, like a sign-up.
     const created = await inviteMember(this.db, p.accountId, input, withNewHostBranding());
-    if (!created.ok) await refundInvitationQuota(this.db, p.accountId);
+    if (!created.ok) await refundInvitationQuota(this.db, p.accountId, now);
     const member = unwrapCrud(created);
 
     // O2 (#65 → Growth funnel): the invitee reaches Dapta's marketing CRM the
@@ -282,7 +284,7 @@ export class AdminCrudController {
     const outcome = this.email
       ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
       : 'off';
-    if (outcome === 'failed') await refundInvitationQuota(this.db, p.accountId);
+    if (outcome === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
     const inviteEmail = outcome === 'queued' || outcome === 'failed' ? outcome : 'off';
     void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
     return { ...member, inviteEmail };
@@ -304,10 +306,11 @@ export class AdminCrudController {
     if (target.status !== 'invited') {
       throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
     }
-    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY))) throw inviteLimit();
+    const now = Date.now();
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY, now))) throw inviteLimit();
     const outcome = this.email ? await this.email.enqueueMemberInvite(p.accountId, id, p.memberId, { locale }) : 'off';
-    // Only a send that went out (or would have, on a server without mail) spends the allowance.
-    if (outcome === 'too_soon' || outcome === 'not_invited' || outcome === 'failed') await refundInvitationQuota(this.db, p.accountId);
+    // Only a send that was queued (or would have been, on a server without mail) spends the allowance.
+    if (outcome === 'too_soon' || outcome === 'not_invited' || outcome === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
     if (outcome === 'too_soon') {
       throw new HttpException({ error: 'RESEND_TOO_SOON', message: 'An invitation just went out. Try again in a minute.' }, 429);
     }

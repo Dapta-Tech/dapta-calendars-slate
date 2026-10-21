@@ -261,7 +261,7 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     expect(list.map((w) => [w.accountId, w.current])).toEqual([[pablo.accountId, false]]);
   });
 
-  it('skips a queued invitation once the member joined or was removed, and gives the allowance back', async () => {
+  it('skips a queued invitation once the member joined or was removed; the send keeps its share of the allowance', async () => {
     const { alejandro, invited } = await setUp();
     const sent = async () =>
       Number((await db.get<{ sent: number | string }>(sql`SELECT sent FROM member_invite_quota WHERE account_id = ${alejandro.accountId}`))?.sent ?? 0);
@@ -269,7 +269,8 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     const [row] = await inviteRows();
     await expect(email.deliver(row!.action, row!.payload, row!.account_id, 0)).rejects.toBeInstanceOf(OutboxSkipError);
-    expect(await sent()).toBe(0);
+    // A skip retried by the worker can never give it back twice: it gives nothing back.
+    expect(await sent()).toBe(1);
 
     await db.run(sql`DELETE FROM member WHERE id = ${invited.id}`);
     await expect(email.deliver(row!.action, row!.payload, row!.account_id, 0)).rejects.toBeInstanceOf(OutboxSkipError);
