@@ -43,6 +43,9 @@ const SNIPPETS: ConnectSnippets = {
   exportKey: 'export DAPTA_CALENDARS_API_KEY="dcl_your_key_here"',
   header: 'Authorization: Bearer $DAPTA_CALENDARS_API_KEY',
   claudeConnector: 'https://claude.ai/settings/connectors',
+  cursorSignInDeeplink: 'cursor://anysphere.cursor-deeplink/mcp/install?name=x&config=signin',
+  cursorSignInJson: '{"mcpServers":{"x":{"url":"https://calendar.example.test/mcp"}}}',
+  claudeCodeSignIn: 'claude mcp add --transport http x https://calendar.example.test/mcp',
 };
 
 const key = (over: Partial<ApiKeyRow> = {}): ApiKeyRow => ({
@@ -79,6 +82,8 @@ async function mount(
     snippets?: ConnectSnippets | null;
     mcpAvailable?: boolean;
     skillAvailable?: boolean;
+    oauth?: boolean;
+    external?: boolean;
   } = {},
 ) {
   host = document.createElement('div');
@@ -92,8 +97,8 @@ async function mount(
         now={NOW}
         mcpAvailable={opts.mcpAvailable ?? true}
         snippets={opts.snippets === undefined ? SNIPPETS : opts.snippets}
-        oauth={false}
-        external={false}
+        oauth={opts.oauth ?? false}
+        external={opts.external ?? false}
         appsConnected={opts.appsConnected ?? false}
         productName="Dapta Calendars"
         docsLabel="API docs"
@@ -106,7 +111,7 @@ async function mount(
   return host;
 }
 
-const step = (el: HTMLElement, id: 'key' | 'agent' | 'try') => el.querySelector<HTMLElement>(`[data-testid="setup-step-${id}"]`)!;
+const step = (el: HTMLElement, id: 'key' | 'agent' | 'try' | 'sign-in') => el.querySelector<HTMLElement>(`[data-testid="setup-step-${id}"]`)!;
 const createButtons = (el: HTMLElement) =>
   Array.from(el.querySelectorAll('button')).filter((b) => b.textContent === m.createKey);
 
@@ -182,7 +187,9 @@ describe('KeysPanel', () => {
 
     el = await mount({ keys: [key({ lastUsedAt: NOW - DAY })] });
     expect(step(el, 'agent').hasAttribute('data-done')).toBe(true);
-    expect(step(el, 'agent').textContent).toContain(m.guideAgentDone);
+    // Says what happened: a key was used, not "or an app has signed in".
+    expect(step(el, 'agent').textContent).toContain(m.guideKeyUsedDone);
+    expect(step(el, 'agent').textContent).not.toContain(m.guideAgentDone);
     act(() => root?.unmount());
     host?.remove();
 
@@ -194,6 +201,7 @@ describe('KeysPanel', () => {
 
     el = await mount({ appsConnected: true });
     expect(step(el, 'agent').hasAttribute('data-done')).toBe(true);
+    expect(step(el, 'agent').textContent).toContain(m.guideAgentDone);
   });
 
   it('puts the agent tabs in step 2, with the deployment’s MCP address', async () => {
@@ -201,6 +209,74 @@ describe('KeysPanel', () => {
     const agent = step(el, 'agent');
     expect(agent.querySelector('[role="tablist"]')).not.toBeNull();
     expect(agent.textContent).toContain(SNIPPETS.mcpUrl);
+  });
+
+  describe('sign-in through an external authorization server', () => {
+    const tabs = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const click = async (b: HTMLElement) => act(async () => b.click());
+
+    it('leads with signing in from the app; a key is step 2, for headless agents and scripts', async () => {
+      const el = await mount({ oauth: true, external: true });
+      const steps = Array.from(el.querySelectorAll<HTMLElement>('[data-testid^="setup-step-"]')).map((s) => s.dataset.testid);
+      expect(steps).toEqual(['setup-step-sign-in', 'setup-step-key', 'setup-step-try']);
+      const signIn = step(el, 'sign-in');
+      expect(signIn.querySelector('h3')!.textContent).toBe(m.signInTitle);
+      expect(signIn.textContent).toContain(m.signInBody);
+      expect(signIn.textContent).toContain(m.signInAccess);
+      expect(signIn.textContent).toContain(m.signInDisconnect);
+      // The sign-in apps, chat apps first and selected; no key anywhere in them.
+      expect(tabs(signIn).map((t) => t.textContent)).toEqual([m.chatOAuthTitle, m.tabCursor, m.tabClaudeCode, m.tabOther]);
+      expect(tabs(signIn)[0]!.getAttribute('aria-selected')).toBe('true');
+      expect(signIn.querySelector('[role="tablist"]')!.getAttribute('aria-label')).toBe(m.signInTitle);
+      expect(signIn.textContent).toContain(m.chatSignInLead);
+      expect(signIn.textContent).not.toContain(SNIPPETS.exportKey);
+
+      const keyStep = step(el, 'key');
+      expect(keyStep.querySelector('h3')!.textContent).toBe(m.guideKeyAltTitle);
+      expect(keyStep.textContent).toContain(m.guideKeyAltBody);
+      expect(keyStep.querySelector('[data-testid="setup-create-key"]')).not.toBeNull();
+      expect(tabs(keyStep).map((t) => t.textContent)).toEqual([m.tabCursor, m.tabClaudeCode, m.tabCodex, m.tabOther]);
+      expect(keyStep.textContent).toContain(SNIPPETS.exportKey);
+      expect(el.textContent).not.toContain(m.guideKeyTitle);
+    });
+
+    it('gives Cursor, Claude Code and any other app their setups with no key', async () => {
+      const el = await mount({ oauth: true, external: true });
+      const signIn = step(el, 'sign-in');
+      await click(tabs(signIn)[1]!);
+      expect(signIn.querySelector('a[href^="cursor://"]')!.getAttribute('href')).toBe(SNIPPETS.cursorSignInDeeplink);
+      expect(signIn.textContent).toContain(m.signInCursorLead);
+      expect(signIn.textContent).toContain(SNIPPETS.cursorSignInJson);
+      await click(tabs(signIn)[2]!);
+      expect(signIn.textContent).toContain(SNIPPETS.claudeCodeSignIn);
+      expect(signIn.textContent).toContain('Then type /mcp in Claude Code, pick dapta-calendars and choose Authenticate to sign in.');
+      await click(tabs(signIn)[3]!);
+      expect(signIn.textContent).toContain(m.signInOtherLead);
+      expect(signIn.textContent).toContain(SNIPPETS.mcpUrl);
+      expect(signIn.textContent).not.toContain(SNIPPETS.header);
+    });
+
+    it('never marks the sign-in done (nothing this page can read), and the key step only from a used key', async () => {
+      let el = await mount({ oauth: true, external: true, keys: [key()] });
+      expect(step(el, 'sign-in').hasAttribute('data-done')).toBe(false);
+      expect(step(el, 'key').hasAttribute('data-done')).toBe(false);
+      expect(step(el, 'key').textContent).toContain(m.guideKeyDone);
+      act(() => root?.unmount());
+      host?.remove();
+
+      el = await mount({ oauth: true, external: true, keys: [key({ lastUsedAt: NOW - DAY })] });
+      expect(step(el, 'sign-in').hasAttribute('data-done')).toBe(false);
+      expect(step(el, 'key').hasAttribute('data-done')).toBe(true);
+      expect(step(el, 'key').textContent).toContain(m.guideKeyUsedDone);
+      expect(el.textContent).not.toContain(m.guideAgentDone);
+    });
+
+    it('says so in both steps when the deployment has no public MCP address', async () => {
+      const el = await mount({ oauth: true, external: true, snippets: null });
+      expect(step(el, 'sign-in').textContent).toContain(m.mcpUrlMissing);
+      expect(step(el, 'sign-in').textContent).not.toContain(m.chatTitle);
+      expect(step(el, 'key').textContent).toContain(m.mcpUrlMissing);
+    });
   });
 
   it('with MCP off: one sentence, no steps, no address, and the list keeps the one Create', async () => {

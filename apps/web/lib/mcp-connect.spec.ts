@@ -5,11 +5,14 @@ import {
   MCP_TOOLS,
   SCOPE_CATALOG,
   claudeCodeCommand,
+  claudeCodeSignInCommand,
   claudeConnectorLink,
   codexConfigToml,
   cursorDeeplink,
   cursorMcpJson,
   cursorServerEntry,
+  cursorSignInDeeplink,
+  cursorSignInJson,
   encodeCursorConfig,
   expiresAtMsFromDays,
   expiryState,
@@ -18,6 +21,21 @@ import {
 } from './mcp-connect';
 
 const URL_ = 'https://calendar.example.com/mcp';
+
+describe('sign-in snippets (an app that signs in itself)', () => {
+  it('Cursor gets the address alone, under the same server name, with no header and no variable', () => {
+    const link = cursorSignInDeeplink(URL_);
+    expect(link.startsWith('cursor://anysphere.cursor-deeplink/mcp/install?name=dapta-calendars&config=')).toBe(true);
+    const config = new URL(link.replace('cursor://', 'http://')).searchParams.get('config')!;
+    expect(JSON.parse(Buffer.from(config, 'base64').toString('utf8'))).toEqual({ url: URL_ });
+    expect(JSON.parse(cursorSignInJson(URL_))).toEqual({ mcpServers: { 'dapta-calendars': { url: URL_ } } });
+  });
+
+  it('Claude Code adds the server with no header', () => {
+    expect(claudeCodeSignInCommand(URL_)).toBe(`claude mcp add --transport http dapta-calendars ${URL_}`);
+    expect(claudeCodeSignInCommand(URL_)).not.toContain(API_KEY_ENV);
+  });
+});
 
 describe('Cursor deeplink', () => {
   const link = cursorDeeplink(URL_);

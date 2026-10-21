@@ -71,10 +71,11 @@ export async function signIn(page: Page, email: string): Promise<void> {
  */
 export async function rail(page: Page, mobile: boolean) {
   if (!mobile) return page.getByTestId('rail');
-  const toggle = page.getByRole('button', { name: 'Open navigation' });
+  // By test id: the button and the drawer are named in the reader's language.
+  const toggle = page.getByTestId('nav-open');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const drawer = page.getByRole('dialog', { name: 'Primary' });
+  const drawer = page.getByTestId('nav-drawer');
   // It slides in: wait until it rests at the left edge before measuring it.
   await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
   return drawer;

@@ -24,15 +24,17 @@ export default async function DeveloperDocsPage() {
   const title = admin.developerNav.docs;
   if (!allowed) return <DeveloperNoAccess locale={locale} title={title} />;
   const m = admin.developer;
-  const mcpEnabled = await adminApi.connectedApps().then(
-    (r) => r.mcpEnabled === true,
-    () => false,
+  const { mcpEnabled, signIn } = await adminApi.connectedApps().then(
+    // A sign-in (OAuth on, this API's own server or an external one) also
+    // works for the tools that need no particular scope.
+    (r) => ({ mcpEnabled: r.mcpEnabled === true, signIn: r.enabled || r.external === true }),
+    () => ({ mcpEnabled: false, signIn: false }),
   );
   const { apiOrigin } = resolveMcpConfig();
   return (
     <DeveloperPage title={title} subtitle={m.docsPageLead}>
       {mcpEnabled ? (
-        <AgentTools messages={m} />
+        <AgentTools messages={m} signIn={signIn} />
       ) : (
         <p data-testid="mcp-unavailable" className="mb-section max-w-prose text-sm text-muted-foreground">
           {m.mcpUnavailable}

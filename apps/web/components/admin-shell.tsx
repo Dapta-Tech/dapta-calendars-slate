@@ -462,6 +462,8 @@ export function AdminShell({
       currentAccountId={currentAccountId}
       fallbackLabel={user?.accountCode}
       collapsed={accountCollapsed}
+      messages={c.accountSwitcher}
+      loadingLabel={c.loading}
     />
   );
 
@@ -535,7 +537,8 @@ export function AdminShell({
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
-          aria-label="Open navigation"
+          aria-label={c.openNav}
+          data-testid="nav-open"
           aria-expanded={drawerOpen}
           className="flex h-11 w-11 items-center justify-center rounded-md text-foreground hover:bg-muted active:scale-[0.98]"
         >
@@ -571,7 +574,7 @@ export function AdminShell({
       >
         {brand}
         {renderAccount(railCollapsed)}
-        <nav ref={railNavRef} aria-label="Primary" className={navScroll}>
+        <nav ref={railNavRef} aria-label={c.primaryNav} className={navScroll}>
           <NavLinks
             items={items}
             collapsed={railCollapsed}
@@ -599,7 +602,8 @@ export function AdminShell({
           drawerOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         role="dialog"
-        aria-label="Primary"
+        aria-label={c.primaryNav}
+        data-testid="nav-drawer"
         // Containment is `inert` on everything else (the top bar and <main>),
         // not aria-modal: the rail's menus are portalled to the end of <body>,
         // and aria-modal would hide them from assistive tech here and nowhere

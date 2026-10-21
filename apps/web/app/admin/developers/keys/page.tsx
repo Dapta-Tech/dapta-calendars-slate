@@ -2,10 +2,13 @@ import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import {
   claudeCodeCommand,
+  claudeCodeSignInCommand,
   claudeConnectorLink,
   codexConfigToml,
   cursorDeeplink,
   cursorMcpJson,
+  cursorSignInDeeplink,
+  cursorSignInJson,
   exportKeyCommand,
   genericConnection,
 } from '@/lib/mcp-connect';
@@ -85,6 +88,9 @@ export default async function DeveloperKeysPage() {
         exportKey: exportKeyCommand(),
         header: genericConnection(mcpUrl).header,
         claudeConnector: claudeConnectorLink(mcpUrl, PRODUCT_NAME),
+        cursorSignInDeeplink: cursorSignInDeeplink(mcpUrl),
+        cursorSignInJson: cursorSignInJson(mcpUrl),
+        claudeCodeSignIn: claudeCodeSignInCommand(mcpUrl),
       }
     : null;
   return (
