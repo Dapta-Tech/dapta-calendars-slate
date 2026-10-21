@@ -520,9 +520,10 @@ Any agent that can read files and make HTTP requests can use it: give it \`${SKI
 
 /**
  * The OpenAPI document as shipped: the API's own, with `servers` pointed at
- * this installation. The document lists the hosted service's address first,
- * which is the wrong one for a fork or for another environment, and an agent
- * that reads `servers` would call it. Everything else is as the API served it.
+ * this installation. The API names its address only as it sees it (its own
+ * API_PUBLIC_URL, or a relative `/` when that is unset), and a relative server
+ * means nothing inside a zip, so an agent that reads `servers` gets the address
+ * this installation shows for its API. Everything else is as the API served it.
  */
 export function shippedOpenApi(doc: OpenApiDocument, apiUrl: string): OpenApiDocument {
   return { ...doc, servers: [{ url: apiUrl, description: 'This installation' }] };

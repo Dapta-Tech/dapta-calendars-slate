@@ -33,6 +33,25 @@ const optionalSecret = (minLength: number) =>
 const blankIsDefault = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema);
 
+/**
+ * A public base URL as the apps use it: trimmed, http(s) only, normalized
+ * (`URL.href`) with no trailing slash. Anything else, empty included, reads as
+ * unset, the same as the web does: a malformed value never stops a process
+ * booting, and the address it meant to name simply stays relative or
+ * unconfigured, which the pages that show it make visible.
+ */
+export function cleanPublicUrl(v: string | undefined): string | undefined {
+  const s = v?.trim();
+  if (!s) return undefined;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return undefined;
+    return u.href.replace(/\/+$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -46,8 +65,9 @@ export const serverEnvSchema = z.object({
   // https://api.calendar.example.com. Named in `/openapi.json` `servers` and
   // the `/docs` copy-paste examples. UNSET (a bare fork) keeps both relative to
   // wherever the API is served: never a hardcoded host, so a fork's docs never
-  // send its readers to someone else's API.
-  API_PUBLIC_URL: blankIsDefault(z.string().url().optional()),
+  // send its readers to someone else's API. Normalized by `cleanPublicUrl`; a
+  // value that is not an http(s) URL reads as unset.
+  API_PUBLIC_URL: z.string().optional().transform(cleanPublicUrl),
 
   // Email / notifications
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),

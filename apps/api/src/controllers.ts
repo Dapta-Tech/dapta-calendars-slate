@@ -90,11 +90,18 @@ export class DocsController {
   @Get('docs')
   @Header('content-type', 'text/html; charset=utf-8')
   docs(): string {
-    const baseUrl = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : 'https://api.your-domain.example';
-    // Unset: this page is served at `<api base>/docs`, so the browser knows the base.
-    const fillBase = this.apiPublicUrl
+    const base = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : null;
+    const baseUrl = base ?? 'https://api.your-domain.example';
+    // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
+    const openapiUrl = base ? `${base}/openapi.json` : '/openapi.json';
+    // Unset: this page is served at `<api base>/docs`, so the browser knows the
+    // base. The prefix is kept only when it is plain path characters.
+    const noscriptBase = base
       ? ''
-      : `<script>document.getElementById('base-url').textContent=location.origin+location.pathname.replace(/\\/docs\\/?$/,'');</script>`;
+      : `\n<noscript><p>Replace <code>BASE_URL</code> with this page's address minus <code>/docs</code>.</p></noscript>`;
+    const fillBase = base
+      ? ''
+      : `<script>(function(){var p=location.pathname.replace(/\\/docs\\/?$/i,'');document.getElementById('base-url').textContent=location.origin+(/^[A-Za-z0-9._~%\\/-]*$/.test(p)?p:'');})();</script>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dapta Calendars API</title>
@@ -108,7 +115,7 @@ a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px
 </style></head><body>
 <main class="intro">
 <h1>Dapta Calendars API</h1>
-<p>OpenAPI 3.1 source: <a href="/openapi.json"><code>/openapi.json</code></a>.
+<p>OpenAPI 3.1 source: <a href="${openapiUrl}"><code>/openapi.json</code></a>.
 This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
 <div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a
 <code>dcl_</code> API key. Never put the key in a URL. Flow Studio should use Bearer auth from Vault,
@@ -122,7 +129,7 @@ raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.
 <pre>BASE_URL="<span id="base-url">${baseUrl}</span>"
 curl "$BASE_URL/v2/event-types" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2024-06-14"</pre>
+  --header "cal-api-version: 2024-06-14"</pre>${noscriptBase}
 <h2>Copy-paste slots request</h2>
 <pre>curl --get "$BASE_URL/v2/slots" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
@@ -154,10 +161,10 @@ curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
 <code>CAL-COMPATIBILITY.md</code>.</p>
 </main>
 ${fillBase}
-<script id="api-reference" data-url="/openapi.json" data-configuration='{"theme":"default","hideModels":false}'></script>
+<script id="api-reference" data-url="${openapiUrl}" data-configuration='{"theme":"default","hideModels":false}'></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 <noscript><p class="intro">JavaScript is required for the interactive explorer. Use
-<a href="/openapi.json">the raw OpenAPI document</a> instead.</p></noscript>
+<a href="${openapiUrl}">the raw OpenAPI document</a> instead.</p></noscript>
 </body></html>`;
   }
 }
