@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   enqueueOutbox,
@@ -5,6 +6,10 @@ import {
   DEFAULT_MAX_ATTEMPTS,
   hasPendingCalendarJob,
   getNotificationSettings,
+  claimInvitationSend,
+  creationSendClaim,
+  releaseInvitationSend,
+  type InvitationSendClaim,
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
   defaultNotificationSetting,
@@ -20,11 +25,13 @@ import {
   MAX_ANSWER_ITEMS,
   collectBookingAnswers,
   defaultEnabledFor,
+  deliversEmail,
   extractTokens,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
   type EmailTemplateKey,
+  type MemberInviteNotification,
 } from '@slate/notifications';
 import { MAX_TEMPLATE_VALUE } from '@slate/engine';
 import { adminBookingPath, formatBookingLocation, getMessages } from '@slate/shared';
@@ -67,6 +74,18 @@ export class ConferencingLinkPendingError extends Error {
  * tells the invitee the opposite of the truth.
  */
 const LIVE_BOOKING_KINDS = new Set(['confirmation', 'reschedule', 'reminder', 'follow_up']);
+
+/** The outbox action of the workspace invitation (kind `email`). */
+export const MEMBER_INVITE_ACTION = 'member_invite';
+
+/**
+ * One invitation per member per minute, the first send included, so a double
+ * click or an impatient "Resend" cannot flood someone's inbox. Claimed in the
+ * database (`claimInvitationSend`), so it holds across replicas and restarts,
+ * on top of the shared daily cap per workspace that the controller takes
+ * (`takeInvitationQuota`).
+ */
+export const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
 
 /**
  * One side's mail about one booking goes out in the order it was queued
@@ -255,6 +274,119 @@ export class EmailEffects {
   private get gate(): EntitlementGate {
     this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
     return this._gate;
+  }
+
+  /**
+   * Queue the invitation email for an `invited` member, written in `locale`
+   * (else the inviter's language) and signed with the inviter's name. Answers
+   * `queued` when the row went in and this deployment really sends mail,
+   * `off` when it does not (log-only / noop: the admin is told to pass the word
+   * on), `too_soon` inside the per-member window, `not_invited`
+   * when the member is no longer pending, and `failed` when the row could not be
+   * queued. Never throws: the member already exists, and a failure to queue is
+   * logged and reported, so the admin can resend.
+   */
+  async enqueueMemberInvite(
+    accountId: string,
+    memberId: string,
+    inviterMemberId: string,
+    opts: { locale?: 'en' | 'es'; firstSend?: boolean } = {},
+  ): Promise<'queued' | 'off' | 'too_soon' | 'not_invited' | 'failed'> {
+    let claim: InvitationSendClaim | null = null;
+    try {
+      const target = await this.db.get<{
+        email: string | null;
+        role: string;
+        status: string;
+        name: string;
+        code: string;
+        invited_at: number | string | null;
+        created_at: number | string;
+      }>(
+        sql`SELECT m.email, m.role, m.status, m.invited_at, m.created_at, a.name, a.code
+            FROM member m JOIN account a ON a.id = m.account_id
+            WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
+      );
+      // A member set back to `invited` by hand never came from an invitation
+      // (no `invited_at`): there is nothing to send, and a send must never
+      // create the mark that makes a membership reachable (ADR 0010).
+      if (!target || target.status !== 'invited' || !target.email || target.invited_at == null) return 'not_invited';
+      const now = Date.now();
+      const invitedAt = Number(target.invited_at);
+      // The invite's own first send: creating the row a moment ago already
+      // closed the window, and nothing has sent since (the stamp is still the
+      // creation's). Every other send claims it, atomically, in the database.
+      claim =
+        opts.firstSend && invitedAt === Number(target.created_at) && now - invitedAt < MEMBER_INVITE_RESEND_WINDOW_MS
+          ? creationSendClaim(invitedAt, MEMBER_INVITE_RESEND_WINDOW_MS)
+          : await claimInvitationSend(this.db, accountId, memberId, MEMBER_INVITE_RESEND_WINDOW_MS, now);
+      if (!claim) {
+        // Closed window, or the member stopped being a pending invitation since
+        // the read above (accepted, removed): say which.
+        const still = await this.db.get<{ status: string }>(
+          sql`SELECT status FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`,
+        );
+        return still?.status === 'invited' ? 'too_soon' : 'not_invited';
+      }
+      const inviter = await this.db.get<{ display_name: string | null; locale: string | null }>(
+        sql`SELECT display_name, locale FROM member WHERE id = ${inviterMemberId} AND account_id = ${accountId} LIMIT 1`,
+      );
+      const locale = opts.locale ?? (inviter?.locale === 'es' ? 'es' : 'en');
+      const base = (this.env?.PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
+      const n: MemberInviteNotification = {
+        accountId,
+        memberId,
+        email: target.email,
+        workspaceName: target.name,
+        inviterName: inviter?.display_name?.trim() || null,
+        productName: this.env?.MAIL_FROM_NAME?.trim() || null,
+        role: target.role === 'admin' ? 'admin' : 'member',
+        // A dashboard path: the one kind a sign-in may return to (`safeReturnTo`).
+        acceptUrl: `${base}/admin/join/${encodeURIComponent(target.code)}`,
+        locale,
+        // Its own per send; a retry of the row carries the same one.
+        sendKey: randomUUID(),
+      };
+      await enqueueOutbox(this.db, {
+        kind: 'email',
+        action: MEMBER_INVITE_ACTION,
+        accountId,
+        orderKey: `member-invite:${memberId}`,
+        payload: JSON.stringify(n),
+        now,
+      });
+      return this.provider && deliversEmail(this.provider) ? 'queued' : 'off';
+    } catch (err) {
+      if (claim) {
+        await releaseInvitationSend(this.db, accountId, memberId, claim).catch((releaseErr: unknown) =>
+          this.log.warn(`could not reopen the invitation window of member ${memberId}: ${String(releaseErr)}`),
+        );
+      }
+      this.log.error(`failed to enqueue the invitation email for member ${memberId}: ${String(err)}`);
+      return 'failed';
+    }
+  }
+
+  /**
+   * Send one queued invitation, unless it has stopped being one: a member
+   * removed, or who already joined, while the row waited is skipped once
+   * (never retried), so nobody is invited into a workspace that took it back.
+   * The send keeps its share of the workspace's daily allowance: giving it back
+   * here could not be made exactly-once with the worker's skip, and a cap that
+   * errs strict is the safe side of an anti-spam limit.
+   */
+  private async deliverMemberInvite(payloadJson: string): Promise<void> {
+    const n = JSON.parse(payloadJson) as MemberInviteNotification;
+    const row = await this.db.get<{ status: string; email: string | null }>(
+      sql`SELECT status, email FROM member WHERE id = ${n.memberId} AND account_id = ${n.accountId} LIMIT 1`,
+    );
+    const skipped = !row || row.status !== 'invited'
+      ? `the member is ${row ? row.status : 'gone'}`
+      : (row.email ?? '').toLowerCase() !== n.email.toLowerCase()
+        ? 'the address changed'
+        : null;
+    if (skipped) throw new OutboxSkipError(`invitation for member ${n.memberId} skipped: ${skipped}`);
+    await this.notifier.sendMemberInvite(n);
   }
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
@@ -664,6 +796,9 @@ export class EmailEffects {
     outboxAccountId?: string | null,
     attempts = 0,
   ): Promise<void> {
+    // Not a booking email: none of what follows (booking state, reminders,
+    // conferencing links, branding) applies to it.
+    if (kind === MEMBER_INVITE_ACTION) return this.deliverMemberInvite(payloadJson);
     const n = JSON.parse(payloadJson) as BookingNotification & {
       reminderLeadMinutes?: number;
       /** The event-type reminder that scheduled this row; absent on rows queued

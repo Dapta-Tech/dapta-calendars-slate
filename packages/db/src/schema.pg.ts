@@ -78,6 +78,12 @@ export const member = pgTable('member', {
   // issue time at a web login), refreshed at most once a day (0028). An MCP
   // sign-in reaches only members seen recently.
   loginSeenAt: bigint('login_seen_at', { mode: 'number' }),
+  // Epoch ms an invitation to this member last went out (0031 / sqlite 0030):
+  // written by the invite, moved by each resend (`claimInvitationSend`, the
+  // shared one-a-minute window), never cleared. NULL for a member who came in
+  // any other way. Marks a membership this app granted: the only kind a request
+  // may act in by naming the account (ADR 0010).
+  invitedAt: bigint('invited_at', { mode: 'number' }),
   handle: text('handle'),
   displayName: text('display_name'),
   email: text('email'),
@@ -103,6 +109,18 @@ export const member = pgTable('member', {
   defaultScheduleId: text('default_schedule_id'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
+
+// Invitation emails each account sent per UTC day (0032 / sqlite 0031): the
+// atomic daily cap, taken by `takeInvitationQuota`.
+export const memberInviteQuota = pgTable(
+  'member_invite_quota',
+  {
+    accountId: text('account_id').notNull(),
+    day: text('day').notNull(),
+    sent: integer('sent').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.day] })],
+);
 
 export const schedule = pgTable('schedule', {
   id: text('id').primaryKey(),

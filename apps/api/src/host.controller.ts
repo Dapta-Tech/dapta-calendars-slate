@@ -78,6 +78,28 @@ export class HostController {
   }
 
   /**
+   * Every workspace the caller can act in (their own, the ones they joined, and
+   * pending invitations), for the dashboard's switcher and the invitation
+   * link. Derived from who the caller IS, never from the workspace they are
+   * viewing; the one this request acts in comes back `current`.
+   */
+  @Get('me/workspaces')
+  async workspaces(@Req() req: ReqLike) {
+    return this.auth.listWorkspaces(req);
+  }
+
+  /**
+   * Accept a pending invitation to that workspace. A POST on purpose: joining
+   * is something the person does (the switcher, the invitation page), never
+   * a side effect of opening a link. 404 when there is no invitation for them.
+   */
+  @Post('me/workspaces/:accountId/accept')
+  @HttpCode(200)
+  async acceptWorkspace(@Req() req: ReqLike, @Param('accountId') accountId: string) {
+    return this.auth.acceptWorkspace(req, accountId);
+  }
+
+  /**
    * Called once by the browser on first admin mount to report its real IANA
    * timezone (the server never knows this). No-op once the member has an
    * explicit (non-'UTC') timezone — see AdminService.syncClientTimeZone.

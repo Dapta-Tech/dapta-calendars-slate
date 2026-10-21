@@ -7,6 +7,7 @@ export * from './email.port';
 export * from './factory';
 export * from './booking-notifier';
 export * from './booking-details';
+export * from './member-invite';
 export { mailSupportAddress } from './email-layout';
 export * from './templates';
 export * from './ics';

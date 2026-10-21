@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import {
   inviteMemberAction,
+  resendInviteAction,
   removeMemberAction,
   setMemberRoleAction,
   setMemberStatusAction,
@@ -94,6 +95,14 @@ export function MembersClient({
     if (ok) run(transferOwnershipAction(member.id), m.ownershipTransferred);
   };
 
+  const resend = (member: AccountMember) =>
+    start(async () => {
+      const r = await resendInviteAction(member.id, locale);
+      if (r.ok && r.email === 'failed') error(m.genericError);
+      else if (r.ok) success(r.email === 'off' ? m.resendNoEmail : m.inviteResent);
+      else error(r.code === 'TOO_SOON' ? m.resendTooSoon : (r.message ?? m.genericError));
+    });
+
   // `Modal` restores focus to whatever was focused when it opened — the trigger
   // — so this only clears the state. (`team-members-panel.tsx` does the same;
   // the two used to disagree.)
@@ -102,9 +111,10 @@ export function MembersClient({
   const submitInvite = () =>
     start(async () => {
       setInviteErr(null);
-      const r = await inviteMemberAction(inviteEmail, inviteRole);
+      const r = await inviteMemberAction(inviteEmail, inviteRole, locale);
       if (r.ok) {
-        success(m.memberInvited);
+        if (r.email === 'failed') error(m.inviteEmailFailed);
+        else success(r.email === 'off' ? m.memberAddedNoEmail : m.memberInvited);
         setInviteEmail('');
         setInviteRole('member');
         closeDialog();
@@ -115,7 +125,9 @@ export function MembersClient({
           ? m.emailInvalid
           : r.code === 'EMAIL_TAKEN'
             ? m.emailTaken
-            : (r.message ?? m.genericError),
+            : r.code === 'LIMIT'
+              ? m.inviteLimit
+              : (r.message ?? m.genericError),
       );
     });
 
@@ -223,6 +235,19 @@ export function MembersClient({
                   className="w-36"
                   onChange={(v) => run(setMemberRoleAction(member.id, v as AccountRole), m.roleUpdated)}
                 />
+
+                {/* A pending invitation can go out again (the API holds it to once a minute). */}
+                {canManage && member.status === 'invited' ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    disabled={pending}
+                    aria-label={`${m.resendInvite} · ${label}`}
+                    onClick={() => resend(member)}
+                  >
+                    {m.resendInvite}
+                  </Button>
+                ) : null}
 
                 {canTransfer ? (
                   <Button

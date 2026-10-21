@@ -138,16 +138,114 @@ export async function inviteMember(
     return { ok: false, reason: 'EMAIL_TAKEN', message: 'A member with that email already exists.' };
 
   const id = randomUUID();
+  const now = Date.now();
   // Auto-handle at creation (short-links §3): invited members are bookable the
   // moment they accept — no "set a handle" step, freely renameable later.
   const handle = await deriveUniqueHandle(db, accountId, input.displayName, email);
   await db.run(
-    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at)
+    // `invited_at` marks the membership as one THIS app granted: the only kind a
+    // request may act in by naming the account (`workspaces.ts`, ADR 0010).
+    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at, invited_at)
         VALUES (${id}, ${accountId}, ${email}, ${input.displayName ?? EMAIL_LOCAL(email)},
           ${handle}, ${role}, ${'invited'}, ${branding?.brandColor ?? null},
-          ${jsonParam(db, branding?.style ?? null)}, ${Date.now()})`,
+          ${jsonParam(db, branding?.style ?? null)}, ${now}, ${now})`,
   );
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
+}
+
+/**
+ * A claim on one member's invitation send: when it was taken, and the value
+ * that reopens the window if it is handed back (a minute earlier, so the next
+ * send may go at once).
+ */
+export interface InvitationSendClaim {
+  at: number;
+  reopen: number;
+}
+
+/**
+ * Claim this member's one invitation send per `windowMs`, shared by every
+ * instance of the app: one conditional UPDATE of `member.invited_at` (when an
+ * invitation to this member last went out), so two requests on two replicas, or
+ * one before and one after a restart, cannot both pass. The claim is handed
+ * back with `releaseInvitationSend` when the send is not queued.
+ *
+ * Only a row that already carries `invited_at` can be claimed: that column is
+ * also what marks a membership as one this app granted (ADR 0010), so a send
+ * must never be what creates it. A member set back to `invited` by hand, who
+ * never came from an invitation, has nothing to claim.
+ *
+ * Null when the window is still closed, the member is no longer a pending
+ * invitation, or the row never came from one.
+ */
+export async function claimInvitationSend(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  windowMs: number,
+  nowMs: number = Date.now(),
+): Promise<InvitationSendClaim | null> {
+  const row = await db.get<{ id: string }>(
+    sql`UPDATE member SET invited_at = ${nowMs}
+        WHERE id = ${memberId} AND account_id = ${accountId} AND status = 'invited'
+          AND invited_at IS NOT NULL AND invited_at <= ${nowMs - windowMs}
+        RETURNING id`,
+  );
+  return row ? { at: nowMs, reopen: nowMs - windowMs } : null;
+}
+
+/**
+ * The claim on the send an invitation's creation just made: the row was written
+ * with `invited_at` = now, which already closes the window. Handing it back opens
+ * the window again, for a first send that could not be queued.
+ */
+export function creationSendClaim(invitedAt: number, windowMs: number): InvitationSendClaim {
+  return { at: invitedAt, reopen: invitedAt - windowMs };
+}
+
+/**
+ * Hand back a claim whose send was not queued: compare, then reopen, so a later
+ * claim (another request, after this window) is never undone. The value written
+ * is never NULL: the row keeps its mark.
+ */
+export async function releaseInvitationSend(db: Db, accountId: string, memberId: string, claim: InvitationSendClaim): Promise<void> {
+  await db.run(
+    sql`UPDATE member SET invited_at = ${claim.reopen}
+        WHERE id = ${memberId} AND account_id = ${accountId} AND invited_at = ${claim.at}`,
+  );
+}
+
+/** The UTC day an invitation email counts against (`member_invite_quota.day`, migration 0032 / sqlite 0031). */
+function quotaDay(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Take one invitation email (new or resent) from the account's daily allowance:
+ * one atomic conditional upsert, so concurrent requests cannot all slip under
+ * the cap, in a table of its own, so deleting members gives nothing back. True
+ * when the send fits within `cap`. A refused send changes nothing (the update
+ * only applies below the cap and then returns no row), so a later refund always
+ * reopens exactly one slot.
+ */
+export async function takeInvitationQuota(db: Db, accountId: string, cap: number, nowMs: number = Date.now()): Promise<boolean> {
+  if (cap < 1) return false;
+  const day = quotaDay(nowMs);
+  const row = await db.get<{ sent: number | string }>(
+    sql`INSERT INTO member_invite_quota (account_id, day, sent) VALUES (${accountId}, ${day}, 1)
+        ON CONFLICT (account_id, day) DO UPDATE SET sent = member_invite_quota.sent + 1
+        WHERE member_invite_quota.sent < ${cap}
+        RETURNING sent`,
+  );
+  return row !== undefined && row !== null;
+}
+
+/** Give back one send taken by `takeInvitationQuota` whose email never went out (the invite was refused). */
+export async function refundInvitationQuota(db: Db, accountId: string, nowMs: number = Date.now()): Promise<void> {
+  await db.run(
+    sql`UPDATE member_invite_quota SET sent = sent - 1
+        WHERE account_id = ${accountId} AND day = ${quotaDay(nowMs)} AND sent > 0`,
+  );
 }
 
 /**

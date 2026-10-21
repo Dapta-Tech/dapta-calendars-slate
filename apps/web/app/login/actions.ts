@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { setSession, getSession, signOutAndRedirect } from '@/lib/auth-session';
 import { RETURN_TO_PARAM, safeReturnTo } from '@/lib/return-to';
+import { clearWorkspace } from '@/lib/workspace';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -22,6 +23,8 @@ export async function signInAction(
 ): Promise<{ error?: string }> {
   const email = String(form.get('email') ?? '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return { error: 'invalid' };
+  // A fresh sign-in starts in the person's own account (see the workos callback).
+  await clearWorkspace();
   await setSession({ provider: 'local', email });
   redirect(safeReturnTo(form.get(RETURN_TO_PARAM)) ?? '/admin');
 }

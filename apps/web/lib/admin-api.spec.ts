@@ -25,8 +25,19 @@ const { SessionUnavailableError } = vi.hoisted(() => ({
     }
   },
 }));
+// `hostHeaders` reads the session on every call, as the real one does (its own
+// workspace half is covered in workspace-session.spec.ts); `leaveForbiddenWorkspace`
+// is a spy here so the client's call to it can be asserted.
+const leaveForbiddenWorkspace = vi.fn(async (_res: Response) => undefined);
 vi.mock('./auth-session', () => ({
   getSession: () => getSession(),
+  hostHeaders: async () => {
+    const s = (await getSession()) as { provider?: string; accessToken?: string; email?: string } | null;
+    if (s?.provider === 'workos') return { authorization: `Bearer ${s.accessToken}` };
+    if (s?.provider === 'local') return { 'x-slate-email': s.email };
+    return {};
+  },
+  leaveForbiddenWorkspace: (res: Response) => leaveForbiddenWorkspace(res),
   refreshOrSignOut: () => refreshOrSignOut(),
   signOutKeepingPlace: (session: unknown) => signOutKeepingPlace(session),
   SessionUnavailableError,
@@ -207,5 +218,22 @@ describe('adminApi 401 handling', () => {
     expect(url).toMatch(/\/v1\/integrations$/);
     expect(init.method).toBe('POST');
     expect(init.body).toContain('pat-fake-0000');
+  });
+});
+
+describe('adminApi and the chosen workspace', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
+    getSession.mockResolvedValue({ provider: 'workos', accessToken: 'tok' });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('hands every response to leaveForbiddenWorkspace before reading it', async () => {
+    const refusal = new Response(JSON.stringify({ error: 'WORKSPACE_FORBIDDEN' }), { status: 403 });
+    fetchMock.mockResolvedValueOnce(refusal);
+    await expect(adminApi.me()).rejects.toMatchObject({ status: 403, code: 'WORKSPACE_FORBIDDEN' });
+    expect(leaveForbiddenWorkspace).toHaveBeenCalledWith(refusal);
   });
 });
