@@ -2,8 +2,10 @@ import Link from 'next/link';
 import type { BookingMessages } from '@slate/shared';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { Select, type SelectOption } from '@/components/ui/select';
 
 type TeamHostsMessages = BookingMessages['admin']['eventTypes']['teamHosts'];
+type PriorityMessages = Pick<BookingMessages['admin']['eventTypes'], 'priority' | 'priorityLevels'>;
 
 export interface TeamOption {
   id: string;
@@ -106,5 +108,67 @@ export function TeamHostsNote({
         </>
       ) : null}
     </p>
+  );
+}
+
+/**
+ * A round robin host's priority as five levels, stored as the integers the
+ * host selector already ranks by (highest free host first). Medium is 0: the
+ * value every host starts with, and the one a missing priority counts as, so
+ * existing hosts read Medium and assignment does not change.
+ */
+export const PRIORITY_LEVELS = [
+  { value: -2, key: 'lowest' },
+  { value: -1, key: 'low' },
+  { value: 0, key: 'medium' },
+  { value: 1, key: 'high' },
+  { value: 2, key: 'highest' },
+] as const;
+
+/**
+ * One host's priority picker. The API accepts any integer, so a host can hold
+ * a value outside the five levels. That value is shown as it is, as a
+ * "Custom (n)" option that cannot be picked, and the form keeps sending it
+ * until someone picks a level: opening and saving the event never rewrites it.
+ */
+export function HostPrioritySelect({
+  hostName,
+  value,
+  onChange,
+  m,
+  locale,
+}: {
+  hostName: string;
+  value: number | null;
+  onChange: (priority: number) => void;
+  m: PriorityMessages;
+  locale?: string;
+}) {
+  const current = value ?? 0;
+  const options: SelectOption[] = PRIORITY_LEVELS.map((level) => ({
+    value: String(level.value),
+    label: m.priorityLevels[level.key],
+  }));
+  if (!PRIORITY_LEVELS.some((level) => level.value === current)) {
+    const custom = {
+      value: String(current),
+      label: m.priorityLevels.custom.replace('{n}', String(current)),
+      disabled: true,
+    };
+    // In its place on the scale: above Highest, or below Lowest.
+    if (current > 0) options.push(custom);
+    else options.unshift(custom);
+  }
+  return (
+    <Select
+      value={String(current)}
+      options={options}
+      onChange={(v) => onChange(Number(v))}
+      ariaLabel={`${hostName}: ${m.priority}`}
+      locale={locale}
+      // The column's width for the five levels; a custom value grows the
+      // field rather than cutting its number off.
+      className="w-auto min-w-28"
+    />
   );
 }

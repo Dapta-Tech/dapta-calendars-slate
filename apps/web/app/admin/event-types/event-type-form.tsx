@@ -21,7 +21,7 @@ import {
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
-import { PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
+import { HostPrioritySelect, PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
 import { track } from '@/lib/analytics/port';
@@ -1187,46 +1187,62 @@ export function EventTypeForm({
                 m={m.teamHosts}
               />
             ) : null}
-            {/* Column header — only the fields the active method actually uses. */}
+            {/* Who a booking goes to, then the column header: only the fields
+                the active method actually uses. Below `sm` the header is
+                hidden and each control carries its own label (HostCell): the
+                three columns do not fit beside a name at 360px. */}
             {schedulingType !== 'collective' ? (
-              <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
-                <span className="flex-1" />
-                <span className="w-20 text-center">{m.priority}</span>
-                <span className="w-20 text-center">{m.weight}</span>
-                {schedulingType === 'fixed_round_robin' ? (
-                  <span className="w-16 text-center">{m.fixedHost}</span>
-                ) : null}
-              </div>
+              <>
+                <p className="text-xs text-muted-foreground">{m.priorityHint}</p>
+                <div className="hidden items-center gap-field px-field text-xs text-muted-foreground sm:flex">
+                  <span className="flex-1" />
+                  <span className="w-28 text-center">{m.priority}</span>
+                  <span className="w-20 text-center">{m.weight}</span>
+                  {schedulingType === 'fixed_round_robin' ? (
+                    <span className="w-16 text-center">{m.fixedHost}</span>
+                  ) : null}
+                </div>
+              </>
             ) : null}
             {hosts.map((h) => {
               const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
               return (
-                <div key={h.memberId} className="flex items-center gap-field rounded-md border border-border bg-card px-field py-inline">
-                  <span className="flex-1 text-sm">{name}</span>
+                <div
+                  key={h.memberId}
+                  className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline sm:flex-row sm:items-center sm:gap-field"
+                >
+                  <span className="text-sm sm:flex-1">{name}</span>
                   {schedulingType !== 'collective' ? (
                     <>
-                      <input
-                        type="number"
-                        aria-label={`${name} — ${m.priority}`}
-                        value={h.priority ?? 0}
-                        onChange={(e) => setHost(h.memberId, { priority: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        aria-label={`${name} — ${m.weight}`}
-                        value={h.weight ?? 100}
-                        onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
-                      />
+                      <HostCell label={m.priority}>
+                        <HostPrioritySelect
+                          hostName={name}
+                          value={h.priority}
+                          onChange={(priority) => setHost(h.memberId, { priority })}
+                          m={m}
+                          locale={locale}
+                        />
+                      </HostCell>
+                      <HostCell label={m.weight}>
+                        <input
+                          type="number"
+                          min={1}
+                          aria-label={`${name}: ${m.weight}`}
+                          value={h.weight ?? 100}
+                          onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
+                          className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
+                        />
+                      </HostCell>
                       {schedulingType === 'fixed_round_robin' ? (
-                        <label className="flex w-16 cursor-pointer justify-center" title={m.fixedHostHint}>
-                          <Checkbox
-                            checked={h.isFixed}
-                            onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
-                          />
-                        </label>
+                        <HostCell label={m.fixedHost}>
+                          <label className="flex w-16 cursor-pointer justify-end sm:justify-center" title={m.fixedHostHint}>
+                            <Checkbox
+                              aria-label={`${name}: ${m.fixedHost}`}
+                              checked={h.isFixed}
+                              onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
+                            />
+                          </label>
+                        </HostCell>
                       ) : null}
                     </>
                   ) : null}
@@ -1447,6 +1463,23 @@ function deliverableMappings(
     .filter((row) => sourceExists(row.source, fields))
     .map((row) => ({ ...row, properties: row.properties.filter((p) => p.trim() !== '') }))
     .filter((row) => row.properties.length > 0);
+}
+
+/**
+ * One host control in a team event's Hosts block. From `sm` up it steps aside
+ * (`contents`) and the control sits under its column header; below `sm` the
+ * header is hidden, so the control shows its column's name beside it. The
+ * name is for the eye only: each control already has its own accessible label.
+ */
+function HostCell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-field sm:contents">
+      <span aria-hidden className="text-xs text-muted-foreground sm:hidden">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
