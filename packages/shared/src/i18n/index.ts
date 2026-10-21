@@ -556,6 +556,22 @@ export interface BookingMessages {
       schedulingMethod: string;
       hostsTitle: string;
       priority: string;
+      /** Round robin: who a booking goes to, said under the Hosts title. */
+      priorityHint: string;
+      /**
+       * A host's priority, picked from five levels stored as -2..2. Medium is
+       * 0, the value every host starts with. `custom` names a value outside
+       * -2..2 (set through the API), kept until someone picks a level; `{n}`
+       * interpolates it.
+       */
+      priorityLevels: {
+        lowest: string;
+        low: string;
+        medium: string;
+        high: string;
+        highest: string;
+        custom: string;
+      };
       weight: string;
       fixedHost: string;
       fixedHostHint: string;
@@ -2012,6 +2028,16 @@ export const en: BookingMessages = {
       schedulingMethod: 'Scheduling method',
       hostsTitle: 'Hosts',
       priority: 'Priority',
+      priorityHint:
+        'Each booking goes to the free host with the highest priority; weight shares bookings among hosts at the same level.',
+      priorityLevels: {
+        lowest: 'Lowest',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        highest: 'Highest',
+        custom: 'Custom ({n})',
+      },
       weight: 'Weight',
       fixedHost: 'Fixed',
       fixedHostHint: 'Always on every booking',
@@ -3373,6 +3399,16 @@ export const es: BookingMessages = {
       schedulingMethod: 'Método de programación',
       hostsTitle: 'Anfitriones',
       priority: 'Prioridad',
+      priorityHint:
+        'Cada reserva va al anfitrión libre con la prioridad más alta; el peso reparte las reservas entre anfitriones del mismo nivel.',
+      priorityLevels: {
+        lowest: 'Muy baja',
+        low: 'Baja',
+        medium: 'Media',
+        high: 'Alta',
+        highest: 'Muy alta',
+        custom: 'Personalizada ({n})',
+      },
       weight: 'Peso',
       fixedHost: 'Fijo',
       fixedHostHint: 'Siempre en cada reserva',
