@@ -154,6 +154,16 @@ describe('the daily invitation allowance', () => {
     expect(await takeInvitationQuota(db, a, 3, NOON + 86_400_000)).toBe(true);
   });
 
+  it('a refused send changes nothing, so a refund reopens exactly one slot', async () => {
+    const a = await account('Team');
+    expect(await takeInvitationQuota(db, a, 2, NOON)).toBe(true);
+    expect(await takeInvitationQuota(db, a, 2, NOON)).toBe(true);
+    for (let i = 0; i < 5; i += 1) expect(await takeInvitationQuota(db, a, 2, NOON)).toBe(false);
+    await refundInvitationQuota(db, a, NOON);
+    expect(await takeInvitationQuota(db, a, 2, NOON)).toBe(true);
+    expect(await takeInvitationQuota(db, a, 2, NOON)).toBe(false);
+  });
+
   it('gives a send back only when one was taken', async () => {
     const a = await account('Team');
     expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(true);

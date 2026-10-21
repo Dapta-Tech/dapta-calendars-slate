@@ -34,6 +34,12 @@ export interface MemberInviteNotification {
   acceptUrl: string;
   locale: 'en' | 'es';
   /**
+   * When the send was queued (epoch ms): the day its share of the workspace's
+   * daily allowance was taken, given back if the send is skipped. Absent on
+   * rows queued before it existed.
+   */
+  queuedAt?: number;
+  /**
    * What tells one send from another for the provider's de-duplication: the
    * first invitation and each resend are distinct messages, a retry of either
    * is not.

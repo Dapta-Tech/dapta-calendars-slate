@@ -6,6 +6,7 @@ import {
   DEFAULT_MAX_ATTEMPTS,
   hasPendingCalendarJob,
   getNotificationSettings,
+  refundInvitationQuota,
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
   defaultNotificationSetting,
@@ -349,6 +350,7 @@ export class EmailEffects {
         // A dashboard path: the one kind a sign-in may return to (`safeReturnTo`).
         acceptUrl: `${base}/admin/join/${encodeURIComponent(target.code)}`,
         locale,
+        queuedAt: now,
         // Its own per send; a retry of the row carries the same one.
         sendKey: randomUUID(),
       };
@@ -372,17 +374,24 @@ export class EmailEffects {
    * Send one queued invitation, unless it has stopped being one: a member
    * removed, or who already joined, while the row waited is skipped once
    * (never retried), so nobody is invited into a workspace that took it back.
+   * A skipped send never went out, so its share of the workspace's daily
+   * allowance is given back (the worker skips a row once, so once).
    */
   private async deliverMemberInvite(payloadJson: string): Promise<void> {
     const n = JSON.parse(payloadJson) as MemberInviteNotification;
     const row = await this.db.get<{ status: string; email: string | null }>(
       sql`SELECT status, email FROM member WHERE id = ${n.memberId} AND account_id = ${n.accountId} LIMIT 1`,
     );
-    if (!row || row.status !== 'invited') {
-      throw new OutboxSkipError(`invitation for member ${n.memberId} skipped: ${row ? `the member is ${row.status}` : 'the member is gone'}`);
-    }
-    if ((row.email ?? '').toLowerCase() !== n.email.toLowerCase()) {
-      throw new OutboxSkipError(`invitation for member ${n.memberId} skipped: the address changed`);
+    const skipped = !row || row.status !== 'invited'
+      ? `the member is ${row ? row.status : 'gone'}`
+      : (row.email ?? '').toLowerCase() !== n.email.toLowerCase()
+        ? 'the address changed'
+        : null;
+    if (skipped) {
+      await refundInvitationQuota(this.db, n.accountId, n.queuedAt).catch((err: unknown) =>
+        this.log.warn(`could not give back the invitation allowance of ${n.accountId}: ${String(err)}`),
+      );
+      throw new OutboxSkipError(`invitation for member ${n.memberId} skipped: ${skipped}`);
     }
     await this.notifier.sendMemberInvite(n);
   }
