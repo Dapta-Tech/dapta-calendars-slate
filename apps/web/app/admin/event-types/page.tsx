@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@slate/shared';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { PageHeader } from '@/components/ui/page-header';
 import { DeleteButton } from './delete-button';
@@ -14,14 +14,13 @@ export default async function EventTypesPage() {
     adminApi.me(),
     adminApi.listTeams(),
   ]);
-  // Team events surface on this page too (QA3 fix 4a) — grouped per team,
-  // loaded in parallel. Teams without events render nothing here (their empty
-  // state lives on the team detail page).
-  const teamEventGroups = (
-    await Promise.all(
-      teams.map(async (team) => ({ team, eventTypes: await adminApi.teamEventTypes(team.id) })),
-    )
-  ).filter((g) => g.eventTypes.length > 0);
+  // Team events surface on this page too (QA3 fix 4a), grouped per team and
+  // loaded in parallel. EVERY team is listed, with or without events: this is
+  // where people look for team events, so a team with none still shows how to
+  // start one.
+  const teamEventGroups = await Promise.all(
+    teams.map(async (team) => ({ team, eventTypes: await adminApi.teamEventTypes(team.id) })),
+  );
   const msgs = getMessages(await getLocale());
   const admin = msgs.admin;
   const m = admin.eventTypes;
@@ -107,7 +106,23 @@ export default async function EventTypesPage() {
           <div className="flex flex-col gap-group">
             {teamEventGroups.map(({ team, eventTypes: teamEventTypes }) => (
               <section key={team.id}>
-                <h3 className="mb-inline text-sm font-medium">{team.name}</h3>
+                {/* The page's one primary CTA stays "New event" above; this is
+                    a secondary link in the row-action style, per team, for
+                    those who may create team events (owners and admins). */}
+                <div className="mb-inline flex flex-wrap items-center justify-between gap-inline">
+                  <h3 className="text-sm font-medium">{team.name}</h3>
+                  {isAdminRole(me.role) ? (
+                    <Link
+                      href={`/admin/event-types/new?teamId=${team.id}`}
+                      className="rounded-md border border-border px-field py-tight text-sm hover:border-primary"
+                    >
+                      {m.teamHosts.newEventFor.replace('{team}', team.name)}
+                    </Link>
+                  ) : null}
+                </div>
+                {teamEventTypes.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">{admin.teams.noTeamEventTypes}</p>
+                ) : null}
                 <ul className="flex flex-col gap-inline">
                   {teamEventTypes.map((et) => (
                     <li

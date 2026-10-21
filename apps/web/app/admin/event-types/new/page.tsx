@@ -1,7 +1,7 @@
 import { unstable_rethrow } from 'next/navigation';
 import { getMessages } from '@slate/shared';
 import type { CrmPropertyCatalog } from '@slate/types';
-import { adminApi } from '@/lib/admin-api';
+import { adminApi, isAdminRole } from '@/lib/admin-api';
 import { getLocale } from '@/lib/locale';
 import { EventTypeForm } from '../event-type-form';
 
@@ -16,11 +16,13 @@ export default async function NewEventType({
   // event" button lands here; the form gains the scheduling-method + hosts
   // section and returns to the team page on success.
   const { teamId } = await searchParams;
-  const [schedules, connections, locale, crm] = await Promise.all([
+  const [schedules, connections, locale, crm, teams, me] = await Promise.all([
     adminApi.listSchedules(),
     adminApi.listConnections(),
     getLocale(),
     crmCatalog(),
+    adminApi.listTeams(),
+    adminApi.me(),
   ]);
   const msgs = getMessages(locale);
   const m = msgs.admin.eventTypes;
@@ -46,6 +48,9 @@ export default async function NewEventType({
         scheduling={teamId ? msgs.scheduling : undefined}
         teamMembers={teamMembers}
         teamId={teamId}
+        teamName={teamId ? teams.find((t) => t.id === teamId)?.name : undefined}
+        teams={teamId ? undefined : teams.map((t) => ({ id: t.id, name: t.name }))}
+        canManageTeams={isAdminRole(me.role)}
         connections={teamId ? undefined : connections}
         redirectOnSuccess={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backHref={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}

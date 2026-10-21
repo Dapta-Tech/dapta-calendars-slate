@@ -577,6 +577,19 @@ export interface BookingMessages {
       calendarsCheckConflicts: string;
       calendarsAddEventsHere: string;
       calendarsManageLink: string;
+      /**
+       * Who hosts an event, said where the editor's Hosts block sits. A
+       * personal event has no hosts to add, so it points at team events
+       * instead; a team event's hosts are its team's members when it is saved,
+       * managed on the team page. `{team}` interpolates the team name.
+       */
+      teamHosts: {
+        personalHint: string;
+        newEventFor: string;
+        createTeam: string;
+        everyMember: string;
+        manageOnTeamPage: string;
+      };
       /** R (#91) — reminders + follow-up, owned by the event type (#68). */
       reminders: {
         sectionTitle: string;
@@ -2014,6 +2027,14 @@ export const en: BookingMessages = {
       calendarsCheckConflicts: 'Check for conflicts',
       calendarsAddEventsHere: 'Add events here',
       calendarsManageLink: 'Manage calendars',
+      teamHosts: {
+        personalHint:
+          'A personal event has one host. To share bookings with your team (round-robin or collective), create a team event.',
+        newEventFor: 'New event for {team}',
+        createTeam: 'Create a team',
+        everyMember: 'Every member of {team} hosts this event once you save it.',
+        manageOnTeamPage: 'Add or remove members on the team page, then save this event.',
+      },
       reminders: {
         sectionTitle: 'Reminders',
         sectionHint: 'Reminders belong to this event. Each one has its own switch, timing and wording.',
@@ -3367,6 +3388,14 @@ export const es: BookingMessages = {
       calendarsCheckConflicts: 'Verificar conflictos',
       calendarsAddEventsHere: 'Añadir eventos aquí',
       calendarsManageLink: 'Administrar calendarios',
+      teamHosts: {
+        personalHint:
+          'Un evento personal tiene un solo anfitrión. Para compartir reservas con tu equipo (por turnos o colectiva), crea un evento de equipo.',
+        newEventFor: 'Nuevo evento para {team}',
+        createTeam: 'Crear un equipo',
+        everyMember: 'Todos los miembros de {team} quedan como anfitriones de este evento al guardarlo.',
+        manageOnTeamPage: 'Agrega o quita miembros en la página del equipo y luego guarda este evento.',
+      },
       reminders: {
         sectionTitle: 'Recordatorios',
         sectionHint:

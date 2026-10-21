@@ -21,6 +21,7 @@ import {
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
+import { PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
 import { track } from '@/lib/analytics/port';
@@ -863,6 +864,9 @@ export function EventTypeForm({
   scheduling,
   teamMembers,
   teamId,
+  teamName,
+  teams,
+  canManageTeams = false,
   connections,
   redirectOnSuccess,
   backHref,
@@ -885,6 +889,14 @@ export function EventTypeForm({
   /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
    *  path to team events at all; editing derives the team from `initial`. */
   teamId?: string;
+  /** TEAM events: the team's name, for the line saying its members host. */
+  teamName?: string;
+  /** PERSONAL events: the account's teams, for the card pointing at team
+   *  events (a personal event has no hosts to add). */
+  teams?: TeamOption[];
+  /** Owner or admin: the team links (new team event, team page) are theirs
+   *  alone; the API refuses them to a plain member. */
+  canManageTeams?: boolean;
   /** The host's connected calendars, for the editable "Calendars for this
    *  event" section (PHASE 2) — omitted for TEAM events (each host has their
    *  own connection; a single per-event picker here would be misleading). */
@@ -964,7 +976,8 @@ export function EventTypeForm({
   const [crmMappings, setCrmMappings] = useState<CrmPropertyMapping[]>(
     () => (crmProvider ? (initial?.crmPropertyMappings?.[crmProvider] ?? []) : []),
   );
-  const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
+  const eventTeamId = initial?.teamId ?? teamId;
+  const isTeamEvent = !!eventTeamId && !!teamMembers && !!scheduling;
   // PHASE 2 — per-event calendar selection (personal events only). Prefill
   // from the event's own configured set when non-empty; otherwise default to
   // the host's CURRENT member-level settings (all check_conflicts calendars +
@@ -1208,6 +1221,18 @@ export function EventTypeForm({
         />
       ) : null}
 
+      {/* Where a team event shows its Hosts block, a personal one says it has
+          none and points at team events, so the question "where do I add my
+          team?" has an answer in the same place in either editor. */}
+      {!isTeamEvent && teams ? (
+        <PersonalHostsCard
+          teams={teams}
+          title={m.hostsTitle}
+          canManageTeams={canManageTeams}
+          m={m.teamHosts}
+        />
+      ) : null}
+
       {isTeamEvent && scheduling ? (
         <div className="flex flex-col gap-card rounded-md border border-border bg-background/40 p-card">
           <Field label={m.schedulingMethod}>
@@ -1227,6 +1252,14 @@ export function EventTypeForm({
 
           <div className="flex flex-col gap-inline">
             <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
+            {eventTeamId && teamName ? (
+              <TeamHostsNote
+                teamId={eventTeamId}
+                teamName={teamName}
+                canManageTeams={canManageTeams}
+                m={m.teamHosts}
+              />
+            ) : null}
             {/* Column header — only the fields the active method actually uses. */}
             {schedulingType !== 'collective' ? (
               <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
