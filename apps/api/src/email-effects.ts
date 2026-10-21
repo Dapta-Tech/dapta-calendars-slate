@@ -301,8 +301,9 @@ export class EmailEffects {
         name: string;
         code: string;
         invited_at: number | string | null;
+        created_at: number | string;
       }>(
-        sql`SELECT m.email, m.role, m.status, m.invited_at, a.name, a.code
+        sql`SELECT m.email, m.role, m.status, m.invited_at, m.created_at, a.name, a.code
             FROM member m JOIN account a ON a.id = m.account_id
             WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
       );
@@ -313,9 +314,10 @@ export class EmailEffects {
       const now = Date.now();
       const invitedAt = Number(target.invited_at);
       // The invite's own first send: creating the row a moment ago already
-      // closed the window. Every other send claims it, atomically, in the database.
+      // closed the window, and nothing has sent since (the stamp is still the
+      // creation's). Every other send claims it, atomically, in the database.
       claim =
-        opts.firstSend && now - invitedAt < MEMBER_INVITE_RESEND_WINDOW_MS
+        opts.firstSend && invitedAt === Number(target.created_at) && now - invitedAt < MEMBER_INVITE_RESEND_WINDOW_MS
           ? creationSendClaim(invitedAt, MEMBER_INVITE_RESEND_WINDOW_MS)
           : await claimInvitationSend(this.db, accountId, memberId, MEMBER_INVITE_RESEND_WINDOW_MS, now);
       if (!claim) {
