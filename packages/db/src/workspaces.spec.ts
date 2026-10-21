@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { inviteMember, refundInvitationQuota, takeInvitationQuota } from './members';
+import {
+  claimInvitationSend,
+  creationSendClaim,
+  inviteMember,
+  refundInvitationQuota,
+  releaseInvitationSend,
+  takeInvitationQuota,
+} from './members';
 import { acceptInvitedMember, findMembership, getPersonIdentity, listWorkspacesForIdentity } from './workspaces';
 
 /**
@@ -171,6 +178,53 @@ describe('the daily invitation allowance', () => {
     await refundInvitationQuota(db, a, NOON); // nothing left to give back: stays at zero
     expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(true);
     expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(false);
+  });
+});
+
+describe('the per-member invitation window (shared by every instance)', () => {
+  const MIN = 60_000;
+  const invitedAt = async (id: string) =>
+    Number((await db.get<{ invited_at: number | string }>(sql`SELECT invited_at FROM member WHERE id = ${id}`))!.invited_at);
+
+  it('is closed by the invite itself, opens after the window, and closes again with each send', async () => {
+    const a = await account('Team');
+    const inv = await inviteMember(db, a, { email: 'one@acme.test' });
+    const id = inv.ok ? inv.value.id : '';
+    const t0 = await invitedAt(id);
+    expect(await claimInvitationSend(db, a, id, MIN, t0 + MIN - 1)).toBeNull();
+    const claim = await claimInvitationSend(db, a, id, MIN, t0 + MIN);
+    expect(claim).toEqual({ at: t0 + MIN, previous: t0 });
+    expect(await invitedAt(id)).toBe(t0 + MIN);
+    expect(await claimInvitationSend(db, a, id, MIN, t0 + MIN + 1)).toBeNull();
+  });
+
+  it('a released claim restores the window, unless a later claim took it', async () => {
+    const a = await account('Team');
+    const inv = await inviteMember(db, a, { email: 'one@acme.test' });
+    const id = inv.ok ? inv.value.id : '';
+    const t0 = await invitedAt(id);
+    const first = (await claimInvitationSend(db, a, id, MIN, t0 + MIN))!;
+    await releaseInvitationSend(db, a, id, first);
+    expect(await invitedAt(id)).toBe(t0);
+    const second = (await claimInvitationSend(db, a, id, MIN, t0 + MIN))!;
+    const third = await claimInvitationSend(db, a, id, MIN, t0 + 3 * MIN);
+    await releaseInvitationSend(db, a, id, second); // stale: a later claim holds the row
+    expect(await invitedAt(id)).toBe(third!.at);
+  });
+
+  it('the creation claim, handed back, opens the window for a first send that failed', async () => {
+    const a = await account('Team');
+    const inv = await inviteMember(db, a, { email: 'one@acme.test' });
+    const id = inv.ok ? inv.value.id : '';
+    const t0 = await invitedAt(id);
+    await releaseInvitationSend(db, a, id, creationSendClaim(t0, MIN));
+    expect(await claimInvitationSend(db, a, id, MIN, t0)).not.toBeNull();
+  });
+
+  it('claims nothing for a member who is no longer a pending invitation', async () => {
+    const a = await account('Team');
+    const active = await member(a, { email: 'x@acme.test', invited: true });
+    expect(await claimInvitationSend(db, a, active, MIN, Date.now() + 10 * MIN)).toBeNull();
   });
 });
 

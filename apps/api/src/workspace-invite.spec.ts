@@ -76,6 +76,10 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
   const deliverAll = async () => {
     for (const r of await inviteRows()) await email.deliver(r.action, r.payload, r.account_id, 0);
   };
+  /** As if a minute had passed since this member's last invitation went out. */
+  const openWindow = (id: string) => db.run(sql`UPDATE member SET invited_at = invited_at - 60000 WHERE id = ${id}`);
+  const memberInvitedAt = async (id: string) =>
+    (await db.get<{ invited_at: number | string | null }>(sql`SELECT invited_at FROM member WHERE id = ${id}`))?.invited_at;
   const memberRow = (id: string) =>
     db.get<{ status: string; external_id: string | null; role: string; login_seen_at: number | string | null }>(
       sql`SELECT status, external_id, role, login_seen_at FROM member WHERE id = ${id}`,
@@ -223,8 +227,11 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     const { alejandro, invited } = await setUp();
     // The first send counts: an immediate resend is refused.
     await expect(crud.resendInvite(req(ALEJANDRO), invited.id, {})).rejects.toMatchObject({ status: 429 });
+    // A restart does not reopen it: the window lives in the database.
+    build(capture);
+    await expect(crud.resendInvite(req(ALEJANDRO), invited.id, {})).rejects.toMatchObject({ status: 429 });
 
-    build(capture); // a fresh process: the window starts over
+    await openWindow(invited.id);
     const again = await crud.resendInvite(req(ALEJANDRO), invited.id, { locale: 'en' });
     expect(again).toEqual({ ok: true, inviteEmail: 'queued' });
     await deliverAll();
@@ -232,8 +239,38 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     expect(new Set(capture.sent.map((m) => m.idempotencyKey)).size).toBe(2);
 
     await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
-    build(capture);
+    await openWindow(invited.id);
     await expect(crud.resendInvite(req(ALEJANDRO), invited.id, {})).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('two replicas resending at once queue one email', async () => {
+    const { invited } = await setUp();
+    await openWindow(invited.id);
+    // Two instances of the app on one database, as prd runs them.
+    const replicaA = crud;
+    build(capture);
+    const replicaB = crud;
+    const results = await Promise.allSettled([
+      replicaA.resendInvite(req(ALEJANDRO), invited.id, {}),
+      replicaB.resendInvite(req(ALEJANDRO), invited.id, {}),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected' && (r.reason as HttpException).getStatus() === 429)).toHaveLength(1);
+    expect(await inviteRows()).toHaveLength(2); // the first invitation and one resend
+  });
+
+  it('a send that could not be queued reopens the window', async () => {
+    const { invited } = await setUp();
+    await openWindow(invited.id);
+    const windowBefore = Number((await memberInvitedAt(invited.id))!);
+    await db.run(sql`ALTER TABLE outbox RENAME TO outbox_away`);
+    try {
+      expect(await crud.resendInvite(req(ALEJANDRO), invited.id, {})).toEqual({ ok: true, inviteEmail: 'failed' });
+    } finally {
+      await db.run(sql`ALTER TABLE outbox_away RENAME TO outbox`);
+    }
+    expect(Number(await memberInvitedAt(invited.id))).toBe(windowBefore);
+    expect(await crud.resendInvite(req(ALEJANDRO), invited.id, {})).toEqual({ ok: true, inviteEmail: 'queued' });
   });
 
   it('caps invitation emails per workspace per day, in the database, and deleting members gives nothing back', async () => {
@@ -243,7 +280,7 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     // A refused invite (the address is already there) does not spend the allowance.
     await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p0@acme.test' })).rejects.toThrow();
     // A resend does.
-    build(capture);
+    await openWindow(ids[0]!);
     await crud.resendInvite(req(ALEJANDRO), ids[0]!, {});
     await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p50@acme.test' })).rejects.toMatchObject({
       status: 429,

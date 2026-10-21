@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { inviteMember, takeInvitationQuota } from './members';
+import { claimInvitationSend, inviteMember, takeInvitationQuota } from './members';
 import { acceptInvitedMember, findMembership, listWorkspacesForIdentity } from './workspaces';
 
 /**
@@ -81,6 +81,15 @@ describePg('workspaces (real Postgres)', () => {
     expect(await findMembership(db, identity, team)).toMatchObject({ memberId: id, status: 'invited' });
     expect(await findMembership(db, identity, own)).toBeNull(); // the home is the token's, not an invitation
     expect(await acceptInvitedMember(db, team, id, null)).toBe(true);
+  });
+
+  it('two instances claiming one member’s send at once: exactly one gets it', async () => {
+    const team = await account(`Pg claim ${run}`);
+    const inv = await inviteMember(db, team, { email: `claim-${run}@acme.test` });
+    const id = inv.ok ? inv.value.id : '';
+    const later = Date.now() + 120_000;
+    const claims = await Promise.all(Array.from({ length: 8 }, () => claimInvitationSend(db, team, id, 60_000, later)));
+    expect(claims.filter(Boolean)).toHaveLength(1);
   });
 
   it('the daily allowance holds under concurrent sends', async () => {
