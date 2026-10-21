@@ -21,7 +21,7 @@ import {
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
-import { HostPrioritySelect, PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
+import { HostPrioritySelect, HostReadiness, PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
 import { track } from '@/lib/analytics/port';
@@ -75,6 +75,10 @@ export interface TeamMemberOption {
   email?: string | null;
   /** Undefined when the API predates the field: unknown, never "missing". */
   hasDestinationCalendar?: boolean;
+  /** Any connected calendar (busy times are checked against it). Undefined = unknown. */
+  hasCalendar?: boolean;
+  /** Working hours on their default schedule. Undefined = unknown. */
+  hasHours?: boolean;
 }
 
 type ReminderMessages = EventTypeMessages['reminders'];
@@ -1260,6 +1264,12 @@ export function EventTypeForm({
                 m={m.teamHosts}
               />
             ) : null}
+            <HostReadiness
+              hosts={teamMembers ?? []}
+              collective={schedulingType === 'collective'}
+              m={m.teamHosts}
+              locale={locale}
+            />
             {/* Who a booking goes to, then the column header: only the fields
                 the active method actually uses. Below `sm` the header is
                 hidden and each control carries its own label (HostCell): the

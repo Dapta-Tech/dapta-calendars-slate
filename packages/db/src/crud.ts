@@ -736,13 +736,23 @@ export async function listTeamMembers(db: Db, accountId: string, teamId: string)
     display_name: string | null;
     email: string | null;
     has_destination_calendar: number;
+    has_calendar: number;
+    has_hours: number;
   }>(
     sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email,
           CASE WHEN EXISTS (
             SELECT 1 FROM connected_calendar cc
             WHERE cc.member_id = tm.member_id AND cc.account_id = ${accountId}
               AND cc.is_destination = 1
-          ) THEN 1 ELSE 0 END AS has_destination_calendar
+          ) THEN 1 ELSE 0 END AS has_destination_calendar,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM connected_calendar cc
+            WHERE cc.member_id = tm.member_id AND cc.account_id = ${accountId}
+          ) THEN 1 ELSE 0 END AS has_calendar,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM schedule s JOIN availability av ON av.schedule_id = s.id
+            WHERE s.id = m.default_schedule_id AND s.account_id = ${accountId}
+          ) THEN 1 ELSE 0 END AS has_hours
         FROM team_membership tm
         JOIN member m ON m.id = tm.member_id
         JOIN team t ON t.id = tm.team_id
@@ -751,6 +761,12 @@ export async function listTeamMembers(db: Db, accountId: string, teamId: string)
   return rows.map((r) => ({
     ...r,
     has_destination_calendar: Number(r.has_destination_calendar) === 1,
+    // Any connected calendar: what busy times are checked against.
+    has_calendar: Number(r.has_calendar) === 1,
+    // Working hours on the member's default schedule. An invited member has
+    // none until their first sign-in creates it; without hours a host is
+    // offered nowhere and never assigned.
+    has_hours: Number(r.has_hours) === 1,
   }));
 }
 

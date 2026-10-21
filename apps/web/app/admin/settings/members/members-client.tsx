@@ -100,7 +100,10 @@ export function MembersClient({
       const r = await resendInviteAction(member.id, locale);
       if (r.ok && r.email === 'failed') error(m.genericError);
       else if (r.ok) success(r.email === 'off' ? m.resendNoEmail : m.inviteResent);
-      else error(r.code === 'TOO_SOON' ? m.resendTooSoon : (r.message ?? m.genericError));
+      else
+        error(
+          r.code === 'TOO_SOON' ? m.resendTooSoon : r.code === 'LIMIT' ? m.inviteLimit : (r.message ?? m.genericError),
+        );
     });
 
   // `Modal` restores focus to whatever was focused when it opened — the trigger
@@ -175,7 +178,11 @@ export function MembersClient({
             // wrapping line that put an avatar, two pills, a picker and three
             // buttons through the same 328px.
             <li key={member.id} className="flex flex-col gap-field px-card py-card sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-field sm:px-control-pad">
-              <span className="flex min-w-0 flex-1 items-center gap-field">
+              {/* From `sm` the identity keeps a readable width (min-w-56) so the
+                  controls wrap below it instead of squeezing the name and email
+                  out of the row: with flex-1 alone its basis is 0, and wider
+                  labels (Spanish, an invited member's resend) left nothing. */}
+              <span className="flex min-w-0 flex-1 items-center gap-field sm:min-w-56">
                 <span
                   aria-hidden
                   className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background bg-cover bg-center text-xs font-semibold text-muted-foreground"
@@ -184,15 +191,18 @@ export function MembersClient({
                   {member.avatarUrl ? '' : initialOf(member)}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="flex items-center gap-inline truncate text-sm font-medium">
-                    {label}
+                  <span className="flex min-w-0 items-center gap-inline text-sm font-medium">
+                    {/* Truncation needs the text in its own box: on the flex row it never ellipsizes. */}
+                    <span className="truncate" title={label}>
+                      {label}
+                    </span>
                     {isSelf ? (
-                      <span className="rounded-sm bg-muted px-inline py-tight text-xs font-medium text-muted-foreground">
+                      <span className="shrink-0 rounded-sm bg-muted px-inline py-tight text-xs font-medium text-muted-foreground">
                         {m.you}
                       </span>
                     ) : null}
                   </span>
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-xs text-muted-foreground" title={member.email ?? undefined}>
                     {member.email ?? m.noEmail}
                   </span>
                 </span>

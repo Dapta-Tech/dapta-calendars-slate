@@ -19,7 +19,7 @@ export type InviteResult = {
   email?: InviteEmail;
 };
 /** A resend answers like an invite; `TOO_SOON` inside the per-member or per-workspace window. */
-export type ResendResult = { ok: boolean; code?: 'TOO_SOON' | 'FAILED'; message?: string; email?: InviteEmail };
+export type ResendResult = { ok: boolean; code?: 'TOO_SOON' | 'LIMIT' | 'FAILED'; message?: string; email?: InviteEmail };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -55,6 +55,9 @@ export async function resendInviteAction(id: string, locale?: 'en' | 'es'): Prom
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof ApiError && e.code === 'RESEND_TOO_SOON') return { ok: false, code: 'TOO_SOON' };
+    // A resend spends the same daily allowance as an invite; its 429 carries
+    // English API text, so it maps to the page's own copy like the invite does.
+    if (e instanceof ApiError && e.code === 'INVITE_LIMIT') return { ok: false, code: 'LIMIT' };
     return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
   }
 }
