@@ -1,8 +1,9 @@
 import { Controller, Get, Header, HttpException, HttpStatus, Inject } from '@nestjs/common';
+import type { ServerEnv } from '@slate/config/env';
 import type { Db } from '@slate/db';
 import { countOutbox, sql } from '@slate/db';
-import { DB } from './tokens';
-import { openapiSpec } from './openapi';
+import { DB, ENV } from './tokens';
+import { openapiFor } from './openapi';
 
 @Controller('health')
 export class HealthController {
@@ -65,17 +66,51 @@ export class HealthController {
   }
 }
 
-/** Public API documentation: OpenAPI JSON plus an interactive Scalar explorer. */
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
+
+/**
+ * Public API documentation: OpenAPI JSON plus an interactive Scalar explorer.
+ * Both name this deployment's address from API_PUBLIC_URL; unset, the examples
+ * fill it in from the page's own address in the browser, never a hardcoded host.
+ * ENV is required, not optional: a module that forgot to provide it must fail
+ * to boot rather than quietly serve relative addresses.
+ */
 @Controller()
 export class DocsController {
+  /** Normalized by the env schema (`cleanPublicUrl`): no trailing slash, query or credentials. */
+  private readonly apiPublicUrl: string | undefined;
+
+  constructor(@Inject(ENV) env: Pick<ServerEnv, 'API_PUBLIC_URL'>) {
+    this.apiPublicUrl = env.API_PUBLIC_URL;
+  }
+
   @Get('openapi.json')
   spec() {
-    return openapiSpec;
+    return openapiFor(this.apiPublicUrl);
   }
 
   @Get('docs')
   @Header('content-type', 'text/html; charset=utf-8')
   docs(): string {
+    const base = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : null;
+    const baseUrl = base ?? 'https://api.your-domain.example';
+    // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
+    const openapiUrl = base ? `${base}/openapi.json` : '/openapi.json';
+    // The explorer fetches its document from the page's own origin (the prefix
+    // kept): an absolute URL would be a cross-origin fetch, and CORS allows only
+    // the web app, so /docs opened on any other host would show nothing.
+    const explorerUrl = this.apiPublicUrl
+      ? escapeHtml(`${new URL(this.apiPublicUrl).pathname.replace(/\/$/, '')}/openapi.json`)
+      : '/openapi.json';
+    // Unset: this page is served at `<api base>/docs`, so the browser knows the
+    // base. The prefix is kept only when it is plain path characters.
+    const noscriptBase = base
+      ? ''
+      : `\n<noscript><p>Replace <code>BASE_URL</code> with this page's address minus <code>/docs</code>.</p></noscript>`;
+    const fillBase = base
+      ? ''
+      : `<script>(function(){var p=location.pathname.replace(/\\/docs\\/?$/i,'');document.getElementById('base-url').textContent=location.origin+(/^[A-Za-z0-9._~%\\/-]*$/.test(p)?p:'');})();</script>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dapta Calendars API</title>
@@ -89,7 +124,7 @@ a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px
 </style></head><body>
 <main class="intro">
 <h1>Dapta Calendars API</h1>
-<p>OpenAPI 3.1 source: <a href="/openapi.json"><code>/openapi.json</code></a>.
+<p>OpenAPI 3.1 source: <a href="${openapiUrl}"><code>/openapi.json</code></a>.
 This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
 <div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a
 <code>dcl_</code> API key. Never put the key in a URL. Flow Studio should use Bearer auth from Vault,
@@ -100,10 +135,10 @@ raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.
 <code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
 <code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
 <h2>Copy-paste discovery request</h2>
-<pre>BASE_URL="https://calendars-api.dapta.ai"
+<pre>BASE_URL="<span id="base-url">${baseUrl}</span>"
 curl "$BASE_URL/v2/event-types" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
-  --header "cal-api-version: 2024-06-14"</pre>
+  --header "cal-api-version: 2024-06-14"</pre>${noscriptBase}
 <h2>Copy-paste slots request</h2>
 <pre>curl --get "$BASE_URL/v2/slots" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
@@ -134,10 +169,11 @@ curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
 <p>Repository guides: <code>API-CONTRACT.md</code>, <code>FLOW-STUDIO-QUICKSTART.md</code>, and
 <code>CAL-COMPATIBILITY.md</code>.</p>
 </main>
-<script id="api-reference" data-url="/openapi.json" data-configuration='{"theme":"default","hideModels":false}'></script>
+${fillBase}
+<script id="api-reference" data-url="${explorerUrl}" data-configuration='{"theme":"default","hideModels":false}'></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 <noscript><p class="intro">JavaScript is required for the interactive explorer. Use
-<a href="/openapi.json">the raw OpenAPI document</a> instead.</p></noscript>
+<a href="${openapiUrl}">the raw OpenAPI document</a> instead.</p></noscript>
 </body></html>`;
   }
 }
