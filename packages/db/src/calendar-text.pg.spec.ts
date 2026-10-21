@@ -6,7 +6,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAccountByCode, getAvailability } from './repository';
 import { createTeamBooking, getTeamAvailability, loadBookingNotificationContext, rescheduleBooking } from './parity';
-import { rescheduleBookingV2 } from './v2-pilot';
+import { addGuestsToBooking, rescheduleBookingV2 } from './v2-pilot';
 import { loadBookingForCalendarWrite } from './calendar-refs';
 import { createEventType, updateEventType, type EventTypeInputRepo } from './crud';
 
@@ -188,5 +188,32 @@ describePg('calendar title and description templates (real Postgres)', () => {
       ok: true,
     });
     expect(await stored(created.uid)).toEqual({ title: 'Demo', calendar_description: '' });
+  });
+
+  it('guests added while a v2 move copies the booking never reach a copy that shows the invitee', async () => {
+    const et = await eventType('race', { calendarTitleTemplate: 'Call {{name}}' });
+    const times = await slots(et.slug);
+    for (let round = 0; round < 4; round++) {
+      const created = await book(et.slug, times[round * 2]!, `Ana${round} Private`);
+      const [guests, moved] = await Promise.all([
+        addGuestsToBooking(db, { accountId, uid: created.uid, guests: [{ email: `g${round}-${run}@example.com` }] }),
+        rescheduleBookingV2(db, { accountId, uid: created.uid, newStartMs: times[round * 2 + 1]! }),
+      ]);
+      if (!moved.ok) throw new Error(`v2 reschedule failed: ${moved.reason}`);
+      // The guests land either on the booking before the move (and are copied
+      // with the mark) or not at all (the move cancelled it first).
+      const copy = (await db.get<{ title: string; seated: number | null; guests: number | string }>(
+        sql`SELECT b.title, b.seated, (SELECT COUNT(*) FROM booking_guest g WHERE g.booking_id = b.id) AS guests
+            FROM booking b WHERE b.uid = ${moved.uid}`,
+      ))!;
+      if (guests.ok && guests.added > 0) {
+        expect(Number(copy.guests), `round ${round}`).toBe(1);
+        expect(copy.seated, `round ${round}`).toBe(1);
+        expect(copy.title, `round ${round}`).toBe('Call');
+      } else {
+        expect(guests, `round ${round}`).toEqual({ ok: false, reason: 'GONE' });
+        expect(Number(copy.guests), `round ${round}`).toBe(0);
+      }
+    }
   });
 });
