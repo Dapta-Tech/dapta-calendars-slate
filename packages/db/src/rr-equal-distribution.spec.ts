@@ -164,6 +164,9 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(await slotsOf(ev)).not.toContain(first);
       const refused = await book(ev, first);
       expect(refused.ok).toBe(false);
+      // Jordan's hours cover the time but a booking fills it, and Alex is held
+      // back: the write answers as for any time taken in the meantime.
+      expect(!refused.ok && refused.reason).toBe('SLOT_TAKEN');
     });
 
     it('availability (NULL): the same host 3 ahead keeps offering, as today', async () => {
@@ -190,17 +193,37 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(picked2.ok && picked2.hostMemberId).toBe(alexId);
     });
 
-    it('equal: a host with no schedule yet (an invited member) does not hold the team back', async () => {
-      const invitedId = randomUUID();
+    /** A member who was invited and never signed in: no schedule, so no hours. */
+    async function invitedMember() {
+      const id = randomUUID();
       await db.run(
         sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
-            VALUES (${invitedId}, ${accountId}, ${`inv-${tag}`}, ${'Casey Morgan'}, ${`casey-${tag}@example.com`},
+            VALUES (${id}, ${accountId}, ${`inv-${tag}-${++made}`}, ${'Casey Morgan'}, ${`casey-${tag}-${made}@example.com`},
               ${'UTC'}, ${null}, ${Date.now()})`,
       );
+      return id;
+    }
+
+    it('equal: a host with no schedule yet (an invited member) neither holds the team back nor takes the booking', async () => {
+      const invitedId = await invitedMember();
       const ev = await makeEvent('equal', [{ memberId: alexId }, { memberId: jordanId }, { memberId: invitedId }]);
       await giveBookings(ev.eventTypeId, ev.teamId, alexId, 4);
       await giveBookings(ev.eventTypeId, ev.teamId, jordanId, 4);
       expect((await slotsOf(ev)).length).toBeGreaterThan(0);
+      // Zero bookings would make them the fairest pick, but they have no hours.
+      const booked = await book(ev, await freeFor(ev, [alexId, jordanId]));
+      expect(booked.ok && booked.hostMemberId).not.toBe(invitedId);
+      expect(booked.ok).toBe(true);
+    });
+
+    it('availability (NULL): a host with no schedule is never assigned, however light their load', async () => {
+      const invitedId = await invitedMember();
+      const ev = await makeEvent(null, [{ memberId: alexId }, { memberId: jordanId }, { memberId: invitedId }]);
+      await giveBookings(null, null, alexId, 2);
+      await giveBookings(null, null, jordanId, 2);
+      const booked = await book(ev, await freeFor(ev, [alexId, jordanId]));
+      expect(booked.ok).toBe(true);
+      expect(booked.ok && [alexId, jordanId]).toContain(booked.ok ? booked.hostMemberId : '');
     });
   });
 }

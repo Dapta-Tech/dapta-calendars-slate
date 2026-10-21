@@ -736,18 +736,27 @@ async function eventHostLoads(
   return loads;
 }
 
+/** A host whose CONFIGURATION offers nothing (as opposed to a calendar that failed to read). */
+const CONFIG_GAPS: ReadonlySet<AvailabilityEmptyReason> = new Set(['SCHEDULE_MISSING', 'NO_SCHEDULE', 'NO_HOURS']);
+
 /**
  * The hosts equal distribution holds back right now (see
  * `hostsAheadOfEqualShare`). Only hosts whose configuration can offer times set
  * the floor: one with no schedule yet (an invited member) sits at zero bookings
- * for good and would otherwise hold back the whole team.
+ * for good and would otherwise hold back the whole team. A calendar that failed
+ * to read is not a configuration gap: the slot list sees those and the
+ * rules-only booking probe does not, so counting them alike keeps the two in
+ * step.
  */
 function equalShareHeldBack(
   hosts: Array<{ memberId: string; reason: AvailabilityEmptyReason | null }>,
   loads: Map<string, { n: number; last: number | null }>,
 ): Set<string> {
   const counts = new Map<string, number>();
-  for (const h of hosts) if (h.reason === null) counts.set(h.memberId, loads.get(h.memberId)?.n ?? 0);
+  for (const h of hosts) {
+    if (h.reason !== null && CONFIG_GAPS.has(h.reason)) continue;
+    counts.set(h.memberId, loads.get(h.memberId)?.n ?? 0);
+  }
   return hostsAheadOfEqualShare(counts);
 }
 
@@ -1060,7 +1069,8 @@ export async function createTeamBooking(
   let sawCalendarFailure = false;
   const heldAt = Date.now();
   for (const host of hosts) {
-    if (!offeredBy.has(host.member_id) || heldBack.has(host.member_id)) continue; // outside their own hours (or no schedule), or held back by equal distribution
+    // Outside their own hours (or no schedule at all), or held back by equal distribution.
+    if (!offeredBy.has(host.member_id) || heldBack.has(host.member_id)) continue;
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
     // A host somebody is holding this time with (a soft hold on one of their
