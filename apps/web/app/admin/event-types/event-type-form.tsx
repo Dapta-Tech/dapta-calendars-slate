@@ -70,6 +70,10 @@ interface HostRow {
 export interface TeamMemberOption {
   memberId: string;
   displayName: string | null;
+  /** The name of last resort, after `displayName`. */
+  email?: string | null;
+  /** Undefined when the API predates the field: unknown, never "missing". */
+  hasDestinationCalendar?: boolean;
 }
 
 type ReminderMessages = EventTypeMessages['reminders'];
@@ -491,16 +495,28 @@ function LocationField({
   onKind,
   onDetail,
   connections,
+  teamHosts,
+  schedulingType,
+  fixedHostIds,
   m,
   locationLabels,
+  locale,
 }: {
   kind: LocationKind | '';
   detail: string;
   onKind: (kind: LocationKind | '') => void;
   onDetail: (detail: string) => void;
   connections?: Connection[];
+  /** Present only for a TEAM event: every host the location applies to. */
+  teamHosts?: TeamMemberOption[];
+  /** Team events: decides whose calendar a booking's link can come from. */
+  schedulingType: SchedulingMethod;
+  /** Fixed round robin: the hosts on every booking (live form state). */
+  fixedHostIds: string[];
   m: EventTypeMessages;
   locationLabels: BookingMessages['location'];
+  /** Sorts and joins host names; the same on the server and in the browser. */
+  locale: 'en' | 'es';
 }) {
   // ADR 0008: the repo names no conferencing platform, the RUNNING product does.
   // The port reports it and it rides here on the connections response the editor
@@ -523,10 +539,55 @@ function LocationField({
   };
   // Warn, never disable: a host must be able to configure conferencing BEFORE
   // connecting a calendar, or connecting later leaves a silently broken event.
-  // `connections === undefined` is a team event — each host has their own
-  // calendar, so there is nothing here to be sure about.
+  // `connections === undefined` is a team event, warned about per host below.
   const missingDestination =
     kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
+  // A team event has ONE location for every host, but its meeting link is
+  // minted on the first host ON THE BOOKING with a calendar set to receive new
+  // events, organizer first (`destinationRefs` in calendar-refs.ts). So the gap
+  // depends on who is on a booking:
+  //  - round robin: one host, so each host without one is a gap;
+  //  - collective: every host, so one calendar among them is enough;
+  //  - fixed round robin: every fixed host, so one fixed calendar is enough;
+  //    without it, each rotating host without one is a gap. Read the hosts the
+  //    way the engine does (`combineTeamSlots` in parity.ts): no fixed host is
+  //    plain round robin, no rotating host is collective over the fixed ones.
+  // Strictly `false`: an API that predates the field sends nothing, and an
+  // unknown is not a gap.
+  const lacksCalendar = (h: TeamMemberOption) => h.hasDestinationCalendar === false;
+  let gapHosts: TeamMemberOption[] = [];
+  let noHostHasCalendar = false;
+  if (kind === 'conferencing' && teamHosts) {
+    const isFixed = (h: TeamMemberOption) => fixedHostIds.includes(h.memberId);
+    const fixed = schedulingType === 'fixed_round_robin' ? teamHosts.filter(isFixed) : [];
+    const rotating = schedulingType === 'fixed_round_robin' ? teamHosts.filter((h) => !isFixed(h)) : [];
+    if (schedulingType === 'collective' || (fixed.length > 0 && rotating.length === 0)) {
+      const attending = schedulingType === 'collective' ? teamHosts : fixed;
+      noHostHasCalendar = attending.length > 0 && attending.every(lacksCalendar);
+    } else if (fixed.length > 0) {
+      if (fixed.every(lacksCalendar)) gapHosts = rotating.filter(lacksCalendar);
+    } else {
+      gapHosts = teamHosts.filter(lacksCalendar);
+    }
+  }
+  // The roster arrives in no set order, so sort; sort and join in the page's
+  // locale, so the server render and the browser's agree.
+  const gapNames = gapHosts
+    .map((h) => h.displayName ?? h.email ?? h.memberId)
+    .sort((a, b) => a.localeCompare(b, locale));
+  const joinedNames = new Intl.ListFormat(locale, { type: 'conjunction' }).format(gapNames);
+  const gapTemplate =
+    gapNames.length === 1 ? m.locationTeamNoDestinationOne : m.locationTeamNoDestinationMany;
+  const linkGapWarning = noHostHasCalendar
+    ? m.locationTeamNoDestinationAll
+    : gapNames.length > 0
+      ? gapTemplate.replace('{names}', joinedNames)
+      : null;
+  const conferencingHint = !teamHosts
+    ? m.locationConferencingHint
+    : schedulingType === 'round_robin'
+      ? m.locationTeamConferencingHint
+      : m.locationTeamSharedConferencingHint;
 
   return (
     <div className="flex flex-col gap-field">
@@ -563,7 +624,15 @@ function LocationField({
       ) : null}
 
       {kind === 'conferencing' ? (
-        <p className="text-xs text-muted-foreground">{m.locationConferencingHint}</p>
+        <p className="text-xs text-muted-foreground">{conferencingHint}</p>
+      ) : null}
+
+      {/* No connect button, unlike the personal warning below: each host
+          sets their own calendar, so there is nothing to click for them. */}
+      {linkGapWarning ? (
+        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
+          <p>{linkGapWarning}</p>
+        </div>
       ) : null}
 
       {missingDestination ? (
@@ -1086,8 +1155,12 @@ export function EventTypeForm({
         onKind={setLocationKind}
         onDetail={setLocationDetail}
         connections={connections}
+        teamHosts={isTeamEvent ? teamMembers : undefined}
+        schedulingType={schedulingType}
+        fixedHostIds={hosts.filter((h) => h.isFixed).map((h) => h.memberId)}
         m={m}
         locationLabels={locationLabels}
+        locale={locale}
       />
       <div className="grid grid-cols-3 gap-field">
         <Field label={m.fLength}>

@@ -694,15 +694,40 @@ export async function deleteTeam(db: Db, accountId: string, id: string): Promise
   return { ok: true, value: { id } };
 }
 
-/** Team membership listing — scoped: only if the team belongs to `accountId`. */
+/**
+ * Team membership listing, scoped: only if the team belongs to `accountId`.
+ *
+ * `has_destination_calendar` says whether the member has a connected calendar
+ * marked as the place bookings are written (`is_destination`). A team event's
+ * meeting link is minted on the ASSIGNED host's own destination calendar
+ * (calendar-refs.ts), so the editor uses this to name the hosts whose bookings
+ * would get none. Computed with CASE rather than read as a bare EXISTS so both
+ * dialects return the same 0/1, then turned into a boolean here.
+ */
 export async function listTeamMembers(db: Db, accountId: string, teamId: string) {
-  return db.all<{ member_id: string; role: string; accepted: number; display_name: string | null; email: string | null }>(
-    sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email
+  const rows = await db.all<{
+    member_id: string;
+    role: string;
+    accepted: number;
+    display_name: string | null;
+    email: string | null;
+    has_destination_calendar: number;
+  }>(
+    sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM connected_calendar cc
+            WHERE cc.member_id = tm.member_id AND cc.account_id = ${accountId}
+              AND cc.is_destination = 1
+          ) THEN 1 ELSE 0 END AS has_destination_calendar
         FROM team_membership tm
         JOIN member m ON m.id = tm.member_id
         JOIN team t ON t.id = tm.team_id
         WHERE tm.team_id = ${teamId} AND t.account_id = ${accountId}`,
   );
+  return rows.map((r) => ({
+    ...r,
+    has_destination_calendar: Number(r.has_destination_calendar) === 1,
+  }));
 }
 
 /**

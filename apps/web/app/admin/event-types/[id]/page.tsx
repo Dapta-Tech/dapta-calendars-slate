@@ -38,6 +38,8 @@ export default async function EditEventType({
     ? (await adminApi.teamMembers(et.teamId)).map((tm) => ({
         memberId: tm.member_id,
         displayName: tm.display_name,
+        email: tm.email,
+        hasDestinationCalendar: tm.has_destination_calendar,
       }))
     : undefined;
 

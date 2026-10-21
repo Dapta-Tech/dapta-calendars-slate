@@ -258,10 +258,17 @@ export const adminApi = {
   updateTeam: (id: string, b: unknown) => req<Team>('PATCH', `/v1/teams/${id}`, b),
   deleteTeam: (id: string) => req<{ id: string }>('DELETE', `/v1/teams/${id}`),
   teamMembers: (id: string) =>
-    req<{ member_id: string; role: string; display_name: string | null; email: string | null }[]>(
-      'GET',
-      `/v1/teams/${id}/members`,
-    ),
+    req<
+      {
+        member_id: string;
+        role: string;
+        display_name: string | null;
+        email: string | null;
+        /** Has a destination calendar, where a team booking's meeting link is
+         *  minted. Absent on an older API: read that as unknown, not as false. */
+        has_destination_calendar?: boolean;
+      }[]
+    >('GET', `/v1/teams/${id}/members`),
   addTeamMember: (id: string, b: unknown) => req('POST', `/v1/teams/${id}/members`, b),
   updateTeamMemberRole: (id: string, memberId: string, role: 'owner' | 'member') =>
     req('PATCH', `/v1/teams/${id}/members/${memberId}`, { role }),
