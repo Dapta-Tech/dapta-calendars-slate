@@ -6,6 +6,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpException,
   Inject,
   Logger,
   NotFoundException,
@@ -53,6 +54,7 @@ import {
 import {
   eventTypeInputSchema,
   memberInviteSchema,
+  memberResendInviteSchema,
   type OneOffLinkView,
   memberPatchSchema,
   scheduleInputSchema,
@@ -66,6 +68,7 @@ import { ZodError } from 'zod';
 import { AnalyticsEffects } from './analytics-effects';
 import { AuthService, type ReqLike } from './auth.service';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
+import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { assertReminderTemplates } from './template-validation';
@@ -155,6 +158,9 @@ export class AdminCrudController {
     // Product analytics. LAST and @Optional() for the same reason: absent, no
     // event is recorded, which is also what analytics being off does.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
+    // The invitation email. LAST and @Optional() for the same reason: absent,
+    // an invite creates the member and sends nothing, as it always did.
+    @Optional() @Inject(EmailEffects) private readonly email?: EmailEffects,
   ) {}
 
   /** The language the host reads template errors in (their own UI locale). */
@@ -248,7 +254,42 @@ export class AdminCrudController {
         this.log.error(`growth enqueue failed for invited member ${member.id}: ${String(err)}`);
       }
     }
-    return member;
+    // The invitation itself: queued, never able to fail the invite either.
+    // `inviteEmail` tells the dashboard what to say: "sent" only when this
+    // deployment really sends mail.
+    const outcome = this.email
+      ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
+      : 'off';
+    const inviteEmail = outcome === 'queued' ? 'queued' : 'off';
+    void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
+    return { ...member, inviteEmail };
+  }
+
+  /**
+   * Send a pending invitation again (admin). Only an `invited` member has one
+   * to resend; a resend inside a minute of the last send is refused (429) so
+   * a double click cannot flood an inbox.
+   */
+  @Post('members/:id/resend-invite')
+  @HttpCode(200)
+  async resendInvite(@Req() req: ReqLike, @Param('id') id: string, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const { locale } = parse(memberResendInviteSchema, body ?? {});
+    const target = await getAccountMember(this.db, p.accountId, id);
+    if (!target) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    if (target.status !== 'invited') {
+      throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
+    }
+    const outcome = this.email ? await this.email.enqueueMemberInvite(p.accountId, id, p.memberId, { locale }) : 'off';
+    if (outcome === 'too_soon') {
+      throw new HttpException({ error: 'RESEND_TOO_SOON', message: 'An invitation just went out. Try again in a minute.' }, 429);
+    }
+    if (outcome === 'not_invited') {
+      throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
+    }
+    void this.analytics?.hostEvent('invite_sent', p, { role: target.role, resend: true, delivery: outcome });
+    return { ok: true, inviteEmail: outcome };
   }
 
   @Patch('members/:id')

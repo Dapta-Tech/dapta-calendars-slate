@@ -951,10 +951,29 @@ export interface BookingMessages {
       roleUpdated: string;
       statusUpdated: string;
       memberInvited: string;
+      /** The invite went in, but this deployment sends no email: say so instead of "sent". */
+      memberAddedNoEmail: string;
+      resendInvite: string;
+      inviteResent: string;
+      resendTooSoon: string;
       memberRemoved: string;
       genericError: string;
       noAccessTitle: string;
       noAccessBody: string;
+    };
+    /** The accounts one person can act in (rail switcher), for anyone with two or more. */
+    workspaces: {
+      menuLabel: string;
+      current: string;
+      pending: string;
+      switchFailed: string;
+    };
+    /** `/invite/{code}` when the signed-in person holds no invitation to that workspace. */
+    invite: {
+      notForYouTitle: string;
+      notForYouBody: string;
+      otherEmail: string;
+      goHome: string;
     };
     connections: {
       pageDesc: string;
@@ -2368,7 +2387,7 @@ export const en: BookingMessages = {
       rolesHintMember: 'Member — manages only their own events, schedules and bookings.',
       invite: 'Invite member',
       inviteTitle: 'Invite a member',
-      inviteLead: 'They’ll join your workspace with the role you choose.',
+      inviteLead: 'We’ll email them an invitation to join with the role you choose.',
       emailLabel: 'Email',
       emailPlaceholder: 'name@company.com',
       emailInvalid: 'Enter a valid email address.',
@@ -2399,10 +2418,26 @@ export const en: BookingMessages = {
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
       memberInvited: 'Invitation sent.',
+      memberAddedNoEmail: 'Invitation saved. This server sends no email, so let them know to sign in with that address.',
+      resendInvite: 'Resend invite',
+      inviteResent: 'Invitation sent again.',
+      resendTooSoon: 'An invitation just went out. Try again in a minute.',
       memberRemoved: 'Member removed.',
       genericError: 'Something went wrong.',
       noAccessTitle: 'You don’t have access',
       noAccessBody: 'This section is available to workspace admins and owners.',
+    },
+    workspaces: {
+      menuLabel: 'Your workspaces',
+      current: 'Current',
+      pending: 'Invited',
+      switchFailed: 'Could not open that workspace. Try again.',
+    },
+    invite: {
+      notForYouTitle: 'This invitation isn’t for this account',
+      notForYouBody: 'You’re signed in as {email}. Sign in with the address the invitation was sent to, or ask whoever invited you to send it to this one.',
+      otherEmail: 'Sign in with another email',
+      goHome: 'Go to my calendar',
     },
     connections: {
       pageDesc: 'Connect a calendar so {product} can check conflicts (busy times) and write your booked events to it.',
@@ -3769,7 +3804,7 @@ export const es: BookingMessages = {
       rolesHintMember: 'Miembro — gestiona solo sus propios eventos, horarios y reservas.',
       invite: 'Invitar miembro',
       inviteTitle: 'Invitar a un miembro',
-      inviteLead: 'Se unirá a tu espacio con el rol que elijas.',
+      inviteLead: 'Le enviaremos un correo para unirse con el rol que elijas.',
       emailLabel: 'Correo',
       emailPlaceholder: 'nombre@empresa.com',
       emailInvalid: 'Introduce un correo válido.',
@@ -3800,10 +3835,26 @@ export const es: BookingMessages = {
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
       memberInvited: 'Invitación enviada.',
+      memberAddedNoEmail: 'Invitación guardada. Este servidor no envía correos, así que avísale que entre con ese correo.',
+      resendInvite: 'Reenviar invitación',
+      inviteResent: 'Invitación reenviada.',
+      resendTooSoon: 'Acabamos de enviar una invitación. Intenta de nuevo en un minuto.',
       memberRemoved: 'Miembro eliminado.',
       genericError: 'Algo salió mal.',
       noAccessTitle: 'No tienes acceso',
       noAccessBody: 'Esta sección está disponible para administradores y propietarios del espacio.',
+    },
+    workspaces: {
+      menuLabel: 'Tus espacios',
+      current: 'Actual',
+      pending: 'Invitado',
+      switchFailed: 'No pudimos abrir ese espacio. Intenta de nuevo.',
+    },
+    invite: {
+      notForYouTitle: 'Esta invitación no es para esta cuenta',
+      notForYouBody: 'Entraste como {email}. Entra con el correo al que llegó la invitación, o pide a quien te invitó que la envíe a este.',
+      otherEmail: 'Entrar con otro correo',
+      goHome: 'Ir a mi calendario',
     },
     connections: {
       pageDesc: 'Conecta un calendario para que {product} pueda verificar conflictos (horas ocupadas) y escribir en él tus reservas.',

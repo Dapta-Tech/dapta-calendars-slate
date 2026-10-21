@@ -1,0 +1,11 @@
+# Who is calling and where they act are two questions
+
+Until now one answer covered both. The auth provider validated the session token and resolved an account and a member from it, and that account was the only one the person could ever act in. The data model already allowed more: `member` is unique per `(account_id, external_id)`, and inviting someone writes an `invited` row into the inviting account. Nothing read that back. An invited teammate signed in, landed in their own account (or got a new empty one), and the invitation led nowhere.
+
+The provider still answers the first question, unchanged: who this is, from the token it validated, and their home account. The second question gets its own input. A dashboard request may name another account in `x-dcal-workspace`, and that name is only a request: `AuthService` re-derives the membership from the database on every call, from the identity the provider proved. A person matches a member row by their subject (`external_id`), or by their address on a row that is not bound to any subject yet, which is exactly what an invitation is. A name they hold no membership in, or a disabled one, is a 403 `WORKSPACE_FORBIDDEN`, never a quiet fall back to the home account: a fallback would land writes in a tenant the person did not believe they were in. The web keeps the choice in an httpOnly cookie and drops it when the API refuses it or the session ends.
+
+Acting in an account you were invited to is accepting the invitation: the row turns `active` and, when it was matched by address, is bound to the person's subject, so it follows them from then on and the MCP door (which finds a person's accounts by subject) sees it. That is the only transition: a disabled member stays disabled.
+
+What does not change is the point. No header, or the home account named, is exactly the provider's answer, so every caller that never sends it (API keys, the MCP door, public pages, webhooks, any fork) behaves as before. Nothing is migrated, and nothing is emailed on deploy.
+
+This is the shape dForms reached first, with the identity service's own workspaces as the source of truth behind it. Projecting those workspaces here is a later step and does not change this contract: the header still names a local account, and membership is still re-derived per request.

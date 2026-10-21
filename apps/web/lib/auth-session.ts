@@ -7,6 +7,7 @@ import { getLocale } from './locale';
 import { safeReturnTo, withReturnTo } from './return-to';
 import { SESSION_COOKIE } from './session';
 import { PATH_HEADER, QUERY_HEADER } from './theme';
+import { WORKSPACE_COOKIE, WORKSPACE_FORBIDDEN, WORKSPACE_RESET_PATH, chosenWorkspace, workspaceHeader } from './workspace';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -316,16 +317,35 @@ export async function refreshUpstreamSession(session: Session | null): Promise<S
 }
 
 /**
- * Identity headers for a raw host `fetch()` that doesn't route through
- * admin-api's `req()` (a few server actions post directly). Same contract as
- * admin-api (§1): Bearer for workos, x-slate-email for local, nothing when
- * logged out (→ the API 401s → the gate redirects).
+ * Identity headers for every host call, admin-api's `req()` included (§1):
+ * Bearer for workos, x-slate-email for local, nothing when logged out (→ the
+ * API 401s → the gate redirects). Plus the chosen workspace, when there is one
+ * (`lib/workspace.ts`); `workspace: false` leaves it out, for the one call that
+ * must speak for the person rather than for a workspace (the invitation link
+ * listing where they may go).
  */
-export async function hostHeaders(): Promise<Record<string, string>> {
+export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<Record<string, string>> {
   const s = await getSession();
-  if (s?.provider === 'workos') return { authorization: `Bearer ${s.accessToken}` };
-  if (s?.provider === 'local') return { 'x-slate-email': s.email };
-  return {};
+  const identity: Record<string, string> =
+    s?.provider === 'workos'
+      ? { authorization: `Bearer ${s.accessToken}` }
+      : s?.provider === 'local'
+        ? { 'x-slate-email': s.email }
+        : {};
+  if (opts.workspace === false || !Object.keys(identity).length) return identity;
+  return { ...identity, ...(await workspaceHeader()) };
+}
+
+/**
+ * The API refused the chosen workspace (removed, disabled, or a cookie from
+ * someone else's session): drop the choice and land on the person's own
+ * account. A redirect, never a quiet retry without the header: a write must not
+ * land in a workspace the page did not say it was in.
+ */
+export async function leaveForbiddenWorkspace(res: Response): Promise<void> {
+  if (res.status !== 403 || !(await chosenWorkspace())) return;
+  const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
+  if (body?.error === WORKSPACE_FORBIDDEN) redirect(WORKSPACE_RESET_PATH);
 }
 
 /**
@@ -466,11 +486,15 @@ export async function refreshOrSignOut(): Promise<void> {
  * caller shows a retryable failure and the session stays signed in. Still one
  * refresh and one retry — the throw ends the attempt rather than extending it.
  */
-export async function hostFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function hostFetch(
+  path: string,
+  init?: RequestInit,
+  opts: { workspace?: boolean } = {},
+): Promise<Response> {
   const call = async (): Promise<Response> =>
     fetch(`${API_URL}${path}`, {
       ...init,
-      headers: { ...((init?.headers as Record<string, string>) ?? {}), ...(await hostHeaders()) },
+      headers: { ...((init?.headers as Record<string, string>) ?? {}), ...(await hostHeaders(opts)) },
       cache: 'no-store',
     });
 
@@ -491,6 +515,7 @@ export async function hostFetch(path: string, init?: RequestInit): Promise<Respo
     await signOutKeepingPlace(await getSession());
   }
 
+  if (opts.workspace !== false) await leaveForbiddenWorkspace(res);
   return res;
 }
 
@@ -513,5 +538,9 @@ export async function setSession(s: Session): Promise<void> {
 
 /** Clear the session cookie (only valid in a Server Action or Route Handler). */
 export async function clearSession(): Promise<void> {
-  (await cookies()).delete(SESSION_COOKIE);
+  const jar = await cookies();
+  jar.delete(SESSION_COOKIE);
+  // The workspace choice belongs to the session it was made in: the next
+  // person to sign in on this browser starts in their own account.
+  jar.delete(WORKSPACE_COOKIE);
 }

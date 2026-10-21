@@ -88,6 +88,8 @@ the deployment prunes it.
 | `calendars_branding_changed` | The booking page look or the workspace brand kit changes | `change` (`page_style`, `look_applied`, `brand_kit`, `kit_applied`, `reverted`), `fields` (names of the settings saved, never their values) |
 | `calendars_hide_branding_toggled` | The Dapta branding switch changes (a save that keeps it is not) | `hidden` |
 | `calendars_booking_created` | A booking is created (not on an idempotent replay, nor a seat taken on an existing group booking). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
+| `calendars_invite_sent` | An admin invites someone to the workspace, or resends a pending invitation. About the **admin** who sent it | `role` (the role offered), `resend`, `delivery` (`queued`, or `off` when this deployment sends no mail) |
+| `calendars_invite_accepted` | An invited person opens the workspace for the first time (the invitation turns active). About the **invitee** | `role` |
 
 ### Browser, host (dashboard and wizard only)
 

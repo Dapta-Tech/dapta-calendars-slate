@@ -1,11 +1,20 @@
 import { ForbiddenException, Inject, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
-import { verifyApiKey, memberRoleAndLoginSeen, noteMemberLogin } from '@slate/db';
+import {
+  acceptInvitedMember,
+  findMembership,
+  getPersonIdentity,
+  listWorkspacesForIdentity,
+  verifyApiKey,
+  memberRoleAndLoginSeen,
+  noteMemberLogin,
+} from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
-import type { ApiScope } from '@slate/types';
+import { WORKSPACE_HEADER, type ApiScope, type WorkspaceView } from '@slate/types';
 import { AUTH_PROVIDER, DB, ENV } from './tokens';
-import { header, type AuthProvider, type HostPrincipal, type ReqLike } from './auth.provider';
+import { header, type AuthProvider, type HostPrincipal, type ReqLike, type ResolvedHost } from './auth.provider';
 import { annotateRequestAccount } from './request-log';
+import { AnalyticsEffects } from './analytics-effects';
 
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
@@ -63,6 +72,9 @@ export class AuthService {
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
     // Optional so specs can build the service with two arguments: the default window.
     @Optional() @Inject(ENV) env?: Pick<ServerEnv, 'OAUTH_LINK_MAX_AGE_DAYS'>,
+    // Product analytics, for the one event this layer sees (an invitation
+    // accepted). LAST and @Optional(): absent, nothing is reported.
+    @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {
     this.loginSeenRefreshMs = loginSeenRefreshMs(env?.OAUTH_LINK_MAX_AGE_DAYS ?? 30);
   }
@@ -85,7 +97,7 @@ export class AuthService {
    * stamps nothing. A failed write is logged and never costs the request.
    */
   async resolveHost(req: ReqLike): Promise<HostPrincipal> {
-    const id = await this.provider.resolveHost(req);
+    const id = await this.actingAs(req, await this.provider.resolveHost(req));
     annotateRequestAccount(req, id.accountId);
     const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
     const vouchedAt = id.authenticatedAt === null ? null : Math.min(id.authenticatedAt ?? Date.now(), Date.now());
@@ -96,6 +108,69 @@ export class AuthService {
       );
     }
     return { ...id, role: member?.role ?? 'member' };
+  }
+
+  /**
+   * WHO is calling and WHERE they act are two questions. The provider answers
+   * the first from the token it validated; the account it resolves is the
+   * person's home. A request may NAME another account in `x-dcal-workspace`,
+   * and that name is only a request: membership is re-derived from the
+   * database, on every request, from the identity the provider proved (subject,
+   * or the address of a not-yet-bound invitation). A name the person holds no
+   * membership in is a 403, never a quiet fall back to the home account, which
+   * would land writes in a tenant the person did not believe they were in.
+   *
+   * No header, or the home account named: exactly the provider's answer, as
+   * before this existed. Either way, the first request an invited member makes
+   * in an account accepts the invitation (`acceptInvitedMember`).
+   */
+  private async actingAs(req: ReqLike, home: ResolvedHost): Promise<ResolvedHost> {
+    const requested = header(req, WORKSPACE_HEADER)?.trim();
+    if (!requested || requested === home.accountId) {
+      await this.acceptIfInvited(home.accountId, home.memberId);
+      return home;
+    }
+    const identity = await getPersonIdentity(this.db, home.accountId, home.memberId);
+    const membership = identity ? await findMembership(this.db, identity, requested) : null;
+    if (!membership) {
+      throw new ForbiddenException({ error: 'WORKSPACE_FORBIDDEN', message: 'You are not a member of that workspace.' });
+    }
+    if (membership.status === 'invited') {
+      await this.acceptIfInvited(membership.accountId, membership.memberId, identity?.externalId ?? null);
+    }
+    return { ...home, accountId: membership.accountId, memberId: membership.memberId };
+  }
+
+  /** Turn an invitation active on first use, and report it once. Never costs the request. */
+  private async acceptIfInvited(accountId: string, memberId: string, externalId: string | null = null): Promise<void> {
+    try {
+      if (!(await acceptInvitedMember(this.db, accountId, memberId, externalId))) return;
+      const role = (await memberRoleAndLoginSeen(this.db, accountId, memberId))?.role ?? 'member';
+      void this.analytics?.hostEvent('invite_accepted', { accountId, memberId }, { role });
+    } catch (error) {
+      this.logger.warn(`could not accept the invitation of member ${memberId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Every workspace the caller can act in, from their HOME identity (never from
+   * the one they are viewing, so the list reads the same from anywhere), with
+   * the one this request acts in marked.
+   */
+  async listWorkspaces(req: ReqLike): Promise<WorkspaceView[]> {
+    const home = await this.provider.resolveHost(req);
+    const acting = await this.actingAs(req, home);
+    const identity = await getPersonIdentity(this.db, home.accountId, home.memberId);
+    const rows = identity ? await listWorkspacesForIdentity(this.db, identity) : [];
+    return rows.map((w) => ({
+      accountId: w.accountId,
+      accountCode: w.accountCode,
+      accountName: w.accountName,
+      role: w.role,
+      status: w.status,
+      current: w.accountId === acting.accountId,
+      home: w.accountId === home.accountId,
+    }));
   }
 
   /**

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { redirect, unstable_rethrow } from 'next/navigation';
+import type { WorkspaceView } from '@slate/types';
 import { LANDING_ID_COOKIE, getMessages } from '@slate/shared';
 import { adminApi, ApiError, isAdminRole } from '@/lib/admin-api';
 import { AdminShell } from '@/components/admin-shell';
@@ -76,6 +77,19 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       ? await listWorkspaces(session.accessToken)
       : { items: [], hasMore: false };
 
+  // The person's own workspaces (their account, the ones they joined, pending
+  // invitations): the rail offers a switcher from two. A failure here costs the
+  // switcher, never the page.
+  let workspaces: WorkspaceView[] = [];
+  try {
+    workspaces = await adminApi.myWorkspaces();
+  } catch (e) {
+    unstable_rethrow(e);
+  }
+  // The staff picker marks the account the TOKEN names; while another
+  // workspace is open that mark would point at the wrong row, so it marks none.
+  const inHome = workspaces.length === 0 || workspaces.some((w) => w.current && w.home);
+
   // Product analytics, read at request time (never inlined at build): null
   // when the deployment configures none, and then nothing loads.
   const analytics = analyticsConfig();
@@ -99,8 +113,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         accounts={accounts.items}
         accountsHasMore={accounts.hasMore}
         currentAccountId={
-          session?.provider === 'workos' ? currentAccountId(session.accessToken) : null
+          session?.provider === 'workos' && inHome ? currentAccountId(session.accessToken) : null
         }
+        workspaces={workspaces}
       >
         {children}
       </AdminShell>

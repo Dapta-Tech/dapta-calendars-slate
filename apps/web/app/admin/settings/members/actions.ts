@@ -5,25 +5,53 @@ import { unstable_rethrow } from 'next/navigation';
 import { adminApi, ApiError, type AccountRole, type MemberStatus } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
-/** Invite carries a stable code so the client can localize (email / duplicate / generic). */
-export type InviteResult = { ok: boolean; code?: 'INVALID_EMAIL' | 'EMAIL_TAKEN' | 'FAILED'; message?: string };
+/**
+ * Invite carries a stable code so the client can localize (email / duplicate /
+ * generic), and `email`: `queued` when the invitation email went in, `off` when
+ * this server sends no mail (the toast must not claim it was sent).
+ */
+export type InviteResult = {
+  ok: boolean;
+  code?: 'INVALID_EMAIL' | 'EMAIL_TAKEN' | 'FAILED';
+  message?: string;
+  email?: 'queued' | 'off';
+};
+/** A resend answers like an invite; `TOO_SOON` inside a minute of the last send. */
+export type ResendResult = { ok: boolean; code?: 'TOO_SOON' | 'FAILED'; message?: string; email?: 'queued' | 'off' };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Invite a member by email with a role (admin or member). Creates an invited row. */
+/**
+ * Invite a member by email with a role (admin or member). Creates an invited
+ * row and queues the invitation email, written in `locale` (the inviter's
+ * dashboard language).
+ */
 export async function inviteMemberAction(
   email: string,
   role: 'admin' | 'member',
+  locale?: 'en' | 'es',
 ): Promise<InviteResult> {
   const target = email.trim().toLowerCase();
   if (!target || !EMAIL_RE.test(target)) return { ok: false, code: 'INVALID_EMAIL' };
   try {
-    await adminApi.inviteMember({ email: target, role });
+    const created = await adminApi.inviteMember({ email: target, role, ...(locale ? { locale } : {}) });
     revalidatePath('/admin/settings/members');
-    return { ok: true };
+    return { ok: true, email: created.inviteEmail === 'queued' ? 'queued' : 'off' };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     if (e instanceof ApiError && e.code === 'EMAIL_TAKEN') return { ok: false, code: 'EMAIL_TAKEN' };
+    return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
+  }
+}
+
+/** Send a pending invitation again. */
+export async function resendInviteAction(id: string, locale?: 'en' | 'es'): Promise<ResendResult> {
+  try {
+    const r = await adminApi.resendInvite(id, locale ? { locale } : {});
+    return { ok: true, email: r.inviteEmail === 'queued' ? 'queued' : 'off' };
+  } catch (e) {
+    unstable_rethrow(e);
+    if (e instanceof ApiError && e.code === 'RESEND_TOO_SOON') return { ok: false, code: 'TOO_SOON' };
     return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
   }
 }

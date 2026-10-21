@@ -347,30 +347,95 @@ export function renderBrandedHtml(
     ? `<div style="margin:0 0 6px;">${esc(es ? 'Hecho con Dapta Calendars' : 'Made with Dapta Calendars')} · ` +
       `<a href="${safeHref(signup)}" style="color:${C.ink};text-decoration:underline;">${esc(es ? 'Crea tu calendario gratis' : 'Create your free calendar')}</a></div>`
     : '';
-  const auto = es ? 'Este es un mensaje automático.' : 'This is an automated message.';
-  const help = es ? '¿Necesitas ayuda?' : 'Need help?';
-  // The deployment's own support desk, or no line at all: never a hard-coded
-  // address, which a fork would otherwise send its readers to.
-  const support = mailSupportAddress(growth.supportEmail);
-  const helpLine = support
-    ? ` ${help} <a href="${safeHref(`mailto:${support}`)}" style="color:${C.faint};">${esc(support)}</a>`
-    : '';
-
-  return `<div style="margin:0;padding:32px 12px;background:${C.ground};font-family:${FONT};">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
-    <tr><td style="background:${C.paper};border:1px solid ${C.border};border-radius:16px;padding:32px 28px;">
-      ${status(c.status, c.color)}
+  return frame(
+    `${status(c.status, c.color)}
       <div style="color:${C.ink};font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">${esc(vars.event_title)}</div>
       <div style="color:${C.muted};font-size:15px;line-height:22px;margin:0 0 20px;">${esc(c.intro)}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${C.border};border-bottom:1px solid ${C.border};">
         ${facts}
       </table>
       ${details ? answersSection(details, locale) : ''}${c.action ? button(c.action.label, c.action.href) : ''}
-      ${c.note ? `<div style="color:${C.faint};font-size:13px;line-height:20px;margin-top:16px;">${esc(c.note)}</div>` : ''}
+      ${c.note ? `<div style="color:${C.faint};font-size:13px;line-height:20px;margin-top:16px;">${esc(c.note)}</div>` : ''}`,
+    `${madeWith}${automatedLine(es, growth)}`,
+  );
+}
+
+/**
+ * "This is an automated message", then the deployment's own support desk, or
+ * no help line at all: never a hard-coded address, which a fork would
+ * otherwise send its readers to.
+ */
+function automatedLine(es: boolean, growth: EmailGrowth): string {
+  const auto = es ? 'Este es un mensaje automático.' : 'This is an automated message.';
+  const help = es ? '¿Necesitas ayuda?' : 'Need help?';
+  const support = mailSupportAddress(growth.supportEmail);
+  const helpLine = support
+    ? ` ${help} <a href="${safeHref(`mailto:${support}`)}" style="color:${C.faint};">${esc(support)}</a>`
+    : '';
+  return `<div>${auto}${helpLine}</div>`;
+}
+
+/** The ground, the 520px card around `card`, and the quiet footer under it. */
+function frame(card: string, footer: string): string {
+  return `<div style="margin:0;padding:32px 12px;background:${C.ground};font-family:${FONT};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;">
+    <tr><td style="background:${C.paper};border:1px solid ${C.border};border-radius:16px;padding:32px 28px;">
+      ${card}
     </td></tr>
     <tr><td style="padding:20px 8px 4px;color:${C.faint};font-size:12px;line-height:18px;text-align:center;">
-      ${madeWith}<div>${auto}${helpLine}</div>
+      ${footer}
     </td></tr>
   </table>
 </div>`;
+}
+
+/** What the workspace invitation shows; every value is escaped here. */
+export interface MemberInviteHtml {
+  workspaceName: string;
+  inviterName: string | null;
+  role: 'admin' | 'member';
+  /** The address the invitation is for: the one to sign in with. */
+  email: string;
+  acceptUrl: string;
+}
+
+/**
+ * The invitation to join a workspace, in the booking email's language: the
+ * status as a word with a dot, the workspace as the title, who sent it and the
+ * role as facts, ONE button. No "Made with" line: the reader is joining a team,
+ * not being marketed to.
+ */
+export function renderMemberInviteHtml(input: MemberInviteHtml, locale: string, growth: EmailGrowth = {}): string {
+  const es = ES(locale);
+  const role = input.role === 'admin' ? (es ? 'Administrador' : 'Admin') : es ? 'Miembro' : 'Member';
+  const intro = input.inviterName
+    ? es
+      ? `${input.inviterName} te invitó a unirte a este espacio. Entra con ${input.email} para aceptar.`
+      : `${input.inviterName} invited you to join this workspace. Sign in with ${input.email} to accept.`
+    : es
+      ? `Te invitaron a unirte a este espacio. Entra con ${input.email} para aceptar.`
+      : `You’re invited to join this workspace. Sign in with ${input.email} to accept.`;
+  const rows: Array<[string, string]> = [
+    [es ? 'Espacio' : 'Workspace', esc(input.workspaceName)],
+    [es ? 'Rol' : 'Role', esc(role)],
+    [es ? 'De' : 'From', esc(input.inviterName ?? '')],
+  ];
+  const facts = rows
+    .filter(([, html]) => html)
+    .map(([label, html], i) => fact(label, html, i === 0))
+    .join('');
+  const note = es
+    ? 'Si no esperabas esta invitación, puedes ignorar este correo.'
+    : 'If you weren’t expecting this invitation, you can ignore this email.';
+  return frame(
+    `${status(es ? 'Invitación' : 'Invitation', C.ink)}
+      <div style="color:${C.ink};font-size:24px;font-weight:700;line-height:30px;letter-spacing:-0.01em;margin:0 0 8px;">${esc(input.workspaceName)}</div>
+      <div style="color:${C.muted};font-size:15px;line-height:22px;margin:0 0 20px;">${esc(intro)}</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${C.border};border-bottom:1px solid ${C.border};">
+        ${facts}
+      </table>
+      ${button(es ? 'Aceptar invitación' : 'Accept invitation', input.acceptUrl)}
+      <div style="color:${C.faint};font-size:13px;line-height:20px;margin-top:16px;">${esc(note)}</div>`,
+    automatedLine(es, growth),
+  );
 }

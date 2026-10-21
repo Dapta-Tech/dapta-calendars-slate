@@ -1,6 +1,7 @@
 import type { EmailProvider, EmailResult } from './email.port';
 import { buildIcs, icsContentType } from './ics';
 import { renderBrandedHtml, type Audience, type EmailGrowth, type EmailKind } from './email-layout';
+import { renderMemberInvite, type MemberInviteNotification } from './member-invite';
 import {
   bookingDetails,
   bookingDetailsText,
@@ -438,6 +439,23 @@ export class BookingNotifier {
       headers: { 'X-Booking-Uid': n.uid },
       idempotencyKey: this.idem(n, `calendar:${n.uid}:cancellation`),
       attachments: [this.ics(n, 'CANCEL', 2)],
+    });
+  }
+
+  /**
+   * The workspace invitation (not a booking email, but the same transport and
+   * footer). One message per send: the first invitation and each resend carry
+   * their own `sendKey`, so a retry of one is de-duplicated and a resend is not.
+   */
+  sendMemberInvite(n: MemberInviteNotification): Promise<EmailResult> {
+    const rendered = renderMemberInvite(n, { supportEmail: this.growth.supportEmail });
+    return this.email.send({
+      accountId: n.accountId,
+      to: n.email,
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html,
+      idempotencyKey: `calendar:member-invite:${n.memberId}:${n.sendKey}`,
     });
   }
 

@@ -10,6 +10,7 @@ import {
   switchAccount,
   type WorkspacePage,
 } from '@/lib/iam';
+import { clearWorkspace } from '@/lib/workspace';
 
 /**
  * One page of accounts for the picker's search box.
@@ -72,6 +73,9 @@ export async function switchAccountAction(accountId: string): Promise<{ error: s
     return { error: e instanceof AccountSwitchDenied ? 'denied' : 'failed' };
   }
 
+  // A workspace chosen in the person's own switcher would override the account
+  // just switched to (the header wins over the token), so the choice goes.
+  await clearWorkspace();
   // Every admin route renders data for whichever account the cookie names, so
   // the whole subtree is stale the moment the cookie changes.
   revalidatePath('/admin', 'layout');

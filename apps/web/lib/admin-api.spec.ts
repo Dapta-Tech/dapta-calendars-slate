@@ -25,8 +25,19 @@ const { SessionUnavailableError } = vi.hoisted(() => ({
     }
   },
 }));
+// `hostHeaders` reads the session on every call, as the real one does (its own
+// workspace half is covered in workspace-session.spec.ts); `leaveForbiddenWorkspace`
+// is a spy here so the client's call to it can be asserted.
+const leaveForbiddenWorkspace = vi.fn(async (_res: Response) => undefined);
 vi.mock('./auth-session', () => ({
   getSession: () => getSession(),
+  hostHeaders: async () => {
+    const s = (await getSession()) as { provider?: string; accessToken?: string; email?: string } | null;
+    if (s?.provider === 'workos') return { authorization: `Bearer ${s.accessToken}` };
+    if (s?.provider === 'local') return { 'x-slate-email': s.email };
+    return {};
+  },
+  leaveForbiddenWorkspace: (res: Response) => leaveForbiddenWorkspace(res),
   refreshOrSignOut: () => refreshOrSignOut(),
   signOutKeepingPlace: (session: unknown) => signOutKeepingPlace(session),
   SessionUnavailableError,

@@ -887,8 +887,35 @@ export const memberInviteSchema = z.object({
   email: z.string().email().max(320),
   role: z.enum(['admin', 'member']).optional(),
   displayName: z.string().max(200).nullable().optional(),
+  /** The language of the invitation email. Absent: the inviter's own. */
+  locale: z.enum(['en', 'es']).optional(),
 });
 export type MemberInvite = z.infer<typeof memberInviteSchema>;
+
+/** Resend a pending invitation; the language may be named again. */
+export const memberResendInviteSchema = z.object({
+  locale: z.enum(['en', 'es']).optional(),
+});
+
+/**
+ * The request header that names the workspace (local account id) a dashboard
+ * call acts in. Absent: the account the session token names, as always.
+ */
+export const WORKSPACE_HEADER = 'x-dcal-workspace';
+
+/** One workspace the signed-in person can act in (`GET /v1/me/workspaces`). */
+export interface WorkspaceView {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  role: 'owner' | 'admin' | 'member';
+  /** `invited` until they first open it; opening it accepts the invitation. */
+  status: 'active' | 'invited';
+  /** The workspace this request acted in. */
+  current: boolean;
+  /** The account the session itself names: where the dashboard opens with no workspace chosen. */
+  home: boolean;
+}
 
 /** Patch a member's role and/or status. At least one field must be present. */
 export const memberPatchSchema = z

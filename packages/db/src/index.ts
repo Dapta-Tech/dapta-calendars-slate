@@ -10,6 +10,7 @@ export * from './duplicate-guard';
 export * from './one-off-link';
 export * from './crud';
 export * from './members';
+export * from './workspaces';
 export * from './calendar-refs';
 export * from './short-links';
 export * from './branding-switch';
