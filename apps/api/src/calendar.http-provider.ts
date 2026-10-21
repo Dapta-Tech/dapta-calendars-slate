@@ -27,8 +27,9 @@ import type {
 
 /** Sent on every backend HTTP call — a UA-less request is rejected by the
  *  backend's WAF (403 "error code: 1010"). Mozilla-prefixed to pass generic
- *  bot heuristics; identifies the product for the vendor's request logs. */
-const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0; +https://calendar.dapta.ai)';
+ *  bot heuristics; identifies the product for the vendor's request logs. No
+ *  contact URL: a hardcoded one would name the same host for every fork. */
+const USER_AGENT = 'Mozilla/5.0 (compatible; DaptaCalendars/1.0)';
 
 /**
  * The longest span asked of the backend in ONE busy read.

@@ -1,4 +1,5 @@
 import 'server-only';
+import { cleanPublicUrl } from '@slate/config/env';
 
 /**
  * Where an agent should connect, resolved from the SERVER's runtime environment.
@@ -25,17 +26,8 @@ export interface McpConfig {
 
 const trimSlash = (s: string) => s.replace(/\/+$/, '');
 
-function clean(v: string | undefined): string | null {
-  const s = v?.trim();
-  if (!s) return null;
-  try {
-    const u = new URL(s);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-    return trimSlash(u.toString());
-  } catch {
-    return null;
-  }
-}
+/** The same normalization the API applies to its own API_PUBLIC_URL. */
+const clean = (v: string | undefined): string | null => cleanPublicUrl(v) ?? null;
 
 /**
  * The API base an MCP address implies: the address minus its final `/mcp`, so a

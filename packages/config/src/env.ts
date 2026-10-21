@@ -33,6 +33,29 @@ const optionalSecret = (minLength: number) =>
 const blankIsDefault = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema);
 
+/**
+ * A public base URL as the apps use it: trimmed, http(s) only, normalized to
+ * origin plus path (lowercase scheme and host, default port dropped) with no
+ * trailing slash. Anything else, empty included, reads as unset, the same as
+ * the web does: a malformed value never stops a process booting, and the
+ * address it meant to name simply stays relative or unconfigured, which the
+ * pages that show it make visible. Credentials, a query or a fragment also
+ * read as unset: this address is published on public pages, and a path is
+ * appended to it.
+ */
+export function cleanPublicUrl(v: string | undefined): string | undefined {
+  const s = v?.trim();
+  if (!s) return undefined;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return undefined;
+    if (u.username || u.password || u.search || u.hash) return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, '');
+  } catch {
+    return undefined;
+  }
+}
+
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -41,7 +64,22 @@ export const serverEnvSchema = z.object({
 
   // API
   API_PORT: z.coerce.number().int().positive().default(4000),
+  // How long (ms) an idle keep-alive connection stays open. Must be LONGER than
+  // the idle timeout of any load balancer in front (60 s on AWS ALB): if the
+  // API closes a socket first, the balancer can send the next request down it
+  // and answer that visitor with a 502. Node's own default is 5 s. The same
+  // name the Next standalone server reads (only when set), so one variable
+  // configures both apps. At most a day: far above any balancer's idle
+  // timeout, so a larger value is a typo and fails the boot.
+  KEEP_ALIVE_TIMEOUT: blankIsDefault(z.coerce.number().int().positive().max(86_400_000).default(65_000)),
   PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
+  // This API's own public base URL (path prefix included), e.g.
+  // https://api.calendar.example.com. Named in `/openapi.json` `servers` and
+  // the `/docs` copy-paste examples. UNSET (a bare fork) keeps both relative to
+  // wherever the API is served: never a hardcoded host, so a fork's docs never
+  // send its readers to someone else's API. Normalized by `cleanPublicUrl`; a
+  // value that is not an http(s) URL reads as unset.
+  API_PUBLIC_URL: z.string().optional().transform(cleanPublicUrl),
 
   // Email / notifications
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),
