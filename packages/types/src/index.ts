@@ -24,6 +24,16 @@ export type BookingStatus = (typeof bookingStatus)[number];
 
 export const schedulingType = ['round_robin', 'collective', 'fixed_round_robin'] as const;
 export type SchedulingType = (typeof schedulingType)[number];
+/**
+ * How a round robin team event spreads its bookings. `availability` (the
+ * default, also what NULL reads as): any free host can be offered, and the
+ * booking goes to the highest priority, then the lowest load. `equal`: only
+ * this event's bookings count, a host 3 or more bookings ahead of the
+ * least-booked host is not offered until the others catch up, and priority is
+ * ignored.
+ */
+export const rrDistribution = ['availability', 'equal'] as const;
+export type RrDistribution = (typeof rrDistribution)[number];
 
 export const membershipRole = ['member', 'admin', 'owner'] as const;
 export type MembershipRole = (typeof membershipRole)[number];
@@ -1125,6 +1135,8 @@ export const eventTypeInputSchema = z.object({
   scheduleId: z.string().nullable().optional(),
   hidden: z.boolean().optional(),
   schedulingType: z.enum(schedulingType).nullable().optional(),
+  /** Round robin only; NULL keeps `availability`. See `rrDistribution`. */
+  rrDistribution: z.enum(rrDistribution).nullable().optional(),
   minimumBookingNotice: z.number().int().min(0).optional(),
   beforeEventBuffer: z.number().int().min(0).optional(),
   afterEventBuffer: z.number().int().min(0).optional(),

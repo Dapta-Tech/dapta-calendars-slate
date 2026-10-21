@@ -183,6 +183,8 @@ export const eventType = pgTable('event_type', {
   scheduleId: text('schedule_id'),
   hidden: integer('hidden').notNull().default(0),
   schedulingType: text('scheduling_type'),
+  /** Round robin only: 'availability' (NULL, the default) or 'equal'. See migration 0033 (pg). */
+  rrDistribution: text('rr_distribution'),
   locations: jsonb('locations'),
   bookingFields: jsonb('booking_fields'),
   /**
