@@ -109,6 +109,18 @@ export const member = sqliteTable('member', {
   createdAt: integer('created_at').notNull(),
 });
 
+// Invitation emails each account sent per UTC day (0031 / sqlite 0030): the
+// atomic daily cap, taken by `takeInvitationQuota`.
+export const memberInviteQuota = sqliteTable(
+  'member_invite_quota',
+  {
+    accountId: text('account_id').notNull(),
+    day: text('day').notNull(),
+    sent: integer('sent').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.day] })],
+);
+
 export const schedule = sqliteTable('schedule', {
   id: text('id').primaryKey(),
   accountId: text('account_id').notNull(),

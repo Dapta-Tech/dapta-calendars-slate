@@ -58,7 +58,7 @@ export interface MachinePrincipal {
 }
 
 /** A membership as the dashboard reads it. */
-function toView(w: WorkspaceMembership, actingAccountId: string, homeAccountId: string): WorkspaceView {
+function toView(w: WorkspaceMembership, actingAccountId: string | null, homeAccountId: string): WorkspaceView {
   return {
     accountId: w.accountId,
     accountCode: w.accountCode,
@@ -169,10 +169,15 @@ export class AuthService {
    */
   async listWorkspaces(req: ReqLike): Promise<WorkspaceView[]> {
     const home = await this.provider.resolveHost(req);
-    const acting = await this.actingAs(req, home);
+    // Always the person's list: a chosen workspace that is no longer theirs
+    // (refused below) only means no row comes back marked current.
+    const acting = await this.actingAs(req, home).catch((error: unknown) => {
+      if (error instanceof ForbiddenException) return null;
+      throw error;
+    });
     const identity = await this.identityOf(home);
     const rows = identity ? await listWorkspacesForIdentity(this.db, identity, home.memberId) : [];
-    return rows.map((w) => toView(w, acting.accountId, home.accountId));
+    return rows.map((w) => toView(w, acting?.accountId ?? null, home.accountId));
   }
 
   /**

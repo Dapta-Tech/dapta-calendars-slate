@@ -236,13 +236,29 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     await expect(crud.resendInvite(req(ALEJANDRO), invited.id, {})).rejects.toMatchObject({ status: 409 });
   });
 
-  it('caps new invitations per workspace per day, in the database', async () => {
+  it('caps invitation emails per workspace per day, in the database, and deleting members gives nothing back', async () => {
     await auth.resolveHost(req(ALEJANDRO));
-    for (let i = 0; i < 50; i += 1) await crud.inviteMember(req(ALEJANDRO), { email: `p${i}@acme.test` });
+    const ids: string[] = [];
+    for (let i = 0; i < 49; i += 1) ids.push((await crud.inviteMember(req(ALEJANDRO), { email: `p${i}@acme.test` })).id);
+    // A refused invite (the address is already there) does not spend the allowance.
+    await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p0@acme.test' })).rejects.toThrow();
+    // A resend does.
+    build(capture);
+    await crud.resendInvite(req(ALEJANDRO), ids[0]!, {});
     await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p50@acme.test' })).rejects.toMatchObject({
       status: 429,
       response: { error: 'INVITE_LIMIT' },
     });
+    await db.run(sql`DELETE FROM member WHERE email LIKE 'p%@acme.test'`);
+    await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p51@acme.test' })).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('lists the person’s workspaces even when the chosen one was taken away', async () => {
+    const { alejandro, pablo, invited } = await setUp();
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
+    await db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${invited.id}`);
+    const list = await auth.listWorkspaces(req(PABLO, alejandro.accountId));
+    expect(list.map((w) => [w.accountId, w.current])).toEqual([[pablo.accountId, false]]);
   });
 
   it('skips a queued invitation once the member joined or was removed', async () => {

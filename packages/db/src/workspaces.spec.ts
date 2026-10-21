@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { countInvitationsSince, inviteMember } from './members';
+import { inviteMember, refundInvitationQuota, takeInvitationQuota } from './members';
 import { acceptInvitedMember, findMembership, getPersonIdentity, listWorkspacesForIdentity } from './workspaces';
 
 /**
@@ -132,14 +132,35 @@ describe('listWorkspacesForIdentity', () => {
 });
 
 describe('inviteMember marks the membership as granted here', () => {
-  it('stamps invited_at, which the daily count reads', async () => {
+  it('stamps invited_at on the invited row only', async () => {
     const a = await account('Team');
-    const before = Date.now() - 1;
-    await inviteMember(db, a, { email: 'one@acme.test' });
-    await inviteMember(db, a, { email: 'two@acme.test' });
-    await member(a, { email: 'owner@acme.test' });
-    expect(await countInvitationsSince(db, a, before)).toBe(2);
-    expect(await countInvitationsSince(db, a, Date.now() + 1000)).toBe(0);
+    const inv = await inviteMember(db, a, { email: 'one@acme.test' });
+    const owner = await member(a, { email: 'owner@acme.test' });
+    const at = (id: string) => db.get<{ invited_at: number | string | null }>(sql`SELECT invited_at FROM member WHERE id = ${id}`);
+    expect(Number((await at(inv.ok ? inv.value.id : ''))!.invited_at)).toBeGreaterThan(0);
+    expect((await at(owner))!.invited_at).toBeNull();
+  });
+});
+
+describe('the daily invitation allowance', () => {
+  const NOON = Date.UTC(2026, 9, 20, 12);
+
+  it('lets the cap through, refuses past it, per account and per UTC day', async () => {
+    const a = await account('Team');
+    const b = await account('Other');
+    for (let i = 0; i < 3; i += 1) expect(await takeInvitationQuota(db, a, 3, NOON)).toBe(true);
+    expect(await takeInvitationQuota(db, a, 3, NOON)).toBe(false);
+    expect(await takeInvitationQuota(db, b, 3, NOON)).toBe(true);
+    expect(await takeInvitationQuota(db, a, 3, NOON + 86_400_000)).toBe(true);
+  });
+
+  it('gives a send back only when one was taken', async () => {
+    const a = await account('Team');
+    expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(true);
+    await refundInvitationQuota(db, a, NOON);
+    await refundInvitationQuota(db, a, NOON); // nothing left to give back: stays at zero
+    expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(true);
+    expect(await takeInvitationQuota(db, a, 1, NOON)).toBe(false);
   });
 });
 

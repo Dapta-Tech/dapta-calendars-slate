@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { countInvitationsSince, inviteMember } from './members';
+import { inviteMember, takeInvitationQuota } from './members';
 import { acceptInvitedMember, findMembership, listWorkspacesForIdentity } from './workspaces';
 
 /**
@@ -81,7 +81,12 @@ describePg('workspaces (real Postgres)', () => {
     expect(await findMembership(db, identity, team)).toMatchObject({ memberId: id, status: 'invited' });
     expect(await findMembership(db, identity, own)).toBeNull(); // the home is the token's, not an invitation
     expect(await acceptInvitedMember(db, team, id, null)).toBe(true);
-    expect(await countInvitationsSince(db, team, Date.now() - 60_000)).toBe(1);
+  });
+
+  it('the daily allowance holds under concurrent sends', async () => {
+    const team = await account(`Pg quota ${run}`);
+    const results = await Promise.all(Array.from({ length: 12 }, () => takeInvitationQuota(db, team, 5)));
+    expect(results.filter(Boolean)).toHaveLength(5);
   });
 
   it('activates without binding when the account already holds the subject', async () => {

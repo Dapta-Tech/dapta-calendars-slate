@@ -153,12 +153,34 @@ export async function inviteMember(
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
 }
 
-/** How many members of the account were invited since `sinceMs` (the daily invitation cap). */
-export async function countInvitationsSince(db: Db, accountId: string, sinceMs: number): Promise<number> {
-  const row = await db.get<{ n: number | string }>(
-    sql`SELECT COUNT(*) AS n FROM member WHERE account_id = ${accountId} AND invited_at >= ${sinceMs}`,
+/** The UTC day an invitation email counts against (`member_invite_quota.day`). */
+function quotaDay(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Take one invitation email (new or resent) from the account's daily allowance:
+ * one atomic upsert, so concurrent requests cannot all slip under the cap, in
+ * a table of its own, so deleting members gives nothing back. True when the
+ * send fits within `cap`; a refused send still counts, which only makes the cap
+ * stricter for whoever keeps trying.
+ */
+export async function takeInvitationQuota(db: Db, accountId: string, cap: number, nowMs: number = Date.now()): Promise<boolean> {
+  const day = quotaDay(nowMs);
+  const row = await db.get<{ sent: number | string }>(
+    sql`INSERT INTO member_invite_quota (account_id, day, sent) VALUES (${accountId}, ${day}, 1)
+        ON CONFLICT (account_id, day) DO UPDATE SET sent = member_invite_quota.sent + 1
+        RETURNING sent`,
   );
-  return Number(row?.n ?? 0);
+  return Number(row?.sent ?? Infinity) <= cap;
+}
+
+/** Give back one send taken by `takeInvitationQuota` whose email never went out (the invite was refused). */
+export async function refundInvitationQuota(db: Db, accountId: string, nowMs: number = Date.now()): Promise<void> {
+  await db.run(
+    sql`UPDATE member_invite_quota SET sent = sent - 1
+        WHERE account_id = ${accountId} AND day = ${quotaDay(nowMs)} AND sent > 0`,
+  );
 }
 
 /**

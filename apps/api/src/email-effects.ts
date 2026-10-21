@@ -36,7 +36,6 @@ import type { CalendarProvider } from '@slate/calendar';
 import { CALENDAR, DB, EMAIL, ENTITLEMENT_GATE, ENTITLEMENTS, ENV, NOTIFIER, PREMIUM_MODE } from './tokens';
 import { DisabledEntitlementsProvider, type EntitlementsProvider } from './entitlements.provider';
 import { EntitlementGate } from './entitlement-gate';
-import { TokenBucketRateLimiter, type RateLimiter } from './rate-limit';
 
 /**
  * Thrown by `deliver` when a row must be deliberately NOT sent (e.g. tenant
@@ -77,14 +76,13 @@ export const MEMBER_INVITE_ACTION = 'member_invite';
 
 /**
  * One invitation per member per minute, the first send included, so a double
- * click or an impatient "Resend" cannot flood someone's inbox; and at most
- * MEMBER_INVITE_ACCOUNT_PER_HOUR sends per account per hour, resends included,
- * so one account cannot turn the invitation into a mailing list. Per process,
- * on top of the shared daily cap on NEW invitations (`MAX_INVITATIONS_PER_DAY`,
- * counted in the database by the controller).
+ * click or an impatient "Resend" cannot flood someone's inbox. Per process, a
+ * courtesy on top of the shared daily cap per workspace that the controller
+ * takes in the database (`takeInvitationQuota`).
  */
-const MEMBER_INVITE_RESEND_WINDOW_SEC = 60;
-const MEMBER_INVITE_ACCOUNT_PER_HOUR = 30;
+const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
+/** A bound on the in-memory window's size; old entries are dropped past it. */
+const MEMBER_INVITE_WINDOW_MAX_KEYS = 10_000;
 
 /**
  * One side's mail about one booking goes out in the order it was queued
@@ -275,18 +273,36 @@ export class EmailEffects {
     return this._gate;
   }
 
-  private readonly inviteLimiter: RateLimiter = new TokenBucketRateLimiter(1, 1 / MEMBER_INVITE_RESEND_WINDOW_SEC);
-  private readonly accountInviteLimiter: RateLimiter = new TokenBucketRateLimiter(
-    MEMBER_INVITE_ACCOUNT_PER_HOUR,
-    MEMBER_INVITE_ACCOUNT_PER_HOUR / 3600,
-  );
+  /** When each member's last invitation went in (`account:member` -> epoch ms). */
+  private readonly lastInviteAt = new Map<string, number>();
+
+  /**
+   * Reserve this member's one send per minute; null when the window is still
+   * closed. The reservation is a claim taken BEFORE the write (two requests at
+   * once cannot both pass) and handed back by `releaseInvite` when the write
+   * fails, so a failure never makes the admin wait for a send that never happened.
+   */
+  private reserveInvite(key: string, now: number): { previous: number | undefined } | null {
+    const previous = this.lastInviteAt.get(key);
+    if (previous !== undefined && now - previous < MEMBER_INVITE_RESEND_WINDOW_MS) return null;
+    if (this.lastInviteAt.size >= MEMBER_INVITE_WINDOW_MAX_KEYS) {
+      for (const [k, at] of this.lastInviteAt) if (now - at >= MEMBER_INVITE_RESEND_WINDOW_MS) this.lastInviteAt.delete(k);
+    }
+    this.lastInviteAt.set(key, now);
+    return { previous };
+  }
+
+  private releaseInvite(key: string, reservation: { previous: number | undefined }): void {
+    if (reservation.previous === undefined) this.lastInviteAt.delete(key);
+    else this.lastInviteAt.set(key, reservation.previous);
+  }
 
   /**
    * Queue the invitation email for an `invited` member, written in `locale`
    * (else the inviter's language) and signed with the inviter's name. Answers
    * `queued` when the row went in and this deployment really sends mail,
    * `off` when it does not (log-only / noop: the admin is told to pass the word
-   * on), `too_soon` inside the per-member or per-account window, `not_invited`
+   * on), `too_soon` inside the per-member window, `not_invited`
    * when the member is no longer pending, and `failed` when the row could not be
    * queued. Never throws: the member already exists, and a failure to queue is
    * logged and reported, so the admin can resend.
@@ -297,6 +313,8 @@ export class EmailEffects {
     inviterMemberId: string,
     opts: { locale?: 'en' | 'es' } = {},
   ): Promise<'queued' | 'off' | 'too_soon' | 'not_invited' | 'failed'> {
+    const key = `${accountId}:${memberId}`;
+    let reservation: { previous: number | undefined } | null = null;
     try {
       const target = await this.db.get<{ email: string | null; role: string; status: string; name: string; code: string }>(
         sql`SELECT m.email, m.role, m.status, a.name, a.code
@@ -304,22 +322,22 @@ export class EmailEffects {
             WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
       );
       if (!target || target.status !== 'invited' || !target.email) return 'not_invited';
-      if (!this.inviteLimiter.take(`${accountId}:${memberId}`).allowed) return 'too_soon';
-      if (!this.accountInviteLimiter.take(accountId).allowed) return 'too_soon';
+      const now = Date.now();
+      reservation = this.reserveInvite(key, now);
+      if (!reservation) return 'too_soon';
       const inviter = await this.db.get<{ display_name: string | null; locale: string | null }>(
         sql`SELECT display_name, locale FROM member WHERE id = ${inviterMemberId} AND account_id = ${accountId} LIMIT 1`,
       );
       const locale = opts.locale ?? (inviter?.locale === 'es' ? 'es' : 'en');
       const base = (this.env?.PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
-      const now = Date.now();
       const n: MemberInviteNotification = {
         accountId,
         memberId,
         email: target.email,
         workspaceName: target.name,
         inviterName: inviter?.display_name?.trim() || null,
-        role: target.role === 'admin' ? 'admin' : 'member',
         productName: this.env?.MAIL_FROM_NAME?.trim() || null,
+        role: target.role === 'admin' ? 'admin' : 'member',
         // A dashboard path: the one kind a sign-in may return to (`safeReturnTo`).
         acceptUrl: `${base}/admin/join/${encodeURIComponent(target.code)}`,
         locale,
@@ -336,6 +354,7 @@ export class EmailEffects {
       });
       return this.provider && deliversEmail(this.provider) ? 'queued' : 'off';
     } catch (err) {
+      if (reservation) this.releaseInvite(key, reservation);
       this.log.error(`failed to enqueue the invitation email for member ${memberId}: ${String(err)}`);
       return 'failed';
     }

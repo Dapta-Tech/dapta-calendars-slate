@@ -21,7 +21,8 @@ import type { Db } from '@slate/db';
 import {
   addTeamMember,
   changeMemberRole,
-  countInvitationsSince,
+  refundInvitationQuota,
+  takeInvitationQuota,
   transferOwnership,
   createEventType,
   createSchedule,
@@ -139,9 +140,19 @@ function toOneOffLinkView(link: {
 }
 
 /** Host-authed CRUD for event-types, schedules, teams, members. */
-/** New invitations one workspace may send per day (counted in the database, shared by every instance). */
+/**
+ * Invitation emails (new or resent) one workspace may send per UTC day:
+ * counted atomically in the database (`takeInvitationQuota`), shared by every
+ * instance, and not given back by deleting members.
+ */
 const MAX_INVITATIONS_PER_DAY = 50;
-const DAY_MS = 86_400_000;
+
+function inviteLimit(): HttpException {
+  return new HttpException(
+    { error: 'INVITE_LIMIT', message: `At most ${MAX_INVITATIONS_PER_DAY} invitations a day per workspace. Try again tomorrow.` },
+    429,
+  );
+}
 
 @Controller('v1')
 export class AdminCrudController {
@@ -244,16 +255,14 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     const input = parse(memberInviteSchema, body);
-    // A shared cap on new invitations per account per day: every one sends an
-    // email, and a free account must not become a way to mail strangers.
-    if ((await countInvitationsSince(this.db, p.accountId, Date.now() - DAY_MS)) >= MAX_INVITATIONS_PER_DAY) {
-      throw new HttpException(
-        { error: 'INVITE_LIMIT', message: `At most ${MAX_INVITATIONS_PER_DAY} invitations a day per workspace. Try again tomorrow.` },
-        429,
-      );
-    }
+    // A shared daily cap: every invitation sends an email, and a free account
+    // must not become a way to mail strangers. Taken before the member exists,
+    // given back when the invite itself is refused (an address already there).
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY))) throw inviteLimit();
     // An invited member is a new host: born with the new look, like a sign-up.
-    const member = unwrapCrud(await inviteMember(this.db, p.accountId, input, withNewHostBranding()));
+    const created = await inviteMember(this.db, p.accountId, input, withNewHostBranding());
+    if (!created.ok) await refundInvitationQuota(this.db, p.accountId);
+    const member = unwrapCrud(created);
 
     // O2 (#65 → Growth funnel): the invitee reaches Dapta's marketing CRM the
     // moment their membership row exists, NOT at template pick — an invitee who
@@ -273,6 +282,7 @@ export class AdminCrudController {
     const outcome = this.email
       ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
       : 'off';
+    if (outcome === 'failed') await refundInvitationQuota(this.db, p.accountId);
     const inviteEmail = outcome === 'queued' || outcome === 'failed' ? outcome : 'off';
     void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
     return { ...member, inviteEmail };
@@ -294,7 +304,10 @@ export class AdminCrudController {
     if (target.status !== 'invited') {
       throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
     }
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY))) throw inviteLimit();
     const outcome = this.email ? await this.email.enqueueMemberInvite(p.accountId, id, p.memberId, { locale }) : 'off';
+    // Only a send that went out (or would have, on a server without mail) spends the allowance.
+    if (outcome === 'too_soon' || outcome === 'not_invited' || outcome === 'failed') await refundInvitationQuota(this.db, p.accountId);
     if (outcome === 'too_soon') {
       throw new HttpException({ error: 'RESEND_TOO_SOON', message: 'An invitation just went out. Try again in a minute.' }, 429);
     }
