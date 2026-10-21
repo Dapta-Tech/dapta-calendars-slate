@@ -42,6 +42,12 @@ export const serverEnvSchema = z.object({
   // API
   API_PORT: z.coerce.number().int().positive().default(4000),
   PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
+  // This API's own public base URL (path prefix included), e.g.
+  // https://api.calendar.example.com. Named in `/openapi.json` `servers` and
+  // the `/docs` copy-paste examples. UNSET (a bare fork) keeps both relative to
+  // wherever the API is served: never a hardcoded host, so a fork's docs never
+  // send its readers to someone else's API.
+  API_PUBLIC_URL: blankIsDefault(z.string().url().optional()),
 
   // Email / notifications
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),

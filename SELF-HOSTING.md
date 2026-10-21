@@ -124,6 +124,7 @@ set** boots on the zero-infra path.
 | `API_PORT` | `4000` | — | no |
 | `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links, and the host's "Confirm or decline" button, which opens `/admin/bookings` there) | no |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | production; **build-time** for web | no |
+| `API_PUBLIC_URL` | unset | the API's public base URL. The API names it in `/openapi.json` `servers` and the `/docs` examples (unset: both stay relative to wherever the API is served); the web shows it on the developer pages and in the agent skill | no |
 
 ### Auth (dashboard only — public booking pages are always open)
 

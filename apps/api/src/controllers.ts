@@ -1,8 +1,9 @@
-import { Controller, Get, Header, HttpException, HttpStatus, Inject } from '@nestjs/common';
+import { Controller, Get, Header, HttpException, HttpStatus, Inject, Optional } from '@nestjs/common';
+import type { ServerEnv } from '@slate/config/env';
 import type { Db } from '@slate/db';
 import { countOutbox, sql } from '@slate/db';
-import { DB } from './tokens';
-import { openapiSpec } from './openapi';
+import { DB, ENV } from './tokens';
+import { openapiFor } from './openapi';
 
 @Controller('health')
 export class HealthController {
@@ -65,17 +66,35 @@ export class HealthController {
   }
 }
 
-/** Public API documentation: OpenAPI JSON plus an interactive Scalar explorer. */
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
+
+/**
+ * Public API documentation: OpenAPI JSON plus an interactive Scalar explorer.
+ * Both name this deployment's address from API_PUBLIC_URL; unset, the examples
+ * fill it in from the page's own address in the browser, never a hardcoded host.
+ */
 @Controller()
 export class DocsController {
+  private readonly apiPublicUrl: string | undefined;
+
+  constructor(@Optional() @Inject(ENV) env?: Pick<ServerEnv, 'API_PUBLIC_URL'>) {
+    this.apiPublicUrl = env?.API_PUBLIC_URL?.replace(/\/+$/, '') || undefined;
+  }
+
   @Get('openapi.json')
   spec() {
-    return openapiSpec;
+    return openapiFor(this.apiPublicUrl);
   }
 
   @Get('docs')
   @Header('content-type', 'text/html; charset=utf-8')
   docs(): string {
+    const baseUrl = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : 'https://api.your-domain.example';
+    // Unset: this page is served at `<api base>/docs`, so the browser knows the base.
+    const fillBase = this.apiPublicUrl
+      ? ''
+      : `<script>document.getElementById('base-url').textContent=location.origin+location.pathname.replace(/\\/docs\\/?$/,'');</script>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dapta Calendars API</title>
@@ -100,7 +119,7 @@ raw JSON bodies, fire-and-forget off, and a stable <code>Idempotency-Key</code>.
 <code>POST /v2/bookings/{uid}/guests</code><code>cal-api-version: 2024-08-13</code>
 <code>booking create/get/cancel/reschedule</code><code>cal-api-version: 2026-02-25</code></div>
 <h2>Copy-paste discovery request</h2>
-<pre>BASE_URL="https://calendars-api.dapta.ai"
+<pre>BASE_URL="<span id="base-url">${baseUrl}</span>"
 curl "$BASE_URL/v2/event-types" \\
   --header "Authorization: Bearer $DCL_API_KEY" \\
   --header "cal-api-version: 2024-06-14"</pre>
@@ -134,6 +153,7 @@ curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
 <p>Repository guides: <code>API-CONTRACT.md</code>, <code>FLOW-STUDIO-QUICKSTART.md</code>, and
 <code>CAL-COMPATIBILITY.md</code>.</p>
 </main>
+${fillBase}
 <script id="api-reference" data-url="/openapi.json" data-configuration='{"theme":"default","hideModels":false}'></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 <noscript><p class="intro">JavaScript is required for the interactive explorer. Use

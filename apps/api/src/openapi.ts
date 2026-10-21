@@ -125,10 +125,9 @@ export const openapiSpec = {
       'Production-pilot scheduling API for generic Flow Studio HTTP nodes. Cal-compatible operations keep their current wire names; multi-calendar availability is an explicit Dapta extension.',
     license: { name: 'MIT' },
   },
-  servers: [
-    { url: 'https://calendars-api.dapta.ai', description: 'Production' },
-    { url: '/', description: 'This deployment' },
-  ],
+  // Relative on purpose: the served document names this deployment's address
+  // through `openapiFor` (API_PUBLIC_URL), never a hardcoded host.
+  servers: [{ url: '/', description: 'This deployment' }],
   tags: [
     {
       name: 'Cal-compatible MVP',
@@ -1446,3 +1445,13 @@ export const openapiSpec = {
     },
   },
 } as const;
+
+/**
+ * The document as served: `servers` names this deployment's public API address
+ * when one is configured (API_PUBLIC_URL), and otherwise stays relative to
+ * wherever the document is served, so a fork never points at someone else's API.
+ */
+export function openapiFor(apiPublicUrl?: string) {
+  const base = apiPublicUrl?.replace(/\/+$/, '');
+  return base ? { ...openapiSpec, servers: [{ url: base, description: 'This deployment' }] } : openapiSpec;
+}
