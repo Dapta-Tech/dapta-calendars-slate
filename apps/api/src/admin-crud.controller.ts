@@ -6,6 +6,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpException,
   Inject,
   Logger,
   NotFoundException,
@@ -20,6 +21,8 @@ import type { Db } from '@slate/db';
 import {
   addTeamMember,
   changeMemberRole,
+  refundInvitationQuota,
+  takeInvitationQuota,
   transferOwnership,
   createEventType,
   createSchedule,
@@ -53,6 +56,7 @@ import {
 import {
   eventTypeInputSchema,
   memberInviteSchema,
+  memberResendInviteSchema,
   type OneOffLinkView,
   memberPatchSchema,
   scheduleInputSchema,
@@ -66,6 +70,7 @@ import { ZodError } from 'zod';
 import { AnalyticsEffects } from './analytics-effects';
 import { AuthService, type ReqLike } from './auth.service';
 import { CrmPropertyCatalogService } from './crm-property-catalog';
+import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { assertReminderTemplates } from './template-validation';
@@ -135,6 +140,20 @@ function toOneOffLinkView(link: {
 }
 
 /** Host-authed CRUD for event-types, schedules, teams, members. */
+/**
+ * Invitation emails (new or resent) one workspace may send per UTC day:
+ * counted atomically in the database (`takeInvitationQuota`), shared by every
+ * instance, and not given back by deleting members.
+ */
+const MAX_INVITATIONS_PER_DAY = 50;
+
+function inviteLimit(): HttpException {
+  return new HttpException(
+    { error: 'INVITE_LIMIT', message: `At most ${MAX_INVITATIONS_PER_DAY} invitations a day per workspace. Try again tomorrow.` },
+    429,
+  );
+}
+
 @Controller('v1')
 export class AdminCrudController {
   private readonly log = new Logger('AdminCrudController');
@@ -155,6 +174,9 @@ export class AdminCrudController {
     // Product analytics. LAST and @Optional() for the same reason: absent, no
     // event is recorded, which is also what analytics being off does.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
+    // The invitation email. LAST and @Optional() for the same reason: absent,
+    // an invite creates the member and sends nothing, as it always did.
+    @Optional() @Inject(EmailEffects) private readonly email?: EmailEffects,
   ) {}
 
   /** The language the host reads template errors in (their own UI locale). */
@@ -233,8 +255,16 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     const input = parse(memberInviteSchema, body);
+    // A shared daily cap: every invitation sends an email, and a free account
+    // must not become a way to mail strangers. Taken before the member exists,
+    // given back when the invite itself is refused (an address already there).
+    // One clock for the take and any refund, so both land on the same UTC day.
+    const now = Date.now();
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY, now))) throw inviteLimit();
     // An invited member is a new host: born with the new look, like a sign-up.
-    const member = unwrapCrud(await inviteMember(this.db, p.accountId, input, withNewHostBranding()));
+    const created = await inviteMember(this.db, p.accountId, input, withNewHostBranding());
+    if (!created.ok) await refundInvitationQuota(this.db, p.accountId, now);
+    const member = unwrapCrud(created);
 
     // O2 (#65 → Growth funnel): the invitee reaches Dapta's marketing CRM the
     // moment their membership row exists, NOT at template pick — an invitee who
@@ -248,7 +278,47 @@ export class AdminCrudController {
         this.log.error(`growth enqueue failed for invited member ${member.id}: ${String(err)}`);
       }
     }
-    return member;
+    // The invitation itself: queued, never able to fail the invite either.
+    // `inviteEmail` tells the dashboard what to say: "sent" only when this
+    // deployment really sends mail.
+    const outcome = this.email
+      ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
+      : 'off';
+    if (outcome === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
+    const inviteEmail = outcome === 'queued' || outcome === 'failed' ? outcome : 'off';
+    void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
+    return { ...member, inviteEmail };
+  }
+
+  /**
+   * Send a pending invitation again (admin). Only an `invited` member has one
+   * to resend; a resend inside a minute of the last send is refused (429) so
+   * a double click cannot flood an inbox.
+   */
+  @Post('members/:id/resend-invite')
+  @HttpCode(200)
+  async resendInvite(@Req() req: ReqLike, @Param('id') id: string, @Body() body: unknown) {
+    const p = await this.auth.resolveHost(req);
+    assertAdmin(p);
+    const { locale } = parse(memberResendInviteSchema, body ?? {});
+    const target = await getAccountMember(this.db, p.accountId, id);
+    if (!target) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
+    if (target.status !== 'invited') {
+      throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
+    }
+    const now = Date.now();
+    if (!(await takeInvitationQuota(this.db, p.accountId, MAX_INVITATIONS_PER_DAY, now))) throw inviteLimit();
+    const outcome = this.email ? await this.email.enqueueMemberInvite(p.accountId, id, p.memberId, { locale }) : 'off';
+    // Only a send that was queued (or would have been, on a server without mail) spends the allowance.
+    if (outcome === 'too_soon' || outcome === 'not_invited' || outcome === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
+    if (outcome === 'too_soon') {
+      throw new HttpException({ error: 'RESEND_TOO_SOON', message: 'An invitation just went out. Try again in a minute.' }, 429);
+    }
+    if (outcome === 'not_invited') {
+      throw new ConflictException({ error: 'NOT_INVITED', message: 'That member has no pending invitation.' });
+    }
+    void this.analytics?.hostEvent('invite_sent', p, { role: target.role, resend: true, delivery: outcome });
+    return { ok: true, inviteEmail: outcome };
   }
 
   @Patch('members/:id')

@@ -13,6 +13,8 @@ import { usePathname } from 'next/navigation';
 import { isNavItemActive, type BookingMessages } from '@slate/shared';
 import { adminNav, platformNavHref, type NavIcon, type NavItem, type SubNavItem } from '@/lib/admin-nav';
 import { AccountSwitcher, type AccountOption } from '@/components/account-switcher';
+import { WorkspaceSwitcher } from '@/components/workspace-switcher';
+import type { WorkspaceView } from '@slate/types';
 import { AppSwitcher } from '@/components/app-switcher';
 import { BrandMark, BrandWordmark } from '@/components/brand/brand';
 import { McpLogos } from '@/components/mcp-logos';
@@ -351,6 +353,7 @@ export function AdminShell({
   accounts = [],
   accountsHasMore = false,
   currentAccountId = null,
+  workspaces = [],
   messages,
   initialCollapsed = false,
   initialTheme,
@@ -364,6 +367,8 @@ export function AdminShell({
   accounts?: AccountOption[];
   accountsHasMore?: boolean;
   currentAccountId?: string | null;
+  /** The person's own workspaces; the switcher shows from two. */
+  workspaces?: WorkspaceView[];
   /** Active-locale admin catalog (F8) — nav + common labels. */
   messages: AdminMessages;
   /** Server-read cookie value → no collapse-rail FOUC on reload. */
@@ -453,18 +458,22 @@ export function AdminShell({
   );
 
   // Under the wordmark and above the nav, as the dForms rail has its workspace
-  // card: which account every link below belongs to. Only operator staff have
-  // a list to pick from, so for everyone else it renders nothing.
+  // card: which account every link below belongs to. The person's own
+  // workspaces when they have two or more; the operator staff's picker below
+  // it. For everyone else both render nothing.
   const renderAccount = (accountCollapsed: boolean) => (
-    <AccountSwitcher
-      accounts={accounts}
-      hasMore={accountsHasMore}
-      currentAccountId={currentAccountId}
-      fallbackLabel={user?.accountCode}
-      collapsed={accountCollapsed}
-      messages={c.accountSwitcher}
-      loadingLabel={c.loading}
-    />
+    <>
+      <WorkspaceSwitcher workspaces={workspaces} messages={messages.workspaces} collapsed={accountCollapsed} />
+      <AccountSwitcher
+        accounts={accounts}
+        hasMore={accountsHasMore}
+        currentAccountId={currentAccountId}
+        fallbackLabel={user?.accountCode}
+        collapsed={accountCollapsed}
+        messages={c.accountSwitcher}
+        loadingLabel={c.loading}
+      />
+    </>
   );
 
   // The foot of the rail, as on dForms: the theme switch on its own row (a 44px

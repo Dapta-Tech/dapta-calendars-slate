@@ -49,6 +49,8 @@ export const SERVER_ANALYTICS_EVENTS = [
   'branding_changed',
   'hide_branding_toggled',
   'booking_created',
+  'invite_sent',
+  'invite_accepted',
 ] as const;
 export type ServerAnalyticsEvent = (typeof SERVER_ANALYTICS_EVENTS)[number];
 

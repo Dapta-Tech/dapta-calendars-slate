@@ -25,6 +25,13 @@ describe('safeReturnTo: only a dashboard page of this app', () => {
     expect(safeReturnTo('//evil.com/auth/consent')).toBeNull();
   });
 
+  it('also keeps the invitation page, exactly that path, with its code', () => {
+    expect(safeReturnTo('/auth/join?code=dasri5')).toBe('/auth/join?code=dasri5');
+    expect(safeReturnTo('/auth/join/extra')).toBeNull();
+    expect(safeReturnTo('/auth/join/../../api/auth/logout')).toBeNull();
+    expect(safeReturnTo('//evil.com/auth/join?code=x')).toBeNull();
+  });
+
   it('drops the fragment, and the flight parameter Next adds to its own requests', () => {
     expect(safeReturnTo('/admin/bookings#booking-x')).toBe('/admin/bookings');
     expect(safeReturnTo(`/admin/bookings/${UID}?_rsc=1x2y3`)).toBe(`/admin/bookings/${UID}`);

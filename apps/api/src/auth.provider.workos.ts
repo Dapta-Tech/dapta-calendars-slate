@@ -39,6 +39,17 @@ import { verifyJwtHs256, JwtError, type JwtClaims } from './jwt';
 
 type WorkOsEnv = Pick<ServerEnv, 'JWT_SECRET' | 'JWT_ISSUER' | 'JWT_AUDIENCE' | 'OPERATOR_EMAIL_DOMAIN'>;
 
+/**
+ * The address this token vouches for, lowercased, or null: none in the token,
+ * or one the identity service marks unverified (`email_verified: false`). It is
+ * what finds the person's invitations in other accounts, so an address the
+ * identity service has not verified must never claim one.
+ */
+function vouchedEmail(claims: JwtClaims): string | null {
+  if (claims.email_verified === false) return null;
+  return typeof claims.email === 'string' ? claims.email.trim().toLowerCase() || null : null;
+}
+
 function unauthenticated(message: string): UnauthorizedException {
   return new UnauthorizedException({ error: 'UNAUTHENTICATED', message });
 }
@@ -109,7 +120,7 @@ export class WorkOsAuthProvider implements AuthProvider {
       typeof claims.iat === 'number' && Number.isFinite(claims.iat) ? Math.min(claims.iat * 1000, Date.now()) : null;
     const subject = typeof claims.workos_user_id === 'string' && claims.workos_user_id ? claims.workos_user_id : undefined;
     if (subject && subject !== member.idpSubject) await this.recordSubject(accountId, member.id, subject, authenticatedAt);
-    return { accountId, memberId: member.id, authenticatedAt };
+    return { accountId, memberId: member.id, authenticatedAt, email: vouchedEmail(claims) };
   }
 
   /**

@@ -154,6 +154,9 @@ export class AnalyticsEffects {
         now,
         { email: who.email, is_internal: who.isInternal },
       );
+      // A login that adopted an invitation in the token's own account accepted
+      // it: the same fact the dashboard's explicit acceptance reports.
+      if (signup.fromInvite) await this.enqueueCapture('invite_accepted', who, { role: signup.role }, now);
       // The account's own facts. `is_internal` here is the FOUNDER's, so an
       // operator who later visits a customer's workspace never marks the
       // customer's account as internal.

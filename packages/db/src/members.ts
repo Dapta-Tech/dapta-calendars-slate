@@ -138,16 +138,52 @@ export async function inviteMember(
     return { ok: false, reason: 'EMAIL_TAKEN', message: 'A member with that email already exists.' };
 
   const id = randomUUID();
+  const now = Date.now();
   // Auto-handle at creation (short-links §3): invited members are bookable the
   // moment they accept — no "set a handle" step, freely renameable later.
   const handle = await deriveUniqueHandle(db, accountId, input.displayName, email);
   await db.run(
-    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at)
+    // `invited_at` marks the membership as one THIS app granted: the only kind a
+    // request may act in by naming the account (`workspaces.ts`, ADR 0010).
+    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at, invited_at)
         VALUES (${id}, ${accountId}, ${email}, ${input.displayName ?? EMAIL_LOCAL(email)},
           ${handle}, ${role}, ${'invited'}, ${branding?.brandColor ?? null},
-          ${jsonParam(db, branding?.style ?? null)}, ${Date.now()})`,
+          ${jsonParam(db, branding?.style ?? null)}, ${now}, ${now})`,
   );
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
+}
+
+/** The UTC day an invitation email counts against (`member_invite_quota.day`, migration 0032 / sqlite 0031). */
+function quotaDay(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Take one invitation email (new or resent) from the account's daily allowance:
+ * one atomic conditional upsert, so concurrent requests cannot all slip under
+ * the cap, in a table of its own, so deleting members gives nothing back. True
+ * when the send fits within `cap`. A refused send changes nothing (the update
+ * only applies below the cap and then returns no row), so a later refund always
+ * reopens exactly one slot.
+ */
+export async function takeInvitationQuota(db: Db, accountId: string, cap: number, nowMs: number = Date.now()): Promise<boolean> {
+  if (cap < 1) return false;
+  const day = quotaDay(nowMs);
+  const row = await db.get<{ sent: number | string }>(
+    sql`INSERT INTO member_invite_quota (account_id, day, sent) VALUES (${accountId}, ${day}, 1)
+        ON CONFLICT (account_id, day) DO UPDATE SET sent = member_invite_quota.sent + 1
+        WHERE member_invite_quota.sent < ${cap}
+        RETURNING sent`,
+  );
+  return row !== undefined && row !== null;
+}
+
+/** Give back one send taken by `takeInvitationQuota` whose email never went out (the invite was refused). */
+export async function refundInvitationQuota(db: Db, accountId: string, nowMs: number = Date.now()): Promise<void> {
+  await db.run(
+    sql`UPDATE member_invite_quota SET sent = sent - 1
+        WHERE account_id = ${accountId} AND day = ${quotaDay(nowMs)} AND sent > 0`,
+  );
 }
 
 /**

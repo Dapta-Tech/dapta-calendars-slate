@@ -75,17 +75,21 @@ export async function recordMemberIdpSubject(
   });
 }
 
-/** A member's role and when the identity service last vouched for it, or null for a member not in the account. */
+/** A member's role, status, and when the identity service last vouched for it, or null for a member not in the account. */
 export async function memberRoleAndLoginSeen(
   db: Db,
   accountId: string,
   memberId: string,
-): Promise<{ role: AccountRole; loginSeenAt: number | null } | null> {
-  const r = await db.get<{ role: string; login_seen_at: number | string | null }>(
-    sql`SELECT role, login_seen_at FROM member WHERE account_id = ${accountId} AND id = ${memberId} LIMIT 1`,
+): Promise<{ role: AccountRole; loginSeenAt: number | null; status: string } | null> {
+  const r = await db.get<{ role: string; login_seen_at: number | string | null; status: string }>(
+    sql`SELECT role, login_seen_at, status FROM member WHERE account_id = ${accountId} AND id = ${memberId} LIMIT 1`,
   );
   if (!r) return null;
-  return { role: (r.role as AccountRole) ?? 'member', loginSeenAt: r.login_seen_at == null ? null : Number(r.login_seen_at) };
+  return {
+    role: (r.role as AccountRole) ?? 'member',
+    loginSeenAt: r.login_seen_at == null ? null : Number(r.login_seen_at),
+    status: r.status,
+  };
 }
 
 /**

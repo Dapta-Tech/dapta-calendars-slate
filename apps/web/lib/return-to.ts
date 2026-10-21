@@ -13,8 +13,9 @@
  * Every hop reads the value through `safeReturnTo`, because it arrives from a
  * URL or a cookie and ends up in a `Location` header: a return target is an
  * open-redirect surface on the auth path unless it can only name a page of this
- * app. It can only ever name a dashboard page (`/admin` and below) or the
- * OAuth consent page (`/auth/consent`), as a path on this origin.
+ * app. It can only ever name a dashboard page (`/admin` and below), the OAuth
+ * consent page (`/auth/consent`) or the invitation page (`/auth/join`), as a
+ * path on this origin.
  *
  * PURE on purpose (no `next/headers`): the route handlers, the login page, the
  * login action and the specs all read it the same way.
@@ -29,6 +30,14 @@ export const RETURN_TO_PARAM = 'next';
  * path (with its query), nothing under it.
  */
 export const CONSENT_PATH = '/auth/consent';
+/**
+ * The other one: the invitation page, which an invitation email sends a
+ * signed-out person to. Exactly this path (with its query), nothing under it.
+ * A page and not the `/admin/join/{code}` route the email links to, because
+ * the local login returns through a Server Action redirect, which cannot land
+ * on a route handler.
+ */
+export const JOIN_PATH = '/auth/join';
 
 /**
  * Holds the return target across the identity-service hand-off. The service
@@ -107,7 +116,13 @@ export function safeReturnTo(raw: unknown): string | null {
   // land on /api.
   for (const u of [url, decodedUrl]) {
     if (u.origin !== BASE) return null;
-    if (u.pathname !== '/admin' && !u.pathname.startsWith('/admin/') && u.pathname !== CONSENT_PATH) return null;
+    if (
+      u.pathname !== '/admin' &&
+      !u.pathname.startsWith('/admin/') &&
+      u.pathname !== CONSENT_PATH &&
+      u.pathname !== JOIN_PATH
+    )
+      return null;
   }
   if (url.searchParams.has(FLIGHT_PARAM)) url.searchParams.delete(FLIGHT_PARAM);
   return `${url.pathname}${url.search}`;

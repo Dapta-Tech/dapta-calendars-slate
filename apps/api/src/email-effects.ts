@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   enqueueOutbox,
@@ -20,11 +21,13 @@ import {
   MAX_ANSWER_ITEMS,
   collectBookingAnswers,
   defaultEnabledFor,
+  deliversEmail,
   extractTokens,
   resolveTemplate,
   type BookingNotification,
   type EmailProvider,
   type EmailTemplateKey,
+  type MemberInviteNotification,
 } from '@slate/notifications';
 import { MAX_TEMPLATE_VALUE } from '@slate/engine';
 import { adminBookingPath, formatBookingLocation, getMessages } from '@slate/shared';
@@ -67,6 +70,25 @@ export class ConferencingLinkPendingError extends Error {
  * tells the invitee the opposite of the truth.
  */
 const LIVE_BOOKING_KINDS = new Set(['confirmation', 'reschedule', 'reminder', 'follow_up']);
+
+/** The outbox action of the workspace invitation (kind `email`). */
+export const MEMBER_INVITE_ACTION = 'member_invite';
+
+/**
+ * One invitation per member per minute, the first send included, so a double
+ * click or an impatient "Resend" cannot flood someone's inbox. Per process, a
+ * courtesy on top of the shared daily cap per workspace that the controller
+ * takes in the database (`takeInvitationQuota`).
+ */
+const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
+/** A bound on the in-memory window's size; old entries are dropped past it. */
+const MEMBER_INVITE_WINDOW_MAX_KEYS = 10_000;
+
+/** A member's claim on their one send per minute: when it was taken, and what it replaced. */
+interface InviteReservation {
+  at: number;
+  previous: number | undefined;
+}
 
 /**
  * One side's mail about one booking goes out in the order it was queued
@@ -255,6 +277,117 @@ export class EmailEffects {
   private get gate(): EntitlementGate {
     this._gate ??= this.sharedGate ?? new EntitlementGate(this.db, this.entitlements, this.premiumMode);
     return this._gate;
+  }
+
+  /** When each member's last invitation went in (`account:member` -> epoch ms). */
+  private readonly lastInviteAt = new Map<string, number>();
+
+  /**
+   * Reserve this member's one send per minute; null when the window is still
+   * closed. The reservation is a claim taken BEFORE the write (two requests at
+   * once cannot both pass) and handed back by `releaseInvite` when the write
+   * fails, so a failure never makes the admin wait for a send that never happened.
+   */
+  private reserveInvite(key: string, now: number): InviteReservation | null {
+    const previous = this.lastInviteAt.get(key);
+    if (previous !== undefined && now - previous < MEMBER_INVITE_RESEND_WINDOW_MS) return null;
+    if (this.lastInviteAt.size >= MEMBER_INVITE_WINDOW_MAX_KEYS) {
+      for (const [k, at] of this.lastInviteAt) if (now - at >= MEMBER_INVITE_RESEND_WINDOW_MS) this.lastInviteAt.delete(k);
+    }
+    this.lastInviteAt.set(key, now);
+    return { at: now, previous };
+  }
+
+  /** Hand a reservation back, unless a later one has taken the key since (compare, then restore). */
+  private releaseInvite(key: string, reservation: InviteReservation): void {
+    if (this.lastInviteAt.get(key) !== reservation.at) return;
+    if (reservation.previous === undefined) this.lastInviteAt.delete(key);
+    else this.lastInviteAt.set(key, reservation.previous);
+  }
+
+  /**
+   * Queue the invitation email for an `invited` member, written in `locale`
+   * (else the inviter's language) and signed with the inviter's name. Answers
+   * `queued` when the row went in and this deployment really sends mail,
+   * `off` when it does not (log-only / noop: the admin is told to pass the word
+   * on), `too_soon` inside the per-member window, `not_invited`
+   * when the member is no longer pending, and `failed` when the row could not be
+   * queued. Never throws: the member already exists, and a failure to queue is
+   * logged and reported, so the admin can resend.
+   */
+  async enqueueMemberInvite(
+    accountId: string,
+    memberId: string,
+    inviterMemberId: string,
+    opts: { locale?: 'en' | 'es' } = {},
+  ): Promise<'queued' | 'off' | 'too_soon' | 'not_invited' | 'failed'> {
+    const key = `${accountId}:${memberId}`;
+    let reservation: InviteReservation | null = null;
+    try {
+      const target = await this.db.get<{ email: string | null; role: string; status: string; name: string; code: string }>(
+        sql`SELECT m.email, m.role, m.status, a.name, a.code
+            FROM member m JOIN account a ON a.id = m.account_id
+            WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
+      );
+      if (!target || target.status !== 'invited' || !target.email) return 'not_invited';
+      const now = Date.now();
+      reservation = this.reserveInvite(key, now);
+      if (!reservation) return 'too_soon';
+      const inviter = await this.db.get<{ display_name: string | null; locale: string | null }>(
+        sql`SELECT display_name, locale FROM member WHERE id = ${inviterMemberId} AND account_id = ${accountId} LIMIT 1`,
+      );
+      const locale = opts.locale ?? (inviter?.locale === 'es' ? 'es' : 'en');
+      const base = (this.env?.PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
+      const n: MemberInviteNotification = {
+        accountId,
+        memberId,
+        email: target.email,
+        workspaceName: target.name,
+        inviterName: inviter?.display_name?.trim() || null,
+        productName: this.env?.MAIL_FROM_NAME?.trim() || null,
+        role: target.role === 'admin' ? 'admin' : 'member',
+        // A dashboard path: the one kind a sign-in may return to (`safeReturnTo`).
+        acceptUrl: `${base}/admin/join/${encodeURIComponent(target.code)}`,
+        locale,
+        // Its own per send; a retry of the row carries the same one.
+        sendKey: randomUUID(),
+      };
+      await enqueueOutbox(this.db, {
+        kind: 'email',
+        action: MEMBER_INVITE_ACTION,
+        accountId,
+        orderKey: `member-invite:${memberId}`,
+        payload: JSON.stringify(n),
+        now,
+      });
+      return this.provider && deliversEmail(this.provider) ? 'queued' : 'off';
+    } catch (err) {
+      if (reservation) this.releaseInvite(key, reservation);
+      this.log.error(`failed to enqueue the invitation email for member ${memberId}: ${String(err)}`);
+      return 'failed';
+    }
+  }
+
+  /**
+   * Send one queued invitation, unless it has stopped being one: a member
+   * removed, or who already joined, while the row waited is skipped once
+   * (never retried), so nobody is invited into a workspace that took it back.
+   * The send keeps its share of the workspace's daily allowance: giving it back
+   * here could not be made exactly-once with the worker's skip, and a cap that
+   * errs strict is the safe side of an anti-spam limit.
+   */
+  private async deliverMemberInvite(payloadJson: string): Promise<void> {
+    const n = JSON.parse(payloadJson) as MemberInviteNotification;
+    const row = await this.db.get<{ status: string; email: string | null }>(
+      sql`SELECT status, email FROM member WHERE id = ${n.memberId} AND account_id = ${n.accountId} LIMIT 1`,
+    );
+    const skipped = !row || row.status !== 'invited'
+      ? `the member is ${row ? row.status : 'gone'}`
+      : (row.email ?? '').toLowerCase() !== n.email.toLowerCase()
+        ? 'the address changed'
+        : null;
+    if (skipped) throw new OutboxSkipError(`invitation for member ${n.memberId} skipped: ${skipped}`);
+    await this.notifier.sendMemberInvite(n);
   }
 
   // Each returns a promise that NEVER rejects (failures are logged) — callers
@@ -664,6 +797,9 @@ export class EmailEffects {
     outboxAccountId?: string | null,
     attempts = 0,
   ): Promise<void> {
+    // Not a booking email: none of what follows (booking state, reminders,
+    // conferencing links, branding) applies to it.
+    if (kind === MEMBER_INVITE_ACTION) return this.deliverMemberInvite(payloadJson);
     const n = JSON.parse(payloadJson) as BookingNotification & {
       reminderLeadMinutes?: number;
       /** The event-type reminder that scheduled this row; absent on rows queued

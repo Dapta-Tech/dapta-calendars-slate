@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { ATTRIBUTION_COOKIE } from '@slate/shared';
 import { setSession, workosSessionIdFromJwt } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
+import { clearWorkspace } from '@/lib/workspace';
 import { RETURN_TO_COOKIE, safeReturnTo, withReturnTo } from '@/lib/return-to';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
@@ -64,6 +65,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // IAM's UUID resolves to nothing upstream, so a sign-out would revoke nothing.
   // The blob's id stays as a fallback, so a token minted without the claim is
   // no worse off than before.
+  // A fresh sign-in starts in the person's own account: a workspace chosen in
+  // an earlier session (perhaps someone else's) does not carry over.
+  await clearWorkspace();
   await setSession({
     provider: 'workos',
     accessToken: tokens.access_token,
