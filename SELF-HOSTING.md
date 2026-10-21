@@ -122,6 +122,7 @@ set** boots on the zero-infra path.
 | `NODE_ENV` | `development` | set `production` for any real deploy | no |
 | `DATABASE_URL` | `file:./.data/dev.db` | always in production (a `postgres://` URL) | **yes** (contains DB password) |
 | `API_PORT` | `4000` | — | no |
+| `KEEP_ALIVE_TIMEOUT` | `65000` | behind a load balancer, keep it above the balancer's idle timeout (60 s on AWS ALB), or the balancer can reuse a socket the server is closing and answer with a 502. Milliseconds, at most `86400000` (a day). The web's standalone server reads the same variable, but only when set (Node's 5 s otherwise), so set it on the web too | no |
 | `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links, and the host's "Confirm or decline" button, which opens `/admin/bookings` there) | no |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | production; **build-time** for web | no |
 | `API_PUBLIC_URL` | unset | the API's public base URL (http or https, no credentials, query or fragment; anything else reads as unset). The API names it in `/openapi.json` `servers`, the `/docs` examples and the explorer's document link (unset: all relative to wherever the API is served); the web shows it on the developer pages and in the agent skill. Serving the API under a path prefix requires `API_PUBLIC_URL`: unset, `/openapi.json` names `/` and `/docs` loads `/openapi.json` from the host root | no |
@@ -544,6 +545,10 @@ Terminate TLS at your proxy and route two hostnames:
 
 With OAuth on, also route the OAuth paths to the API (see "OAuth for the MCP
 endpoint"), and keep forwarding `X-Forwarded-Proto` so its cookies are Secure.
+
+If your proxy reuses idle connections to the apps (AWS ALB does, for 60 s), keep
+`KEEP_ALIVE_TIMEOUT` above that idle timeout on both, so the proxy always closes
+first: the API defaults to 65 s, the web needs it set (see "Core" above).
 
 Behind a proxy, derive the request origin from `X-Forwarded-*` headers (the app
 does this) — set `PUBLIC_APP_URL` to the public web URL and build the web image with

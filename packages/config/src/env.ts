@@ -64,6 +64,14 @@ export const serverEnvSchema = z.object({
 
   // API
   API_PORT: z.coerce.number().int().positive().default(4000),
+  // How long (ms) an idle keep-alive connection stays open. Must be LONGER than
+  // the idle timeout of any load balancer in front (60 s on AWS ALB): if the
+  // API closes a socket first, the balancer can send the next request down it
+  // and answer that visitor with a 502. Node's own default is 5 s. The same
+  // name the Next standalone server reads (only when set), so one variable
+  // configures both apps. At most a day: far above any balancer's idle
+  // timeout, so a larger value is a typo and fails the boot.
+  KEEP_ALIVE_TIMEOUT: blankIsDefault(z.coerce.number().int().positive().max(86_400_000).default(65_000)),
   PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   // This API's own public base URL (path prefix included), e.g.
   // https://api.calendar.example.com. Named in `/openapi.json` `servers` and

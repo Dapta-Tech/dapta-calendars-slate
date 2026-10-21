@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 import { securityHeaders } from './security-headers';
 import { requestLogger } from './request-log';
 import { oidcOwnsBody } from './oauth/oauth.settings';
+import { applyKeepAliveTimeout } from './keep-alive';
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -79,6 +80,9 @@ async function bootstrap() {
   );
   console.log(`[api] CORS allowlist: ${origins.join(', ')}`);
   await app.listen(env.API_PORT);
+  const server = app.getHttpServer();
+  applyKeepAliveTimeout(server, env.KEEP_ALIVE_TIMEOUT);
+  console.log(`[api] keep-alive timeout: ${server.keepAliveTimeout}ms (headers: ${server.headersTimeout}ms)`);
   console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL.replace(/\/\/([^:@/]+):[^@]+@/, '//$1:***@')})`);
 }
 
