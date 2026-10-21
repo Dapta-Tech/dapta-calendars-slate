@@ -4,7 +4,7 @@ import { useId, useState } from 'react';
 import { t, type BookingMessages } from '@slate/shared';
 import { buttonVariants, Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
-import { MCP_TOOLS, scopeLabel, type ToolKind } from '@/lib/mcp-connect';
+import { MCP_TOOLS, SERVER_NAME, scopeLabel, type ToolKind } from '@/lib/mcp-connect';
 
 type DevMessages = BookingMessages['admin']['developer'];
 
@@ -19,6 +19,10 @@ export interface ConnectSnippets {
   header: string;
   /** Claude's add-connector dialog, pre-filled (used when OAuth is on). */
   claudeConnector: string;
+  /** The same setups with no key, for an app that signs in itself (external sign-in). */
+  cursorSignInDeeplink: string;
+  cursorSignInJson: string;
+  claudeCodeSignIn: string;
 }
 
 type TabId = 'cursor' | 'claude-code' | 'codex' | 'other' | 'chat';
@@ -78,35 +82,51 @@ export function CodeBlock({
 }
 
 /**
- * The agent tabs: the MCP address and the exact setup for each agent. Step 2 of
- * the setup guide (`setup-guide.tsx`), which carries the title and, in step 1,
- * the key, and which shows none of this while the API does not serve MCP.
+ * Which tabs a list shows. `all`: the four key setups and the chat apps, the
+ * guide's step 2 with OAuth off or this API's own server. With an external
+ * sign-in the guide splits them: `sign-in` (the chat apps first, then Cursor,
+ * Claude Code and any other app, all with no key) and `keys` (the four key
+ * setups, for headless agents and scripts).
+ */
+export type ConnectVariant = 'all' | 'sign-in' | 'keys';
+
+const TAB_ORDER: Record<ConnectVariant, TabId[]> = {
+  all: ['cursor', 'claude-code', 'codex', 'other', 'chat'],
+  'sign-in': ['chat', 'cursor', 'claude-code', 'other'],
+  keys: ['cursor', 'claude-code', 'codex', 'other'],
+};
+
+/**
+ * The agent tabs: the MCP address and the exact setup for each agent. Part of
+ * the setup guide (`setup-guide.tsx`), which carries the titles and the key,
+ * and which shows none of this while the API does not serve MCP.
  */
 export function ConnectAgent({
   snippets,
   oauth = false,
-  external = false,
+  variant = 'all',
+  label,
   messages: m,
 }: {
   snippets: ConnectSnippets | null;
   /** OAuth is on: chat apps connect with a sign-in. */
   oauth?: boolean;
-  /**
-   * The sign-in is an external authorization server's: people sign in with the
-   * account they use here, and a connection acts with their admin role.
-   */
-  external?: boolean;
+  variant?: ConnectVariant;
+  /** The tab list's accessible name (the step's title). */
+  label?: string;
   messages: DevMessages;
 }) {
   const base = useId();
-  const tabs: { id: TabId; label: string }[] = [
-    { id: 'cursor', label: m.tabCursor },
-    { id: 'claude-code', label: m.tabClaudeCode },
-    { id: 'codex', label: m.tabCodex },
-    { id: 'other', label: m.tabOther },
-    { id: 'chat', label: oauth ? m.chatOAuthTitle : m.tabChat },
-  ];
-  const [active, setActive] = useState<TabId>('cursor');
+  const signIn = variant === 'sign-in';
+  const labels: Record<TabId, string> = {
+    cursor: m.tabCursor,
+    'claude-code': m.tabClaudeCode,
+    codex: m.tabCodex,
+    other: m.tabOther,
+    chat: oauth || signIn ? m.chatOAuthTitle : m.tabChat,
+  };
+  const tabs = TAB_ORDER[variant].map((id) => ({ id, label: labels[id] }));
+  const [active, setActive] = useState<TabId>(tabs[0]!.id);
 
   const onKey = (e: React.KeyboardEvent, i: number) => {
     let next = i;
@@ -124,11 +144,10 @@ export function ConnectAgent({
 
   return (
     <div>
-      {external ? <SignInNote m={m} /> : null}
       {/* Wraps rather than scrolls: in the guide's step column a scrolling strip
           hid two of the five agents at 360px with nothing to say they were
           there, and the old bleed to the page gutter ran into the step numbers. */}
-      <div role="tablist" aria-label={m.connectTitle} className="mb-field flex flex-wrap gap-tight">
+      <div role="tablist" aria-label={label ?? m.connectTitle} className="mb-field flex flex-wrap gap-tight">
         {tabs.map((tab, i) => (
           <button
             key={tab.id}
@@ -158,15 +177,17 @@ export function ConnectAgent({
         aria-labelledby={`${base}-tab-${active}`}
         className="flex flex-col gap-field rounded-xl border border-border bg-card p-field"
       >
-        {active === 'chat' && oauth && snippets ? (
-          <ChatOAuth snippets={snippets} external={external} m={m} />
-        ) : active === 'chat' ? (
+        {active === 'chat' && (oauth || signIn) && snippets ? (
+          <ChatOAuth snippets={snippets} external={signIn} m={m} />
+        ) : active === 'chat' && !signIn ? (
           <div className="flex flex-col gap-tight">
             <h3 className="text-base font-semibold">{m.chatTitle}</h3>
             <p className="max-w-prose text-sm text-muted-foreground">{m.chatBody}</p>
           </div>
         ) : snippets === null ? (
           <p className="max-w-prose text-sm text-muted-foreground">{m.mcpUrlMissing}</p>
+        ) : signIn ? (
+          <SignInSetup tab={active} snippets={snippets} m={m} />
         ) : (
           <>
             <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
@@ -200,18 +221,41 @@ export function ConnectAgent({
 }
 
 /**
- * Signing in through an external authorization server, said once above the
- * tabs: with which account, what a connection may do, and how it ends. There
- * is no consent page or Connected apps list here to say it instead.
+ * An app that signs in itself, with no key: the address, then that app's own
+ * way to add it. The server's 401 starts the sign-in, so no snippet carries a
+ * header or names the key variable.
  */
-function SignInNote({ m }: { m: DevMessages }) {
+function SignInSetup({ tab, snippets, m }: { tab: TabId; snippets: ConnectSnippets; m: DevMessages }) {
+  const copy = { copyLabel: m.copy, copiedLabel: m.copied };
+  if (tab === 'other') {
+    return (
+      <>
+        <p className="max-w-prose text-sm text-muted-foreground">{m.signInOtherLead}</p>
+        <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
+      </>
+    );
+  }
   return (
-    <div className="mb-field flex flex-col gap-tight rounded-xl border border-border bg-card p-field">
-      <h3 className="text-base font-semibold">{m.signInTitle}</h3>
-      <p className="max-w-prose text-sm text-muted-foreground">{m.signInBody}</p>
-      <p className="max-w-prose text-sm text-muted-foreground">{m.signInAccess}</p>
-      <p className="max-w-prose text-sm text-muted-foreground">{m.signInDisconnect}</p>
-    </div>
+    <>
+      <CodeBlock value={snippets.mcpUrl} label={m.mcpUrlLabel} {...copy} />
+      {tab === 'cursor' ? (
+        <>
+          <p className="max-w-prose text-sm text-muted-foreground">{m.signInCursorLead}</p>
+          <div>
+            <a href={snippets.cursorSignInDeeplink} className={buttonVariants({ size: 'lg' })}>
+              {m.addToCursor}
+            </a>
+          </div>
+          <CodeBlock value={snippets.cursorSignInJson} label={m.cursorFileLabel} {...copy} />
+        </>
+      ) : null}
+      {tab === 'claude-code' ? (
+        <>
+          <CodeBlock value={snippets.claudeCodeSignIn} label={m.claudeCodeLead} {...copy} />
+          <p className="max-w-prose text-sm text-muted-foreground">{t(m.signInClaudeCodeNext, { server: SERVER_NAME })}</p>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -242,7 +286,7 @@ function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; exter
         <h3 className="text-base font-semibold">{m.chatGptHeading}</h3>
         {steps([m.chatGptStep1, m.chatGptStep2, external ? m.chatSignInGptStep3 : m.chatGptStep3])}
       </div>
-      {/* A sign-in has no step-up: what it may do is said above the tabs. */}
+      {/* A sign-in has no step-up: what it may do is said under the tabs (setup-guide.tsx). */}
       {external ? null : <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>}
     </>
   );
@@ -263,8 +307,12 @@ export function KindChip({ kind, m }: { kind: ToolKind; m: DevMessages }) {
   );
 }
 
-/** The tools with read / write / destructive labels, before anyone creates a key. */
-export function AgentTools({ messages: m }: { messages: DevMessages }) {
+/**
+ * The tools with read / write / destructive labels, before anyone creates a key.
+ * `signIn`: this installation also signs agents in (OAuth on, either server), so
+ * a tool that needs no particular scope says a sign-in works too.
+ */
+export function AgentTools({ messages: m, signIn = false }: { messages: DevMessages; signIn?: boolean }) {
   return (
     <section className="mb-section">
       <h2 className="mb-tight text-xl font-semibold">{m.toolsTitle}</h2>
@@ -278,7 +326,13 @@ export function AgentTools({ messages: m }: { messages: DevMessages }) {
             </div>
             <p className="text-xs text-muted-foreground">{m.toolDescriptions[tool.name] ?? ''}</p>
             <p className="text-xs text-foreground">
-              {tool.scope ? t(m.toolNeeds, { scope: scopeLabel(m.scopeLabels, tool.scope) }) : tool.publicOk ? m.toolNeedsNoKey : m.toolNeedsAnyKey}
+              {tool.scope
+                ? t(m.toolNeeds, { scope: scopeLabel(m.scopeLabels, tool.scope) })
+                : tool.publicOk
+                  ? m.toolNeedsNoKey
+                  : signIn
+                    ? m.toolNeedsAnyKeyOrSignIn
+                    : m.toolNeedsAnyKey}
               {tool.scope && tool.publicOk ? ` ${m.toolOrPublic}` : ''}
             </p>
           </li>

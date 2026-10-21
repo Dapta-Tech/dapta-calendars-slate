@@ -93,3 +93,38 @@ test('the API cannot be asked: fails closed to the same state', async ({ page })
   await openAsOwner(page);
   await expectUnavailable(page);
 });
+
+test('external sign-in: the guide leads with signing in from the app, and a key comes second', async ({ page }) => {
+  // What an API with OAUTH_AUTHORIZATION_SERVER set answers (pinned in the API's oauth specs).
+  await answerWith({
+    match: GRANTS,
+    method: 'GET',
+    times: 10,
+    status: 200,
+    body: { enabled: false, external: true, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] },
+  });
+  await page.goto(`/login?next=${encodeURIComponent(PAGE)}`);
+  await signIn(page, HOST.email);
+  await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
+
+  const steps = page.locator('[data-testid^="setup-step-"]');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(0)).toHaveAttribute('data-testid', 'setup-step-sign-in');
+  await expect(steps.nth(1)).toHaveAttribute('data-testid', 'setup-step-key');
+
+  const signInTabs = page.getByRole('tablist', { name: 'Sign in from your app' });
+  const chat = signInTabs.getByRole('tab').first();
+  await expect(chat).toHaveText('Claude, Claude Desktop and ChatGPT');
+  await expect(chat).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('link', { name: 'Add to Claude' })).toBeVisible();
+
+  // Cursor with no key: the one-click link carries the address and nothing else.
+  await signInTabs.getByRole('tab', { name: 'Cursor' }).click();
+  const link = page.getByTestId('setup-step-sign-in').getByRole('link', { name: 'Add to Cursor' });
+  const config = new URL((await link.getAttribute('href'))!.replace('cursor://', 'http://')).searchParams.get('config')!;
+  expect(JSON.parse(Buffer.from(config, 'base64').toString('utf8'))).toEqual({ url: MCP_URL });
+
+  // The key setups follow, for headless agents and scripts.
+  await expect(page.getByRole('tablist', { name: 'Or use an API key' })).toBeVisible();
+  await expect(page.getByTestId('setup-create-key')).toBeVisible();
+});

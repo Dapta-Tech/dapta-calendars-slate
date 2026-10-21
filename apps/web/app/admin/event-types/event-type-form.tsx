@@ -21,6 +21,7 @@ import {
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
+import { HostPrioritySelect, PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
 import { track } from '@/lib/analytics/port';
@@ -70,6 +71,10 @@ interface HostRow {
 export interface TeamMemberOption {
   memberId: string;
   displayName: string | null;
+  /** The name of last resort, after `displayName`. */
+  email?: string | null;
+  /** Undefined when the API predates the field: unknown, never "missing". */
+  hasDestinationCalendar?: boolean;
 }
 
 type ReminderMessages = EventTypeMessages['reminders'];
@@ -491,16 +496,28 @@ function LocationField({
   onKind,
   onDetail,
   connections,
+  teamHosts,
+  schedulingType,
+  fixedHostIds,
   m,
   locationLabels,
+  locale,
 }: {
   kind: LocationKind | '';
   detail: string;
   onKind: (kind: LocationKind | '') => void;
   onDetail: (detail: string) => void;
   connections?: Connection[];
+  /** Present only for a TEAM event: every host the location applies to. */
+  teamHosts?: TeamMemberOption[];
+  /** Team events: decides whose calendar a booking's link can come from. */
+  schedulingType: SchedulingMethod;
+  /** Fixed round robin: the hosts on every booking (live form state). */
+  fixedHostIds: string[];
   m: EventTypeMessages;
   locationLabels: BookingMessages['location'];
+  /** Sorts and joins host names; the same on the server and in the browser. */
+  locale: 'en' | 'es';
 }) {
   // ADR 0008: the repo names no conferencing platform, the RUNNING product does.
   // The port reports it and it rides here on the connections response the editor
@@ -523,10 +540,55 @@ function LocationField({
   };
   // Warn, never disable: a host must be able to configure conferencing BEFORE
   // connecting a calendar, or connecting later leaves a silently broken event.
-  // `connections === undefined` is a team event — each host has their own
-  // calendar, so there is nothing here to be sure about.
+  // `connections === undefined` is a team event, warned about per host below.
   const missingDestination =
     kind === 'conferencing' && !!connections && !connections.some((c) => c.isDestination);
+  // A team event has ONE location for every host, but its meeting link is
+  // minted on the first host ON THE BOOKING with a calendar set to receive new
+  // events, organizer first (`destinationRefs` in calendar-refs.ts). So the gap
+  // depends on who is on a booking:
+  //  - round robin: one host, so each host without one is a gap;
+  //  - collective: every host, so one calendar among them is enough;
+  //  - fixed round robin: every fixed host, so one fixed calendar is enough;
+  //    without it, each rotating host without one is a gap. Read the hosts the
+  //    way the engine does (`combineTeamSlots` in parity.ts): no fixed host is
+  //    plain round robin, no rotating host is collective over the fixed ones.
+  // Strictly `false`: an API that predates the field sends nothing, and an
+  // unknown is not a gap.
+  const lacksCalendar = (h: TeamMemberOption) => h.hasDestinationCalendar === false;
+  let gapHosts: TeamMemberOption[] = [];
+  let noHostHasCalendar = false;
+  if (kind === 'conferencing' && teamHosts) {
+    const isFixed = (h: TeamMemberOption) => fixedHostIds.includes(h.memberId);
+    const fixed = schedulingType === 'fixed_round_robin' ? teamHosts.filter(isFixed) : [];
+    const rotating = schedulingType === 'fixed_round_robin' ? teamHosts.filter((h) => !isFixed(h)) : [];
+    if (schedulingType === 'collective' || (fixed.length > 0 && rotating.length === 0)) {
+      const attending = schedulingType === 'collective' ? teamHosts : fixed;
+      noHostHasCalendar = attending.length > 0 && attending.every(lacksCalendar);
+    } else if (fixed.length > 0) {
+      if (fixed.every(lacksCalendar)) gapHosts = rotating.filter(lacksCalendar);
+    } else {
+      gapHosts = teamHosts.filter(lacksCalendar);
+    }
+  }
+  // The roster arrives in no set order, so sort; sort and join in the page's
+  // locale, so the server render and the browser's agree.
+  const gapNames = gapHosts
+    .map((h) => h.displayName ?? h.email ?? h.memberId)
+    .sort((a, b) => a.localeCompare(b, locale));
+  const joinedNames = new Intl.ListFormat(locale, { type: 'conjunction' }).format(gapNames);
+  const gapTemplate =
+    gapNames.length === 1 ? m.locationTeamNoDestinationOne : m.locationTeamNoDestinationMany;
+  const linkGapWarning = noHostHasCalendar
+    ? m.locationTeamNoDestinationAll
+    : gapNames.length > 0
+      ? gapTemplate.replace('{names}', joinedNames)
+      : null;
+  const conferencingHint = !teamHosts
+    ? m.locationConferencingHint
+    : schedulingType === 'round_robin'
+      ? m.locationTeamConferencingHint
+      : m.locationTeamSharedConferencingHint;
 
   return (
     <div className="flex flex-col gap-field">
@@ -563,7 +625,15 @@ function LocationField({
       ) : null}
 
       {kind === 'conferencing' ? (
-        <p className="text-xs text-muted-foreground">{m.locationConferencingHint}</p>
+        <p className="text-xs text-muted-foreground">{conferencingHint}</p>
+      ) : null}
+
+      {/* No connect button, unlike the personal warning below: each host
+          sets their own calendar, so there is nothing to click for them. */}
+      {linkGapWarning ? (
+        <div className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground">
+          <p>{linkGapWarning}</p>
+        </div>
       ) : null}
 
       {missingDestination ? (
@@ -794,6 +864,9 @@ export function EventTypeForm({
   scheduling,
   teamMembers,
   teamId,
+  teamName,
+  teams,
+  canManageTeams = false,
   connections,
   redirectOnSuccess,
   backHref,
@@ -816,6 +889,14 @@ export function EventTypeForm({
   /** Create a TEAM event for this team (QA2 fix 5) — the /new surface had no
    *  path to team events at all; editing derives the team from `initial`. */
   teamId?: string;
+  /** TEAM events: the team's name, for the line saying its members host. */
+  teamName?: string;
+  /** PERSONAL events: the account's teams, for the card pointing at team
+   *  events (a personal event has no hosts to add). */
+  teams?: TeamOption[];
+  /** Owner or admin: the team links (new team event, team page) are theirs
+   *  alone; the API refuses them to a plain member. */
+  canManageTeams?: boolean;
   /** The host's connected calendars, for the editable "Calendars for this
    *  event" section (PHASE 2) — omitted for TEAM events (each host has their
    *  own connection; a single per-event picker here would be misleading). */
@@ -895,7 +976,8 @@ export function EventTypeForm({
   const [crmMappings, setCrmMappings] = useState<CrmPropertyMapping[]>(
     () => (crmProvider ? (initial?.crmPropertyMappings?.[crmProvider] ?? []) : []),
   );
-  const isTeamEvent = !!(initial?.teamId ?? teamId) && !!teamMembers && !!scheduling;
+  const eventTeamId = initial?.teamId ?? teamId;
+  const isTeamEvent = !!eventTeamId && !!teamMembers && !!scheduling;
   // PHASE 2 — per-event calendar selection (personal events only). Prefill
   // from the event's own configured set when non-empty; otherwise default to
   // the host's CURRENT member-level settings (all check_conflicts calendars +
@@ -1086,8 +1168,12 @@ export function EventTypeForm({
         onKind={setLocationKind}
         onDetail={setLocationDetail}
         connections={connections}
+        teamHosts={isTeamEvent ? teamMembers : undefined}
+        schedulingType={schedulingType}
+        fixedHostIds={hosts.filter((h) => h.isFixed).map((h) => h.memberId)}
         m={m}
         locationLabels={locationLabels}
+        locale={locale}
       />
       <div className="grid grid-cols-3 gap-field">
         <Field label={m.fLength}>
@@ -1135,6 +1221,18 @@ export function EventTypeForm({
         />
       ) : null}
 
+      {/* Where a team event shows its Hosts block, a personal one says it has
+          none and points at team events, so the question "where do I add my
+          team?" has an answer in the same place in either editor. */}
+      {!isTeamEvent && teams ? (
+        <PersonalHostsCard
+          teams={teams}
+          title={m.hostsTitle}
+          canManageTeams={canManageTeams}
+          m={m.teamHosts}
+        />
+      ) : null}
+
       {isTeamEvent && scheduling ? (
         <div className="flex flex-col gap-card rounded-md border border-border bg-background/40 p-card">
           <Field label={m.schedulingMethod}>
@@ -1154,46 +1252,70 @@ export function EventTypeForm({
 
           <div className="flex flex-col gap-inline">
             <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
-            {/* Column header — only the fields the active method actually uses. */}
+            {eventTeamId && teamName ? (
+              <TeamHostsNote
+                teamId={eventTeamId}
+                teamName={teamName}
+                canManageTeams={canManageTeams}
+                m={m.teamHosts}
+              />
+            ) : null}
+            {/* Who a booking goes to, then the column header: only the fields
+                the active method actually uses. Below `sm` the header is
+                hidden and each control carries its own label (HostCell): the
+                three columns do not fit beside a name at 360px. */}
             {schedulingType !== 'collective' ? (
-              <div className="flex items-center gap-field px-tight text-xs text-muted-foreground">
-                <span className="flex-1" />
-                <span className="w-20 text-center">{m.priority}</span>
-                <span className="w-20 text-center">{m.weight}</span>
-                {schedulingType === 'fixed_round_robin' ? (
-                  <span className="w-16 text-center">{m.fixedHost}</span>
-                ) : null}
-              </div>
+              <>
+                <p className="text-xs text-muted-foreground">{m.priorityHint}</p>
+                <div className="hidden items-center gap-field px-field text-xs text-muted-foreground sm:flex">
+                  <span className="flex-1" />
+                  <span className="w-28 text-center">{m.priority}</span>
+                  <span className="w-20 text-center">{m.weight}</span>
+                  {schedulingType === 'fixed_round_robin' ? (
+                    <span className="w-16 text-center">{m.fixedHost}</span>
+                  ) : null}
+                </div>
+              </>
             ) : null}
             {hosts.map((h) => {
               const name = teamMembers!.find((tm) => tm.memberId === h.memberId)?.displayName ?? h.memberId;
               return (
-                <div key={h.memberId} className="flex items-center gap-field rounded-md border border-border bg-card px-field py-inline">
-                  <span className="flex-1 text-sm">{name}</span>
+                <div
+                  key={h.memberId}
+                  className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline sm:flex-row sm:items-center sm:gap-field"
+                >
+                  <span className="text-sm sm:flex-1">{name}</span>
                   {schedulingType !== 'collective' ? (
                     <>
-                      <input
-                        type="number"
-                        aria-label={`${name} — ${m.priority}`}
-                        value={h.priority ?? 0}
-                        onChange={(e) => setHost(h.memberId, { priority: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        aria-label={`${name} — ${m.weight}`}
-                        value={h.weight ?? 100}
-                        onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
-                        className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
-                      />
+                      <HostCell label={m.priority}>
+                        <HostPrioritySelect
+                          hostName={name}
+                          value={h.priority}
+                          onChange={(priority) => setHost(h.memberId, { priority })}
+                          m={m}
+                          locale={locale}
+                        />
+                      </HostCell>
+                      <HostCell label={m.weight}>
+                        <input
+                          type="number"
+                          min={1}
+                          aria-label={`${name}: ${m.weight}`}
+                          value={h.weight ?? 100}
+                          onChange={(e) => setHost(h.memberId, { weight: Number(e.target.value) })}
+                          className="w-20 rounded-md border border-input bg-background px-inline py-tight text-center text-sm"
+                        />
+                      </HostCell>
                       {schedulingType === 'fixed_round_robin' ? (
-                        <label className="flex w-16 cursor-pointer justify-center" title={m.fixedHostHint}>
-                          <Checkbox
-                            checked={h.isFixed}
-                            onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
-                          />
-                        </label>
+                        <HostCell label={m.fixedHost}>
+                          <label className="flex w-16 cursor-pointer justify-end sm:justify-center" title={m.fixedHostHint}>
+                            <Checkbox
+                              aria-label={`${name}: ${m.fixedHost}`}
+                              checked={h.isFixed}
+                              onChange={(e) => setHost(h.memberId, { isFixed: e.target.checked })}
+                            />
+                          </label>
+                        </HostCell>
                       ) : null}
                     </>
                   ) : null}
@@ -1414,6 +1536,23 @@ function deliverableMappings(
     .filter((row) => sourceExists(row.source, fields))
     .map((row) => ({ ...row, properties: row.properties.filter((p) => p.trim() !== '') }))
     .filter((row) => row.properties.length > 0);
+}
+
+/**
+ * One host control in a team event's Hosts block. From `sm` up it steps aside
+ * (`contents`) and the control sits under its column header; below `sm` the
+ * header is hidden, so the control shows its column's name beside it. The
+ * name is for the eye only: each control already has its own accessible label.
+ */
+function HostCell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-field sm:contents">
+      <span aria-hidden className="text-xs text-muted-foreground sm:hidden">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

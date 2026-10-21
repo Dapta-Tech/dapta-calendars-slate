@@ -18,10 +18,18 @@ type DevMessages = BookingMessages['admin']['developer'];
  * same thing the same way.
  *
  * A step shows as done from what the page can know: the workspace has a working
- * key; a key has been used, or an app has signed in through OAuth. None of that
- * blocks a step. Step 1's button opens the key list's own create dialog, so
+ * key; a key has been used, or an app has signed in through this API's own
+ * OAuth server. None of that blocks a step. The key step's button (step 1, or
+ * step 2 with an external sign-in) opens the key list's own create dialog, so
  * there is one way to make a key, and it is the page's only Create while there
  * is no key (R30: one create action per screen).
+ *
+ * With sign-in through an external authorization server (`external`), the
+ * guide leads with it: step 1 is signing in from the app (Claude, ChatGPT,
+ * Cursor, Claude Code and any other app that signs in), step 2 is a key, for
+ * headless agents and scripts or for narrower access. That server's sign-ins
+ * leave nothing this page can read, so step 1 is never marked done, and step 2
+ * only says a key has been used.
  *
  * Under the steps, the way in for an agent without MCP: the skill zip, which
  * teaches it the REST API with the same key (offered with MCP off too, where it
@@ -37,7 +45,8 @@ export function SetupGuide({
   oauth,
   external,
   hasKey,
-  agentConnected,
+  keyUsed,
+  appsConnected,
   productName,
   docsLabel,
   skillAvailable,
@@ -52,10 +61,13 @@ export function SetupGuide({
   mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
   oauth: boolean;
-  /** People sign in through an external authorization server (see ConnectAgent). */
+  /** People sign in through an external authorization server: the guide leads with signing in. */
   external: boolean;
   hasKey: boolean;
-  agentConnected: boolean;
+  /** A working key has been used. */
+  keyUsed: boolean;
+  /** An app has signed in through this API's own OAuth server (never with `external`). */
+  appsConnected: boolean;
   productName: string;
   /** The API docs page's name in the rail, the link under the prompt. */
   docsLabel: string;
@@ -96,6 +108,28 @@ export function SetupGuide({
       </section>
     );
   }
+  const agentConnected = appsConnected || keyUsed;
+  const createKey = hasKey ? null : (
+    <div className="mt-field">
+      <Button size="lg" data-testid="setup-create-key" onClick={onCreate}>
+        {m.createKey}
+      </Button>
+    </div>
+  );
+  const tryStep = (
+    <Step n={3} title={m.guideTryTitle} done={false} doneLabel={m.guideStepDone} last testId="setup-step-try">
+      <p className="mb-inline max-w-prose text-sm text-muted-foreground">{m.guideTryHint}</p>
+      <CodeBlock value={t(m.guidePrompt, { product: productName })} copyLabel={m.copyPrompt} copiedLabel={m.copied} wrap />
+      <p className="mt-field max-w-prose text-xs text-muted-foreground">
+        {m.guideTryNote}{' '}
+        <Link href={DEVELOPERS_DOCS_HREF} className="font-medium text-foreground underline underline-offset-2">
+          {docsLabel}
+        </Link>
+        .
+      </p>
+    </Step>
+  );
+
   return (
     <section
       aria-labelledby="setup-guide-title"
@@ -107,42 +141,45 @@ export function SetupGuide({
       </h2>
       <p className="mt-tight max-w-prose text-sm text-muted-foreground">{m.guideIntro}</p>
 
-      <ol className="mt-group flex flex-col">
-        <Step n={1} title={m.guideKeyTitle} done={hasKey} doneLabel={m.guideStepDone} testId="setup-step-key">
-          <p className="max-w-prose text-sm text-muted-foreground">{hasKey ? m.guideKeyDone : m.guideKeyBody}</p>
-          {hasKey ? null : (
+      {external ? (
+        <ol className="mt-group flex flex-col">
+          <Step n={1} title={m.signInTitle} done={false} doneLabel={m.guideStepDone} testId="setup-step-sign-in">
+            <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.signInBody}</p>
+            <ConnectAgent snippets={snippets} variant="sign-in" label={m.signInTitle} messages={m} />
+            <p className="mt-field max-w-prose text-xs text-muted-foreground">{m.signInAccess}</p>
+            <p className="mt-tight max-w-prose text-xs text-muted-foreground">{m.signInDisconnect}</p>
+          </Step>
+
+          <Step n={2} title={m.guideKeyAltTitle} done={keyUsed} doneLabel={m.guideStepDone} testId="setup-step-key">
+            <p className="max-w-prose text-sm text-muted-foreground">
+              {keyUsed ? m.guideKeyUsedDone : hasKey ? m.guideKeyDone : m.guideKeyAltBody}
+            </p>
+            {createKey}
             <div className="mt-field">
-              <Button size="lg" data-testid="setup-create-key" onClick={onCreate}>
-                {m.createKey}
-              </Button>
+              <ConnectAgent snippets={snippets} variant="keys" label={m.guideKeyAltTitle} messages={m} />
             </div>
-          )}
-        </Step>
+          </Step>
 
-        <Step n={2} title={m.connectTitle} done={agentConnected} doneLabel={m.guideStepDone} testId="setup-step-agent">
-          <p className="mb-field max-w-prose text-sm text-muted-foreground">
-            {agentConnected ? m.guideAgentDone : m.guideAgentBody}
-          </p>
-          <ConnectAgent snippets={snippets} oauth={oauth} external={external} messages={m} />
-        </Step>
+          {tryStep}
+        </ol>
+      ) : (
+        <ol className="mt-group flex flex-col">
+          <Step n={1} title={m.guideKeyTitle} done={hasKey} doneLabel={m.guideStepDone} testId="setup-step-key">
+            <p className="max-w-prose text-sm text-muted-foreground">{hasKey ? m.guideKeyDone : m.guideKeyBody}</p>
+            {createKey}
+          </Step>
 
-        <Step n={3} title={m.guideTryTitle} done={false} doneLabel={m.guideStepDone} last testId="setup-step-try">
-          <p className="mb-inline max-w-prose text-sm text-muted-foreground">{m.guideTryHint}</p>
-          <CodeBlock
-            value={t(m.guidePrompt, { product: productName })}
-            copyLabel={m.copyPrompt}
-            copiedLabel={m.copied}
-            wrap
-          />
-          <p className="mt-field max-w-prose text-xs text-muted-foreground">
-            {m.guideTryNote}{' '}
-            <Link href={DEVELOPERS_DOCS_HREF} className="font-medium text-foreground underline underline-offset-2">
-              {docsLabel}
-            </Link>
-            .
-          </p>
-        </Step>
-      </ol>
+          <Step n={2} title={m.connectTitle} done={agentConnected} doneLabel={m.guideStepDone} testId="setup-step-agent">
+            <p className="mb-field max-w-prose text-sm text-muted-foreground">
+              {/* Say only what happened: "or an app has signed in" only when one has. */}
+              {appsConnected ? m.guideAgentDone : keyUsed ? m.guideKeyUsedDone : m.guideAgentBody}
+            </p>
+            <ConnectAgent snippets={snippets} oauth={oauth} messages={m} />
+          </Step>
+
+          {tryStep}
+        </ol>
+      )}
 
       {skill(true)}
     </section>

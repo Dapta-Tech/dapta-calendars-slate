@@ -133,6 +133,11 @@ describe('MCP, Connect and keys: the setup guide follows the API', () => {
     expect(html).toContain(m.chatOAuthTitle);
     expect(html).not.toContain('data-testid="connected-apps"');
     expectOtherSectionsUnchanged(html);
+    // Signing in leads; a key is the option after it.
+    expect(html.indexOf('data-testid="setup-step-sign-in"')).toBeGreaterThan(-1);
+    expect(html.indexOf('data-testid="setup-step-sign-in"')).toBeLessThan(html.indexOf('data-testid="setup-step-key"'));
+    expect(html).toContain(m.guideKeyAltTitle);
+    expect(html).not.toContain(m.guideKeyTitle);
   });
 
   it("this API's own OAuth server keeps its Connected apps and says nothing about an external sign-in", async () => {
@@ -140,6 +145,9 @@ describe('MCP, Connect and keys: the setup guide follows the API', () => {
     const html = await render();
     expect(html).toContain('data-testid="connected-apps"');
     expect(html).not.toContain(m.signInTitle);
+    // Today's order: create a key first.
+    expect(html).toContain(m.guideKeyTitle);
+    expect(html).not.toContain('data-testid="setup-step-sign-in"');
   });
 
   it('MCP off with an external sign-in still shows only the honest state', async () => {

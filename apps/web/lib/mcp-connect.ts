@@ -56,6 +56,26 @@ export function claudeCodeCommand(mcpUrl: string): string {
   ].join('\n');
 }
 
+// --- Sign-in (no key) ---------------------------------------------------------
+// For an app that signs in itself (OAuth): the address alone, no header. The
+// server's 401 points the app at the sign-in, so nothing here names a variable.
+
+/** Cursor's one-click link for a sign-in: the address, no header. */
+export function cursorSignInDeeplink(mcpUrl: string): string {
+  const config = encodeURIComponent(encodeCursorConfig({ url: mcpUrl }));
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${SERVER_NAME}&config=${config}`;
+}
+
+/** `.cursor/mcp.json` for a sign-in: the address, no header. */
+export function cursorSignInJson(mcpUrl: string): string {
+  return JSON.stringify({ mcpServers: { [SERVER_NAME]: { url: mcpUrl } } }, null, 2);
+}
+
+/** Claude Code with a sign-in: the server added with no header, then `/mcp` signs in. */
+export function claudeCodeSignInCommand(mcpUrl: string): string {
+  return `claude mcp add --transport http ${SERVER_NAME} ${mcpUrl}`;
+}
+
 /** `~/.codex/config.toml`, or `.codex/config.toml` in a trusted project. */
 export function codexConfigToml(mcpUrl: string): string {
   return [`[mcp_servers.${SERVER_NAME}]`, `url = "${mcpUrl}"`, `bearer_token_env_var = "${API_KEY_ENV}"`].join('\n');

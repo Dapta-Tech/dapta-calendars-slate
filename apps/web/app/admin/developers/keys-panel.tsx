@@ -43,7 +43,7 @@ export function KeysPanel({
   mcpAvailable: boolean;
   snippets: ConnectSnippets | null;
   oauth: boolean;
-  /** People sign in through an external authorization server (see ConnectAgent). */
+  /** People sign in through an external authorization server (see SetupGuide). */
   external: boolean;
   /** Some app has signed in through OAuth: an agent is connected without a key. */
   appsConnected: boolean;
@@ -57,7 +57,7 @@ export function KeysPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const working = keys.filter((k) => isWorkingKey(k, now));
   const hasKey = working.length > 0;
-  const agentConnected = appsConnected || working.some((k) => toMs(k.lastUsedAt) !== null);
+  const keyUsed = working.some((k) => toMs(k.lastUsedAt) !== null);
   return (
     <>
       <SetupGuide
@@ -67,7 +67,8 @@ export function KeysPanel({
         oauth={oauth}
         external={external}
         hasKey={hasKey}
-        agentConnected={agentConnected}
+        keyUsed={keyUsed}
+        appsConnected={appsConnected}
         productName={productName}
         docsLabel={docsLabel}
         skillAvailable={skillAvailable}
