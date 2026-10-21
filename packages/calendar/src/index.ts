@@ -26,6 +26,12 @@ export interface CreateEventInput {
   /** Optional provider-calendar target discovered beneath the connection. */
   calendarId?: string;
   title: string;
+  /**
+   * The event body, PLAIN TEXT (line breaks as `\n`): the booking's rendered
+   * description and, on a co-host's copy, the join line. Null or absent: none.
+   * Values typed by the invitee arrive without `<` or `>`, but the text is not
+   * HTML; a backend whose provider takes HTML must send it as text.
+   */
   description?: string | null;
   startUtc: string;
   endUtc: string;
@@ -58,6 +64,12 @@ export interface UpdateEventInput {
   calendarId?: string;
   externalEventId: string;
   title: string;
+  /**
+   * The event body after the move, plain text as on create. ABSENT leaves the
+   * event's body as it is (a booking without a description template never
+   * sends one); a string replaces it, so a time written in it moves too, and
+   * an empty string clears it (its template was removed or now prints nothing).
+   */
   description?: string | null;
   startUtc: string;
   endUtc: string;

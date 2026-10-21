@@ -45,7 +45,7 @@ function escapeText(value: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r\n?|\n/g, '\\n');
+    .replace(/\r\n?|\n|[\u2028\u2029]/g, '\\n');
 }
 
 /**

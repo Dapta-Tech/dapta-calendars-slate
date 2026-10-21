@@ -516,6 +516,12 @@ export class BookingService {
     // (single-active-token invariant); only mint a URL for a fresh booking.
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
 
+    // A seat on an existing group booking: its calendar event already exists,
+    // with one guest fewer and the text it was first written with. Rewrite it
+    // (once accepted; a pending slot has no event yet) so the new seat-taker
+    // is on it and it carries the slot's shared title and body.
+    if (outcome.seatTaken && b.status === 'accepted') this.afterGuestsChanged(b.uid);
+
     if (outcome.manageToken) {
       // B5: gate the email + calendar write on STATUS. An ACCEPTED booking is
       // confirmed (write to the calendar + send a "confirmed" mail with a
@@ -570,6 +576,7 @@ export class BookingService {
       endUtc,
       host: { name: b.hostName, handle: b.hostHandle },
       attendee: b.attendee,
+      calendarDescription: b.calendarDescription || undefined,
       manageUrl,
       deduplicated: outcome.deduplicated || undefined,
     };
@@ -597,9 +604,11 @@ export class BookingService {
     // location column (same field calendar write-out reads); the meeting link is
     // the provider-generated URL persisted per booking in booking_reference (the
     // real source — booking.meeting_url is not populated by the create flow).
-    const details = await this.db.get<{ location: string | null; location_kind: string | null }>(
-      sql`SELECT location, location_kind FROM booking WHERE id = ${b.id} LIMIT 1`,
-    );
+    const details = await this.db.get<{
+      location: string | null;
+      location_kind: string | null;
+      calendar_description: string | null;
+    }>(sql`SELECT location, location_kind, calendar_description FROM booking WHERE id = ${b.id} LIMIT 1`);
     const ref = await this.db.get<{ meeting_url: string | null }>(
       sql`SELECT meeting_url FROM booking_reference
           WHERE booking_id = ${b.id} AND meeting_url IS NOT NULL LIMIT 1`,
@@ -644,6 +653,9 @@ export class BookingService {
       location: details?.location ?? null,
       locationKind: isLocationKind(details?.location_kind) ? details.location_kind : null,
       meetingUrl: ref?.meeting_url ?? null,
+      // The calendar event's body, as the create answer gives it (an emptied
+      // one is none).
+      calendarDescription: details?.calendar_description || undefined,
       reschedule: rescheduleContextOf(ctx),
       showBranding: await this.gate.showBranding(b.account_id),
     };
@@ -1085,6 +1097,7 @@ export class BookingService {
     const row = await this.db
       .get<{
         title: string;
+        calendar_description: string | null;
         start_ms: number | string;
         end_ms: number | string;
         status: string;
@@ -1094,7 +1107,8 @@ export class BookingService {
         // `uid` is a UUID this request just minted and `booking.uid` is UNIQUE in
         // both dialects, so this is an exact index hit that cannot reach another
         // account's row — the value is never caller-supplied.
-        sql`SELECT b.title AS title, b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
+        sql`SELECT b.title AS title, b.calendar_description AS calendar_description,
+                   b.start_ms AS start_ms, b.end_ms AS end_ms, b.status AS status,
                    m.display_name AS host_name, m.handle AS host_handle
             FROM booking b
             LEFT JOIN member m ON m.id = b.host_member_id
@@ -1124,6 +1138,7 @@ export class BookingService {
         email: body.attendee.email,
         timeZone: body.attendee.timeZone,
       },
+      calendarDescription: row?.calendar_description || undefined,
       hostMemberId: out.hostMemberId,
       manageUrl,
     };

@@ -4,6 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
+import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
 import {
   bookingStartOutOfRange,
   isSlotBookable,
@@ -347,58 +348,122 @@ export async function addGuestsToBooking(
     uid: string;
     guests: Array<{ email: string; name?: string; timeZone?: string }>;
   },
-): Promise<{ ok: true; added: number } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }> {
+): Promise<
+  | {
+      ok: true;
+      added: number;
+      /**
+       * The booking's calendar text is the shared one, so its event may be
+       * rewritten for the new guests. False when guests were added but neither
+       * the shared render nor its reset landed: then the event must not be
+       * written out to them.
+       */
+      shared: boolean;
+    }
+  | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }
+> {
   const booking = await db.get<{
     id: string;
     status: string;
     metadata: unknown;
+    start_ms: number;
+    end_ms: number;
+    event_name: string | null;
   }>(
-    sql`SELECT id, status, metadata FROM booking
-        WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
+    sql`SELECT b.id, b.status, b.metadata, b.start_ms, b.end_ms, et.title AS event_name
+        FROM booking b LEFT JOIN event_type et ON et.id = b.event_type_id
+        WHERE b.account_id = ${args.accountId} AND b.uid = ${args.uid} LIMIT 1`,
   );
   if (!booking) return { ok: false, reason: 'NOT_FOUND' };
   if (booking.status !== 'accepted' && booking.status !== 'pending') return { ok: false, reason: 'GONE' };
 
-  const metadata = parseJsonColumn<{ _guests?: string[] }>(booking.metadata, {});
-  const existing = new Set((metadata._guests ?? []).map((email) => email.toLowerCase()));
-  for (const row of await db.all<{ email: string }>(
-    sql`SELECT email FROM booking_attendee WHERE booking_id = ${booking.id}
+  // The guests and the mark that the booking is now shared land together,
+  // under the booking's row lock (the one a v2 move takes before it copies the
+  // booking), and read everything again there: a move can never copy the new
+  // guests without the mark, nor add them to a booking it already cancelled.
+  const lockedRowSql = sql`SELECT status, metadata FROM booking WHERE id = ${booking.id}`;
+  const takenSql = sql`SELECT email FROM booking_attendee WHERE booking_id = ${booking.id}
         UNION ALL
-        SELECT email FROM booking_guest WHERE booking_id = ${booking.id}`,
-  ))
-    existing.add(row.email.toLowerCase());
-
+        SELECT email FROM booking_guest WHERE booking_id = ${booking.id}`;
+  const countSql = sql`SELECT COUNT(*) AS count FROM booking_guest WHERE booking_id = ${booking.id}`;
+  const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${booking.id}`;
   const byEmail = new Map<string, (typeof args.guests)[number]>();
   for (const guest of args.guests) {
     const normalized = guest.email.toLowerCase();
     if (!byEmail.has(normalized)) byEmail.set(normalized, guest);
   }
-  const unique = [...byEmail.values()].filter((guest) => !existing.has(guest.email.toLowerCase()));
-  const totalGuests =
-    (metadata._guests ?? []).length +
-    Number(
-      (
-        await db.get<{ count: number }>(
-          sql`SELECT COUNT(*) AS count FROM booking_guest WHERE booking_id = ${booking.id}`,
-        )
-      )?.count ?? 0,
-    );
-  if (totalGuests + unique.length > 30) return { ok: false, reason: 'LIMIT_EXCEEDED' };
-
-  let added = 0;
-  for (const guest of unique) {
-    const inserted = await db.get<{ id: string }>(
-      sql`INSERT INTO booking_guest
-            (id, booking_id, email, email_normalized, name, time_zone, created_at)
-          VALUES (${randomUUID()}, ${booking.id}, ${guest.email},
-            ${guest.email.toLowerCase()}, ${guest.name ?? null},
-            ${guest.timeZone ?? null}, ${Date.now()})
-          ON CONFLICT (booking_id, email_normalized) DO NOTHING
-          RETURNING id`,
-    );
-    if (inserted) added += 1;
+  type Plan = { kind: 'gone' } | { kind: 'limit' } | { kind: 'add'; guests: Array<(typeof args.guests)[number]> };
+  const plan = (
+    row: { status: string; metadata: unknown } | undefined,
+    taken: ReadonlyArray<{ email: string }>,
+    guestRows: number,
+  ): Plan => {
+    if (!row || (row.status !== 'accepted' && row.status !== 'pending')) return { kind: 'gone' };
+    const metadata = parseJsonColumn<{ _guests?: string[] }>(row.metadata, {});
+    const existing = new Set((metadata._guests ?? []).map((email) => email.toLowerCase()));
+    for (const r of taken) existing.add(r.email.toLowerCase());
+    const unique = [...byEmail.values()].filter((guest) => !existing.has(guest.email.toLowerCase()));
+    if ((metadata._guests ?? []).length + guestRows + unique.length > 30) return { kind: 'limit' };
+    return { kind: 'add', guests: unique };
+  };
+  const insertGuest = (guest: (typeof args.guests)[number]) =>
+    sql`INSERT INTO booking_guest
+          (id, booking_id, email, email_normalized, name, time_zone, created_at)
+        VALUES (${randomUUID()}, ${booking.id}, ${guest.email},
+          ${guest.email.toLowerCase()}, ${guest.name ?? null},
+          ${guest.timeZone ?? null}, ${Date.now()})
+        ON CONFLICT (booking_id, email_normalized) DO NOTHING
+        RETURNING id`;
+  type Result = { kind: 'gone' } | { kind: 'limit' } | { kind: 'added'; added: number };
+  let result: Result;
+  if (db.dialect === 'sqlite') {
+    result = db.sqlite!.txn<Result>(() => {
+      const p = plan(
+        db.sqlite!.drizzle.get<{ status: string; metadata: unknown }>(lockedRowSql),
+        db.sqlite!.drizzle.all<{ email: string }>(takenSql),
+        Number(db.sqlite!.drizzle.get<{ count: number }>(countSql)?.count ?? 0),
+      );
+      if (p.kind !== 'add') return p;
+      let added = 0;
+      for (const guest of p.guests) if (db.sqlite!.drizzle.get(insertGuest(guest))) added += 1;
+      if (added > 0) db.sqlite!.drizzle.run(markShared);
+      return { kind: 'added', added };
+    }, { immediate: true });
+  } else {
+    result = await db.pg!.drizzle.transaction(async (tx): Promise<Result> => {
+      const rows = (await tx.execute(sql`${lockedRowSql} FOR UPDATE`)) as unknown as Array<{
+        status: string;
+        metadata: unknown;
+      }>;
+      const taken = (await tx.execute(takenSql)) as unknown as Array<{ email: string }>;
+      const count = (await tx.execute(countSql)) as unknown as Array<{ count: number | string }>;
+      const p = plan(rows[0], taken, Number(count[0]?.count ?? 0));
+      if (p.kind !== 'add') return p;
+      let added = 0;
+      for (const guest of p.guests)
+        if (((await tx.execute(insertGuest(guest))) as unknown as unknown[]).length > 0) added += 1;
+      if (added > 0) await tx.execute(markShared);
+      return { kind: 'added', added };
+    });
   }
-  return { ok: true, added };
+  if (result.kind === 'gone') return { ok: false, reason: 'GONE' };
+  if (result.kind === 'limit') return { ok: false, reason: 'LIMIT_EXCEEDED' };
+  const added = result.added;
+  if (added === 0) return { ok: true, added, shared: true };
+  // The guests are on the booking's one calendar event now: it is shared (and
+  // marked so, above), and its title and description must never carry the
+  // invitee's own data. Rendered again as shared (or reset to the event's
+  // name), as a seat is.
+  const shared =
+    (await applyCalendarTemplates(db, args.uid)) ??
+    (booking.event_name !== null
+      ? await applySharedFallback(
+          db,
+          { id: booking.id, startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) },
+          booking.event_name,
+        )
+      : null);
+  return { ok: true, added, shared: shared !== null };
 }
 
 interface RescheduleSource {
@@ -417,6 +482,8 @@ interface RescheduleSource {
   attendee_time_zone: string | null;
   /** The language the invitee booked in; carried to the new row, NULL included. */
   locale: string | null;
+  /** The rendered calendar body; carried, then rendered again at the new time. */
+  calendar_description: string | null;
   responses: unknown;
   metadata: unknown;
   recurring_event_id: string | null;
@@ -477,7 +544,7 @@ export async function rescheduleBookingV2(
   const source = await db.get<RescheduleSource>(
     sql`SELECT id, account_id, uid, event_type_id, host_member_id, team_id, title,
                start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
-               responses, metadata, recurring_event_id
+               calendar_description, responses, metadata, recurring_event_id
         FROM booking
         WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
   );
@@ -581,14 +648,16 @@ export async function rescheduleBookingV2(
   const insertNew = sql`INSERT INTO booking
     (id, account_id, uid, event_type_id, host_member_id, team_id, title,
      start_ms, end_ms, status, location, meeting_url, attendee_time_zone, locale,
-     responses, metadata, cancellation_reason, cancelled_by, rescheduled,
+     calendar_description, seated, responses, metadata, cancellation_reason, cancelled_by, rescheduled,
      from_reschedule, rescheduled_from_uid, rescheduled_to_uid,
      rescheduling_reason, rescheduled_by_email, recurring_event_id,
      idempotency_key, created_at, updated_at)
     VALUES (${newId}, ${source.account_id}, ${newUid}, ${source.event_type_id},
       ${source.host_member_id}, ${source.team_id}, ${source.title},
       ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location},
-      ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null}, ${responsesExpr},
+      ${source.meeting_url}, ${source.attendee_time_zone}, ${source.locale ?? null},
+      ${source.calendar_description ?? null},
+      (SELECT seated FROM booking WHERE id = ${source.id}), ${responsesExpr},
       ${metadataExpr}, NULL, NULL, 1, ${previousStartUtc}, ${source.uid}, NULL,
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
       ${source.recurring_event_id},
@@ -712,6 +781,9 @@ export async function rescheduleBookingV2(
     return { ok: false, reason: 'GONE' };
   }
   if (result === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+  // The copy carried the old title and body; a template renders them again at
+  // the new time.
+  await applyCalendarTemplates(db, newUid);
   return {
     ok: true,
     uid: newUid,

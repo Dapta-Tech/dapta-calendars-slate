@@ -1,0 +1,327 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createDb, sql, type Db } from './client';
+import { migrate } from './migrate';
+import { seed } from './seed';
+import { createBooking, getAvailability } from './repository';
+import { createTeamBooking, getTeamAvailability } from './parity';
+import { addGuestsToBooking } from './v2-pilot';
+import { createEventType, updateEventType } from './crud';
+import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
+
+// Both renders are spied on, so a test can make one of them not land.
+vi.mock('./calendar-text', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./calendar-text')>();
+  return {
+    ...mod,
+    applyCalendarTemplates: vi.fn(mod.applyCalendarTemplates),
+    applySharedFallback: vi.fn(mod.applySharedFallback),
+  };
+});
+
+/**
+ * Taking a seat on a group slot: the slot's text must be the shared one before
+ * its calendar event is rewritten for the person joining (`seatTaken`), and a
+ * repeated seat is a replay. Its own file, so the renders can be made to fail.
+ */
+describe('a seat taken on a group slot', () => {
+  let db: Db;
+  let accountId: string;
+  let alexId: string;
+
+  beforeEach(async () => {
+    vi.mocked(applyCalendarTemplates).mockClear();
+    vi.mocked(applySharedFallback).mockClear();
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
+    alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+  });
+
+  /** A slot Alice booked while the event had no seats and a personal title; then seats on. */
+  async function slotBookedBeforeSeats(): Promise<{ startMs: number; uid: string }> {
+    const out = await createEventType(db, accountId, alexId, {
+      slug: 'office',
+      title: 'Office hours',
+      lengthMinutes: 30,
+      calendarTitleTemplate: 'Office hours - {{name}}',
+      calendarDescriptionTemplate: 'Email {{email}}',
+    });
+    if (!out.ok) throw new Error('event type failed');
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'office',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const startMs = new Date(a!.slots[0]!.startUtc).getTime();
+    const alice = await book(startMs, 'Alice Secret', 'alice@example.com');
+    if (!alice.ok) throw new Error('first booking failed');
+    await updateEventType(db, accountId, out.value.id, {
+      seatsPerTimeSlot: 5,
+      calendarTitleTemplate: null,
+      calendarDescriptionTemplate: null,
+    });
+    return { startMs, uid: alice.booking.uid };
+  }
+
+  const book = (startMs: number, name: string, email: string) =>
+    createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'office',
+      startMs,
+      attendee: { name, email, timeZone: 'UTC' },
+    });
+
+  const stored = async (uid: string) =>
+    (await db.get<{ title: string; calendar_description: string | null }>(
+      sql`SELECT title, calendar_description FROM booking WHERE uid = ${uid}`,
+    ))!;
+
+  it('when the shared render does not land, the slot is reset to the event name before the event is rewritten', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    expect((await stored(uid)).title).toBe('Office hours - Alice Secret');
+    vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
+    const bob = await book(startMs, 'Bob Other', 'bob@example.com');
+    expect(bob).toMatchObject({ ok: true, seatTaken: true, booking: { title: 'Office hours', calendarDescription: null } });
+    expect(applySharedFallback).toHaveBeenCalledTimes(1);
+    expect(await stored(uid)).toEqual({ title: 'Office hours', calendar_description: '' });
+  });
+
+  it('when even the reset fails, the event is not rewritten for the new seat-taker', async () => {
+    const { startMs } = await slotBookedBeforeSeats();
+    vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
+    vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
+    const bob = await book(startMs, 'Bob Other', 'bob@example.com');
+    if (!bob.ok) throw new Error('seat failed');
+    expect(bob.seatTaken).toBeUndefined();
+    expect(bob.booking).toMatchObject({ title: 'Office hours', calendarDescription: null });
+  });
+
+  it('the reset never writes over a booking that moved meanwhile', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    const row = (await db.get<{ id: string; title: string }>(sql`SELECT id, title FROM booking WHERE uid = ${uid}`))!;
+    // Seen at one time, but the booking is now somewhere else.
+    expect(await applySharedFallback(db, { id: row.id, startMs: startMs + 1, endMs: startMs + 30 * 60_000 }, 'Office hours')).toBeNull();
+    expect((await stored(uid)).title).toBe(row.title);
+    expect(
+      await applySharedFallback(db, { id: row.id, startMs, endMs: startMs + 30 * 60_000 }, 'Office hours'),
+    ).toEqual({ title: 'Office hours' });
+  });
+
+  it('a repeated seat is a replay: no second row, no seat spent, no rewrite, nobody else text', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    const first = await book(startMs, 'Bob Other', 'bob@example.com');
+    expect(first).toMatchObject({ ok: true, seatTaken: true });
+    const again = await book(startMs, 'Bob Other', ' BOB@example.com ');
+    expect(again).toMatchObject({ ok: true, deduplicated: true, manageToken: '' });
+    if (!again.ok) throw new Error('replay failed');
+    expect(again.seatTaken).toBeUndefined();
+    // Someone typing the first booker's address learns nothing of her text.
+    const posing = await book(startMs, 'Mallory', 'alice@example.com');
+    expect(posing).toMatchObject({ ok: true, deduplicated: true, booking: { title: 'Office hours', calendarDescription: null } });
+    const count = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+    );
+    expect(Number(count!.n)).toBe(2);
+  });
+
+  it('a seat request with several attendees takes one seat per new address, and counts only those', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    await db.run(sql`UPDATE event_type SET seats_per_time_slot = 3 WHERE slug = 'office'`);
+    const seat = (attendee: string, others: string[]) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'office',
+        startMs,
+        attendee: { name: attendee, email: `${attendee}@example.com`, timeZone: 'UTC' },
+        additionalAttendees: others.map((o) => ({ name: o, email: `${o}@example.com`, timeZone: 'UTC' })),
+      });
+    const emails = async () =>
+      (
+        await db.all<{ email: string }>(
+          sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid}) ORDER BY created_at`,
+        )
+      ).map((r) => r.email.toLowerCase());
+    // Three new people do not fit beside Alice in three seats.
+    expect(await seat('bob', ['carl', 'dana'])).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    // Alice already holds hers and Carl is named twice: two new seats, which fit.
+    expect(await seat('bob', ['alice', 'carl', 'CARL'])).toMatchObject({ ok: true, seatTaken: true });
+    expect(await emails()).toEqual(['alice@example.com', 'bob@example.com', 'carl@example.com']);
+  });
+
+  it("the slot's first booking counts and writes each address once too", async () => {
+    const out = await createEventType(db, accountId, alexId, {
+      slug: 'pair',
+      title: 'Pair session',
+      lengthMinutes: 30,
+      seatsPerTimeSlot: 2,
+    });
+    if (!out.ok) throw new Error('event type failed');
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pair',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const first = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'pair',
+      startMs: new Date(a!.slots[0]!.startUtc).getTime(),
+      attendee: { name: 'Ana', email: 'ana@example.com', timeZone: 'UTC' },
+      // Ana again, and Bob twice: two people, which fit in two seats.
+      additionalAttendees: ['ANA', 'bob', 'Bob'].map((n) => ({ name: n, email: `${n}@example.com`, timeZone: 'UTC' })),
+    });
+    if (!first.ok) throw new Error(`first booking failed: ${'reason' in first ? first.reason : ''}`);
+    const rows = await db.all<{ email: string }>(
+      sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${first.booking.uid}) ORDER BY created_at`,
+    );
+    expect(rows.map((r) => r.email)).toEqual(['ana@example.com', 'bob@example.com']);
+  });
+
+  it('a seat request whose invitee holds a seat still seats its new attendees, and rewrites', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    const seat = (attendee: string, others: string[]) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'office',
+        startMs,
+        attendee: { name: attendee, email: `${attendee}@example.com`, timeZone: 'UTC' },
+        additionalAttendees: others.map((o) => ({ name: o, email: `${o}@example.com`, timeZone: 'UTC' })),
+      });
+    // Alice again, bringing Carl: Carl takes a seat, Alice does not take a second.
+    expect(await seat('alice', ['carl'])).toMatchObject({ ok: true, seatTaken: true });
+    // Everyone already seated: a replay.
+    expect(await seat('alice', ['carl'])).toMatchObject({ ok: true, deduplicated: true });
+    const rows = await db.all<{ email: string }>(
+      sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid}) ORDER BY created_at`,
+    );
+    expect(rows.map((r) => r.email.toLowerCase())).toEqual(['alice@example.com', 'carl@example.com']);
+  });
+});
+
+describe('a booking whose calendar event has others on it is shared from the start', () => {
+  let db: Db;
+  let accountId: string;
+  let alexId: string;
+  let jordanId: string;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+    accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
+    alexId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='alex-rivera'`))!.id;
+    jordanId = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle='jordan-lee'`))!.id;
+    const out = await createEventType(db, accountId, alexId, {
+      slug: 'call',
+      title: 'Call',
+      lengthMinutes: 30,
+      bookingFields: [{ name: 'company', label: 'Company', type: 'text', required: false }],
+      calendarTitleTemplate: 'Call {{name}} {{form.company}}',
+      calendarDescriptionTemplate: 'Phone {{attendee_phone}}\nWith {{host_name}}',
+    });
+    if (!out.ok) throw new Error('event type failed');
+  });
+
+  const stored = async (uid: string) =>
+    (await db.get<{ title: string; calendar_description: string | null; seated: number | null }>(
+      sql`SELECT title, calendar_description, seated FROM booking WHERE uid = ${uid}`,
+    ))!;
+
+  async function firstSlot(): Promise<number> {
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'call',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    return new Date(a!.slots[0]!.startUtc).getTime();
+  }
+
+  const book = async (others: string[]) => {
+    const out = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'call',
+      startMs: await firstSlot(),
+      attendee: { name: 'Ana Private', email: 'ana@example.com', timeZone: 'UTC', phone: '+57 300' },
+      additionalAttendees: others.map((o) => ({ name: o, email: `${o}@example.com`, timeZone: 'UTC' })),
+      answers: { company: 'Secret Co' },
+    });
+    if (!out.ok) throw new Error(`book failed: ${'reason' in out ? out.reason : ''}`);
+    return out.booking;
+  };
+
+  it('a booking with other attendees never carries the invitee data; alone it does', async () => {
+    const shared = await book(['bob']);
+    expect(shared).toMatchObject({ title: 'Call', calendarDescription: 'With Alex Rivera' });
+    expect(await stored(shared.uid)).toEqual({ title: 'Call', calendar_description: 'With Alex Rivera', seated: 1 });
+    const alone = await book([]);
+    expect(alone.title).toBe('Call Ana Private Secret Co');
+    expect((await stored(alone.uid)).seated).toBeNull();
+    // The invitee's own address named again is not another person.
+    expect((await stored((await book(['ANA'])).uid)).seated).toBeNull();
+  });
+
+  it('the team path marks it too, and writes each address once', async () => {
+    const team = await createEventType(db, accountId, null, {
+      slug: 'team-call',
+      title: 'Team call',
+      lengthMinutes: 30,
+      teamId: (await db.get<{ id: string }>(sql`SELECT id FROM team WHERE slug='sales'`))!.id,
+      schedulingType: 'round_robin',
+      hostMemberIds: [alexId, jordanId],
+      calendarTitleTemplate: 'Team {{name}}',
+    });
+    if (!team.ok) throw new Error('team event type failed');
+    const avail = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-call',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const out = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-call',
+      startMs: new Date(avail!.slots[0]!).getTime(),
+      attendee: { name: 'Ana Private', email: 'ana@example.com', timeZone: 'UTC' },
+      additionalAttendees: ['bob', 'BOB', 'ana'].map((o) => ({ name: o, email: `${o}@example.com`, timeZone: 'UTC' })),
+    });
+    if (!out.ok) throw new Error('team book failed');
+    expect(await stored(out.uid)).toMatchObject({ title: 'Team', seated: 1 });
+    const rows = await db.all<{ email: string }>(
+      sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${out.uid}) ORDER BY created_at`,
+    );
+    expect(rows.map((r) => r.email.toLowerCase())).toEqual(['ana@example.com', 'bob@example.com']);
+  });
+
+  it('guests added later make it shared and render it again; the event is rewritten only then', async () => {
+    const alone = await book([]);
+    expect((await stored(alone.uid)).title).toBe('Call Ana Private Secret Co');
+    expect(
+      await addGuestsToBooking(db, { accountId, uid: alone.uid, guests: [{ email: 'guest@example.com' }] }),
+    ).toEqual({ ok: true, added: 1, shared: true });
+    expect(await stored(alone.uid)).toEqual({ title: 'Call', calendar_description: 'With Alex Rivera', seated: 1 });
+    // No guest added: nothing to rewrite, nothing changed.
+    expect(await addGuestsToBooking(db, { accountId, uid: alone.uid, guests: [{ email: 'GUEST@example.com' }] })).toEqual(
+      { ok: true, added: 0, shared: true },
+    );
+    // Neither the render nor its reset landing: the guests are kept but not written out.
+    const other = await book([]);
+    vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
+    vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
+    expect(
+      await addGuestsToBooking(db, { accountId, uid: other.uid, guests: [{ email: 'late@example.com' }] }),
+    ).toEqual({ ok: true, added: 1, shared: false });
+  });
+});

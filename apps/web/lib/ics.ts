@@ -22,7 +22,9 @@ function icsText(value: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    // A lone CR, and the Unicode line and paragraph separators, are line
+    // breaks too: escaped like one, never left raw.
+    .replace(/\r\n?|\n|[\u2028\u2029]/g, '\\n');
 }
 
 /** Fold to 75 octets per line (§3.1); continuation lines start with a space. */
@@ -51,6 +53,8 @@ export interface CalendarFileInput {
   title: string;
   startUtc: string;
   endUtc: string;
+  /** The calendar event's body, when the event type's description template wrote one. */
+  description?: string | null;
   /** Where, in words ("Online meeting", an address). */
   location?: string | null;
   /**
@@ -78,6 +82,7 @@ export function buildCalendarFile(input: CalendarFileInput): string {
     `DTEND:${icsUtc(input.endUtc)}`,
     `SUMMARY:${icsText(input.title)}`,
   ];
+  if (input.description) lines.push(`DESCRIPTION:${icsText(input.description)}`);
   const url = input.url && /^https?:\/\/[^\s]+$/i.test(input.url) ? input.url : null;
   const location = url ?? input.location;
   if (location) lines.push(`LOCATION:${icsText(location)}`);

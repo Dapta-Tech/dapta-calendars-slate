@@ -727,6 +727,8 @@ export class EmailEffects {
       accountId: ctx.accountId,
       uid: ctx.uid,
       title: ctx.title,
+      // The calendar event's body (its .ics DESCRIPTION), when a template wrote one.
+      ...(ctx.calendarDescription ? { calendarDescription: ctx.calendarDescription } : {}),
       eventName: ctx.eventName,
       eventDescription: ctx.eventDescription,
       workspaceName: ctx.workspaceName,

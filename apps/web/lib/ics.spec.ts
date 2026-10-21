@@ -40,6 +40,14 @@ describe('buildCalendarFile', () => {
     expect(buildCalendarFile(input)).toContain('SUMMARY:Design review\\; with notes\\, please\r\n');
   });
 
+  it('carries the calendar description, every line break escaped, a lone CR too', () => {
+    const ics = buildCalendarFile({ ...input, description: 'Company: Acme\nNotes\rEND:VEVENT' });
+    expect(ics).toContain('DESCRIPTION:Company: Acme\\nNotes\\nEND:VEVENT\r\n');
+    expect(ics.split('\r\n').filter((l) => l === 'END:VEVENT')).toHaveLength(1);
+    expect(buildCalendarFile({ ...input, description: 'a\u2028b\u2029c' })).toContain('DESCRIPTION:a\\nb\\nc\r\n');
+    expect(buildCalendarFile(input)).not.toContain('DESCRIPTION');
+  });
+
   it('folds long lines at 75 octets', () => {
     const ics = buildCalendarFile({ ...input, title: 'x'.repeat(200), location: null, url: null });
     for (const line of ics.split('\r\n')) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);

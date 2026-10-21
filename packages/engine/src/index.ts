@@ -13,3 +13,4 @@ export * from './pg-errors';
 export * from './location';
 export * from './onboarding';
 export * from './template';
+export * from './template-calendar';

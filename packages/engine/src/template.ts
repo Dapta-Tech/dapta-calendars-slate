@@ -73,6 +73,7 @@ export type TemplateIssueCode =
   | 'unknown_question'
   | 'not_available'
   | 'host_only'
+  | 'per_invitee'
   | 'bad_tag'
   | 'unclosed_tag'
   | 'unclosed_block'
@@ -379,6 +380,12 @@ export interface ValidateOptions {
    */
   audience?: TemplateAudience;
   /**
+   * The text is shared by everyone on a seated event's slot (its calendar
+   * title and description). One invitee's data (`perInvitee` variables and
+   * every answer) is refused, since each seat-taker would read it.
+   */
+  seated?: boolean;
+  /**
    * The event type's question names. Given: `{{form.x}}` for a question the
    * event does not ask is a WARNING (questions can be renamed or removed after
    * a template is written, and old bookings keep their old answers). Omitted
@@ -398,6 +405,7 @@ export function validateTemplate(text: string, opts: ValidateOptions): TemplateI
     if (isFormVariable(name)) {
       const field = name.slice(FORM_VARIABLE_PREFIX.length);
       if (!FORM_FIELD_NAME_RE.test(field)) issues.push(issue('bad_tag', raw, start, end));
+      else if (opts.seated) issues.push(issue('per_invitee', raw, start, end));
       else if (questions && !questions.has(field)) issues.push(issue('unknown_question', raw, start, end));
       return;
     }
@@ -405,6 +413,7 @@ export function validateTemplate(text: string, opts: ValidateOptions): TemplateI
     if (!def) issues.push(issue('unknown_variable', raw, start, end));
     else if (!def.contexts.includes(opts.context)) issues.push(issue('not_available', raw, start, end));
     else if (def.hostOnly && opts.audience !== 'host') issues.push(issue('host_only', raw, start, end));
+    else if (def.perInvitee && opts.seated) issues.push(issue('per_invitee', raw, start, end));
   };
   walk(parsed.nodes, (node) => {
     if (node.type === 'var') check(node.name, node.raw, node.start, node.end);
@@ -454,6 +463,10 @@ const MESSAGES: Record<TemplateIssueCode, Record<TemplateLocale, string>> = {
   host_only: {
     en: "{token} is only available in the host's copy.",
     es: '{token} solo está disponible en la copia del anfitrión.',
+  },
+  per_invitee: {
+    en: "{token} is one invitee's data, and everyone who takes a seat sees this event.",
+    es: '{token} es un dato de un solo invitado, y todos los que reservan un cupo ven este evento.',
   },
   bad_tag: {
     en: '{token} is not valid. Variables look like {{attendee_name}}.',
@@ -575,9 +588,93 @@ export function formatTemplateValue(value: TemplateValue, locale: TemplateLocale
   return '';
 }
 
+/** Locale-aware "Sat, Aug 1, 11:00 AM EDT" in `timeZone`; the ISO text itself when the zone is unreadable. */
+export function formatTemplateTime(iso: string, timeZone: string, locale: TemplateLocale = 'en'): string {
+  try {
+    return new Intl.DateTimeFormat(locale === 'es' ? 'es' : 'en-US', {
+      timeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+/** "30 min", "1 h", "1 h 30 min": the meeting length, the same in EN and ES. */
+export function formatTemplateDuration(startIso: string, endIso: string): string {
+  const minutes = Math.round((Date.parse(endIso) - Date.parse(startIso)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+/** The first word of a name: what `{{attendee_first_name}}` reads. */
+export function templateFirstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? '';
+}
+
+/**
+ * The most items of one list answer a template reads (the email's answer list
+ * shows as many). The public booking request does not bound an answer, so a
+ * huge one is cut before it is formatted or compared, never after.
+ */
+export const MAX_TEMPLATE_LIST_ITEMS = 50;
+
+/**
+ * One intake answer as the engine reads it. Text, numbers and yes/no stay as
+ * they are and lists keep their items, so the engine can word a boolean in the
+ * reader's language and test a list item by item. Anything else (an object, a
+ * nested list) is not an answer a form produces and reads as empty. Text is cut
+ * to the longest value a template prints, and a list to its first items.
+ */
+function answerValue(value: unknown): TemplateValue {
+  if (typeof value === 'string') return value.slice(0, MAX_TEMPLATE_VALUE.text);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (v): v is string | number | boolean => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean',
+      )
+      .slice(0, MAX_TEMPLATE_LIST_ITEMS)
+      .map((v) => (typeof v === 'string' ? v.slice(0, MAX_TEMPLATE_VALUE.text) : v));
+  }
+  return null;
+}
+
+
+/**
+ * The `{{form.<question name>}}` half of a values map, from a booking's
+ * answers. Own properties only, and every key is `form.`-prefixed, so an
+ * answer can never collide with a built-in. With `questions`, only the answers
+ * to those questions: the public booking request accepts any answer key, and
+ * one the event never asked must not print under the host's name.
+ */
+export function templateFormValues(
+  answers: Readonly<Record<string, unknown>> | null | undefined,
+  questions?: readonly string[],
+): Record<string, TemplateValue> {
+  const out: Record<string, TemplateValue> = Object.create(null) as Record<string, TemplateValue>;
+  if (!answers) return out;
+  const asked = questions ? new Set(questions) : null;
+  for (const [name, value] of Object.entries(answers)) {
+    if (asked && !asked.has(name)) continue;
+    out[`${FORM_VARIABLE_PREFIX}${name}`] = answerValue(value);
+  }
+  return out;
+}
+
 /** Clean one value for insertion: control and bidi characters out, line breaks per mode, length capped. */
 export function cleanTemplateValue(text: string, opts: Pick<RenderOptions, 'mode' | 'maxValueLength' | 'stripAngleBrackets'>): string {
-  let out = text.replace(/\r\n?/g, '\n');
+  // The Unicode line and paragraph separators break a line for many readers:
+  // they are line breaks here too, never a way to hide one.
+  let out = text.replace(/\r\n?|[\u2028\u2029]/g, '\n');
   if (opts.mode === 'line') out = out.replace(/[\n\t]+/g, ' ');
   out = out.replace(UNSAFE_CHARS, '');
   if (opts.stripAngleBrackets) out = out.replace(/[<>]/g, '');
@@ -697,7 +794,7 @@ export function renderTemplate(template: string | ParsedTemplate, values: Templa
   } else {
     // The host's own text is cleaned like a value: one line-break style (a
     // bare CR must never reach a mail transport) and no invisible controls.
-    out = joinLines(pieces).replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n');
+    out = joinLines(pieces).replace(/\r\n?|[\u2028\u2029]/g, '\n').replace(/\n{3,}/g, '\n\n');
   }
   out = stripUnsafeText(out).trim();
   return opts.maxLength ? cap(out, opts.maxLength) : out;

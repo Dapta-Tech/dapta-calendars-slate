@@ -32,6 +32,7 @@ import {
   bookingLocale,
   bookingStartOutOfRange,
   busyReadSpan,
+  distinctAttendees,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -62,6 +63,7 @@ import {
   type OneOffLinkRecord,
 } from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
+import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
 import type { BrandKit } from '@slate/types';
@@ -1059,15 +1061,20 @@ export async function createTeamBooking(
   // Snapshot the team event type's configured Where onto the booking (F5), same
   // as the personal path — otherwise team bookings show no location.
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
+  // One row per address, as the personal path writes them; other attendees
+  // make the booking's calendar event shared from the start (`seated`), so its
+  // text never carries the invitee's own data.
+  const additionalAttendees = distinctAttendees(args.attendee, args.additionalAttendees).slice(1);
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, seated,
+      created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
-      ${now}, ${now})`;
+      ${additionalAttendees.length > 0 ? 1 : null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
@@ -1076,7 +1083,7 @@ export async function createTeamBooking(
   // Extra attendees are written a millisecond apart, after the invitee, so
   // "the first attendee row" names the one who booked without relying on the
   // database's physical row order (see loadBookingNotificationContext).
-  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+  const insertAdditionalAttendees = additionalAttendees.map(
     (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
@@ -1106,6 +1113,7 @@ export async function createTeamBooking(
   // first would kill the link on every SLOT_TAKEN and strand the invitee with a
   // dead link and no booking. See `consumeOneOffLink`.
   if (live) await consumeOneOffLink(db, live.id, bookingId);
+  await applyCalendarTemplates(db, uid);
   return { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token };
 }
 
@@ -1459,6 +1467,8 @@ export async function rescheduleBooking(
   const moved = await runGuardedUpdate(db, assignedHostIds, overlapChecks, updateSql);
   if (moved === 'gone') return { ok: false, reason: 'GONE' };
   if (moved === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+  // A time in the calendar title or body would be stale: render them again.
+  await applyCalendarTemplates(db, b.uid);
   return {
     ok: true,
     uid: b.uid,
@@ -1800,6 +1810,8 @@ export interface BookingNotificationContext {
   accountId: string;
   uid: string;
   title: string;
+  /** The calendar event's rendered body (the .ics DESCRIPTION); null when there is none. */
+  calendarDescription: string | null;
   /**
    * For the template variables `{{event_name}}`, `{{event_description}}`,
    * `{{workspace_name}}` and `{{team_name}}`: the event type's name and
@@ -1913,6 +1925,7 @@ export async function loadBookingNotificationContext(
     account_id: string;
     uid: string;
     title: string;
+    calendar_description: string | null;
     start_ms: number;
     end_ms: number;
     status: string;
@@ -1936,8 +1949,9 @@ export async function loadBookingNotificationContext(
     workspace_name: string | null;
     team_name: string | null;
   }>(
-    sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
-               b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+    sql`SELECT b.id, b.account_id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms,
+               b.status, b.location, b.location_kind, b.host_member_id, m.display_name AS host_name,
+               m.email AS host_email,
                m.time_zone AS host_tz, m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
@@ -2006,6 +2020,7 @@ export async function loadBookingNotificationContext(
     accountId: row.account_id,
     uid: row.uid,
     title: row.title,
+    calendarDescription: row.calendar_description?.trim() ? row.calendar_description : null,
     eventName: row.event_name?.trim() || null,
     eventDescription: row.event_description?.trim() || null,
     workspaceName: row.workspace_name?.trim() || null,

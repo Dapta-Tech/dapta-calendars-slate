@@ -31,6 +31,12 @@
  *     changed. Returning `null` is the right answer for a backend that keeps the
  *     same room across a move: a null NEVER overwrites the stored URL.
  *
+ * DESCRIPTION (both POST and PATCH). `description` is the event body as PLAIN
+ * TEXT (`\n` line breaks): the booking's description rendered from the event
+ * type's template, and on a co-host's copy the join line. Write it as text,
+ * never as HTML. On PATCH, an absent `description` leaves the body unchanged,
+ * a string replaces it and an empty string clears it.
+ *
  * GUESTS (both POST and PATCH). On the organizer's own calendar,
  * `attendeeEmails` lists the ORGANIZER FIRST (`organizerEmail`, the owner of the
  * calendar being written), then the invitee(s), then any co-hosts, each address

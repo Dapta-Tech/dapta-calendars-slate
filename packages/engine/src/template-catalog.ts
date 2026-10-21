@@ -12,12 +12,18 @@
  * A variable missing from a context is refused there at save time with a
  * "not available here" message rather than rendering empty forever: the manage
  * link, for instance, is a capability that must never sit in a calendar event
- * shared with guests, and the meeting link does not exist yet when the event
- * is first written.
+ * shared with guests, the meeting link does not exist yet when the event is
+ * first written, and the booking page link needs the deployment's public
+ * address, which only the mail sender is configured with.
  *
  * `hostOnly` marks a variable that reads other people's data, so it resolves
  * only in the host's copy of an email: `guests` lists everyone else on the
  * booking, and on a group event those are strangers to each invitee.
+ *
+ * `perInvitee` marks the data of the one person who booked. On an event with
+ * seats, everyone who takes a seat is a guest on the same calendar event, so
+ * its title and description cannot carry one invitee's name, contact details
+ * or answers: they are refused there (and render empty if one slips through).
  */
 
 export const TEMPLATE_CONTEXTS = ['title', 'description', 'email'] as const;
@@ -40,6 +46,8 @@ export interface TemplateVariableDef {
   sample: Record<TemplateLocale, string>;
   /** Resolves only in the host's copy (see the header). */
   hostOnly?: true;
+  /** One invitee's data, kept out of a seated event's shared calendar text (see the header). */
+  perInvitee?: true;
 }
 
 const ALL: readonly TemplateContext[] = ['title', 'description', 'email'];
@@ -52,7 +60,7 @@ function v(
   contexts: readonly TemplateContext[],
   label: [string, string],
   sample: [string, string],
-  hostOnly?: true,
+  flags: { hostOnly?: true; perInvitee?: true } = {},
 ): TemplateVariableDef {
   return {
     name,
@@ -60,9 +68,11 @@ function v(
     contexts,
     label: { en: label[0], es: label[1] },
     sample: { en: sample[0], es: sample[1] },
-    ...(hostOnly ? { hostOnly } : {}),
+    ...flags,
   };
 }
+
+const INVITEE = { perInvitee: true } as const;
 
 /**
  * The built-in variables, grouped for the picker. Every name of the email
@@ -71,12 +81,12 @@ function v(
  * as it did.
  */
 export const TEMPLATE_CATALOG: readonly TemplateVariableDef[] = [
-  v('attendee_name', 'invitee', ALL, ['Invitee name', 'Nombre del invitado'], ['Ana Gómez', 'Ana Gómez']),
-  v('attendee_first_name', 'invitee', ALL, ['Invitee first name', 'Nombre de pila del invitado'], ['Ana', 'Ana']),
-  v('attendee_email', 'invitee', ALL, ['Invitee email', 'Correo del invitado'], ['ana@example.com', 'ana@example.com']),
-  v('attendee_phone', 'invitee', ALL, ['Invitee phone', 'Teléfono del invitado'], ['+57 300 123 4567', '+57 300 123 4567']),
-  v('guests', 'invitee', EMAIL, ['Other guests', 'Otros invitados'], ['luis@example.com', 'luis@example.com'], true),
-  v('attendee_time_zone', 'invitee', BODY, ['Invitee time zone', 'Zona horaria del invitado'], ['America/Bogota', 'America/Bogota']),
+  v('attendee_name', 'invitee', ALL, ['Invitee name', 'Nombre del invitado'], ['Ana Gómez', 'Ana Gómez'], INVITEE),
+  v('attendee_first_name', 'invitee', ALL, ['Invitee first name', 'Nombre de pila del invitado'], ['Ana', 'Ana'], INVITEE),
+  v('attendee_email', 'invitee', ALL, ['Invitee email', 'Correo del invitado'], ['ana@example.com', 'ana@example.com'], INVITEE),
+  v('attendee_phone', 'invitee', ALL, ['Invitee phone', 'Teléfono del invitado'], ['+57 300 123 4567', '+57 300 123 4567'], INVITEE),
+  v('guests', 'invitee', EMAIL, ['Other guests', 'Otros invitados'], ['luis@example.com', 'luis@example.com'], { hostOnly: true }),
+  v('attendee_time_zone', 'invitee', BODY, ['Invitee time zone', 'Zona horaria del invitado'], ['America/Bogota', 'America/Bogota'], INVITEE),
   v('host_name', 'host', ALL, ['Host name', 'Nombre del anfitrión'], ['Felipe Gómez', 'Felipe Gómez']),
   v('host_email', 'host', BODY, ['Host email', 'Correo del anfitrión'], ['felipe@example.com', 'felipe@example.com']),
   v('event_name', 'event', ALL, ['Event name', 'Nombre del evento'], ['Product demo', 'Demo del producto']),
@@ -90,8 +100,8 @@ export const TEMPLATE_CATALOG: readonly TemplateVariableDef[] = [
   v('end_time', 'time', ALL, ['End time', 'Hora de fin'], ['Tue, Oct 21, 10:30 AM GMT-5', 'mar, 21 oct, 10:30 GMT-5']),
   v('start_time_host', 'time', BODY, ['Start time (host zone)', 'Hora de inicio (zona del anfitrión)'], ['Tue, Oct 21, 10:00 AM GMT-5', 'mar, 21 oct, 10:00 GMT-5']),
   v('end_time_host', 'time', BODY, ['End time (host zone)', 'Hora de fin (zona del anfitrión)'], ['Tue, Oct 21, 10:30 AM GMT-5', 'mar, 21 oct, 10:30 GMT-5']),
-  v('start_time_attendee', 'time', BODY, ['Start time (invitee zone)', 'Hora de inicio (zona del invitado)'], ['Tue, Oct 21, 10:00 AM GMT-5', 'mar, 21 oct, 10:00 GMT-5']),
-  v('end_time_attendee', 'time', BODY, ['End time (invitee zone)', 'Hora de fin (zona del invitado)'], ['Tue, Oct 21, 10:30 AM GMT-5', 'mar, 21 oct, 10:30 GMT-5']),
+  v('start_time_attendee', 'time', BODY, ['Start time (invitee zone)', 'Hora de inicio (zona del invitado)'], ['Tue, Oct 21, 10:00 AM GMT-5', 'mar, 21 oct, 10:00 GMT-5'], INVITEE),
+  v('end_time_attendee', 'time', BODY, ['End time (invitee zone)', 'Hora de fin (zona del invitado)'], ['Tue, Oct 21, 10:30 AM GMT-5', 'mar, 21 oct, 10:30 GMT-5'], INVITEE),
   v('time_zone', 'time', BODY, ['Time zone', 'Zona horaria'], ['America/Bogota', 'America/Bogota']),
   v('previous_start_time', 'time', EMAIL, ['Previous start time', 'Hora de inicio anterior'], ['Mon, Oct 20, 3:00 PM GMT-5', 'lun, 20 oct, 15:00 GMT-5']),
   v('reminder_lead', 'time', EMAIL, ['Time until the meeting', 'Tiempo para la reunión'], ['in 1 day(s)', 'en 1 día(s)']),
@@ -99,7 +109,7 @@ export const TEMPLATE_CATALOG: readonly TemplateVariableDef[] = [
   v('manage_url', 'links', EMAIL, ['Manage booking link', 'Enlace para gestionar la reserva'], ['https://calendar.example.com/manage/abc', 'https://calendar.example.com/manage/abc']),
   v('cancel_link', 'links', EMAIL, ['Cancel link', 'Enlace para cancelar'], ['https://calendar.example.com/manage/abc', 'https://calendar.example.com/manage/abc']),
   v('reschedule_link', 'links', EMAIL, ['Reschedule link', 'Enlace para reprogramar'], ['https://calendar.example.com/manage/abc', 'https://calendar.example.com/manage/abc']),
-  v('booking_link', 'links', BODY, ['Booking page link', 'Enlace de la página de reservas'], ['https://calendar.example.com/dapta/felipe/demo', 'https://calendar.example.com/dapta/felipe/demo']),
+  v('booking_link', 'links', EMAIL, ['Booking page link', 'Enlace de la página de reservas'], ['https://calendar.example.com/dapta/felipe/demo', 'https://calendar.example.com/dapta/felipe/demo']),
   v('booking_uid', 'booking', BODY, ['Booking reference', 'Referencia de la reserva'], ['b7c1e2d4', 'b7c1e2d4']),
   v('cancellation_reason', 'booking', EMAIL, ['Cancellation reason', 'Motivo de la cancelación'], ['A conflict came up.', 'Me surgió un imprevisto.']),
   v('pending_note', 'booking', EMAIL, ['Pending approval note', 'Nota de aprobación pendiente'], ['This request is pending your confirmation.', 'Esta solicitud está pendiente de tu confirmación.']),

@@ -591,7 +591,9 @@ export class CalV2PilotService {
                 : 422;
           v2Error(status, outcome.reason, "Guests could not be added.");
         }
-        if (outcome.added > 0) this.bookings.afterGuestsChanged(uid);
+        // Rewritten for the new guests only once the booking's text is the
+        // shared one, never with the invitee's own.
+        if (outcome.added > 0 && outcome.shared) this.bookings.afterGuestsChanged(uid);
         return this.cal.bookingResponse(accountId, uid, allowedEventTypeIds);
       },
     );

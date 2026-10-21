@@ -81,11 +81,15 @@ A reminder's mirror after the meeting ends. Same shape, same ownership, disabled
 _Avoid_: post-event email, thank-you email
 
 **Template variable**:
-A placeholder a host writes in email copy, `{{attendee_name}}`, resolved from the booking when the message is rendered. The catalog of names, and where each one can be used, lives in `@slate/engine`; the same language adds fallbacks and `{{#if}}` blocks.
+A placeholder a host writes in email copy or in an event type's calendar title and description, `{{attendee_name}}`, resolved from the booking when the text is rendered. The catalog of names, and where each one can be used, lives in `@slate/engine`; the same language adds fallbacks and `{{#if}}` blocks.
 _Avoid_: merge tag, token, placeholder (in UI copy)
 
+**Calendar title** / **Calendar description**:
+The calendar event's own title and body, rendered from the event type's templates when a booking is placed or moved and stored on the booking (`booking.title`, `booking.calendar_description`), so the calendar write, the .ics files and the emails read one text. Without a template the title is the event's name and there is no description. On an event with seats the event is shared by every seat-taker, so neither carries one invitee's data.
+_Avoid_: event name (that is the event type's own `title`), meeting title
+
 **Form variable**:
-A template variable that prints an answer to one of the booking's intake questions, written `{{form.<field name>}}`, in any email. The prefix keeps a question named `location` from shadowing the built-in `{{location}}`.
+A template variable that prints an answer to one of the booking's intake questions, written `{{form.<field name>}}`, in any email and in the calendar title and description. The prefix keeps a question named `location` from shadowing the built-in `{{location}}`.
 _Avoid_: custom variable, merge tag
 
 **Qualification**:

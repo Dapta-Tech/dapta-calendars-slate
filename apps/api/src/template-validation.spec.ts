@@ -4,7 +4,12 @@ import { createDb, migrate, seed, sql, type Db } from '@slate/db';
 import type { EventReminder } from '@slate/types';
 import { AdminCrudController } from './admin-crud.controller';
 import type { AuthService, HostPrincipal, ReqLike } from './auth.service';
-import { assertReminderTemplates, assertTemplates, type TemplateFieldIssue } from './template-validation';
+import {
+  assertCalendarTemplates,
+  assertReminderTemplates,
+  assertTemplates,
+  type TemplateFieldIssue,
+} from './template-validation';
 
 type Refusal = { error: string; message: string; issues: TemplateFieldIssue[] };
 
@@ -126,6 +131,73 @@ describe('assertReminderTemplates', () => {
   });
 });
 
+describe('assertCalendarTemplates', () => {
+  it('accepts a title with the invitee name and a description built on answers', () => {
+    expect(() =>
+      assertCalendarTemplates(
+        {
+          calendarTitleTemplate: 'Reunión Felipe - {{name}}',
+          calendarDescriptionTemplate: '{{#if form.company}}Company: {{form.company}}{{/if}}\n{{start_time_attendee}}',
+        },
+        null,
+        'en',
+      ),
+    ).not.toThrow();
+  });
+
+  it('refuses what a calendar event cannot carry, naming the field', () => {
+    const r = refusal(() =>
+      assertCalendarTemplates(
+        { calendarTitleTemplate: 'Call {{manage_url}}', calendarDescriptionTemplate: 'Others: {{guests}} {{nope}}' },
+        null,
+        'en',
+      ),
+    );
+    expect(r.error).toBe('INVALID_TEMPLATE');
+    expect(r.message).toBe('Calendar event title: {{manage_url}} is not available here.');
+    expect(r.issues.map((i) => [i.field, i.code])).toEqual([
+      ['calendarTitleTemplate', 'not_available'],
+      ['calendarDescriptionTemplate', 'not_available'],
+      ['calendarDescriptionTemplate', 'unknown_variable'],
+    ]);
+  });
+
+  it('keeps the booking page link and the time variables of the description out of the title', () => {
+    const r = refusal(() =>
+      assertCalendarTemplates({ calendarTitleTemplate: '{{booking_link}} {{start_time_host}}' }, null, 'es'),
+    );
+    expect(r.issues.map((i) => i.code)).toEqual(['not_available', 'not_available']);
+    expect(r.message).toBe('Título del evento en el calendario: {{booking_link}} no está disponible aquí.');
+  });
+
+  it('on an event with seats, refuses one invitee data, also when a save turns seats on', () => {
+    const seated = refusal(() =>
+      assertCalendarTemplates({ calendarTitleTemplate: 'Workshop {{name}}', seatsPerTimeSlot: 5 }, null, 'en'),
+    );
+    expect(seated.issues[0]).toMatchObject({ field: 'calendarTitleTemplate', code: 'per_invitee' });
+    // Stored before, untouched by this save, and now shared by every seat.
+    const stored = { calendarTitleTemplate: 'Call {{name}}', calendarDescriptionTemplate: '{{form.company}}', seatsPerTimeSlot: null };
+    const turnedOn = refusal(() => assertCalendarTemplates({ seatsPerTimeSlot: 3 }, stored, 'en'));
+    expect(turnedOn.issues.map((i) => [i.field, i.code])).toEqual([
+      ['calendarTitleTemplate', 'per_invitee'],
+      ['calendarDescriptionTemplate', 'per_invitee'],
+    ]);
+    // Seats off again, or a text with nothing personal: fine.
+    expect(() => assertCalendarTemplates({ seatsPerTimeSlot: 1 }, stored, 'en')).not.toThrow();
+    expect(() =>
+      assertCalendarTemplates({ calendarTitleTemplate: 'Workshop with {{host_name}}', seatsPerTimeSlot: 3 }, null, 'en'),
+    ).not.toThrow();
+  });
+
+  it('lets stored text through unchanged, checks an edit, and treats null or blank as none', () => {
+    const stored = { calendarTitleTemplate: 'Old {{bogus}}', calendarDescriptionTemplate: null, seatsPerTimeSlot: null };
+    expect(() => assertCalendarTemplates({}, stored, 'en')).not.toThrow();
+    expect(() => assertCalendarTemplates({ calendarTitleTemplate: 'Old {{bogus}}' }, stored, 'en')).not.toThrow();
+    expect(() => assertCalendarTemplates({ calendarTitleTemplate: null, calendarDescriptionTemplate: '  ' }, stored, 'en')).not.toThrow();
+    expect(refusal(() => assertCalendarTemplates({ calendarTitleTemplate: 'New {{bogus}}' }, stored, 'en')).issues).toHaveLength(1);
+  });
+});
+
 describe('event type saves run the gate (real controller)', () => {
   const REQ: ReqLike = { headers: {} };
   let db: Db;
@@ -168,5 +240,33 @@ describe('event type saves run the gate (real controller)', () => {
       crud.updateEventType(REQ, created.id, { reminders: [reminder({ id: 'r1', body: 'Legacy {{bogus}} edited' })] }),
     );
     expect(r.issues[0]).toMatchObject({ reminderId: 'r1', code: 'unknown_variable' });
+  });
+
+  it('stores calendar templates that render, refuses one that cannot, and re-checks on seats', async () => {
+    const created = await crud.createEventType(REQ, {
+      slug: 'cal-tpl',
+      title: 'Cal',
+      lengthMinutes: 30,
+      calendarTitleTemplate: 'Reunión Alex - {{name}}',
+      calendarDescriptionTemplate: 'Empresa: {{form.company}}',
+    });
+    expect(created).toMatchObject({
+      calendarTitleTemplate: 'Reunión Alex - {{name}}',
+      calendarDescriptionTemplate: 'Empresa: {{form.company}}',
+    });
+    const bad = await refusalOf(
+      crud.updateEventType(REQ, created.id, { calendarDescriptionTemplate: 'Gestionar: {{manage_url}}' }),
+    );
+    expect(bad.message).toBe('Descripción del evento en el calendario: {{manage_url}} no está disponible aquí.');
+    const seats = await refusalOf(crud.updateEventType(REQ, created.id, { seatsPerTimeSlot: 4 }));
+    expect(seats.issues.map((i) => i.code)).toEqual(['per_invitee', 'per_invitee']);
+    expect(seats.message).toContain('todos los que reservan un cupo');
+    // Clearing them is always allowed, and then seats can go on.
+    const cleared = await crud.updateEventType(REQ, created.id, {
+      calendarTitleTemplate: null,
+      calendarDescriptionTemplate: '',
+      seatsPerTimeSlot: 4,
+    });
+    expect(cleared).toMatchObject({ calendarTitleTemplate: null, calendarDescriptionTemplate: null, seatsPerTimeSlot: 4 });
   });
 });
