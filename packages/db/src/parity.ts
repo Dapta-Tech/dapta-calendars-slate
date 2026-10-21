@@ -946,6 +946,12 @@ export async function createTeamBooking(
   // scheduling method) — same hole as the personal path: a caller skipping
   // the availability window could book any instant. Rules-only per host;
   // busy/conflict handling stays downstream (SLOT_TAKEN / fail-closed).
+  //
+  // The same read says WHICH hosts' own hours offer the time (`offeredBy`):
+  // only they can be assigned below. Busy-free alone is not enough, since a
+  // host outside their hours, or an invited member with no schedule yet (no
+  // bookings, so the lightest load), would otherwise win the round robin pick.
+  const offeredBy = new Set<string>();
   {
     const now = new Date();
     const endMsProbe = args.startMs + et.length_minutes * 60_000;
@@ -959,6 +965,15 @@ export async function createTeamBooking(
         rulesOnly: true,
       });
       ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
+      // Within this host's own hours at any minute, not only on their slot
+      // grid: a grid starts at each block's start in the host's zone, so a
+      // host whose day starts at 9:15, or in a zone a half hour off, covers
+      // times their grid never lists.
+      const covered = free.has(args.startMs)
+        ? free
+        : (await hostFreeSlotMs(db, host, { ...et, slot_interval: 1 }, args.startMs, endMsProbe, now, { rulesOnly: true }))
+            .free;
+      if (covered.has(args.startMs)) offeredBy.add(host.member_id);
     }
     const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets).includes(
       args.startMs,
@@ -980,6 +995,7 @@ export async function createTeamBooking(
   let sawCalendarFailure = false;
   const heldAt = Date.now();
   for (const host of hosts) {
+    if (!offeredBy.has(host.member_id)) continue; // outside their own hours, or no schedule at all
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
     // A host somebody is holding this time with (a soft hold on one of their
