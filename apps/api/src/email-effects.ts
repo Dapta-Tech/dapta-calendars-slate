@@ -6,6 +6,10 @@ import {
   DEFAULT_MAX_ATTEMPTS,
   hasPendingCalendarJob,
   getNotificationSettings,
+  claimInvitationSend,
+  creationSendClaim,
+  releaseInvitationSend,
+  type InvitationSendClaim,
   loadBookingMeetingUrl,
   loadBookingNotificationContext,
   defaultNotificationSetting,
@@ -76,19 +80,12 @@ export const MEMBER_INVITE_ACTION = 'member_invite';
 
 /**
  * One invitation per member per minute, the first send included, so a double
- * click or an impatient "Resend" cannot flood someone's inbox. Per process, a
- * courtesy on top of the shared daily cap per workspace that the controller
- * takes in the database (`takeInvitationQuota`).
+ * click or an impatient "Resend" cannot flood someone's inbox. Claimed in the
+ * database (`claimInvitationSend`), so it holds across replicas and restarts,
+ * on top of the shared daily cap per workspace that the controller takes
+ * (`takeInvitationQuota`).
  */
-const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
-/** A bound on the in-memory window's size; old entries are dropped past it. */
-const MEMBER_INVITE_WINDOW_MAX_KEYS = 10_000;
-
-/** A member's claim on their one send per minute: when it was taken, and what it replaced. */
-interface InviteReservation {
-  at: number;
-  previous: number | undefined;
-}
+export const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
 
 /**
  * One side's mail about one booking goes out in the order it was queued
@@ -279,32 +276,6 @@ export class EmailEffects {
     return this._gate;
   }
 
-  /** When each member's last invitation went in (`account:member` -> epoch ms). */
-  private readonly lastInviteAt = new Map<string, number>();
-
-  /**
-   * Reserve this member's one send per minute; null when the window is still
-   * closed. The reservation is a claim taken BEFORE the write (two requests at
-   * once cannot both pass) and handed back by `releaseInvite` when the write
-   * fails, so a failure never makes the admin wait for a send that never happened.
-   */
-  private reserveInvite(key: string, now: number): InviteReservation | null {
-    const previous = this.lastInviteAt.get(key);
-    if (previous !== undefined && now - previous < MEMBER_INVITE_RESEND_WINDOW_MS) return null;
-    if (this.lastInviteAt.size >= MEMBER_INVITE_WINDOW_MAX_KEYS) {
-      for (const [k, at] of this.lastInviteAt) if (now - at >= MEMBER_INVITE_RESEND_WINDOW_MS) this.lastInviteAt.delete(k);
-    }
-    this.lastInviteAt.set(key, now);
-    return { at: now, previous };
-  }
-
-  /** Hand a reservation back, unless a later one has taken the key since (compare, then restore). */
-  private releaseInvite(key: string, reservation: InviteReservation): void {
-    if (this.lastInviteAt.get(key) !== reservation.at) return;
-    if (reservation.previous === undefined) this.lastInviteAt.delete(key);
-    else this.lastInviteAt.set(key, reservation.previous);
-  }
-
   /**
    * Queue the invitation email for an `invited` member, written in `locale`
    * (else the inviter's language) and signed with the inviter's name. Answers
@@ -319,20 +290,44 @@ export class EmailEffects {
     accountId: string,
     memberId: string,
     inviterMemberId: string,
-    opts: { locale?: 'en' | 'es' } = {},
+    opts: { locale?: 'en' | 'es'; firstSend?: boolean } = {},
   ): Promise<'queued' | 'off' | 'too_soon' | 'not_invited' | 'failed'> {
-    const key = `${accountId}:${memberId}`;
-    let reservation: InviteReservation | null = null;
+    let claim: InvitationSendClaim | null = null;
     try {
-      const target = await this.db.get<{ email: string | null; role: string; status: string; name: string; code: string }>(
-        sql`SELECT m.email, m.role, m.status, a.name, a.code
+      const target = await this.db.get<{
+        email: string | null;
+        role: string;
+        status: string;
+        name: string;
+        code: string;
+        invited_at: number | string | null;
+        created_at: number | string;
+      }>(
+        sql`SELECT m.email, m.role, m.status, m.invited_at, m.created_at, a.name, a.code
             FROM member m JOIN account a ON a.id = m.account_id
             WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
       );
-      if (!target || target.status !== 'invited' || !target.email) return 'not_invited';
+      // A member set back to `invited` by hand never came from an invitation
+      // (no `invited_at`): there is nothing to send, and a send must never
+      // create the mark that makes a membership reachable (ADR 0010).
+      if (!target || target.status !== 'invited' || !target.email || target.invited_at == null) return 'not_invited';
       const now = Date.now();
-      reservation = this.reserveInvite(key, now);
-      if (!reservation) return 'too_soon';
+      const invitedAt = Number(target.invited_at);
+      // The invite's own first send: creating the row a moment ago already
+      // closed the window, and nothing has sent since (the stamp is still the
+      // creation's). Every other send claims it, atomically, in the database.
+      claim =
+        opts.firstSend && invitedAt === Number(target.created_at) && now - invitedAt < MEMBER_INVITE_RESEND_WINDOW_MS
+          ? creationSendClaim(invitedAt, MEMBER_INVITE_RESEND_WINDOW_MS)
+          : await claimInvitationSend(this.db, accountId, memberId, MEMBER_INVITE_RESEND_WINDOW_MS, now);
+      if (!claim) {
+        // Closed window, or the member stopped being a pending invitation since
+        // the read above (accepted, removed): say which.
+        const still = await this.db.get<{ status: string }>(
+          sql`SELECT status FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`,
+        );
+        return still?.status === 'invited' ? 'too_soon' : 'not_invited';
+      }
       const inviter = await this.db.get<{ display_name: string | null; locale: string | null }>(
         sql`SELECT display_name, locale FROM member WHERE id = ${inviterMemberId} AND account_id = ${accountId} LIMIT 1`,
       );
@@ -362,7 +357,11 @@ export class EmailEffects {
       });
       return this.provider && deliversEmail(this.provider) ? 'queued' : 'off';
     } catch (err) {
-      if (reservation) this.releaseInvite(key, reservation);
+      if (claim) {
+        await releaseInvitationSend(this.db, accountId, memberId, claim).catch((releaseErr: unknown) =>
+          this.log.warn(`could not reopen the invitation window of member ${memberId}: ${String(releaseErr)}`),
+        );
+      }
       this.log.error(`failed to enqueue the invitation email for member ${memberId}: ${String(err)}`);
       return 'failed';
     }

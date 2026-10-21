@@ -153,6 +153,68 @@ export async function inviteMember(
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
 }
 
+/**
+ * A claim on one member's invitation send: when it was taken, and the value
+ * that reopens the window if it is handed back (a minute earlier, so the next
+ * send may go at once).
+ */
+export interface InvitationSendClaim {
+  at: number;
+  reopen: number;
+}
+
+/**
+ * Claim this member's one invitation send per `windowMs`, shared by every
+ * instance of the app: one conditional UPDATE of `member.invited_at` (when an
+ * invitation to this member last went out), so two requests on two replicas, or
+ * one before and one after a restart, cannot both pass. The claim is handed
+ * back with `releaseInvitationSend` when the send is not queued.
+ *
+ * Only a row that already carries `invited_at` can be claimed: that column is
+ * also what marks a membership as one this app granted (ADR 0010), so a send
+ * must never be what creates it. A member set back to `invited` by hand, who
+ * never came from an invitation, has nothing to claim.
+ *
+ * Null when the window is still closed, the member is no longer a pending
+ * invitation, or the row never came from one.
+ */
+export async function claimInvitationSend(
+  db: Db,
+  accountId: string,
+  memberId: string,
+  windowMs: number,
+  nowMs: number = Date.now(),
+): Promise<InvitationSendClaim | null> {
+  const row = await db.get<{ id: string }>(
+    sql`UPDATE member SET invited_at = ${nowMs}
+        WHERE id = ${memberId} AND account_id = ${accountId} AND status = 'invited'
+          AND invited_at IS NOT NULL AND invited_at <= ${nowMs - windowMs}
+        RETURNING id`,
+  );
+  return row ? { at: nowMs, reopen: nowMs - windowMs } : null;
+}
+
+/**
+ * The claim on the send an invitation's creation just made: the row was written
+ * with `invited_at` = now, which already closes the window. Handing it back opens
+ * the window again, for a first send that could not be queued.
+ */
+export function creationSendClaim(invitedAt: number, windowMs: number): InvitationSendClaim {
+  return { at: invitedAt, reopen: invitedAt - windowMs };
+}
+
+/**
+ * Hand back a claim whose send was not queued: compare, then reopen, so a later
+ * claim (another request, after this window) is never undone. The value written
+ * is never NULL: the row keeps its mark.
+ */
+export async function releaseInvitationSend(db: Db, accountId: string, memberId: string, claim: InvitationSendClaim): Promise<void> {
+  await db.run(
+    sql`UPDATE member SET invited_at = ${claim.reopen}
+        WHERE id = ${memberId} AND account_id = ${accountId} AND invited_at = ${claim.at}`,
+  );
+}
+
 /** The UTC day an invitation email counts against (`member_invite_quota.day`, migration 0032 / sqlite 0031). */
 function quotaDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);

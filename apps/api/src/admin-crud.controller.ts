@@ -282,10 +282,12 @@ export class AdminCrudController {
     // `inviteEmail` tells the dashboard what to say: "sent" only when this
     // deployment really sends mail.
     const outcome = this.email
-      ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
+      ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale, firstSend: true })
       : 'off';
-    if (outcome === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
-    const inviteEmail = outcome === 'queued' || outcome === 'failed' ? outcome : 'off';
+    // Only a send that was queued (or would have been, on a server without
+    // mail) spends the allowance; anything else is reported as not sent.
+    const inviteEmail = outcome === 'queued' || outcome === 'off' ? outcome : 'failed';
+    if (inviteEmail === 'failed') await refundInvitationQuota(this.db, p.accountId, now);
     void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
     return { ...member, inviteEmail };
   }
