@@ -34,11 +34,14 @@ const blankIsDefault = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema);
 
 /**
- * A public base URL as the apps use it: trimmed, http(s) only, normalized
- * (`URL.href`) with no trailing slash. Anything else, empty included, reads as
- * unset, the same as the web does: a malformed value never stops a process
- * booting, and the address it meant to name simply stays relative or
- * unconfigured, which the pages that show it make visible.
+ * A public base URL as the apps use it: trimmed, http(s) only, normalized to
+ * origin plus path (lowercase scheme and host, default port dropped) with no
+ * trailing slash. Anything else, empty included, reads as unset, the same as
+ * the web does: a malformed value never stops a process booting, and the
+ * address it meant to name simply stays relative or unconfigured, which the
+ * pages that show it make visible. Credentials, a query or a fragment also
+ * read as unset: this address is published on public pages, and a path is
+ * appended to it.
  */
 export function cleanPublicUrl(v: string | undefined): string | undefined {
   const s = v?.trim();
@@ -46,7 +49,8 @@ export function cleanPublicUrl(v: string | undefined): string | undefined {
   try {
     const u = new URL(s);
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return undefined;
-    return u.href.replace(/\/+$/, '');
+    if (u.username || u.password || u.search || u.hash) return undefined;
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, '');
   } catch {
     return undefined;
   }

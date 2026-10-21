@@ -1,4 +1,4 @@
-import { Controller, Get, Header, HttpException, HttpStatus, Inject, Optional } from '@nestjs/common';
+import { Controller, Get, Header, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import type { ServerEnv } from '@slate/config/env';
 import type { Db } from '@slate/db';
 import { countOutbox, sql } from '@slate/db';
@@ -73,13 +73,16 @@ const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => HTML_ESCA
  * Public API documentation: OpenAPI JSON plus an interactive Scalar explorer.
  * Both name this deployment's address from API_PUBLIC_URL; unset, the examples
  * fill it in from the page's own address in the browser, never a hardcoded host.
+ * ENV is required, not optional: a module that forgot to provide it must fail
+ * to boot rather than quietly serve relative addresses.
  */
 @Controller()
 export class DocsController {
+  /** Normalized by the env schema (`cleanPublicUrl`): no trailing slash, query or credentials. */
   private readonly apiPublicUrl: string | undefined;
 
-  constructor(@Optional() @Inject(ENV) env?: Pick<ServerEnv, 'API_PUBLIC_URL'>) {
-    this.apiPublicUrl = env?.API_PUBLIC_URL?.replace(/\/+$/, '') || undefined;
+  constructor(@Inject(ENV) env: Pick<ServerEnv, 'API_PUBLIC_URL'>) {
+    this.apiPublicUrl = env.API_PUBLIC_URL;
   }
 
   @Get('openapi.json')
@@ -94,6 +97,12 @@ export class DocsController {
     const baseUrl = base ?? 'https://api.your-domain.example';
     // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
     const openapiUrl = base ? `${base}/openapi.json` : '/openapi.json';
+    // The explorer fetches its document from the page's own origin (the prefix
+    // kept): an absolute URL would be a cross-origin fetch, and CORS allows only
+    // the web app, so /docs opened on any other host would show nothing.
+    const explorerUrl = this.apiPublicUrl
+      ? escapeHtml(`${new URL(this.apiPublicUrl).pathname.replace(/\/$/, '')}/openapi.json`)
+      : '/openapi.json';
     // Unset: this page is served at `<api base>/docs`, so the browser knows the
     // base. The prefix is kept only when it is plain path characters.
     const noscriptBase = base
@@ -161,7 +170,7 @@ curl "$BASE_URL/v2/bookings/$BOOKING_UID/reschedule" --request POST \\
 <code>CAL-COMPATIBILITY.md</code>.</p>
 </main>
 ${fillBase}
-<script id="api-reference" data-url="${openapiUrl}" data-configuration='{"theme":"default","hideModels":false}'></script>
+<script id="api-reference" data-url="${explorerUrl}" data-configuration='{"theme":"default","hideModels":false}'></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 <noscript><p class="intro">JavaScript is required for the interactive explorer. Use
 <a href="${openapiUrl}">the raw OpenAPI document</a> instead.</p></noscript>

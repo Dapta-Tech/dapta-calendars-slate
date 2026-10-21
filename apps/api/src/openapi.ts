@@ -1452,6 +1452,6 @@ export const openapiSpec = {
  * wherever the document is served, so a fork never points at someone else's API.
  */
 export function openapiFor(apiPublicUrl?: string) {
-  const base = apiPublicUrl?.replace(/\/+$/, '');
-  return base ? { ...openapiSpec, servers: [{ url: base, description: 'This deployment' }] } : openapiSpec;
+  // Already normalized by the env schema (`cleanPublicUrl`).
+  return apiPublicUrl ? { ...openapiSpec, servers: [{ url: apiPublicUrl, description: 'This deployment' }] } : openapiSpec;
 }

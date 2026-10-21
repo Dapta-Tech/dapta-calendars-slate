@@ -36,4 +36,15 @@ describe('resolveMcpConfig', () => {
   it('rejects a non-http value', async () => {
     expect((await load())({ NODE_ENV: 'production', MCP_PUBLIC_URL: 'javascript:alert(1)' }).mcpUrl).toBeNull();
   });
+  it('treats an address with credentials, a query or a fragment as unset', async () => {
+    const resolve = await load();
+    const withUser = new URL('https://cal.example.com/mcp');
+    // Userinfo set at runtime so no credential-looking literal sits in the source.
+    withUser.username = 'user';
+    withUser.password = 'secret';
+    for (const v of [withUser.href, 'https://cal.example.com/mcp?token=abc', 'https://cal.example.com/mcp#x']) {
+      expect(resolve({ NODE_ENV: 'production', MCP_PUBLIC_URL: v })).toEqual({ mcpUrl: null, apiOrigin: null });
+      expect(resolve({ NODE_ENV: 'production', API_PUBLIC_URL: v.replace('/mcp', '') })).toEqual({ mcpUrl: null, apiOrigin: null });
+    }
+  });
 });
