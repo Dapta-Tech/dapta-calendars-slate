@@ -19,16 +19,17 @@ type DevMessages = BookingMessages['admin']['developer'];
  *
  * A step shows as done from what the page can know: the workspace has a working
  * key; a key has been used, or an app has signed in through this API's own
- * OAuth server. None of that blocks a step.
+ * OAuth server. None of that blocks a step. The key step's button (step 1, or
+ * step 2 with an external sign-in) opens the key list's own create dialog, so
+ * there is one way to make a key, and it is the page's only Create while there
+ * is no key (R30: one create action per screen).
  *
  * With sign-in through an external authorization server (`external`), the
  * guide leads with it: step 1 is signing in from the app (Claude, ChatGPT,
  * Cursor, Claude Code and any other app that signs in), step 2 is a key, for
  * headless agents and scripts or for narrower access. That server's sign-ins
  * leave nothing this page can read, so step 1 is never marked done, and step 2
- * only says a key has been used. Step 1's button opens the key list's own create dialog, so
- * there is one way to make a key, and it is the page's only Create while there
- * is no key (R30: one create action per screen).
+ * only says a key has been used.
  *
  * Under the steps, the way in for an agent without MCP: the skill zip, which
  * teaches it the REST API with the same key (offered with MCP off too, where it

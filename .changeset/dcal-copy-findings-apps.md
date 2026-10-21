@@ -15,8 +15,7 @@ unless an app really signed in through this API's own server.
 
 The MCP server's no-key hint names every tool that works without a key
 (`find_available_slots`, `find_team_slots`, `hold_slot`, `book_meeting`,
-`book_team_meeting`), read from the tool catalog so it cannot drift, and
-`whoami` says it takes an API key or a sign-in. On API docs, `whoami` and
+`book_team_meeting`), read from the tool catalog so it cannot drift. On API docs, `whoami` and
 `list_my_accounts` say "Works with any key or a sign-in" where the
 installation signs agents in. In Spanish, the mobile menu button, the nav's
 name, the operator account picker and the webhook event names are translated

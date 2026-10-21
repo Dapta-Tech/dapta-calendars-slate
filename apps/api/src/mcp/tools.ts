@@ -1234,7 +1234,7 @@ const whoami: ToolDef = {
   }),
   async run(_args: z.infer<typeof whoamiInput>, call, deps) {
     if (!call.principal)
-      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key or a sign-in.', CREDENTIAL_HINT);
+      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', CREDENTIAL_HINT);
     const p = call.principal;
     const account = await deps.db.get<{ code: string; name: string }>(
       sql`SELECT code, name FROM account WHERE id = ${p.accountId} LIMIT 1`,

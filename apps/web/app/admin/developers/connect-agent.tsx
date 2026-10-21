@@ -286,7 +286,7 @@ function ChatOAuth({ snippets, external, m }: { snippets: ConnectSnippets; exter
         <h3 className="text-base font-semibold">{m.chatGptHeading}</h3>
         {steps([m.chatGptStep1, m.chatGptStep2, external ? m.chatSignInGptStep3 : m.chatGptStep3])}
       </div>
-      {/* A sign-in has no step-up: what it may do is said above the tabs. */}
+      {/* A sign-in has no step-up: what it may do is said under the tabs (setup-guide.tsx). */}
       {external ? null : <p className="max-w-prose text-xs text-muted-foreground">{m.chatScopesNote}</p>}
     </>
   );

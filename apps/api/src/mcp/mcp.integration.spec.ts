@@ -294,7 +294,8 @@ describe('keyed tools', () => {
     const anon = await h.connect();
     const refused = errorText(await anon.callTool({ name: 'whoami', arguments: {} }));
     expect(refused).toContain('AUTH_REQUIRED');
-    expect(refused).toContain('whoami needs an API key or a sign-in.');
+    // Only a keys-only install gets here: with OAuth on, the door answers 401 first.
+    expect(refused).toContain('whoami needs an API key.');
     const key = await h.key(['bookings:read']);
     const c = await h.connect(key);
     const r = structured<{ account: { code: string }; key: { scopes: string[]; event_type_allowlist: null; prefix: string }; host: { time_zone: string } }>(

@@ -50,7 +50,7 @@ test('an owner follows an old link through the login to the keys, then walks the
   await expect(page.getByRole('heading', { name: 'What an agent can do' })).toBeVisible();
   // Picking a page closes the drawer (it slides off screen, so it is still
   // "visible" to a locator; the toggle says whether it is open).
-  if (isMobile) await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveAttribute('aria-expanded', 'false');
+  if (isMobile) await expect(page.getByTestId('nav-open')).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('on the collapsed rail MCP is a menu: open it, arrow down, pick a page', async ({ page, context, isMobile }) => {
@@ -141,7 +141,7 @@ test('the foot of the rail is the person: one menu with the public page and Sign
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(me).toBeFocused();
-  if (isMobile) await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveAttribute('aria-expanded', 'true');
+  if (isMobile) await expect(page.getByTestId('nav-open')).toHaveAttribute('aria-expanded', 'true');
 
   await me.click();
   await menu.getByRole('menuitem', { name: 'Sign out' }).click();
