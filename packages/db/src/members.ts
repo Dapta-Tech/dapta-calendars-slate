@@ -153,7 +153,7 @@ export async function inviteMember(
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
 }
 
-/** The UTC day an invitation email counts against (`member_invite_quota.day`). */
+/** The UTC day an invitation email counts against (`member_invite_quota.day`, migration 0032 / sqlite 0031). */
 function quotaDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);
 }

@@ -84,6 +84,12 @@ const MEMBER_INVITE_RESEND_WINDOW_MS = 60_000;
 /** A bound on the in-memory window's size; old entries are dropped past it. */
 const MEMBER_INVITE_WINDOW_MAX_KEYS = 10_000;
 
+/** A member's claim on their one send per minute: when it was taken, and what it replaced. */
+interface InviteReservation {
+  at: number;
+  previous: number | undefined;
+}
+
 /**
  * One side's mail about one booking goes out in the order it was queued
  * (confirmed, moved, cancelled), however long a retry waits. The two sides are
@@ -282,17 +288,19 @@ export class EmailEffects {
    * once cannot both pass) and handed back by `releaseInvite` when the write
    * fails, so a failure never makes the admin wait for a send that never happened.
    */
-  private reserveInvite(key: string, now: number): { previous: number | undefined } | null {
+  private reserveInvite(key: string, now: number): InviteReservation | null {
     const previous = this.lastInviteAt.get(key);
     if (previous !== undefined && now - previous < MEMBER_INVITE_RESEND_WINDOW_MS) return null;
     if (this.lastInviteAt.size >= MEMBER_INVITE_WINDOW_MAX_KEYS) {
       for (const [k, at] of this.lastInviteAt) if (now - at >= MEMBER_INVITE_RESEND_WINDOW_MS) this.lastInviteAt.delete(k);
     }
     this.lastInviteAt.set(key, now);
-    return { previous };
+    return { at: now, previous };
   }
 
-  private releaseInvite(key: string, reservation: { previous: number | undefined }): void {
+  /** Hand a reservation back, unless a later one has taken the key since (compare, then restore). */
+  private releaseInvite(key: string, reservation: InviteReservation): void {
+    if (this.lastInviteAt.get(key) !== reservation.at) return;
     if (reservation.previous === undefined) this.lastInviteAt.delete(key);
     else this.lastInviteAt.set(key, reservation.previous);
   }
@@ -314,7 +322,7 @@ export class EmailEffects {
     opts: { locale?: 'en' | 'es' } = {},
   ): Promise<'queued' | 'off' | 'too_soon' | 'not_invited' | 'failed'> {
     const key = `${accountId}:${memberId}`;
-    let reservation: { previous: number | undefined } | null = null;
+    let reservation: InviteReservation | null = null;
     try {
       const target = await this.db.get<{ email: string | null; role: string; status: string; name: string; code: string }>(
         sql`SELECT m.email, m.role, m.status, a.name, a.code

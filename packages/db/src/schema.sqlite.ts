@@ -109,7 +109,7 @@ export const member = sqliteTable('member', {
   createdAt: integer('created_at').notNull(),
 });
 
-// Invitation emails each account sent per UTC day (0031 / sqlite 0030): the
+// Invitation emails each account sent per UTC day (0032 / sqlite 0031): the
 // atomic daily cap, taken by `takeInvitationQuota`.
 export const memberInviteQuota = sqliteTable(
   'member_invite_quota',

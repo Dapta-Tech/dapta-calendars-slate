@@ -108,7 +108,7 @@ export const member = pgTable('member', {
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
-// Invitation emails each account sent per UTC day (0031 / sqlite 0030): the
+// Invitation emails each account sent per UTC day (0032 / sqlite 0031): the
 // atomic daily cap, taken by `takeInvitationQuota`.
 export const memberInviteQuota = pgTable(
   'member_invite_quota',
