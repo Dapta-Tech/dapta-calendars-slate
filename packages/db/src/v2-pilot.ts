@@ -4,7 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { applyCalendarTemplates } from './calendar-text';
+import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
 import {
   bookingStartOutOfRange,
   isSlotBookable,
@@ -343,14 +343,31 @@ export async function addGuestsToBooking(
     uid: string;
     guests: Array<{ email: string; name?: string; timeZone?: string }>;
   },
-): Promise<{ ok: true; added: number } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }> {
+): Promise<
+  | {
+      ok: true;
+      added: number;
+      /**
+       * The booking's calendar text is the shared one, so its event may be
+       * rewritten for the new guests. False when guests were added but neither
+       * the shared render nor its reset landed: then the event must not be
+       * written out to them.
+       */
+      shared: boolean;
+    }
+  | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }
+> {
   const booking = await db.get<{
     id: string;
     status: string;
     metadata: unknown;
+    start_ms: number;
+    end_ms: number;
+    event_name: string | null;
   }>(
-    sql`SELECT id, status, metadata FROM booking
-        WHERE account_id = ${args.accountId} AND uid = ${args.uid} LIMIT 1`,
+    sql`SELECT b.id, b.status, b.metadata, b.start_ms, b.end_ms, et.title AS event_name
+        FROM booking b LEFT JOIN event_type et ON et.id = b.event_type_id
+        WHERE b.account_id = ${args.accountId} AND b.uid = ${args.uid} LIMIT 1`,
   );
   if (!booking) return { ok: false, reason: 'NOT_FOUND' };
   if (booking.status !== 'accepted' && booking.status !== 'pending') return { ok: false, reason: 'GONE' };
@@ -394,7 +411,21 @@ export async function addGuestsToBooking(
     );
     if (inserted) added += 1;
   }
-  return { ok: true, added };
+  if (added === 0) return { ok: true, added, shared: true };
+  // The guests are on the booking's one calendar event now: it is shared, and
+  // its title and description must never carry the invitee's own data. Marked,
+  // then rendered again as shared (or reset to the event's name), as a seat is.
+  await db.run(sql`UPDATE booking SET seated = 1 WHERE id = ${booking.id}`);
+  const shared =
+    (await applyCalendarTemplates(db, args.uid)) ??
+    (booking.event_name !== null
+      ? await applySharedFallback(
+          db,
+          { id: booking.id, startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) },
+          booking.event_name,
+        )
+      : null);
+  return { ok: true, added, shared: shared !== null };
 }
 
 interface RescheduleSource {

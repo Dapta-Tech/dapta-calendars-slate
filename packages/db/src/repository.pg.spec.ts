@@ -172,7 +172,7 @@ describePg('repository (real Postgres — the tested truth)', () => {
         uid: created.booking.uid,
         guests: [{ email: `guest-pg-${run}@example.com`, name: 'Guest' }, { email: `GUEST-PG-${run}@example.com` }],
       }),
-    ).toEqual({ ok: true, added: 1 });
+    ).toEqual({ ok: true, added: 1, shared: true });
 
     const moved = await rescheduleBookingV2(db, {
       accountId: account!.id,

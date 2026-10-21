@@ -1101,14 +1101,10 @@ export async function createBooking(
   const startMs = args.startMs;
   const endMs = startMs + eventType.length_minutes * 60_000;
 
-  // One attendee row per address: the invitee first, then each additional
-  // attendee whose address is new. The request's own repeats, and the
-  // invitee's address named again, are dropped, so a seat is never taken (or
-  // counted) twice for one person, on the first booking of a slot or a later one.
-  const requested = [args.attendee, ...(args.additionalAttendees ?? [])].filter(
-    (attendee, i, all) =>
-      all.findIndex((a) => normalizeAttendeeEmail(a.email) === normalizeAttendeeEmail(attendee.email)) === i,
-  );
+  // One attendee row per address (see `distinctAttendees`), so a seat is never
+  // taken (or counted) twice for one person, on the first booking of a slot or
+  // a later one.
+  const requested = distinctAttendees(args.attendee, args.additionalAttendees);
   const additionalAttendees = requested.slice(1);
 
   // R23 group events (seats > 1): a slot is ONE booking row that accrues up to
@@ -1129,12 +1125,14 @@ export async function createBooking(
                 AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
     );
     if (existing) {
-      // A seat this address already holds (a retried request, or the same
-      // person again) is answered as a replay: nothing is inserted twice, no
-      // seat is spent twice and the calendar event is not rewritten again. It
-      // carries the event's name only, never the slot's stored text, which an
-      // address alone must not be enough to read. Checked here and again under
-      // the lock below, where a concurrent repeat would otherwise slip in.
+      // A request whose every address already holds a seat (a retried
+      // request, or the same people again) is answered as a replay: nothing is
+      // inserted twice, no seat is spent twice and the calendar event is not
+      // rewritten again. It carries the event's name only, never the slot's
+      // stored text, which an address alone must not be enough to read. One new
+      // address is enough to take seats: the ones already held are left out.
+      // Checked here and again under the lock below, where a concurrent
+      // repeat would otherwise slip in.
       const takenSql = sql`SELECT COALESCE(email_normalized, lower(trim(email))) AS email
           FROM booking_attendee WHERE booking_id = ${existing.id}`;
       const replay = (): BookingOutcome => ({
@@ -1153,8 +1151,11 @@ export async function createBooking(
         manageToken: '',
         deduplicated: true,
       });
-      const primaryKey = normalizeAttendeeEmail(args.attendee.email);
-      if ((await db.all<{ email: string | null }>(takenSql)).some((r) => r.email === primaryKey)) return replay();
+      const allHeld = (taken: ReadonlyArray<{ email: string | null }>) => {
+        const held = new Set(taken.map((r) => r.email));
+        return requested.every((attendee) => held.has(normalizeAttendeeEmail(attendee.email)));
+      };
+      if (allHeld(await db.all<{ email: string | null }>(takenSql))) return replay();
       // Seats, holds and the booking itself are read again under the host's
       // lock (the one every guarded booking write and the hold write take),
       // then the booking's own row (member first, booking second, the order a
@@ -1187,7 +1188,7 @@ export async function createBooking(
         : null;
       const stillThere = (row: { status: string; start_ms: number | string } | undefined) =>
         !!row && (row.status === 'accepted' || row.status === 'pending') && Number(row.start_ms) === startMs;
-      // The booking's status as it stands under the lock; 'repeat' when this
+      // The booking's status as it stands under the lock; 'repeat' when every
       // address took its seat meanwhile; null when no seat was taken.
       type SeatResult = { status: string } | 'repeat' | null;
       let seated: SeatResult;
@@ -1198,8 +1199,8 @@ export async function createBooking(
           );
           if (!stillThere(now)) return null;
           const taken = db.sqlite!.drizzle.all<{ email: string | null }>(takenSql);
-          if (taken.some((r) => r.email === primaryKey)) return 'repeat';
           const inserts = seatInserts(taken);
+          if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
           if (taken.length + inserts.length > capacity) return null;
           if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return null;
@@ -1215,8 +1216,8 @@ export async function createBooking(
           )) as unknown as Array<{ status: string; start_ms: number | string }>;
           if (!stillThere(now[0])) return null;
           const taken = (await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>;
-          if (taken.some((r) => r.email === primaryKey)) return 'repeat';
           const inserts = seatInserts(taken);
+          if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
           if (taken.length + inserts.length > capacity) return null;
           if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return null;
@@ -1301,16 +1302,19 @@ export async function createBooking(
   // The KIND drives behaviour (conferencing ⇒ request a link at write-out); the
   // detail is the human string. Both are frozen here on purpose.
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null));
+  // Other attendees on the booking are guests on its one calendar event, so it
+  // is shared from the start: its title and description never carry the
+  // invitee's own data (see `applyCalendarTemplates`).
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key,
-      created_at, updated_at)
+      seated, created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${eventType.id}, ${member.id}, ${title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${startMs}, ${endMs}, ${status}, ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
-      ${now}, ${now})`;
+      ${additionalAttendees.length > 0 ? 1 : null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, language, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
@@ -1409,6 +1413,18 @@ async function withCalendarText(db: Db, record: BookingRecord): Promise<BookingR
     // An emptied description ('') is none, as far as anyone reading the booking goes.
     ...(text?.description !== undefined ? { calendarDescription: text.description || null } : {}),
   };
+}
+
+/**
+ * A booking's attendees, one per address: the invitee first, then each
+ * additional attendee whose address is new. The request's own repeats, and the
+ * invitee's address named again, are dropped.
+ */
+export function distinctAttendees<T extends { email: string }>(invitee: T, additional: readonly T[] | undefined): T[] {
+  return [invitee, ...(additional ?? [])].filter(
+    (attendee, i, all) =>
+      all.findIndex((a) => normalizeAttendeeEmail(a.email) === normalizeAttendeeEmail(attendee.email)) === i,
+  );
 }
 
 /**

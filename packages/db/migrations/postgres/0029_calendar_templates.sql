@@ -11,10 +11,11 @@
 --     title template. Every calendar write and both .ics files read it. NULL =
 --     no description; '' = one this booking had, cleared since (a move then
 --     clears it on the calendar too).
---   - booking.seated: 1 once someone took a seat on this booking, so people who
---     booked separately share its one calendar event. Its title and description
---     then never carry one invitee's data, even if the event type's seats are
---     turned off later. NULL = nobody took a seat.
+--   - booking.seated: 1 once the booking's one calendar event has more people
+--     on it than its booker (someone took a seat, the booking named other
+--     attendees, or guests were added). Its title and description then never
+--     carry one invitee's data, even if the event type's seats are turned off
+--     later. NULL = the booker alone.
 --
 -- NULL on every existing row, which reads as "no template" and "no
 -- description": nothing changes for a host until they write one, and bookings

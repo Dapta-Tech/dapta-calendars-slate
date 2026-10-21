@@ -253,7 +253,7 @@ export const booking = sqliteTable('booking', {
   locale: text('locale'),
   /** The rendered calendar event body; NULL = none, '' = cleared. See schema.pg.ts. */
   calendarDescription: text('calendar_description'),
-  /** 1 once someone took a seat on this booking. See schema.pg.ts. */
+  /** 1 once the booking's calendar event is shared beyond its booker. See schema.pg.ts. */
   seated: integer('seated'),
   responses: text('responses'),
   metadata: text('metadata'),

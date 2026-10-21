@@ -19,11 +19,12 @@
  * (its template was removed, or now prints nothing) is emptied, so the next
  * calendar move clears it rather than leave a stale time in the event.
  *
- * A SHARED slot (the event type has seats, or someone took one) is the
- * exception: its stored text may have been rendered for its first booker
- * before the seats existed, so without a template it goes back to the event's
- * name and no description. It also runs when someone takes a seat, so the
- * person joining never reads another invitee's data.
+ * A SHARED booking (the event type has seats, or `booking.seated`: someone
+ * took a seat, it was written with other attendees, or guests were added) is
+ * the exception: its stored text may have been rendered for its booker alone,
+ * so without a template it goes back to the event's name and no description.
+ * It also runs when someone takes a seat or guests are added, so nobody
+ * joining the event reads another invitee's data.
  */
 import { sql } from 'drizzle-orm';
 import { plainCalendarTitle, renderCalendarText, type CalendarText } from '@slate/engine';
@@ -63,8 +64,9 @@ export async function applyCalendarTemplates(db: Db, uid: string): Promise<Calen
     );
     if (!row) return null;
     const hadDescription = !!row.stored_description?.trim();
-    // Shared by every seat-taker: while the event type has seats, and for good
-    // once someone took one, whatever the seats are now.
+    // Shared by everyone on the event: while the event type has seats, and for good
+    // once it was shared (a seat, other attendees, added guests), whatever the
+    // seats are now.
     const seated = Number(row.seats ?? 1) > 1 || Number(row.seated) === 1;
     let rendered: CalendarText = {};
     if (row.title_template?.trim() || row.description_template?.trim()) {

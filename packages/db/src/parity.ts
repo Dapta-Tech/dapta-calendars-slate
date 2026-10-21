@@ -32,6 +32,7 @@ import {
   bookingLocale,
   bookingStartOutOfRange,
   busyReadSpan,
+  distinctAttendees,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -1044,15 +1045,20 @@ export async function createTeamBooking(
   // Snapshot the team event type's configured Where onto the booking (F5), same
   // as the personal path — otherwise team bookings show no location.
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
+  // One row per address, as the personal path writes them; other attendees
+  // make the booking's calendar event shared from the start (`seated`), so its
+  // text never carries the invitee's own data.
+  const additionalAttendees = distinctAttendees(args.attendee, args.additionalAttendees).slice(1);
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, seated,
+      created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
-      ${now}, ${now})`;
+      ${additionalAttendees.length > 0 ? 1 : null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
@@ -1061,7 +1067,7 @@ export async function createTeamBooking(
   // Extra attendees are written a millisecond apart, after the invitee, so
   // "the first attendee row" names the one who booked without relying on the
   // database's physical row order (see loadBookingNotificationContext).
-  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+  const insertAdditionalAttendees = additionalAttendees.map(
     (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},

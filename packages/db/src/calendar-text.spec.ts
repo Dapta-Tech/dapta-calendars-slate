@@ -323,7 +323,7 @@ Company: {{form.company}} {{email}}'
 });
 
 describe('migration 0029 marks the shared slots that already exist', () => {
-  it('flags every booking with more than one attendee, seats or not, and no single one', async () => {
+  it('flags every booking with more than one attendee or an added guest, and no booker alone', async () => {
     const source = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations', 'sqlite');
     const root = mkdtempSync(join(tmpdir(), 'slate-mig-'));
     mkdirSync(join(root, 'sqlite'));
@@ -356,9 +356,15 @@ describe('migration 0029 marks the shared slots that already exist', () => {
     await db.run(sql`UPDATE event_type SET seats_per_time_slot = 3 WHERE id = ${ids.et}`);
     const shared = await booking(2);
     const single = await booking(1);
-    // Seats turned off since, or a booker who brought a guest: a row cannot
-    // tell those from a shared slot, so they are marked too (the safe side).
+    // Seats turned off since, or a booker who brought a guest: both share the
+    // event with someone else, so both are marked.
     const withGuest = await booking(2, plainEt);
+    // One attendee plus a guest added afterwards: shared too.
+    const addedGuest = await booking(1, plainEt);
+    await db.run(
+      sql`INSERT INTO booking_guest (id, booking_id, email, email_normalized, created_at)
+          VALUES (${randomUUID()}, ${addedGuest}, 'g@example.com', 'g@example.com', ${now})`,
+    );
 
     copyFileSync(join(source, target), join(root, 'sqlite', target));
     expect(await migrate(db, root)).toEqual([target]);
@@ -367,6 +373,7 @@ describe('migration 0029 marks the shared slots that already exist', () => {
     expect(await seated(shared)).toBe(1);
     expect(await seated(single)).toBeNull();
     expect(await seated(withGuest)).toBe(1);
+    expect(await seated(addedGuest)).toBe(1);
     await db.close();
   });
 });

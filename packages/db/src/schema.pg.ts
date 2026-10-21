@@ -272,10 +272,11 @@ export const booking = pgTable('booking', {
    */
   calendarDescription: text('calendar_description'),
   /**
-   * 1 once someone took a seat on this booking: people who booked separately
-   * share its one calendar event, so its title and description never carry one
-   * invitee's data, even after the event type's seats are turned off. NULL =
-   * nobody took a seat.
+   * 1 once the booking's one calendar event has more people on it than its
+   * booker: someone took a seat, the booking was written with other
+   * attendees, or guests were added. Its title and description then never
+   * carry one invitee's data, even after the event type's seats are turned
+   * off. NULL = the booker alone.
    */
   seated: integer('seated'),
   responses: jsonb('responses'),
