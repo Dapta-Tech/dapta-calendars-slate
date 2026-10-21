@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { claimInvitationSend, inviteMember, takeInvitationQuota } from './members';
+import { claimInvitationSend, inviteMember, releaseInvitationSend, takeInvitationQuota } from './members';
 import { acceptInvitedMember, findMembership, listWorkspacesForIdentity } from './workspaces';
 
 /**
@@ -89,7 +89,14 @@ describePg('workspaces (real Postgres)', () => {
     const id = inv.ok ? inv.value.id : '';
     const later = Date.now() + 120_000;
     const claims = await Promise.all(Array.from({ length: 8 }, () => claimInvitationSend(db, team, id, 60_000, later)));
-    expect(claims.filter(Boolean)).toHaveLength(1);
+    const won = claims.filter(Boolean);
+    expect(won).toHaveLength(1);
+    // Handed back (compare on the stored bigint, then reopen): the next claim passes at once.
+    await releaseInvitationSend(db, team, id, won[0]!);
+    expect(await claimInvitationSend(db, team, id, 60_000, later + 1)).not.toBeNull();
+    // A stale release (that claim no longer holds the row) changes nothing.
+    await releaseInvitationSend(db, team, id, won[0]!);
+    expect(await claimInvitationSend(db, team, id, 60_000, later + 2)).toBeNull();
   });
 
   it('the daily allowance holds under concurrent sends', async () => {

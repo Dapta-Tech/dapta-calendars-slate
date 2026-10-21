@@ -306,15 +306,26 @@ export class EmailEffects {
             FROM member m JOIN account a ON a.id = m.account_id
             WHERE m.id = ${memberId} AND m.account_id = ${accountId} LIMIT 1`,
       );
-      if (!target || target.status !== 'invited' || !target.email) return 'not_invited';
+      // A member set back to `invited` by hand never came from an invitation
+      // (no `invited_at`): there is nothing to send, and a send must never
+      // create the mark that makes a membership reachable (ADR 0010).
+      if (!target || target.status !== 'invited' || !target.email || target.invited_at == null) return 'not_invited';
       const now = Date.now();
-      // The invite's own first send: creating the row already closed the
-      // window. Every other send claims it, atomically, in the database.
+      const invitedAt = Number(target.invited_at);
+      // The invite's own first send: creating the row a moment ago already
+      // closed the window. Every other send claims it, atomically, in the database.
       claim =
-        opts.firstSend && target.invited_at != null
-          ? creationSendClaim(Number(target.invited_at), MEMBER_INVITE_RESEND_WINDOW_MS)
+        opts.firstSend && now - invitedAt < MEMBER_INVITE_RESEND_WINDOW_MS
+          ? creationSendClaim(invitedAt, MEMBER_INVITE_RESEND_WINDOW_MS)
           : await claimInvitationSend(this.db, accountId, memberId, MEMBER_INVITE_RESEND_WINDOW_MS, now);
-      if (!claim) return 'too_soon';
+      if (!claim) {
+        // Closed window, or the member stopped being a pending invitation since
+        // the read above (accepted, removed): say which.
+        const still = await this.db.get<{ status: string }>(
+          sql`SELECT status FROM member WHERE id = ${memberId} AND account_id = ${accountId} LIMIT 1`,
+        );
+        return still?.status === 'invited' ? 'too_soon' : 'not_invited';
+      }
       const inviter = await this.db.get<{ display_name: string | null; locale: string | null }>(
         sql`SELECT display_name, locale FROM member WHERE id = ${inviterMemberId} AND account_id = ${accountId} LIMIT 1`,
       );

@@ -76,6 +76,8 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
   const deliverAll = async () => {
     for (const r of await inviteRows()) await email.deliver(r.action, r.payload, r.account_id, 0);
   };
+  const quotaSent = async () =>
+    Number((await db.get<{ n: number | string }>(sql`SELECT COALESCE(SUM(sent), 0) AS n FROM member_invite_quota`))?.n ?? 0);
   /** As if a minute had passed since this member's last invitation went out. */
   const openWindow = (id: string) => db.run(sql`UPDATE member SET invited_at = invited_at - 60000 WHERE id = ${id}`);
   const memberInvitedAt = async (id: string) =>
@@ -257,19 +259,47 @@ describe('workspace invitations: invite, email, list, accept, act', () => {
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((r) => r.status === 'rejected' && (r.reason as HttpException).getStatus() === 429)).toHaveLength(1);
     expect(await inviteRows()).toHaveLength(2); // the first invitation and one resend
+    expect(await quotaSent()).toBe(2); // and only the send that went out spent the allowance
+  });
+
+  it('a first send that could not be queued gives everything back: the allowance, and the window', async () => {
+    await auth.resolveHost(req(ALEJANDRO));
+    await db.run(sql`ALTER TABLE outbox RENAME TO outbox_away`);
+    let id = '';
+    try {
+      const invited = await crud.inviteMember(req(ALEJANDRO), { email: 'pablo@acme.test' });
+      expect(invited).toMatchObject({ status: 'invited', inviteEmail: 'failed' });
+      id = invited.id;
+    } finally {
+      await db.run(sql`ALTER TABLE outbox_away RENAME TO outbox`);
+    }
+    expect(await quotaSent()).toBe(0);
+    expect(await crud.resendInvite(req(ALEJANDRO), id, {})).toEqual({ ok: true, inviteEmail: 'queued' });
+  });
+
+  it('a member set back to invited by hand gets no invitation and no workspace access', async () => {
+    const alejandro = await auth.resolveHost(req(ALEJANDRO));
+    // A row a token for that account created, then marked invited through the roster.
+    const viaToken = await auth.resolveHost(req({ ...PABLO, account_id: ALEJANDRO.account_id }));
+    await crud.updateMember(req(ALEJANDRO), viaToken.memberId, { status: 'invited' });
+    await expect(crud.resendInvite(req(ALEJANDRO), viaToken.memberId, {})).rejects.toMatchObject({ status: 409 });
+    expect(await memberInvitedAt(viaToken.memberId)).toBeNull();
+    await auth.resolveHost(req(PABLO));
+    await expect(auth.resolveHost(req(PABLO, alejandro.accountId))).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('a send that could not be queued reopens the window', async () => {
     const { invited } = await setUp();
     await openWindow(invited.id);
-    const windowBefore = Number((await memberInvitedAt(invited.id))!);
     await db.run(sql`ALTER TABLE outbox RENAME TO outbox_away`);
     try {
       expect(await crud.resendInvite(req(ALEJANDRO), invited.id, {})).toEqual({ ok: true, inviteEmail: 'failed' });
     } finally {
       await db.run(sql`ALTER TABLE outbox_away RENAME TO outbox`);
     }
-    expect(Number(await memberInvitedAt(invited.id))).toBe(windowBefore);
+    // Open again: the last send is at least a minute old, and the mark is kept.
+    expect(Number(await memberInvitedAt(invited.id))).toBeLessThanOrEqual(Date.now() - 60_000);
+    expect(await quotaSent()).toBe(1); // the failed resend gave its share back
     expect(await crud.resendInvite(req(ALEJANDRO), invited.id, {})).toEqual({ ok: true, inviteEmail: 'queued' });
   });
 

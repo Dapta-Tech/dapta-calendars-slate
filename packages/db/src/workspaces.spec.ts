@@ -193,12 +193,12 @@ describe('the per-member invitation window (shared by every instance)', () => {
     const t0 = await invitedAt(id);
     expect(await claimInvitationSend(db, a, id, MIN, t0 + MIN - 1)).toBeNull();
     const claim = await claimInvitationSend(db, a, id, MIN, t0 + MIN);
-    expect(claim).toEqual({ at: t0 + MIN, previous: t0 });
+    expect(claim).toEqual({ at: t0 + MIN, reopen: t0 });
     expect(await invitedAt(id)).toBe(t0 + MIN);
     expect(await claimInvitationSend(db, a, id, MIN, t0 + MIN + 1)).toBeNull();
   });
 
-  it('a released claim restores the window, unless a later claim took it', async () => {
+  it('a released claim reopens the window, unless a later claim took it', async () => {
     const a = await account('Team');
     const inv = await inviteMember(db, a, { email: 'one@acme.test' });
     const id = inv.ok ? inv.value.id : '';
@@ -206,7 +206,8 @@ describe('the per-member invitation window (shared by every instance)', () => {
     const first = (await claimInvitationSend(db, a, id, MIN, t0 + MIN))!;
     await releaseInvitationSend(db, a, id, first);
     expect(await invitedAt(id)).toBe(t0);
-    const second = (await claimInvitationSend(db, a, id, MIN, t0 + MIN))!;
+    expect(await claimInvitationSend(db, a, id, MIN, t0 + MIN)).not.toBeNull();
+    const second = { at: t0 + MIN, reopen: t0 };
     const third = await claimInvitationSend(db, a, id, MIN, t0 + 3 * MIN);
     await releaseInvitationSend(db, a, id, second); // stale: a later claim holds the row
     expect(await invitedAt(id)).toBe(third!.at);
@@ -225,6 +226,15 @@ describe('the per-member invitation window (shared by every instance)', () => {
     const a = await account('Team');
     const active = await member(a, { email: 'x@acme.test', invited: true });
     expect(await claimInvitationSend(db, a, active, MIN, Date.now() + 10 * MIN)).toBeNull();
+  });
+
+  it('never stamps a row that did not come from an invitation, even one set back to invited by hand', async () => {
+    const a = await account('Team');
+    const byHand = await member(a, { email: 'x@acme.test', externalId: 'sub_x', status: 'invited' });
+    expect(await claimInvitationSend(db, a, byHand, MIN, Date.now() + 10 * MIN)).toBeNull();
+    const row = await db.get<{ invited_at: number | null }>(sql`SELECT invited_at FROM member WHERE id = ${byHand}`);
+    expect(row!.invited_at).toBeNull();
+    expect(await findMembership(db, { externalId: 'sub_x', email: 'x@acme.test' }, a)).toBeNull();
   });
 });
 
