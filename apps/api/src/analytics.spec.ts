@@ -213,7 +213,8 @@ describe('product analytics (API)', () => {
       await fx.signup({ accountId, memberId: alex, role: 'owner', isFirstMember: true, fromInvite: false });
       await fx.signup({ accountId, memberId: jordan, role: 'member', isFirstMember: false, fromInvite: true });
       const all = await payloads();
-      expect(all.map((p) => p.type)).toEqual(['capture', 'account', 'capture']);
+      // The invite that a login adopted is also an accepted invitation.
+      expect(all.map((p) => p.type)).toEqual(['capture', 'account', 'capture', 'capture']);
       expect(all[0]!.capture).toMatchObject({
         event: 'calendars_signup_completed',
         distinctId: 'alex@example.com',
@@ -222,6 +223,7 @@ describe('product analytics (API)', () => {
       });
       expect(all[1]!.update).toMatchObject({ accountKey: 'acme', properties: { is_internal: false, account_code: 'acme' } });
       expect(all[2]!.capture!.properties).toMatchObject({ from_invite: true, is_internal: true });
+      expect(all[3]!.capture).toMatchObject({ event: 'calendars_invite_accepted', properties: { role: 'member' } });
     });
 
     it('a campaign tag that is an address, a URL or a query never reaches either payload', async () => {

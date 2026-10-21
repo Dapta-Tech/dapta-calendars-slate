@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional, UnauthorizedException } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
   acceptInvitedMember,
@@ -8,6 +8,7 @@ import {
   verifyApiKey,
   memberRoleAndLoginSeen,
   noteMemberLogin,
+  type WorkspaceMembership,
 } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { WORKSPACE_HEADER, type ApiScope, type WorkspaceView } from '@slate/types';
@@ -56,6 +57,19 @@ export interface MachinePrincipal {
   sessionId?: string;
 }
 
+/** A membership as the dashboard reads it. */
+function toView(w: WorkspaceMembership, actingAccountId: string, homeAccountId: string): WorkspaceView {
+  return {
+    accountId: w.accountId,
+    accountCode: w.accountCode,
+    accountName: w.accountName,
+    role: w.role,
+    status: w.status,
+    current: w.accountId === actingAccountId,
+    home: w.accountId === homeAccountId,
+  };
+}
+
 /**
  * Auth authority for the API. Host/dashboard identity is delegated to the
  * pluggable `AuthProvider` port (local dev stub / WorkOS overlay) selected on
@@ -96,8 +110,11 @@ export class AuthService {
    * and never moves backwards; a token that does not say when it was issued
    * stamps nothing. A failed write is logged and never costs the request.
    */
-  async resolveHost(req: ReqLike): Promise<HostPrincipal> {
-    const id = await this.actingAs(req, await this.provider.resolveHost(req));
+  async resolveHost(req: ReqLike, opts: { workspace?: boolean } = {}): Promise<HostPrincipal> {
+    const home = await this.provider.resolveHost(req);
+    // `email` is the session's own claim, used to find the person; it never
+    // rides on the principal the controllers see.
+    const { email: _email, ...id } = opts.workspace === false ? home : await this.actingAs(req, home);
     annotateRequestAccount(req, id.accountId);
     const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
     const vouchedAt = id.authenticatedAt === null ? null : Math.min(id.authenticatedAt ?? Date.now(), Date.now());
@@ -111,66 +128,75 @@ export class AuthService {
   }
 
   /**
-   * WHO is calling and WHERE they act are two questions. The provider answers
-   * the first from the token it validated; the account it resolves is the
-   * person's home. A request may NAME another account in `x-dcal-workspace`,
-   * and that name is only a request: membership is re-derived from the
-   * database, on every request, from the identity the provider proved (subject,
-   * or the address of a not-yet-bound invitation). A name the person holds no
-   * membership in is a 403, never a quiet fall back to the home account, which
-   * would land writes in a tenant the person did not believe they were in.
+   * WHO is calling and WHERE they act are two questions (ADR 0010). The
+   * provider answers the first from the token it validated; the account it
+   * resolves is the person's home. A request may NAME another account in
+   * `x-dcal-workspace`, and that name is only a request: the membership is
+   * re-derived from the database, on every request, from the identity the
+   * provider proved, and only a membership this app granted counts (an
+   * accepted invitation, `findMembership`). A name with none is a 403, never a
+   * quiet fall back to the home account, which would land writes in a tenant
+   * the person did not believe they were in; a pending invitation is a 403 too,
+   * until it is accepted on purpose (`acceptWorkspace`).
    *
    * No header, or the home account named: exactly the provider's answer, as
-   * before this existed. Either way, the first request an invited member makes
-   * in an account accepts the invitation (`acceptInvitedMember`).
+   * before this existed.
    */
   private async actingAs(req: ReqLike, home: ResolvedHost): Promise<ResolvedHost> {
     const requested = header(req, WORKSPACE_HEADER)?.trim();
-    if (!requested || requested === home.accountId) {
-      await this.acceptIfInvited(home.accountId, home.memberId);
-      return home;
-    }
-    const identity = await getPersonIdentity(this.db, home.accountId, home.memberId);
+    if (!requested || requested === home.accountId) return home;
+    const identity = await this.identityOf(home);
     const membership = identity ? await findMembership(this.db, identity, requested) : null;
     if (!membership) {
       throw new ForbiddenException({ error: 'WORKSPACE_FORBIDDEN', message: 'You are not a member of that workspace.' });
     }
     if (membership.status === 'invited') {
-      await this.acceptIfInvited(membership.accountId, membership.memberId, identity?.externalId ?? null);
+      throw new ForbiddenException({ error: 'INVITATION_PENDING', message: 'Accept the invitation to this workspace first.' });
     }
     return { ...home, accountId: membership.accountId, memberId: membership.memberId };
   }
 
-  /** Turn an invitation active on first use, and report it once. Never costs the request. */
-  private async acceptIfInvited(accountId: string, memberId: string, externalId: string | null = null): Promise<void> {
-    try {
-      if (!(await acceptInvitedMember(this.db, accountId, memberId, externalId))) return;
-      const role = (await memberRoleAndLoginSeen(this.db, accountId, memberId))?.role ?? 'member';
-      void this.analytics?.hostEvent('invite_accepted', { accountId, memberId }, { role });
-    } catch (error) {
-      this.logger.warn(`could not accept the invitation of member ${memberId}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  /** The person behind the home member: their subject, and the address the session vouches for. */
+  private identityOf(home: ResolvedHost) {
+    return getPersonIdentity(this.db, home.accountId, home.memberId, home.email === undefined ? {} : { email: home.email });
   }
 
   /**
-   * Every workspace the caller can act in, from their HOME identity (never from
-   * the one they are viewing, so the list reads the same from anywhere), with
-   * the one this request acts in marked.
+   * Every workspace the caller can act in: their home account and every
+   * membership an invitation granted (pending ones included). Derived from who
+   * the caller IS, never from the workspace they are viewing, so the list reads
+   * the same from anywhere; the one this request acts in is marked.
    */
   async listWorkspaces(req: ReqLike): Promise<WorkspaceView[]> {
     const home = await this.provider.resolveHost(req);
     const acting = await this.actingAs(req, home);
-    const identity = await getPersonIdentity(this.db, home.accountId, home.memberId);
-    const rows = identity ? await listWorkspacesForIdentity(this.db, identity) : [];
-    return rows.map((w) => ({
-      accountId: w.accountId,
-      accountCode: w.accountCode,
-      accountName: w.accountName,
-      role: w.role,
-      status: w.status,
-      current: w.accountId === acting.accountId,
-      home: w.accountId === home.accountId,
-    }));
+    const identity = await this.identityOf(home);
+    const rows = identity ? await listWorkspacesForIdentity(this.db, identity, home.memberId) : [];
+    return rows.map((w) => toView(w, acting.accountId, home.accountId));
+  }
+
+  /**
+   * Accept a pending invitation, on purpose: a POST the person made (the
+   * switcher, or the invitation page's Join button), never a side effect of
+   * reading a page. The member turns active with the invited role and is bound
+   * to the person's subject. Idempotent: an accepted one answers as it is.
+   * 404 for an account the person holds no invitation to, whatever the reason.
+   */
+  async acceptWorkspace(req: ReqLike, accountId: string): Promise<WorkspaceView> {
+    const home = await this.provider.resolveHost(req);
+    const identity = await this.identityOf(home);
+    const found = accountId === home.accountId ? null : identity ? await findMembership(this.db, identity, accountId) : null;
+    if (!found) {
+      if (accountId === home.accountId) {
+        const own = identity ? (await listWorkspacesForIdentity(this.db, identity, home.memberId)).find((w) => w.accountId === accountId) : undefined;
+        if (own) return toView(own, accountId, home.accountId);
+      }
+      throw new NotFoundException({ error: 'NOT_FOUND', message: 'There is no invitation to that workspace for you.' });
+    }
+    if (found.status === 'invited' && (await acceptInvitedMember(this.db, accountId, found.memberId, identity?.externalId ?? null))) {
+      void this.analytics?.hostEvent('invite_accepted', { accountId, memberId: found.memberId }, { role: found.role });
+    }
+    return toView({ ...found, status: 'active' }, accountId, home.accountId);
   }
 
   /**

@@ -393,6 +393,8 @@ function frame(card: string, footer: string): string {
 export interface MemberInviteHtml {
   workspaceName: string;
   inviterName: string | null;
+  /** The product as the deployment names it, or null to name none. */
+  productName?: string | null;
   role: 'admin' | 'member';
   /** The address the invitation is for: the one to sign in with. */
   email: string;
@@ -408,13 +410,14 @@ export interface MemberInviteHtml {
 export function renderMemberInviteHtml(input: MemberInviteHtml, locale: string, growth: EmailGrowth = {}): string {
   const es = ES(locale);
   const role = input.role === 'admin' ? (es ? 'Administrador' : 'Admin') : es ? 'Miembro' : 'Member';
+  const on = input.productName ? (es ? ` en ${input.productName}` : ` on ${input.productName}`) : '';
   const intro = input.inviterName
     ? es
-      ? `${input.inviterName} te invitó a unirte a este espacio. Entra con ${input.email} para aceptar.`
-      : `${input.inviterName} invited you to join this workspace. Sign in with ${input.email} to accept.`
+      ? `${input.inviterName} te invitó a unirte a este espacio${on}. Inicia sesión con ${input.email} para aceptar.`
+      : `${input.inviterName} invited you to join this workspace${on}. Sign in with ${input.email} to accept.`
     : es
-      ? `Te invitaron a unirte a este espacio. Entra con ${input.email} para aceptar.`
-      : `You’re invited to join this workspace. Sign in with ${input.email} to accept.`;
+      ? `Te invitaron a unirte a este espacio${on}. Inicia sesión con ${input.email} para aceptar.`
+      : `You’re invited to join this workspace${on}. Sign in with ${input.email} to accept.`;
   const rows: Array<[string, string]> = [
     [es ? 'Espacio' : 'Workspace', esc(input.workspaceName)],
     [es ? 'Rol' : 'Role', esc(role)],

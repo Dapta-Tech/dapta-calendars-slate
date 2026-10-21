@@ -7,8 +7,9 @@ import { E2E, HOST, rail, signIn } from './stack';
  * One person, two workspaces, in the browser: someone who already has their
  * own account is invited by an admin of another, the invitation goes out
  * (logged here: the stack sends no mail), and on their next visit the rail
- * offers the workspace marked "Invited". Opening it is accepting it: the admin
- * then sees them active.
+ * offers the workspace marked "Invited". Picking it accepts it (that click is
+ * the acceptance): the admin then sees them active. The email's link works
+ * signed out too, through the login and a Join button.
  */
 
 test.beforeEach(async ({ context }) => {
@@ -60,8 +61,7 @@ test('an invited person opens the workspace from the rail, and that accepts the 
   expect(workspaceName).not.toBe('');
   await invited.click();
 
-  // In the inviting workspace now, and the invitation is spent.
-  await expect(page).toHaveURL(/\/admin$/);
+  // In the inviting workspace now (the rail names it), and the invitation is spent.
   const after = await rail(page, mobile);
   await expect(after.getByTestId('workspace-switcher-trigger')).toHaveAttribute('title', workspaceName);
   await after.getByTestId('workspace-switcher-trigger').click();
@@ -74,10 +74,36 @@ test('an invited person opens the workspace from the rail, and that accepts the 
   await expect(joined.getByRole('button', { name: /Resend invite/ })).toHaveCount(0);
 });
 
+test('the email link, opened signed out, goes through the login to a Join button', async ({ page }, info) => {
+  const mobile = info.project.name === 'mobile';
+  const invitee = `linked-${info.project.name}-${Date.now().toString(36)}@example.test`;
+  await signInAt(page, '/admin', invitee);
+  await expect(page).toHaveURL(/\/admin/);
+  await signInAt(page, '/admin/settings/members', HOST.email);
+  await page.getByRole('button', { name: 'Invite member' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Invite a member' });
+  await dialog.getByRole('textbox').fill(invitee);
+  await dialog.getByRole('button', { name: 'Send invite' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: invitee })).toBeVisible();
+
+  // Signed out, as from a mail client: the link goes through the login.
+  await page.goto('/api/auth/logout');
+  await page.goto(`/admin/join/${HOST.accountCode}`);
+  await signIn(page, invitee);
+  await expect(page).toHaveURL(/\/auth\/join\?code=/);
+  // Opening the link accepted nothing: joining is the button.
+  await expect(page.getByRole('heading', { name: /^Join / })).toBeVisible();
+  await page.getByRole('button', { name: 'Join workspace' }).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  const nav = await rail(page, mobile);
+  await nav.getByTestId('workspace-switcher-trigger').click();
+  await expect(page.getByTestId('workspace-switcher-menu').getByText('Invited', { exact: true })).toHaveCount(0);
+});
+
 test('an invitation link opened by someone it is not for says so', async ({ page }) => {
   await signInAt(page, '/admin', `stranger-${Date.now().toString(36)}@example.test`);
   await expect(page).toHaveURL(/\/admin/);
-  await page.goto(`/invite/${HOST.accountCode}`);
-  await expect(page).toHaveURL(/\/invite\/not-for-you/);
+  await page.goto(`/admin/join/${HOST.accountCode}`);
+  await expect(page).toHaveURL(/\/auth\/join\?code=/);
   await expect(page.getByRole('heading', { name: 'This invitation isn’t for this account' })).toBeVisible();
 });

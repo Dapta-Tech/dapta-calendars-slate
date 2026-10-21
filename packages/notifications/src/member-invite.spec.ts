@@ -12,7 +12,8 @@ const base: MemberInviteNotification = {
   workspaceName: 'Acme Sales',
   inviterName: 'Alejandro',
   role: 'member',
-  acceptUrl: 'https://calendar.example.com/invite/abc123',
+  acceptUrl: 'https://calendar.example.com/admin/join/abc123',
+  productName: 'dCal',
   locale: 'en',
   sendKey: '1',
 };
@@ -28,27 +29,30 @@ class Capture implements EmailProvider {
 describe('renderMemberInvite', () => {
   it('says who invited whom, where, and which address to sign in with (EN)', () => {
     const r = renderMemberInvite(base);
-    expect(r.subject).toBe('Alejandro invited you to Acme Sales');
-    expect(r.text).toContain('Alejandro invited you to join Acme Sales as a member.');
-    expect(r.text).toContain('Accept the invitation: https://calendar.example.com/invite/abc123');
+    // Fixed words and the product lead the subject; the inviter is in the body.
+    expect(r.subject).toBe('Join Acme Sales on dCal');
+    expect(r.text).toContain('Alejandro invited you to join Acme Sales on dCal as a member.');
+    expect(r.text).toContain('Accept the invitation: https://calendar.example.com/admin/join/abc123');
     expect(r.text).toContain('Sign in with pablo@acme.test to accept.');
-    expect(r.html).toContain('href="https://calendar.example.com/invite/abc123"');
+    expect(r.html).toContain('href="https://calendar.example.com/admin/join/abc123"');
+    expect(r.html).toContain('this workspace on dCal');
     expect(r.html).toContain('Accept invitation');
     expect(r.html).not.toContain('Made with');
   });
 
   it('is written in Spanish when the inviter works in Spanish', () => {
     const r = renderMemberInvite({ ...base, locale: 'es', role: 'admin' });
-    expect(r.subject).toBe('Alejandro te invitó a Acme Sales');
-    expect(r.text).toContain('Alejandro te invitó a unirte a Acme Sales como administrador.');
-    expect(r.text).toContain('Entra con pablo@acme.test para aceptar.');
+    expect(r.subject).toBe('Únete a Acme Sales en dCal');
+    expect(r.text).toContain('Alejandro te invitó a unirte a Acme Sales en dCal como administrador.');
+    expect(r.text).toContain('Inicia sesión con pablo@acme.test para aceptar.');
     expect(r.html).toContain('Aceptar invitación');
     expect(r.html).toContain('Administrador');
   });
 
-  it('reads without an inviter name', () => {
-    const r = renderMemberInvite({ ...base, inviterName: null });
-    expect(r.subject).toBe('You’re invited to Acme Sales');
+  it('reads without an inviter name, and without a product name', () => {
+    const r = renderMemberInvite({ ...base, inviterName: null, productName: null });
+    expect(r.subject).toBe('Join Acme Sales');
+    expect(r.text).toContain('You’re invited to join Acme Sales as a member.');
     expect(r.html).not.toContain('>From<');
   });
 

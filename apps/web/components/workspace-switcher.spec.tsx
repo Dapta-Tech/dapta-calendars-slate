@@ -81,7 +81,11 @@ describe('WorkspaceSwitcher', () => {
     const rows = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
     expect(rows.map((r) => r.textContent)).toEqual([`Pablo${m.current}`, `Alejandro Sales${m.pending}`]);
     expect(rows[0]!.getAttribute('aria-current')).toBe('true');
-    expect(rows[0]!.disabled).toBe(true);
+    // Focusable (a disabled button is not), inert: picking the current workspace does nothing.
+    expect(rows[0]!.disabled).toBe(false);
+    expect(rows[0]!.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => rows[0]!.click());
+    expect(enterWorkspaceAction).not.toHaveBeenCalled();
   });
 
   it('opens a workspace through the action, and says so when it is refused', async () => {
@@ -93,6 +97,9 @@ describe('WorkspaceSwitcher', () => {
     )!;
     await act(async () => invited.click());
     expect(enterWorkspaceAction).toHaveBeenCalledWith('acct_alejandro');
-    expect(document.querySelector('[role="alert"]')?.textContent).toBe(m.switchFailed);
+    const alert = document.querySelector('[role="alert"]');
+    expect(alert?.textContent).toBe(m.switchFailed);
+    // Outside the menu: an alert is not a menu's child.
+    expect(alert?.closest('[data-testid="workspace-switcher-menu"]')).toBeNull();
   });
 });

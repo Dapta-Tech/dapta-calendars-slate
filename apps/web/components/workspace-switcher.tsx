@@ -29,13 +29,20 @@ export function WorkspaceSwitcher({
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    setOpen(false);
+    setFailed(false);
+  }, []);
 
   if (workspaces.length < 2) return null;
   const current = workspaces.find((w) => w.current) ?? workspaces[0]!;
   const label = current.accountName;
 
-  const choose = (accountId: string) => {
+  const choose = (w: WorkspaceView) => {
+    // The current row stays focusable (a disabled button cannot take focus, and
+    // the menu's keys need every row reachable), so it is inert here instead.
+    if (w.current || pending) return;
+    const accountId = w.accountId;
     setFailed(false);
     startTransition(async () => {
       // A successful switch redirects and never returns; only a refusal does.
@@ -93,12 +100,14 @@ export function WorkspaceSwitcher({
               type="button"
               role="menuitem"
               tabIndex={-1}
-              disabled={pending || w.current}
+              aria-disabled={pending || w.current ? 'true' : undefined}
               aria-current={w.current ? 'true' : undefined}
-              onClick={() => choose(w.accountId)}
+              onClick={() => choose(w)}
               className={[
                 'flex min-h-control w-full items-center gap-field rounded-sm px-inline py-inline text-left text-sm transition-colors',
-                w.current ? 'bg-muted font-medium' : 'hover:bg-accent hover:text-accent-foreground disabled:opacity-60',
+                w.current
+                  ? 'bg-muted font-medium'
+                  : 'hover:bg-accent hover:text-accent-foreground aria-disabled:opacity-60',
               ].join(' ')}
             >
               <span className="min-w-0 flex-1 truncate">{w.accountName}</span>
@@ -116,12 +125,13 @@ export function WorkspaceSwitcher({
             </button>
           ))}
         </div>
-        {failed ? (
-          <p role="alert" className="px-inline py-tight text-xs text-destructive">
-            {m.switchFailed}
-          </p>
-        ) : null}
       </AnchoredMenu>
+      {/* Outside the menu: an alert is not a menu's child, and it must stay readable once the menu closes. */}
+      {failed && !collapsed ? (
+        <p role="alert" className="px-inline py-tight text-xs text-destructive">
+          {m.switchFailed}
+        </p>
+      ) : null}
     </>
   );
 }

@@ -89,7 +89,7 @@ the deployment prunes it.
 | `calendars_hide_branding_toggled` | The Dapta branding switch changes (a save that keeps it is not) | `hidden` |
 | `calendars_booking_created` | A booking is created (not on an idempotent replay, nor a seat taken on an existing group booking). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
 | `calendars_invite_sent` | An admin invites someone to the workspace, or resends a pending invitation. About the **admin** who sent it | `role` (the role offered), `resend`, `delivery` (`queued`, or `off` when this deployment sends no mail) |
-| `calendars_invite_accepted` | An invited person opens the workspace for the first time (the invitation turns active). About the **invitee** | `role` |
+| `calendars_invite_accepted` | An invitation turns active: the invitee joins from the switcher or the invitation page, or a login through a token for that account adopts it. About the **invitee** | `role` |
 
 ### Browser, host (dashboard and wizard only)
 

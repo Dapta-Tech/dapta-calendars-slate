@@ -2,14 +2,16 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
-import { inviteMember } from './members';
+import { countInvitationsSince, inviteMember } from './members';
 import { acceptInvitedMember, findMembership, listWorkspacesForIdentity } from './workspaces';
 
 /**
  * The workspace reads against a REAL Postgres. The SQLite twin
  * (`workspaces.spec.ts`) owns the rules; this file exists for what only
  * Postgres does here: typing the parameters inside `CASE` and the joined
- * branches, and the per-account unique index the subject binding steers clear of.
+ * branches (by subject, by address only, with and without the account filter),
+ * the per-account unique index the subject binding steers clear of, and two
+ * acceptances of one invitation at once.
  *
  * Every fixture is created by this file and unique per run: a Postgres
  * `DATABASE_URL` is a persistent, shared database other pg specs seed.
@@ -21,13 +23,16 @@ const describePg = isPg ? describe : describe.skip;
 describePg('workspaces (real Postgres)', () => {
   let db: Db;
   const run = randomUUID().slice(0, 8);
+  // Strictly increasing: the list is oldest account first, and two accounts
+  // made in the same millisecond would otherwise sort by their random ids.
+  let clock = Date.now();
 
   async function account(name: string): Promise<string> {
     const id = randomUUID();
-    await db.run(sql`INSERT INTO account (id, code, name, created_at) VALUES (${id}, ${`p${id.slice(0, 7)}`}, ${name}, ${Date.now()})`);
+    await db.run(sql`INSERT INTO account (id, code, name, created_at) VALUES (${id}, ${`p${id.slice(0, 7)}`}, ${name}, ${clock++})`);
     return id;
   }
-  async function member(accountId: string, email: string, externalId: string | null): Promise<string> {
+  async function member(accountId: string, email: string | null, externalId: string | null): Promise<string> {
     const id = randomUUID();
     await db.run(
       sql`INSERT INTO member (id, account_id, external_id, email, handle, time_zone, role, status, created_at)
@@ -48,12 +53,12 @@ describePg('workspaces (real Postgres)', () => {
     const email = `pablo-${run}@acme.test`;
     const subject = `sub_pablo_${run}`;
     const own = await account(`Pg own ${run}`);
-    await member(own, email, subject);
+    const home = await member(own, email, subject);
     const team = await account(`Pg team ${run}`);
     const inv = await inviteMember(db, team, { email });
     const id = inv.ok ? inv.value.id : '';
 
-    const before = await listWorkspacesForIdentity(db, { externalId: subject, email });
+    const before = await listWorkspacesForIdentity(db, { externalId: subject, email }, home);
     expect(before.map((w) => [w.accountId, w.status])).toEqual([
       [own, 'active'],
       [team, 'invited'],
@@ -61,6 +66,22 @@ describePg('workspaces (real Postgres)', () => {
 
     expect(await acceptInvitedMember(db, team, id, subject)).toBe(true);
     expect(await findMembership(db, { externalId: subject, email: null }, team)).toMatchObject({ memberId: id, status: 'active' });
+  });
+
+  it('by address alone: the list, the account filter, and acceptance with no subject', async () => {
+    const email = `local-${run}@acme.test`;
+    const own = await account(`Pg local ${run}`);
+    const home = await member(own, email, null);
+    const team = await account(`Pg local team ${run}`);
+    const inv = await inviteMember(db, team, { email });
+    const id = inv.ok ? inv.value.id : '';
+
+    const identity = { externalId: null, email };
+    expect((await listWorkspacesForIdentity(db, identity, home)).map((w) => w.accountId)).toEqual([own, team]);
+    expect(await findMembership(db, identity, team)).toMatchObject({ memberId: id, status: 'invited' });
+    expect(await findMembership(db, identity, own)).toBeNull(); // the home is the token's, not an invitation
+    expect(await acceptInvitedMember(db, team, id, null)).toBe(true);
+    expect(await countInvitationsSince(db, team, Date.now() - 60_000)).toBe(1);
   });
 
   it('activates without binding when the account already holds the subject', async () => {
@@ -74,5 +95,17 @@ describePg('workspaces (real Postgres)', () => {
     expect(await acceptInvitedMember(db, team, id, subject)).toBe(true);
     const row = await db.get<{ status: string; external_id: string | null }>(sql`SELECT status, external_id FROM member WHERE id = ${id}`);
     expect(row).toEqual({ status: 'active', external_id: null });
+  });
+
+  it('two acceptances at once: exactly one reports it', async () => {
+    const email = `race-${run}@acme.test`;
+    const team = await account(`Pg race ${run}`);
+    const inv = await inviteMember(db, team, { email });
+    const id = inv.ok ? inv.value.id : '';
+    const results = await Promise.all([
+      acceptInvitedMember(db, team, id, `sub_race_${run}`),
+      acceptInvitedMember(db, team, id, `sub_race_${run}`),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 });

@@ -50,6 +50,13 @@ function externalSignIn(): never {
  * `/.well-known/oauth-protected-resource[/<path>]` (RFC 9728). Clients cache
  * discovery for minutes; so may any proxy.
  */
+/**
+ * Consent always speaks for the person's own account, whatever workspace the
+ * dashboard has open (`x-dcal-workspace`): connecting an app is a choice about
+ * the account the session names, as it was before workspaces existed.
+ */
+const HOME_ACCOUNT = { workspace: false } as const;
+
 @Controller('.well-known')
 export class OAuthMetadataController {
   constructor(
@@ -161,7 +168,7 @@ export class OAuthHostController {
   @Get('consent/:uid')
   async consent(@Req() req: ReqLike, @Param('uid') uid: string) {
     if (oauthMode(this.env) === 'external') externalSignIn();
-    const host = await this.auth.resolveHost(req);
+    const host = await this.auth.resolveHost(req, HOME_ACCOUNT);
     if (!this.oauth.enabled) notEnabled();
     return this.oauth.consentDetails(uid, host);
   }
@@ -170,7 +177,7 @@ export class OAuthHostController {
   @HttpCode(200)
   async decide(@Req() req: ReqLike, @Param('uid') uid: string, @Body() body: { decision?: unknown }) {
     if (oauthMode(this.env) === 'external') externalSignIn();
-    const host = await this.auth.resolveHost(req);
+    const host = await this.auth.resolveHost(req, HOME_ACCOUNT);
     if (!this.oauth.enabled) notEnabled();
     const decision = body?.decision;
     if (decision !== 'approve' && decision !== 'deny')
@@ -189,7 +196,7 @@ export class OAuthHostController {
    */
   @Get('grants')
   async grants(@Req() req: ReqLike) {
-    const host = await this.auth.resolveHost(req);
+    const host = await this.auth.resolveHost(req, HOME_ACCOUNT);
     assertAdmin(host);
     const mcpEnabled = this.env.MCP_ENABLED;
     if (oauthMode(this.env) === 'external') return { enabled: false, external: true, mcpEnabled, accessTokenTtlSeconds: null, grants: [] };
@@ -205,7 +212,7 @@ export class OAuthHostController {
   @Delete('grants/:id')
   @HttpCode(204)
   async revoke(@Req() req: ReqLike, @Param('id') id: string): Promise<void> {
-    const host = await this.auth.resolveHost(req);
+    const host = await this.auth.resolveHost(req, HOME_ACCOUNT);
     assertAdmin(host);
     if (!this.oauth.enabled || !(await this.oauth.revokeGrant(host.accountId, id, host.memberId)))
       throw new NotFoundException({ error: 'NOT_FOUND', message: 'Connected app not found.' });

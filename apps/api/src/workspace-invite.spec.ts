@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ForbiddenException, HttpException } from '@nestjs/common';
+import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import { createDb, membershipsBySubject, migrate, sql, type Db } from '@slate/db';
 import {
   BookingNotifier,
@@ -19,15 +19,17 @@ import type { ReqLike } from './auth.provider';
 /**
  * One person, several workspaces, through the production auth path (the
  * platform JWT): an admin invites an address, the invitation email goes out
- * through the outbox, the invitee sees the workspace in their list, and acting
- * in it (the `x-dcal-workspace` header) is accepting it. Without the header
- * nothing changes.
+ * through the outbox, the invitee sees the workspace in their list, accepts it
+ * on purpose, and from then on may act in it by naming it (`x-dcal-workspace`).
+ * Only memberships this app granted are reachable that way; without the
+ * header nothing changes.
  */
 
 const SECRET = 'workspace-invite-test-secret';
 const ISS = 'example-identity-service';
 const AUD = 'calendar-platform';
 const APP = 'https://calendar.example.com';
+const DAY = 86_400_000;
 
 function mint(claims: Record<string, unknown>): string {
   const nowSec = Math.floor(Date.now() / 1000);
@@ -46,7 +48,7 @@ const ALEJANDRO = { account_id: 'iam_acct_alejandro', sub: 'iam_user_alejandro',
 const PABLO = { account_id: 'iam_acct_pablo', sub: 'iam_user_pablo', email: 'Pablo@Acme.test', name: 'Pablo', workos_user_id: 'user_01PAB' };
 const OUTSIDER = { account_id: 'iam_acct_outsider', sub: 'iam_user_outsider', email: 'out@else.test', name: 'Outsider' };
 
-describe('workspace invitations: invite, email, list, enter = accept', () => {
+describe('workspace invitations: invite, email, list, accept, act', () => {
   let db: Db;
   let capture: Capture;
   let auth: AuthService;
@@ -57,9 +59,13 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     headers: { authorization: `Bearer ${mint(claims)}`, ...(workspace ? { 'x-dcal-workspace': workspace } : {}) },
   });
 
-  const build = (provider: EmailProvider) => {
+  const build = (provider: EmailProvider, mailFromName = 'dCal') => {
     auth = new AuthService(db, new WorkOsAuthProvider(db, { JWT_SECRET: SECRET, JWT_ISSUER: ISS, JWT_AUDIENCE: AUD }));
-    email = new EmailEffects(new BookingNotifier(provider), db, provider, { PUBLIC_APP_URL: `${APP}/`, OUTBOX_POLL_MS: 0 } as ServerEnv);
+    email = new EmailEffects(new BookingNotifier(provider), db, provider, {
+      PUBLIC_APP_URL: `${APP}/`,
+      OUTBOX_POLL_MS: 0,
+      MAIL_FROM_NAME: mailFromName,
+    } as ServerEnv);
     crud = new AdminCrudController(db, auth, undefined, undefined, undefined, email);
   };
 
@@ -71,7 +77,9 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     for (const r of await inviteRows()) await email.deliver(r.action, r.payload, r.account_id, 0);
   };
   const memberRow = (id: string) =>
-    db.get<{ status: string; external_id: string | null; role: string }>(sql`SELECT status, external_id, role FROM member WHERE id = ${id}`);
+    db.get<{ status: string; external_id: string | null; role: string; login_seen_at: number | string | null }>(
+      sql`SELECT status, external_id, role, login_seen_at FROM member WHERE id = ${id}`,
+    );
 
   beforeEach(async () => {
     db = await createDb('file::memory:');
@@ -87,7 +95,7 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     return { alejandro, pablo, invited };
   }
 
-  it('queues the invitation, in the language asked for, with a link to the workspace', async () => {
+  it('queues the invitation, in the language asked for, naming the product, linking to the join page', async () => {
     const { alejandro, invited } = await setUp();
     expect(invited).toMatchObject({ status: 'invited', inviteEmail: 'queued' });
     const code = (await db.get<{ code: string }>(sql`SELECT code FROM account WHERE id = ${alejandro.accountId}`))!.code;
@@ -96,40 +104,78 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     expect(capture.sent).toHaveLength(1);
     const mail = capture.sent[0]!;
     expect(mail.to).toBe('pablo@acme.test');
-    expect(mail.subject).toBe(`Alejandro te invitó a Alejandro`);
-    expect(mail.text).toContain(`${APP}/invite/${code}`);
+    expect(mail.subject).toBe('Únete a Alejandro en dCal');
+    expect(mail.text).toContain(`${APP}/admin/join/${code}`);
     expect(mail.accountId).toBe(alejandro.accountId);
   });
 
   it('lists the invitation beside the own account, and nothing changes without the header', async () => {
     const { alejandro, pablo } = await setUp();
     const home = await auth.resolveHost(req(PABLO));
-    expect(home).toMatchObject({ accountId: pablo.accountId, memberId: pablo.memberId, role: 'owner' });
+    expect(home).toEqual({ accountId: pablo.accountId, memberId: pablo.memberId, authenticatedAt: expect.any(Number), role: 'owner' });
 
+    // Oldest account first; both were made within the same millisecond or two, so compare as a set.
     const list = await auth.listWorkspaces(req(PABLO));
-    expect(list.map((w) => [w.accountId, w.status, w.current, w.home])).toEqual([
-      [alejandro.accountId, 'invited', false, false],
-      [pablo.accountId, 'active', true, true],
-    ]);
+    expect(list.map((w) => [w.accountId, w.status, w.current, w.home]).sort()).toEqual(
+      [
+        [alejandro.accountId, 'invited', false, false],
+        [pablo.accountId, 'active', true, true],
+      ].sort(),
+    );
   });
 
-  it('acting in the invited workspace accepts it, binds it to the person, and keeps the invited role', async () => {
+  it('a pending invitation is not acted in until it is accepted on purpose', async () => {
     const { alejandro, invited } = await setUp();
+    await expect(auth.resolveHost(req(PABLO, alejandro.accountId))).rejects.toMatchObject({
+      response: { error: 'INVITATION_PENDING' },
+    });
+    expect(await memberRow(invited.id)).toMatchObject({ status: 'invited', external_id: null });
+
+    const accepted = await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
+    expect(accepted).toMatchObject({ accountId: alejandro.accountId, status: 'active', role: 'member' });
+    expect(await memberRow(invited.id)).toMatchObject({ status: 'active', external_id: PABLO.sub, role: 'member' });
+    // Idempotent.
+    expect(await auth.acceptWorkspace(req(PABLO), alejandro.accountId)).toMatchObject({ status: 'active' });
+
     const inside = await auth.resolveHost(req(PABLO, alejandro.accountId));
     expect(inside).toMatchObject({ accountId: alejandro.accountId, memberId: invited.id, role: 'member' });
-    expect(await memberRow(invited.id)).toEqual({ status: 'active', external_id: PABLO.sub, role: 'member' });
-
-    const list = await auth.listWorkspaces(req(PABLO, alejandro.accountId));
-    expect(list.find((w) => w.accountId === alejandro.accountId)).toMatchObject({ status: 'active', current: true });
     // A member, not an admin: the roster stays out of reach.
     await expect(crud.inviteMember(req(PABLO, alejandro.accountId), { email: 'x@acme.test' })).rejects.toThrow();
   });
 
-  it('the MCP door sees the joined workspace once the person has acted in it', async () => {
-    const { alejandro } = await setUp();
+  it('accepting answers 404 where there is no invitation, and the own account as it is', async () => {
+    const { pablo } = await setUp();
+    const outsider = await auth.resolveHost(req(OUTSIDER));
+    await expect(auth.acceptWorkspace(req(PABLO), outsider.accountId)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(auth.acceptWorkspace(req(PABLO), 'no-such-account')).rejects.toBeInstanceOf(NotFoundException);
+    expect(await auth.acceptWorkspace(req(PABLO), pablo.accountId)).toMatchObject({ home: true, status: 'active' });
+  });
+
+  it('the MCP door sees the joined workspace once the person acts in it', async () => {
+    const { alejandro, pablo } = await setUp();
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     await auth.resolveHost(req(PABLO, alejandro.accountId));
-    const seen = await membershipsBySubject(db, PABLO.workos_user_id, Date.now() - 86_400_000);
-    expect(seen.map((m) => m.accountId).sort()).toEqual([alejandro.accountId, (await auth.resolveHost(req(PABLO))).accountId].sort());
+    const seen = await membershipsBySubject(db, PABLO.workos_user_id, Date.now() - DAY);
+    expect(seen.map((m) => m.accountId).sort()).toEqual([alejandro.accountId, pablo.accountId].sort());
+  });
+
+  it('never honors, from another account’s token, a membership a token for that account created', async () => {
+    // Pablo once held a token for Alejandro's account (an upstream switch): the
+    // provider made him a member there. Upstream then removes him, which this
+    // app is never told; the identity service will not mint that token again.
+    const alejandro = await auth.resolveHost(req(ALEJANDRO));
+    const viaToken = await auth.resolveHost(req({ ...PABLO, account_id: ALEJANDRO.account_id }));
+    expect(viaToken.accountId).toBe(alejandro.accountId);
+    await db.run(sql`UPDATE member SET login_seen_at = ${Date.now() - 40 * DAY} WHERE id = ${viaToken.memberId}`);
+    const before = (await memberRow(viaToken.memberId))!.login_seen_at;
+
+    await auth.resolveHost(req(PABLO));
+    await expect(auth.resolveHost(req(PABLO, alejandro.accountId))).rejects.toMatchObject({
+      response: { error: 'WORKSPACE_FORBIDDEN' },
+    });
+    expect((await memberRow(viaToken.memberId))!.login_seen_at).toBe(before);
+    expect((await auth.listWorkspaces(req(PABLO))).map((w) => w.accountId)).not.toContain(alejandro.accountId);
+    await expect(auth.acceptWorkspace(req(PABLO), alejandro.accountId)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('refuses a workspace the person holds no membership in, never falling back to home', async () => {
@@ -140,12 +186,37 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     await expect(auth.resolveHost(req(PABLO, 'no-such-account'))).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('naming the home account is the same as naming none', async () => {
+    const { pablo } = await setUp();
+    expect(await auth.resolveHost(req(PABLO, pablo.accountId))).toMatchObject({ accountId: pablo.accountId, role: 'owner' });
+  });
+
+  it('consent speaks for the home account whatever workspace is named', async () => {
+    const { alejandro, pablo } = await setUp();
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
+    expect(await auth.resolveHost(req(PABLO, alejandro.accountId), { workspace: false })).toMatchObject({
+      accountId: pablo.accountId,
+      role: 'owner',
+    });
+  });
+
   it('refuses a membership that was disabled or removed', async () => {
     const { alejandro, invited } = await setUp();
-    await auth.resolveHost(req(PABLO, alejandro.accountId));
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     await db.run(sql`UPDATE member SET status = 'disabled' WHERE id = ${invited.id}`);
     await expect(auth.resolveHost(req(PABLO, alejandro.accountId))).rejects.toBeInstanceOf(ForbiddenException);
     expect((await auth.listWorkspaces(req(PABLO))).map((w) => w.accountId)).not.toContain(alejandro.accountId);
+  });
+
+  it('finds the invitation by the address the token vouches for, not a stale stored one', async () => {
+    const alejandro = await auth.resolveHost(req(ALEJANDRO));
+    await auth.resolveHost(req({ ...PABLO, email: 'old@acme.test' }));
+    await crud.inviteMember(req(ALEJANDRO), { email: 'new@acme.test' });
+    const withNew = await auth.listWorkspaces(req({ ...PABLO, email: 'New@Acme.test' }));
+    expect(withNew.map((w) => w.accountId)).toContain(alejandro.accountId);
+    // An address the identity service marks unverified claims nothing.
+    const unverified = await auth.listWorkspaces(req({ ...PABLO, email: 'new@acme.test', email_verified: false }));
+    expect(unverified.map((w) => w.accountId)).not.toContain(alejandro.accountId);
   });
 
   it('resends a pending invitation, at most once a minute, and only while it is pending', async () => {
@@ -157,17 +228,26 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     const again = await crud.resendInvite(req(ALEJANDRO), invited.id, { locale: 'en' });
     expect(again).toEqual({ ok: true, inviteEmail: 'queued' });
     await deliverAll();
-    expect(capture.sent.map((m) => m.subject)).toEqual(['Alejandro te invitó a Alejandro', 'Alejandro invited you to Alejandro']);
+    expect(capture.sent.map((m) => m.subject)).toEqual(['Únete a Alejandro en dCal', 'Join Alejandro on dCal']);
     expect(new Set(capture.sent.map((m) => m.idempotencyKey)).size).toBe(2);
 
-    await auth.resolveHost(req(PABLO, alejandro.accountId));
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     build(capture);
     await expect(crud.resendInvite(req(ALEJANDRO), invited.id, {})).rejects.toMatchObject({ status: 409 });
   });
 
+  it('caps new invitations per workspace per day, in the database', async () => {
+    await auth.resolveHost(req(ALEJANDRO));
+    for (let i = 0; i < 50; i += 1) await crud.inviteMember(req(ALEJANDRO), { email: `p${i}@acme.test` });
+    await expect(crud.inviteMember(req(ALEJANDRO), { email: 'p50@acme.test' })).rejects.toMatchObject({
+      status: 429,
+      response: { error: 'INVITE_LIMIT' },
+    });
+  });
+
   it('skips a queued invitation once the member joined or was removed', async () => {
     const { alejandro, invited } = await setUp();
-    await auth.resolveHost(req(PABLO, alejandro.accountId));
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     const [row] = await inviteRows();
     await expect(email.deliver(row!.action, row!.payload, row!.account_id, 0)).rejects.toBeInstanceOf(OutboxSkipError);
 
@@ -176,19 +256,20 @@ describe('workspace invitations: invite, email, list, enter = accept', () => {
     expect(capture.sent).toHaveLength(0);
   });
 
-  it('says "off" when this deployment sends no mail', async () => {
-    build(new LogOnlyEmailProvider());
+  it('says "off" when this deployment sends no mail, and names no product it was not given', async () => {
+    build(new LogOnlyEmailProvider(), ''); // a deployment that names no product
     await auth.resolveHost(req(ALEJANDRO));
     const invited = await crud.inviteMember(req(ALEJANDRO), { email: 'pablo@acme.test' });
     expect(invited).toMatchObject({ status: 'invited', inviteEmail: 'off' });
+    const [row] = await inviteRows();
+    expect(JSON.parse(row!.payload)).toMatchObject({ productName: null });
   });
 
   it('only an admin can resend', async () => {
-    const { alejandro, invited } = await setUp();
-    await auth.resolveHost(req(PABLO, alejandro.accountId));
+    const { alejandro } = await setUp();
+    await auth.acceptWorkspace(req(PABLO), alejandro.accountId);
     const other = await crud.inviteMember(req(ALEJANDRO), { email: 'third@acme.test' });
     build(capture);
     await expect(crud.resendInvite(req(PABLO, alejandro.accountId), other.id, {})).rejects.toBeInstanceOf(HttpException);
-    expect(invited.id).not.toBe(other.id);
   });
 });

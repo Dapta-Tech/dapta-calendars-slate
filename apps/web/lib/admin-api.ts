@@ -199,6 +199,9 @@ export const adminApi = {
   me: () => req<Me>('GET', '/v1/me'),
   /** Every workspace the signed-in person can act in, pending invitations included. */
   myWorkspaces: () => req<WorkspaceView[]>('GET', '/v1/me/workspaces'),
+  /** Accept a pending invitation to that workspace (idempotent; 404 when there is none for this person). */
+  acceptWorkspace: (accountId: string) =>
+    req<WorkspaceView>('POST', `/v1/me/workspaces/${encodeURIComponent(accountId)}/accept`),
   // Home "Get bookable" checklist — real data, not a static nag (see AdminService.setupStatus).
   setupStatus: () => req<SetupStatus>('GET', '/v1/me/setup-status'),
   // Onboarding's two gates (ADR 0002).
@@ -281,12 +284,12 @@ export const adminApi = {
 
   // Members (workspace roster — admin/owner only)
   listMembers: () => req<AccountMember[]>('GET', '/v1/members'),
-  /** `inviteEmail`: `queued` when the invitation email went in, `off` when this server sends no mail. */
+  /** `inviteEmail`: `queued` when the invitation email went in, `off` when this server sends no mail, `failed` when it could not be queued. */
   inviteMember: (b: { email: string; role?: 'admin' | 'member'; locale?: 'en' | 'es' }) =>
-    req<AccountMember & { inviteEmail: 'queued' | 'off' }>('POST', '/v1/members', b),
+    req<AccountMember & { inviteEmail: 'queued' | 'off' | 'failed' }>('POST', '/v1/members', b),
   /** 429 `RESEND_TOO_SOON` inside a minute of the last send; 409 once the member joined. */
   resendInvite: (id: string, b: { locale?: 'en' | 'es' } = {}) =>
-    req<{ ok: true; inviteEmail: 'queued' | 'off' }>('POST', `/v1/members/${encodeURIComponent(id)}/resend-invite`, b),
+    req<{ ok: true; inviteEmail: 'queued' | 'off' | 'failed' }>('POST', `/v1/members/${encodeURIComponent(id)}/resend-invite`, b),
   updateMember: (id: string, b: { role?: AccountRole; status?: MemberStatus }) =>
     req<AccountMember>('PATCH', `/v1/members/${id}`, b),
   removeMember: (id: string) => req<{ ok: boolean }>('DELETE', `/v1/members/${id}`),

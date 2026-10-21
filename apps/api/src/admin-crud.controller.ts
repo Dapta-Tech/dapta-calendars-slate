@@ -21,6 +21,7 @@ import type { Db } from '@slate/db';
 import {
   addTeamMember,
   changeMemberRole,
+  countInvitationsSince,
   transferOwnership,
   createEventType,
   createSchedule,
@@ -138,6 +139,10 @@ function toOneOffLinkView(link: {
 }
 
 /** Host-authed CRUD for event-types, schedules, teams, members. */
+/** New invitations one workspace may send per day (counted in the database, shared by every instance). */
+const MAX_INVITATIONS_PER_DAY = 50;
+const DAY_MS = 86_400_000;
+
 @Controller('v1')
 export class AdminCrudController {
   private readonly log = new Logger('AdminCrudController');
@@ -239,6 +244,14 @@ export class AdminCrudController {
     const p = await this.auth.resolveHost(req);
     assertAdmin(p);
     const input = parse(memberInviteSchema, body);
+    // A shared cap on new invitations per account per day: every one sends an
+    // email, and a free account must not become a way to mail strangers.
+    if ((await countInvitationsSince(this.db, p.accountId, Date.now() - DAY_MS)) >= MAX_INVITATIONS_PER_DAY) {
+      throw new HttpException(
+        { error: 'INVITE_LIMIT', message: `At most ${MAX_INVITATIONS_PER_DAY} invitations a day per workspace. Try again tomorrow.` },
+        429,
+      );
+    }
     // An invited member is a new host: born with the new look, like a sign-up.
     const member = unwrapCrud(await inviteMember(this.db, p.accountId, input, withNewHostBranding()));
 
@@ -260,7 +273,7 @@ export class AdminCrudController {
     const outcome = this.email
       ? await this.email.enqueueMemberInvite(p.accountId, member.id, p.memberId, { locale: input.locale })
       : 'off';
-    const inviteEmail = outcome === 'queued' ? 'queued' : 'off';
+    const inviteEmail = outcome === 'queued' || outcome === 'failed' ? outcome : 'off';
     void this.analytics?.hostEvent('invite_sent', p, { role: member.role, resend: false, delivery: inviteEmail });
     return { ...member, inviteEmail };
   }

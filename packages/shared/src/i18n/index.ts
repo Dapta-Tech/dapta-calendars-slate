@@ -953,8 +953,12 @@ export interface BookingMessages {
       memberInvited: string;
       /** The invite went in, but this deployment sends no email: say so instead of "sent". */
       memberAddedNoEmail: string;
+      /** The invite went in, but its email could not be queued. */
+      inviteEmailFailed: string;
+      inviteLimit: string;
       resendInvite: string;
       inviteResent: string;
+      resendNoEmail: string;
       resendTooSoon: string;
       memberRemoved: string;
       genericError: string;
@@ -970,6 +974,17 @@ export interface BookingMessages {
     };
     /** `/invite/{code}` when the signed-in person holds no invitation to that workspace. */
     invite: {
+      pageTitle: string;
+      joinTitle: string;
+      joinBody: string;
+      join: string;
+      joining: string;
+      joinFailed: string;
+      notNow: string;
+      /** The same page for someone already in the workspace. */
+      openTitle: string;
+      openBody: string;
+      open: string;
       notForYouTitle: string;
       notForYouBody: string;
       otherEmail: string;
@@ -2387,7 +2402,7 @@ export const en: BookingMessages = {
       rolesHintMember: 'Member — manages only their own events, schedules and bookings.',
       invite: 'Invite member',
       inviteTitle: 'Invite a member',
-      inviteLead: 'We’ll email them an invitation to join with the role you choose.',
+      inviteLead: 'They get an invitation to join with the role you choose.',
       emailLabel: 'Email',
       emailPlaceholder: 'name@company.com',
       emailInvalid: 'Enter a valid email address.',
@@ -2418,9 +2433,12 @@ export const en: BookingMessages = {
       roleUpdated: 'Role updated.',
       statusUpdated: 'Member updated.',
       memberInvited: 'Invitation sent.',
-      memberAddedNoEmail: 'Invitation saved. This server sends no email, so let them know to sign in with that address.',
+      memberAddedNoEmail: 'Member added. This server sends no email, so let them know to sign in with that address.',
+      inviteEmailFailed: 'Member added, but the invitation email could not be sent. Use Resend invite.',
+      inviteLimit: 'This workspace reached today’s invitation limit. Try again tomorrow.',
       resendInvite: 'Resend invite',
       inviteResent: 'Invitation sent again.',
+      resendNoEmail: 'This server sends no email, so let them know to sign in with that address.',
       resendTooSoon: 'An invitation just went out. Try again in a minute.',
       memberRemoved: 'Member removed.',
       genericError: 'Something went wrong.',
@@ -2434,6 +2452,16 @@ export const en: BookingMessages = {
       switchFailed: 'Could not open that workspace. Try again.',
     },
     invite: {
+      pageTitle: 'Invitation',
+      joinTitle: 'Join {workspace}',
+      joinBody: 'You’re invited as {role}. You keep your own account, and you can switch between them from the menu.',
+      join: 'Join workspace',
+      joining: 'Joining…',
+      joinFailed: 'Could not join this workspace. Try again.',
+      notNow: 'Not now',
+      openTitle: 'Open {workspace}',
+      openBody: 'You’re already a member of this workspace.',
+      open: 'Open workspace',
       notForYouTitle: 'This invitation isn’t for this account',
       notForYouBody: 'You’re signed in as {email}. Sign in with the address the invitation was sent to, or ask whoever invited you to send it to this one.',
       otherEmail: 'Sign in with another email',
@@ -3804,7 +3832,7 @@ export const es: BookingMessages = {
       rolesHintMember: 'Miembro — gestiona solo sus propios eventos, horarios y reservas.',
       invite: 'Invitar miembro',
       inviteTitle: 'Invitar a un miembro',
-      inviteLead: 'Le enviaremos un correo para unirse con el rol que elijas.',
+      inviteLead: 'Recibirá una invitación para unirse con el rol que elijas.',
       emailLabel: 'Correo',
       emailPlaceholder: 'nombre@empresa.com',
       emailInvalid: 'Introduce un correo válido.',
@@ -3835,9 +3863,12 @@ export const es: BookingMessages = {
       roleUpdated: 'Rol actualizado.',
       statusUpdated: 'Miembro actualizado.',
       memberInvited: 'Invitación enviada.',
-      memberAddedNoEmail: 'Invitación guardada. Este servidor no envía correos, así que avísale que entre con ese correo.',
+      memberAddedNoEmail: 'Miembro añadido. Este servidor no envía correos, así que avísale que inicie sesión con ese correo.',
+      inviteEmailFailed: 'Miembro añadido, pero no pudimos enviar el correo de invitación. Usa Reenviar invitación.',
+      inviteLimit: 'Este espacio llegó al límite de invitaciones de hoy. Intenta de nuevo mañana.',
       resendInvite: 'Reenviar invitación',
       inviteResent: 'Invitación reenviada.',
+      resendNoEmail: 'Este servidor no envía correos, así que avísale que inicie sesión con ese correo.',
       resendTooSoon: 'Acabamos de enviar una invitación. Intenta de nuevo en un minuto.',
       memberRemoved: 'Miembro eliminado.',
       genericError: 'Algo salió mal.',
@@ -3847,13 +3878,23 @@ export const es: BookingMessages = {
     workspaces: {
       menuLabel: 'Tus espacios',
       current: 'Actual',
-      pending: 'Invitado',
+      pending: 'Pendiente',
       switchFailed: 'No pudimos abrir ese espacio. Intenta de nuevo.',
     },
     invite: {
+      pageTitle: 'Invitación',
+      joinTitle: 'Únete a {workspace}',
+      joinBody: 'Te invitaron como {role}. Conservas tu propia cuenta y puedes cambiar entre las dos desde el menú.',
+      join: 'Unirme al espacio',
+      joining: 'Uniéndote…',
+      joinFailed: 'No pudimos unirte a este espacio. Intenta de nuevo.',
+      notNow: 'Ahora no',
+      openTitle: 'Abrir {workspace}',
+      openBody: 'Ya eres miembro de este espacio.',
+      open: 'Abrir espacio',
       notForYouTitle: 'Esta invitación no es para esta cuenta',
-      notForYouBody: 'Entraste como {email}. Entra con el correo al que llegó la invitación, o pide a quien te invitó que la envíe a este.',
-      otherEmail: 'Entrar con otro correo',
+      notForYouBody: 'Iniciaste sesión como {email}. Inicia sesión con el correo al que llegó la invitación, o pide a quien te invitó que la envíe a este.',
+      otherEmail: 'Iniciar sesión con otro correo',
       goHome: 'Ir a mi calendario',
     },
     connections: {

@@ -98,7 +98,8 @@ export function MembersClient({
   const resend = (member: AccountMember) =>
     start(async () => {
       const r = await resendInviteAction(member.id, locale);
-      if (r.ok) success(r.email === 'off' ? m.memberAddedNoEmail : m.inviteResent);
+      if (r.ok && r.email === 'failed') error(m.genericError);
+      else if (r.ok) success(r.email === 'off' ? m.resendNoEmail : m.inviteResent);
       else error(r.code === 'TOO_SOON' ? m.resendTooSoon : (r.message ?? m.genericError));
     });
 
@@ -112,7 +113,8 @@ export function MembersClient({
       setInviteErr(null);
       const r = await inviteMemberAction(inviteEmail, inviteRole, locale);
       if (r.ok) {
-        success(r.email === 'off' ? m.memberAddedNoEmail : m.memberInvited);
+        if (r.email === 'failed') error(m.inviteEmailFailed);
+        else success(r.email === 'off' ? m.memberAddedNoEmail : m.memberInvited);
         setInviteEmail('');
         setInviteRole('member');
         closeDialog();
@@ -123,7 +125,9 @@ export function MembersClient({
           ? m.emailInvalid
           : r.code === 'EMAIL_TAKEN'
             ? m.emailTaken
-            : (r.message ?? m.genericError),
+            : r.code === 'LIMIT'
+              ? m.inviteLimit
+              : (r.message ?? m.genericError),
       );
     });
 

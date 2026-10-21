@@ -138,16 +138,27 @@ export async function inviteMember(
     return { ok: false, reason: 'EMAIL_TAKEN', message: 'A member with that email already exists.' };
 
   const id = randomUUID();
+  const now = Date.now();
   // Auto-handle at creation (short-links §3): invited members are bookable the
   // moment they accept — no "set a handle" step, freely renameable later.
   const handle = await deriveUniqueHandle(db, accountId, input.displayName, email);
   await db.run(
-    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at)
+    // `invited_at` marks the membership as one THIS app granted: the only kind a
+    // request may act in by naming the account (`workspaces.ts`, ADR 0010).
+    sql`INSERT INTO member (id, account_id, email, display_name, handle, role, status, brand_color, booking_page_style, created_at, invited_at)
         VALUES (${id}, ${accountId}, ${email}, ${input.displayName ?? EMAIL_LOCAL(email)},
           ${handle}, ${role}, ${'invited'}, ${branding?.brandColor ?? null},
-          ${jsonParam(db, branding?.style ?? null)}, ${Date.now()})`,
+          ${jsonParam(db, branding?.style ?? null)}, ${now}, ${now})`,
   );
   return { ok: true, value: (await getAccountMember(db, accountId, id))! };
+}
+
+/** How many members of the account were invited since `sinceMs` (the daily invitation cap). */
+export async function countInvitationsSince(db: Db, accountId: string, sinceMs: number): Promise<number> {
+  const row = await db.get<{ n: number | string }>(
+    sql`SELECT COUNT(*) AS n FROM member WHERE account_id = ${accountId} AND invited_at >= ${sinceMs}`,
+  );
+  return Number(row?.n ?? 0);
 }
 
 /**

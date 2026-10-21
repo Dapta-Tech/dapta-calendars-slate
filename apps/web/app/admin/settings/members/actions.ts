@@ -5,19 +5,21 @@ import { unstable_rethrow } from 'next/navigation';
 import { adminApi, ApiError, type AccountRole, type MemberStatus } from '@/lib/admin-api';
 
 export type ActionResult = { ok: boolean; message?: string };
+/** How the invitation email went: queued, not sent by this server, or not queued at all. */
+export type InviteEmail = 'queued' | 'off' | 'failed';
 /**
  * Invite carries a stable code so the client can localize (email / duplicate /
- * generic), and `email`: `queued` when the invitation email went in, `off` when
- * this server sends no mail (the toast must not claim it was sent).
+ * daily limit / generic), and `email`, so the toast never claims a send that
+ * did not happen.
  */
 export type InviteResult = {
   ok: boolean;
-  code?: 'INVALID_EMAIL' | 'EMAIL_TAKEN' | 'FAILED';
+  code?: 'INVALID_EMAIL' | 'EMAIL_TAKEN' | 'LIMIT' | 'FAILED';
   message?: string;
-  email?: 'queued' | 'off';
+  email?: InviteEmail;
 };
-/** A resend answers like an invite; `TOO_SOON` inside a minute of the last send. */
-export type ResendResult = { ok: boolean; code?: 'TOO_SOON' | 'FAILED'; message?: string; email?: 'queued' | 'off' };
+/** A resend answers like an invite; `TOO_SOON` inside the per-member or per-workspace window. */
+export type ResendResult = { ok: boolean; code?: 'TOO_SOON' | 'FAILED'; message?: string; email?: InviteEmail };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -36,10 +38,11 @@ export async function inviteMemberAction(
   try {
     const created = await adminApi.inviteMember({ email: target, role, ...(locale ? { locale } : {}) });
     revalidatePath('/admin/settings/members');
-    return { ok: true, email: created.inviteEmail === 'queued' ? 'queued' : 'off' };
+    return { ok: true, email: created.inviteEmail };
   } catch (e) {
     unstable_rethrow(e); // let a 401→/login redirect through
     if (e instanceof ApiError && e.code === 'EMAIL_TAKEN') return { ok: false, code: 'EMAIL_TAKEN' };
+    if (e instanceof ApiError && e.code === 'INVITE_LIMIT') return { ok: false, code: 'LIMIT' };
     return { ok: false, code: 'FAILED', message: e instanceof Error ? e.message : undefined };
   }
 }
@@ -48,7 +51,7 @@ export async function inviteMemberAction(
 export async function resendInviteAction(id: string, locale?: 'en' | 'es'): Promise<ResendResult> {
   try {
     const r = await adminApi.resendInvite(id, locale ? { locale } : {});
-    return { ok: true, email: r.inviteEmail === 'queued' ? 'queued' : 'off' };
+    return { ok: true, email: r.inviteEmail };
   } catch (e) {
     unstable_rethrow(e);
     if (e instanceof ApiError && e.code === 'RESEND_TOO_SOON') return { ok: false, code: 'TOO_SOON' };

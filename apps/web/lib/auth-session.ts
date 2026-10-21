@@ -7,7 +7,7 @@ import { getLocale } from './locale';
 import { safeReturnTo, withReturnTo } from './return-to';
 import { SESSION_COOKIE } from './session';
 import { PATH_HEADER, QUERY_HEADER } from './theme';
-import { WORKSPACE_COOKIE, WORKSPACE_FORBIDDEN, WORKSPACE_RESET_PATH, chosenWorkspace, workspaceHeader } from './workspace';
+import { WORKSPACE_REFUSALS, WORKSPACE_RESET_PATH, chosenWorkspace, clearWorkspace, workspaceHeader } from './workspace';
 
 // SERVER-side API base. MUST read the runtime env var `API_URL` — NOT
 // `NEXT_PUBLIC_API_URL`, which Next INLINES at BUILD time (baked into the image,
@@ -337,15 +337,31 @@ export async function hostHeaders(opts: { workspace?: boolean } = {}): Promise<R
 }
 
 /**
- * The API refused the chosen workspace (removed, disabled, or a cookie from
- * someone else's session): drop the choice and land on the person's own
- * account. A redirect, never a quiet retry without the header: a write must not
- * land in a workspace the page did not say it was in.
+ * The API refused the chosen workspace (the membership was removed or
+ * disabled, or the invitation is not accepted yet): drop the choice and go back
+ * to the page, now in the person's own account. A redirect, never a quiet retry
+ * without the header: a write must not land in a workspace the page did not say
+ * it was in.
+ *
+ * Where cookies can be written (a Server Action, a Route Handler) the choice is
+ * dropped right here. A render cannot write them, so it hands over to the reset
+ * route, naming the refused workspace: the route clears the cookie only while it
+ * still names that one, so it can never undo a newer choice, nor be used to
+ * reset someone from another site.
  */
 export async function leaveForbiddenWorkspace(res: Response): Promise<void> {
-  if (res.status !== 403 || !(await chosenWorkspace())) return;
+  if (res.status !== 403) return;
+  const chosen = await chosenWorkspace();
+  if (!chosen) return;
   const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
-  if (body?.error === WORKSPACE_FORBIDDEN) redirect(WORKSPACE_RESET_PATH);
+  if (typeof body?.error !== 'string' || !WORKSPACE_REFUSALS.has(body.error)) return;
+  const back = (await currentReturnTo()) ?? '/admin';
+  try {
+    await clearWorkspace();
+  } catch {
+    redirect(withReturnTo(`${WORKSPACE_RESET_PATH}?w=${encodeURIComponent(chosen)}`, back));
+  }
+  redirect(back);
 }
 
 /**
@@ -542,5 +558,5 @@ export async function clearSession(): Promise<void> {
   jar.delete(SESSION_COOKIE);
   // The workspace choice belongs to the session it was made in: the next
   // person to sign in on this browser starts in their own account.
-  jar.delete(WORKSPACE_COOKIE);
+  await clearWorkspace();
 }

@@ -23,8 +23,14 @@ export interface MemberInviteNotification {
   workspaceName: string;
   /** Who sent it (the inviter's display name), when known. */
   inviterName: string | null;
+  /**
+   * The product as the deployment names its mail (`MAIL_FROM_NAME`), so a cold
+   * reader sees which service this is before any name an admin typed. Null: a
+   * deployment that names none, and the copy names no product.
+   */
+  productName?: string | null;
   role: 'admin' | 'member';
-  /** `{PUBLIC_APP_URL}/invite/{account code}`: sign in, then this workspace. */
+  /** `{PUBLIC_APP_URL}/admin/join/{account code}`: sign in, then the invitation. */
   acceptUrl: string;
   locale: 'en' | 'es';
   /**
@@ -52,33 +58,31 @@ export function renderMemberInvite(n: MemberInviteNotification, growth: EmailGro
   const es = n.locale === 'es';
   const workspace = oneLine(n.workspaceName, 120);
   const inviter = n.inviterName ? oneLine(n.inviterName, 120) : null;
-  const subject = inviter
-    ? es
-      ? `${inviter} te invitó a ${workspace}`
-      : `${inviter} invited you to ${workspace}`
-    : es
-      ? `Te invitaron a ${workspace}`
-      : `You’re invited to ${workspace}`;
+  const product = n.productName ? oneLine(n.productName, 60) : null;
+  // The subject leads with fixed words and the product, never with a name an
+  // admin typed: the inviter is named in the body, as a fact.
+  const on = product ? (es ? ` en ${product}` : ` on ${product}`) : '';
+  const subject = es ? `Únete a ${workspace}${on}` : `Join ${workspace}${on}`;
   const role = n.role === 'admin' ? (es ? 'administrador' : 'an admin') : es ? 'miembro' : 'a member';
   const lead = inviter
     ? es
-      ? `${inviter} te invitó a unirte a ${workspace} como ${role}.`
-      : `${inviter} invited you to join ${workspace} as ${role}.`
+      ? `${inviter} te invitó a unirte a ${workspace}${on} como ${role}.`
+      : `${inviter} invited you to join ${workspace}${on} as ${role}.`
     : es
-      ? `Te invitaron a unirte a ${workspace} como ${role}.`
-      : `You’re invited to join ${workspace} as ${role}.`;
+      ? `Te invitaron a unirte a ${workspace}${on} como ${role}.`
+      : `You’re invited to join ${workspace}${on} as ${role}.`;
   const text = [
     lead,
     '',
     es ? `Acepta la invitación: ${n.acceptUrl}` : `Accept the invitation: ${n.acceptUrl}`,
     '',
-    es ? `Entra con ${n.email} para aceptar.` : `Sign in with ${n.email} to accept.`,
+    es ? `Inicia sesión con ${n.email} para aceptar.` : `Sign in with ${n.email} to accept.`,
     es
       ? 'Si no esperabas esta invitación, puedes ignorar este correo.'
       : 'If you weren’t expecting this invitation, you can ignore this email.',
   ].join('\n');
   const html = renderMemberInviteHtml(
-    { workspaceName: workspace, inviterName: inviter, role: n.role, email: n.email, acceptUrl: n.acceptUrl },
+    { workspaceName: workspace, inviterName: inviter, productName: product, role: n.role, email: n.email, acceptUrl: n.acceptUrl },
     n.locale,
     growth,
   );

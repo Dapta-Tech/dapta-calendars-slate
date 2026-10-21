@@ -220,3 +220,20 @@ describe('adminApi 401 handling', () => {
     expect(init.body).toContain('pat-fake-0000');
   });
 });
+
+describe('adminApi and the chosen workspace', () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
+    getSession.mockResolvedValue({ provider: 'workos', accessToken: 'tok' });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('hands every response to leaveForbiddenWorkspace before reading it', async () => {
+    const refusal = new Response(JSON.stringify({ error: 'WORKSPACE_FORBIDDEN' }), { status: 403 });
+    fetchMock.mockResolvedValueOnce(refusal);
+    await expect(adminApi.me()).rejects.toMatchObject({ status: 403, code: 'WORKSPACE_FORBIDDEN' });
+    expect(leaveForbiddenWorkspace).toHaveBeenCalledWith(refusal);
+  });
+});

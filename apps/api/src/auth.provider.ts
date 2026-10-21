@@ -45,6 +45,14 @@ export interface ResolvedHost {
    * token): the request time.
    */
   authenticatedAt?: number | null;
+  /**
+   * The address the session itself vouches for (the verified token's email
+   * claim), lowercased. What finds the person's invitations in other accounts
+   * (`AuthService`), in preference to the stored address, which can be stale.
+   * Null: the session vouches for none (no claim, or one marked unverified).
+   * Absent: the provider does not say, and the stored address is used.
+   */
+  email?: string | null;
 }
 
 /** The authenticated host, enriched with the account role for authorization. */
@@ -159,7 +167,7 @@ export class LocalAuthProvider implements AuthProvider {
       sql`SELECT account_id, id AS member_id FROM member
           WHERE email = ${email} ORDER BY created_at ASC LIMIT 1`,
     );
-    if (existing) return { accountId: existing.account_id, memberId: existing.member_id };
+    if (existing) return { accountId: existing.account_id, memberId: existing.member_id, email: email.trim().toLowerCase() };
 
     // JIT: a fresh isolated account+member for this email, idempotent across
     // reseeds/races via external_id (`dev:<email>`). Pre-short-links accounts
@@ -204,7 +212,7 @@ export class LocalAuthProvider implements AuthProvider {
       isFirstMember: role === 'owner',
       fromInvite: false,
     });
-    return { accountId: account.id, memberId };
+    return { accountId: account.id, memberId, email: email.trim().toLowerCase() };
   }
 }
 

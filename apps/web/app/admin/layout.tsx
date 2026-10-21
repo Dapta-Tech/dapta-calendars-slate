@@ -9,6 +9,8 @@ import { HostAnalytics } from '@/components/analytics/host-analytics';
 import { analyticsConfig, hostAnalyticsIdentity } from '@/lib/analytics/config';
 import { ToastProvider } from '@/components/toast';
 import { TimeZoneSync } from '@/components/timezone-sync';
+import { WorkspaceSync } from '@/components/workspace-sync';
+import { chosenWorkspace } from '@/lib/workspace';
 import { currentReturnTo, getSession } from '@/lib/auth-session';
 import { withReturnTo } from '@/lib/return-to';
 import { currentAccountId, listWorkspaces, mayPickAccount } from '@/lib/iam';
@@ -97,6 +99,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   return (
     <ToastProvider>
       <TimeZoneSync currentTimeZone={me.timeZone} />
+      <WorkspaceSync rendered={await chosenWorkspace()} />
       <HostAnalytics
         config={analytics}
         identity={analytics ? hostAnalyticsIdentity(me, jar.get(LANDING_ID_COOKIE)?.value) : null}
