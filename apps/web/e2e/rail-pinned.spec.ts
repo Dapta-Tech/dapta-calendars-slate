@@ -84,7 +84,7 @@ test('the footer stays on screen at the top, the middle and the end of a long pa
     await expectOnScreen(page, nav.getByRole('button', { name: /^Switch to (light|dark) theme$/ }));
     if (isMobile && at < 1) {
       await page.keyboard.press('Escape');
-      await expect(page.getByRole('button', { name: 'Open navigation' })).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.getByTestId('nav-open')).toHaveAttribute('aria-expanded', 'false');
     }
   }
 

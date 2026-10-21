@@ -3,7 +3,6 @@ import { HttpException } from '@nestjs/common';
 import { ZodError } from 'zod';
 import { hashApiValue } from '@slate/db';
 import { zoneOffsetMinutes } from '@slate/shared';
-import type { ApiScope } from '@slate/types';
 import type { MachinePrincipal } from '../auth.service';
 import type { ExternalLogin, LoginAccount } from '../oauth/external.service';
 import { OAUTH_SCOPES } from '../oauth/oauth.settings';
@@ -108,38 +107,6 @@ export function callerId(call: McpCall): string {
 export function reachesAccount(call: McpCall, accountId: string): boolean {
   if (call.login) return call.login.accounts.some((a) => a.accountId === accountId);
   return call.principal?.accountId === accountId;
-}
-
-/**
- * The last word on scope, inside the tool. With OAuth on, the HTTP door has
- * already answered a missing credential with a 401 challenge and an OAuth
- * token lacking a scope with a 403 step-up, so reaching the throws below means
- * an API key (whose scopes are fixed at creation) or OAuth off. The tool error
- * says what to do in either case.
- */
-export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[]): MachinePrincipal {
-  const accepted = Array.isArray(scope) ? scope : [scope as ApiScope];
-  if (!call.principal) {
-    throw new ToolFailure(
-      'AUTH_REQUIRED',
-      `This tool needs an API key with scope \`${accepted.join('` or `')}\`.`,
-      'Create a key in the Calendars web app (MCP, then Connect and keys) and send it as the header `Authorization: Bearer dcl_...`. Without a key only find_available_slots (public booking pages) and book_meeting work.',
-    );
-  }
-  if (!accepted.some((s) => call.principal!.scopes.includes(s))) {
-    if (call.principal.kind === 'oauth')
-      throw new ToolFailure(
-        'INSUFFICIENT_SCOPE',
-        `This connection was not granted \`${accepted.join('` or `')}\`.`,
-        `It has: ${call.principal.scopes.join(', ') || 'none'}. Reconnect the app and approve the missing access.`,
-      );
-    throw new ToolFailure(
-      'INSUFFICIENT_SCOPE',
-      `This API key (${call.principal.prefix}) lacks scope \`${accepted.join('` or `')}\`.`,
-      `Its scopes are: ${call.principal.scopes.join(', ') || 'none'}. Ask the workspace admin to create a key that includes the missing scope.`,
-    );
-  }
-  return call.principal;
 }
 
 /** Not found for everything out of reach: another tenant, outside the allowlist, or absent. */

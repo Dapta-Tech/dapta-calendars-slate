@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '@slate/db';
 import { bootHarness, errorText, idem, structured, type Harness } from './mcp-harness';
+import { publicToolNames } from './tools';
 
 const ALL = ['availability:read', 'bookings:read', 'bookings:write', 'bookings:cancel', 'event-types:read'];
 const PAGE = 'https://calendar.example.test/acme/alex-rivera/intro-call';
@@ -126,6 +127,9 @@ describe('public tools without a key', () => {
     expect(text).toContain('AUTH_REQUIRED');
     expect(text).toContain('bookings:read');
     expect(text).toContain('Authorization: Bearer');
+    // Every tool that works with no key is named, read from the catalog.
+    expect(publicToolNames()).toEqual(['find_available_slots', 'find_team_slots', 'hold_slot', 'book_meeting', 'book_team_meeting']);
+    expect(text).toContain(`only the public booking page tools work: ${publicToolNames().join(', ')}.`);
   });
 
   it('books a public page, replays the same key to the same booking, and reports SLOT_TAKEN on a second booker', async () => {
@@ -288,7 +292,10 @@ describe('public tools without a key', () => {
 describe('keyed tools', () => {
   it('whoami reports account, scopes and allowlist; needs a key', async () => {
     const anon = await h.connect();
-    expect(errorText(await anon.callTool({ name: 'whoami', arguments: {} }))).toContain('AUTH_REQUIRED');
+    const refused = errorText(await anon.callTool({ name: 'whoami', arguments: {} }));
+    expect(refused).toContain('AUTH_REQUIRED');
+    // Only a keys-only install gets here: with OAuth on, the door answers 401 first.
+    expect(refused).toContain('whoami needs an API key.');
     const key = await h.key(['bookings:read']);
     const c = await h.connect(key);
     const r = structured<{ account: { code: string }; key: { scopes: string[]; event_type_allowlist: null; prefix: string }; host: { time_zone: string } }>(

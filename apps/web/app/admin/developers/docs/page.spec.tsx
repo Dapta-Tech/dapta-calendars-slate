@@ -54,7 +54,22 @@ describe('MCP, API docs: the tool list follows the API', () => {
     expect(html).toContain('find_available_slots');
     expect(html).toContain('list_my_accounts');
     expect(html).not.toContain(m.mcpUnavailable);
+    // Keys only: whoami and list_my_accounts take any key, and nothing else.
+    expect(html).toContain(m.toolNeedsAnyKey);
+    expect(html).not.toContain(m.toolNeedsAnyKeyOrSignIn);
     expectReference(html);
+  });
+
+  it("with a sign-in (an external server or this API's own), whoami and list_my_accounts say a sign-in works too", async () => {
+    for (const reply of [
+      { enabled: false, external: true, mcpEnabled: true, accessTokenTtlSeconds: null, grants: [] },
+      { enabled: true, mcpEnabled: true, accessTokenTtlSeconds: 3600, grants: [] },
+    ]) {
+      admin.connectedApps.mockResolvedValue(reply);
+      const html = await render();
+      expect(html.split(m.toolNeedsAnyKeyOrSignIn)).toHaveLength(3);
+      expect(html).not.toContain(`>${m.toolNeedsAnyKey}<`);
+    }
   });
 
   it('MCP off: one sentence instead of the tools, and the reference', async () => {

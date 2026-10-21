@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { searchAccountsAction, switchAccountAction } from '@/app/admin/account-actions';
+import { t, type BookingMessages } from '@slate/shared';
 import { AnchoredMenu } from '@/components/ui/anchored-menu';
 
 /**
@@ -45,12 +46,16 @@ export function AccountSwitcher({
   hasMore: initialHasMore = false,
   fallbackLabel,
   collapsed = false,
+  messages: m,
+  loadingLabel,
 }: {
   accounts: AccountOption[];
   currentAccountId: string | null;
   hasMore?: boolean;
   fallbackLabel?: string;
   collapsed?: boolean;
+  messages: BookingMessages['admin']['common']['accountSwitcher'];
+  loadingLabel: string;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +108,7 @@ export function AccountSwitcher({
   // address bar shows, so it is the honest fallback, and it changes with the
   // account rather than reading the same in all of them.
   const current = results.find((a) => a.accountId === currentAccountId);
-  const label = current?.name ?? fallbackLabel ?? 'Switch account';
+  const label = current?.name ?? fallbackLabel ?? m.label;
 
   const choose = (accountId: string) => {
     setError(null);
@@ -125,7 +130,7 @@ export function AccountSwitcher({
         data-testid="account-switcher-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Account: ${label}`}
+        aria-label={t(m.trigger, { name: label })}
         title={label}
         onClick={() => setOpen((o) => !o)}
         className={[
@@ -154,7 +159,7 @@ export function AccountSwitcher({
         open={open}
         onClose={close}
         role="dialog"
-        label="Switch account"
+        label={m.label}
         width="anchor"
         minWidth={256}
         // The search field takes focus once the panel is placed and visible.
@@ -166,8 +171,8 @@ export function AccountSwitcher({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search accounts"
-          aria-label="Search accounts"
+          placeholder={m.search}
+          aria-label={m.search}
           autoComplete="off"
           className="mb-inline w-full rounded-sm border border-input bg-background px-inline py-tight text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
@@ -198,9 +203,7 @@ export function AccountSwitcher({
           })}
 
           {results.length === 0 && !pending ? (
-            <p className="px-inline py-tight text-xs text-muted-foreground">
-              No account matches that.
-            </p>
+            <p className="px-inline py-tight text-xs text-muted-foreground">{m.noMatch}</p>
           ) : null}
 
           {hasMore ? (
@@ -210,7 +213,7 @@ export function AccountSwitcher({
               onClick={loadMore}
               className="w-full rounded-sm px-inline py-inline text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
             >
-              {pending ? 'Loading…' : 'Load more'}
+              {pending ? loadingLabel : m.loadMore}
             </button>
           ) : null}
         </div>
@@ -218,14 +221,12 @@ export function AccountSwitcher({
         {/* Announced because the search runs on a timer, not on submit: with
             nothing to read, a screen reader never learns the list changed. */}
         <p aria-live="polite" className="sr-only">
-          {pending ? 'Searching accounts' : `${results.length} accounts listed`}
+          {pending ? m.searching : t(m.listed, { count: results.length })}
         </p>
 
         {error ? (
           <p role="alert" className="px-inline py-tight text-xs text-destructive">
-            {error === 'denied'
-              ? 'You do not have access to that account.'
-              : 'Could not switch account. Try again.'}
+            {error === 'denied' ? m.denied : m.failed}
           </p>
         ) : null}
       </AnchoredMenu>

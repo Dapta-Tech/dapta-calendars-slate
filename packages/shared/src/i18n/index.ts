@@ -378,6 +378,24 @@ export interface BookingMessages {
       /** A2 (#112) — screen-reader suffix on every icon-only link that opens a
        *  new tab. The icon says it visually; this says it out loud. */
       opensNewTab: string;
+      /** The mobile top bar's menu button, and the name of the nav it opens. */
+      openNav: string;
+      primaryNav: string;
+      /**
+       * The operator account picker at the top of the rail (operator staff
+       * only). `trigger` takes `{name}`, `listed` takes `{count}`.
+       */
+      accountSwitcher: {
+        label: string;
+        trigger: string;
+        search: string;
+        noMatch: string;
+        loadMore: string;
+        searching: string;
+        listed: string;
+        denied: string;
+        failed: string;
+      };
       switcher: {
         trigger: string;
         menuLabel: string;
@@ -1141,6 +1159,8 @@ export interface BookingMessages {
       webhookNoKeyError: string;
       subscriberUrl: string;
       events: string;
+      /** The webhook form's event checkboxes, by the wire name after `booking.` (the wire name itself is never translated). */
+      webhookEventLabels: Record<string, string>;
       addWebhook: string;
       ping: string;
       deliveries: string;
@@ -1187,6 +1207,8 @@ export interface BookingMessages {
       kindDestructive: string;
       toolNeedsNoKey: string;
       toolNeedsAnyKey: string;
+      /** A tool with no particular scope, where this installation also signs agents in. */
+      toolNeedsAnyKeyOrSignIn: string;
       toolOrPublic: string;
       toolNeeds: string;
       toolDescriptions: Record<string, string>;
@@ -1236,6 +1258,11 @@ export interface BookingMessages {
       chatSignInLead: string;
       chatSignInClaudeStep3: string;
       chatSignInGptStep3: string;
+      /** The sign-in tabs (external sign-in): Cursor, Claude Code and any other app, with no key. */
+      signInCursorLead: string;
+      /** Takes `{server}`, the name the server is registered under. */
+      signInClaudeCodeNext: string;
+      signInOtherLead: string;
       /** Connected apps: OAuth grants with revoke. */
       connectedTitle: string;
       connectedLead: string;
@@ -1268,6 +1295,11 @@ export interface BookingMessages {
       guideAgentBody: string;
       /** Step 2 once a key has been used or an app has signed in. */
       guideAgentDone: string;
+      /** Step 2 done from a used key alone (no app signed in that the page can see). */
+      guideKeyUsedDone: string;
+      /** External sign-in: the step for agents that use a key instead. */
+      guideKeyAltTitle: string;
+      guideKeyAltBody: string;
       guideTryTitle: string;
       guideTryHint: string;
       /** A first request to paste into the agent. `{product}` is the product's name. */
@@ -1879,6 +1911,19 @@ export const en: BookingMessages = {
       collapse: 'Collapse sidebar',
       expand: 'Expand sidebar',
       opensNewTab: 'Opens in a new tab',
+      openNav: 'Open navigation',
+      primaryNav: 'Primary',
+      accountSwitcher: {
+        label: 'Switch account',
+        trigger: 'Account: {name}',
+        search: 'Search accounts',
+        noMatch: 'No account matches that.',
+        loadMore: 'Load more',
+        searching: 'Searching accounts',
+        listed: '{count} accounts listed',
+        denied: 'You do not have access to that account.',
+        failed: 'Could not switch account. Try again.',
+      },
       switcher: {
         trigger: 'Switch product',
         menuLabel: 'Dapta products',
@@ -2564,6 +2609,11 @@ export const en: BookingMessages = {
         'This installation has no encryption key, so a signing secret could only be kept in the clear. We refuse to do that. Ask whoever runs it to set INTEGRATION_ENCRYPTION_KEY, then come back. Webhooks you already have keep working.',
       subscriberUrl: 'Subscriber URL',
       events: 'Events',
+      webhookEventLabels: {
+        created: 'Booking created',
+        rescheduled: 'Booking rescheduled',
+        cancelled: 'Booking cancelled',
+      },
       addWebhook: 'Add webhook',
       ping: 'Ping',
       deliveries: 'Deliveries',
@@ -2611,6 +2661,7 @@ export const en: BookingMessages = {
       kindDestructive: 'Destructive',
       toolNeedsNoKey: 'No key needed on a public booking page',
       toolNeedsAnyKey: 'Works with any key',
+      toolNeedsAnyKeyOrSignIn: 'Works with any key or a sign-in',
       toolOrPublic: '(or no key on a public booking page)',
       toolNeeds: 'Needs: {scope}',
       toolDescriptions: {
@@ -2666,15 +2717,15 @@ export const en: BookingMessages = {
       addToClaude: 'Add to Claude',
       chatClaudeHeading: 'In Claude',
       chatClaudeStep1: 'Click Add to Claude, or open Settings, then Connectors, and choose Add custom connector.',
-      chatClaudeStep2: 'Use the MCP address below as the server URL and click Add.',
+      chatClaudeStep2: 'Use the MCP address above as the server URL and click Add.',
       chatClaudeStep3: 'Click Connect. You come back here to sign in and approve.',
       chatGptHeading: 'In ChatGPT',
       chatGptStep1: 'Open Plugins, choose the plus button and Add custom MCP server.',
-      chatGptStep2: 'Use the MCP address below as the server URL and choose OAuth for authentication.',
+      chatGptStep2: 'Use the MCP address above as the server URL and choose OAuth for authentication.',
       chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
       chatScopesNote:
         'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
-      signInTitle: 'Sign in instead of a key',
+      signInTitle: 'Sign in from your app',
       signInBody:
         'Claude, ChatGPT, Cursor and other apps that support sign-in connect with no key: add the MCP address as a connector, then sign in with the same account you use for Dapta Calendars.',
       signInAccess:
@@ -2684,6 +2735,11 @@ export const en: BookingMessages = {
       chatSignInLead: 'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in with your account.',
       chatSignInClaudeStep3: 'Click Connect and sign in with your Dapta Calendars account.',
       chatSignInGptStep3: 'Create it, then sign in with your Dapta Calendars account when ChatGPT asks.',
+      signInCursorLead:
+        'One click opens Cursor and asks you to confirm. Cursor then shows the server as needing sign-in: click it and sign in.',
+      signInClaudeCodeNext: 'Then type /mcp in Claude Code, pick {server} and choose Authenticate to sign in.',
+      signInOtherLead:
+        'Any app that supports MCP sign-in (OAuth) needs only the address: add it with no key, then sign in when the app asks.',
       connectedTitle: 'Connected apps',
       connectedLead:
         'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
@@ -2712,6 +2768,10 @@ export const en: BookingMessages = {
       guideKeyDone: 'You already have a key. Create one per agent so you can revoke each on its own.',
       guideAgentBody: 'Pick your agent. Each tab has the address and the exact setup it needs.',
       guideAgentDone: 'A key has been used or an app has signed in: your agent is connected.',
+      guideKeyUsedDone: 'A key has been used: your agent is connected.',
+      guideKeyAltTitle: 'Or use an API key',
+      guideKeyAltBody:
+        'For headless agents and scripts, or for narrower access such as read-only or a single event type. A key is shown only once, so copy it when you create it.',
       guideTryTitle: 'Ask it for something',
       guideTryHint: 'Open your agent and paste this to check that everything works.',
       guidePrompt: 'Use the {product} MCP to tell me which workspace you are connected to and what you are allowed to do there.',
@@ -3250,6 +3310,19 @@ export const es: BookingMessages = {
       collapse: 'Contraer barra lateral',
       expand: 'Expandir barra lateral',
       opensNewTab: 'Se abre en una pestaña nueva',
+      openNav: 'Abrir navegación',
+      primaryNav: 'Principal',
+      accountSwitcher: {
+        label: 'Cambiar de cuenta',
+        trigger: 'Cuenta: {name}',
+        search: 'Buscar cuentas',
+        noMatch: 'Ninguna cuenta coincide.',
+        loadMore: 'Cargar más',
+        searching: 'Buscando cuentas',
+        listed: '{count} cuentas en la lista',
+        denied: 'No tienes acceso a esa cuenta.',
+        failed: 'No se pudo cambiar de cuenta. Inténtalo de nuevo.',
+      },
       switcher: {
         trigger: 'Cambiar producto',
         menuLabel: 'Productos Dapta',
@@ -3937,6 +4010,11 @@ export const es: BookingMessages = {
         'Esta instalación no tiene clave de cifrado, así que una clave de firma solo podría guardarse sin proteger. Nos negamos a hacerlo. Pide a quien la administra que configure INTEGRATION_ENCRYPTION_KEY y vuelve. Los webhooks que ya tienes siguen funcionando.',
       subscriberUrl: 'URL del suscriptor',
       events: 'Eventos',
+      webhookEventLabels: {
+        created: 'Reserva creada',
+        rescheduled: 'Reserva reagendada',
+        cancelled: 'Reserva cancelada',
+      },
       addWebhook: 'Añadir webhook',
       ping: 'Probar',
       deliveries: 'Entregas',
@@ -3984,6 +4062,7 @@ export const es: BookingMessages = {
       kindDestructive: 'Destructiva',
       toolNeedsNoKey: 'Sin clave en una página de reservas pública',
       toolNeedsAnyKey: 'Funciona con cualquier clave',
+      toolNeedsAnyKeyOrSignIn: 'Funciona con cualquier clave o con un inicio de sesión',
       toolOrPublic: '(o sin clave en una página de reservas pública)',
       toolNeeds: 'Requiere: {scope}',
       toolDescriptions: {
@@ -4039,15 +4118,15 @@ export const es: BookingMessages = {
       addToClaude: 'Agregar a Claude',
       chatClaudeHeading: 'En Claude',
       chatClaudeStep1: 'Haz clic en Agregar a Claude, o abre Configuración, luego Conectores, y elige Agregar conector personalizado.',
-      chatClaudeStep2: 'Usa la dirección MCP de abajo como URL del servidor y haz clic en Agregar.',
+      chatClaudeStep2: 'Usa la dirección MCP de arriba como URL del servidor y haz clic en Agregar.',
       chatClaudeStep3: 'Haz clic en Conectar. Vuelves aquí para iniciar sesión y aprobar.',
       chatGptHeading: 'En ChatGPT',
       chatGptStep1: 'Abre Plugins, elige el botón más y Agregar servidor MCP personalizado.',
-      chatGptStep2: 'Usa la dirección MCP de abajo como URL del servidor y elige OAuth como autenticación.',
+      chatGptStep2: 'Usa la dirección MCP de arriba como URL del servidor y elige OAuth como autenticación.',
       chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
       chatScopesNote:
         'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
-      signInTitle: 'Inicia sesión en lugar de usar una clave',
+      signInTitle: 'Inicia sesión desde tu app',
       signInBody:
         'Claude, ChatGPT, Cursor y otras apps que admiten inicio de sesión se conectan sin clave: agrega la dirección MCP como conector y luego inicia sesión con la misma cuenta que usas en Dapta Calendars.',
       signInAccess:
@@ -4057,6 +4136,11 @@ export const es: BookingMessages = {
       chatSignInLead: 'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión con tu cuenta.',
       chatSignInClaudeStep3: 'Haz clic en Conectar e inicia sesión con tu cuenta de Dapta Calendars.',
       chatSignInGptStep3: 'Créalo e inicia sesión con tu cuenta de Dapta Calendars cuando ChatGPT te lo pida.',
+      signInCursorLead:
+        'Un clic abre Cursor y te pide confirmar. Luego Cursor muestra que el servidor necesita inicio de sesión: haz clic en él e inicia sesión.',
+      signInClaudeCodeNext: 'Luego escribe /mcp en Claude Code, elige {server} y selecciona Authenticate para iniciar sesión.',
+      signInOtherLead:
+        'Cualquier app que admita inicio de sesión en MCP (OAuth) solo necesita la dirección: agrégala sin clave e inicia sesión cuando la app te lo pida.',
       connectedTitle: 'Apps conectadas',
       connectedLead:
         'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',
@@ -4085,6 +4169,10 @@ export const es: BookingMessages = {
       guideKeyDone: 'Ya tienes una clave. Crea una por agente para poder revocar cada una por separado.',
       guideAgentBody: 'Elige tu agente. Cada pestaña tiene la dirección y la configuración exacta que necesita.',
       guideAgentDone: 'Ya se usó una clave o una app inició sesión: tu agente está conectado.',
+      guideKeyUsedDone: 'Ya se usó una clave: tu agente está conectado.',
+      guideKeyAltTitle: 'O usa una clave API',
+      guideKeyAltBody:
+        'Para agentes y scripts que corren sin interfaz, o para un acceso más acotado, como solo lectura o un único tipo de evento. La clave solo se muestra una vez, así que cópiala al crearla.',
       guideTryTitle: 'Pídele algo',
       guideTryHint: 'Abre tu agente y pega esto para comprobar que todo funciona.',
       guidePrompt: 'Usa el MCP de {product} para decirme a qué espacio de trabajo estás conectado y qué puedes hacer ahí.',

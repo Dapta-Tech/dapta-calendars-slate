@@ -13,6 +13,7 @@ import {
 import type { ApiScope } from '@slate/types';
 import { isValidTimeZone } from '@slate/shared';
 import type { AdminService } from '../admin.service';
+import type { MachinePrincipal } from '../auth.service';
 import type { BookingService } from '../booking.service';
 import type { CalV2Service } from '../cal-v2.service';
 import type { CalV2PilotService } from '../cal-v2-pilot.service';
@@ -28,7 +29,6 @@ import {
   instantFrom,
   notFound,
   reachesAccount,
-  requireScope,
   stableStringify,
   toFailure,
   untrusted,
@@ -1204,6 +1204,13 @@ const bookTeamMeeting: ToolDef = {
   },
 };
 
+/**
+ * What whoami and list_my_accounts say to a call with no credential. Reached
+ * only with OAuth off: with it on, the HTTP door answers such a call with the
+ * 401 that starts the sign-in, so a key is the one thing left to send.
+ */
+const CREDENTIAL_HINT = 'Send `Authorization: Bearer dcl_...`. Create a key in the web app (MCP, then Connect and keys).';
+
 const whoamiInput = z.object({});
 const whoami: ToolDef = {
   name: 'whoami',
@@ -1227,7 +1234,7 @@ const whoami: ToolDef = {
   }),
   async run(_args: z.infer<typeof whoamiInput>, call, deps) {
     if (!call.principal)
-      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (MCP, then Connect and keys).');
+      throw new ToolFailure('AUTH_REQUIRED', 'whoami needs an API key.', CREDENTIAL_HINT);
     const p = call.principal;
     const account = await deps.db.get<{ code: string; name: string }>(
       sql`SELECT code, name FROM account WHERE id = ${p.accountId} LIMIT 1`,
@@ -1277,7 +1284,7 @@ const listMyAccounts: ToolDef = {
       if (!row) throw notFound('Account');
       accounts = [{ id: call.principal.accountId, name: untrusted(row.name, 120) }];
     } else {
-      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', 'Send `Authorization: Bearer dcl_...`. Create one in the Calendars web app (MCP, then Connect and keys).');
+      throw new ToolFailure('AUTH_REQUIRED', 'list_my_accounts needs an API key or a sign-in.', CREDENTIAL_HINT);
     }
     return {
       data: { accounts, count: accounts.length },
@@ -1883,6 +1890,48 @@ const declineBooking: ToolDef = {
 export function accessOf(def: ToolDef, args: Record<string, unknown>): 'public' | { scope: ApiScope | null } {
   if (def.access) return def.access(args);
   return def.scope ? { scope: def.scope } : 'public';
+}
+
+/**
+ * The last word on scope, inside the tool. With OAuth on, the HTTP door has
+ * already answered a missing credential with a 401 challenge and an OAuth
+ * token lacking a scope with a 403 step-up, so reaching the throws below means
+ * an API key (whose scopes are fixed at creation) or OAuth off. The tool error
+ * says what to do in either case. It lives next to the catalog because the
+ * no-key hint names the tools that work without one, read from the catalog,
+ * so a new public tool can never be left out of the sentence.
+ */
+export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[]): MachinePrincipal {
+  const accepted = Array.isArray(scope) ? scope : [scope as ApiScope];
+  if (!call.principal) {
+    throw new ToolFailure(
+      'AUTH_REQUIRED',
+      `This tool needs an API key with scope \`${accepted.join('` or `')}\`.`,
+      `Create a key in the web app (MCP, then Connect and keys) and send it as the header \`Authorization: Bearer dcl_...\`. Without a key only the public booking page tools work: ${publicToolNames().join(', ')}.`,
+    );
+  }
+  if (!accepted.some((s) => call.principal!.scopes.includes(s))) {
+    if (call.principal.kind === 'oauth')
+      throw new ToolFailure(
+        'INSUFFICIENT_SCOPE',
+        `This connection was not granted \`${accepted.join('` or `')}\`.`,
+        `It has: ${call.principal.scopes.join(', ') || 'none'}. Reconnect the app and approve the missing access.`,
+      );
+    throw new ToolFailure(
+      'INSUFFICIENT_SCOPE',
+      `This API key (${call.principal.prefix}) lacks scope \`${accepted.join('` or `')}\`.`,
+      `Its scopes are: ${call.principal.scopes.join(', ') || 'none'}. Ask the workspace admin to create a key that includes the missing scope.`,
+    );
+  }
+  return call.principal;
+}
+
+/**
+ * The tools that work with no credential at all (on a public booking page), in
+ * catalog order: those whose access, with no event_type_id, is public.
+ */
+export function publicToolNames(): string[] {
+  return TOOLS.filter((def) => accessOf(def, {}) === 'public').map((def) => def.name);
 }
 
 /**

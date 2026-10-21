@@ -535,7 +535,10 @@ export function Webhooks({
                       setTriggers((cur) => (e.target.checked ? [...cur, tr] : cur.filter((x) => x !== tr)))
                     }
                   />
-                  {tr.replace('booking.', '')}
+                  {/* The label in the reader's language; the wire name, which
+                      the payload carries, as it is. */}
+                  <span>{m.webhookEventLabels[tr.replace('booking.', '')] ?? tr}</span>
+                  <code className="font-mono text-xs text-muted-foreground">{tr}</code>
                 </label>
               ))}
             </div>
