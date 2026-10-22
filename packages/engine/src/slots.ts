@@ -184,6 +184,8 @@ export function computeSlots(input: ComputeSlotsInput): Date[] {
     for (const rule of rulesForDay) {
       const s = parseTimeOfDay(rule.startTime);
       const e = parseTimeOfDay(rule.endTime);
+      // Both ends follow the same rule on a DST day: in a gap, the transition;
+      // in an overlap, the first occurrence (see zonedWallClockToUtc).
       const blockStartWc: WallClock = { ...civil, hour: s.hour, minute: s.minute };
       const blockEndWc: WallClock = { ...civil, hour: e.hour, minute: e.minute };
       const blockStart = zonedWallClockToUtc(blockStartWc, timeZone).getTime();

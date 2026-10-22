@@ -271,6 +271,10 @@ describe('support helpers', () => {
     expect(instantFrom('2026-11-03', 'America/Bogota').toISOString()).toBe('2026-11-03T05:00:00.000Z');
     expect(instantFrom('2026-11-03', 'America/Bogota', true).toISOString()).toBe('2026-11-04T05:00:00.000Z');
     expect(instantFrom('2026-03-08', 'America/New_York', true).toISOString()).toBe('2026-03-09T04:00:00.000Z');
+    // America/Santiago skips 00:00 to 01:00 on 2026-09-06 (04:00Z): Sunday
+    // starts there and Saturday ends there, so Saturday 23:00 is Saturday's.
+    expect(instantFrom('2026-09-06', 'America/Santiago').toISOString()).toBe('2026-09-06T04:00:00.000Z');
+    expect(instantFrom('2026-09-05', 'America/Santiago', true).toISOString()).toBe('2026-09-06T04:00:00.000Z');
     expect(() => instantFrom('2026-02-31', 'UTC')).toThrow(ToolFailure);
     expect(() => instantFrom('2026-11-03T10:00:00', 'UTC')).toThrow(/offset/);
     expect(zonedIso(new Date('2026-11-03T15:00:00Z'), 'America/Bogota')).toBe('2026-11-03T10:00:00-05:00');
