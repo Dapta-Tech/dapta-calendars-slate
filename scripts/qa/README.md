@@ -2,7 +2,7 @@
 
 Tools for proving a deployment works, beyond the unit suites. Nothing here
 names a host, a page or a vendor: every script takes them as arguments. Plain
-Node 20, no dependencies.
+Node 22, no dependencies.
 
 | Script | What it proves | Where it runs |
 |---|---|---|

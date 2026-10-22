@@ -18,7 +18,7 @@ Self-host anywhere Node or Docker runs.
 
 ```bash
 git clone https://github.com/Dapta-Tech/dapta-calendars-slate.git calendars && cd calendars
-pnpm install          # Node >= 20, pnpm >= 10
+pnpm install          # Node >= 22.13, pnpm >= 10
 pnpm dev              # builds packages, creates + seeds a SQLite DB, starts both apps
 ```
 

@@ -10,7 +10,7 @@ pnpm install
 pnpm dev        # SQLite is created + seeded automatically
 ```
 
-Requirements: Node ≥ 20, pnpm ≥ 10. That's it — no Docker or database needed.
+Requirements: Node ≥ 22.13, pnpm ≥ 10. That's it — no Docker or database needed.
 
 ## Repository layout
 

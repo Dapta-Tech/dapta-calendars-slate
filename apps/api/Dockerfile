@@ -15,7 +15,10 @@
 # scaling to N replicas never races N migrators.
 
 # ---- base: pnpm via corepack -------------------------------------------------
-FROM node:22-trixie-slim@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c AS base
+# apps/web/Dockerfile uses this same digest-pinned base: bump both together,
+# and .nvmrc with them (CI reads it). The distroless run stage below is pinned
+# on its own and needs its own bump.
+FROM node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e85136452f781741c7242ddf AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable

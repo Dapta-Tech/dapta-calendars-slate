@@ -2,7 +2,7 @@
 
 Dapta Calendars is **deployment-agnostic**: two Node apps (a Next.js web frontend
 and a NestJS API) plus a database. No host-only APIs, no managed-platform lock-in —
-anywhere Node ≥ 20 or Docker runs, it runs. This guide takes you from a clean host
+anywhere Node ≥ 22.13 or Docker runs, it runs. This guide takes you from a clean host
 to a running, double-booking-safe production deployment.
 
 For the architecture behind these choices, read [`ARCHITECTURE.md`](ARCHITECTURE.md);
@@ -21,7 +21,7 @@ skill.
 
 ## Prerequisites
 
-- **Node ≥ 20** and **pnpm ≥ 10** (only if you build from source), or **Docker +
+- **Node ≥ 22.13** and **pnpm ≥ 10** (only if you build from source), or **Docker +
   Docker Compose** (if you deploy the prebuilt images).
 - A **PostgreSQL 14+** database for production (SQLite is dev-only — see below).
 - A TLS-terminating reverse proxy (nginx, Caddy, Traefik, or a cloud load

@@ -15,7 +15,9 @@
 # env-portable — an app change, tracked in DEPLOY-INTERNAL.)
 
 # ---- base: pnpm via corepack -------------------------------------------------
-FROM node:20-slim AS base
+# The same digest-pinned Node 22 image as apps/api/Dockerfile's base: bump both
+# together, and .nvmrc with them (CI reads it).
+FROM node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e85136452f781741c7242ddf AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
