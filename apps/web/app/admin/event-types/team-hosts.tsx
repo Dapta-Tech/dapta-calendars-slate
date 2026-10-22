@@ -181,8 +181,16 @@ interface ReadinessHost {
   hasCalendar?: boolean;
 }
 
-/** Names as people read them: sorted and joined in the page's language ("Casey and Taylor"). */
-function joinNames(hosts: ReadinessHost[], locale?: string): string {
+/**
+ * Hosts' names as people read them: display name, else email, else id, sorted
+ * and joined in the page's language ("Casey and Taylor", "Casey y Taylor").
+ * Sorting in the page's locale keeps the server render and the browser's in
+ * step. The one formatter every team-host warning uses.
+ */
+export function joinHostNames(
+  hosts: Array<{ memberId: string; displayName: string | null; email?: string | null }>,
+  locale?: string,
+): string {
   const names = hosts.map((h) => h.displayName ?? h.email ?? h.memberId).sort((a, b) => a.localeCompare(b, locale));
   return new Intl.ListFormat(locale, { type: 'conjunction' }).format(names);
 }
@@ -216,9 +224,9 @@ export function HostReadiness({
       className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground"
     >
       {noHours.length > 0 ? (
-        <p>{(collective ? m.noHoursCollective : m.noHours).replace('{names}', joinNames(noHours, locale))}</p>
+        <p>{(collective ? m.noHoursCollective : m.noHours).replace('{names}', joinHostNames(noHours, locale))}</p>
       ) : null}
-      {noCalendar.length > 0 ? <p>{m.noCalendar.replace('{names}', joinNames(noCalendar, locale))}</p> : null}
+      {noCalendar.length > 0 ? <p>{m.noCalendar.replace('{names}', joinHostNames(noCalendar, locale))}</p> : null}
     </div>
   );
 }

@@ -21,7 +21,14 @@ import {
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
 import { CrmMappingSection } from './crm-mapping-section';
-import { HostPrioritySelect, HostReadiness, PersonalHostsCard, TeamHostsNote, type TeamOption } from './team-hosts';
+import {
+  HostPrioritySelect,
+  HostReadiness,
+  joinHostNames,
+  PersonalHostsCard,
+  TeamHostsNote,
+  type TeamOption,
+} from './team-hosts';
 import { connectionDisplayLabel } from '@/lib/connection-label';
 import { cn } from '@/lib/cn';
 import { track } from '@/lib/analytics/port';
@@ -575,18 +582,14 @@ function LocationField({
       gapHosts = teamHosts.filter(lacksCalendar);
     }
   }
-  // The roster arrives in no set order, so sort; sort and join in the page's
-  // locale, so the server render and the browser's agree.
-  const gapNames = gapHosts
-    .map((h) => h.displayName ?? h.email ?? h.memberId)
-    .sort((a, b) => a.localeCompare(b, locale));
-  const joinedNames = new Intl.ListFormat(locale, { type: 'conjunction' }).format(gapNames);
+  // The roster arrives in no set order: `joinHostNames` sorts and joins it in
+  // the page's locale, so the server render and the browser's agree.
   const gapTemplate =
-    gapNames.length === 1 ? m.locationTeamNoDestinationOne : m.locationTeamNoDestinationMany;
+    gapHosts.length === 1 ? m.locationTeamNoDestinationOne : m.locationTeamNoDestinationMany;
   const linkGapWarning = noHostHasCalendar
     ? m.locationTeamNoDestinationAll
-    : gapNames.length > 0
-      ? gapTemplate.replace('{names}', joinedNames)
+    : gapHosts.length > 0
+      ? gapTemplate.replace('{names}', joinHostNames(gapHosts, locale))
       : null;
   const conferencingHint = !teamHosts
     ? m.locationConferencingHint
