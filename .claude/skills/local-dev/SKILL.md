@@ -12,7 +12,7 @@ required for the fast path.
 ## Boot (SQLite, fast path)
 
 ```bash
-pnpm install          # Node >= 20, pnpm >= 10
+pnpm install          # Node >= 22.13, pnpm >= 10
 pnpm dev              # builds packages, migrates + seeds SQLite, runs web + api
 ```
 
