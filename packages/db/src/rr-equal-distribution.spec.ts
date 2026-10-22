@@ -169,6 +169,30 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(!refused.ok && refused.reason).toBe('SLOT_TAKEN');
     });
 
+    it('equal: bookings attended as a co-host (from when the event was collective) count as load', async () => {
+      const ev = await makeEvent('equal', [{ memberId: alexId }, { memberId: jordanId }]);
+      const first = await freeFor(ev, [alexId]);
+      await makeBusy(jordanId, Date.parse(first)); // only Alex is free at `first`
+      // Three past bookings Jordan organized with Alex as a co-host.
+      for (let i = 0; i < 3; i++) {
+        const id = randomUUID();
+        const start = PAST_BASE - ++loadSeq * HOUR;
+        await db.run(
+          sql`INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, start_ms, end_ms, status, created_at, updated_at)
+              VALUES (${id}, ${accountId}, ${randomUUID()}, ${ev.eventTypeId}, ${jordanId}, ${ev.teamId}, ${'load'},
+                ${start}, ${start + HOUR / 2}, 'accepted', ${start}, ${start})`,
+        );
+        await db.run(
+          sql`INSERT INTO booking_host (id, booking_id, member_id, created_at)
+              VALUES (${randomUUID()}, ${id}, ${alexId}, ${start})`,
+        );
+      }
+      // Both now carry three: nobody is ahead, so Alex is still offered.
+      expect(await slotsOf(ev)).toContain(first);
+      await giveBookings(ev.eventTypeId, ev.teamId, alexId, 3); // Alex 6, Jordan 3: three ahead
+      expect(await slotsOf(ev)).not.toContain(first);
+    });
+
     it('availability (NULL): the same host 3 ahead keeps offering, as today', async () => {
       const ev = await makeEvent(null, [{ memberId: alexId }, { memberId: jordanId }]);
       const first = await freeFor(ev, [alexId]);

@@ -718,7 +718,9 @@ function isEqualDistribution(method: TeamSchedulingMethod, et: Pick<TeamEventTyp
 /**
  * Equal distribution's load: each host's accepted bookings OF THIS EVENT, and
  * when the latest one starts (the recency tie-break). Round robin books one
- * host, the booking's host_member_id.
+ * host, the booking's host_member_id; bookings the event took while it was
+ * collective or fixed round robin also list co-hosts in booking_host, and
+ * those count too, as in the default load.
  */
 async function eventHostLoads(
   db: Db,
@@ -728,8 +730,10 @@ async function eventHostLoads(
   const loads = new Map<string, { n: number; last: number | null }>();
   for (const memberId of memberIds) {
     const row = await db.get<{ n: number; last: number | null }>(
-      sql`SELECT COUNT(*) AS n, MAX(start_ms) AS last FROM booking
-          WHERE status = 'accepted' AND event_type_id = ${eventTypeId} AND host_member_id = ${memberId}`,
+      sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
+          WHERE b.status = 'accepted' AND b.event_type_id = ${eventTypeId}
+            AND (b.host_member_id = ${memberId}
+                 OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))`,
     );
     loads.set(memberId, { n: Number(row?.n ?? 0), last: row?.last != null ? Number(row.last) : null });
   }
