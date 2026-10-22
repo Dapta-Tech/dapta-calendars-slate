@@ -11,7 +11,8 @@ import type {
   UpdateEventInput,
 } from '@slate/calendar';
 import { LEGACY_CONFERENCING_VALUE } from '@slate/engine';
-import { CalendarEffects } from './calendar-effects';
+import { getMessages } from '@slate/shared';
+import { CalendarEffects, eventBody } from './calendar-effects';
 
 /** A fake provider that records writes, moves AND deletes (the port's effects). */
 class RecordingCalendarProvider implements CalendarProvider {
@@ -366,5 +367,87 @@ describe('CalendarEffects — booking lifecycle → CalendarProvider port (E4/B9
           WHERE b.uid = ${uid}`,
     );
     expect(refs).toHaveLength(0);
+  });
+
+  describe('the title and description templates reach the event', () => {
+    const JOIN = getMessages('en').manage.joinMeeting;
+
+    async function withTemplates(title: string | null, description: string | null): Promise<void> {
+      await db.run(
+        sql`UPDATE event_type SET calendar_title_template = ${title}, calendar_description_template = ${description}
+            WHERE slug = 'intro-call'`,
+      );
+    }
+
+    it("on the organizer's event and its move, as rendered at booking time", async () => {
+      await withTemplates('Reunión Alex - {{name}}', 'Company: {{form.company}}\nGuest: {{attendee_email}}');
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      for (const body of [provider.created[0]!, provider.updated[0]!]) {
+        expect(body.title).toBe('Reunión Alex - Sam Guest');
+        expect(body.description).toBe('Company: Acme\nGuest: sam@example.com');
+      }
+    });
+
+    it("on a co-host's copy, above the organizer's room", async () => {
+      await withTemplates(null, 'Company: {{form.company}}');
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      const jordan = (await db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'jordan-lee'`))!.id;
+      const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${uid}`))!.id;
+      await db.run(sql`UPDATE booking SET location_kind = 'conferencing' WHERE id = ${bookingId}`);
+      for (const m of [memberId, jordan]) {
+        await db.run(sql`INSERT INTO booking_host (id, booking_id, member_id, created_at) VALUES (${randomUUID()}, ${bookingId}, ${m}, ${Date.now()})`);
+      }
+      await db.run(
+        sql`INSERT INTO connected_calendar
+              (id, account_id, member_id, provider, external_id, primary_email, is_destination, check_conflicts, created_at)
+            VALUES (${randomUUID()}, ${accountId}, ${jordan}, ${'google'}, ${'cal-dest-2'}, ${null}, ${1}, ${1}, ${Date.now()})`,
+      );
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      expect(provider.created.map((c) => c.description)).toEqual([
+        'Company: Acme',
+        `Company: Acme\n\n${JOIN}: https://meet/x`,
+      ]);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      const byRef = Object.fromEntries(provider.updated.map((u) => [u.connectionRef, u.description]));
+      expect(byRef).toEqual({ [CAL_REF]: 'Company: Acme', 'cal-dest-2': `Company: Acme\n\n${JOIN}: https://meet/x` });
+    });
+
+    it('without one: no body on the organizer event, and a move sends none, as before', async () => {
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      expect(provider.created[0]!.title).toBe('Intro Call');
+      expect(provider.created[0]!.description).toBeNull();
+      expect('description' in provider.updated[0]!).toBe(false);
+    });
+
+    it('a body the template no longer writes is cleared on the move, the join line kept', async () => {
+      await withTemplates(null, 'Company: {{form.company}}');
+      const provider = new RecordingCalendarProvider();
+      const effects = new CalendarEffects(provider, db);
+      const uid = await bookFirstSlot();
+      await (effects as unknown as Awaitable).writeEvent(uid);
+      // What `applyCalendarTemplates` stores once the template is gone.
+      await db.run(sql`UPDATE booking SET calendar_description = '' WHERE uid = ${uid}`);
+      await (effects as unknown as Awaitable).moveEvent(uid);
+      expect(provider.updated[0]!.description).toBe('');
+      expect(eventBody({ description: '', organizerLocale: 'en' }, 'https://m')).toBe(`${JOIN}: https://m`);
+    });
+
+    it('eventBody joins the description and the room, and is null with neither', () => {
+      expect(eventBody({ description: null, organizerLocale: 'en' }, null)).toBeNull();
+      expect(eventBody({ description: 'D', organizerLocale: 'en' }, null)).toBe('D');
+      expect(eventBody({ description: null, organizerLocale: 'es' }, 'https://m')).toBe(
+        `${getMessages('es').manage.joinMeeting}: https://m`,
+      );
+    });
   });
 });

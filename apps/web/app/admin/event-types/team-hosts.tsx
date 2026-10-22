@@ -172,3 +172,61 @@ export function HostPrioritySelect({
     />
   );
 }
+
+interface ReadinessHost {
+  memberId: string;
+  displayName: string | null;
+  email?: string | null;
+  hasHours?: boolean;
+  hasCalendar?: boolean;
+}
+
+/**
+ * Hosts' names as people read them: display name, else email, else id, sorted
+ * and joined in the page's language ("Casey and Taylor", "Casey y Taylor").
+ * Sorting in the page's locale keeps the server render and the browser's in
+ * step. The one formatter every team-host warning uses.
+ */
+export function joinHostNames(
+  hosts: Array<{ memberId: string; displayName: string | null; email?: string | null }>,
+  locale?: string,
+): string {
+  const names = hosts.map((h) => h.displayName ?? h.email ?? h.memberId).sort((a, b) => a.localeCompare(b, locale));
+  return new Intl.ListFormat(locale, { type: 'conjunction' }).format(names);
+}
+
+/**
+ * Who among a team event's hosts is not ready, said where the admin reads the
+ * hosts. A host with no working hours (an invited member until their first
+ * sign-in) is offered at no time and never assigned a booking; in a collective
+ * event everyone attends, so nobody can book. A host with no calendar is
+ * still booked, but nothing is checked against or added to a calendar. An
+ * unknown flag (an older API) is never read as missing. Same quiet box as the
+ * location warning beside it.
+ */
+export function HostReadiness({
+  hosts,
+  collective,
+  m,
+  locale,
+}: {
+  hosts: ReadinessHost[];
+  collective: boolean;
+  m: TeamHostsMessages;
+  locale?: string;
+}) {
+  const noHours = hosts.filter((h) => h.hasHours === false);
+  const noCalendar = hosts.filter((h) => h.hasHours !== false && h.hasCalendar === false);
+  if (noHours.length === 0 && noCalendar.length === 0) return null;
+  return (
+    <div
+      data-testid="host-readiness"
+      className="flex flex-col items-start gap-inline rounded-md border border-border bg-muted/40 px-field py-inline text-xs text-muted-foreground"
+    >
+      {noHours.length > 0 ? (
+        <p>{(collective ? m.noHoursCollective : m.noHours).replace('{names}', joinHostNames(noHours, locale))}</p>
+      ) : null}
+      {noCalendar.length > 0 ? <p>{m.noCalendar.replace('{names}', joinHostNames(noCalendar, locale))}</p> : null}
+    </div>
+  );
+}

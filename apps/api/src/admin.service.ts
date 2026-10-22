@@ -316,10 +316,18 @@ export class AdminService {
       // disabled). FRESH, never the display cache (ADR 0009).
       this.calendar.provider,
     );
-    // Write out only a fresh ACCEPTED booking (pending waits for confirm).
-    if (outcome.ok && outcome.booking.status === 'accepted') {
-      this.calendar.onBookingAccepted(outcome.booking.uid);
-      this.crm?.onBookingAccepted(outcome.booking.uid);
+    // Write out only a fresh ACCEPTED booking (pending waits for confirm). A
+    // seat on an existing group booking rewrites the event already written
+    // instead: one more guest, and the slot's shared title and body. A replay
+    // (a seat this address already holds) writes nothing.
+    if (outcome.ok && outcome.booking.status === 'accepted' && !outcome.deduplicated) {
+      if (outcome.seatTaken) {
+        this.calendar.onBookingRescheduled(outcome.booking.uid);
+        this.crm?.onBookingRescheduled(outcome.booking.uid);
+      } else {
+        this.calendar.onBookingAccepted(outcome.booking.uid);
+        this.crm?.onBookingAccepted(outcome.booking.uid);
+      }
     }
     // QA2 BUG-1 — same bug develop's 7305d09 fixed; merged as the superset:
     // this path created the booking but notified NOBODY while the UI claimed

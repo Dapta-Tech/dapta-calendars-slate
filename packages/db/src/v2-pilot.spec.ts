@@ -143,6 +143,6 @@ describe('v2 pilot persistence (SQLite)', () => {
         uid,
         guests: [{ email: 'guest@example.com' }, { email: 'GUEST@example.com' }],
       }),
-    ).toEqual({ ok: true, added: 1 });
+    ).toEqual({ ok: true, added: 1, shared: true });
   });
 });

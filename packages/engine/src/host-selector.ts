@@ -9,6 +9,9 @@
  *   2. among equal priority, weighted least-load — lowest
  *      bookingCount / weight (so a weight-200 host absorbs ~2× a weight-100 host);
  *   3. tie-break by least-recently-booked, then memberId (stable).
+ * Round robin set to equal distribution swaps this order for
+ * {@link selectEqualHost}: the fewest bookings of the event, priority and
+ * weight aside, with hosts too far ahead held back ({@link hostsAheadOfEqualShare}).
  *
  * Three team scheduling methods share this seam (all FREE in Dapta — the layer
  * Calendly/Cal.com paywall):
@@ -79,4 +82,41 @@ export function selectFixedRoundRobinHosts(freeCandidates: HostCandidate[]): Hos
   const assigned = [...fixed];
   if (lucky) assigned.push(lucky);
   return assigned.length > 0 ? assigned : null;
+}
+
+/**
+ * How far ahead of the least-booked host a round robin host may get under
+ * equal distribution before their times are held back (Calendly's "Optimize for
+ * equal distribution": nobody more than three meetings ahead).
+ */
+export const EQUAL_DISTRIBUTION_LEAD = 3;
+
+/**
+ * The hosts equal distribution holds back: those `EQUAL_DISTRIBUTION_LEAD` or
+ * more bookings ahead of the least-booked host. `counts` holds each host's
+ * bookings OF THIS EVENT; pass only hosts that can offer times at all (a host
+ * with no schedule yet would otherwise sit at zero and hold everyone back).
+ */
+export function hostsAheadOfEqualShare(counts: ReadonlyMap<string, number>): Set<string> {
+  if (counts.size === 0) return new Set();
+  const least = Math.min(...counts.values());
+  return new Set([...counts].filter(([, n]) => n - least >= EQUAL_DISTRIBUTION_LEAD).map(([id]) => id));
+}
+
+/**
+ * Equal distribution's pick from the hosts free at the slot: the fewest
+ * bookings of this event (`bookingCount`), then the least recently booked, then
+ * memberId. Priority and weight do not take part.
+ */
+export function selectEqualHost(candidates: HostCandidate[]): HostCandidate | null {
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, cur) => (isFairerShare(cur, best) ? cur : best));
+}
+
+function isFairerShare(a: HostCandidate, b: HostCandidate): boolean {
+  if (a.bookingCount !== b.bookingCount) return a.bookingCount < b.bookingCount;
+  const ra = a.lastBookedAt ? a.lastBookedAt.getTime() : -Infinity;
+  const rb = b.lastBookedAt ? b.lastBookedAt.getTime() : -Infinity;
+  if (ra !== rb) return ra < rb;
+  return a.memberId < b.memberId;
 }

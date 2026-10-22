@@ -36,6 +36,8 @@ export default async function NewEventType({
         displayName: tm.display_name,
         email: tm.email,
         hasDestinationCalendar: tm.has_destination_calendar,
+        hasCalendar: tm.has_calendar,
+        hasHours: tm.has_hours,
       }))
     : undefined;
 

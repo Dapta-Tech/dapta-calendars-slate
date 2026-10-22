@@ -294,6 +294,16 @@ export interface BookingMessages {
     round_robin_hint: string;
     collective_hint: string;
     fixed_round_robin_hint: string;
+    /**
+     * Round robin's distribution method (`rrDistribution`), as Calendly names
+     * the choice: `availability` is today's behavior, `equal` counts only this
+     * event's bookings and holds back a host 3 or more ahead.
+     */
+    distribution: string;
+    availability: string;
+    availability_hint: string;
+    equal: string;
+    equal_hint: string;
   };
   /** Themed timezone combobox (QA2 fix 1) — shared by public + admin surfaces. */
   tzPicker: {
@@ -623,6 +633,15 @@ export interface BookingMessages {
         createTeam: string;
         everyMember: string;
         manageOnTeamPage: string;
+        /**
+         * Hosts who cannot take a booking yet: no working hours (an invited
+         * member until their first sign-in). `{names}` is the joined list.
+         * The collective variant: everyone attends, so nobody can book.
+         */
+        noHours: string;
+        noHoursCollective: string;
+        /** Hosts with no calendar connected: still booked, busy times unchecked, no calendar of their own written. */
+        noCalendar: string;
       };
       /** R (#91) — reminders + follow-up, owned by the event type (#68). */
       reminders: {
@@ -1789,6 +1808,12 @@ export const en: BookingMessages = {
     round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
     collective_hint: 'Everyone attends — offer only times when all hosts are free.',
     fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+    distribution: 'Distribution',
+    availability: 'Maximize availability',
+    availability_hint: 'Offer every time any host is free; the booking goes by priority, then by load.',
+    equal: 'Equal distribution',
+    equal_hint:
+      "Share this event's bookings evenly: a host 3 or more bookings ahead is not offered until the others catch up. Priority and weight don't apply.",
   },
   tzPicker: {
     search: 'Search timezone…',
@@ -2139,6 +2164,12 @@ export const en: BookingMessages = {
         createTeam: 'Create a team',
         everyMember: 'Every member of {team} hosts this event once you save it.',
         manageOnTeamPage: 'Add or remove members on the team page, then save this event.',
+        noHours:
+          'No bookings yet, there are no working hours for: {names}. Hours are set at first sign-in and can be changed in Availability.',
+        noHoursCollective:
+          'No times are offered yet. Everyone attends a collective event, and there are no working hours yet for: {names}. Hours are set at first sign-in and can be changed in Availability.',
+        noCalendar:
+          'No calendar connected for: {names}. Busy times elsewhere aren’t checked, and nothing is written to a calendar of their own until one is connected in Calendars.',
       },
       reminders: {
         sectionTitle: 'Reminders',
@@ -3217,6 +3248,13 @@ export const es: BookingMessages = {
     round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
     collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
     fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+    distribution: 'Distribución',
+    availability: 'Maximizar disponibilidad',
+    availability_hint:
+      'Ofrece cada horario en que algún anfitrión esté libre; la reserva se asigna por prioridad y luego por carga.',
+    equal: 'Distribución equitativa',
+    equal_hint:
+      'Reparte por igual las reservas de este evento: un anfitrión con 3 o más reservas de ventaja no se ofrece hasta que los demás lo alcancen. La prioridad y el peso no aplican.',
   },
   tzPicker: {
     search: 'Buscar zona horaria…',
@@ -3567,6 +3605,12 @@ export const es: BookingMessages = {
         createTeam: 'Crear un equipo',
         everyMember: 'Todos los miembros de {team} quedan como anfitriones de este evento al guardarlo.',
         manageOnTeamPage: 'Agrega o quita miembros en la página del equipo y luego guarda este evento.',
+        noHours:
+          'Aún sin reservas, no hay horario de trabajo para: {names}. El horario se crea al iniciar sesión por primera vez y se cambia en Disponibilidad.',
+        noHoursCollective:
+          'Aún no se ofrecen horarios. En un evento colectivo asisten todos, y todavía no hay horario de trabajo para: {names}. El horario se crea al iniciar sesión por primera vez y se cambia en Disponibilidad.',
+        noCalendar:
+          'Sin calendario conectado para: {names}. No se revisan sus horas ocupadas en otros calendarios y nada se escribe en un calendario propio hasta conectar uno en Calendarios.',
       },
       reminders: {
         sectionTitle: 'Recordatorios',
@@ -3846,7 +3890,7 @@ export const es: BookingMessages = {
       you: 'Tú',
       noEmail: 'Sin correo',
       statusActive: 'Activo',
-      statusInvited: 'Invitado',
+      statusInvited: 'Invitación pendiente',
       statusDisabled: 'Desactivado',
       enable: 'Activar',
       disable: 'Desactivar',
@@ -3878,7 +3922,7 @@ export const es: BookingMessages = {
     workspaces: {
       menuLabel: 'Tus espacios',
       current: 'Actual',
-      pending: 'Pendiente',
+      pending: 'Invitación pendiente',
       switchFailed: 'No pudimos abrir ese espacio. Intenta de nuevo.',
     },
     invite: {

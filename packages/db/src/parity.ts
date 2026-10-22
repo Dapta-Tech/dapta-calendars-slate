@@ -16,6 +16,8 @@ import {
   isOneOffTokenShape,
   parseEventLocation,
   selectFixedRoundRobinHosts,
+  hostsAheadOfEqualShare,
+  selectEqualHost,
   selectLuckyHost,
   unionInstants,
   verifyManageToken,
@@ -32,6 +34,7 @@ import {
   bookingLocale,
   bookingStartOutOfRange,
   busyReadSpan,
+  distinctAttendees,
   getAccountByCode,
   getAvailability,
   getEventType,
@@ -62,6 +65,7 @@ import {
   type OneOffLinkRecord,
 } from './one-off-link';
 import { loadExternalBusy } from './calendar-refs';
+import { applyCalendarTemplates } from './calendar-text';
 import { brandingUpdateSql, type BrandingPatch } from './branding-sql';
 import { getAccountBranding } from './account-branding';
 import type { BrandKit } from '@slate/types';
@@ -516,6 +520,8 @@ interface TeamEventType {
   before_event_buffer: number;
   after_event_buffer: number;
   scheduling_type: string | null;
+  /** Round robin only: 'equal', or NULL / 'availability' for today's behavior. */
+  rr_distribution: string | null;
   booking_fields: unknown;
   /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
   prevent_duplicate_bookings: number;
@@ -538,7 +544,7 @@ async function getTeamEventType(
   return db.get<TeamEventType>(
     sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
-               booking_fields, prevent_duplicate_bookings
+               rr_distribution, booking_fields, prevent_duplicate_bookings
         FROM event_type
         WHERE account_id = ${accountId} AND team_id = ${teamId} AND slug = ${slug}${visibility}
         LIMIT 1`,
@@ -704,6 +710,60 @@ function combineTeamSlots(
   return unionInstants(all); // round_robin
 }
 
+/** Round robin set to equal distribution (`event_type.rr_distribution`). */
+function isEqualDistribution(method: TeamSchedulingMethod, et: Pick<TeamEventType, 'rr_distribution'>): boolean {
+  return method === 'round_robin' && et.rr_distribution === 'equal';
+}
+
+/**
+ * Equal distribution's load: each host's accepted bookings OF THIS EVENT, and
+ * when the latest one starts (the recency tie-break). Round robin books one
+ * host, the booking's host_member_id; bookings the event took while it was
+ * collective or fixed round robin also list co-hosts in booking_host, and
+ * those count too, as in the default load.
+ */
+async function eventHostLoads(
+  db: Db,
+  eventTypeId: string,
+  memberIds: string[],
+): Promise<Map<string, { n: number; last: number | null }>> {
+  const loads = new Map<string, { n: number; last: number | null }>();
+  for (const memberId of memberIds) {
+    const row = await db.get<{ n: number; last: number | null }>(
+      sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
+          WHERE b.status = 'accepted' AND b.event_type_id = ${eventTypeId}
+            AND (b.host_member_id = ${memberId}
+                 OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))`,
+    );
+    loads.set(memberId, { n: Number(row?.n ?? 0), last: row?.last != null ? Number(row.last) : null });
+  }
+  return loads;
+}
+
+/** A host whose CONFIGURATION offers nothing (as opposed to a calendar that failed to read). */
+const CONFIG_GAPS: ReadonlySet<AvailabilityEmptyReason> = new Set(['SCHEDULE_MISSING', 'NO_SCHEDULE', 'NO_HOURS']);
+
+/**
+ * The hosts equal distribution holds back right now (see
+ * `hostsAheadOfEqualShare`). Only hosts whose configuration can offer times set
+ * the floor: one with no schedule yet (an invited member) sits at zero bookings
+ * for good and would otherwise hold back the whole team. A calendar that failed
+ * to read is not a configuration gap: the slot list sees those and the
+ * rules-only booking probe does not, so counting them alike keeps the two in
+ * step.
+ */
+function equalShareHeldBack(
+  hosts: Array<{ memberId: string; reason: AvailabilityEmptyReason | null }>,
+  loads: Map<string, { n: number; last: number | null }>,
+): Set<string> {
+  const counts = new Map<string, number>();
+  for (const h of hosts) {
+    if (h.reason !== null && CONFIG_GAPS.has(h.reason)) continue;
+    counts.set(h.memberId, loads.get(h.memberId)?.n ?? 0);
+  }
+  return hostsAheadOfEqualShare(counts);
+}
+
 /**
  * Team availability, combined across hosts per the event's scheduling method
  * (UNION for round-robin, INTERSECTION for collective, fixed∩union for
@@ -738,15 +798,22 @@ export async function getTeamAvailability(
   const method = normalizeSchedulingMethod(et.scheduling_type);
 
   const hostSets: Array<{
+    memberId: string;
     isFixed: boolean;
     free: Set<number>;
     reason: AvailabilityEmptyReason | null;
   }> = [];
   for (const host of hosts) {
     const { free, reason } = await hostFreeSlotMs(db, host, et, args.fromMs, args.toMs, now, { calendar });
-    hostSets.push({ isFixed: host.is_fixed === 1, free, reason });
+    hostSets.push({ memberId: host.member_id, isFixed: host.is_fixed === 1, free, reason });
   }
-  const slots = combineTeamSlots(method, hostSets).map((ms) => new Date(ms).toISOString());
+  // Equal distribution: a host far enough ahead offers no times until the
+  // others catch up.
+  const heldBack = isEqualDistribution(method, et)
+    ? equalShareHeldBack(hostSets, await eventHostLoads(db, et.id, hosts.map((h) => h.member_id)))
+    : new Set<string>();
+  const offering = hostSets.filter((h) => !heldBack.has(h.memberId));
+  const slots = combineTeamSlots(method, offering).map((ms) => new Date(ms).toISOString());
   return {
     eventType: {
       slug: et.slug,
@@ -952,10 +1019,16 @@ export async function createTeamBooking(
   // host outside their hours, or an invited member with no schedule yet (no
   // bookings, so the lightest load), would otherwise win the round robin pick.
   const offeredBy = new Set<string>();
+  // Equal distribution reads each host's bookings of this event once: the
+  // probe below holds back the hosts too far ahead, and the pick ranks by it.
+  const equal = isEqualDistribution(normalizeSchedulingMethod(et.scheduling_type), et);
+  let equalLoads: Map<string, { n: number; last: number | null }> | null = null;
+  let heldBack = new Set<string>();
   {
     const now = new Date();
     const endMsProbe = args.startMs + et.length_minutes * 60_000;
     const ruleSets: Array<{
+      memberId: string;
       isFixed: boolean;
       free: Set<number>;
       reason: AvailabilityEmptyReason | null;
@@ -964,7 +1037,7 @@ export async function createTeamBooking(
       const { free, reason } = await hostFreeSlotMs(db, host, et, args.startMs, endMsProbe, now, {
         rulesOnly: true,
       });
-      ruleSets.push({ isFixed: host.is_fixed === 1, free, reason });
+      ruleSets.push({ memberId: host.member_id, isFixed: host.is_fixed === 1, free, reason });
       // Within this host's own hours at any minute, not only on their slot
       // grid: a grid starts at each block's start in the host's zone, so a
       // host whose day starts at 9:15, or in a zone a half hour off, covers
@@ -975,9 +1048,14 @@ export async function createTeamBooking(
             .free;
       if (covered.has(args.startMs)) offeredBy.add(host.member_id);
     }
-    const offered = combineTeamSlots(normalizeSchedulingMethod(et.scheduling_type), ruleSets).includes(
-      args.startMs,
-    );
+    if (equal) {
+      equalLoads = await eventHostLoads(db, et.id, ruleSets.map((r) => r.memberId));
+      heldBack = equalShareHeldBack(ruleSets, equalLoads);
+    }
+    const offered = combineTeamSlots(
+      normalizeSchedulingMethod(et.scheduling_type),
+      ruleSets.filter((r) => !heldBack.has(r.memberId)),
+    ).includes(args.startMs);
     if (!offered)
       return {
         ok: false,
@@ -995,7 +1073,8 @@ export async function createTeamBooking(
   let sawCalendarFailure = false;
   const heldAt = Date.now();
   for (const host of hosts) {
-    if (!offeredBy.has(host.member_id)) continue; // outside their own hours, or no schedule at all
+    // Outside their own hours (or no schedule at all), or held back by equal distribution.
+    if (!offeredBy.has(host.member_id) || heldBack.has(host.member_id)) continue;
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
     // A host somebody is holding this time with (a soft hold on one of their
@@ -1018,12 +1097,14 @@ export async function createTeamBooking(
       sawCalendarFailure = true;
       continue;
     }
-    const counts = await db.get<{ n: number; last: number | null }>(
-      sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
-          WHERE b.status = 'accepted'
-            AND (b.host_member_id = ${host.member_id}
-                 OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${host.member_id}))`,
-    );
+    const counts =
+      equalLoads?.get(host.member_id) ??
+      (await db.get<{ n: number; last: number | null }>(
+        sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
+            WHERE b.status = 'accepted'
+              AND (b.host_member_id = ${host.member_id}
+                   OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${host.member_id}))`,
+      ));
     candidates.push({
       memberId: host.member_id,
       priority: host.priority,
@@ -1035,7 +1116,7 @@ export async function createTeamBooking(
   }
 
   // Resolve the assigned host set for the method.
-  const assigned = resolveAssignment(method, hosts, candidates);
+  const assigned = resolveAssignment(method, hosts, candidates, equal);
   if (!assigned || assigned.length === 0)
     return {
       ok: false,
@@ -1059,15 +1140,20 @@ export async function createTeamBooking(
   // Snapshot the team event type's configured Where onto the booking (F5), same
   // as the personal path — otherwise team bookings show no location.
   const eventLocation = parseEventLocation(parseJsonColumn<unknown>(et.locations, null));
+  // One row per address, as the personal path writes them; other attendees
+  // make the booking's calendar event shared from the start (`seated`), so its
+  // text never carries the invitee's own data.
+  const additionalAttendees = distinctAttendees(args.attendee, args.additionalAttendees).slice(1);
   const insertBooking = sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
-      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, created_at, updated_at)
+      start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, seated,
+      created_at, updated_at)
     VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${bookingLocale(args.locale)},
       ${args.idempotencyKey ? scopedIdempotencyKey(account.id, args.idempotencyKey) : null},
-      ${now}, ${now})`;
+      ${additionalAttendees.length > 0 ? 1 : null}, ${now}, ${now})`;
   const insertAttendee = sql`
     INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
     VALUES (${attendeeId}, ${bookingId}, ${args.attendee.name}, ${args.attendee.email},
@@ -1076,7 +1162,7 @@ export async function createTeamBooking(
   // Extra attendees are written a millisecond apart, after the invitee, so
   // "the first attendee row" names the one who booked without relying on the
   // database's physical row order (see loadBookingNotificationContext).
-  const insertAdditionalAttendees = (args.additionalAttendees ?? []).map(
+  const insertAdditionalAttendees = additionalAttendees.map(
     (attendee, i) => sql`
       INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${bookingId}, ${attendee.name}, ${attendee.email},
@@ -1106,13 +1192,15 @@ export async function createTeamBooking(
   // first would kill the link on every SLOT_TAKEN and strand the invitee with a
   // dead link and no booking. See `consumeOneOffLink`.
   if (live) await consumeOneOffLink(db, live.id, bookingId);
+  await applyCalendarTemplates(db, uid);
   return { ok: true, uid, hostMemberId: organizer.memberId, manageToken: token };
 }
 
 /**
  * Turn the free candidates into the assigned host set for a method, or null if
  * the slot can't be booked (a required host is busy).
- *   - round_robin       → the one fair host.
+ *   - round_robin       → the one fair host (equal distribution: the fewest
+ *     bookings of this event, priority and weight aside).
  *   - collective        → every event host (all must be free).
  *   - fixed_round_robin  → every fixed host (all must be free) + one rotating pick.
  */
@@ -1120,6 +1208,7 @@ function resolveAssignment(
   method: TeamSchedulingMethod,
   hosts: EventHostRow[],
   free: HostCandidate[],
+  equal = false,
 ): HostCandidate[] | null {
   const freeIds = new Set(free.map((c) => c.memberId));
   if (method === 'collective') {
@@ -1131,7 +1220,7 @@ function resolveAssignment(
     if (!requiredFixed.every((id) => freeIds.has(id))) return null; // a fixed host is busy
     return selectFixedRoundRobinHosts(free);
   }
-  const lucky = selectLuckyHost(free);
+  const lucky = equal ? selectEqualHost(free) : selectLuckyHost(free);
   return lucky ? [lucky] : null;
 }
 
@@ -1459,6 +1548,8 @@ export async function rescheduleBooking(
   const moved = await runGuardedUpdate(db, assignedHostIds, overlapChecks, updateSql);
   if (moved === 'gone') return { ok: false, reason: 'GONE' };
   if (moved === 'conflict') return { ok: false, reason: 'SLOT_TAKEN' };
+  // A time in the calendar title or body would be stale: render them again.
+  await applyCalendarTemplates(db, b.uid);
   return {
     ok: true,
     uid: b.uid,
@@ -1800,6 +1891,8 @@ export interface BookingNotificationContext {
   accountId: string;
   uid: string;
   title: string;
+  /** The calendar event's rendered body (the .ics DESCRIPTION); null when there is none. */
+  calendarDescription: string | null;
   /**
    * For the template variables `{{event_name}}`, `{{event_description}}`,
    * `{{workspace_name}}` and `{{team_name}}`: the event type's name and
@@ -1913,6 +2006,7 @@ export async function loadBookingNotificationContext(
     account_id: string;
     uid: string;
     title: string;
+    calendar_description: string | null;
     start_ms: number;
     end_ms: number;
     status: string;
@@ -1936,8 +2030,9 @@ export async function loadBookingNotificationContext(
     workspace_name: string | null;
     team_name: string | null;
   }>(
-    sql`SELECT b.id, b.account_id, b.uid, b.title, b.start_ms, b.end_ms, b.status, b.location,
-               b.location_kind, b.host_member_id, m.display_name AS host_name, m.email AS host_email,
+    sql`SELECT b.id, b.account_id, b.uid, b.title, b.calendar_description, b.start_ms, b.end_ms,
+               b.status, b.location, b.location_kind, b.host_member_id, m.display_name AS host_name,
+               m.email AS host_email,
                m.time_zone AS host_tz, m.locale AS host_locale, m.handle AS host_handle,
                COALESCE(acc.vanity_slug, acc.code) AS account_code, et.slug AS event_slug,
                et.reminders AS event_reminders, b.responses AS responses,
@@ -2006,6 +2101,7 @@ export async function loadBookingNotificationContext(
     accountId: row.account_id,
     uid: row.uid,
     title: row.title,
+    calendarDescription: row.calendar_description?.trim() ? row.calendar_description : null,
     eventName: row.event_name?.trim() || null,
     eventDescription: row.event_description?.trim() || null,
     workspaceName: row.workspace_name?.trim() || null,

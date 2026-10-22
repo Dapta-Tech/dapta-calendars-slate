@@ -14,6 +14,7 @@ import {
   releaseBookingReference,
   setBookingReferenceMeetingUrl,
   sql,
+  type CalendarWriteContext,
   type Db,
 } from '@slate/db';
 import { BUSY_CACHE_DEFAULTS, BusyCache, CachedBusyProvider } from './busy-cache';
@@ -22,6 +23,24 @@ import { CALENDAR, DB, ENV } from './tokens';
 
 /** Calendar lifecycle transitions the outbox can carry. */
 export type CalendarAction = 'create' | 'delete' | 'reschedule';
+
+/**
+ * The body of one written event: the booking's rendered description (from the
+ * event type's template; none without one, and none when it was emptied),
+ * then, on a co-host's copy, the organizer's room as a labelled line. Labelled
+ * in the organizer's locale: a bare URL alone in an event body says nothing
+ * about what it is. Null when there is neither, which is how an event without
+ * a template always read.
+ */
+export function eventBody(
+  ctx: Pick<CalendarWriteContext, 'description' | 'organizerLocale'>,
+  joinUrl: string | null,
+): string | null {
+  const join = joinUrl
+    ? `${getMessages(ctx.organizerLocale === 'es' ? 'es' : 'en').manage.joinMeeting}: ${joinUrl}`
+    : null;
+  return [ctx.description, join].filter(Boolean).join('\n\n') || null;
+}
 
 /**
  * The single place the booking lifecycle reaches the CalendarProvider PORT to
@@ -225,6 +244,13 @@ export class CalendarEffects {
           ctx.destinationCalendarIds[ref.destination ?? ctx.destinationRefs[0] ?? ''],
         externalEventId: ref.externalEventId!,
         title: ctx.title,
+        // Only a booking whose body came from a template sends one (absent
+        // leaves the event's body as it is); an emptied one is sent empty, to
+        // clear it. A co-host's copy keeps its join line, with the room the
+        // organizer's event has now.
+        ...(ctx.description !== null
+          ? { description: eventBody(ctx, isOrganizer ? null : (meetingUrl ?? storedUrl)) ?? '' }
+          : {}),
         startUtc: ctx.startUtc,
         endUtc: ctx.endUtc,
         attendeeEmails: attendeesFor(ctx, ref.destination ?? ctx.destinationRefs[0]),
@@ -292,14 +318,10 @@ export class CalendarEffects {
           endUtc: ctx.endUtc,
           attendeeEmails: attendeesFor(ctx, connectionRef),
           organizerEmail: ctx.organizerEmail,
-          // Co-hosts get the organizer's room as text; only the organizer's
+          // The booking's rendered body (none without a template), and on a
+          // co-host's copy the organizer's room as text: only the organizer's
           // destination is allowed to mint one.
-          // Labelled in the organizer's locale — a bare URL alone in an event
-          // body says nothing about what it is, and every other surface this
-          // feature touches is EN+ES.
-          description: meetingUrl
-            ? `${getMessages(ctx.organizerLocale === 'es' ? 'es' : 'en').manage.joinMeeting}: ${meetingUrl}`
-            : null,
+          description: eventBody(ctx, meetingUrl),
           // B9: the booking's snapshotted location KIND triggers the link — no
           // vendor literal on the public path (R15, ADR 0008).
           requestConferenceLink: wantsLink && isOrganizer,

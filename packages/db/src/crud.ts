@@ -47,6 +47,8 @@ export interface EventTypeView {
   scheduleId: string | null;
   hidden: boolean;
   schedulingType: string | null;
+  /** Round robin only: 'availability' (NULL) or 'equal'. */
+  rrDistribution: string | null;
   minimumBookingNotice: number;
   beforeEventBuffer: number;
   afterEventBuffer: number;
@@ -75,6 +77,10 @@ export interface EventTypeView {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. NULL ⇒ never
    *  configured, which is what every event type predating this reads as. */
   crmPropertyMappings: CrmPropertyMappings | null;
+  /** The calendar event title and description templates (`Meeting Felipe - {{name}}`).
+   *  NULL ⇒ none: the title is the event's name and there is no description. */
+  calendarTitleTemplate: string | null;
+  calendarDescriptionTemplate: string | null;
 }
 
 interface EventTypeDbRow {
@@ -89,6 +95,7 @@ interface EventTypeDbRow {
   schedule_id: string | null;
   hidden: number;
   scheduling_type: string | null;
+  rr_distribution: string | null;
   minimum_booking_notice: number;
   before_event_buffer: number;
   after_event_buffer: number;
@@ -100,13 +107,20 @@ interface EventTypeDbRow {
   reminders: unknown;
   destination_calendar_id: string | null;
   crm_property_mappings: unknown;
+  calendar_title_template: string | null;
+  calendar_description_template: string | null;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
-  schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
+  schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
-  crm_property_mappings`;
+  crm_property_mappings, calendar_title_template, calendar_description_template`;
+
+/** A template as stored: blank is "none" (NULL), so the booking keeps today's text. */
+function templateOrNull(text: string | null | undefined): string | null {
+  return text?.trim() ? text : null;
+}
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
   const hosts = await db.all<{ member_id: string; is_fixed: number; priority: number | null; weight: number | null }>(
@@ -127,6 +141,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     scheduleId: r.schedule_id,
     hidden: !!r.hidden,
     schedulingType: r.scheduling_type,
+    rrDistribution: r.rr_distribution,
     minimumBookingNotice: r.minimum_booking_notice,
     beforeEventBuffer: r.before_event_buffer,
     afterEventBuffer: r.after_event_buffer,
@@ -146,6 +161,8 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     conflictCalendarIds: conflictCalendars.map((c) => c.connected_calendar_id),
     destinationCalendarId: r.destination_calendar_id,
     crmPropertyMappings: parseJsonColumn<CrmPropertyMappings | null>(r.crm_property_mappings, null),
+    calendarTitleTemplate: templateOrNull(r.calendar_title_template),
+    calendarDescriptionTemplate: templateOrNull(r.calendar_description_template),
   };
 }
 
@@ -236,6 +253,7 @@ export interface EventTypeInputRepo {
   scheduleId?: string | null;
   hidden?: boolean;
   schedulingType?: string | null;
+  rrDistribution?: string | null;
   minimumBookingNotice?: number;
   beforeEventBuffer?: number;
   afterEventBuffer?: number;
@@ -264,6 +282,10 @@ export interface EventTypeInputRepo {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. UNDEFINED ⇒
    *  unchanged; `null` ⇒ cleared back to "never configured". */
   crmPropertyMappings?: CrmPropertyMappings | null;
+  /** Calendar title and description templates. UNDEFINED ⇒ unchanged; null
+   *  or blank ⇒ none. Validated by the API before they reach this layer. */
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -299,21 +321,24 @@ export async function createEventType(
     : null;
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
-          length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
+          length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
-          destination_calendar_id, crm_property_mappings, created_at)
+          destination_calendar_id, crm_property_mappings, calendar_title_template,
+          calendar_description_template, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
-          ${input.schedulingType ?? null},
+          ${input.schedulingType ?? null}, ${input.rrDistribution ?? null},
           ${jsonParam(db, input.bookingFields ?? null)},
           ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
           ${input.minimumBookingNotice ?? 120},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
-          ${jsonParam(db, input.crmPropertyMappings ?? null)}, ${now})`,
+          ${jsonParam(db, input.crmPropertyMappings ?? null)},
+          ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
+          ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -346,6 +371,7 @@ export async function updateEventType(
   if (input.scheduleId !== undefined) set('schedule_id', sql`${input.scheduleId ?? null}`);
   if (input.hidden !== undefined) set('hidden', sql`${input.hidden ? 1 : 0}`);
   if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);
+  if (input.rrDistribution !== undefined) set('rr_distribution', sql`${input.rrDistribution ?? null}`);
   if (input.minimumBookingNotice !== undefined) set('minimum_booking_notice', sql`${input.minimumBookingNotice}`);
   if (input.beforeEventBuffer !== undefined) set('before_event_buffer', sql`${input.beforeEventBuffer}`);
   if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);
@@ -359,6 +385,10 @@ export async function updateEventType(
   // never-configured; UNDEFINED leaves whatever the event already had.
   if (input.crmPropertyMappings !== undefined)
     set('crm_property_mappings', jsonParam(db, input.crmPropertyMappings ?? null));
+  if (input.calendarTitleTemplate !== undefined)
+    set('calendar_title_template', sql`${templateOrNull(input.calendarTitleTemplate)}`);
+  if (input.calendarDescriptionTemplate !== undefined)
+    set('calendar_description_template', sql`${templateOrNull(input.calendarDescriptionTemplate)}`);
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
   // back the reminder they just deleted.
@@ -712,13 +742,23 @@ export async function listTeamMembers(db: Db, accountId: string, teamId: string)
     display_name: string | null;
     email: string | null;
     has_destination_calendar: number;
+    has_calendar: number;
+    has_hours: number;
   }>(
     sql`SELECT tm.member_id, tm.role, tm.accepted, m.display_name, m.email,
           CASE WHEN EXISTS (
             SELECT 1 FROM connected_calendar cc
             WHERE cc.member_id = tm.member_id AND cc.account_id = ${accountId}
               AND cc.is_destination = 1
-          ) THEN 1 ELSE 0 END AS has_destination_calendar
+          ) THEN 1 ELSE 0 END AS has_destination_calendar,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM connected_calendar cc
+            WHERE cc.member_id = tm.member_id AND cc.account_id = ${accountId}
+          ) THEN 1 ELSE 0 END AS has_calendar,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM schedule s JOIN availability av ON av.schedule_id = s.id
+            WHERE s.id = m.default_schedule_id AND s.account_id = ${accountId}
+          ) THEN 1 ELSE 0 END AS has_hours
         FROM team_membership tm
         JOIN member m ON m.id = tm.member_id
         JOIN team t ON t.id = tm.team_id
@@ -727,6 +767,12 @@ export async function listTeamMembers(db: Db, accountId: string, teamId: string)
   return rows.map((r) => ({
     ...r,
     has_destination_calendar: Number(r.has_destination_calendar) === 1,
+    // Any connected calendar: what busy times are checked against.
+    has_calendar: Number(r.has_calendar) === 1,
+    // Working hours on the member's default schedule. An invited member has
+    // none until their first sign-in creates it; without hours a host is
+    // offered nowhere and never assigned.
+    has_hours: Number(r.has_hours) === 1,
   }));
 }
 

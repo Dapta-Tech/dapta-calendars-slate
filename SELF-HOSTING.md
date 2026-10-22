@@ -660,6 +660,19 @@ Three rules make a booking end up with exactly one room:
 The link is stored on `booking_reference.meeting_url` and read from there by the
 email, the `.ics` and the manage page. Only `https://` URLs are rendered.
 
+#### The event body
+
+`POST /v1/events` and `PATCH /v1/events/:id` may carry `description`, the event's
+body as plain text with `\n` line breaks: the booking's description, rendered from
+the event type's description template, and on a co-host's copy the join line below
+it. Write it as text, never as HTML; a provider that takes a content type gets it
+as text.
+
+- On `POST`, `null` or absent means no body.
+- On `PATCH`, absent means leave the body as it is, a string replaces it, and an
+  empty string clears it (the host removed the template that wrote it). A booking
+  without a description template never sends one.
+
 ### The ESM module contract (advanced)
 
 For a backend that needs its own token authority (short-lived minted tokens per

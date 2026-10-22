@@ -71,7 +71,41 @@ describe('listTeamMembers: has_destination_calendar (SQLite in-memory)', () => {
       display_name: 'Alex Rivera',
       email: 'alex@example.com',
       has_destination_calendar: true,
+      has_calendar: true,
+      has_hours: true,
     });
+  });
+
+  it('has_calendar counts any connected calendar, a conflict-only one included', async () => {
+    const calendars = async () =>
+      Object.fromEntries((await listTeamMembers(db, accountId, teamId)).map((r) => [r.member_id, r.has_calendar]));
+    expect(await calendars()).toEqual({ [alexId]: false, [jordanId]: false });
+    await createConnection(db, { accountId, memberId: jordanId, provider: 'generic', externalId: 'j', isDestination: false });
+    expect(await calendars()).toEqual({ [alexId]: false, [jordanId]: true });
+  });
+
+  it('has_hours needs a default schedule with at least one rule: an invited member has none', async () => {
+    const invitedId = randomUUID();
+    await db.run(
+      sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, status, created_at)
+          VALUES (${invitedId}, ${accountId}, ${'casey-morgan'}, ${'Casey Morgan'}, ${'casey@example.com'}, ${'UTC'},
+            ${null}, ${'invited'}, ${Date.now()})`,
+    );
+    await db.run(
+      sql`INSERT INTO team_membership (id, account_id, team_id, member_id, role, accepted, created_at)
+          VALUES (${randomUUID()}, ${accountId}, ${teamId}, ${invitedId}, 'member', 1, ${Date.now()})`,
+    );
+    const hours = async () =>
+      Object.fromEntries((await listTeamMembers(db, accountId, teamId)).map((r) => [r.member_id, r.has_hours]));
+    // The seeded hosts have working hours; the invitee has no schedule yet.
+    expect(await hours()).toEqual({ [alexId]: true, [jordanId]: true, [invitedId]: false });
+
+    // A schedule with every rule deleted offers nothing either.
+    const jordanSchedule = (await db.get<{ id: string }>(
+      sql`SELECT default_schedule_id AS id FROM member WHERE id = ${jordanId}`,
+    ))!.id;
+    await db.run(sql`DELETE FROM availability WHERE schedule_id = ${jordanSchedule}`);
+    expect((await hours())[jordanId]).toBe(false);
   });
 
   it('does not count a calendar that is only checked for conflicts', async () => {

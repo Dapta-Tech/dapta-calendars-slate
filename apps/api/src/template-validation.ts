@@ -5,12 +5,16 @@ import {
   type TemplateAudience,
   type TemplateContext,
   type TemplateLocale,
+  type ValidateOptions,
 } from '@slate/engine';
 import type { EventReminder } from '@slate/types';
 
+/** The fields a template can sit in: an email's two, and the calendar event's two on an event type. */
+export type TemplateFieldName = 'subject' | 'body' | 'calendarTitleTemplate' | 'calendarDescriptionTemplate';
+
 /** One host-written template field on a save, with what is stored for it now. */
 export interface TemplateField {
-  field: 'subject' | 'body';
+  field: TemplateFieldName;
   /** The reminder this field belongs to, on an event type save. */
   reminderId?: string;
   /** How the message names the field ("Subject", "Reminder 2 body"), in the host's language. */
@@ -26,7 +30,7 @@ export interface TemplateField {
  * in the host's language.
  */
 export interface TemplateFieldIssue {
-  field: 'subject' | 'body';
+  field: TemplateFieldName;
   reminderId?: string;
   label: string;
   code: string;
@@ -59,22 +63,84 @@ export function assertTemplates(
   const issues: TemplateFieldIssue[] = [];
   for (const f of fields) {
     if (!f.text || sameText(f.text, f.previous)) continue;
-    for (const i of templateErrors(f.text, { context: target.context, audience: target.audience })) {
-      issues.push({
-        field: f.field,
-        ...(f.reminderId ? { reminderId: f.reminderId } : {}),
-        label: f.label,
-        code: i.code,
-        token: i.token,
-        start: i.start,
-        end: i.end,
-        message: templateIssueMessage(i, target.locale),
-      });
-    }
+    issues.push(...fieldIssues(f, { context: target.context, audience: target.audience }, target.locale));
   }
+  refuse(issues);
+}
+
+/** One field's blocking issues, as the 400 body lists them. */
+function fieldIssues(f: TemplateField, opts: ValidateOptions, locale: TemplateLocale): TemplateFieldIssue[] {
+  return templateErrors(f.text ?? '', opts).map((i) => ({
+    field: f.field,
+    ...(f.reminderId ? { reminderId: f.reminderId } : {}),
+    label: f.label,
+    code: i.code,
+    token: i.token,
+    start: i.start,
+    end: i.end,
+    message: templateIssueMessage(i, locale),
+  }));
+}
+
+/** Throw the 400 for a save with refused templates; the message names the first. */
+function refuse(issues: readonly TemplateFieldIssue[]): void {
   const first = issues[0];
   if (!first) return;
   throw new BadRequestException({ error: 'INVALID_TEMPLATE', message: `${first.label}: ${first.message}`, issues });
+}
+
+const CALENDAR_LABELS: Record<TemplateLocale, Record<'calendarTitleTemplate' | 'calendarDescriptionTemplate', string>> = {
+  en: { calendarTitleTemplate: 'Calendar event title', calendarDescriptionTemplate: 'Calendar event description' },
+  es: {
+    calendarTitleTemplate: 'Título del evento en el calendario',
+    calendarDescriptionTemplate: 'Descripción del evento en el calendario',
+  },
+};
+
+/** An event type's calendar text: the two templates and whether it has seats. */
+export interface CalendarTemplateState {
+  calendarTitleTemplate?: string | null;
+  calendarDescriptionTemplate?: string | null;
+  seatsPerTimeSlot?: number | null;
+}
+
+/**
+ * The calendar event's title and description templates on an event type save.
+ * The event is the host's, and every invitee on it is a guest, so it is
+ * checked for the invitee: nothing private to the host. On an event with
+ * seats, one invitee's data is refused too (`seated`), since every seat-taker
+ * shares the one event; a save that turns seats on checks the templates it
+ * leaves behind for that reason, even if it did not touch them. Otherwise a
+ * text equal to what is stored passes, as every template does.
+ *
+ * `input` is the save (omitted fields unchanged); `stored` is the event type as
+ * it is now, absent on a create. A question the event does not ask is only the
+ * editor's warning: answers are matched by name and a question can be renamed.
+ */
+export function assertCalendarTemplates(
+  input: CalendarTemplateState,
+  stored: CalendarTemplateState | null,
+  locale: TemplateLocale,
+): void {
+  const seats = input.seatsPerTimeSlot !== undefined ? input.seatsPerTimeSlot : stored?.seatsPerTimeSlot;
+  const seated = (seats ?? 1) > 1;
+  const seatsTurnedOn = seated && (stored?.seatsPerTimeSlot ?? 1) <= 1;
+  const issues: TemplateFieldIssue[] = [];
+  for (const field of ['calendarTitleTemplate', 'calendarDescriptionTemplate'] as const) {
+    const previous = stored?.[field] ?? null;
+    const text = input[field] !== undefined ? input[field] : previous;
+    if (!text?.trim()) continue;
+    if (!seatsTurnedOn && sameText(text, previous)) continue;
+    const context = field === 'calendarTitleTemplate' ? 'title' : 'description';
+    issues.push(
+      ...fieldIssues(
+        { field, label: CALENDAR_LABELS[locale][field], text },
+        { context, audience: 'invitee', seated },
+        locale,
+      ),
+    );
+  }
+  refuse(issues);
 }
 
 const LABELS: Record<TemplateLocale, { subject: string; body: string; reminder: string; followUp: string }> = {

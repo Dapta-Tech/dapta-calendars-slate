@@ -273,6 +273,8 @@ export const adminApi = {
         /** Has a destination calendar, where a team booking's meeting link is
          *  minted. Absent on an older API: read that as unknown, not as false. */
         has_destination_calendar?: boolean;
+        has_calendar?: boolean;
+        has_hours?: boolean;
       }[]
     >('GET', `/v1/teams/${id}/members`),
   addTeamMember: (id: string, b: unknown) => req('POST', `/v1/teams/${id}/members`, b),
@@ -401,6 +403,8 @@ export interface EventType {
   afterEventBuffer: number;
   slotInterval: number | null;
   schedulingType: string | null;
+  /** Round robin only: 'equal', or 'availability' / null (today's behavior). Optional on the wire. */
+  rrDistribution?: string | null;
   requiresConfirmation: boolean;
   /** Duplicate-booking guard (#69) — false on every event nobody switched on. */
   preventDuplicateBookings: boolean;

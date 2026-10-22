@@ -1,4 +1,11 @@
-import { HostCandidate, selectLuckyHost, selectFixedRoundRobinHosts } from './host-selector';
+import {
+  EQUAL_DISTRIBUTION_LEAD,
+  HostCandidate,
+  hostsAheadOfEqualShare,
+  selectEqualHost,
+  selectFixedRoundRobinHosts,
+  selectLuckyHost,
+} from './host-selector';
 
 const host = (memberId: string, over: Partial<HostCandidate> = {}): HostCandidate => ({
   memberId,
@@ -93,5 +100,35 @@ describe('selectFixedRoundRobinHosts', () => {
   it('with only fixed hosts free returns just the fixed set', () => {
     const assigned = selectFixedRoundRobinHosts([host('f1', { isFixed: true })]);
     expect(assigned?.map((h) => h.memberId)).toEqual(['f1']);
+  });
+});
+
+describe('equal distribution (round robin)', () => {
+  it('holds back a host 3 or more bookings ahead of the least-booked host, never the least-booked one', () => {
+    expect(EQUAL_DISTRIBUTION_LEAD).toBe(3);
+    const ahead = hostsAheadOfEqualShare(new Map([['a', 5], ['b', 2], ['c', 4], ['d', 3]]));
+    expect([...ahead].sort()).toEqual(['a']);
+    expect(hostsAheadOfEqualShare(new Map([['a', 2], ['b', 0]])).size).toBe(0);
+    expect(hostsAheadOfEqualShare(new Map([['a', 7]])).size).toBe(0);
+    expect(hostsAheadOfEqualShare(new Map()).size).toBe(0);
+  });
+
+  it('picks the fewest bookings of this event, ignoring priority and weight', () => {
+    const picked = selectEqualHost([
+      host('star', { priority: 2, weight: 500, bookingCount: 3 }),
+      host('plain', { priority: -2, weight: 1, bookingCount: 1 }),
+    ]);
+    expect(picked?.memberId).toBe('plain');
+  });
+
+  it('breaks a tie by the least recently booked, then by member id', () => {
+    expect(
+      selectEqualHost([
+        host('recent', { bookingCount: 2, lastBookedAt: new Date('2026-10-20T15:00:00Z') }),
+        host('earlier', { bookingCount: 2, lastBookedAt: new Date('2026-10-19T15:00:00Z') }),
+      ])?.memberId,
+    ).toBe('earlier');
+    expect(selectEqualHost([host('b', { bookingCount: 1 }), host('a', { bookingCount: 1 })])?.memberId).toBe('a');
+    expect(selectEqualHost([])).toBeNull();
   });
 });
