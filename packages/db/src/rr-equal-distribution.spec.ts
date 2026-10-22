@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { BusyInterval, CalendarProvider } from '@slate/calendar';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
@@ -276,7 +277,12 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
      * key `insertEqualShareGuarded` takes) until all of them wait on it, past
      * their reads; SQLite interleaves them in this one process already.
      */
-    async function allAtOnce<T>(eventTypeId: string, requests: Array<() => Promise<T>>): Promise<T[]> {
+    async function allAtOnce<T>(
+      eventTypeId: string,
+      requests: Array<() => Promise<T>>,
+      /** Postgres only: runs once every request waits on the lock, before it is released. */
+      whileWaiting?: () => Promise<void>,
+    ): Promise<T[]> {
       if (db.dialect === 'sqlite') return Promise.all(requests.map((r) => r()));
       let results!: Promise<T[]>;
       await db.pg!.drizzle.transaction(async (tx) => {
@@ -291,6 +297,7 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
           if (Date.now() > deadline) throw new Error('the requests never reached the event lock');
           await new Promise((r) => setTimeout(r, 20));
         }
+        await whileWaiting?.();
       });
       return results;
     }
@@ -363,6 +370,47 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       // Riley takes the first three (to 3 and 3), then the six end within one of each other.
       expect(Math.abs(casey - riley)).toBeLessThanOrEqual(1);
     }, 20_000);
+
+    (engine === 'Postgres' ? it : it.skip)(
+      "equal: a picked host who loses the time meanwhile answers SLOT_TAKEN, though another host's calendar failed",
+      async () => {
+        const caseyId = await workingHost('Casey Morgan');
+        const rileyId = await workingHost('Riley Chen');
+        const ev = await makeEvent('equal', [{ memberId: caseyId }, { memberId: rileyId }]);
+        // Casey's calendar cannot be read, so Riley is the one host left to pick.
+        const ref = `cal-fails-${tag}`;
+        await db.run(
+          sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+              VALUES (${randomUUID()}, ${accountId}, ${caseyId}, ${'google'}, ${ref}, 0, 1, ${Date.now()})`,
+        );
+        const failsForCasey: CalendarProvider = {
+          enabled: true,
+          listBusy: ({ connectionRefs }): Promise<BusyInterval[]> =>
+            connectionRefs.includes(ref) ? Promise.reject(new Error('vendor 503')) : Promise.resolve([]),
+          createEvent: () => Promise.resolve({ externalEventId: 'e' }),
+          updateEvent: () => Promise.resolve({ externalEventId: 'e' }),
+          deleteEvent: () => Promise.resolve(),
+          listCalendars: () => Promise.resolve([]),
+          checkConnection: () => Promise.resolve({ ok: true, detail: 'ok' }),
+        };
+        const [iso] = await slotsOf(ev);
+        const [out] = await allAtOnce(
+          ev.eventTypeId,
+          [
+            () =>
+              createTeamBooking(
+                db,
+                { accountCode: 'acme', teamSlug: ev.teamSlug, slug: ev.slug, startMs: Date.parse(iso!), attendee: attendee(tag) },
+                failsForCasey,
+              ),
+          ],
+          // Riley's time is taken by another booking while the request waits.
+          () => makeBusy(rileyId, Date.parse(iso!)),
+        );
+        expect(out).toEqual({ ok: false, reason: 'SLOT_TAKEN' });
+      },
+      20_000,
+    );
   });
 }
 
