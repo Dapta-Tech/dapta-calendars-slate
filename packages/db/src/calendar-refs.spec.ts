@@ -206,7 +206,7 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
 
     it('getAvailability subtracts busy from ONLY the event-scoped conflict calendar', async () => {
       const calA = await connectCalendar({ destination: false, conflicts: true }, 'cal-a');
-      const calB = await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
+      await connectCalendar({ destination: false, conflicts: true }, 'cal-b');
       const eventTypeId = await getIntroCallEventTypeId();
       // Scope this event to cal-a ONLY.
       await db.run(

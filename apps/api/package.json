@@ -10,7 +10,7 @@
     "start": "tsx src/main.ts",
     "auth:mint": "tsx src/cli/mint-token.ts",
     "build": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src",
+    "lint": "eslint src --max-warnings 0",
     "test": "vitest run",
     "e2e:mcp": "tsx scripts/mcp-e2e.mjs",
     "e2e:oauth": "tsx scripts/oauth-e2e.mjs",
