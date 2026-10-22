@@ -249,6 +249,59 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(booked.ok).toBe(true);
       expect(booked.ok && [alexId, jordanId]).toContain(booked.ok ? booked.hostMemberId : '');
     });
+
+    /** A member with working hours like the seeded hosts (weekdays 09:00 to 17:00, New York) and no bookings. */
+    async function workingHost(name: string) {
+      const id = randomUUID();
+      const scheduleId = randomUUID();
+      await db.run(
+        sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
+            VALUES (${id}, ${accountId}, ${`wh-${tag}-${++made}`}, ${name}, ${`wh-${tag}-${made}@example.com`},
+              ${'America/New_York'}, ${scheduleId}, ${Date.now()})`,
+      );
+      await db.run(
+        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+            VALUES (${scheduleId}, ${accountId}, ${id}, ${'Working hours'}, ${'America/New_York'}, ${Date.now()})`,
+      );
+      await db.run(
+        sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+            VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'09:00'}, ${'17:00'}, ${null})`,
+      );
+      return id;
+    }
+
+    it('equal: bookings made at once never all read the same lightest host; the pick runs one at a time per event', async () => {
+      // Two hosts of this run only, so every offered time is free for both,
+      // however many runs a shared Postgres database has kept.
+      const caseyId = await workingHost('Casey Morgan');
+      const rileyId = await workingHost('Riley Chen');
+      const ev = await makeEvent('equal', [{ memberId: caseyId }, { memberId: rileyId }]);
+      // Six times booked all at once: each request reads the loads before any
+      // of them writes, so without the per-event lock every one of them would
+      // pick the same host.
+      const times = (await slotsOf(ev)).slice(0, 6);
+      expect(times).toHaveLength(6);
+      const outs = await Promise.all(
+        times.map((iso, i) =>
+          createTeamBooking(db, {
+            accountCode: 'acme',
+            teamSlug: ev.teamSlug,
+            slug: ev.slug,
+            startMs: Date.parse(iso),
+            attendee: attendee(`${tag}-at-once-${i}`),
+          }),
+        ),
+      );
+      const hosts = outs.map((o) => (o.ok ? o.hostMemberId : `refused:${!o.ok && o.reason}`));
+      expect(hosts.filter((h) => h === caseyId)).toHaveLength(3);
+      expect(hosts.filter((h) => h === rileyId)).toHaveLength(3);
+      // What the event's own rows say, not only what the calls answered.
+      const rows = await db.all<{ host_member_id: string }>(
+        sql`SELECT host_member_id FROM booking WHERE event_type_id = ${ev.eventTypeId} AND status = 'accepted'`,
+      );
+      expect(rows.filter((r) => r.host_member_id === caseyId)).toHaveLength(3);
+      expect(rows.filter((r) => r.host_member_id === rileyId)).toHaveLength(3);
+    });
   });
 }
 

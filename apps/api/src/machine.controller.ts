@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  GoneException,
   Get,
   Headers,
   HttpCode,
@@ -13,6 +14,7 @@ import {
   Post,
   Query,
   Req,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Db } from '@slate/db';
 import {
@@ -258,13 +260,24 @@ export class MachineController {
     const a = body?.attendee;
     if (!a?.name || !a?.email)
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'attendee name + email required' });
-    await addAttendeeToBooking(this.db, uid, principal.accountId, {
+    const outcome = await addAttendeeToBooking(this.db, uid, principal.accountId, {
       name: a.name,
       email: a.email,
       timeZone: a.timeZone ?? 'UTC',
       notes: a.notes,
       phone: a.phone,
     });
+    // Gone from the account since the scope check: answered as that check
+    // answers a uid it cannot see (no uid probing).
+    if (!outcome.ok && outcome.reason === 'NOT_FOUND')
+      throw new ForbiddenException({ error: 'FORBIDDEN', message: 'Not permitted.' });
+    if (!outcome.ok && outcome.reason === 'LIMIT_EXCEEDED')
+      throw new UnprocessableEntityException({ error: 'LIMIT_EXCEEDED', message: 'The booking has no room for more attendees.' });
+    if (!outcome.ok) throw new GoneException({ error: 'GONE', message: 'booking is no longer active' });
+    // The calendar event is written out again for a new attendee, as for v2
+    // guests, only when its text is the shared one; an address already on the
+    // booking changes nothing and sends nothing.
+    if (outcome.added && outcome.shared) this.svc.afterGuestsChanged(uid);
     return { ok: true, uid };
   }
 }

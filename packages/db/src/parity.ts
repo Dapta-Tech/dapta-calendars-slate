@@ -728,16 +728,22 @@ async function eventHostLoads(
   memberIds: string[],
 ): Promise<Map<string, { n: number; last: number | null }>> {
   const loads = new Map<string, { n: number; last: number | null }>();
-  for (const memberId of memberIds) {
-    const row = await db.get<{ n: number; last: number | null }>(
-      sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
-          WHERE b.status = 'accepted' AND b.event_type_id = ${eventTypeId}
-            AND (b.host_member_id = ${memberId}
-                 OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))`,
-    );
-    loads.set(memberId, { n: Number(row?.n ?? 0), last: row?.last != null ? Number(row.last) : null });
-  }
+  for (const memberId of memberIds)
+    loads.set(memberId, toEventHostLoad(await db.get<EventHostLoadRow>(eventHostLoadSql(eventTypeId, memberId))));
   return loads;
+}
+
+type EventHostLoadRow = { n: number | string; last: number | string | null };
+
+function eventHostLoadSql(eventTypeId: string, memberId: string) {
+  return sql`SELECT COUNT(*) AS n, MAX(b.start_ms) AS last FROM booking b
+      WHERE b.status = 'accepted' AND b.event_type_id = ${eventTypeId}
+        AND (b.host_member_id = ${memberId}
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${memberId}))`;
+}
+
+function toEventHostLoad(row: EventHostLoadRow | undefined): { n: number; last: number | null } {
+  return { n: Number(row?.n ?? 0), last: row?.last != null ? Number(row.last) : null };
 }
 
 /** A host whose CONFIGURATION offers nothing (as opposed to a calendar that failed to read). */
@@ -1023,6 +1029,7 @@ export async function createTeamBooking(
   // probe below holds back the hosts too far ahead, and the pick ranks by it.
   const equal = isEqualDistribution(normalizeSchedulingMethod(et.scheduling_type), et);
   let equalLoads: Map<string, { n: number; last: number | null }> | null = null;
+  let equalHosts: Array<{ memberId: string; reason: AvailabilityEmptyReason | null }> = [];
   let heldBack = new Set<string>();
   {
     const now = new Date();
@@ -1049,6 +1056,7 @@ export async function createTeamBooking(
       if (covered.has(args.startMs)) offeredBy.add(host.member_id);
     }
     if (equal) {
+      equalHosts = ruleSets;
       equalLoads = await eventHostLoads(db, et.id, ruleSets.map((r) => r.memberId));
       heldBack = equalShareHeldBack(ruleSets, equalLoads);
     }
@@ -1123,9 +1131,6 @@ export async function createTeamBooking(
       reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN',
     };
 
-  const organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
-  const assignedIds = assigned.map((h) => h.memberId);
-
   const uid = randomUUID();
   const bookingId = randomUUID();
   const attendeeId = randomUUID();
@@ -1144,11 +1149,11 @@ export async function createTeamBooking(
   // make the booking's calendar event shared from the start (`seated`), so its
   // text never carries the invitee's own data.
   const additionalAttendees = distinctAttendees(args.attendee, args.additionalAttendees).slice(1);
-  const insertBooking = sql`
+  const insertBooking = (organizerId: string) => sql`
     INSERT INTO booking (id, account_id, uid, event_type_id, host_member_id, team_id, title, location, location_kind,
       start_ms, end_ms, status, metadata, responses, attendee_time_zone, locale, idempotency_key, seated,
       created_at, updated_at)
-    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizer.memberId}, ${team.id}, ${et.title},
+    VALUES (${bookingId}, ${account.id}, ${uid}, ${et.id}, ${organizerId}, ${team.id}, ${et.title},
       ${eventLocation?.detail ?? null}, ${eventLocation?.kind ?? null},
       ${args.startMs}, ${endMs}, 'accepted', ${metaExpr}, ${responsesExpr}, ${args.attendee.timeZone},
       ${bookingLocale(args.locale)},
@@ -1172,22 +1177,41 @@ export async function createTeamBooking(
   // Multi-host bookings (collective / fixed_round_robin) record every assigned
   // host so write-out + notifications fan out. Round-robin's single host is
   // already carried by host_member_id, so it writes no booking_host rows.
-  const insertHostRows =
-    assignedIds.length > 1
-      ? assigned.map(
+  const insertHostRows = (hosts: HostCandidate[]) =>
+    hosts.length > 1
+      ? hosts.map(
           (h) =>
             sql`INSERT INTO booking_host (id, booking_id, member_id, is_fixed, created_at)
                 VALUES (${randomUUID()}, ${bookingId}, ${h.memberId}, ${h.isFixed ? 1 : 0}, ${now})`,
         )
       : [];
-
-  const booked = await insertBookingGuarded(db, assignedIds, args.startMs, endMs, [
-    insertBooking,
+  const statementsFor = (hosts: HostCandidate[], organizerId: string) => [
+    insertBooking(organizerId),
     insertAttendee,
     ...insertAdditionalAttendees,
-    ...insertHostRows,
-  ]);
-  if (!booked) return { ok: false, reason: 'SLOT_TAKEN' };
+    ...insertHostRows(hosts),
+  ];
+
+  let organizer = pickOrganizer(method, assigned as [HostCandidate, ...HostCandidate[]]);
+  if (equal) {
+    // The pick above read the loads outside any lock; two bookings of the
+    // event at once would both see the same lightest host. It is made again
+    // where it is written (see `insertEqualShareGuarded`).
+    const pick = await insertEqualShareGuarded(db, et.id, equalHosts, candidates, args.startMs, endMs, (h) =>
+      statementsFor([h], h.memberId),
+    );
+    if (!pick) return { ok: false, reason: 'SLOT_TAKEN' };
+    organizer = pick;
+  } else {
+    const booked = await insertBookingGuarded(
+      db,
+      assigned.map((h) => h.memberId),
+      args.startMs,
+      endMs,
+      statementsFor(assigned, organizer.memberId),
+    );
+    if (!booked) return { ok: false, reason: 'SLOT_TAKEN' };
+  }
   // Committed — burn the link (#110). AFTER the write, never before: burning
   // first would kill the link on every SLOT_TAKEN and strand the invitee with a
   // dead link and no booking. See `consumeOneOffLink`.
@@ -1315,6 +1339,86 @@ function insertBookingGuarded(
     ],
     statements,
   );
+}
+
+/**
+ * Equal distribution's pick and write as one step, so two bookings of the
+ * event at once never both read the same lightest host. On Postgres a
+ * transaction-scoped advisory lock on the event type runs them one after the
+ * other; SQLite runs one writer at a time already, and its IMMEDIATE
+ * transaction is that lock. Under it the event's loads are read again, the
+ * hosts too far ahead held back again, and the pick made from the hosts found
+ * free (`candidates`); then the usual member lock, overlap and hold checks, and
+ * the write of `statementsFor(pick)`. Answers the host written, or null when
+ * none can take the time.
+ */
+async function insertEqualShareGuarded(
+  db: Db,
+  eventTypeId: string,
+  hosts: Array<{ memberId: string; reason: AvailabilityEmptyReason | null }>,
+  candidates: HostCandidate[],
+  startMs: number,
+  endMs: number,
+  statementsFor: (pick: HostCandidate) => Array<ReturnType<typeof sql>>,
+): Promise<HostCandidate | null> {
+  const now = Date.now();
+  const pickFrom = (loads: Map<string, { n: number; last: number | null }>) => {
+    const held = equalShareHeldBack(hosts, loads);
+    return selectEqualHost(
+      candidates
+        .filter((c) => !held.has(c.memberId))
+        .map((c) => {
+          const load = loads.get(c.memberId) ?? { n: 0, last: null };
+          return { ...c, bookingCount: load.n, lastBookedAt: load.last != null ? new Date(load.last) : null };
+        }),
+    );
+  };
+  const checks = (memberId: string) => [
+    memberOverlapSql(memberId, startMs, endMs),
+    memberHeldSql(memberId, startMs, endMs, now),
+  ];
+  if (db.dialect === 'sqlite') {
+    const lite = db.sqlite!.drizzle;
+    return db.sqlite!.txn<HostCandidate | null>(
+      () => {
+        const loads = new Map(
+          hosts.map((h) => [h.memberId, toEventHostLoad(lite.get<EventHostLoadRow>(eventHostLoadSql(eventTypeId, h.memberId)))]),
+        );
+        const pick = pickFrom(loads);
+        if (!pick) return null;
+        for (const check of checks(pick.memberId)) if (lite.get(check)) return null;
+        for (const stmt of statementsFor(pick)) lite.run(stmt);
+        return pick;
+      },
+      { immediate: true },
+    );
+  }
+  try {
+    return await db.pg!.drizzle.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`slate:rr-equal:${eventTypeId}`}, 0))`);
+      const loads = new Map<string, { n: number; last: number | null }>();
+      for (const h of hosts) {
+        const rows = (await tx.execute(eventHostLoadSql(eventTypeId, h.memberId))) as unknown as EventHostLoadRow[];
+        loads.set(h.memberId, toEventHostLoad(rows[0]));
+      }
+      const pick = pickFrom(loads);
+      if (!pick) return null;
+      await lockMembers(tx, [pick.memberId]);
+      for (const check of checks(pick.memberId))
+        if (((await tx.execute(check)) as unknown as unknown[]).length > 0) return null;
+      for (const stmt of statementsFor(pick)) await tx.execute(stmt);
+      return pick;
+    });
+  } catch (err) {
+    // The EXCLUDE refusing an overlap is a time taken meanwhile; anything else
+    // is a fault, answered as a taken time but said so in the log.
+    const e = err as { code?: string; cause?: { code?: string } } | undefined;
+    if ((e?.code ?? e?.cause?.code) !== '23P01')
+      console.warn(
+        `equal distribution: a booking of event type ${eventTypeId} failed to write: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    return null;
+  }
 }
 
 // --- Reschedule / cancel --------------------------------------------------
@@ -1760,33 +1864,6 @@ export async function cancelBooking(
     return { ok: false, reason: current ? 'GONE' : 'NOT_FOUND' };
   }
   return { ok: true, uid: b.uid, ...nowIso };
-}
-
-/**
- * Add an attendee to an existing booking (agent/group use). Account-scoped: a
- * uid outside the account resolves to not-found (anti-uid-probing upstream).
- */
-export async function addAttendeeToBooking(
-  db: Db,
-  uid: string,
-  accountId: string,
-  attendee: {
-    name: string;
-    email: string;
-    timeZone: string;
-    notes?: string;
-    phone?: string;
-  },
-): Promise<{ ok: boolean; reason?: 'NOT_FOUND' }> {
-  const b = await resolveBooking(db, uid, accountId);
-  if (!b) return { ok: false, reason: 'NOT_FOUND' };
-  await db.run(
-    sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
-        VALUES (${randomUUID()}, ${b.id}, ${attendee.name}, ${attendee.email},
-          ${normalizeAttendeeEmail(attendee.email)}, ${attendee.timeZone},
-          ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`,
-  );
-  return { ok: true };
 }
 
 /**

@@ -1438,8 +1438,12 @@ export const openapiSpec = {
           properties: { attendee: { $ref: '#/components/schemas/Attendee' } },
         }),
         responses: {
-          '201': { description: 'attendee added' },
+          '201': { description: 'attendee added, or already on the booking (nothing written again)' },
           '403': { description: 'out-of-scope' },
+          '410': { description: 'the booking is cancelled or otherwise no longer active' },
+          '422': {
+            description: 'LIMIT_EXCEEDED: the booking already holds 30 attendees and guests (or its event seats, when more)',
+          },
         },
       },
     },
