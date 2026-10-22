@@ -23,6 +23,7 @@ jobs:
     # get with Advanced Security. Skip until the repo flips public (where it is free).
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
