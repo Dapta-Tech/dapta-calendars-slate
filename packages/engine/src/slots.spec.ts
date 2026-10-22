@@ -116,6 +116,211 @@ describe('computeSlots', () => {
     });
   });
 
+  describe('DST gaps and overlaps inside a block', () => {
+    /** A recurring block on one weekday only. */
+    const on = (day: number, startTime: string, endTime: string): AvailabilityRule => ({
+      days: [day],
+      startTime,
+      endTime,
+      date: null,
+    });
+
+    /**
+     * What `isSlotBookable` asks before a booking or a reschedule is written:
+     * the same rules over the meeting's own window must offer that start.
+     */
+    const bookable = (input: Parameters<typeof computeSlots>[0], startMs: number): boolean =>
+      computeSlots({
+        ...input,
+        fromUtc: new Date(startMs),
+        toUtc: new Date(startMs + input.durationMin * 60_000),
+      }).some(d => d.getTime() === startMs);
+
+    it.each([
+      [60, ['2026-09-06T04:00:00.000Z', '2026-09-06T05:00:00.000Z']], // 01:00, 02:00 -03
+      [30, ['2026-09-06T04:00:00.000Z', '2026-09-06T04:30:00.000Z', '2026-09-06T05:00:00.000Z', '2026-09-06T05:30:00.000Z']],
+    ])('America/Santiago: Sunday hours from 00:00 start at 01:00 when the clocks skip midnight (%i min)', (durationMin, expected) => {
+      // 2026-09-06: 00:00 -04 jumps to 01:00 -03 (04:00Z). The old projection
+      // started the block at Saturday 23:00 -04 (03:00Z); with 30 minutes it
+      // offered 03:00Z, which the booking check, reading Saturday only, refused.
+      const input = {
+        timeZone: 'America/Santiago',
+        availability: [on(0, '00:00', '03:00')],
+        durationMin,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-09-05T00:00:00Z'),
+        toUtc: new Date('2026-09-08T00:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual(expected);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+      expect(bookable(input, Date.parse('2026-09-06T03:00:00Z'))).toBe(false); // Saturday 23:00 -04
+    });
+
+    it('America/Santiago: Saturday hours to 24:00 keep their last hour when midnight is skipped', () => {
+      // The block ends at the transition (04:00Z), so 23:00 -04 (03:00Z) is offered.
+      const input = {
+        timeZone: 'America/Santiago',
+        availability: [on(6, '20:00', '24:00')],
+        durationMin: 60,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-09-05T12:00:00Z'),
+        toUtc: new Date('2026-09-07T00:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual([
+        '2026-09-06T00:00:00.000Z', // 20:00 -04
+        '2026-09-06T01:00:00.000Z',
+        '2026-09-06T02:00:00.000Z',
+        '2026-09-06T03:00:00.000Z', // 23:00 -04
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+    });
+
+    it('America/New_York: a block ending in the gap ends at the transition', () => {
+      // 00:00 to 02:30 on 2026-03-08 covers 00:00 to 02:00 EST, every time before 02:30.
+      const input = {
+        timeZone: 'America/New_York',
+        availability: [on(0, '00:00', '02:30')],
+        durationMin: 30,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-03-07T12:00:00Z'),
+        toUtc: new Date('2026-03-09T12:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual([
+        '2026-03-08T05:00:00.000Z', // 00:00 EST
+        '2026-03-08T05:30:00.000Z',
+        '2026-03-08T06:00:00.000Z',
+        '2026-03-08T06:30:00.000Z', // 01:30 EST, ends at the transition
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+    });
+
+    it('Europe/Berlin: a block ending in the gap ends at the transition, east of UTC too', () => {
+      // 00:00 to 02:30 on 2026-03-29 covers 00:00 to 02:00 CET; the old
+      // projection ran it to 03:30 CEST.
+      const input = {
+        timeZone: 'Europe/Berlin',
+        availability: [on(0, '00:00', '02:30')],
+        durationMin: 30,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-03-28T12:00:00Z'),
+        toUtc: new Date('2026-03-30T12:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual([
+        '2026-03-28T23:00:00.000Z', // 00:00 CET
+        '2026-03-28T23:30:00.000Z',
+        '2026-03-29T00:00:00.000Z',
+        '2026-03-29T00:30:00.000Z', // 01:30 CET, ends at the transition
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+      expect(bookable(input, Date.parse('2026-03-29T01:00:00Z'))).toBe(false); // 03:00 CEST
+    });
+
+    it('America/New_York: hours wholly inside the gap offer nothing that day', () => {
+      // 02:00 to 02:45 never happens on 2026-03-08; both ends land on the transition.
+      const input = {
+        timeZone: 'America/New_York',
+        availability: [{ days: null, startTime: '02:00', endTime: '02:45', date: '2026-03-08' }],
+        durationMin: 30,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-03-07T12:00:00Z'),
+        toUtc: new Date('2026-03-09T12:00:00Z'),
+      };
+      expect(computeSlots(input)).toEqual([]);
+      expect(bookable(input, Date.parse('2026-03-08T06:00:00Z'))).toBe(false); // 01:00 EST
+    });
+
+    it('America/New_York: a block starting in the gap starts at 03:00 EDT, not 01:00 EST', () => {
+      // 2026-03-08 02:00 EST jumps to 03:00 EDT (07:00Z).
+      const input = {
+        timeZone: 'America/New_York',
+        availability: [on(0, '02:00', '05:00')],
+        durationMin: 60,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-03-07T12:00:00Z'),
+        toUtc: new Date('2026-03-09T12:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual(['2026-03-08T07:00:00.000Z', '2026-03-08T08:00:00.000Z']); // 03:00, 04:00 EDT
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+      expect(bookable(input, Date.parse('2026-03-08T06:00:00Z'))).toBe(false); // 01:00 EST
+    });
+
+    it('America/Asuncion: a block ending in the overlap ends at its first occurrence', () => {
+      // 2024-03-24 00:00 -03 went back to 23:00 -04 on the 23rd (03:00Z), so
+      // Saturday 23:00 to 24:00 happened twice; the block ends at the first 23:30.
+      const input = {
+        timeZone: 'America/Asuncion',
+        availability: [on(6, '22:00', '23:30')],
+        durationMin: 30,
+        busy: [] as Interval[],
+        now: new Date('2024-01-01T00:00:00Z'),
+        fromUtc: new Date('2024-03-23T12:00:00Z'),
+        toUtc: new Date('2024-03-25T00:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      // 22:00 -03 (01:00Z) up to 23:30 -03, the first 23:30 (02:30Z).
+      expect(iso(slots)).toEqual([
+        '2024-03-24T01:00:00.000Z',
+        '2024-03-24T01:30:00.000Z',
+        '2024-03-24T02:00:00.000Z',
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+    });
+
+    it('Europe/Berlin: a block starting in the overlap starts at its first occurrence', () => {
+      // 2026-10-25 03:00 CEST went back to 02:00 CET (01:00Z): 02:00 to 04:00
+      // local is three real hours, from 02:00 CEST (00:00Z).
+      const input = {
+        timeZone: 'Europe/Berlin',
+        availability: [on(0, '02:00', '04:00')],
+        durationMin: 60,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-10-24T12:00:00Z'),
+        toUtc: new Date('2026-10-26T12:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual([
+        '2026-10-25T00:00:00.000Z', // 02:00 CEST
+        '2026-10-25T01:00:00.000Z', // 02:00 CET
+        '2026-10-25T02:00:00.000Z', // 03:00 CET
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+    });
+
+    it('Europe/Berlin: a block ending in the overlap ends at its first occurrence', () => {
+      // 00:00 to 02:30 on 2026-10-25 ends at 02:30 CEST (00:30Z), not 02:30 CET.
+      const input = {
+        timeZone: 'Europe/Berlin',
+        availability: [on(0, '00:00', '02:30')],
+        durationMin: 30,
+        busy: [] as Interval[],
+        now: NOW_EARLY,
+        fromUtc: new Date('2026-10-24T12:00:00Z'),
+        toUtc: new Date('2026-10-26T12:00:00Z'),
+      };
+      const slots = computeSlots(input);
+      expect(iso(slots)).toEqual([
+        '2026-10-24T22:00:00.000Z', // 00:00 CEST
+        '2026-10-24T22:30:00.000Z',
+        '2026-10-24T23:00:00.000Z',
+        '2026-10-24T23:30:00.000Z',
+        '2026-10-25T00:00:00.000Z', // 02:00 CEST, the last that ends by the first 02:30
+      ]);
+      for (const d of slots) expect(bookable(input, d.getTime())).toBe(true);
+    });
+  });
+
   describe('date overrides', () => {
     it('a date override replaces recurring rules for that calendar date', () => {
       const slots = iso(
