@@ -4,7 +4,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
 import { createTeamBooking, getTeamAvailability } from './parity';
-import { addGuestsToBooking } from './v2-pilot';
+import { addAttendeeToBooking, addGuestsToBooking } from './v2-pilot';
 import { createEventType, updateEventType } from './crud';
 import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
 
@@ -91,13 +91,15 @@ describe('a seat taken on a group slot', () => {
   });
 
   it('when even the reset fails, the event is not rewritten for the new seat-taker', async () => {
-    const { startMs } = await slotBookedBeforeSeats();
+    const { startMs, uid } = await slotBookedBeforeSeats();
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
     const bob = await book(startMs, 'Bob Other', 'bob@example.com');
     if (!bob.ok) throw new Error('seat failed');
     expect(bob.seatTaken).toBeUndefined();
     expect(bob.booking).toMatchObject({ title: 'Office hours', calendarDescription: null });
+    // The seat itself wrote the safe text with it: no reader sees Bob beside Alice's own text.
+    expect(await stored(uid)).toEqual({ title: 'Office hours', calendar_description: '' });
   });
 
   it('the reset never writes over a booking that moved meanwhile', async () => {
@@ -323,5 +325,100 @@ describe('a booking whose calendar event has others on it is shared from the sta
     expect(
       await addGuestsToBooking(db, { accountId, uid: other.uid, guests: [{ email: 'late@example.com' }] }),
     ).toEqual({ ok: true, added: 1, shared: false });
+    // The guests came with the safe text, in the same write.
+    expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
+  });
+
+  it('an attendee the machine API adds makes it shared the same way, and never joins a cancelled booking', async () => {
+    const bo = { name: 'Bo Added', email: 'bo@example.com', timeZone: 'UTC' };
+    const attendees = async (uid: string) =>
+      (
+        await db.all<{ email: string }>(
+          sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+        )
+      ).map((r) => r.email);
+    const alone = await book([]);
+    expect((await stored(alone.uid)).title).toBe('Call Ana Private Secret Co');
+    expect(await addAttendeeToBooking(db, alone.uid, accountId, bo)).toEqual({ ok: true, added: true, shared: true });
+    expect(await stored(alone.uid)).toEqual({ title: 'Call', calendar_description: 'With Alex Rivera', seated: 1 });
+    expect(await attendees(alone.uid)).toEqual(['ana@example.com', 'bo@example.com']);
+    // Another account's uid, or none at all, is not found.
+    expect(await addAttendeeToBooking(db, alone.uid, 'other-account', bo)).toEqual({ ok: false, reason: 'NOT_FOUND' });
+    // A cancelled booking gains nobody.
+    const gone = await book([]);
+    await db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${gone.uid}`);
+    expect(await addAttendeeToBooking(db, gone.uid, accountId, bo)).toEqual({ ok: false, reason: 'GONE' });
+    expect(await attendees(gone.uid)).toEqual(['ana@example.com']);
+    expect((await stored(gone.uid)).seated).toBeNull();
+    // Neither the render nor its reset landing: the attendee is kept but the event is not written out.
+    const other = await book([]);
+    vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
+    vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
+    expect(await addAttendeeToBooking(db, other.uid, accountId, bo)).toEqual({ ok: true, added: true, shared: false });
+    // The attendee came with the safe text, in the same write.
+    expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
+  });
+
+  it('the machine API writes an address already on the booking once, and stops at 30 people', async () => {
+    const attendees = async (uid: string) =>
+      Number(
+        (await db.get<{ n: number }>(
+          sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+        ))!.n,
+      );
+    const one = await book([]);
+    const bo = { name: 'Bo Added', email: 'bo@example.com', timeZone: 'UTC' };
+    expect(await addAttendeeToBooking(db, one.uid, accountId, bo)).toMatchObject({ ok: true, added: true });
+    // A retry, the invitee, or a guest's address: nothing written again (so nothing sent).
+    for (const email of [' BO@example.com ', 'ana@example.com']) {
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email })).toEqual({
+        ok: true,
+        added: false,
+        shared: true,
+      });
+    }
+    expect(await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: 'gi@example.com' }] })).toMatchObject({
+      ok: true,
+      added: 1,
+    });
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'GI@example.com' })).toMatchObject({
+      added: false,
+    });
+    expect(await attendees(one.uid)).toBe(2);
+
+    // 30 people in all (the invitee, Bo, a guest and 27 more): the 31st is refused.
+    for (let i = 0; i < 26; i++)
+      expect(
+        await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: `p${i}@example.com` }),
+      ).toMatchObject({ ok: true, added: true });
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'p26@example.com' })).toMatchObject({
+      ok: true,
+      added: true,
+    });
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'p27@example.com' })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
+    expect(await attendees(one.uid)).toBe(29);
+  });
+
+  it('the 30-person cap counts an address listed in more than one place once', async () => {
+    const one = await book([]);
+    const bo = { name: 'Bo Added', email: 'bo@example.com', timeZone: 'UTC' };
+    // A guest on the guest list and in the booking's metadata, as v2 bookings list them.
+    expect(await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: 'gi@example.com' }] })).toMatchObject({
+      added: 1,
+    });
+    await db.run(sql`UPDATE booking SET metadata = ${JSON.stringify({ _guests: ['GI@example.com'] })} WHERE uid = ${one.uid}`);
+    // The invitee and the guest are 2 people: 28 more make 30.
+    for (let i = 0; i < 28; i++)
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: `p${i}@example.com` })).toMatchObject({
+        ok: true,
+        added: true,
+      });
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'p28@example.com' })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
   });
 });

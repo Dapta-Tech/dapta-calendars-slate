@@ -1,8 +1,9 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '@slate/db';
 import { loadServerEnv } from '@slate/config/env';
 import { bootHarness, errorText, idem, structured, type Harness } from './mcp-harness';
 import { hostnameOf } from './mcp.controller';
+import { BookingService } from '../booking.service';
 import { argsHash, instantFrom, redactArgs, toFailure, untrusted, zonedIso, ToolFailure } from './support';
 
 const PAGE = 'https://x.test/acme/alex-rivera/intro-call';
@@ -232,6 +233,44 @@ describe('REST cancel scope', () => {
     await h.post(initialize('2025-06-18'), { authorization: `Bearer ${key}` });
     const after = (await listApiKeys(h.db, h.accountId)).find((k) => key.startsWith(k.prefix))!;
     expect(after.lastUsedAt).toMatch(/^\d{4}-/);
+  });
+});
+
+describe('REST machine attendee', () => {
+  it('adds an attendee under the shared flow, queues the calendar update, once per address, and refuses a full, cancelled or foreign booking', async () => {
+    const h = await boot();
+    const key = await h.key(['bookings:write']);
+    const rewrite = vi.spyOn(h.app.get(BookingService), 'afterGuestsChanged');
+    const add = (uid: string, email = 'bo@example.com') =>
+      fetch(`${h.base}/v1/machine/bookings/${uid}/attendees`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ attendee: { name: 'Bo Added', email } }),
+      });
+    const uid = await h.newBooking();
+    expect((await add(uid)).status).toBe(201);
+    expect(rewrite.mock.calls).toEqual([[uid]]);
+    expect((await h.db.get<{ seated: number | null }>(sql`SELECT seated FROM booking WHERE uid = ${uid}`))!.seated).toBe(1);
+    // A retry writes nothing again and sends nothing again.
+    expect((await add(uid, 'BO@example.com')).status).toBe(201);
+    expect(rewrite.mock.calls).toEqual([[uid]]);
+    // 30 people at most (this booking has no invitee row: Bo and 29 more): the 31st is refused.
+    for (let i = 0; i < 29; i++) expect((await add(uid, `p${i}@example.com`)).status).toBe(201);
+    const full = await add(uid, 'one-more@example.com');
+    expect(full.status).toBe(422);
+    expect(((await full.json()) as { error: string }).error).toBe('LIMIT_EXCEEDED');
+
+    rewrite.mockClear();
+    const gone = await h.newBooking();
+    await h.db.run(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${gone}`);
+    expect((await add(gone)).status).toBe(410);
+    expect((await add(h.other.bookingUid)).status).toBe(403);
+    expect(rewrite).not.toHaveBeenCalled();
+    const rows = await h.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE email = 'bo@example.com' AND booking_id IN
+            (SELECT id FROM booking WHERE uid IN (${gone}, ${h.other.bookingUid}))`,
+    );
+    expect(Number(rows!.n)).toBe(0);
   });
 });
 

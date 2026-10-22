@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import type { BusyInterval, CalendarProvider } from '@slate/calendar';
 import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
@@ -249,6 +250,167 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
       expect(booked.ok).toBe(true);
       expect(booked.ok && [alexId, jordanId]).toContain(booked.ok ? booked.hostMemberId : '');
     });
+
+    /** A member with working hours like the seeded hosts (weekdays 09:00 to 17:00, New York) and no bookings. */
+    async function workingHost(name: string) {
+      const id = randomUUID();
+      const scheduleId = randomUUID();
+      await db.run(
+        sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
+            VALUES (${id}, ${accountId}, ${`wh-${tag}-${++made}`}, ${name}, ${`wh-${tag}-${made}@example.com`},
+              ${'America/New_York'}, ${scheduleId}, ${Date.now()})`,
+      );
+      await db.run(
+        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+            VALUES (${scheduleId}, ${accountId}, ${id}, ${'Working hours'}, ${'America/New_York'}, ${Date.now()})`,
+      );
+      await db.run(
+        sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+            VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'09:00'}, ${'17:00'}, ${null})`,
+      );
+      return id;
+    }
+
+    /**
+     * Runs the requests so that every one has read the loads before any of
+     * them writes. On Postgres the test holds the event's advisory lock (the
+     * key `insertEqualShareGuarded` takes) until all of them wait on it, past
+     * their reads; SQLite interleaves them in this one process already.
+     */
+    async function allAtOnce<T>(
+      eventTypeId: string,
+      requests: Array<() => Promise<T>>,
+      /** Postgres only: runs once every request waits on the lock, before it is released. */
+      whileWaiting?: () => Promise<void>,
+    ): Promise<T[]> {
+      if (db.dialect === 'sqlite') return Promise.all(requests.map((r) => r()));
+      let results!: Promise<T[]>;
+      await db.pg!.drizzle.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`slate:rr-equal:${eventTypeId}`}, 0))`);
+        results = Promise.all(requests.map((r) => r()));
+        const deadline = Date.now() + 10_000;
+        for (;;) {
+          const waiting = await db.get<{ n: number | string }>(
+            sql`SELECT COUNT(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`,
+          );
+          if (Number(waiting?.n ?? 0) >= requests.length) break;
+          if (Date.now() > deadline) throw new Error('the requests never reached the event lock');
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        await whileWaiting?.();
+      });
+      return results;
+    }
+
+    it('equal: bookings made at once never all read the same lightest host; the pick runs one at a time per event', async () => {
+      // Two hosts of this run only, so every offered time is free for both,
+      // however many runs a shared Postgres database has kept.
+      const caseyId = await workingHost('Casey Morgan');
+      const rileyId = await workingHost('Riley Chen');
+      const ev = await makeEvent('equal', [{ memberId: caseyId }, { memberId: rileyId }]);
+      // Six times booked all at once: each request reads the loads before any
+      // of them writes, so without the per-event lock every one of them would
+      // pick the same host.
+      const times = (await slotsOf(ev)).slice(0, 6);
+      expect(times).toHaveLength(6);
+      const outs = await allAtOnce(
+        ev.eventTypeId,
+        times.map((iso, i) => () =>
+          createTeamBooking(db, {
+            accountCode: 'acme',
+            teamSlug: ev.teamSlug,
+            slug: ev.slug,
+            startMs: Date.parse(iso),
+            attendee: attendee(`${tag}-at-once-${i}`),
+          }),
+        ),
+      );
+      const hosts = outs.map((o) => (o.ok ? o.hostMemberId : `refused:${!o.ok && o.reason}`));
+      expect(hosts.filter((h) => h === caseyId)).toHaveLength(3);
+      expect(hosts.filter((h) => h === rileyId)).toHaveLength(3);
+      // What the event's own rows say, not only what the calls answered.
+      const rows = await db.all<{ host_member_id: string }>(
+        sql`SELECT host_member_id FROM booking WHERE event_type_id = ${ev.eventTypeId} AND status = 'accepted'`,
+      );
+      expect(rows.filter((r) => r.host_member_id === caseyId)).toHaveLength(3);
+      expect(rows.filter((r) => r.host_member_id === rileyId)).toHaveLength(3);
+    }, 20_000);
+
+    it('equal: a host held back when the requests arrive is picked again once the others catch up under the lock', async () => {
+      // Casey starts 3 bookings ahead, so every one of six requests made at
+      // once reads Casey as held back. Under the lock the first ones go to
+      // Riley; once Riley catches up Casey is no longer held back, and the
+      // rest share out. A pick that only knew the hosts free AND not held back
+      // when each request arrived would give Riley all six (Riley 3 ahead).
+      const caseyId = await workingHost('Casey Morgan');
+      const rileyId = await workingHost('Riley Chen');
+      const ev = await makeEvent('equal', [{ memberId: caseyId }, { memberId: rileyId }]);
+      await giveBookings(ev.eventTypeId, ev.teamId, caseyId, 3);
+      const times = (await slotsOf(ev)).slice(0, 6);
+      expect(times).toHaveLength(6);
+      const outs = await allAtOnce(
+        ev.eventTypeId,
+        times.map((iso, i) => () =>
+          createTeamBooking(db, {
+            accountCode: 'acme',
+            teamSlug: ev.teamSlug,
+            slug: ev.slug,
+            startMs: Date.parse(iso),
+            attendee: attendee(`${tag}-caught-up-${i}`),
+          }),
+        ),
+      );
+      expect(outs.map((o) => o.ok)).toEqual([true, true, true, true, true, true]);
+      const rows = await db.all<{ host_member_id: string }>(
+        sql`SELECT host_member_id FROM booking WHERE event_type_id = ${ev.eventTypeId} AND status = 'accepted'`,
+      );
+      const casey = rows.filter((r) => r.host_member_id === caseyId).length;
+      const riley = rows.filter((r) => r.host_member_id === rileyId).length;
+      expect(casey + riley).toBe(9);
+      // Riley takes the first three (to 3 and 3), then the six end within one of each other.
+      expect(Math.abs(casey - riley)).toBeLessThanOrEqual(1);
+    }, 20_000);
+
+    (engine === 'Postgres' ? it : it.skip)(
+      "equal: a picked host who loses the time meanwhile answers SLOT_TAKEN, though another host's calendar failed",
+      async () => {
+        const caseyId = await workingHost('Casey Morgan');
+        const rileyId = await workingHost('Riley Chen');
+        const ev = await makeEvent('equal', [{ memberId: caseyId }, { memberId: rileyId }]);
+        // Casey's calendar cannot be read, so Riley is the one host left to pick.
+        const ref = `cal-fails-${tag}`;
+        await db.run(
+          sql`INSERT INTO connected_calendar (id, account_id, member_id, provider, external_id, is_destination, check_conflicts, created_at)
+              VALUES (${randomUUID()}, ${accountId}, ${caseyId}, ${'google'}, ${ref}, 0, 1, ${Date.now()})`,
+        );
+        const failsForCasey: CalendarProvider = {
+          enabled: true,
+          listBusy: ({ connectionRefs }): Promise<BusyInterval[]> =>
+            connectionRefs.includes(ref) ? Promise.reject(new Error('vendor 503')) : Promise.resolve([]),
+          createEvent: () => Promise.resolve({ externalEventId: 'e' }),
+          updateEvent: () => Promise.resolve({ externalEventId: 'e' }),
+          deleteEvent: () => Promise.resolve(),
+          listCalendars: () => Promise.resolve([]),
+          checkConnection: () => Promise.resolve({ ok: true, detail: 'ok' }),
+        };
+        const [iso] = await slotsOf(ev);
+        const [out] = await allAtOnce(
+          ev.eventTypeId,
+          [
+            () =>
+              createTeamBooking(
+                db,
+                { accountCode: 'acme', teamSlug: ev.teamSlug, slug: ev.slug, startMs: Date.parse(iso!), attendee: attendee(tag) },
+                failsForCasey,
+              ),
+          ],
+          // Riley's time is taken by another booking while the request waits.
+          () => makeBusy(rileyId, Date.parse(iso!)),
+        );
+        expect(out).toEqual({ ok: false, reason: 'SLOT_TAKEN' });
+      },
+      20_000,
+    );
   });
 }
 
