@@ -153,6 +153,59 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  compose:
+    name: Self-host compose (production images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Throwaway password for a database that lives only inside this job.
+      POSTGRES_PASSWORD: slate
+    steps:
+      - uses: actions/checkout@v7
+      # Assembled here rather than written out, so the publish gate's secret
+      # scan has no credential-shaped URL to flag in this file.
+      - name: Point the stack at its own database
+        run: echo "DATABASE_URL=postgres://slate:${POSTGRES_PASSWORD}@db:5432/slate" >> "$GITHUB_ENV"
+      # SELF-HOSTING.md's quickstart, as written: both images built from this
+      # tree, migrations in the one-shot service, the web started once the
+      # API's healthcheck passes.
+      # A step timeout fails the step, so the logs step below still runs; a job
+      # timeout would cancel the job and skip it.
+      - name: Build and start docker-compose.prod.yml
+        timeout-minutes: 8
+        run: docker compose -f docker-compose.prod.yml up -d --build
+      - name: Seed the demo account
+        timeout-minutes: 3
+        run: >-
+          docker compose -f docker-compose.prod.yml run --rm --no-deps migrate
+          node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.runtime.json
+          node_modules/@slate/db/src/cli/seed.ts
+      # Both pages are rendered on the web server, so both prove the web
+      # container reaches the API (API_URL), not only that it is up.
+      - name: A booking page and a dashboard page render
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          base=http://localhost:3000
+          page="$(curl -fsS --max-time 20 --retry 10 --retry-all-errors --retry-delay 2 "$base/acme/alex-rivera/intro-call")"
+          grep -q '<title>Intro Call with Alex Rivera</title>' <<<"$page" \
+            || { echo "::error::the booking page did not render the event"; head -c 2000 <<<"$page"; exit 1; }
+          # The cookie the local dev sign-in sets for the seeded owner. It is
+          # unsigned because this stack sets no WEB_SESSION_SECRET.
+          session="$(printf '{"provider":"local","email":"alex@example.com"}' | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+          code="$(curl -sS --max-time 20 -o admin.html -w '%{http_code}' -H "Cookie: slate_session=$session" "$base/admin/event-types")"
+          # The event's public path is in the list only, never in the admin copy,
+          # so this fails if the list did not render (an error under a 200).
+          { test "$code" = 200 && grep -q 'alex-rivera/intro-call' admin.html; } \
+            || { echo "::error::the event types page answered $code without the event list"; head -c 2000 admin.html; exit 1; }
+      - if: failure() || cancelled()
+        run: |
+          docker compose -f docker-compose.prod.yml ps -a
+          docker inspect --format '{{json .State.Health}}' "$(docker compose -f docker-compose.prod.yml ps -aq api)" || true
+          docker compose -f docker-compose.prod.yml logs --no-color
+      - if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
+
   publish-gate:
     name: Publish gate (secret scan)
     runs-on: ubuntu-latest

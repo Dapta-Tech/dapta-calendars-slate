@@ -74,6 +74,20 @@ services:
       EMAIL_PROVIDER: log-only
     ports:
       - '4000:4000'
+    # Ready means the API answers and its database is up. The image is
+    # distroless (no shell, curl or wget), so the probe is its own node binary.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/nodejs/bin/node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy
@@ -85,16 +99,24 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        # Inlined into the client bundle at build time (see the web Dockerfile).
+        # Inlined at build time, client and server code alike: the web
+        # server's API address when API_URL is unset. No browser code calls
+        # the API directly.
         NEXT_PUBLIC_API_URL: http://localhost:4000
     environment:
       NODE_ENV: production
       PORT: '3000'
-      NEXT_PUBLIC_API_URL: http://localhost:4000
+      # The web server (pages rendered on the server, server actions, sign-in)
+      # calls the API at API_URL, read at runtime. Inside this container
+      # `localhost` is the web itself, so it names the API's service on this
+      # network. A runtime NEXT_PUBLIC_API_URL would do nothing: the build arg
+      # above is already inlined.
+      API_URL: http://api:4000
     ports:
       - '3000:3000'
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   slate-prod-pgdata:

@@ -51,9 +51,15 @@ Notes carried straight from that file:
   under `NODE_ENV=production`**, so the smoke-test stack runs
   `NODE_ENV=development` by default. For a real deployment set
   `NODE_ENV=production` **and** a real provider together (see Auth options).
-- `NEXT_PUBLIC_API_URL` is **inlined into the web client bundle at build time** (a
-  Docker `--build-arg`), not read at runtime. If your API is at
-  `https://calendars-api.example.com`, build the web image with that value.
+- The web **server** calls the API at `API_URL`, read at runtime: pages rendered
+  on the server, server actions and sign-in all use it (no browser code calls
+  the API directly). Inside the web container `localhost` is the web itself, so
+  the file sets `API_URL=http://api:4000`, the API's name on the Compose network.
+  Without it every booking page and the dashboard show the error page.
+- `NEXT_PUBLIC_API_URL` is **inlined at build time** (a Docker `--build-arg`), not
+  read at runtime: it is the API address the web uses when `API_URL` is unset.
+- The web starts once the API's healthcheck (`/health/ready`: the API answers and
+  its database is up) passes.
 
 Use `docker-compose.prod.yml` as the template for your orchestrator (Compose,
 Kubernetes, Nomad, a PaaS) — the two images and the migrate-then-serve ordering are
@@ -124,7 +130,8 @@ set** boots on the zero-infra path.
 | `API_PORT` | `4000` | — | no |
 | `KEEP_ALIVE_TIMEOUT` | `65000` | behind a load balancer, keep it above the balancer's idle timeout (60 s on AWS ALB), or the balancer can reuse a socket the server is closing and answer with a 502. Milliseconds, at most `86400000` (a day). The web's standalone server reads the same variable, but only when set (Node's 5 s otherwise), so set it on the web too | no |
 | `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links, and the host's "Confirm or decline" button, which opens `/admin/bookings` there) | no |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | production; **build-time** for web | no |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | **build-time** for web: inlined into the image, the web server's API address when `API_URL` is unset. No browser code calls the API directly | no |
+| `API_URL` | unset (falls back to the `NEXT_PUBLIC_API_URL` the web image was **built** with) | production, on the **web**: the address the web **server** calls (server-rendered pages, server actions, sign-in), read at runtime. Set it whenever the web container cannot reach the API at the built-in address, as in `docker-compose.prod.yml` (`http://api:4000`); a private or in-cluster address is best either way. `INTERNAL_API_SECRET` is sent only to this address | no |
 | `API_PUBLIC_URL` | unset | the API's public base URL (http or https, no credentials, query or fragment; anything else reads as unset). The API names it in `/openapi.json` `servers`, the `/docs` examples and the explorer's document link (unset: all relative to wherever the API is served); the web shows it on the developer pages and in the agent skill. Serving the API under a path prefix requires `API_PUBLIC_URL`: unset, `/openapi.json` names `/` and `/docs` loads `/openapi.json` from the host root | no |
 
 ### Auth (dashboard only — public booking pages are always open)
@@ -551,8 +558,9 @@ If your proxy reuses idle connections to the apps (AWS ALB does, for 60 s), keep
 first: the API defaults to 65 s, the web needs it set (see "Core" above).
 
 Behind a proxy, derive the request origin from `X-Forwarded-*` headers (the app
-does this) — set `PUBLIC_APP_URL` to the public web URL and build the web image with
-`NEXT_PUBLIC_API_URL` set to the public API URL. If you embed the booking widget on
+does this). Set `PUBLIC_APP_URL` to the public web URL and set `API_URL` on the web
+to the address the web server reaches the API at (unset, it uses the
+`NEXT_PUBLIC_API_URL` the image was built with). If you embed the booking widget on
 other domains, add them to `CORS_ORIGINS`.
 
 ## Auth options
@@ -741,7 +749,8 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 | "Refusing to boot: AUTH_PROVIDER=local … production" | You set `NODE_ENV=production` with the dev stub — switch to `workos` (with `JWT_SECRET`) or another real provider. |
 | Migrations fail on `CREATE EXTENSION btree_gist` | The DB role lacks the privilege — have a superuser run `CREATE EXTENSION IF NOT EXISTS btree_gist;` once, then re-run migrations. |
 | Login redirect bounces away from your app | Your identity service must allow your web origin, and `PUBLIC_APP_URL` / `NEXT_PUBLIC_API_URL` must match the public hostnames. |
-| Web calls the wrong API URL | `NEXT_PUBLIC_API_URL` is build-time-inlined — rebuild the web image with the correct value. |
+| Booking pages and the dashboard show the error page; the web log shows `ECONNREFUSED 127.0.0.1:4000` | The web server has no `API_URL`, so it calls itself. Set `API_URL` on the web to the API's address as the web container sees it (`http://api:4000` in Compose). |
+| Web calls the wrong API URL | Set `API_URL` on the web; it is read at runtime. Without it the web uses the `NEXT_PUBLIC_API_URL` the image was built with, which only a rebuild changes. |
 | Booking confirmations never arrive | Default `EMAIL_PROVIDER=log-only` only logs — configure `smtp` or `http`. |
 | `CALENDAR_PROVIDER=external` fails loud at boot | No backend configured — set `CALENDAR_API_BASE_URL` + `CALENDAR_API_TOKEN`, or `CALENDAR_BACKEND_MODULE`, or use `disabled`. |
 | Browser requests blocked by CORS | Add the embedding origin(s) to `CORS_ORIGINS`. |
