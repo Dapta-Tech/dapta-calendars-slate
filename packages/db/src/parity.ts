@@ -1081,8 +1081,11 @@ export async function createTeamBooking(
   let sawCalendarFailure = false;
   const heldAt = Date.now();
   for (const host of hosts) {
-    // Outside their own hours (or no schedule at all), or held back by equal distribution.
-    if (!offeredBy.has(host.member_id) || heldBack.has(host.member_id)) continue;
+    // Outside their own hours (or no schedule at all). A host equal
+    // distribution holds back stays a candidate here: who is held back is
+    // decided again under the lock, from loads that other bookings of the
+    // event may have changed since (see `insertEqualShareGuarded`).
+    if (!offeredBy.has(host.member_id)) continue;
     const conflict = await db.get<{ id: string }>(memberOverlapSql(host.member_id, args.startMs, endMs));
     if (conflict) continue;
     // A host somebody is holding this time with (a soft hold on one of their
@@ -1196,11 +1199,11 @@ export async function createTeamBooking(
   if (equal) {
     // The pick above read the loads outside any lock; two bookings of the
     // event at once would both see the same lightest host. It is made again
-    // where it is written (see `insertEqualShareGuarded`).
+    // where it is written, from every free host (see `insertEqualShareGuarded`).
     const pick = await insertEqualShareGuarded(db, et.id, equalHosts, candidates, args.startMs, endMs, (h) =>
       statementsFor([h], h.memberId),
     );
-    if (!pick) return { ok: false, reason: 'SLOT_TAKEN' };
+    if (!pick) return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
     organizer = pick;
   } else {
     const booked = await insertBookingGuarded(
@@ -1347,10 +1350,12 @@ function insertBookingGuarded(
  * transaction-scoped advisory lock on the event type runs them one after the
  * other; SQLite runs one writer at a time already, and its IMMEDIATE
  * transaction is that lock. Under it the event's loads are read again, the
- * hosts too far ahead held back again, and the pick made from the hosts found
- * free (`candidates`); then the usual member lock, overlap and hold checks, and
- * the write of `statementsFor(pick)`. Answers the host written, or null when
- * none can take the time.
+ * hosts too far ahead held back again from those loads, and the pick made from
+ * the hosts found free (`candidates`, which no earlier hold-back has narrowed:
+ * a host held back before the lock may have been caught up since); then the
+ * usual member lock, overlap and hold checks, and the write of
+ * `statementsFor(pick)`. Answers the host written, or null when none can take
+ * the time.
  */
 async function insertEqualShareGuarded(
   db: Db,
