@@ -633,6 +633,15 @@ export interface BookingMessages {
         createTeam: string;
         everyMember: string;
         manageOnTeamPage: string;
+        /**
+         * Hosts who cannot take a booking yet: no working hours (an invited
+         * member until their first sign-in). `{names}` is the joined list.
+         * The collective variant: everyone attends, so nobody can book.
+         */
+        noHours: string;
+        noHoursCollective: string;
+        /** Hosts with no calendar connected: still booked, busy times unchecked, no calendar of their own written. */
+        noCalendar: string;
       };
       /** R (#91) — reminders + follow-up, owned by the event type (#68). */
       reminders: {
@@ -2155,6 +2164,12 @@ export const en: BookingMessages = {
         createTeam: 'Create a team',
         everyMember: 'Every member of {team} hosts this event once you save it.',
         manageOnTeamPage: 'Add or remove members on the team page, then save this event.',
+        noHours:
+          'No bookings yet, there are no working hours for: {names}. Hours are set at first sign-in and can be changed in Availability.',
+        noHoursCollective:
+          'No times are offered yet. Everyone attends a collective event, and there are no working hours yet for: {names}. Hours are set at first sign-in and can be changed in Availability.',
+        noCalendar:
+          'No calendar connected for: {names}. Busy times elsewhere aren’t checked, and nothing is written to a calendar of their own until one is connected in Calendars.',
       },
       reminders: {
         sectionTitle: 'Reminders',
@@ -3590,6 +3605,12 @@ export const es: BookingMessages = {
         createTeam: 'Crear un equipo',
         everyMember: 'Todos los miembros de {team} quedan como anfitriones de este evento al guardarlo.',
         manageOnTeamPage: 'Agrega o quita miembros en la página del equipo y luego guarda este evento.',
+        noHours:
+          'Aún sin reservas, no hay horario de trabajo para: {names}. El horario se crea al iniciar sesión por primera vez y se cambia en Disponibilidad.',
+        noHoursCollective:
+          'Aún no se ofrecen horarios. En un evento colectivo asisten todos, y todavía no hay horario de trabajo para: {names}. El horario se crea al iniciar sesión por primera vez y se cambia en Disponibilidad.',
+        noCalendar:
+          'Sin calendario conectado para: {names}. No se revisan sus horas ocupadas en otros calendarios y nada se escribe en un calendario propio hasta conectar uno en Calendarios.',
       },
       reminders: {
         sectionTitle: 'Recordatorios',
@@ -3869,7 +3890,7 @@ export const es: BookingMessages = {
       you: 'Tú',
       noEmail: 'Sin correo',
       statusActive: 'Activo',
-      statusInvited: 'Invitado',
+      statusInvited: 'Invitación pendiente',
       statusDisabled: 'Desactivado',
       enable: 'Activar',
       disable: 'Desactivar',
@@ -3901,7 +3922,7 @@ export const es: BookingMessages = {
     workspaces: {
       menuLabel: 'Tus espacios',
       current: 'Actual',
-      pending: 'Pendiente',
+      pending: 'Invitación pendiente',
       switchFailed: 'No pudimos abrir ese espacio. Intenta de nuevo.',
     },
     invite: {

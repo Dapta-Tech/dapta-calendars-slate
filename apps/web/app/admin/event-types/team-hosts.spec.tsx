@@ -37,7 +37,7 @@ vi.mock('./actions', () => ({
 
 import { listOneOffLinksAction, saveEventTypeAction, type EventTypePayload } from './actions';
 import { EventTypeForm } from './event-type-form';
-import { HostPrioritySelect, PersonalHostsCard, TeamHostsNote } from './team-hosts';
+import { HostPrioritySelect, HostReadiness, PersonalHostsCard, TeamHostsNote } from './team-hosts';
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -450,5 +450,43 @@ describe('the team event editor saves each host priority', () => {
     );
     expect(priorityOf(el, 'Jordan Lee: Prioridad')!.textContent).toBe('Media');
     expect(priorityOf(el, 'Alex Rivera: Prioridad')!.textContent).toBe('Personalizada (7)');
+  });
+});
+
+describe('HostReadiness', () => {
+  const READY = { memberId: 'm-alex', displayName: 'Alex Rivera', hasHours: true, hasCalendar: true };
+  const INVITED = { memberId: 'm-casey', displayName: 'Casey Morgan', hasHours: false, hasCalendar: false };
+  const NO_CAL = { memberId: 'm-taylor', displayName: null, email: 'taylor@example.com', hasHours: true, hasCalendar: false };
+  const box = (el: HTMLElement) => el.querySelector('[data-testid="host-readiness"]');
+  const lines = (el: HTMLElement) => [...el.querySelectorAll('[data-testid="host-readiness"] p')].map((p) => p.textContent);
+
+  it('names who gets no bookings for lack of hours, and who has no calendar, apart', () => {
+    const en = getMessages('en').admin.eventTypes.teamHosts;
+    const el = mount(<HostReadiness hosts={[READY, NO_CAL, INVITED]} collective={false} m={en} locale="en" />);
+    expect(lines(el)).toEqual([
+      en.noHours.replace('{names}', 'Casey Morgan'),
+      en.noCalendar.replace('{names}', 'taylor@example.com'),
+    ]);
+  });
+
+  it('in a collective event, says no times are offered at all', () => {
+    const en = getMessages('en').admin.eventTypes.teamHosts;
+    const el = mount(<HostReadiness hosts={[READY, INVITED]} collective m={en} locale="en" />);
+    expect(lines(el)).toEqual([en.noHoursCollective.replace('{names}', 'Casey Morgan')]);
+  });
+
+  it('says nothing when everyone is ready, or when an older API sends no flags', () => {
+    const en = getMessages('en').admin.eventTypes.teamHosts;
+    expect(box(mount(<HostReadiness hosts={[READY]} collective={false} m={en} />))).toBeNull();
+    expect(
+      box(mount(<HostReadiness hosts={[{ memberId: 'm-x', displayName: 'X' }]} collective={false} m={en} />)),
+    ).toBeNull();
+  });
+
+  it('in Spanish, joining names the Spanish way', () => {
+    const es = getMessages('es').admin.eventTypes.teamHosts;
+    const other = { ...INVITED, memberId: 'm-riley', displayName: 'Riley Chen' };
+    const el = mount(<HostReadiness hosts={[INVITED, other]} collective={false} m={es} locale="es" />);
+    expect(lines(el)).toEqual([es.noHours.replace('{names}', 'Casey Morgan y Riley Chen')]);
   });
 });

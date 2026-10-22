@@ -81,6 +81,29 @@ describePg('listTeamMembers: has_destination_calendar (real Postgres)', () => {
     });
   });
 
+  it('has_calendar counts any calendar and has_hours needs a schedule with rules', async () => {
+    const before = await listTeamMembers(db, accountId, teamId);
+    expect(Object.fromEntries(before.map((r) => [r.member_id, [r.has_calendar, r.has_hours]]))).toEqual({
+      [withCalendar]: [true, false],
+      [withoutCalendar]: [true, false],
+    });
+    const scheduleId = randomUUID();
+    await db.run(
+      sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
+          VALUES (${scheduleId}, ${accountId}, ${withCalendar}, ${'Working hours'}, ${'UTC'}, ${Date.now()})`,
+    );
+    await db.run(
+      sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
+          VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'09:00'}, ${'17:00'}, ${null})`,
+    );
+    await db.run(sql`UPDATE member SET default_schedule_id = ${scheduleId} WHERE id = ${withCalendar}`);
+    const after = await listTeamMembers(db, accountId, teamId);
+    expect(Object.fromEntries(after.map((r) => [r.member_id, r.has_hours]))).toEqual({
+      [withCalendar]: true,
+      [withoutCalendar]: false,
+    });
+  });
+
   it('is scoped to the account: another account reads no roster at all', async () => {
     expect(await listTeamMembers(db, randomUUID(), teamId)).toEqual([]);
   });
