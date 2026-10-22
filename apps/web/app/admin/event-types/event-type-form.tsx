@@ -1005,6 +1005,15 @@ export function EventTypeForm({
       ? (initial!.schedulingType as SchedulingMethod)
       : 'round_robin',
   );
+  // Round robin's distribution method; 'availability' (null in the column)
+  // is today's behavior, 'equal' counts this event's bookings only.
+  const [rrDistribution, setRrDistribution] = useState<'availability' | 'equal'>(
+    initial?.rrDistribution === 'equal' ? 'equal' : 'availability',
+  );
+  // Equal distribution ranks hosts by bookings alone, so priority and weight
+  // have nothing to say there.
+  const ranksHosts =
+    schedulingType !== 'collective' && !(schedulingType === 'round_robin' && rrDistribution === 'equal');
   const [hosts, setHosts] = useState<HostRow[]>(
     (teamMembers ?? []).map((tm) => {
       const existing = initial?.hosts?.find((h) => h.memberId === tm.memberId);
@@ -1108,6 +1117,7 @@ export function EventTypeForm({
               // changes teams from this form.
               ...(initial ? {} : { teamId }),
               schedulingType,
+              rrDistribution: rrDistribution === 'equal' ? 'equal' : null,
               hosts: hosts.map((h) => ({
                 memberId: h.memberId,
                 priority: h.priority,
@@ -1249,6 +1259,19 @@ export function EventTypeForm({
             </select>
             <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${schedulingType}_hint`]}</span>
           </Field>
+          {schedulingType === 'round_robin' ? (
+            <Field label={scheduling.distribution}>
+              <select
+                value={rrDistribution}
+                onChange={(e) => setRrDistribution(e.target.value === 'equal' ? 'equal' : 'availability')}
+                className={inputCls}
+              >
+                <option value="availability">{scheduling.availability}</option>
+                <option value="equal">{scheduling.equal}</option>
+              </select>
+              <span className="mt-tight text-xs text-muted-foreground">{scheduling[`${rrDistribution}_hint`]}</span>
+            </Field>
+          ) : null}
 
           <div className="flex flex-col gap-inline">
             <span className="text-sm font-semibold text-muted-foreground">{m.hostsTitle}</span>
@@ -1264,7 +1287,7 @@ export function EventTypeForm({
                 the active method actually uses. Below `sm` the header is
                 hidden and each control carries its own label (HostCell): the
                 three columns do not fit beside a name at 360px. */}
-            {schedulingType !== 'collective' ? (
+            {ranksHosts ? (
               <>
                 <p className="text-xs text-muted-foreground">{m.priorityHint}</p>
                 <div className="hidden items-center gap-field px-field text-xs text-muted-foreground sm:flex">
@@ -1285,7 +1308,7 @@ export function EventTypeForm({
                   className="flex flex-col gap-inline rounded-md border border-border bg-card px-field py-inline sm:flex-row sm:items-center sm:gap-field"
                 >
                   <span className="text-sm sm:flex-1">{name}</span>
-                  {schedulingType !== 'collective' ? (
+                  {ranksHosts ? (
                     <>
                       <HostCell label={m.priority}>
                         <HostPrioritySelect

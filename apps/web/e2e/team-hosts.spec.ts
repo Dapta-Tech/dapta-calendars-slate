@@ -145,10 +145,63 @@ test('a round robin host keeps the priority level they are given', async ({ page
   } finally {
     // Back to Medium even when a check above fails: a Highest Jordan would
     // take every later round robin booking on this shared stack.
-    await page.goto(editUrl);
+    await page.goto(editUrl, { waitUntil: 'networkidle' }); // hydrated before the select is used
     await setJordan('Medium');
   }
   await page.reload();
   await expect(jordan).toHaveText('Medium');
   expect(await storedPriorities()).toEqual([0, 0]);
+});
+
+/**
+ * "Let us choose between Maximize availability and Equal distribution." On the
+ * seeded round robin Team Demo the distribution starts at Maximize
+ * availability; Equal distribution is saved, survives a reload with priority
+ * and weight set aside, and is put back in a finally so later booking tests
+ * see today's behavior.
+ */
+test('a round robin event keeps the distribution it is given', async ({ page, request }) => {
+  await page.goto('/admin/event-types');
+  await signIn(page, HOST.email);
+  await expect(page).toHaveURL(/\/admin\/event-types$/);
+  await page
+    .getByRole('listitem')
+    .filter({ hasText: 'Team Demo' })
+    .getByRole('link', { name: 'Edit', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/admin\/event-types\/[^/?]+$/);
+  const editUrl = page.url();
+  const eventId = new URL(editUrl).pathname.split('/').pop()!;
+
+  const distribution = page.getByRole('combobox', { name: 'Distribution' });
+  /** What the API has stored; null is today's behavior. */
+  const stored = async () => {
+    const r = await request.get(`${E2E.api}/v1/event-types/${eventId}`, {
+      headers: { 'x-slate-email': HOST.email },
+    });
+    return ((await r.json()) as { rrDistribution?: string | null }).rrDistribution ?? null;
+  };
+  const save = async (value: 'availability' | 'equal') => {
+    await distribution.selectOption(value);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved successfully.' })).toBeVisible();
+    // Stored before anything reloads the page, so a reload never cuts the save short.
+    await expect.poll(stored).toBe(value === 'equal' ? 'equal' : null);
+  };
+  await expect(distribution).toHaveValue('availability');
+  try {
+    await save('equal');
+    await page.reload();
+    await expect(distribution).toHaveValue('equal');
+    await expect(page.getByRole('button', { name: 'Jordan Lee: Priority' })).toHaveCount(0);
+    await expect(page.getByText("Share this event's bookings evenly")).toBeVisible();
+  } finally {
+    // A fresh load: let it hydrate before choosing, or hydration puts the
+    // select back to what the server rendered and that is what gets saved.
+    await page.goto(editUrl, { waitUntil: 'networkidle' });
+    await save('availability');
+  }
+  await page.reload();
+  await expect(distribution).toHaveValue('availability');
+  await expect(page.getByRole('button', { name: 'Jordan Lee: Priority' })).toBeVisible();
 });

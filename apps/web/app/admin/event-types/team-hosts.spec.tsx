@@ -403,8 +403,48 @@ describe('the team event editor saves each host priority', () => {
     expect(el.textContent).not.toContain('Each booking goes to');
   });
 
+  /** The round robin distribution select (Maximize availability / Equal distribution). */
+  const distributionOf = (el: HTMLElement) =>
+    el.querySelector('option[value="equal"]')!.closest('select') as HTMLSelectElement;
+
+  it('round robin offers the distribution, today by default, and equal sets aside priority and weight', async () => {
+    const el = await editor();
+    const distribution = distributionOf(el);
+    expect(distribution.value).toBe('availability');
+    expect(el.textContent).toContain('Offer every time any host is free');
+    expect((await savedPriorities(el)).length).toBe(3);
+    expect((vi.mocked(saveEventTypeAction).mock.lastCall![0] as EventTypePayload).rrDistribution).toBeNull();
+
+    act(() => {
+      distribution.value = 'equal';
+      distribution.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(el.textContent).toContain("Share this event's bookings evenly");
+    expect(priorityOf(el, 'Alex Rivera: Priority')).toBeNull();
+    expect(el.querySelector('input[aria-label="Riley Chen: Weight"]')).toBeNull();
+    expect(el.textContent).not.toContain('Each booking goes to');
+    // The hosts still travel with the values they had: switching back loses nothing.
+    expect(await savedPriorities(el)).toEqual([
+      ['m-alex', 7],
+      ['m-jordan', 0],
+      ['m-riley', -1],
+    ]);
+    expect((vi.mocked(saveEventTypeAction).mock.lastCall![0] as EventTypePayload).rrDistribution).toBe('equal');
+  });
+
+  it('only round robin has a distribution', async () => {
+    const el = await editor();
+    const method = el.querySelector('option[value="collective"]')!.closest('select')!;
+    act(() => {
+      method.value = 'fixed_round_robin';
+      method.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(el.querySelector('option[value="equal"]')).toBeNull();
+  });
+
   it('in Spanish', async () => {
     const el = await editor('es');
+    expect(distributionOf(el).selectedOptions[0]!.textContent).toBe('Maximizar disponibilidad');
     expect(el.textContent).toContain(
       'Cada reserva va al anfitrión libre con la prioridad más alta; el peso reparte las reservas entre anfitriones del mismo nivel.',
     );

@@ -47,6 +47,8 @@ export interface EventTypeView {
   scheduleId: string | null;
   hidden: boolean;
   schedulingType: string | null;
+  /** Round robin only: 'availability' (NULL) or 'equal'. */
+  rrDistribution: string | null;
   minimumBookingNotice: number;
   beforeEventBuffer: number;
   afterEventBuffer: number;
@@ -93,6 +95,7 @@ interface EventTypeDbRow {
   schedule_id: string | null;
   hidden: number;
   scheduling_type: string | null;
+  rr_distribution: string | null;
   minimum_booking_notice: number;
   before_event_buffer: number;
   after_event_buffer: number;
@@ -109,7 +112,7 @@ interface EventTypeDbRow {
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
-  schedule_id, hidden, scheduling_type, minimum_booking_notice, before_event_buffer,
+  schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
   crm_property_mappings, calendar_title_template, calendar_description_template`;
@@ -138,6 +141,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     scheduleId: r.schedule_id,
     hidden: !!r.hidden,
     schedulingType: r.scheduling_type,
+    rrDistribution: r.rr_distribution,
     minimumBookingNotice: r.minimum_booking_notice,
     beforeEventBuffer: r.before_event_buffer,
     afterEventBuffer: r.after_event_buffer,
@@ -249,6 +253,7 @@ export interface EventTypeInputRepo {
   scheduleId?: string | null;
   hidden?: boolean;
   schedulingType?: string | null;
+  rrDistribution?: string | null;
   minimumBookingNotice?: number;
   beforeEventBuffer?: number;
   afterEventBuffer?: number;
@@ -316,7 +321,7 @@ export async function createEventType(
     : null;
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
-          length_minutes, locations, schedule_id, hidden, scheduling_type, booking_fields, reminders,
+          length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
@@ -324,7 +329,7 @@ export async function createEventType(
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
-          ${input.schedulingType ?? null},
+          ${input.schedulingType ?? null}, ${input.rrDistribution ?? null},
           ${jsonParam(db, input.bookingFields ?? null)},
           ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
           ${input.minimumBookingNotice ?? 120},
@@ -366,6 +371,7 @@ export async function updateEventType(
   if (input.scheduleId !== undefined) set('schedule_id', sql`${input.scheduleId ?? null}`);
   if (input.hidden !== undefined) set('hidden', sql`${input.hidden ? 1 : 0}`);
   if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);
+  if (input.rrDistribution !== undefined) set('rr_distribution', sql`${input.rrDistribution ?? null}`);
   if (input.minimumBookingNotice !== undefined) set('minimum_booking_notice', sql`${input.minimumBookingNotice}`);
   if (input.beforeEventBuffer !== undefined) set('before_event_buffer', sql`${input.beforeEventBuffer}`);
   if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);

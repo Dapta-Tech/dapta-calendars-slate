@@ -401,6 +401,8 @@ export interface EventType {
   afterEventBuffer: number;
   slotInterval: number | null;
   schedulingType: string | null;
+  /** Round robin only: 'equal', or 'availability' / null (today's behavior). Optional on the wire. */
+  rrDistribution?: string | null;
   requiresConfirmation: boolean;
   /** Duplicate-booking guard (#69) — false on every event nobody switched on. */
   preventDuplicateBookings: boolean;

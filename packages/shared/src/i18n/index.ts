@@ -294,6 +294,16 @@ export interface BookingMessages {
     round_robin_hint: string;
     collective_hint: string;
     fixed_round_robin_hint: string;
+    /**
+     * Round robin's distribution method (`rrDistribution`), as Calendly names
+     * the choice: `availability` is today's behavior, `equal` counts only this
+     * event's bookings and holds back a host 3 or more ahead.
+     */
+    distribution: string;
+    availability: string;
+    availability_hint: string;
+    equal: string;
+    equal_hint: string;
   };
   /** Themed timezone combobox (QA2 fix 1) — shared by public + admin surfaces. */
   tzPicker: {
@@ -1789,6 +1799,12 @@ export const en: BookingMessages = {
     round_robin_hint: 'Rotate bookings fairly across hosts — one host per booking.',
     collective_hint: 'Everyone attends — offer only times when all hosts are free.',
     fixed_round_robin_hint: 'A fixed host always attends, plus one rotating host.',
+    distribution: 'Distribution',
+    availability: 'Maximize availability',
+    availability_hint: 'Offer every time any host is free; the booking goes by priority, then by load.',
+    equal: 'Equal distribution',
+    equal_hint:
+      "Share this event's bookings evenly: a host 3 or more bookings ahead is not offered until the others catch up. Priority and weight don't apply.",
   },
   tzPicker: {
     search: 'Search timezone…',
@@ -3217,6 +3233,13 @@ export const es: BookingMessages = {
     round_robin_hint: 'Reparte las reservas de forma equitativa entre anfitriones — uno por reserva.',
     collective_hint: 'Todos asisten — ofrece solo horarios en que todos los anfitriones están libres.',
     fixed_round_robin_hint: 'Un anfitrión fijo siempre asiste, más uno por turnos.',
+    distribution: 'Distribución',
+    availability: 'Maximizar disponibilidad',
+    availability_hint:
+      'Ofrece cada horario en que algún anfitrión esté libre; la reserva se asigna por prioridad y luego por carga.',
+    equal: 'Distribución equitativa',
+    equal_hint:
+      'Reparte por igual las reservas de este evento: un anfitrión con 3 o más reservas de ventaja no se ofrece hasta que los demás lo alcancen. La prioridad y el peso no aplican.',
   },
   tzPicker: {
     search: 'Buscar zona horaria…',
