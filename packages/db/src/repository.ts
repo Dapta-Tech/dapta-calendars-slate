@@ -25,7 +25,7 @@ import {
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
+import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
 import { canonicalPublicCode } from './short-links';
 import {
   duplicateGuardApplies,
@@ -1182,7 +1182,7 @@ export async function createBooking(
       // The slot is now shared by people who booked separately: its calendar
       // title and description must never carry one of them, whatever the
       // event type's seats become. Marked with the seat, in one transaction.
-      const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${existing.id}`;
+      const markShared = markSharedSql(existing.id, eventType.title);
       const heldElsewhere = args.refuseHeld
         ? memberHeldSql(member.id, startMs, endMs, seatTime, args.reservationUid)
         : null;

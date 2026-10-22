@@ -91,13 +91,15 @@ describe('a seat taken on a group slot', () => {
   });
 
   it('when even the reset fails, the event is not rewritten for the new seat-taker', async () => {
-    const { startMs } = await slotBookedBeforeSeats();
+    const { startMs, uid } = await slotBookedBeforeSeats();
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
     const bob = await book(startMs, 'Bob Other', 'bob@example.com');
     if (!bob.ok) throw new Error('seat failed');
     expect(bob.seatTaken).toBeUndefined();
     expect(bob.booking).toMatchObject({ title: 'Office hours', calendarDescription: null });
+    // The seat itself wrote the safe text with it: no reader sees Bob beside Alice's own text.
+    expect(await stored(uid)).toEqual({ title: 'Office hours', calendar_description: '' });
   });
 
   it('the reset never writes over a booking that moved meanwhile', async () => {
@@ -323,6 +325,8 @@ describe('a booking whose calendar event has others on it is shared from the sta
     expect(
       await addGuestsToBooking(db, { accountId, uid: other.uid, guests: [{ email: 'late@example.com' }] }),
     ).toEqual({ ok: true, added: 1, shared: false });
+    // The guests came with the safe text, in the same write.
+    expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
   });
 
   it('an attendee the machine API adds makes it shared the same way, and never joins a cancelled booking', async () => {
@@ -351,6 +355,8 @@ describe('a booking whose calendar event has others on it is shared from the sta
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
     expect(await addAttendeeToBooking(db, other.uid, accountId, bo)).toEqual({ ok: true, added: true, shared: false });
+    // The attendee came with the safe text, in the same write.
+    expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
   });
 
   it('the machine API writes an address already on the booking once, and stops at 30 people', async () => {
@@ -394,5 +400,25 @@ describe('a booking whose calendar event has others on it is shared from the sta
       reason: 'LIMIT_EXCEEDED',
     });
     expect(await attendees(one.uid)).toBe(29);
+  });
+
+  it('the 30-person cap counts an address listed in more than one place once', async () => {
+    const one = await book([]);
+    const bo = { name: 'Bo Added', email: 'bo@example.com', timeZone: 'UTC' };
+    // A guest on the guest list and in the booking's metadata, as v2 bookings list them.
+    expect(await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: 'gi@example.com' }] })).toMatchObject({
+      added: 1,
+    });
+    await db.run(sql`UPDATE booking SET metadata = ${JSON.stringify({ _guests: ['GI@example.com'] })} WHERE uid = ${one.uid}`);
+    // The invitee and the guest are 2 people: 28 more make 30.
+    for (let i = 0; i < 28; i++)
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: `p${i}@example.com` })).toMatchObject({
+        ok: true,
+        added: true,
+      });
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'p28@example.com' })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
   });
 });

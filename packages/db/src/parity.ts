@@ -1200,11 +1200,15 @@ export async function createTeamBooking(
     // The pick above read the loads outside any lock; two bookings of the
     // event at once would both see the same lightest host. It is made again
     // where it is written, from every free host (see `insertEqualShareGuarded`).
-    const pick = await insertEqualShareGuarded(db, et.id, equalHosts, candidates, args.startMs, endMs, (h) =>
+    const written = await insertEqualShareGuarded(db, et.id, equalHosts, candidates, args.startMs, endMs, (h) =>
       statementsFor([h], h.memberId),
     );
-    if (!pick) return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
-    organizer = pick;
+    // Nobody left to pick says why, as above; a picked host who lost the time
+    // (or a write that failed) is a time taken meanwhile.
+    if (written.kind === 'none')
+      return { ok: false, reason: sawCalendarFailure ? 'CALENDAR_UNAVAILABLE' : 'SLOT_TAKEN' };
+    if (written.kind === 'taken') return { ok: false, reason: 'SLOT_TAKEN' };
+    organizer = written.host;
   } else {
     const booked = await insertBookingGuarded(
       db,
@@ -1344,6 +1348,8 @@ function insertBookingGuarded(
   );
 }
 
+type EqualShareWrite = { kind: 'written'; host: HostCandidate } | { kind: 'none' } | { kind: 'taken' };
+
 /**
  * Equal distribution's pick and write as one step, so two bookings of the
  * event at once never both read the same lightest host. On Postgres a
@@ -1354,8 +1360,9 @@ function insertBookingGuarded(
  * the hosts found free (`candidates`, which no earlier hold-back has narrowed:
  * a host held back before the lock may have been caught up since); then the
  * usual member lock, overlap and hold checks, and the write of
- * `statementsFor(pick)`. Answers the host written, or null when none can take
- * the time.
+ * `statementsFor(pick)`. Answers the host written; `none` when no free host is
+ * left once the hold-back is applied; `taken` when the host picked lost the
+ * time meanwhile or the write failed.
  */
 async function insertEqualShareGuarded(
   db: Db,
@@ -1365,7 +1372,7 @@ async function insertEqualShareGuarded(
   startMs: number,
   endMs: number,
   statementsFor: (pick: HostCandidate) => Array<ReturnType<typeof sql>>,
-): Promise<HostCandidate | null> {
+): Promise<EqualShareWrite> {
   const now = Date.now();
   const pickFrom = (loads: Map<string, { n: number; last: number | null }>) => {
     const held = equalShareHeldBack(hosts, loads);
@@ -1384,22 +1391,22 @@ async function insertEqualShareGuarded(
   ];
   if (db.dialect === 'sqlite') {
     const lite = db.sqlite!.drizzle;
-    return db.sqlite!.txn<HostCandidate | null>(
+    return db.sqlite!.txn<EqualShareWrite>(
       () => {
         const loads = new Map(
           hosts.map((h) => [h.memberId, toEventHostLoad(lite.get<EventHostLoadRow>(eventHostLoadSql(eventTypeId, h.memberId)))]),
         );
         const pick = pickFrom(loads);
-        if (!pick) return null;
-        for (const check of checks(pick.memberId)) if (lite.get(check)) return null;
+        if (!pick) return { kind: 'none' };
+        for (const check of checks(pick.memberId)) if (lite.get(check)) return { kind: 'taken' };
         for (const stmt of statementsFor(pick)) lite.run(stmt);
-        return pick;
+        return { kind: 'written', host: pick };
       },
       { immediate: true },
     );
   }
   try {
-    return await db.pg!.drizzle.transaction(async (tx) => {
+    return await db.pg!.drizzle.transaction(async (tx): Promise<EqualShareWrite> => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`slate:rr-equal:${eventTypeId}`}, 0))`);
       const loads = new Map<string, { n: number; last: number | null }>();
       for (const h of hosts) {
@@ -1407,12 +1414,12 @@ async function insertEqualShareGuarded(
         loads.set(h.memberId, toEventHostLoad(rows[0]));
       }
       const pick = pickFrom(loads);
-      if (!pick) return null;
+      if (!pick) return { kind: 'none' };
       await lockMembers(tx, [pick.memberId]);
       for (const check of checks(pick.memberId))
-        if (((await tx.execute(check)) as unknown as unknown[]).length > 0) return null;
+        if (((await tx.execute(check)) as unknown as unknown[]).length > 0) return { kind: 'taken' };
       for (const stmt of statementsFor(pick)) await tx.execute(stmt);
-      return pick;
+      return { kind: 'written', host: pick };
     });
   } catch (err) {
     // The EXCLUDE refusing an overlap is a time taken meanwhile; anything else
@@ -1422,7 +1429,7 @@ async function insertEqualShareGuarded(
       console.warn(
         `equal distribution: a booking of event type ${eventTypeId} failed to write: ${err instanceof Error ? err.message : String(err)}`,
       );
-    return null;
+    return { kind: 'taken' };
   }
 }
 

@@ -4,7 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
+import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
 import { normalizeAttendeeEmail } from './duplicate-guard';
 import {
   bookingStartOutOfRange,
@@ -387,7 +387,7 @@ export async function addGuestsToBooking(
         UNION ALL
         SELECT email FROM booking_guest WHERE booking_id = ${booking.id}`;
   const countSql = sql`SELECT COUNT(*) AS count FROM booking_guest WHERE booking_id = ${booking.id}`;
-  const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${booking.id}`;
+  const markShared = markSharedSql(booking.id, booking.event_name);
   const byEmail = new Map<string, (typeof args.guests)[number]>();
   for (const guest of args.guests) {
     const normalized = guest.email.toLowerCase();
@@ -528,16 +528,18 @@ export async function addAttendeeToBooking(
       VALUES (${randomUUID()}, ${booking.id}, ${attendee.name}, ${attendee.email},
         ${email}, ${attendee.timeZone},
         ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`;
-  const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${booking.id}`;
+  const markShared = markSharedSql(booking.id, booking.event_name);
   type Plan = 'gone' | 'limit' | 'present' | 'add';
   const plan = (row: { status: string; metadata: unknown } | undefined, taken: ReadonlyArray<{ email: string }>): Plan => {
     if (!row || !live(row.status)) return 'gone';
-    const people = [
-      ...taken.map((r) => r.email),
-      ...(parseJsonColumn<{ _guests?: string[] }>(row.metadata, {})._guests ?? []),
-    ].map(normalizeAttendeeEmail);
-    if (people.includes(email)) return 'present';
-    return people.length + 1 > limit ? 'limit' : 'add';
+    // Each address once: a v2 booking's guests are listed in more than one place.
+    const people = new Set(
+      [...taken.map((r) => r.email), ...(parseJsonColumn<{ _guests?: string[] }>(row.metadata, {})._guests ?? [])].map(
+        normalizeAttendeeEmail,
+      ),
+    );
+    if (people.has(email)) return 'present';
+    return people.size + 1 > limit ? 'limit' : 'add';
   };
   let outcome: Plan;
   if (db.dialect === 'sqlite') {

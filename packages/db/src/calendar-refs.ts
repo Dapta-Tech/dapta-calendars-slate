@@ -239,6 +239,16 @@ export function attendeesFor(
  * if the booking is gone.
  */
 export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<CalendarWriteContext | null> {
+  // Who is on the event BEFORE its text: a path that adds someone writes them
+  // and the shared text in one transaction (`markSharedSql`), so every
+  // attendee read here comes with a text at least that new. Read the other way
+  // round, the first invitee's own text could be sent to a newcomer who joined
+  // between the two reads.
+  const attendees = await db.all<{ email: string }>(
+    sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})
+        UNION
+        SELECT email FROM booking_guest WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+  );
   const b = await db.get<{
     id: string;
     uid: string;
@@ -263,11 +273,6 @@ export async function loadBookingForCalendarWrite(db: Db, uid: string): Promise<
         WHERE b.uid = ${uid} LIMIT 1`,
   );
   if (!b) return null;
-  const attendees = await db.all<{ email: string }>(
-    sql`SELECT email FROM booking_attendee WHERE booking_id = ${b.id}
-        UNION
-        SELECT email FROM booking_guest WHERE booking_id = ${b.id}`,
-  );
 
   // The assigned host set: co-hosts recorded in booking_host (collective /
   // fixed_round_robin) plus the primary organizer. Round-robin bookings have no
