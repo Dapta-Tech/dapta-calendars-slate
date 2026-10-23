@@ -75,7 +75,7 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
   },
   {
     name: 'url-query',
-    apply: (t) => t.replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>`()[\]{}]+/gi, urlWithoutQuery),
+    apply: (t) => t.replace(/\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"'<>`()[\]{}]+/gi, urlWithoutQuery),
   },
   {
     // A path with a query, outside a full URL: "API /v1/x?email=... failed".
@@ -118,12 +118,14 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
         ),
   },
   {
-    // Plain and URL-encoded (`%40`) addresses.
+    // Plain and URL-encoded (`%40`) addresses. Bounded like the addresses
+    // themselves (64 before the `@`, 63 per label), so a long run of
+    // address-like characters costs linear time, not quadratic.
     name: 'email',
     apply: (t) =>
       t
-        .replace(/[\p{L}\p{N}._%+'-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}/gu, '[email]')
-        .replace(/[\w.%+-]+%40[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}/gi, '[email]'),
+        .replace(/[\p{L}\p{N}._%+'-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,8}\.\p{L}{2,24}/gu, '[email]')
+        .replace(/[\w.%+-]{1,64}%40[\w-]{1,63}(?:\.[\w-]{1,63}){0,8}\.[a-z]{2,24}/gi, '[email]'),
   },
   {
     // `+57 300 123 4567`, `+1 (555) 123-4567`, `+573001234567`.
@@ -159,8 +161,10 @@ const NUMBER_RULES = new Set(['phone-international', 'phone-national', 'digit-ru
  */
 export function scrubErrorText(text: unknown, rules: readonly ScrubRule[] = SCRUB_RULES): string {
   if (typeof text !== 'string' || !text) return '';
-  // Bounded work whatever arrives: anything past the cut below is dropped anyway.
-  let out = text.length > ERROR_MESSAGE_MAX * 10 ? text.slice(0, ERROR_MESSAGE_MAX * 10) : text;
+  // Bounded work whatever arrives: only twice what can be sent is read, and a
+  // word cut in half at that edge is dropped whole, so no partial address or
+  // number is left for the rules to miss.
+  let out = text.length > ERROR_MESSAGE_MAX * 2 ? text.slice(0, ERROR_MESSAGE_MAX * 2).replace(/\S*$/, '') : text;
   for (const rule of rules) {
     if (NUMBER_RULES.has(rule.name)) {
       const parked = park(out);

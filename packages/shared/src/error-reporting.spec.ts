@@ -166,8 +166,24 @@ describe('scrubErrorText: what it leaves alone', () => {
   it('is empty for anything but a string, and caps a long message', () => {
     expect(scrubErrorText(undefined)).toBe('');
     expect(scrubErrorText({ email: 'ana@example.com' })).toBe('');
-    const long = scrubErrorText('x'.repeat(ERROR_MESSAGE_MAX * 20));
+    const long = scrubErrorText(`${'word '.repeat(ERROR_MESSAGE_MAX)}`);
     expect(long.length).toBe(ERROR_MESSAGE_MAX + 3);
+  });
+
+  it('never keeps half of an address cut at the reading edge, even when scrubbing shortens what is before it', () => {
+    // A long query before the address is removed, pulling the address's
+    // first half from past the edge into what is sent.
+    const before = `https://x.example.test/p?${'q'.repeat(ERROR_MESSAGE_MAX * 2 - 40)} `;
+    const text = `${before}ana.perez@example.com and more`;
+    expect(scrubErrorText(text)).not.toMatch(/ana|perez/);
+  });
+
+  it('costs linear time on long runs of address-like characters', () => {
+    for (const text of ['a.'.repeat(5000), '1-'.repeat(5000), 'http://' + 'a'.repeat(9990), 'a%40'.repeat(2500)]) {
+      const started = performance.now();
+      scrubErrorText(text);
+      expect(performance.now() - started).toBeLessThan(50);
+    }
   });
 });
 
