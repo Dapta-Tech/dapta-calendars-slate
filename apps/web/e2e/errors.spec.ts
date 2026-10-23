@@ -143,16 +143,21 @@ test('a page that fails on the web server is reported once, by the server, with 
   // minute would be the same error, which the reporter counts instead of sending.
   test.skip(info.project.name !== 'desktop', 'server-side; runs once');
   const since = Date.now();
-  await answerWith({ match: `/v1/profiles/${JORDAN.accountCode}/${JORDAN.handle}`, times: 20, status: 500, body: { error: 'INTERNAL' } });
+  // A status of its own per attempt, so a CI retry raises a different error
+  // than the attempt before it, which the reporter would count, not send.
+  const status = 500 + info.retry;
+  await answerWith({ match: `/v1/profiles/${JORDAN.accountCode}/${JORDAN.handle}`, times: 20, status, body: { error: 'INTERNAL' } });
   const retry = page.getByRole('button', { name: /try again|reintentar/i });
+  let requestId: string | undefined;
   try {
-    await page.goto(`/${JORDAN.accountCode}/${JORDAN.handle}/${JORDAN.slug}?prefill=${encodeURIComponent(EMAIL)}`);
+    const response = await page.goto(`/${JORDAN.accountCode}/${JORDAN.handle}/${JORDAN.slug}?prefill=${encodeURIComponent(EMAIL)}`);
+    requestId = response?.headers()['x-request-id'];
     await expect(retry).toBeVisible();
   } finally {
     await clearThrottle();
   }
 
-  const failure = `API /v1/profiles/${JORDAN.accountCode}/${JORDAN.handle} failed: 500`;
+  const failure = `API /v1/profiles/${JORDAN.accountCode}/${JORDAN.handle} failed: ${status}`;
   const server = await waitForAnalytics((e) => isException(e, 'server', failure), since);
   expectTagged(server, 'next_server', WEB_HOST);
   expect(server.distinct_id).toBe('calendars-web-server');
@@ -163,7 +168,9 @@ test('a page that fails on the web server is reported once, by the server, with 
     account_code: JORDAN.accountCode,
     $process_person_profile: false,
   });
-  expect(String(server.properties?.['request_id'])).toMatch(/^[\w.:-]+$/);
+  // The id the response gave the browser is the id the report carries.
+  expect(requestId).toMatch(/^req_/);
+  expect(server.properties?.['request_id']).toBe(requestId);
   expect(typeof server.properties?.['digest']).toBe('string');
   expect(entries(server)[0]).toMatchObject({ type: 'Error', value: failure, mechanism: { handled: false } });
   // Readable: the failing frame names the source file, not a bundled chunk.

@@ -62,7 +62,8 @@ function deliveryFor(config: AnalyticsConfig): ((report: ErrorReport) => Promise
   switch (config.provider) {
     case 'posthog':
       return async (report) => {
-        await sendAnalyticsEvent(config, exceptionEvent(report, { distinctId: WEB_SERVER_ERROR_DISTINCT_ID }));
+        const res = await sendAnalyticsEvent(config, exceptionEvent(report, { distinctId: WEB_SERVER_ERROR_DISTINCT_ID }));
+        if (!res.ok) throw new Error(`error tracking refused the event: HTTP ${res.status}`);
       };
     default:
       return null;
@@ -96,6 +97,15 @@ function nextStack(error: Error): string | undefined {
 
 let reporter: ErrorReporter | null | undefined;
 
+/** A delivery that keeps failing (a refused key) is said in the log, at most once a minute. */
+let lastWarning = 0;
+function warnAtMostOnceAMinute(message: string): void {
+  const now = Date.now();
+  if (now - lastWarning < 60_000) return;
+  lastWarning = now;
+  console.warn(message);
+}
+
 /** This process's reporter, built on first use from the runtime env; null when error tracking is off. */
 export function webServerErrorReporter(env: NodeJS.ProcessEnv = process.env): ErrorReporter | null {
   if (reporter !== undefined) return reporter;
@@ -108,6 +118,9 @@ export function webServerErrorReporter(env: NodeJS.ProcessEnv = process.env): Er
         properties: { surface: 'next_server', ...(host ? { $host: host } : {}) },
         root: typeof process.cwd === 'function' ? process.cwd() : undefined,
         stackOf: nextStack,
+        onDrop: (reason) => warnAtMostOnceAMinute(`error reports are being dropped (${reason}); the log still has every error`),
+        onFailure: (error) =>
+          warnAtMostOnceAMinute(`error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`),
       })
     : null;
   return reporter;
@@ -160,4 +173,5 @@ export function reportRequestError(
 /** Test seam: forget the reporter. */
 export function resetWebServerErrorsForTests(): void {
   reporter = undefined;
+  lastWarning = 0;
 }

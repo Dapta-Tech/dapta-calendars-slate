@@ -100,7 +100,7 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
   {
     // A path with a query, outside a full URL: "API /v1/x?email=... failed".
     name: 'path-query',
-    apply: (t) => t.replace(/(\S)\?[\w.%[\]-]+=[^\s"'<>`]*/g, '$1'),
+    apply: (t) => t.replace(/(\S)\?&?[\w.%[\]-]+=[^\s"'<>`]*/g, '$1'),
   },
   {
     name: 'bearer',
@@ -112,10 +112,14 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
   },
   {
     // Prefixed keys: payment and analytics keys (`sk_`, `pk_`, `phc_`, `phx_`),
-    // this app's own API keys (`dcl_`), webhook secrets, code-host tokens.
+    // this app's own API keys (`dcl_`), webhook secrets, code-host tokens, and
+    // the shapes of common mail and cloud keys (`re_`, `SG.`, `AIza`, `ya29.`).
     name: 'prefixed-key',
     apply: (t) =>
-      t.replace(/\b(?:sk|pk|rk|phc|phx|dcl|whsec|ghp|gho|ghs|github_pat|xox[abprs])_[A-Za-z0-9_-]{6,}|\bsk-[A-Za-z0-9_-]{10,}/g, '[token]'),
+      t.replace(
+        /\b(?:sk|pk|rk|re|phc|phx|dcl|whsec|ghp|gho|ghs|github_pat|xox[abprs])_[A-Za-z0-9_-]{6,}|\bsk-[A-Za-z0-9_-]{10,}|\bya29\.[\w-]{10,}|\bAIza[\w-]{20,}|\bSG\.[\w-]{10,}\.[\w-]{10,}/g,
+        '[token]',
+      ),
   },
   {
     // `key=...`, `token=...`, `"password": "..."`: a secret by its name.
@@ -135,7 +139,9 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
         .replace(
           /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|passwd)(\s*:\s*)[^\s"',;}]+/gi,
           '$1$2[redacted]',
-        ),
+        )
+        // A credential header quoted whole: everything after it on the line.
+        .replace(/\b(authorization|proxy-authorization|cookie|set-cookie)(\s*:\s*)[^\n"']+/gi, '$1$2[redacted]'),
   },
   {
     // Plain and URL-encoded (`%40`) addresses. Bounded like the addresses
@@ -187,10 +193,14 @@ const NUMBER_RULES = new Set(['phone-international', 'phone-national', 'digit-ru
  */
 export function scrubErrorText(text: unknown, rules: readonly ScrubRule[] = SCRUB_RULES): string {
   if (typeof text !== 'string' || !text) return '';
-  // Bounded work whatever arrives: only twice what can be sent is read, and a
-  // word cut in half at that edge is dropped whole, so no partial address or
-  // number is left for the rules to miss.
-  let out = text.length > ERROR_MESSAGE_MAX * 2 ? text.slice(0, ERROR_MESSAGE_MAX * 2).replace(/\S*$/, '') : text;
+  // Bounded work whatever arrives: only twice what can be sent is read, and
+  // the run of address, number or token characters cut in half at that edge
+  // is dropped whole, so no partial address, number or key is left for the
+  // rules to miss (punctuation in minified JSON or a URL bounds it).
+  let out =
+    text.length > ERROR_MESSAGE_MAX * 2
+      ? text.slice(0, ERROR_MESSAGE_MAX * 2).replace(/[\p{L}\p{N}._%+@'~=-]*$/u, '')
+      : text;
   // Compatibility forms first, so a full-width `＠` or digit reads as itself.
   out = out.normalize('NFKC');
   for (const rule of rules) {
@@ -422,6 +432,8 @@ export interface ErrorReporterOptions {
   uuid?: () => string;
   /** Told about every drop, so an operator can see the reporter shedding load. */
   onDrop?: (reason: 'queue_full' | 'rate_limited') => void;
+  /** Told when a delivery fails (a refused key, an outage), so a misconfiguration is not silent forever. */
+  onFailure?: (error: unknown) => void;
 }
 
 export interface ErrorReporter {
@@ -528,9 +540,17 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
     sentAt.push(t);
     stats.sent += 1;
     let p: Promise<void>;
+    const failed = (error: unknown) => {
+      try {
+        options.onFailure?.(error);
+      } catch {
+        /* never into the caller */
+      }
+    };
     try {
-      p = Promise.resolve(options.deliver(report)).catch(() => undefined);
-    } catch {
+      p = Promise.resolve(options.deliver(report)).catch(failed);
+    } catch (error) {
+      failed(error);
       return;
     }
     const tracked = p.finally(() => inflight.delete(tracked));
@@ -561,10 +581,10 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
     }, windowMs);
   };
 
-  const build = (item: Queued): ErrorReport => ({
+  const build = (item: Queued, exceptions: ExceptionEntry[]): ErrorReport => ({
     uuid: uuid(),
     timestamp: item.at,
-    exceptions: describeError(item.error, options.root, options.stackOf),
+    exceptions,
     handled: item.input.handled ?? false,
     mechanism: item.input.mechanism ?? 'generic',
     count: 1,
@@ -575,13 +595,15 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
     scheduled = false;
     sweep(false);
     for (const item of queue.splice(0)) {
-      let report: ErrorReport;
+      // Fingerprinted on the plain stack; a runtime's better stack (`stackOf`,
+      // which can cost a source map lookup) is read only for what is sent.
+      let plain: ExceptionEntry[];
       try {
-        report = build(item);
+        plain = describeError(item.error, options.root);
       } catch {
         continue;
       }
-      const key = errorFingerprint(report.exceptions);
+      const key = errorFingerprint(plain);
       const w = windows.get(key);
       if (w && item.at - w.first < windowMs) {
         w.folded += 1;
@@ -592,6 +614,12 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
       if (w) {
         windows.delete(key);
         if (w.folded > 0) send({ ...w.sample, uuid: uuid(), timestamp: now(), count: w.folded });
+      }
+      let report: ErrorReport;
+      try {
+        report = build(item, options.stackOf ? describeError(item.error, options.root, options.stackOf) : plain);
+      } catch {
+        continue;
       }
       windows.set(key, { first: item.at, folded: 0, sample: report });
       while (windows.size > MAX_WINDOWS) {
@@ -671,7 +699,8 @@ const PRIVATE_IPV4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|100
 export function reportableHost(raw: unknown): string | null {
   const value = (Array.isArray(raw) ? raw[0] : raw) as unknown;
   if (typeof value !== 'string') return null;
-  const host = value.trim().toLowerCase();
+  // A fully qualified name's trailing dot (`api.svc.cluster.local.`) is dropped first.
+  const host = value.trim().toLowerCase().replace(/\.(?=(:\d+)?$)/, '');
   if (!/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(host)) return null;
   const name = host.replace(/:\d+$/, '');
   if (PRIVATE_IPV4.test(name) || INTERNAL_HOST.test(name)) return null;

@@ -5,7 +5,6 @@ import {
   analyticsErrorsEnabled,
   createErrorReporter,
   hostOfUrl,
-  reportableHost,
   type ErrorReporter,
   type ErrorReporterOptions,
 } from '@slate/shared';
@@ -42,12 +41,6 @@ export interface RequestErrorOptions {
   requestId?: string;
 }
 
-/** The API's reporter: a shared one, plus whether a request may name its own `$host`. */
-export interface ApiErrorReporter extends ErrorReporter {
-  /** True when no public API host is configured, so a request's own (public) Host header is the best name. */
-  readonly useRequestHost: boolean;
-}
-
 /** The status a thrown value answers with: its own for an `HttpException`, else 500. */
 export function statusOf(exception: unknown): number {
   return exception instanceof HttpException ? exception.getStatus() : 500;
@@ -64,30 +57,31 @@ export function createApiErrorReporter(
   env: Pick<ServerEnv, 'PRODUCT_ANALYTICS_ERRORS' | 'PUBLIC_APP_URL' | 'API_PUBLIC_URL'>,
   provider: AnalyticsProvider | null,
   overrides: Partial<ErrorReporterOptions> = {},
-): ApiErrorReporter | null {
+): ErrorReporter | null {
   const capture = provider?.captureException?.bind(provider);
   if (!capture || !analyticsErrorsEnabled(env.PRODUCT_ANALYTICS_ERRORS)) return null;
-  // `$host` names the public address the error belongs to, never a pod's: the
-  // configured public API host; without one, a request's own Host header when
-  // it is a public name (see `reportRequestError`); for anything else (a
-  // crash, an internal caller) the deployment's public app host.
-  const apiHost = hostOfUrl(env.API_PUBLIC_URL);
-  const host = apiHost ?? hostOfUrl(env.PUBLIC_APP_URL);
+  // `$host` names the public address the error belongs to, from configuration
+  // only: the public API host, else the deployment's public app host. Never a
+  // request's Host header: the web server calls this API at its internal
+  // address, which is not a name anyone outside can use.
+  const host = hostOfUrl(env.API_PUBLIC_URL) ?? hostOfUrl(env.PUBLIC_APP_URL);
   const log = new Logger('ErrorTracking');
   let lastWarning = 0;
-  const reporter = createErrorReporter({
+  const warnAtMostOnceAMinute = (message: string) => {
+    const now = Date.now();
+    if (now - lastWarning < DROP_WARNING_EVERY_MS) return;
+    lastWarning = now;
+    log.warn(message);
+  };
+  return createErrorReporter({
     deliver: capture,
     properties: { surface: 'api', ...(host ? { $host: host } : {}) },
     root: process.cwd(),
-    onDrop: (reason) => {
-      const now = Date.now();
-      if (now - lastWarning < DROP_WARNING_EVERY_MS) return;
-      lastWarning = now;
-      log.warn(`error reports are being dropped (${reason}); the log still has every error`);
-    },
+    onDrop: (reason) => warnAtMostOnceAMinute(`error reports are being dropped (${reason}); the log still has every error`),
+    onFailure: (error) =>
+      warnAtMostOnceAMinute(`error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`),
     ...overrides,
   });
-  return Object.assign(reporter, { useRequestHost: apiHost === null });
 }
 
 /**
@@ -104,13 +98,10 @@ export function reportRequestError(
   try {
     const status = opts.status ?? statusOf(exception);
     if (status < 500) return;
-    const host = (reporter as Partial<ApiErrorReporter>).useRequestHost
-      ? reportableHost((req as { headers?: Record<string, unknown> } | null)?.headers?.['host'])
-      : null;
     reporter.report(exception, {
       handled: false,
       mechanism: 'filter',
-      properties: { ...requestErrorContext(req, opts.requestId), status, ...(host ? { $host: host } : {}) },
+      properties: { ...requestErrorContext(req, opts.requestId), status },
     });
   } catch {
     /* reporting never changes the answer */
@@ -139,9 +130,11 @@ export class ErrorReportingFilter extends BaseExceptionFilter {
       const req = http.getRequest<{ headers?: Record<string, string | string[] | undefined> }>();
       const res = http.getResponse<{ headersSent?: boolean; getHeader?(n: string): unknown; setHeader?(n: string, v: string): void }>();
       // The request log names every request; with it off, a reported failure
-      // still tells the client the id its report carries.
-      const requestId = requestIdFrom(req?.headers?.['x-request-id']);
-      if (statusOf(exception) >= 500 && res && !res.headersSent && !res.getHeader?.('X-Request-Id')) {
+      // still tells the client the id its report carries. An id a handler
+      // already gave the response (the MCP endpoint does) is the one used.
+      const given = res?.getHeader?.('X-Request-Id');
+      const requestId = typeof given === 'string' && given ? given : requestIdFrom(req?.headers?.['x-request-id']);
+      if (statusOf(exception) >= 500 && res && !res.headersSent && !given) {
         res.setHeader?.('X-Request-Id', requestId);
       }
       reportRequestError(this.reporter, exception, req, { requestId });
@@ -168,10 +161,13 @@ export function unhandledRejectionsMode(
 ): string {
   const flags = [...execArgv, ...(nodeOptions ?? '').split(/\s+/)];
   let mode = 'throw';
-  for (const flag of flags) {
-    const m = /^--unhandled-rejections=([\w-]+)$/.exec(flag);
-    if (m) mode = m[1]!;
-  }
+  flags.forEach((flag, i) => {
+    const m = /^--unhandled-rejections(?:=([\w-]+))?$/.exec(flag);
+    if (!m) return;
+    // `--unhandled-rejections=warn` or `--unhandled-rejections warn`.
+    const value = m[1] ?? flags[i + 1];
+    if (value && /^[\w-]+$/.test(value)) mode = value;
+  });
   return mode;
 }
 
@@ -215,7 +211,8 @@ export function installProcessErrorHooks(reporter: ErrorReporter, opts: ProcessH
       // The mode this process was started in keeps it alive: report, and say
       // so as Node would have.
       reporter.report(reason, { handled: false, mechanism: 'unhandled_rejection' });
-      if (rejectionMode !== 'none') log('[api] unhandled rejection:', reason);
+      // `warn` prints Node's own warning whatever the hook; the other two are silent with one.
+      if (rejectionMode === 'warn-with-error-code') log('[api] unhandled rejection:', reason);
       if (rejectionMode === 'warn-with-error-code') process.exitCode = 1;
       return;
     }

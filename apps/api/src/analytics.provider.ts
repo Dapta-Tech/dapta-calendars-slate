@@ -110,11 +110,13 @@ export class PosthogAnalyticsProvider implements AnalyticsProvider {
    * Fire-and-forget: a refusal or an outage is swallowed by the reporter.
    */
   async captureException(report: ErrorReport): Promise<void> {
-    await sendAnalyticsEvent(
+    const res = await sendAnalyticsEvent(
       this.config,
       exceptionEvent(report, { distinctId: API_ERROR_DISTINCT_ID }),
       this.fetchImpl as unknown as AnalyticsFetch,
     );
+    // Said, not retried: the reporter logs it (at most once a minute).
+    if (!res.ok) throw new Error(`error tracking refused the event: HTTP ${res.status}`);
   }
 
   updateAccount(u: AnalyticsAccountUpdate): Promise<void> {

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BadRequestException,
+  Logger,
   Controller,
   Get,
   HttpException,
@@ -83,29 +84,50 @@ describe('createApiErrorReporter', () => {
     });
   });
 
-  it("names the configured public API host; without one, a request's public Host, never an internal one", () => {
-    const report = vi.fn();
-    const withApiHost = createApiErrorReporter(env({ API_PUBLIC_URL: 'https://api.example.test' }), recordingProvider())!;
-    expect(withApiHost.useRequestHost).toBe(false);
-    reportRequestError({ ...withApiHost, report }, new Error('x'), { headers: { host: 'localhost:4000' }, method: 'GET' });
-    expect(report.mock.calls[0]![1].properties).not.toHaveProperty('$host');
+  it("names the configured public API host, else the public app host, never a request's Host header", async () => {
+    const withApi = recordingProvider();
+    createApiErrorReporter(env({ API_PUBLIC_URL: 'https://api.example.test/v1' }), withApi)!.report(new Error('a'));
+    const appOnly = recordingProvider();
+    const reporter = createApiErrorReporter(env(), appOnly)!;
+    // The web server calls the API at its internal address: that Host never names an error.
+    reportRequestError(reporter, new Error('b'), { headers: { host: 'calendars-api.prod:4000' }, method: 'GET' });
+    await settle();
+    expect(withApi.errors[0]!.properties['$host']).toBe('api.example.test');
+    expect(appOnly.errors[0]!.properties['$host']).toBe('cal.example.test');
+  });
 
-    const without = createApiErrorReporter(env(), recordingProvider())!;
-    expect(without.useRequestHost).toBe(true);
-    for (const [hostHeader, expected] of [
-      ['localhost:4411', 'localhost:4411'],
-      ['api.example.test', 'api.example.test'],
-      ['calendars-api.lab.svc.cluster.local', undefined],
-      ['10.2.3.4:4000', undefined],
-    ] as const) {
-      report.mockClear();
-      reportRequestError({ ...without, report }, new Error('x'), { headers: { host: hostHeader }, method: 'GET' });
-      expect([hostHeader, report.mock.calls[0]![1].properties['$host']]).toEqual([hostHeader, expected]);
+  it('says once a minute, in the log, that reports are not being delivered (a refused key)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      const refusing: AnalyticsProvider = {
+        ...recordingProvider(),
+        captureException: () => Promise.reject(new Error('error tracking refused the event: HTTP 401')),
+      };
+      const reporter = createApiErrorReporter(env(), refusing)!;
+      reporter.report(new Error('one'));
+      reporter.report(new Error('two'));
+      await reporter.flush(100);
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('not being delivered'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('HTTP 401');
+    } finally {
+      warn.mockRestore();
     }
   });
 });
 
 describe('PosthogAnalyticsProvider.captureException', () => {
+  it('a refused event is an error the reporter can say, not silence', async () => {
+    const provider = new PosthogAnalyticsProvider(
+      { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true },
+      ANALYTICS_GROUP_TYPE,
+    );
+    provider.fetchImpl = (async () => new Response('{}', { status: 401 })) as unknown as typeof fetch;
+    await expect(
+      provider.captureException({ uuid: 'u', timestamp: 0, exceptions: [], handled: false, mechanism: 'filter', count: 1, properties: {} }),
+    ).rejects.toThrow('HTTP 401');
+  });
+
   it('posts one $exception to the capture endpoint, filed under the process, with no person', async () => {
     const provider = new PosthogAnalyticsProvider(
       { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true },
@@ -216,7 +238,7 @@ describe('the global filter and the v2 filter, in a real app', () => {
       mechanism: 'filter',
       properties: {
         surface: 'api',
-        // Asked at 127.0.0.1: a loopback address is not a public name, so the configured app host stands in.
+        // From configuration (PUBLIC_APP_URL here), never the request's Host.
         $host: 'cal.example.test',
         route: '/v1/profiles/:accountCode/boom',
         method: 'GET',
@@ -391,7 +413,8 @@ describe('installProcessErrorHooks', () => {
       await settle();
       expect([mode, p.exit.mock.calls.length]).toEqual([mode, 0]);
       expect(provider.errors[0]).toMatchObject({ mechanism: 'unhandled_rejection' });
-      expect(p.logs.length).toBe(mode === 'none' ? 0 : 1);
+      // `warn` prints Node's own warning; only `warn-with-error-code` is silent with a hook and logs here.
+      expect([mode, p.logs.length]).toEqual([mode, mode === 'warn-with-error-code' ? 1 : 0]);
       if (mode === 'warn-with-error-code') expect(process.exitCode).toBe(1);
       process.exitCode = before;
       undo();
@@ -403,6 +426,7 @@ describe('installProcessErrorHooks', () => {
     expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], undefined)).toBe('warn');
     expect(unhandledRejectionsMode([], '--max-old-space-size=512 --unhandled-rejections=none')).toBe('none');
     expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], '--unhandled-rejections=strict')).toBe('strict');
+    expect(unhandledRejectionsMode(['--unhandled-rejections', 'none'], undefined)).toBe('none');
   });
 
   it('a provider that never answers cannot keep a crashed process alive', async () => {

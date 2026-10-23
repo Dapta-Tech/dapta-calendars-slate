@@ -28,8 +28,9 @@ test('an API route that fails is reported by the API, with its route, request id
     (e) => e.event === '$exception' && e.source === 'server' && e.properties?.['request_id'] === 'req_e2e_errors_api',
     since,
   );
-  // No public API address is configured in the suite, so the request's own host names it.
-  expect(api.properties).toMatchObject({ product: 'calendars', surface: 'api', $host: `localhost:${E2E.apiPort}` });
+  // No public API address is configured in the suite, so the deployment's
+  // public app address names it (from configuration, never a request's Host).
+  expect(api.properties).toMatchObject({ product: 'calendars', surface: 'api', $host: `localhost:${E2E.webPort}` });
   expect(api.distinct_id).toBe('calendars-api');
   expect(api.properties).toMatchObject({
     route: '/v1/webhooks',

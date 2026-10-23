@@ -95,7 +95,7 @@ describe('reportRequestError', () => {
     for (const [hostHeader, expected] of [
       ['localhost:3411', 'localhost:3411'],
       ['10.0.12.7:3000', 'cal.example.test'],
-      ['calendars-web.lab.svc.cluster.local', 'cal.example.test'],
+      ['calendars-web.ns.svc.cluster.local', 'cal.example.test'],
       [undefined, 'cal.example.test'],
       ['evil.example.test/../x', 'cal.example.test'],
     ] as const) {
@@ -131,6 +131,19 @@ describe('reportRequestError', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(webServerErrorReporter({ ...ON, PRODUCT_ANALYTICS_ERRORS: 'off' })).toBeNull();
     expect(() => reportRequestError(new Error('z'), null as never, null as never, ON)).not.toThrow();
+  });
+
+  it('a refused event is said in the log, at most once a minute', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      reportRequestError(new Error('one'), request(), RENDER, ON);
+      reportRequestError(new Error('two'), request(), RENDER, ON);
+      await settle();
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('HTTP 401'))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('a provider that is down costs the request nothing', async () => {

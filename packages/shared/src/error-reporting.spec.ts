@@ -80,11 +80,13 @@ describe('scrubErrorText: one group per rule', () => {
 
   it('a path with a query loses the query', () => {
     expect(scrubErrorText('API /v1/bookings/abc?token=t0k3n failed: 500')).toBe('API /v1/bookings/abc failed: 500');
+    expect(scrubErrorText('API /v1/search?&name=ana failed')).toBe('API /v1/search failed');
     expect(scrubErrorText('What went wrong? Nothing.')).toBe('What went wrong? Nothing.');
   });
 
   it('bearer and basic credentials', () => {
-    expect(scrubErrorText('Authorization: Bearer abc.def')).toContain('[token]');
+    expect(scrubErrorText('upstream said Bearer abc.def')).toBe('upstream said Bearer [token]');
+    expect(scrubErrorText('Authorization: Bearer abc.def')).not.toContain('abc.def');
     expect(scrubErrorText('sent Basic dXNlcjpwYXNz')).toBe('sent Basic [token]');
   });
 
@@ -104,6 +106,17 @@ describe('scrubErrorText: one group per rule', () => {
       ['sk', '-abcdefghij12'],
     ]) {
       const key = fake(prefix!, rest!);
+      expect([key, scrubErrorText(`key ${key} refused`)]).toEqual([key, 'key [token] refused']);
+    }
+  });
+
+  it('a credential header quoted whole loses everything after it on the line', () => {
+    expect(scrubErrorText('sent Authorization: Token abc123\nnext line')).toBe('sent Authorization: [redacted]\nnext line');
+    expect(scrubErrorText('Cookie: sid=abc; theme=dark')).toBe('Cookie: [redacted]');
+  });
+
+  it('the shapes of common mail and cloud keys', () => {
+    for (const key of [fake('re', '_abcdefghij123456'), fake('SG', '.abcdefghij12', '.klmnopqrst34'), fake('AIza', 'SyAbcdefghij1234567890'), fake('ya29', '.a0AbcdefGhij12')]) {
       expect([key, scrubErrorText(`key ${key} refused`)]).toEqual([key, 'key [token] refused']);
     }
   });
@@ -207,6 +220,13 @@ describe('scrubErrorText: what it leaves alone', () => {
     const before = `https://x.example.test/p?${'q'.repeat(ERROR_MESSAGE_MAX * 2 - 40)} `;
     const text = `${before}ana.perez@example.com and more`;
     expect(scrubErrorText(text)).not.toMatch(/ana|perez/);
+  });
+
+  it('a long message with no spaces (minified JSON) keeps what precedes the reading edge', () => {
+    const json = `{"error":"upstream","items":[${'{"id":1},'.repeat(400)}]}`;
+    const out = scrubErrorText(json);
+    expect(out.startsWith('{"error":"upstream","items":[')).toBe(true);
+    expect(out.length).toBe(ERROR_MESSAGE_MAX + 3);
   });
 
   it('costs linear time on long runs of address-like characters', () => {
@@ -471,6 +491,27 @@ describe('createErrorReporter', () => {
     await expect(throwing.flush(10)).resolves.toBeUndefined();
   });
 
+  it('says when a delivery fails, so a refused key is not silent forever', async () => {
+    const failures: unknown[] = [];
+    const reporter = createErrorReporter({
+      deliver: () => Promise.reject(new Error('refused: HTTP 401')),
+      schedule: (fn) => fn(),
+      onFailure: (e) => void failures.push(e),
+    });
+    reporter.report(new Error('x'));
+    await reporter.flush(50);
+    expect(String(failures[0])).toContain('401');
+  });
+
+  it("reads a runtime's better stack only for reports it sends, never for the repeats it counts", async () => {
+    const stackOf = vi.fn((e: Error) => e.stack);
+    const h = harness({ stackOf });
+    for (let i = 0; i < 5; i++) h.reporter.report(sameError());
+    h.run();
+    expect(h.sent).toHaveLength(1);
+    expect(stackOf).toHaveBeenCalledTimes(1);
+  });
+
   it('defaults run the drain on the next turn, off the caller', async () => {
     const deliver = vi.fn(async () => undefined);
     const reporter = createErrorReporter({ deliver });
@@ -496,10 +537,14 @@ describe('reportableHost and hostOfUrl', () => {
     expect(reportableHost('App.Example.Test')).toBe('app.example.test');
     expect(reportableHost(['localhost:3411'])).toBe('localhost:3411');
     for (const outside of ['203.0.113.7', '100.63.0.1', '100.128.0.1', '172.32.0.1']) expect(reportableHost(outside)).toBe(outside);
-    for (const internal of ['10.0.1.2', '172.20.0.5:3000', '192.168.1.10', '127.0.0.1:3000', '100.64.0.9', '100.127.255.1', 'calendars-api.lab.svc.cluster.local', 'calendars-api.lab.svc', 'db.internal', 'printer.local', 'calendars-api']) {
+    for (const internal of ['10.0.1.2', '172.20.0.5:3000', '192.168.1.10', '127.0.0.1:3000', '100.64.0.9', '100.127.255.1', 'calendars-api.ns.svc.cluster.local', 'calendars-api.ns.svc', 'db.internal', 'printer.local', 'calendars-api']) {
       expect([internal, reportableHost(internal)]).toEqual([internal, null]);
     }
     for (const junk of ['a b', 'host/path', 'user@host', '', undefined, 42]) expect(reportableHost(junk)).toBeNull();
+    // A fully qualified name's trailing dot changes nothing.
+    expect(reportableHost('calendars-api.ns.svc.cluster.local.')).toBeNull();
+    expect(reportableHost('db.internal.:5432')).toBeNull();
+    expect(reportableHost('app.example.test.')).toBe('app.example.test');
   });
 
   it('reads the host of a configured public URL', () => {

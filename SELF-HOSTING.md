@@ -343,7 +343,7 @@ a `surface`, and `$host`, the public host it belongs to):
   public booking pages): uncaught errors and unhandled promise rejections, plus
   every error an error boundary shows. Never the console. A host's errors are
   filed under the host, through the dashboard's own analytics (a wizard page
-  that fails in the browser before that starts is left to the server's half);
+  that fails in the browser before its analytics starts goes unreported);
   a visitor's are anonymous like every other visitor
   event (no person profile, nothing stored). The manage page, one-off links and
   sign-in report nothing from the browser. An error the server already reported
@@ -399,15 +399,22 @@ them with your error tracking:
    export POSTHOG_CLI_HOST=https://us.posthog.com     # your PostHog app host
    export POSTHOG_CLI_PROJECT_ID=<project id>
    export POSTHOG_CLI_API_KEY=<personal API key: error tracking write, organization read>
-   npx -y @posthog/cli@0.18.12 sourcemap inject --directory "$1" --release-name calendars-web --release-version <version>
-   npx -y @posthog/cli@0.18.12 sourcemap upload --directory "$1" --release-name calendars-web --release-version <version>
+   npx -y @posthog/cli@0.18.12 sourcemap inject --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
+   npx -y @posthog/cli@0.18.12 sourcemap upload --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
    ```
 
    `inject` stamps each chunk with an id the browser library reports with
    every frame, so it must run before the chunks are copied into the image.
 3. The Dockerfile then deletes every browser `.map` file, whatever the script
    did: no source map is ever served. A failed upload is logged and costs
-   readable stacks, never the build.
+   readable stacks, never the build. Pass the release to the script as the
+   build arg `SOURCEMAPS_RELEASE` (the script reads `$SOURCEMAPS_RELEASE`): a
+   new value also makes BuildKit run the upload step again instead of reusing
+   a cached one.
+
+**Outside the web Dockerfile** (a plain `next build` and `next start`, a
+platform's build), `PRODUCT_ANALYTICS_SOURCEMAPS=1` maps are **served** from
+`/_next/static` unless your own pipeline deletes them after the upload.
 
 **What a visitor's browser stores.** Nothing, from analytics itself. The one
 cookie this feature adds is `slate.ph_id`: when a link to one of the product's

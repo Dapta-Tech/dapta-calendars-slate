@@ -5,6 +5,7 @@ import {
   LANDING_ID_COOKIE,
   LANDING_ID_QUERY_KEY,
   parseAttribution,
+  reportableRequestId,
   sanitizeLandingDistinctId,
 } from '@slate/shared';
 import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
@@ -144,7 +145,13 @@ export function middleware(req: NextRequest) {
   // downstream reads out of it is one short enum. `URL` has already
   // percent-encoded any C0 control, so the cap is about size, not injection.
   requestHeaders.set(QUERY_HEADER, req.nextUrl.search.slice(0, 2048));
+  // One id per request, kept when a proxy in front already gave one that is
+  // safe to echo: the response says it (`X-Request-Id`), and an error the
+  // server reports for this request carries the same id, so the two meet.
+  const requestId = reportableRequestId(req.headers.get('x-request-id'));
+  requestHeaders.set('x-request-id', requestId);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set('X-Request-Id', requestId);
 
   // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public
   // booking routes is the promise the embed rests on; `'self'` on the admin,
