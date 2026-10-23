@@ -325,6 +325,99 @@ A provider without a usable key or host turns analytics off with one warning at
 boot; it never stops either app from starting. Turning analytics off later
 leaves any queued rows to drain as `skipped`.
 
+#### Error tracking
+
+With analytics on, unhandled errors are reported to the same project as
+`$exception` events, which PostHog's Error Tracking groups into issues. Off with
+analytics, and a fork that sets nothing sends nothing and loads nothing.
+
+| Var | Default | Set when | Secret? |
+|---|---|---|---|
+| `PRODUCT_ANALYTICS_ERRORS` | `on` whenever analytics is on | `off` to stop error capture only (product analytics keeps running). Any other value is read as `off`, with one warning at boot | no |
+| `PRODUCT_ANALYTICS_SOURCEMAPS` | unset (no maps) | **build time**, web image only: `1` to emit browser source maps for upload and keep the web server's own maps in the image (see below) | no |
+
+What is reported, from each surface (every event carries `product: "calendars"`,
+a `surface`, and `$host`, the public host it belongs to):
+
+- **Browser** (`browser_host` on the dashboard and wizard, `browser_visitor` on
+  public booking pages): uncaught errors and unhandled promise rejections, plus
+  every error an error boundary shows. Never the console. A host's errors are
+  filed under the host, through the dashboard's own analytics (a wizard page
+  that fails in the browser before its analytics starts goes unreported);
+  a visitor's are anonymous like every other visitor
+  event (no person profile, nothing stored). The manage page, one-off links and
+  sign-in report nothing from the browser. An error the server already reported
+  (it reaches the browser with a `digest`) is not sent again.
+- **Web server** (`next_server`): every error Next reports through
+  `onRequestError` (a render, route handler, server action or middleware), with
+  the route template (`/[accountCode]/[handle]/[slug]`), method, status, request
+  id, what failed (`route_type`), the `digest` the browser shows, and as `$host`
+  the request's Host header when it is a public name (else `PUBLIC_APP_URL`;
+  never a private, loopback or cluster address). With error tracking on,
+  every web response carries `X-Request-Id` (a safe incoming one is kept), the
+  same id the report carries.
+- **API** (`api`): every response of 500 or more and anything thrown that is not
+  an HTTP error, with the route template, method, status, request id, the
+  `:accountCode` route parameter and `is_internal` when known, plus crashes
+  (an uncaught exception, an unhandled rejection), after which the process still
+  exits as Node would (it keeps running after a rejection when started with
+  `--unhandled-rejections=warn`, `warn-with-error-code` or `none`, as before).
+  A reported failure's response carries its `X-Request-Id`, the id the report
+  carries. `$host` is `API_PUBLIC_URL`'s host, else the request's public Host
+  header, never a pod or cluster address. A handled 4xx is not an error and is
+  never reported. An upstream service's response body is never sent: a
+  calendar backend's failure is reported by its operation and status only.
+  Reports wait in memory, never in the database: at most 100 queued, at most
+  60 sent a minute per process, the same error (type, message, failing line)
+  sent once a minute with a `count` of the rest. The web server counts its
+  repeats the same way.
+
+What is scrubbed before anything leaves either app: email addresses (plain and
+URL-encoded), phone numbers (`+`-led and national formats), runs of seven or
+more digits, bearer and basic credentials, JWTs, prefixed keys (`sk_`, `pk_`,
+`phc_`, `phx_`, `dcl_`, `whsec_`, ...), `key=`/`token=`/`password=`-style
+secrets, the parameter list of a failed database query, the input a database
+quotes back as invalid, and the query string,
+fragment and credentials of every URL; stack frame files lose everything after
+`?` or `#`. Request bodies, form answers, headers and cookies are never attached.
+The rules live in `scrubErrorText` (`@slate/shared`, `error-reporting.ts`), each
+with its own test.
+
+**Readable stacks.** The API runs its TypeScript with source maps on, so its
+frames name `.ts` lines without any setup. The web server's frames name source
+lines when the web image is built with `PRODUCT_ANALYTICS_SOURCEMAPS=1`, which
+keeps the server's maps beside its chunks (they are never served). Browser
+bundles are minified; to read them, build the web image with maps and register
+them with your error tracking:
+
+1. Build with `--build-arg PRODUCT_ANALYTICS_SOURCEMAPS=1`.
+2. Hand in an upload script as the BuildKit secret `sourcemaps_upload`
+   (`docker build --secret id=sourcemaps_upload,src=upload.sh ...`). The web
+   Dockerfile runs it after `next build` with the browser assets directory as
+   its argument, before the run stage copies them. With PostHog's CLI:
+
+   ```sh
+   set -eu
+   export POSTHOG_CLI_HOST=https://us.posthog.com     # your PostHog app host
+   export POSTHOG_CLI_PROJECT_ID=<project id>
+   export POSTHOG_CLI_API_KEY=<personal API key: error tracking write, organization read>
+   npx -y @posthog/cli@0.18.12 sourcemap inject --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
+   npx -y @posthog/cli@0.18.12 sourcemap upload --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
+   ```
+
+   `inject` stamps each chunk with an id the browser library reports with
+   every frame, so it must run before the chunks are copied into the image.
+3. The Dockerfile then deletes every browser `.map` file, whatever the script
+   did: no source map is ever served. A failed upload is logged and costs
+   readable stacks, never the build. Pass the release to the script as the
+   build arg `SOURCEMAPS_RELEASE` (the script reads `$SOURCEMAPS_RELEASE`): a
+   new value also makes BuildKit run the upload step again instead of reusing
+   a cached one.
+
+**Outside the web Dockerfile** (a plain `next build` and `next start`, a
+platform's build), `PRODUCT_ANALYTICS_SOURCEMAPS=1` maps are **served** from
+`/_next/static` unless your own pipeline deletes them after the upload.
+
 **What a visitor's browser stores.** Nothing, from analytics itself. The one
 cookie this feature adds is `slate.ph_id`: when a link to one of the product's
 own entry points (`/`, `/login`, `/onboarding`, `/admin`) arrives carrying

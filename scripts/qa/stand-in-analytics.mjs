@@ -11,6 +11,9 @@
 //   GET  /static/array.js  the REAL vendor library, from the web app's pinned
 //                          `posthog-js` devDependency, so the suite sees every
 //                          property the vendor adds on its own
+//   GET  /static/[<version>/]exception-autocapture.js
+//                          the library's error capture extension, from the same
+//                          package (it asks for it when error tracking is on)
 //   POST /e/ (and the vendor's other event paths)
 //                          the browser's batches, decoded (gzip or base64) and
 //                          recorded one event at a time
@@ -34,10 +37,14 @@ import { gunzipSync } from 'node:zlib';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-function library() {
-  const path = createRequire(resolve(root, 'apps/web/package.json')).resolve('posthog-js/dist/array.js');
+/** A file of the pinned library's `dist`, by name. */
+function library(file = 'array.js') {
+  const path = createRequire(resolve(root, 'apps/web/package.json')).resolve(`posthog-js/dist/${file}`);
   return readFileSync(path, 'utf8');
 }
+
+/** The library's own files this host serves: the library and its error capture extension, any version path. */
+const STATIC_FILE = /^\/static\/(?:[\w.-]+\/)?(array\.js|exception-autocapture\.js)$/;
 
 /** The browser's event paths, across the vendor's versions. */
 const EVENT_PATHS = new Set(['/e/', '/i/v0/e/', '/batch/', '/track/', '/engage/']);
@@ -55,7 +62,7 @@ function decodeBatch(raw, url) {
 export function startStandInAnalytics(port = 0) {
   const events = [];
   const requests = [];
-  let lib = null;
+  const libs = new Map();
 
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -89,13 +96,14 @@ export function startStandInAnalytics(port = 0) {
     }
 
     requests.push({ method: req.method, path: url.pathname, at: Date.now() });
-    if (req.method === 'GET' && url.pathname === '/static/array.js') {
+    const file = req.method === 'GET' ? STATIC_FILE.exec(url.pathname)?.[1] : undefined;
+    if (file) {
       try {
-        lib ??= library();
+        if (!libs.has(file)) libs.set(file, library(file));
       } catch (err) {
         return send(500, `/* posthog-js is not installed: ${String(err)} */`, 'application/javascript');
       }
-      return send(200, lib, 'application/javascript');
+      return send(200, libs.get(file), 'application/javascript');
     }
     if (req.method === 'POST' && url.pathname === '/capture/') {
       try {

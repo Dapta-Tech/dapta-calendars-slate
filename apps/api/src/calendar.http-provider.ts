@@ -24,6 +24,7 @@ import type {
   ListBusyInput,
   UpdateEventInput,
 } from '@slate/calendar';
+import { REPORTABLE_MESSAGE } from '@slate/shared';
 
 /** Sent on every backend HTTP call — a UA-less request is rejected by the
  *  backend's WAF (403 "error code: 1010"). Mozilla-prefixed to pass generic
@@ -286,6 +287,9 @@ export class CalendarHttpError extends Error {
   ) {
     super(`calendar backend ${op} failed (${status}): ${detail}`);
     this.name = 'CalendarHttpError';
+    // Error tracking reports this, never the message: the detail is the
+    // backend's own response body (see `failureCause`).
+    (this as { [REPORTABLE_MESSAGE]?: string })[REPORTABLE_MESSAGE] = `calendar backend ${op} failed (${status})`;
   }
 }
 

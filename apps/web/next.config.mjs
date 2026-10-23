@@ -12,6 +12,14 @@ const nextConfig = {
   // Node runtime only — deployment-agnostic (self-host on any Node/Docker host
   // AND one-click Vercel). No Vercel-only APIs.
   output: 'standalone',
+  // Readable browser stack traces in error tracking, opt-in at BUILD time:
+  // `PRODUCT_ANALYTICS_SOURCEMAPS=1` emits a `.map` beside each browser chunk,
+  // for a deployment to upload to its analytics provider. The web Dockerfile
+  // deletes every one before the image is assembled; any other build path (a
+  // plain `next build` and `next start`, a platform's build) SERVES them from
+  // `/_next/static` unless its own pipeline deletes them after the upload.
+  // Unset (every bare fork): no maps, as before.
+  productionBrowserSourceMaps: process.env.PRODUCT_ANALYTICS_SOURCEMAPS === '1',
   experimental: {
     /**
      * The studio saves the booking page through a Server Action, and an avatar

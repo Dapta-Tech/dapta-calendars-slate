@@ -10,10 +10,21 @@
  *     `AnalyticsProvider` and returning it from the factory; nothing upstream
  *     of the port names a vendor.
  *
- * Delivery only ever runs in the outbox worker, never on a request path.
+ * Product events are only ever delivered by the outbox worker, never on a
+ * request path. Errors are the exception, on purpose: they are reported by
+ * `error-reporting.ts` from memory (a bounded queue, never the outbox table),
+ * so a database outage is still reportable.
  */
 import type { ServerEnv } from '@slate/config/env';
-import { resolveAnalyticsConfig, type AnalyticsConfig, type AnalyticsProps } from '@slate/shared';
+import {
+  exceptionEvent,
+  resolveAnalyticsConfig,
+  sendAnalyticsEvent,
+  type AnalyticsConfig,
+  type AnalyticsFetch,
+  type AnalyticsProps,
+  type ErrorReport,
+} from '@slate/shared';
 
 /** One event about one person, as the port receives it. */
 export interface AnalyticsCapture {
@@ -53,17 +64,22 @@ export interface AnalyticsProvider {
   readonly name: string;
   capture(event: AnalyticsCapture): Promise<void>;
   updateAccount(update: AnalyticsAccountUpdate): Promise<void>;
+  /**
+   * One error (already scrubbed, see `describeError`), for the provider's
+   * error tracking. Optional: a provider without it reports no errors.
+   * Called from memory, off the request path, never through the outbox.
+   */
+  captureException?(report: ErrorReport): Promise<void>;
 }
 
-/**
- * Give up on a hung vendor quickly. The worker drains one row at a time, so
- * every second spent here is a second a booking email waits behind it.
- */
-const REQUEST_TIMEOUT_MS = 3_000;
+/** Who a server error is filed under: the process, never a person. */
+export const API_ERROR_DISTINCT_ID = 'calendars-api';
 
 /**
  * PostHog's public ingestion API: one JSON POST per event to `/capture/`,
- * authorized by the write-only project key in the body. No SDK.
+ * authorized by the write-only project key in the body. No SDK. The POST
+ * itself (3 s timeout, no redirects) is `sendAnalyticsEvent`, shared with the
+ * web server's error reporter.
  */
 export class PosthogAnalyticsProvider implements AnalyticsProvider {
   readonly name = 'posthog';
@@ -89,6 +105,20 @@ export class PosthogAnalyticsProvider implements AnalyticsProvider {
     });
   }
 
+  /**
+   * An `$exception` event, which PostHog's error tracking groups into issues.
+   * Fire-and-forget: a refusal or an outage is swallowed by the reporter.
+   */
+  async captureException(report: ErrorReport): Promise<void> {
+    const res = await sendAnalyticsEvent(
+      this.config,
+      exceptionEvent(report, { distinctId: API_ERROR_DISTINCT_ID }),
+      this.fetchImpl as unknown as AnalyticsFetch,
+    );
+    // Said, not retried: the reporter logs it (at most once a minute).
+    if (!res.ok) throw new Error(`error tracking refused the event: HTTP ${res.status}`);
+  }
+
   updateAccount(u: AnalyticsAccountUpdate): Promise<void> {
     return this.post({
       event: '$groupidentify',
@@ -104,17 +134,11 @@ export class PosthogAnalyticsProvider implements AnalyticsProvider {
   }
 
   private async post(body: Record<string, unknown>): Promise<void> {
-    let res: Response;
+    let res: { ok: boolean; status: number };
     try {
-      res = await this.fetchImpl(`${this.config.host}/capture/`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ api_key: this.config.key, ...body }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        // A redirect would turn the POST into a GET that can only be refused;
-        // a misconfigured host fails as itself instead, and is retried.
-        redirect: 'error',
-      });
+      // A redirect is refused (a POST turned GET can only be refused), so a
+      // misconfigured host fails as itself and is retried.
+      res = await sendAnalyticsEvent(this.config, body, this.fetchImpl as unknown as AnalyticsFetch);
     } catch (err) {
       // Network level (DNS, TLS, timeout): transient.
       throw new Error(`analytics delivery failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -136,13 +160,17 @@ export class PosthogAnalyticsProvider implements AnalyticsProvider {
  * to take the API down.
  */
 export function createAnalyticsProvider(
-  env: Pick<ServerEnv, 'PRODUCT_ANALYTICS_PROVIDER' | 'PRODUCT_ANALYTICS_KEY' | 'PRODUCT_ANALYTICS_HOST'>,
+  env: Pick<
+    ServerEnv,
+    'PRODUCT_ANALYTICS_PROVIDER' | 'PRODUCT_ANALYTICS_KEY' | 'PRODUCT_ANALYTICS_HOST' | 'PRODUCT_ANALYTICS_ERRORS'
+  >,
   groupType: string,
 ): AnalyticsProvider | null {
   const config = resolveAnalyticsConfig({
     provider: env.PRODUCT_ANALYTICS_PROVIDER,
     key: env.PRODUCT_ANALYTICS_KEY,
     host: env.PRODUCT_ANALYTICS_HOST,
+    errors: env.PRODUCT_ANALYTICS_ERRORS,
   });
   if (!config) return null;
   return new PosthogAnalyticsProvider(config, groupType);

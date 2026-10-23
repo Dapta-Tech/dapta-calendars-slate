@@ -1,5 +1,11 @@
-import type { AnalyticsConfig, AnalyticsProps } from '@slate/shared';
-import type { AnalyticsPort, AnalyticsSurface } from './port';
+import {
+  ANALYTICS_PRODUCT,
+  scrubErrorText,
+  scrubFrameFilename,
+  type AnalyticsConfig,
+  type AnalyticsProps,
+} from '@slate/shared';
+import { HOST_PATH, analyticsSurfaceOf, type AnalyticsPort, type AnalyticsSurface } from './port';
 
 /**
  * The PostHog adapter behind the browser analytics port.
@@ -22,6 +28,7 @@ interface PosthogInstance {
   register(properties: Record<string, unknown>): void;
   group(type: string, key: string, properties?: Record<string, unknown>): void;
   reset(): void;
+  captureException(error: unknown, properties?: Record<string, unknown>): void;
 }
 
 interface PosthogGlobal {
@@ -44,9 +51,6 @@ const INSTANCE_NAME: Record<AnalyticsSurface, string> = {
   host: 'calendars_host',
   visitor: 'calendars_visitor',
 };
-
-/** Where the host instance may report from: the dashboard and the wizard. */
-const HOST_PATH = /^\/(admin|onboarding)(\/|$)/;
 
 /**
  * What a VISITOR event may carry, and nothing else: an allowlist, so a vendor
@@ -99,6 +103,13 @@ const VISITOR_PROPERTIES = new Set([
   '$session_entry_host',
   '$session_entry_pathname',
   '$session_entry_referring_domain',
+  // An error (`$exception`), after `scrubException`: the scrubbed exception
+  // list and its level, the release the build was stamped with (for stack
+  // symbolication), and which boundary caught it.
+  '$exception_list',
+  '$exception_level',
+  '$release_id',
+  'error_boundary',
   // This app's own.
   'product',
   'surface',
@@ -109,6 +120,64 @@ const VISITOR_PROPERTIES = new Set([
   'status',
   'preselected',
 ]);
+
+/** What an error's exception entry, mechanism and stack frame may carry, and nothing else. */
+const MECHANISM_KEYS = ['type', 'handled', 'synthetic', 'exception_id', 'parent_id', 'source'] as const;
+const FRAME_KEYS = ['platform', 'lineno', 'colno', 'in_app', 'chunk_id'] as const;
+/** The most exceptions (an error and its causes) and frames per exception sent. */
+const MAX_EXCEPTIONS = 5;
+const MAX_FRAMES = 50;
+
+/** Copy only the named keys, and only when their value is a primitive. */
+function pick(source: unknown, keys: readonly string[]): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  if (!source || typeof source !== 'object') return out;
+  for (const key of keys) {
+    const value = (source as Record<string, unknown>)[key];
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * An `$exception` event's own properties, made fit to leave: every message
+ * and type through `scrubErrorText` (emails, phones, digit runs, tokens and
+ * query strings out), every frame's file without its query, and only the
+ * named fields of each exception, mechanism and frame kept, so a vendor
+ * release that starts attaching source lines or variables attaches them to
+ * nothing. Breadcrumbs (`$exception_steps`) and every older single-exception
+ * field are dropped: this app records none it would want sent.
+ */
+function scrubException(bag: Record<string, unknown>): void {
+  const list = Array.isArray(bag['$exception_list']) ? (bag['$exception_list'] as unknown[]) : [];
+  bag['$exception_list'] = list.slice(0, MAX_EXCEPTIONS).map((raw) => {
+    const entry = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const trace = (entry['stacktrace'] && typeof entry['stacktrace'] === 'object' ? entry['stacktrace'] : {}) as Record<
+      string,
+      unknown
+    >;
+    const frames = Array.isArray(trace['frames']) ? (trace['frames'] as unknown[]) : [];
+    return {
+      type: scrubErrorText(entry['type']) || 'Error',
+      value: scrubErrorText(entry['value']),
+      mechanism: pick(entry['mechanism'], MECHANISM_KEYS),
+      stacktrace: {
+        type: typeof trace['type'] === 'string' ? trace['type'] : 'raw',
+        frames: frames.slice(-MAX_FRAMES).map((frame) => {
+          const raw = (frame && typeof frame === 'object' ? frame : {}) as Record<string, unknown>;
+          const filename = scrubFrameFilename(raw['filename']);
+          const fn = typeof raw['function'] === 'string' ? scrubErrorText(raw['function']).slice(0, 200) : '';
+          return { ...pick(raw, FRAME_KEYS), ...(filename ? { filename } : {}), ...(fn ? { function: fn } : {}) };
+        }),
+      },
+    };
+  });
+  for (const key of Object.keys(bag)) {
+    if (key.startsWith('$exception_') && key !== '$exception_list' && key !== '$exception_level') {
+      delete bag[key];
+    }
+  }
+}
 
 /** Our own `utm_medium`, read off the clicked growth link, rides on this event only. */
 const CTA_EVENT = 'calendars_cta_clicked';
@@ -154,12 +223,28 @@ function scrubUrls(bag: Record<string, unknown>, surface: AnalyticsSurface): voi
  *  - The host instance only speaks for dashboard pages. A host who follows a
  *    link from the dashboard to a booking page in the same tab would otherwise
  *    be reported there under their identity.
+ *  - An error (`$exception`) is scrubbed (`scrubException`) on both
+ *    audiences, tagged with the product and its surface (`browser_host`,
+ *    `browser_visitor`), and a visitor's only leaves from a booking page.
  *  - A visitor event keeps only `VISITOR_PROPERTIES` and carries no person
  *    properties at all. A host event drops every campaign tag and click id.
  *  - Every URL left, on either audience, loses its query and fragment.
  */
 export function scrubEvent(event: CaptureEvent, surface: AnalyticsSurface, pathname: string): CaptureEvent | null {
   if (surface === 'host' && !HOST_PATH.test(pathname)) return null;
+  if (event.event === '$exception') {
+    // The visitor's error capture listens to the whole tab and outlives its
+    // page: it reports from booking pages only, never from a host's dashboard
+    // or a manage link the same tab moved on to.
+    if (surface === 'visitor' && analyticsSurfaceOf(pathname) !== 'visitor') return null;
+    event.properties = event.properties ?? {};
+    scrubException(event.properties);
+    // Every error says which product and which surface it came from, also
+    // one captured before (or without) a loader registering anything. The
+    // vendor sets `$host` (the page's host) itself.
+    event.properties['product'] = ANALYTICS_PRODUCT;
+    event.properties['surface'] = surface === 'host' ? 'browser_host' : 'browser_visitor';
+  }
   if (surface === 'visitor') {
     const kept: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(event.properties ?? {})) {
@@ -178,10 +263,28 @@ export function scrubEvent(event: CaptureEvent, surface: AnalyticsSurface, pathn
 }
 
 /**
+ * Error capture, when error tracking is on: what nothing caught (an uncaught
+ * error, an unhandled rejection), on both audiences. Never the console: a
+ * logged line can be anything the code that logged it was holding.
+ *
+ * On a booking page too, on purpose: the booking flow fails in event handlers
+ * and async calls (a slot that will not load, a submit that throws), which no
+ * error boundary ever sees, so explicit reports alone would miss the failures
+ * that cost a booking. What leaves is the same allowlisted, scrubbed,
+ * anonymous event as any other visitor event.
+ */
+const EXCEPTION_CAPTURE = {
+  capture_unhandled_errors: true,
+  capture_unhandled_rejections: true,
+  capture_console_errors: false,
+};
+
+/**
  * The vendor settings per audience. Everything that could record what a
  * person types or sees is OFF on both: no autocapture (an admin row's text is
  * an invitee's name), no session recording, no heatmaps, no surveys. Only the
- * events this app sends by hand are captured, plus dashboard pageviews.
+ * events this app sends by hand are captured, plus dashboard pageviews and,
+ * with error tracking on, uncaught errors.
  */
 export function posthogSettings(
   config: AnalyticsConfig,
@@ -198,7 +301,7 @@ export function posthogSettings(
     capture_heatmaps: false,
     capture_dead_clicks: false,
     rageclick: false,
-    capture_exceptions: false,
+    capture_exceptions: config.errors ? EXCEPTION_CAPTURE : false,
     capture_performance: false,
     advanced_disable_flags: true,
     // The signup source is the API's, claimed write-once from the first
@@ -232,7 +335,7 @@ export function posthogSettings(
 const initialized = new Set<string>();
 
 /** The methods the port calls, queued by the stub until the library loads. */
-const QUEUED_METHODS = ['capture', 'identify', 'alias', 'register', 'group', 'reset'] as const;
+const QUEUED_METHODS = ['capture', 'identify', 'alias', 'register', 'group', 'reset', 'captureException'] as const;
 
 /** Where the library is served from: the vendor's own hosts keep it on an assets host. */
 function libraryOrigin(apiHost: string): string {
@@ -312,6 +415,9 @@ export function connectPosthog(
       if (isHost) instance()?.group(type, key, properties);
     },
     reset: () => instance()?.reset(),
+    captureError: (error, properties) => {
+      if (config.errors) instance()?.captureException(error, properties);
+    },
   };
 }
 

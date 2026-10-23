@@ -45,7 +45,37 @@ COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 RUN pnpm build:packages
+# Readable stack traces in error tracking (opt-in; unset = no maps). `1`
+# makes `next build` emit a source map beside each browser chunk. Declared
+# here, after the install, so turning it on or off reuses the installed layer.
+ARG PRODUCT_ANALYTICS_SOURCEMAPS=
+ENV PRODUCT_ANALYTICS_SOURCEMAPS=$PRODUCT_ANALYTICS_SOURCEMAPS
 RUN pnpm --filter @slate/web build
+# A deployment that builds with maps hands in its own upload step as the
+# BuildKit secret `sourcemaps_upload`: a shell script run here, given the
+# browser assets directory, that registers the maps with its error tracking
+# (and may stamp the chunks, which is why it runs before they are copied). A
+# failed upload costs readable stacks, never the release. Then, with or
+# without it, every browser map is deleted: none is ever served.
+# `SOURCEMAPS_RELEASE` names the release for the script (`$SOURCEMAPS_RELEASE`);
+# a new value also makes BuildKit run this step again rather than reuse it.
+ARG SOURCEMAPS_RELEASE=
+RUN --mount=type=secret,id=sourcemaps_upload \
+    if [ -s /run/secrets/sourcemaps_upload ]; then \
+      sh /run/secrets/sourcemaps_upload /repo/apps/web/.next/static \
+        || echo "sourcemaps_upload failed: this image's browser stacks will not be readable"; \
+    fi; \
+    find /repo/apps/web/.next/static -name '*.map' -delete
+# The server's own maps (never served): the standalone output leaves them
+# out, so with maps on they are copied beside the chunks it kept, and the web
+# server's errors name source lines (instrumentation.ts turns Node's source
+# map support on while error tracking is on).
+RUN if [ "$PRODUCT_ANALYTICS_SOURCEMAPS" = "1" ]; then \
+      cd /repo/apps/web/.next/server && find . -name '*.js.map' | while read -r map; do \
+        dest="/repo/apps/web/.next/standalone/apps/web/.next/server/$map"; \
+        [ -f "${dest%.map}" ] && cp "$map" "$dest"; \
+      done; \
+    fi; true
 
 # ---- run: standalone server, non-root ----------------------------------------
 FROM base AS run

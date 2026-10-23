@@ -9,6 +9,15 @@ import { securityHeaders } from './security-headers';
 import { requestLogger } from './request-log';
 import { oidcOwnsBody } from './oauth/oauth.settings';
 import { applyKeepAliveTimeout } from './keep-alive';
+import { installProcessErrorHooks } from './error-reporting';
+import { ERROR_REPORTER } from './tokens';
+import type { ErrorReporter } from '@slate/shared';
+
+// Stack traces name the TypeScript line, here and in the workspace packages'
+// compiled output (each ships its `.js.map`): what the log and every error
+// report show is a line someone can open. tsx turns this on too; saying it
+// here keeps it on whatever runs the file.
+process.setSourceMapsEnabled(true);
 
 /**
  * The only routes that carry an inline `data:` image, and therefore the only
@@ -37,6 +46,9 @@ const INLINE_IMAGE_ROUTES = [/^\/v1\/booking-page\/?$/, /^\/v1\/teams(\/[^/]+)?\
  */
 const DEFAULT_BODY_LIMIT = '100kb';
 
+/** Set once the app exists: a crash after that is reported before the process exits. */
+let errorReporter: ErrorReporter | null = null;
+
 async function bootstrap() {
   const env = loadServerEnv();
   // Own the body parsers outright: Nest's defaults are registered during
@@ -46,6 +58,10 @@ async function bootstrap() {
     logger: ['error', 'warn', 'log'],
     bodyParser: false,
   });
+  // Error tracking (off unless analytics is on): crashes are reported before
+  // the process exits, which it still does, as Node would.
+  errorReporter = app.get<symbol, ErrorReporter | null>(ERROR_REPORTER, { strict: false });
+  if (errorReporter) installProcessErrorHooks(errorReporter);
   // First, so a request refused by the body parser (413, bad JSON) is logged too.
   if (env.REQUEST_LOG_ENABLED)
     app.use(requestLogger({ format: env.NODE_ENV === 'production' ? 'json' : 'pretty' }));
@@ -86,7 +102,11 @@ async function bootstrap() {
   console.log(`[api] listening on http://localhost:${env.API_PORT} (db=${env.DATABASE_URL.replace(/\/\/([^:@/]+):[^@]+@/, '//$1:***@')})`);
 }
 
-bootstrap().catch((err) => {
+bootstrap().catch(async (err) => {
   console.error('[api] failed to start:', err);
+  if (errorReporter) {
+    errorReporter.report(err, { handled: false, mechanism: 'startup' });
+    await errorReporter.flush(2_000);
+  }
   process.exit(1);
 });

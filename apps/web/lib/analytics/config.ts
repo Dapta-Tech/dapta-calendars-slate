@@ -28,7 +28,18 @@ export function analyticsConfig(env: NodeJS.ProcessEnv = process.env): Analytics
     provider: env.PRODUCT_ANALYTICS_PROVIDER,
     key: env.PRODUCT_ANALYTICS_KEY,
     host: env.PRODUCT_ANALYTICS_HOST,
+    errors: env.PRODUCT_ANALYTICS_ERRORS,
   });
+}
+
+/**
+ * The settings a page needs to report a browser error, or null when error
+ * tracking is off (analytics off, or `PRODUCT_ANALYTICS_ERRORS=off`), in which
+ * case nothing about it reaches the page.
+ */
+export function errorAnalyticsConfig(env: NodeJS.ProcessEnv = process.env): AnalyticsConfig | null {
+  const config = analyticsConfig(env);
+  return config?.errors ? config : null;
 }
 
 /** Is this signed-in host one of the operator's own people? Decided here, on the server. */

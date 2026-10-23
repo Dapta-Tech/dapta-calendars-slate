@@ -10,15 +10,17 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { gunzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import type { AnalyticsConfig } from '@slate/shared';
 import { connectPosthog, resetPosthogForTests } from './posthog';
 
-const LIBRARY = readFileSync(
-  createRequire(import.meta.url).resolve('posthog-js/dist/array.js'),
-  'utf8',
-);
-const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_vendor_test', host: 'https://ingest.example.test' };
+const LIBRARY_PATH = createRequire(import.meta.url).resolve('posthog-js/dist/array.js');
+const LIBRARY = readFileSync(LIBRARY_PATH, 'utf8');
+/** Where the library asks the configured host for that extension (versioned: `/static/<version>/...`). */
+const EXTENSION_PATH = /\/static\/(?:[^/]+\/)?exception-autocapture\.js(\?|$)/;
+/** The extension the library loads from the configured host when error capture is on. */
+const EXCEPTIONS_EXTENSION = readFileSync(LIBRARY_PATH.replace(/array\.js$/, 'exception-autocapture.js'), 'utf8');
+const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_vendor_test', host: 'https://ingest.example.test', errors: true };
 const EMAIL = 'ana.visitor@example.com';
 /** Long enough for the library's batch queue (3 s) to flush. */
 const FLUSH_MS = 3500;
@@ -32,13 +34,37 @@ interface Sent {
 
 /** A browser window with the vendor's transports captured. */
 function browser(url: string, referrer?: string) {
+  // An uncaught error in the page is what some tests cause on purpose: the
+  // page's own handlers see it, the test runner's console does not.
+  const virtualConsole = new VirtualConsole();
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
     url,
     ...(referrer ? { referrer } : {}),
     runScripts: 'outside-only',
     pretendToBeVisual: true,
+    virtualConsole,
   });
   const w = dom.window as unknown as Window & { eval(code: string): unknown };
+  // Scripts the library asks for. The error capture extension is answered
+  // with the pinned package's own file, as the configured host would serve
+  // it; the library itself is loaded by hand (`load`), so a test controls
+  // what is queued before it arrives.
+  const scripts: string[] = [];
+  new dom.window.MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of Array.from(record.addedNodes)) {
+        const src = (node as HTMLScriptElement).src;
+        if ((node as Element).tagName !== 'SCRIPT' || !src) continue;
+        scripts.push(src);
+        if (EXTENSION_PATH.test(src)) {
+          setTimeout(() => {
+            w.eval(EXCEPTIONS_EXTENSION);
+            (node as HTMLScriptElement).onload?.(new dom.window.Event('load'));
+          }, 0);
+        }
+      }
+    }
+  }).observe(dom.window.document, { childList: true, subtree: true });
   const bodies: unknown[] = [];
   const urls: string[] = [];
   const record = (u: unknown, body: unknown) => {
@@ -90,7 +116,31 @@ function browser(url: string, referrer?: string) {
     return out;
   }
 
-  return { w, urls, sent, load: () => w.eval(LIBRARY), close: () => dom.window.close() };
+  /** Throw from the page, outside any handler: what `window.onerror` sees. */
+  const throwInPage = (error: Error) =>
+    w.setTimeout(() => {
+      throw error;
+    }, 0);
+  /** Until the library has started listening for errors (its extension loaded). */
+  const errorCaptureReady = async () => {
+    for (let i = 0; i < 100; i++) {
+      const ext = (w as unknown as { __PosthogExtensions__?: { errorWrappingFunctions?: unknown } }).__PosthogExtensions__;
+      if (ext?.errorWrappingFunctions && typeof w.onerror === 'function') return;
+      await wait(20);
+    }
+    throw new Error(`the error capture extension never loaded; scripts asked for: ${scripts.join(', ')}`);
+  };
+
+  return {
+    w,
+    urls,
+    sent,
+    scripts,
+    throwInPage,
+    errorCaptureReady,
+    load: () => w.eval(LIBRARY),
+    close: () => dom.window.close(),
+  };
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -206,6 +256,125 @@ describe('the PostHog adapter, against the real library', () => {
       }
       expect(strings(e).join(' ')).not.toContain('calendly');
     }
+    b.close();
+  }, 20_000);
+
+  it("a visitor's uncaught error leaves anonymous, scrubbed, and with nothing from the URL's query", async () => {
+    const b = browser(
+      `https://cal.example.test/acme/ana/intro?prefill=${encodeURIComponent(EMAIL)}&gclid=CLICK123&utm_content=${encodeURIComponent(EMAIL)}#x`,
+      'https://crm.example.test/contacts/42?email=bob%40example.com',
+    );
+    const port = connectPosthog(CONFIG, 'visitor', b.w);
+    port.register({ product: 'calendars', surface: 'booking_page', account_code: 'abc123', embed: false });
+    b.load();
+    await b.errorCaptureReady();
+    b.throwInPage(new Error(`Booking for ${EMAIL} failed, call +57 300 123 4567, see https://x.example.test/p?token=abc`));
+    await wait(FLUSH_MS);
+
+    const exception = (await b.sent()).find((e) => e.event === '$exception');
+    expect(exception).toBeDefined();
+    const props = exception!.properties;
+    // Only the allowlist: the vendor's own entry URL, campaign tags and click
+    // ids, which it puts on every event, never reach the wire.
+    expect(Object.keys(props).filter((k) => /utm_|gclid|session_entry_url|session_entry_referrer$|_steps/.test(k))).toEqual([]);
+    expect(props).toMatchObject({
+      product: 'calendars',
+      surface: 'browser_visitor',
+      $host: 'cal.example.test',
+      account_code: 'abc123',
+      $exception_level: 'error',
+    });
+    expect(props['$process_person_profile']).toBe(false);
+    expect(exception!.$set).toBeUndefined();
+    const [entry] = props['$exception_list'] as Array<{
+      type: string;
+      value: string;
+      mechanism: { handled: boolean };
+      stacktrace: { frames: Array<{ filename?: string }> };
+    }>;
+    expect(entry).toMatchObject({
+      type: 'Error',
+      value: 'Booking for [email] failed, call [phone], see https://x.example.test/p',
+      mechanism: { handled: false },
+    });
+    for (const frame of entry!.stacktrace.frames) expect(frame.filename ?? '').not.toContain('?');
+    const all = strings(exception).join(' ');
+    expect(all).not.toContain('example.com');
+    expect(all).not.toContain('CLICK123');
+    expect(all).not.toContain('token=abc');
+    // No query string anywhere (an anonymous function is named `?` by the library).
+    expect(all).not.toMatch(/\?[\w%.-]+=/);
+    // The extension came from the configured host, and nothing was stored.
+    expect(b.scripts.some((src) => src.startsWith(`${CONFIG.host}/static/`) && EXTENSION_PATH.test(src))).toBe(true);
+    expect(b.w.localStorage.length + b.w.sessionStorage.length).toBe(0);
+    b.close();
+  }, 20_000);
+
+  it('an error a boundary reports before the library has loaded waits in the queue, and leaves scrubbed', async () => {
+    const b = browser('https://cal.example.test/acme/ana/intro');
+    const port = connectPosthog(CONFIG, 'visitor', b.w);
+    port.captureError(new TypeError(`render failed for ${EMAIL}`), { product: 'calendars', error_boundary: 'booking_page' });
+    b.load();
+    await wait(FLUSH_MS);
+    const exception = (await b.sent()).find((e) => e.event === '$exception');
+    expect(exception?.properties).toMatchObject({
+      product: 'calendars',
+      surface: 'browser_visitor',
+      $host: 'cal.example.test',
+      error_boundary: 'booking_page',
+      $exception_list: [{ type: 'TypeError', value: 'render failed for [email]', mechanism: { handled: true } }],
+    });
+    expect(strings(exception).join(' ')).not.toContain(EMAIL);
+    b.close();
+  }, 20_000);
+
+  it("a host's uncaught error is filed under the host, with no query and no campaign tag", async () => {
+    const b = browser('https://cal.example.test/admin/bookings?q=bob%40example.com&utm_source=newsletter');
+    const port = connectPosthog(CONFIG, 'host', b.w);
+    port.identify('host@example.test', { email: 'host@example.test' });
+    b.load();
+    await b.errorCaptureReady();
+    b.throwInPage(new Error('could not load bookings for bob@example.com'));
+    await wait(FLUSH_MS);
+    const exception = (await b.sent()).find((e) => e.event === '$exception');
+    expect(exception?.properties).toMatchObject({
+      distinct_id: 'host@example.test',
+      product: 'calendars',
+      surface: 'browser_host',
+      $host: 'cal.example.test',
+      $exception_list: [{ value: 'could not load bookings for [email]' }],
+    });
+    const all = strings(exception).join(' ');
+    expect(all).not.toContain('bob');
+    expect(all).not.toContain('newsletter');
+    expect(all).not.toMatch(/\?[\w%.-]+=/);
+    b.close();
+  }, 20_000);
+
+  it("the visitor's capture stays silent once the tab has left the booking page", async () => {
+    const b = browser('https://cal.example.test/acme/ana/intro');
+    connectPosthog(CONFIG, 'visitor', b.w);
+    b.load();
+    await b.errorCaptureReady();
+    b.w.history.pushState({}, '', '/manage/uid-123');
+    b.throwInPage(new Error('manage page broke'));
+    await wait(FLUSH_MS);
+    expect((await b.sent()).filter((e) => e.event === '$exception')).toEqual([]);
+    b.close();
+  }, 20_000);
+
+  it('with errors off, no error is captured and no extension is loaded', async () => {
+    const b = browser('https://cal.example.test/acme/ana/intro');
+    const port = connectPosthog({ ...CONFIG, errors: false }, 'visitor', b.w);
+    port.captureError(new Error('ignored'));
+    b.load();
+    port.capture('calendars_day_picked', { mode: 'personal' });
+    await wait(100);
+    b.throwInPage(new Error('ignored too'));
+    await wait(FLUSH_MS);
+    const events = await b.sent();
+    expect(events.map((e) => e.event)).toEqual(['calendars_day_picked']);
+    expect(b.scripts.filter((src) => src.includes('exception-autocapture'))).toEqual([]);
     b.close();
   }, 20_000);
 

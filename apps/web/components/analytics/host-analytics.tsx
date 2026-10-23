@@ -29,6 +29,7 @@ export function HostAnalytics({
   const provider = config?.provider ?? null;
   const key = config?.key ?? null;
   const host = config?.host ?? null;
+  const errors = config?.errors ?? false;
   const email = identity?.email ?? null;
   const memberId = identity?.memberId ?? null;
   const accountKey = identity?.accountKey ?? null;
@@ -41,7 +42,7 @@ export function HostAnalytics({
   // Depends on values, never on the objects, which every render re-creates.
   useEffect(() => {
     if (!provider || !key || !host || !email || !memberId || !accountKey || !role) return;
-    const port = connectAnalytics({ provider, key, host }, 'host');
+    const port = connectAnalytics({ provider, key, host, errors }, 'host');
     if (!port) return;
     setActiveAnalyticsPort(port);
     port.identify(email, { email, member_id: memberId, role, is_internal: isInternal });
@@ -60,7 +61,7 @@ export function HostAnalytics({
     // workspace must not stamp it with their own `is_internal`.
     port.group(ANALYTICS_GROUP_TYPE, accountKey);
     return () => clearActiveAnalyticsPort(port);
-  }, [provider, key, host, email, memberId, accountKey, role, isInternal, landingId]);
+  }, [provider, key, host, errors, email, memberId, accountKey, role, isInternal, landingId]);
 
   return null;
 }
