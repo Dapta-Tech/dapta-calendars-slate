@@ -117,7 +117,14 @@ test('a visitor is counted anonymously, and nothing personal leaves the page', a
   expect(sent).not.toContain('?');
   // Nothing on the device, and nothing asked for beyond the library and events.
   expect(await vendorStorage(page)).toEqual([]);
-  expect([...new Set(await analyticsRequests(since))].sort()).toEqual(['/capture/', '/e/', '/static/array.js']);
+  // With error tracking on (the suite's default), the library also fetches
+  // its error capture extension from the same host; nothing else.
+  const paths = [...new Set(await analyticsRequests(since))];
+  expect(paths.filter((p) => !/^\/static\/[\w.-]+\/exception-autocapture\.js$/.test(p)).sort()).toEqual([
+    '/capture/',
+    '/e/',
+    '/static/array.js',
+  ]);
 
   // The API's half: the booking, about the HOST who received it, by when it
   // HAPPENED (the outbox can deliver an earlier file's booking for Jordan

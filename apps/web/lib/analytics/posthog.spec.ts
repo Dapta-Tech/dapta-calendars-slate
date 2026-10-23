@@ -4,7 +4,7 @@ import type { AnalyticsConfig } from '@slate/shared';
 import { connectPosthog, posthogSettings, resetPosthogForTests, scrubEvent, withoutQuery } from './posthog';
 import { clearActiveAnalyticsPort, resetAnalytics, setActiveAnalyticsPort, track, type AnalyticsPort } from './port';
 
-const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test' };
+const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true };
 
 /** A loaded vendor global: `__SV` set, so no stub is installed, and every call recorded. */
 function loadedVendor() {
@@ -47,9 +47,20 @@ describe('posthogSettings', () => {
       capture_heatmaps: false,
       capture_dead_clicks: false,
       rageclick: false,
-      capture_exceptions: false,
+      capture_exceptions: { capture_unhandled_errors: true, capture_unhandled_rejections: true, capture_console_errors: false },
       disable_surveys: true,
     });
+  });
+
+  it('captures uncaught errors and rejections on both audiences while errors are on, never the console, and none when off', () => {
+    for (const surface of ['host', 'visitor'] as const) {
+      expect(posthogSettings(CONFIG, surface, location)['capture_exceptions']).toEqual({
+        capture_unhandled_errors: true,
+        capture_unhandled_rejections: true,
+        capture_console_errors: false,
+      });
+      expect(posthogSettings({ ...CONFIG, errors: false }, surface, location)['capture_exceptions']).toBe(false);
+    }
   });
 
   it('a host gets pageviews, but still no recording and no autocapture', () => {
@@ -127,6 +138,110 @@ describe('scrubEvent', () => {
   });
 });
 
+describe('scrubEvent: errors ($exception)', () => {
+  const exception = () => ({
+    event: '$exception',
+    properties: {
+      $current_url: 'https://cal.example.test/acme/ana/intro?prefill=ana@example.com',
+      $session_entry_url: 'https://cal.example.test/acme/ana/intro?gclid=X',
+      utm_source: 'newsletter',
+      $exception_level: 'error',
+      $exception_steps: [{ $message: 'clicked Confirm for ana@example.com' }],
+      $exception_personURL: 'https://ingest.example.test/person/ana@example.com',
+      $exception_message: 'legacy ana@example.com',
+      error_boundary: 'booking_page',
+      $exception_list: [
+        {
+          type: 'TypeError',
+          value: 'Booking for ana@example.com failed, call +57 300 123 4567, see https://x.example.test/p?token=abc',
+          mechanism: { type: 'onerror', handled: false, synthetic: false, extra: { email: 'ana@example.com' } },
+          stacktrace: {
+            type: 'raw',
+            frames: [
+              {
+                platform: 'web:javascript',
+                filename: 'https://cal.example.test/_next/static/chunks/page.js?dpl=abc',
+                function: 'onSubmit',
+                lineno: 10,
+                colno: 5,
+                in_app: true,
+                context_line: 'const email = "ana@example.com"',
+                vars: { email: 'ana@example.com' },
+              },
+            ],
+          },
+          module: 'ana@example.com',
+        },
+      ],
+    } as Record<string, unknown>,
+  });
+
+  const SCRUBBED_LIST = [
+    {
+      type: 'TypeError',
+      value: 'Booking for [email] failed, call [phone], see https://x.example.test/p',
+      mechanism: { type: 'onerror', handled: false, synthetic: false },
+      stacktrace: {
+        type: 'raw',
+        frames: [
+          {
+            platform: 'web:javascript',
+            filename: 'https://cal.example.test/_next/static/chunks/page.js',
+            function: 'onSubmit',
+            lineno: 10,
+            colno: 5,
+            in_app: true,
+          },
+        ],
+      },
+    },
+  ];
+
+  it('a visitor error keeps only the allowlist and a scrubbed exception list, nothing it typed', () => {
+    const out = scrubEvent(exception(), 'visitor', '/acme/ana/intro')!;
+    expect(out.properties).toEqual({
+      $current_url: 'https://cal.example.test/acme/ana/intro',
+      $exception_level: 'error',
+      error_boundary: 'booking_page',
+      product: 'calendars',
+      surface: 'browser_visitor',
+      $exception_list: SCRUBBED_LIST,
+    });
+    expect(JSON.stringify(out)).not.toContain('ana@example.com');
+  });
+
+  it('a host error is scrubbed the same way; breadcrumbs and older single-exception fields are dropped', () => {
+    const out = scrubEvent(exception(), 'host', '/admin/bookings')!;
+    expect(out.properties!['$exception_list']).toEqual(SCRUBBED_LIST);
+    expect(out.properties).toMatchObject({ product: 'calendars', surface: 'browser_host' });
+    for (const key of ['$exception_steps', '$exception_personURL', '$exception_message', 'utm_source']) {
+      expect(out.properties).not.toHaveProperty(key);
+    }
+    expect(out.properties!['$session_entry_url']).toBe('https://cal.example.test/acme/ana/intro');
+    expect(JSON.stringify(out)).not.toContain('ana@example.com');
+  });
+
+  it('caps the chain and the frames, and survives a malformed list', () => {
+    const many = exception();
+    const entry = (many.properties['$exception_list'] as unknown[])[0];
+    many.properties['$exception_list'] = Array.from({ length: 9 }, () => entry);
+    const out = scrubEvent(many, 'host', '/admin')!;
+    expect(out.properties!['$exception_list']).toHaveLength(5);
+    const broken = { event: '$exception', properties: { $exception_list: [null, 'text', { stacktrace: { frames: [null] } }] } };
+    const fixed = scrubEvent(broken, 'host', '/admin')!.properties!['$exception_list'] as Array<Record<string, unknown>>;
+    expect(fixed.map((e) => e['type'])).toEqual(['Error', 'Error', 'Error']);
+  });
+
+  it("the visitor instance's errors come from booking pages only", () => {
+    for (const path of ['/admin', '/onboarding', '/login', '/manage/uid-1', '/booking/tok-1', '/acme', '/']) {
+      expect([path, scrubEvent(exception(), 'visitor', path)]).toEqual([path, null]);
+    }
+    for (const path of ['/acme/ana', '/acme/ana/intro', '/acme/team/sales', '/acme/team/sales/demo']) {
+      expect(scrubEvent(exception(), 'visitor', path)).not.toBeNull();
+    }
+  });
+});
+
 describe('connectPosthog', () => {
   it('installs the vendor loader stub as a queue, and asks the configured host for the library once', () => {
     const own = { document, location: window.location } as unknown as Parameters<typeof connectPosthog>[2] & {
@@ -170,6 +285,25 @@ describe('connectPosthog', () => {
     port.group('calendars_account', 'acme');
     port.capture('calendars_booking_confirmed');
     expect(vendor.calls.map(([, method]) => method)).toEqual(['capture']);
+  });
+
+  it('an error is handed to the instance while errors are on, queued before the library loads, and dropped when off', () => {
+    const own = { document, location: window.location } as unknown as Parameters<typeof connectPosthog>[2] & {
+      posthog?: Record<string, unknown>;
+    };
+    const port = connectPosthog(CONFIG, 'visitor', own);
+    const error = new Error('boom');
+    port.captureError(error, { error_boundary: 'booking_page' });
+    expect((own.posthog as Record<string, unknown>)['calendars_visitor']).toContainEqual([
+      'captureException',
+      error,
+      { error_boundary: 'booking_page' },
+    ]);
+
+    resetPosthogForTests();
+    const vendor = loadedVendor();
+    connectPosthog({ ...CONFIG, errors: false }, 'host').captureError(new Error('x'));
+    expect(vendor.calls).toEqual([]);
   });
 
   it('a host port passes identity through', () => {

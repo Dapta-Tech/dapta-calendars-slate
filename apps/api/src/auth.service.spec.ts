@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, migrate, seed, sql, type Db } from '@slate/db';
 import { LocalAuthProvider, type AuthProvider, type ResolvedHost } from './auth.provider';
 import { AuthService, LOGIN_SEEN_REFRESH_MS, loginSeenRefreshMs } from './auth.service';
+import { requestErrorContext } from './request-log';
 
 /**
  * Every verified host request tells when a login last resolved the member
@@ -103,5 +104,42 @@ describe('AuthService.resolveHost stamps the login, at most once a day', () => {
     // The real one still stamps.
     await auth.resolveHost(req());
     expect(await seenAt()).not.toBeNull();
+  });
+});
+
+/**
+ * Error tracking may say whether a failed request came from one of the
+ * operator's own people: the auth layer records that boolean on the request,
+ * decided from the session's email, and never the email itself.
+ */
+describe('AuthService.resolveHost marks an internal host for error reports', () => {
+  let db: Db;
+
+  beforeEach(async () => {
+    db = await createDb('file::memory:');
+    await migrate(db);
+    await seed(db);
+  });
+
+  const authWith = (patterns?: string) =>
+    new AuthService(
+      db,
+      new LocalAuthProvider(db, { NODE_ENV: 'test', DEV_LOGIN_EMAIL: undefined, AUTH_LOCAL_STRICT: false }),
+      { OAUTH_LINK_MAX_AGE_DAYS: 30, PRODUCT_ANALYTICS_INTERNAL_EMAILS: patterns },
+    );
+
+  it('records true for a matching email, false otherwise, and no email at all', async () => {
+    const internal = { headers: { 'x-slate-email': 'jordan@example.com' } };
+    await authWith('jordan@').resolveHost(internal);
+    expect(requestErrorContext(internal)).toMatchObject({ is_internal: true });
+    expect(JSON.stringify(requestErrorContext(internal))).not.toContain('jordan');
+
+    const customer = { headers: { 'x-slate-email': 'alex@example.com' } };
+    await authWith('jordan@').resolveHost(customer);
+    expect(requestErrorContext(customer)).toMatchObject({ is_internal: false });
+
+    const unset = { headers: { 'x-slate-email': 'jordan@example.com' } };
+    await authWith(undefined).resolveHost(unset);
+    expect(requestErrorContext(unset)).toMatchObject({ is_internal: false });
   });
 });

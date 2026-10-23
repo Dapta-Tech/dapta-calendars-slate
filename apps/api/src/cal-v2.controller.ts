@@ -15,6 +15,7 @@ import {
   Injectable,
   Logger,
   NestInterceptor,
+  Optional,
   Param,
   Post,
   Query,
@@ -37,6 +38,9 @@ import {
 } from "./cal-v2.service";
 import { CalV2PilotService } from "./cal-v2-pilot.service";
 import { requestIdFrom } from "./request-log";
+import { reportRequestError } from "./error-reporting";
+import { ERROR_REPORTER } from "./tokens";
+import type { ErrorReporter } from "@slate/shared";
 
 export const CAL_V2_SLOTS_VERSION = "2024-09-04";
 export const CAL_V2_BOOKINGS_VERSION = "2026-02-25";
@@ -74,6 +78,14 @@ export class CalV2RequestIdInterceptor implements NestInterceptor {
 @Catch()
 export class CalV2ExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger("CalV2");
+
+  // This filter is the nearest one on the v2 surface, so Nest never runs the
+  // global one here: a 5xx is reported to error tracking from this filter.
+  constructor(
+    @Optional()
+    @Inject(ERROR_REPORTER)
+    private readonly reporter: ErrorReporter | null = null,
+  ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
@@ -131,6 +143,10 @@ export class CalV2ExceptionFilter implements ExceptionFilter {
         `v2 ${typeof method === "string" ? method : "?"} ${typeof route === "string" ? route : "(unmatched)"} ${statusCode} ${requestId}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      reportRequestError(this.reporter, exception, request, {
+        status: statusCode,
+        requestId,
+      });
     }
     response.setHeader("X-Request-Id", requestId);
     response

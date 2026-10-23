@@ -3,7 +3,9 @@ import { Suspense, type ReactNode } from 'react';
 import { Figtree } from 'next/font/google';
 import { getMessages, t } from '@slate/shared';
 import './icons.css';
+import { ErrorAnalytics } from '@/components/analytics/error-analytics';
 import { LangStamp } from '@/components/lang-stamp';
+import { errorAnalyticsConfig } from '@/lib/analytics/config';
 import { ThemeStamp } from '@/components/theme-stamp';
 import { deploymentNoindex } from '@/lib/indexing';
 import { documentLangAnswers, documentLocale } from '@/lib/locale';
@@ -102,6 +104,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             crosses between the product and a booking page. This re-derives it
             from the route on the client. */}
         <ThemeStamp />
+        {/* Error tracking's settings for the error boundaries, read at request
+            time; null (renders and loads nothing) unless it is on. */}
+        <ErrorAnalytics config={errorAnalyticsConfig()} />
         {/* It reads the query, so it sits in its own boundary: a route that is
             ever prerendered keeps its HTML, and this simply runs in the browser. */}
         <Suspense fallback={null}>

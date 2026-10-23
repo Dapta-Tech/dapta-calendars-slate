@@ -12,6 +12,8 @@ import {
   referrerDomain,
   resolveAnalyticsConfig,
   sanitizeLandingDistinctId,
+  analyticsErrorsEnabled,
+  analyticsErrorsSettingUnknown,
 } from './analytics';
 
 describe('resolveAnalyticsConfig', () => {
@@ -40,6 +42,7 @@ describe('resolveAnalyticsConfig', () => {
       provider: 'posthog',
       key: 'phc_test',
       host: POSTHOG_DEFAULT_HOST,
+      errors: true,
     });
     expect(
       resolveAnalyticsConfig({ provider: ' PostHog ', key: 'phc_test', host: 'https://e.example.com/' })?.host,
@@ -50,6 +53,34 @@ describe('resolveAnalyticsConfig', () => {
     expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'k', host: 'javascript:alert(1)' })).toBeNull();
     expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'k', host: 'e.example.com' })).toBeNull();
     expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'k', host: 'https://e.example.com?x=1' })).toBeNull();
+  });
+});
+
+describe('error tracking switch (PRODUCT_ANALYTICS_ERRORS)', () => {
+  const on = (errors?: string | null) => resolveAnalyticsConfig({ provider: 'posthog', key: 'phc_test', errors })?.errors;
+
+  it('is on with analytics unless switched off, whatever the case or padding', () => {
+    expect(on(undefined)).toBe(true);
+    expect(on(null)).toBe(true);
+    expect(on('')).toBe(true);
+    expect(on('on')).toBe(true);
+    expect(on(' ON ')).toBe(true);
+    expect(on('off')).toBe(false);
+    expect(on(' Off ')).toBe(false);
+  });
+
+  it('reads anything else as off, since a mistyped "off" must not leave it on, and says it is unknown', () => {
+    for (const typo of ['of', 'false', '0', 'no', 'disabled', 'true', 'yes', '1']) {
+      expect([typo, on(typo)]).toEqual([typo, false]);
+      expect(analyticsErrorsSettingUnknown(typo)).toBe(true);
+    }
+    for (const known of [undefined, '', 'on', 'OFF']) expect(analyticsErrorsSettingUnknown(known)).toBe(false);
+  });
+
+  it('never turns analytics itself on or off', () => {
+    expect(resolveAnalyticsConfig({ errors: 'on' })).toBeNull();
+    expect(resolveAnalyticsConfig({ provider: 'posthog', key: 'phc_test', errors: 'off' })).not.toBeNull();
+    expect(analyticsErrorsEnabled('off')).toBe(false);
   });
 });
 

@@ -11,3 +11,4 @@ export const ENTITLEMENTS = Symbol('ENTITLEMENTS');
 export const PREMIUM_MODE = Symbol('PREMIUM_MODE');
 export const ENTITLEMENT_GATE = Symbol('ENTITLEMENT_GATE');
 export const ANALYTICS = Symbol('ANALYTICS');
+export const ERROR_REPORTER = Symbol('ERROR_REPORTER');

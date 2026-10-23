@@ -374,6 +374,17 @@ export const serverEnvSchema = z.object({
   // operator's own people (staff, test accounts): `is_internal` on their
   // events, so launch numbers can leave them out. Unset = nobody is internal.
   PRODUCT_ANALYTICS_INTERNAL_EMAILS: z.string().optional(),
+  // Error tracking on the same provider and project: unhandled errors of the
+  // browser, the web server and this API, scrubbed before they leave (see
+  // `error-reporting.ts` in @slate/shared). `on` (the default whenever
+  // analytics is on) or `off`, which turns off error capture only. Read
+  // case-insensitively; any other value reads as `off`, because this is a
+  // privacy switch and a mistyped "off" must not leave it on, and the API
+  // warns about it once at boot. Never stops the API booting.
+  PRODUCT_ANALYTICS_ERRORS: z.preprocess(
+    (v) => (typeof v === 'string' ? v.trim().toLowerCase() || undefined : v),
+    z.string().optional(),
+  ),
 
   // --- MCP endpoint (`POST /mcp`) -------------------------------------------
   // Every var here is optional with a safe default: unset, the endpoint serves

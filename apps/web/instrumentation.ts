@@ -1,3 +1,5 @@
+import type { Instrumentation } from 'next';
+
 /**
  * Runs once when the web server starts. Configuration the server can only
  * half use is reported here, once, rather than on every request.
@@ -7,4 +9,20 @@ export async function register(): Promise<void> {
   const { internalApiSecretWarning } = await import('./lib/internal-secret');
   const warning = internalApiSecretWarning();
   if (warning) console.warn(warning);
+  const { analyticsErrorsSettingUnknown } = await import('@slate/shared');
+  if (analyticsErrorsSettingUnknown(process.env.PRODUCT_ANALYTICS_ERRORS)) {
+    console.warn('PRODUCT_ANALYTICS_ERRORS is neither `on` nor `off`; error tracking is off.');
+  }
 }
+
+/**
+ * Every error the server captures while answering (a render, a route handler,
+ * a server action, the middleware), reported to error tracking when it is on
+ * (`lib/analytics/server-errors.ts`): route template, method, status and
+ * request id, never a header, a body or the path. Returns at once; the report
+ * leaves off the request path.
+ */
+export const onRequestError: Instrumentation.onRequestError = async (error, request, context) => {
+  const { reportRequestError } = await import('./lib/analytics/server-errors');
+  reportRequestError(error, request, context);
+};

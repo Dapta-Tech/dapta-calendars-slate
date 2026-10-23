@@ -1,7 +1,10 @@
 'use client';
 
+import { useErrorReport } from '@/lib/analytics/use-error-report';
+
 /** Root error boundary (R22: every error state has a real Retry). */
-export default function Error({ reset }: { error: Error; reset: () => void }) {
+export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+  useErrorReport(error, 'root');
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-2xl font-semibold">Something went wrong</h1>

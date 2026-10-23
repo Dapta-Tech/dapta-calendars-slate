@@ -105,12 +105,35 @@ export interface AnalyticsConfig {
   key: string;
   /** Ingestion host, without a trailing slash. */
   host: string;
+  /**
+   * Error tracking (`PRODUCT_ANALYTICS_ERRORS`): on with analytics unless
+   * switched off. Errors ride the same provider and project; see
+   * `error-reporting.ts`.
+   */
+  errors: boolean;
 }
 
-function clean(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null;
+/**
+ * `PRODUCT_ANALYTICS_ERRORS`, read: on when unset or `on`, off when `off`.
+ * Anything else is off too: it is a privacy switch, so a value that meant
+ * "off" and was mistyped must not leave it on. Never a reason to refuse to
+ * boot; the API warns once about a value it does not know.
+ */
+export function analyticsErrorsEnabled(raw: string | null | undefined): boolean {
+  const value = clean(raw)?.toLowerCase();
+  return value === undefined || value === 'on';
+}
+
+/** True when `PRODUCT_ANALYTICS_ERRORS` holds something other than `on`, `off` or nothing. */
+export function analyticsErrorsSettingUnknown(raw: string | null | undefined): boolean {
+  const value = clean(raw)?.toLowerCase();
+  return value !== undefined && value !== 'on' && value !== 'off';
+}
+
+function clean(value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+  return trimmed ? trimmed : undefined;
 }
 
 /**
@@ -126,6 +149,8 @@ export function resolveAnalyticsConfig(env: {
   provider?: string | null;
   key?: string | null;
   host?: string | null;
+  /** `PRODUCT_ANALYTICS_ERRORS`; see `analyticsErrorsEnabled`. */
+  errors?: string | null;
 }): AnalyticsConfig | null {
   const provider = clean(env.provider)?.toLowerCase();
   const key = clean(env.key);
@@ -133,7 +158,7 @@ export function resolveAnalyticsConfig(env: {
   if (READ_KEY_PREFIXES.some((p) => key.toLowerCase().startsWith(p))) return null;
   const host = (clean(env.host) ?? POSTHOG_DEFAULT_HOST).replace(/\/+$/, '');
   if (!/^https?:\/\/[^/?#\s]+(\/[^?#\s]*)?$/i.test(host)) return null;
-  return { provider, key, host };
+  return { provider, key, host, errors: analyticsErrorsEnabled(env.errors) };
 }
 
 /* ------------------------------------------------------- internal users */

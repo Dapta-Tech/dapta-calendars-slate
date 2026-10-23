@@ -14,8 +14,9 @@ import type { ServerEnv } from '@slate/config/env';
 import { WORKSPACE_HEADER, type ApiScope, type WorkspaceView } from '@slate/types';
 import { AUTH_PROVIDER, DB, ENV } from './tokens';
 import { header, type AuthProvider, type HostPrincipal, type ReqLike, type ResolvedHost } from './auth.provider';
-import { annotateRequestAccount } from './request-log';
+import { annotateRequestAccount, annotateRequestInternal } from './request-log';
 import { AnalyticsEffects } from './analytics-effects';
+import { isInternalEmail, parseInternalEmailPatterns } from '@slate/shared';
 
 export type { HostPrincipal, ReqLike } from './auth.provider';
 
@@ -80,17 +81,20 @@ function toView(w: WorkspaceMembership, actingAccountId: string | null, homeAcco
 export class AuthService {
   private readonly logger = new Logger('Auth');
   private readonly loginSeenRefreshMs: number;
+  /** The operator's own people, so an error report can say a host is one (only the boolean leaves). */
+  private readonly internalPatterns: string[];
 
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
     // Optional so specs can build the service with two arguments: the default window.
-    @Optional() @Inject(ENV) env?: Pick<ServerEnv, 'OAUTH_LINK_MAX_AGE_DAYS'>,
+    @Optional() @Inject(ENV) env?: Pick<ServerEnv, 'OAUTH_LINK_MAX_AGE_DAYS' | 'PRODUCT_ANALYTICS_INTERNAL_EMAILS'>,
     // Product analytics, for the one event this layer sees (an invitation
     // accepted). LAST and @Optional(): absent, nothing is reported.
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
   ) {
     this.loginSeenRefreshMs = loginSeenRefreshMs(env?.OAUTH_LINK_MAX_AGE_DAYS ?? 30);
+    this.internalPatterns = parseInternalEmailPatterns(env?.PRODUCT_ANALYTICS_INTERNAL_EMAILS);
   }
 
   /**
@@ -114,8 +118,9 @@ export class AuthService {
     const home = await this.provider.resolveHost(req);
     // `email` is the session's own claim, used to find the person; it never
     // rides on the principal the controllers see.
-    const { email: _email, ...id } = opts.workspace === false ? home : await this.actingAs(req, home);
+    const { email, ...id } = opts.workspace === false ? home : await this.actingAs(req, home);
     annotateRequestAccount(req, id.accountId);
+    if (email) annotateRequestInternal(req, isInternalEmail(email, this.internalPatterns));
     const member = await memberRoleAndLoginSeen(this.db, id.accountId, id.memberId);
     const vouchedAt = id.authenticatedAt === null ? null : Math.min(id.authenticatedAt ?? Date.now(), Date.now());
     const step = this.loginSeenRefreshMs;

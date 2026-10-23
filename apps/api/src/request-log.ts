@@ -55,8 +55,9 @@ const SKIP = /^\/health(\/|$)/;
 
 const ACCOUNT_ID = Symbol('requestLog.accountId');
 const ERROR_CODE = Symbol('requestLog.errorCode');
+const IS_INTERNAL = Symbol('requestLog.isInternal');
 
-type Annotated = Request & { [ACCOUNT_ID]?: string; [ERROR_CODE]?: string };
+type Annotated = Request & { [ACCOUNT_ID]?: string; [ERROR_CODE]?: string; [IS_INTERNAL]?: boolean };
 
 /**
  * Record the authenticated account on the request so its log line can carry
@@ -65,6 +66,15 @@ type Annotated = Request & { [ACCOUNT_ID]?: string; [ERROR_CODE]?: string };
  */
 export function annotateRequestAccount(req: unknown, accountId: string): void {
   if (req && typeof req === 'object') (req as Annotated)[ACCOUNT_ID] = accountId;
+}
+
+/**
+ * Record whether the signed-in host is one of the operator's own people
+ * (`PRODUCT_ANALYTICS_INTERNAL_EMAILS`), so an error report can say so. Only
+ * the boolean is kept, never the email it was decided from.
+ */
+export function annotateRequestInternal(req: unknown, isInternal: boolean): void {
+  if (req && typeof req === 'object') (req as Annotated)[IS_INTERNAL] = isInternal;
 }
 
 /**
@@ -101,6 +111,26 @@ function routeTemplate(req: Request): string {
 function accountCode(req: Request): string | undefined {
   const code = (req.params as Record<string, unknown> | undefined)?.['accountCode'];
   return typeof code === 'string' && SAFE_ACCOUNT_CODE.test(code) ? code : undefined;
+}
+
+/**
+ * What an error report may say about the request it came from, by the same
+ * rules as the log line: the route TEMPLATE, the method, the request id, the
+ * `:accountCode` route parameter, and whether the host is internal when the
+ * auth layer resolved one. Never the path, the query, a header or the body.
+ */
+export function requestErrorContext(req: unknown, requestId?: string): Record<string, string | boolean> {
+  if (!req || typeof req !== 'object') return {};
+  const r = req as Annotated;
+  const out: Record<string, string | boolean> = {
+    route: routeTemplate(r),
+    method: typeof r.method === 'string' ? r.method : 'UNKNOWN',
+    request_id: requestId ?? requestIdFrom(r.headers?.['x-request-id']),
+  };
+  const account = accountCode(r);
+  if (account) out['account_code'] = account;
+  if (typeof r[IS_INTERNAL] === 'boolean') out['is_internal'] = r[IS_INTERNAL];
+  return out;
 }
 
 export function formatPretty(l: RequestLogLine): string {

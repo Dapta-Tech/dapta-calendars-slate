@@ -1,6 +1,9 @@
 'use client';
 
-export default function AdminError({ reset }: { error: Error; reset: () => void }) {
+import { useErrorReport } from '@/lib/analytics/use-error-report';
+
+export default function AdminError({ error, reset }: { error: Error; reset: () => void }) {
+  useErrorReport(error, 'dashboard');
   return (
     <div className="mx-auto max-w-md px-gutter py-16 text-center sm:px-gutter-wide">
       <h1 className="mb-inline text-2xl font-semibold">Couldn’t load this section</h1>

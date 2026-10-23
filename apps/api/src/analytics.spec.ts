@@ -401,7 +401,7 @@ describe('product analytics (API)', () => {
   describe('delivery', () => {
     function posthog(status = 200) {
       const provider = new PosthogAnalyticsProvider(
-        { provider: 'posthog', key: KEY, host: HOST },
+        { provider: 'posthog', key: KEY, host: HOST, errors: true },
         ANALYTICS_GROUP_TYPE,
       );
       const fetchImpl = vi.fn(async () => new Response('{}', { status }));
