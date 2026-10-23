@@ -134,6 +134,24 @@ describe('captureError', () => {
     expect(port.captureError).toHaveBeenCalledTimes(2);
   });
 
+  it('never connects a host audience itself (it would count a pageview and keep an id)', async () => {
+    setErrorAnalyticsConfig(CONFIG);
+    at('/onboarding');
+    captureError(new Error('wizard failed first'), 'root');
+    await turn();
+    expect(connectAnalytics).not.toHaveBeenCalled();
+  });
+
+  it('an error that found no audience yet is not marked sent: a later report still goes', async () => {
+    const error = new Error('early');
+    at('/admin');
+    captureError(error, 'dashboard');
+    const port = fakePort('host');
+    setActiveAnalyticsPort(port);
+    captureError(error, 'dashboard');
+    expect(port.captureError).toHaveBeenCalledTimes(1);
+  });
+
   it('connects nothing with errors off or no settings', async () => {
     at('/acme/ana');
     captureError(new Error('a'), 'booking_page');

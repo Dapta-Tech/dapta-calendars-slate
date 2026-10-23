@@ -155,31 +155,38 @@ const reported = new WeakSet<object>();
  *  - on a page that belongs to no audience (login, manage, one-off links);
  *  - for an error the server already reported (it has a `digest`).
  *
- * The audience's own instance is used when the page connected one; when the
- * page failed before its loader could (a render error on the first paint),
- * the audience is connected here, from a chunk only an error ever loads.
+ * The audience's own instance is used when the page connected one. A host's
+ * dashboard always has: its loader lives in the dashboard's layout, which
+ * stays mounted when a page under it fails. A booking page that failed before
+ * its loader could (a render error on the first paint) gets its visitor
+ * audience connected here, from a chunk only an error ever loads; that
+ * audience sends only what it is asked to and stores nothing. A host audience
+ * is never connected here: it would count a pageview and keep an anonymous
+ * id, so the wizard's own first-paint failures are left to the server's half.
  */
 export function captureError(error: unknown, boundary: ErrorBoundaryName): void {
   try {
     if (reportedByServer(error)) return;
-    if (typeof error === 'object' && error !== null) {
-      if (reported.has(error)) return;
-      reported.add(error);
-    }
+    if (typeof error === 'object' && error !== null && reported.has(error)) return;
     const surface = analyticsSurfaceOf(window.location.pathname);
     if (!surface) return;
     // The adapter adds the surface the error came from (`browser_host`, `browser_visitor`).
     const properties: AnalyticsProps = { product: ANALYTICS_PRODUCT, error_boundary: boundary };
+    const handOver = (port: AnalyticsPort) => {
+      if (typeof error === 'object' && error !== null) reported.add(error);
+      port.captureError(error, properties);
+    };
     const known = connected.get(surface);
-    if (known) return known.captureError(error, properties);
+    if (known) return handOver(known);
     const config = errorConfig;
-    if (!config) return;
+    if (!config || surface !== 'visitor') return;
     void import('./connect')
       .then(({ connectAnalytics }) => {
+        if (typeof error === 'object' && error !== null && reported.has(error)) return;
         const port = connected.get(surface) ?? connectAnalytics(config, surface);
         if (!port) return;
         connected.set(surface, port);
-        port.captureError(error, properties);
+        handOver(port);
       })
       .catch(() => undefined);
   } catch {

@@ -80,12 +80,15 @@ describe('reportRequestError', () => {
     expect(sent).not.toContain('/acme/ana/intro');
   });
 
-  it('reports one failure once, though Next may hand it over twice', async () => {
-    const error = Object.assign(new Error('boom'), { digest: 'same' });
-    reportRequestError(error, request(), RENDER, ON);
-    reportRequestError(error, request(), { ...RENDER, renderSource: 'server-rendering' }, ON);
+  it('counts repeats of one failure instead of dropping them: sent once now, the rest folded into a count', async () => {
+    const failing = () => Object.assign(new Error('boom'), { digest: 'same', stack: 'Error: boom\n    at load (/srv/app/lib/api.ts:81:9)' });
+    for (let i = 0; i < 3; i++) reportRequestError(failing(), request(), RENDER, ON);
     await settle();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((bodies()[0]!['properties'] as Record<string, unknown>)['count']).toBe(1);
+    // The other two wait for the minute to close, then leave as one event with `count: 2`.
+    await webServerErrorReporter(ON)!.flush(100);
+    expect(bodies().map((b) => (b['properties'] as Record<string, unknown>)['count'])).toEqual([1, 2]);
   });
 
   it('names the public host the request came to, never an internal one, else the configured app host', async () => {

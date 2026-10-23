@@ -125,7 +125,7 @@ function browser(url: string, referrer?: string) {
   const errorCaptureReady = async () => {
     for (let i = 0; i < 100; i++) {
       const ext = (w as unknown as { __PosthogExtensions__?: { errorWrappingFunctions?: unknown } }).__PosthogExtensions__;
-      if (ext?.errorWrappingFunctions) return;
+      if (ext?.errorWrappingFunctions && typeof w.onerror === 'function') return;
       await wait(20);
     }
     throw new Error(`the error capture extension never loaded; scripts asked for: ${scripts.join(', ')}`);

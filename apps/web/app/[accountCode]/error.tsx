@@ -5,12 +5,13 @@ import { useVisitorLocale } from '@/lib/use-visitor-locale';
 import { useErrorReport } from '@/lib/analytics/use-error-report';
 
 /**
- * R22 error boundary for the public booking subtree: a real Retry, no dead end.
+ * R22 error boundary for the public booking subtree: a real Retry, no dead end
+ * (`retry` asks the server again, so a failure that has passed clears).
  * A busy service never lands here (the pages render their own busy notice), so
  * this is a genuine failure on our side, and it says so in the visitor's
  * language without naming anything internal.
  */
-export default function PublicError({ error, reset }: { error: Error; reset: () => void }) {
+export default function PublicError({ error, retry }: { error: Error; retry: () => void }) {
   useErrorReport(error, 'booking_page');
   const copy = getMessages(useVisitorLocale()).trouble;
   return (
@@ -19,7 +20,7 @@ export default function PublicError({ error, reset }: { error: Error; reset: () 
       <p className="text-muted-foreground">{copy.pageBody}</p>
       <button
         type="button"
-        onClick={reset}
+        onClick={() => retry()}
         className="rounded-md bg-primary px-5 py-2 font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
       >
         {copy.tryAgain}

@@ -62,6 +62,16 @@ RUN --mount=type=secret,id=sourcemaps_upload \
         || echo "sourcemaps_upload failed: this image's browser stacks will not be readable"; \
     fi; \
     find /repo/apps/web/.next/static -name '*.map' -delete
+# The server's own maps (never served): the standalone output leaves them
+# out, so with maps on they are copied beside the chunks it kept, and the web
+# server's errors name source lines (instrumentation.ts turns Node's source
+# map support on while error tracking is on).
+RUN if [ "$PRODUCT_ANALYTICS_SOURCEMAPS" = "1" ]; then \
+      cd /repo/apps/web/.next/server && find . -name '*.js.map' | while read -r map; do \
+        dest="/repo/apps/web/.next/standalone/apps/web/.next/server/$map"; \
+        [ -f "${dest%.map}" ] && cp "$map" "$dest"; \
+      done; \
+    fi; true
 
 # ---- run: standalone server, non-root ----------------------------------------
 FROM base AS run

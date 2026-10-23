@@ -60,10 +60,17 @@ function expectClean(e: RecordedAnalytics): void {
   expect(sent).not.toMatch(/\?[\w%.-]+=/);
 }
 
-/** Until the library listens for uncaught errors (its extension has loaded). */
+/**
+ * Until the library listens for uncaught errors: its extension has loaded AND
+ * the page's own `onerror` and `onunhandledrejection` handlers are installed
+ * (the extension installs them just after it runs).
+ */
 async function errorCaptureReady(page: Page): Promise<void> {
   await page.waitForFunction(
-    () => Boolean((window as unknown as { __PosthogExtensions__?: { errorWrappingFunctions?: unknown } }).__PosthogExtensions__?.errorWrappingFunctions),
+    () =>
+      Boolean((window as unknown as { __PosthogExtensions__?: { errorWrappingFunctions?: unknown } }).__PosthogExtensions__?.errorWrappingFunctions) &&
+      typeof window.onerror === 'function' &&
+      typeof window.onunhandledrejection === 'function',
     undefined,
     { timeout: 20_000 },
   );
@@ -137,10 +144,10 @@ test('a page that fails on the web server is reported once, by the server, with 
   test.skip(info.project.name !== 'desktop', 'server-side; runs once');
   const since = Date.now();
   await answerWith({ match: `/v1/profiles/${JORDAN.accountCode}/${JORDAN.handle}`, times: 20, status: 500, body: { error: 'INTERNAL' } });
+  const retry = page.getByRole('button', { name: /try again|reintentar/i });
   try {
     await page.goto(`/${JORDAN.accountCode}/${JORDAN.handle}/${JORDAN.slug}?prefill=${encodeURIComponent(EMAIL)}`);
-    // R22: the visitor gets the boundary's real Retry, not a dead end.
-    await expect(page.getByRole('button', { name: /try again|reintentar/i })).toBeVisible();
+    await expect(retry).toBeVisible();
   } finally {
     await clearThrottle();
   }
@@ -159,11 +166,19 @@ test('a page that fails on the web server is reported once, by the server, with 
   expect(String(server.properties?.['request_id'])).toMatch(/^[\w.:-]+$/);
   expect(typeof server.properties?.['digest']).toBe('string');
   expect(entries(server)[0]).toMatchObject({ type: 'Error', value: failure, mechanism: { handled: false } });
+  // Readable: the failing frame names the source file, not a bundled chunk.
+  const top = [...entries(server)[0]!.stacktrace.frames].reverse().find((f) => f['in_app'] === true);
+  expect(String(top?.['filename'])).toMatch(/lib\/api\.ts$/);
   expectClean(server);
 
   // The browser's boundary saw the same failure (it carries a digest) and
-  // sent nothing: one failure, one report. The library flushes every 3 s.
-  await page.waitForTimeout(4_000);
+  // sent nothing: one failure, one report. Long enough for a report the
+  // boundary had sent to arrive: a lazy chunk, the library, a 3 s flush.
+  await page.waitForTimeout(8_000);
   const fromBrowser = (await analyticsRecorded(since)).filter((e) => e.event === '$exception' && e.source === 'browser');
   expect(fromBrowser).toEqual([]);
+
+  // R22: the API is back, and Retry asks the server again: the page loads.
+  await retry.click();
+  await expect(page.getByRole('grid')).toBeVisible();
 });

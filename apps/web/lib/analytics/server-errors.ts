@@ -29,8 +29,15 @@ import { analyticsConfig } from './config';
  * kind of work failed (render, route, action, proxy), the error's digest (the
  * id the browser's error boundary shows, so the two can be matched), and as
  * `$host` the public host the request was addressed to (its Host header, when
- * that is a public name; else the deployment's `PUBLIC_APP_URL`). The path
- * itself, its query, the body and every other header are never sent.
+ * that is a public name; else the deployment's `PUBLIC_APP_URL`). The request
+ * path, its query, the body and every other header are never sent. The
+ * error's own message is, scrubbed: it can name an API path the server called,
+ * such as `/v1/profiles/{account}/{handle}`, the same public segments as the
+ * booking page's own address.
+ *
+ * Repeats of one failure (the same type, message and failing line) are
+ * counted by the reporter, not dropped: the first is sent at once, and one
+ * more event a minute later carries how many followed (`count`).
  */
 
 /** Who a web server error is filed under: the process, never a person. */
@@ -62,6 +69,31 @@ function deliveryFor(config: AnalyticsConfig): ((report: ErrorReport) => Promise
   }
 }
 
+/**
+ * The stack Next would print for an error. Next replaces the runtime's stack
+ * formatter, so `error.stack` names lines of the bundled server chunks; what
+ * Next prints (`util.inspect`) has the build's source maps applied, so frames
+ * name `lib/api.ts:81`. Only the error's own frames are kept: what Next adds
+ * after them (its properties, a cause) is cut. Unavailable outside Node (the
+ * edge runtime), where the plain stack stands.
+ */
+function nextStack(error: Error): string | undefined {
+  const util = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process?.getBuiltinModule?.(
+    'node:util',
+  ) as { inspect?: (value: unknown, options: Record<string, unknown>) => string } | undefined;
+  if (!util?.inspect) return undefined;
+  const lines: string[] = [];
+  let inFrames = false;
+  for (const raw of util.inspect(error, { colors: false, depth: 0 }).split('\n')) {
+    const line = raw.replace(/ \{$/, '');
+    const frame = /^\s+at /.test(line);
+    if (inFrames && !frame) break;
+    inFrames ||= frame;
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
 let reporter: ErrorReporter | null | undefined;
 
 /** This process's reporter, built on first use from the runtime env; null when error tracking is off. */
@@ -75,26 +107,10 @@ export function webServerErrorReporter(env: NodeJS.ProcessEnv = process.env): Er
         deliver,
         properties: { surface: 'next_server', ...(host ? { $host: host } : {}) },
         root: typeof process.cwd === 'function' ? process.cwd() : undefined,
+        stackOf: nextStack,
       })
     : null;
   return reporter;
-}
-
-/**
- * Next can report one failure twice (the server components pass, then the
- * HTML pass that rendered its digest): one report per digest a minute.
- */
-const recentDigests = new Map<string, number>();
-const DIGEST_WINDOW_MS = 60_000;
-
-function seenRecently(digest: string, now: number): boolean {
-  for (const [d, at] of recentDigests) {
-    if (now - at < DIGEST_WINDOW_MS && recentDigests.size <= 500) break;
-    recentDigests.delete(d);
-  }
-  if (recentDigests.has(digest)) return true;
-  recentDigests.set(digest, now);
-  return false;
 }
 
 /** The account a public route was serving, from its first path segment: never the rest of the path. */
@@ -122,7 +138,6 @@ export function reportRequestError(
       typeof error === 'object' && error !== null && typeof (error as { digest?: unknown }).digest === 'string'
         ? (error as { digest: string }).digest
         : undefined;
-    if (digest && seenRecently(digest, Date.now())) return;
     const account = accountCodeOf(context, request);
     const host = reportableHost(request.headers['host']);
     const properties: AnalyticsProps = {
@@ -142,8 +157,7 @@ export function reportRequestError(
   }
 }
 
-/** Test seam: forget the reporter and the digests seen. */
+/** Test seam: forget the reporter. */
 export function resetWebServerErrorsForTests(): void {
   reporter = undefined;
-  recentDigests.clear();
 }

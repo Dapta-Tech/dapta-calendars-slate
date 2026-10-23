@@ -13,6 +13,14 @@ export async function register(): Promise<void> {
   if (analyticsErrorsSettingUnknown(process.env.PRODUCT_ANALYTICS_ERRORS)) {
     console.warn('PRODUCT_ANALYTICS_ERRORS is neither `on` nor `off`; error tracking is off.');
   }
+  // With error tracking on, the server's own stack traces name source lines
+  // rather than a line of a bundled chunk, wherever the build left the
+  // chunks' maps beside them (the web image ships them when built with
+  // PRODUCT_ANALYTICS_SOURCEMAPS=1). Only chunks loaded from here on are
+  // mapped, which is every route's: they load on first request. Off, nothing
+  // changes for a fork.
+  const { errorAnalyticsConfig } = await import('./lib/analytics/config');
+  if (errorAnalyticsConfig()) process.setSourceMapsEnabled(true);
 }
 
 /**

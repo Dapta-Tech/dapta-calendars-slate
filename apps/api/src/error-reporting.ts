@@ -10,7 +10,7 @@ import {
   type ErrorReporterOptions,
 } from '@slate/shared';
 import type { AnalyticsProvider } from './analytics.provider';
-import { requestErrorContext } from './request-log';
+import { requestErrorContext, requestIdFrom } from './request-log';
 import { ERROR_REPORTER } from './tokens';
 
 /**
@@ -134,7 +134,18 @@ export class ErrorReportingFilter extends BaseExceptionFilter {
   }
 
   override catch(exception: unknown, host: ArgumentsHost): void {
-    if (host.getType() === 'http') reportRequestError(this.reporter, exception, host.switchToHttp().getRequest());
+    if (host.getType() === 'http' && this.reporter) {
+      const http = host.switchToHttp();
+      const req = http.getRequest<{ headers?: Record<string, string | string[] | undefined> }>();
+      const res = http.getResponse<{ headersSent?: boolean; getHeader?(n: string): unknown; setHeader?(n: string, v: string): void }>();
+      // The request log names every request; with it off, a reported failure
+      // still tells the client the id its report carries.
+      const requestId = requestIdFrom(req?.headers?.['x-request-id']);
+      if (statusOf(exception) >= 500 && res && !res.headersSent && !res.getHeader?.('X-Request-Id')) {
+        res.setHeader?.('X-Request-Id', requestId);
+      }
+      reportRequestError(this.reporter, exception, req, { requestId });
+    }
     super.catch(exception, host);
   }
 }
@@ -145,25 +156,45 @@ export interface ProcessHookOptions {
   exit?: (code: number) => void;
   /** How long a crash waits for its own report to leave. */
   flushMs?: number;
+  /** Node's `--unhandled-rejections` mode; read from the process when not given. */
+  unhandledRejections?: string;
   log?: (message: string, error: unknown) => void;
+}
+
+/** Node's `--unhandled-rejections` mode, from the process's flags or `NODE_OPTIONS`. */
+export function unhandledRejectionsMode(
+  execArgv: readonly string[] = process.execArgv,
+  nodeOptions: string | undefined = process.env['NODE_OPTIONS'],
+): string {
+  const flags = [...execArgv, ...(nodeOptions ?? '').split(/\s+/)];
+  let mode = 'throw';
+  for (const flag of flags) {
+    const m = /^--unhandled-rejections=([\w-]+)$/.exec(flag);
+    if (m) mode = m[1]!;
+  }
+  return mode;
 }
 
 /**
  * Report a crash before the process dies of it.
  *
  * Node's own behavior is kept: an uncaught exception, and an unhandled
- * rejection (Node's default since v15 turns it into one), still end the
- * process with exit code 1 and the error on stderr. What changes is that the
- * error is reported first, waiting at most `flushMs` (2 s) for it to leave.
- * A second crash while the first is being reported is queued and the process
- * still exits once. Installed only when a reporter exists; returns the undo,
- * for tests.
+ * rejection in Node's default mode (since v15 it ends the process), still end
+ * the process with exit code 1 and the error on stderr. What changes is that
+ * the error is reported first, waiting at most `flushMs` (2 s) for it to
+ * leave; the process keeps answering in that window, as it would while Node
+ * printed the error. A process started with `--unhandled-rejections=warn`,
+ * `warn-with-error-code` or `none` keeps running after a rejection, as it did
+ * before: the rejection is reported, not made fatal. A second crash while the
+ * first is being reported is queued and the process still exits once.
+ * Installed only when a reporter exists; returns the undo, for tests.
  */
 export function installProcessErrorHooks(reporter: ErrorReporter, opts: ProcessHookOptions = {}): () => void {
   const proc = opts.proc ?? process;
   const exit = opts.exit ?? ((code: number) => process.exit(code));
   const flushMs = opts.flushMs ?? 2_000;
   const log = opts.log ?? ((message: string, error: unknown) => console.error(message, error));
+  const rejectionMode = opts.unhandledRejections ?? unhandledRejectionsMode();
   let crashing = false;
 
   const fatal = (error: unknown, mechanism: 'uncaught_exception' | 'unhandled_rejection') => {
@@ -179,7 +210,17 @@ export function installProcessErrorHooks(reporter: ErrorReporter, opts: ProcessH
     });
   };
   const onException = (error: unknown) => fatal(error, 'uncaught_exception');
-  const onRejection = (reason: unknown) => fatal(reason, 'unhandled_rejection');
+  const onRejection = (reason: unknown) => {
+    if (rejectionMode === 'warn' || rejectionMode === 'warn-with-error-code' || rejectionMode === 'none') {
+      // The mode this process was started in keeps it alive: report, and say
+      // so as Node would have.
+      reporter.report(reason, { handled: false, mechanism: 'unhandled_rejection' });
+      if (rejectionMode !== 'none') log('[api] unhandled rejection:', reason);
+      if (rejectionMode === 'warn-with-error-code') process.exitCode = 1;
+      return;
+    }
+    fatal(reason, 'unhandled_rejection');
+  };
   proc.on('uncaughtException', onException);
   proc.on('unhandledRejection', onRejection);
   return () => {

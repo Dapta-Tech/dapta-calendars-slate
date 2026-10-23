@@ -24,11 +24,13 @@ import { loadServerEnv } from '@slate/config/env';
 import { ANALYTICS_GROUP_TYPE, type ErrorReport, type ErrorReporter } from '@slate/shared';
 import { PosthogAnalyticsProvider, type AnalyticsProvider } from './analytics.provider';
 import { CalV2ExceptionFilter, CalV2RequestIdInterceptor } from './cal-v2.controller';
+import { CalendarHttpError } from './calendar.http-provider';
 import {
   ErrorReportingFilter,
   createApiErrorReporter,
   installProcessErrorHooks,
   reportRequestError,
+  unhandledRejectionsMode,
 } from './error-reporting';
 import { annotateRequestInternal, requestLogger } from './request-log';
 import { ERROR_REPORTER } from './tokens';
@@ -145,6 +147,11 @@ class FixtureController {
     throw new ServiceUnavailableException({ error: 'INTEGRATION_KEY_MISSING', message: 'no key' });
   }
 
+  @Get('calendars')
+  calendars() {
+    throw new CalendarHttpError(502, 'listCalendars', '{"items":[{"summary":"Jane Smith personal","owner":"jane@example.com"}]}');
+  }
+
   @Get('handled/:kind')
   handled(@Param('kind') kind: string) {
     if (kind === 'bad') throw new BadRequestException({ error: 'BAD_REQUEST' });
@@ -209,7 +216,8 @@ describe('the global filter and the v2 filter, in a real app', () => {
       mechanism: 'filter',
       properties: {
         surface: 'api',
-        $host: expect.stringMatching(/^127\.0\.0\.1:\d+$/),
+        // Asked at 127.0.0.1: a loopback address is not a public name, so the configured app host stands in.
+        $host: 'cal.example.test',
         route: '/v1/profiles/:accountCode/boom',
         method: 'GET',
         status: 500,
@@ -228,6 +236,46 @@ describe('the global filter and the v2 filter, in a real app', () => {
     expect(sent).not.toContain(EMAIL);
     expect(sent).not.toContain('session=');
     expect(sent).not.toContain('300 123');
+  });
+
+  it("a calendar backend's failure is reported by operation and status, never its response body", async () => {
+    const res = await fetch(`${base}/v1/calendars`);
+    expect(res.status).toBe(500);
+    await settle();
+    expect(provider.errors).toHaveLength(1);
+    expect(provider.errors[0]!.exceptions[0]).toMatchObject({
+      type: 'CalendarHttpError',
+      value: 'calendar backend listCalendars failed (502)',
+    });
+    expect(JSON.stringify(provider.errors)).not.toMatch(/Jane|summary|jane@/);
+  });
+
+  it('a reported failure tells the client its request id, even with the request log off', async () => {
+    const { NestFactory: Factory } = await import('@nestjs/core');
+    const own = recordingProvider();
+    @Module({
+      controllers: [FixtureController],
+      providers: [
+        { provide: ERROR_REPORTER, useValue: createApiErrorReporter(env(), own) },
+        { provide: APP_FILTER, useClass: ErrorReportingFilter },
+      ],
+    })
+    class NoLogModule {}
+    const bare = await Factory.create<NestExpressApplication>(NoLogModule, { logger: false });
+    await bare.listen(0, '127.0.0.1');
+    try {
+      const port = (bare.getHttpServer().address() as AddressInfo).port;
+      const res = await fetch(`http://127.0.0.1:${port}/v1/profiles/acme/boom`);
+      expect(res.status).toBe(500);
+      const id = res.headers.get('x-request-id');
+      expect(id).toMatch(/^req_/);
+      await settle();
+      expect(own.errors.at(-1)!.properties['request_id']).toBe(id);
+      const handled = await fetch(`http://127.0.0.1:${port}/v1/handled/bad`);
+      expect(handled.headers.get('x-request-id')).toBeNull();
+    } finally {
+      await bare.close();
+    }
   });
 
   it('a deliberate 503 is a 5xx and is reported; its body is still the coded one', async () => {
@@ -324,6 +372,37 @@ describe('installProcessErrorHooks', () => {
       mechanism: 'unhandled_rejection',
       exceptions: [{ type: 'string', value: 'rejected with a plain string' }],
     });
+  });
+
+  it('a process started with --unhandled-rejections=warn|none keeps running after a rejection, which is still reported', async () => {
+    for (const mode of ['warn', 'warn-with-error-code', 'none']) {
+      const provider = recordingProvider();
+      const reporter = createApiErrorReporter(env(), provider)!;
+      const p = fakeProcess();
+      const undo = installProcessErrorHooks(reporter, {
+        proc: p.proc as unknown as NodeJS.Process,
+        exit: p.exit,
+        log: p.log,
+        flushMs: 50,
+        unhandledRejections: mode,
+      });
+      const before = process.exitCode;
+      p.proc.emit('unhandledRejection', new Error(`rejected in ${mode}`));
+      await settle();
+      expect([mode, p.exit.mock.calls.length]).toEqual([mode, 0]);
+      expect(provider.errors[0]).toMatchObject({ mechanism: 'unhandled_rejection' });
+      expect(p.logs.length).toBe(mode === 'none' ? 0 : 1);
+      if (mode === 'warn-with-error-code') expect(process.exitCode).toBe(1);
+      process.exitCode = before;
+      undo();
+    }
+  });
+
+  it('reads the mode from the flags or NODE_OPTIONS, the last one winning, default throw', () => {
+    expect(unhandledRejectionsMode([], undefined)).toBe('throw');
+    expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], undefined)).toBe('warn');
+    expect(unhandledRejectionsMode([], '--max-old-space-size=512 --unhandled-rejections=none')).toBe('none');
+    expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], '--unhandled-rejections=strict')).toBe('strict');
   });
 
   it('a provider that never answers cannot keep a crashed process alive', async () => {

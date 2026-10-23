@@ -42,9 +42,23 @@ function urlWithoutQuery(url: string): string {
   return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#@\s]*@/i, '$1').replace(/[?#].*$/s, '');
 }
 
-/** Values the scrubber must leave whole (an IP address, a date, a UUID), parked while the number rules run. */
-const PROTECTED =
-  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:19|20)\d{2}-[01]\d-[0-3]\d(?:[T ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)?\b|\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/gi;
+/** One IPv4 octet as written in an address: 0 to 255, no leading zero. */
+const OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+
+/**
+ * Values the scrubber must leave whole, parked while the number rules run: a
+ * UUID, an ISO date or timestamp, an IPv4 address (with its port). Strict on
+ * purpose: a dotted phone (`06.12.34.56.78`) or an id written with dot
+ * separators (`1.023.456.789`) is not an address and is not parked.
+ */
+const PROTECTED = new RegExp(
+  [
+    '\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b',
+    '\\b(?:19|20)\\d{2}-[01]\\d-[0-3]\\d(?:[T ][0-2]\\d:[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|[+-][0-2]\\d:?[0-5]\\d)?)?\\b',
+    `(?<![\\d.])${OCTET}(?:\\.${OCTET}){3}(?::\\d{1,5})?(?![.\\d])`,
+  ].join('|'),
+  'gi',
+);
 
 /** A private-use character: no rule matches it, and no real message carries it. */
 const MARK = '\uE000';
@@ -72,6 +86,12 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
     // `params:` goes, whatever it spans.
     name: 'query-params',
     apply: (t) => t.replace(/\bparams:[\s\S]*$/i, 'params: [redacted]'),
+  },
+  {
+    // A database's "invalid input syntax for type uuid: "<what was sent>"":
+    // the quoted part is whatever a caller typed into that field.
+    name: 'quoted-input',
+    apply: (t) => t.replace(/(invalid input (?:syntax|value) for (?:type |enum )?[\w ]{1,40}:\s*)"[^"]*"/gi, '$1"[redacted]"'),
   },
   {
     name: 'url-query',
@@ -125,30 +145,36 @@ export const SCRUB_RULES: readonly ScrubRule[] = [
     apply: (t) =>
       t
         .replace(/[\p{L}\p{N}._%+'-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,8}\.\p{L}{2,24}/gu, '[email]')
-        .replace(/[\w.%+-]{1,64}%40[\w-]{1,63}(?:\.[\w-]{1,63}){0,8}\.[a-z]{2,24}/gi, '[email]'),
+        .replace(/[\w.%+-]{1,64}%(?:25)?40[\w-]{1,63}(?:\.[\w-]{1,63}){0,8}\.[a-z]{2,24}/gi, '[email]'),
   },
   {
     // `+57 300 123 4567`, `+1 (555) 123-4567`, `+573001234567`.
     name: 'phone-international',
-    apply: (t) => t.replace(/\+\d(?:[ \t().-]{0,2}\d){6,14}/g, '[phone]'),
+    apply: (t) => t.replace(/\+\p{Nd}(?:[ \t\u00a0().\u2013-]{0,2}\p{Nd}){6,14}/gu, '[phone]'),
   },
   {
-    // National formats, digit blocks joined by a space, dot, dash or brackets:
-    // `300 123 4567`, `(11) 98765-4321`, `555.123.4567`. Seven to fifteen
-    // digits in two or more blocks. IP addresses, dates and UUIDs are set
-    // aside before this runs, so they survive.
+    // National formats, digit blocks joined by a space (a no-break one too),
+    // a dot, a dash (an en dash too) or brackets: `300 123 4567`,
+    // `(11) 98765-4321`, `555.123.4567`. Seven to fifteen digits in two or
+    // more blocks is a phone; more than fifteen (a card number written in
+    // groups, a phone beside another number) is a number. IP addresses,
+    // dates and UUIDs are set aside before this runs, so they survive.
     name: 'phone-national',
     apply: (t) =>
-      t.replace(/(?<![\p{L}\p{N}_+])\(?\d{1,8}\)?(?:[ .-]{1,2}\(?\d{1,8}\)?)+(?![\p{L}\p{N}_])/gu, (m) => {
-        const digits = m.replace(/\D/g, '').length;
-        return digits >= 7 && digits <= 15 ? '[phone]' : m;
-      }),
+      t.replace(
+        /(?<![\p{L}\p{N}_+])\(?\p{Nd}{1,8}\)?(?:[ .\u00a0\u2013-]{1,2}\(?\p{Nd}{1,8}\)?)+(?![\p{L}\p{N}_])/gu,
+        (m) => {
+          const digits = m.replace(/\P{Nd}/gu, '').length;
+          if (digits > 15) return '[number]';
+          return digits >= 7 ? '[phone]' : m;
+        },
+      ),
   },
   {
     // An unbroken run of seven or more digits: a phone without separators, an
     // account or card number, an epoch. Nothing an error needs to be grouped.
     name: 'digit-run',
-    apply: (t) => t.replace(/\d{7,}/g, '[number]'),
+    apply: (t) => t.replace(/\p{Nd}{7,}/gu, '[number]'),
   },
 ];
 
@@ -165,6 +191,8 @@ export function scrubErrorText(text: unknown, rules: readonly ScrubRule[] = SCRU
   // word cut in half at that edge is dropped whole, so no partial address or
   // number is left for the rules to miss.
   let out = text.length > ERROR_MESSAGE_MAX * 2 ? text.slice(0, ERROR_MESSAGE_MAX * 2).replace(/\S*$/, '') : text;
+  // Compatibility forms first, so a full-width `＠` or digit reads as itself.
+  out = out.normalize('NFKC');
   for (const rule of rules) {
     if (NUMBER_RULES.has(rule.name)) {
       const parked = park(out);
@@ -212,6 +240,15 @@ export interface ExceptionEntry {
   frames: ErrorFrame[];
 }
 
+/**
+ * An error whose message quotes something that must never leave (an upstream
+ * service's response body, say) names what may be reported instead under
+ * this key: `error[REPORTABLE_MESSAGE] = 'calendar backend listBusy failed (502)'`.
+ * `describeError` sends that, scrubbed, in place of the message. A
+ * well-known symbol, so code that cannot import this package can set it too.
+ */
+export const REPORTABLE_MESSAGE: unique symbol = Symbol.for('slate.reportable-message');
+
 /** The most frames kept per exception, nearest the failure. */
 const MAX_FRAMES = 50;
 /** The most causes followed (`error.cause`). */
@@ -243,9 +280,10 @@ export function parseStackFrames(stack: unknown, root?: string): ErrorFrame[] {
     const file = m[2]!;
     const own = OWN_PACKAGE.exec(file)?.[1];
     const filename = own ? scrubFrameFilename(own) : scrubFrameFilename(file, root);
+    const fn = m[1] ? scrubErrorText(m[1]).slice(0, 200) : '';
     frames.push({
       ...(filename ? { filename } : {}),
-      ...(m[1] ? { function: m[1] } : {}),
+      ...(fn ? { function: fn } : {}),
       lineno: Number(m[3]),
       colno: Number(m[4]),
       in_app: own !== undefined || !DEPENDENCY.test(file),
@@ -267,17 +305,23 @@ function typeOf(value: unknown): string {
 }
 
 function messageOf(value: unknown): string {
-  if (value instanceof Error) return value.message;
+  if (value instanceof Error) {
+    const reportable = (value as { [REPORTABLE_MESSAGE]?: unknown })[REPORTABLE_MESSAGE];
+    return typeof reportable === 'string' ? reportable : value.message;
+  }
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
   return value === undefined || value === null ? String(value) : 'Non-Error value thrown';
 }
 
+/** Reads an error's stack where the runtime keeps a better one than `error.stack` (see `stackOf`). */
+export type StackReader = (error: Error) => string | undefined;
+
 /**
  * A thrown value and its causes as scrubbed data: type, message and frames,
  * outermost first. Never throws, whatever it is handed.
  */
-export function describeError(error: unknown, root?: string): ExceptionEntry[] {
+export function describeError(error: unknown, root?: string, stackOf?: StackReader): ExceptionEntry[] {
   const out: ExceptionEntry[] = [];
   let current: unknown = error;
   const seen = new Set<unknown>();
@@ -287,16 +331,39 @@ export function describeError(error: unknown, root?: string): ExceptionEntry[] {
       out.push({
         type: scrubErrorText(typeOf(current)) || 'Error',
         value: scrubErrorText(messageOf(current)),
-        frames: current instanceof Error ? parseStackFrames(current.stack, root) : [],
+        frames: current instanceof Error ? parseStackFrames(stackFrames(current, stackOf), root) : [],
       });
     } catch {
       out.push({ type: 'Error', value: '', frames: [] });
     }
-    const cause = current instanceof Error ? (current as { cause?: unknown }).cause : undefined;
+    let cause: unknown;
+    try {
+      cause = current instanceof Error ? (current as { cause?: unknown }).cause : undefined;
+    } catch {
+      cause = undefined;
+    }
     if (cause === undefined) break;
     current = cause;
   }
   return out;
+}
+
+/**
+ * An error's stack without its `Name: message` header, so a line of the
+ * message shaped like a frame is never read as one (and never carries what
+ * the scrubbed message hid).
+ */
+function stackFrames(error: Error, stackOf?: StackReader): string {
+  let stack = typeof error.stack === 'string' ? error.stack : '';
+  try {
+    const better = stackOf?.(error);
+    if (typeof better === 'string' && better) stack = better;
+  } catch {
+    /* the plain stack, then */
+  }
+  const message = typeof error.message === 'string' ? error.message : '';
+  // The header spans as many lines as the message, whatever name it was given.
+  return stack.split('\n').slice(Math.max(1, message.split('\n').length)).join('\n');
 }
 
 /* -------------------------------------------------------------- reporter */
@@ -336,6 +403,11 @@ export interface ErrorReporterOptions {
   properties?: AnalyticsProps;
   /** The process's working directory: frames are sent relative to it. */
   root?: string;
+  /**
+   * Where the runtime keeps a better stack than `error.stack` (one with
+   * source maps applied that `error.stack` does not have): read from there.
+   */
+  stackOf?: StackReader;
   /** Reports waiting to be built and sent. Past this, new ones are dropped. Default 100. */
   maxQueue?: number;
   /** Reports sent per rolling minute, repeats included. Past this, dropped. Default 60. */
@@ -492,7 +564,7 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
   const build = (item: Queued): ErrorReport => ({
     uuid: uuid(),
     timestamp: item.at,
-    exceptions: describeError(item.error, options.root),
+    exceptions: describeError(item.error, options.root, options.stackOf),
     handled: item.input.handled ?? false,
     mechanism: item.input.mechanism ?? 'generic',
     count: 1,
@@ -503,7 +575,12 @@ export function createErrorReporter(options: ErrorReporterOptions): ErrorReporte
     scheduled = false;
     sweep(false);
     for (const item of queue.splice(0)) {
-      const report = build(item);
+      let report: ErrorReport;
+      try {
+        report = build(item);
+      } catch {
+        continue;
+      }
       const key = errorFingerprint(report.exceptions);
       const w = windows.get(key);
       if (w && item.at - w.first < windowMs) {
@@ -577,8 +654,12 @@ export function reportableRequestId(raw: unknown, uuid: () => string = defaultUu
 
 /** Names that only resolve inside a cluster or a private network. */
 const INTERNAL_HOST = /(^|\.)(svc|cluster\.local|local|internal|localdomain|lan)$/;
-/** IPv4 ranges a pod, a node or a private network answers on. */
-const PRIVATE_IPV4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/;
+/**
+ * IPv4 ranges that never name a public site: private networks (where pods and
+ * nodes answer), link-local, carrier-grade NAT, loopback (a reverse proxy on
+ * the same machine forwarding `Host: 127.0.0.1:3000`), and `0.`.
+ */
+const PRIVATE_IPV4 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|127\.|0\.)/;
 
 /**
  * A host fit to report as `$host`: the public name a request was addressed

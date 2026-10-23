@@ -221,6 +221,15 @@ describe('scrubEvent: errors ($exception)', () => {
     expect(JSON.stringify(out)).not.toContain('ana@example.com');
   });
 
+  it("scrubs a frame's function name like a message", () => {
+    const e = exception();
+    const list = e.properties['$exception_list'] as Array<{ stacktrace: { frames: Array<Record<string, unknown>> } }>;
+    list[0]!.stacktrace.frames[0]!['function'] = 'save ana@example.com';
+    const out = scrubEvent(e, 'host', '/admin')!;
+    const frame = (out.properties!['$exception_list'] as typeof list)[0]!.stacktrace.frames[0]!;
+    expect(frame['function']).toBe('save [email]');
+  });
+
   it('caps the chain and the frames, and survives a malformed list', () => {
     const many = exception();
     const entry = (many.properties['$exception_list'] as unknown[])[0];

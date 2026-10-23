@@ -11,6 +11,7 @@ import RootError from './error';
 import AdminError from './admin/error';
 import PublicError from './[accountCode]/error';
 import GlobalError from './global-error';
+import ManageError from './manage/error';
 
 const captureError = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/analytics/port', () => ({ captureError }));
@@ -39,22 +40,30 @@ async function mount(node: React.ReactNode) {
   await act(async () => root!.render(node));
 }
 
-type SegmentBoundary = ComponentType<{ error: Error; reset: () => void }>;
+type SegmentBoundary = ComponentType<{ error: Error; retry: () => void }>;
 
 describe('segment error boundaries', () => {
   it.each([
     ['app/error.tsx', RootError as SegmentBoundary, 'root'],
     ['app/admin/error.tsx', AdminError as SegmentBoundary, 'dashboard'],
     ['app/[accountCode]/error.tsx', PublicError as SegmentBoundary, 'booking_page'],
-  ])('%s reports what it shows as %s, and its Retry resets', async (_file, Boundary, name) => {
+  ])('%s reports what it shows as %s, and its Retry asks the server again', async (_file, Boundary, name) => {
     const error = new Error('render failed');
-    const reset = vi.fn();
-    await mount(<Boundary error={error} reset={reset} />);
+    const retry = vi.fn();
+    await mount(<Boundary error={error} retry={retry} />);
     expect(captureError).toHaveBeenCalledTimes(1);
     expect(captureError).toHaveBeenCalledWith(error, name);
-    const retry = container!.querySelector('button')!;
-    act(() => retry.click());
-    expect(reset).toHaveBeenCalledTimes(1);
+    const button = container!.querySelector('button')!;
+    act(() => button.click());
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('app/manage/error.tsx reports nothing (its pages carry a token) and its Retry asks the server again', async () => {
+    const retry = vi.fn();
+    await mount(<ManageError error={new Error('x')} retry={retry} />);
+    expect(captureError).not.toHaveBeenCalled();
+    act(() => container!.querySelector('button')!.click());
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 });
 

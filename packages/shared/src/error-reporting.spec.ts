@@ -6,6 +6,7 @@ import {
   describeError,
   errorFingerprint,
   exceptionEvent,
+  REPORTABLE_MESSAGE,
   hostOfUrl,
   parseStackFrames,
   reportableHost,
@@ -36,6 +37,10 @@ const CREDENTIAL_URL = fake('https://user', ':', 'hunter2', '@app.example.test/c
 const RULE_SAMPLES: Record<string, { text: string; leaks: RegExp }> = {
   'query-params': {
     text: 'Failed query: insert into "booking" ("name", "email") values ($1, $2)\nparams: Ana Perez,ana@example.com',
+    leaks: /Ana Perez/,
+  },
+  'quoted-input': {
+    text: 'invalid input syntax for type uuid: "Ana Perez"',
     leaks: /Ana Perez/,
   },
   'url-query': {
@@ -134,6 +139,32 @@ describe('scrubErrorText: one group per rule', () => {
   it('long digit runs', () => {
     expect(scrubErrorText('card 4111111111111111 declined')).toBe('card [number] declined');
     expect(scrubErrorText('epoch 1792777132944')).toBe('epoch [number]');
+  });
+
+  it("what a caller typed, quoted back by the database's invalid-input message", () => {
+    expect(scrubErrorText('invalid input syntax for type uuid: "ana perez"')).toBe('invalid input syntax for type uuid: "[redacted]"');
+    expect(scrubErrorText('invalid input value for enum role: "owner x"')).toBe('invalid input value for enum role: "[redacted]"');
+  });
+
+  it('dotted phones and ids are not mistaken for an IP address and kept', () => {
+    expect(scrubErrorText('call 06.12.34.56.78')).toBe('call [phone]');
+    expect(scrubErrorText('call 079.123.45.67')).toBe('call [phone]');
+    expect(scrubErrorText('cedula 1.023.456.789')).toBe('cedula [phone]');
+    expect(scrubErrorText('connect 192.168.100.200:5432 refused')).toBe('connect 192.168.100.200:5432 refused');
+  });
+
+  it('a grouped run past fifteen digits is a number, not left alone', () => {
+    expect(scrubErrorText('card 4111 1111 1111 1111 declined')).toBe('card [number] declined');
+    expect(scrubErrorText('call 300 123 4567 2024 11')).toBe('call [number]');
+  });
+
+  it('full-width, other-script digits, no-break spaces, en dashes and a doubly encoded @ are read as what they are', () => {
+    expect(scrubErrorText('to ana\uFF20example.com')).toBe('to [email]');
+    expect(scrubErrorText('to ana%2540example.com')).toBe('to [email]');
+    expect(scrubErrorText('call \uFF13\uFF10\uFF10\uFF11\uFF12\uFF13\uFF14\uFF15\uFF16\uFF17')).toBe('call [number]');
+    expect(scrubErrorText('call \u0663\u0660\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667')).toBe('call [number]');
+    expect(scrubErrorText('call 300\u00a0123\u00a04567')).toBe('call [phone]');
+    expect(scrubErrorText('call 300\u2013123\u20134567')).toBe('call [phone]');
   });
 
   it('every rule is needed: without it, its own sample leaks', () => {
@@ -247,6 +278,32 @@ describe('describeError', () => {
     expect(first).toMatchObject({ type: 'Error', value: 'booking for [email] failed' });
     expect(second).toMatchObject({ type: 'TypeError', value: 'socket hang up at [phone]' });
     expect(first!.frames.at(-1)?.in_app).toBe(true);
+  });
+
+  it('sends what an error says may be reported, never its raw message', () => {
+    const upstream = Object.assign(new Error('calendar backend listCalendars failed (502): {"summary":"Jane Smith personal"}'), {
+      [REPORTABLE_MESSAGE]: 'calendar backend listCalendars failed (502)',
+    });
+    expect(describeError(upstream)[0]!.value).toBe('calendar backend listCalendars failed (502)');
+    expect(JSON.stringify(describeError(upstream))).not.toContain('Jane');
+  });
+
+  it('never reads a line of the message as a stack frame, and scrubs function names', () => {
+    const e = new Error('boom\n    at secret (ana@example.com:1:1)');
+    expect(JSON.stringify(describeError(e)[0]!.frames)).not.toContain('ana@');
+    const named = new Error('x');
+    named.stack = 'Error: x\n    at Object.ana@example.com (/srv/app/a.ts:1:1)';
+    expect(describeError(named, '/srv/app')[0]!.frames[0]).toMatchObject({ function: '[email]', filename: 'a.ts' });
+  });
+
+  it('a cause that throws when read ends the chain, never the report', () => {
+    const e = new Error('outer');
+    Object.defineProperty(e, 'cause', {
+      get() {
+        throw new Error('trap');
+      },
+    });
+    expect(describeError(e).map((x) => x.value)).toEqual(['outer']);
   });
 
   it('names a thrown non-Error without serializing it', () => {
@@ -438,8 +495,8 @@ describe('reportableHost and hostOfUrl', () => {
   it('keeps a public host name (and local development), never an address internal to the deployment', () => {
     expect(reportableHost('App.Example.Test')).toBe('app.example.test');
     expect(reportableHost(['localhost:3411'])).toBe('localhost:3411');
-    expect(reportableHost('127.0.0.1:4411')).toBe('127.0.0.1:4411');
-    for (const internal of ['10.0.1.2', '172.20.0.5:3000', '192.168.1.10', 'calendars-api.lab.svc.cluster.local', 'calendars-api.lab.svc', 'db.internal', 'printer.local', 'calendars-api']) {
+    for (const outside of ['203.0.113.7', '100.63.0.1', '100.128.0.1', '172.32.0.1']) expect(reportableHost(outside)).toBe(outside);
+    for (const internal of ['10.0.1.2', '172.20.0.5:3000', '192.168.1.10', '127.0.0.1:3000', '100.64.0.9', '100.127.255.1', 'calendars-api.lab.svc.cluster.local', 'calendars-api.lab.svc', 'db.internal', 'printer.local', 'calendars-api']) {
       expect([internal, reportableHost(internal)]).toEqual([internal, null]);
     }
     for (const junk of ['a b', 'host/path', 'user@host', '', undefined, 42]) expect(reportableHost(junk)).toBeNull();

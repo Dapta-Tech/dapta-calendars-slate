@@ -123,7 +123,7 @@ const VISITOR_PROPERTIES = new Set([
 
 /** What an error's exception entry, mechanism and stack frame may carry, and nothing else. */
 const MECHANISM_KEYS = ['type', 'handled', 'synthetic', 'exception_id', 'parent_id', 'source'] as const;
-const FRAME_KEYS = ['platform', 'function', 'lineno', 'colno', 'in_app', 'chunk_id'] as const;
+const FRAME_KEYS = ['platform', 'lineno', 'colno', 'in_app', 'chunk_id'] as const;
 /** The most exceptions (an error and its causes) and frames per exception sent. */
 const MAX_EXCEPTIONS = 5;
 const MAX_FRAMES = 50;
@@ -164,14 +164,16 @@ function scrubException(bag: Record<string, unknown>): void {
       stacktrace: {
         type: typeof trace['type'] === 'string' ? trace['type'] : 'raw',
         frames: frames.slice(-MAX_FRAMES).map((frame) => {
-          const filename = scrubFrameFilename((frame as Record<string, unknown> | null)?.['filename']);
-          return { ...pick(frame, FRAME_KEYS), ...(filename ? { filename } : {}) };
+          const raw = (frame && typeof frame === 'object' ? frame : {}) as Record<string, unknown>;
+          const filename = scrubFrameFilename(raw['filename']);
+          const fn = typeof raw['function'] === 'string' ? scrubErrorText(raw['function']).slice(0, 200) : '';
+          return { ...pick(raw, FRAME_KEYS), ...(filename ? { filename } : {}), ...(fn ? { function: fn } : {}) };
         }),
       },
     };
   });
   for (const key of Object.keys(bag)) {
-    if (key.startsWith('$exception_') && key !== '$exception_list' && key !== '$exception_level' && key !== '$exception_fingerprint') {
+    if (key.startsWith('$exception_') && key !== '$exception_list' && key !== '$exception_level') {
       delete bag[key];
     }
   }
