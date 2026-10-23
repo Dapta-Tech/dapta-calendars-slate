@@ -110,6 +110,16 @@ describe('createApiErrorReporter', () => {
       const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('not being delivered'));
       expect(lines).toHaveLength(1);
       expect(lines[0]).toContain('HTTP 401');
+
+      // A flood of drops in the same minute does not hide it.
+      warn.mockClear();
+      const flooded = createApiErrorReporter(env(), refusing, { maxQueue: 1 })!;
+      flooded.report(new Error('first'));
+      flooded.report(new Error('dropped'));
+      await flooded.flush(100);
+      const said = warn.mock.calls.map((c) => String(c[0]));
+      expect(said.some((l) => l.includes('being dropped'))).toBe(true);
+      expect(said.some((l) => l.includes('not being delivered'))).toBe(true);
     } finally {
       warn.mockRestore();
     }
@@ -421,11 +431,11 @@ describe('installProcessErrorHooks', () => {
     }
   });
 
-  it('reads the mode from the flags or NODE_OPTIONS, the last one winning, default throw', () => {
+  it("reads the mode from NODE_OPTIONS and the flags, the command line winning as in Node, default throw", () => {
     expect(unhandledRejectionsMode([], undefined)).toBe('throw');
     expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], undefined)).toBe('warn');
     expect(unhandledRejectionsMode([], '--max-old-space-size=512 --unhandled-rejections=none')).toBe('none');
-    expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], '--unhandled-rejections=strict')).toBe('strict');
+    expect(unhandledRejectionsMode(['--unhandled-rejections=warn'], '--unhandled-rejections=strict')).toBe('warn');
     expect(unhandledRejectionsMode(['--unhandled-rejections', 'none'], undefined)).toBe('none');
   });
 

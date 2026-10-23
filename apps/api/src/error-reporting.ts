@@ -66,20 +66,25 @@ export function createApiErrorReporter(
   // address, which is not a name anyone outside can use.
   const host = hostOfUrl(env.API_PUBLIC_URL) ?? hostOfUrl(env.PUBLIC_APP_URL);
   const log = new Logger('ErrorTracking');
-  let lastWarning = 0;
-  const warnAtMostOnceAMinute = (message: string) => {
+  // One clock per kind: a flood of drops must not hide that delivery fails.
+  const lastWarning = { drop: 0, failure: 0 };
+  const warnAtMostOnceAMinute = (kind: keyof typeof lastWarning, message: string) => {
     const now = Date.now();
-    if (now - lastWarning < DROP_WARNING_EVERY_MS) return;
-    lastWarning = now;
+    if (now - lastWarning[kind] < DROP_WARNING_EVERY_MS) return;
+    lastWarning[kind] = now;
     log.warn(message);
   };
   return createErrorReporter({
     deliver: capture,
     properties: { surface: 'api', ...(host ? { $host: host } : {}) },
     root: process.cwd(),
-    onDrop: (reason) => warnAtMostOnceAMinute(`error reports are being dropped (${reason}); the log still has every error`),
+    onDrop: (reason) =>
+      warnAtMostOnceAMinute('drop', `error reports are being dropped (${reason}); the log still has every error`),
     onFailure: (error) =>
-      warnAtMostOnceAMinute(`error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`),
+      warnAtMostOnceAMinute(
+        'failure',
+        `error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`,
+      ),
     ...overrides,
   });
 }
@@ -154,12 +159,15 @@ export interface ProcessHookOptions {
   log?: (message: string, error: unknown) => void;
 }
 
-/** Node's `--unhandled-rejections` mode, from the process's flags or `NODE_OPTIONS`. */
+/**
+ * Node's `--unhandled-rejections` mode, from `NODE_OPTIONS` and the process's
+ * own flags, read in Node's order: the command line overrides `NODE_OPTIONS`.
+ */
 export function unhandledRejectionsMode(
   execArgv: readonly string[] = process.execArgv,
   nodeOptions: string | undefined = process.env['NODE_OPTIONS'],
 ): string {
-  const flags = [...execArgv, ...(nodeOptions ?? '').split(/\s+/)];
+  const flags = [...(nodeOptions ?? '').split(/\s+/), ...execArgv];
   let mode = 'throw';
   flags.forEach((flag, i) => {
     const m = /^--unhandled-rejections(?:=([\w-]+))?$/.exec(flag);

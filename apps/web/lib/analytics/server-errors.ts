@@ -97,12 +97,15 @@ function nextStack(error: Error): string | undefined {
 
 let reporter: ErrorReporter | null | undefined;
 
-/** A delivery that keeps failing (a refused key) is said in the log, at most once a minute. */
-let lastWarning = 0;
-function warnAtMostOnceAMinute(message: string): void {
+/**
+ * Drops and failed deliveries (a refused key) are said in the log, each at
+ * most once a minute, on clocks of their own so one never hides the other.
+ */
+const lastWarning = { drop: 0, failure: 0 };
+function warnAtMostOnceAMinute(kind: keyof typeof lastWarning, message: string): void {
   const now = Date.now();
-  if (now - lastWarning < 60_000) return;
-  lastWarning = now;
+  if (now - lastWarning[kind] < 60_000) return;
+  lastWarning[kind] = now;
   console.warn(message);
 }
 
@@ -118,9 +121,13 @@ export function webServerErrorReporter(env: NodeJS.ProcessEnv = process.env): Er
         properties: { surface: 'next_server', ...(host ? { $host: host } : {}) },
         root: typeof process.cwd === 'function' ? process.cwd() : undefined,
         stackOf: nextStack,
-        onDrop: (reason) => warnAtMostOnceAMinute(`error reports are being dropped (${reason}); the log still has every error`),
+        onDrop: (reason) =>
+          warnAtMostOnceAMinute('drop', `error reports are being dropped (${reason}); the log still has every error`),
         onFailure: (error) =>
-          warnAtMostOnceAMinute(`error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`),
+          warnAtMostOnceAMinute(
+            'failure',
+            `error reports are not being delivered: ${error instanceof Error ? error.message : String(error)}`,
+          ),
       })
     : null;
   return reporter;
@@ -173,5 +180,6 @@ export function reportRequestError(
 /** Test seam: forget the reporter. */
 export function resetWebServerErrorsForTests(): void {
   reporter = undefined;
-  lastWarning = 0;
+  lastWarning.drop = 0;
+  lastWarning.failure = 0;
 }

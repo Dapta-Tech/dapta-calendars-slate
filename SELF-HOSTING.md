@@ -353,7 +353,9 @@ a `surface`, and `$host`, the public host it belongs to):
   the route template (`/[accountCode]/[handle]/[slug]`), method, status, request
   id, what failed (`route_type`), the `digest` the browser shows, and as `$host`
   the request's Host header when it is a public name (else `PUBLIC_APP_URL`;
-  never a private, loopback or cluster address).
+  never a private, loopback or cluster address). With error tracking on,
+  every web response carries `X-Request-Id` (a safe incoming one is kept), the
+  same id the report carries.
 - **API** (`api`): every response of 500 or more and anything thrown that is not
   an HTTP error, with the route template, method, status, request id, the
   `:accountCode` route parameter and `is_internal` when known, plus crashes
