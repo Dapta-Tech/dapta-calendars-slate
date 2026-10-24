@@ -32,6 +32,22 @@ export class ToolFailure extends Error {
   }
 }
 
+/**
+ * The MCP client a request came from, as the request itself says (the server
+ * is stateless, so nothing is remembered from an earlier `initialize`). Every
+ * field is trimmed and optional: a client may send none of it.
+ */
+export interface McpClientInfo {
+  /** `clientInfo.name` from `initialize`, or the per-request `_meta` envelope. */
+  name?: string;
+  /** `clientInfo.version`, from the same place. */
+  version?: string;
+  /** The `User-Agent` header, trimmed. */
+  userAgent?: string;
+  /** The AI vendor behind the client, when a header names it (`anthropic`, `openai`). */
+  vendor?: string;
+}
+
 /** What one request knows about who is calling and why. Built by the controller. */
 export interface McpCall {
   requestId: string;
@@ -51,6 +67,8 @@ export interface McpCall {
    * tool that is not public answers NOT_LINKED.
    */
   login?: { token: ExternalLogin; accounts: LoginAccount[] };
+  /** The client the request came from, when it says. For usage analytics only. */
+  client?: McpClientInfo;
 }
 
 /** `dcl_<8hex>`, `login:<8 chars>` or `anonymous`: the only identity that reaches a log line. */

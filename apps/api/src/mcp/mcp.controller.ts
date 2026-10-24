@@ -12,7 +12,7 @@ import { ExternalOAuthService, type ExternalLogin, type LoginAccount } from '../
 import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
-import { loginPrincipal, signInKey, type McpCall } from './support';
+import { loginPrincipal, signInKey, type McpCall, type McpClientInfo } from './support';
 import { TOOLS, accessOf } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
@@ -75,6 +75,47 @@ function protocolVersionOf(req: Request): string {
   const init = body?.params?.protocolVersion;
   const v = typeof meta === 'string' ? meta : typeof init === 'string' ? init : 'unknown';
   return v.slice(0, 20);
+}
+
+/** The first value of a header that may repeat. */
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** A short printable label from client input, or undefined. Control characters are dropped, the rest cut to `max`. */
+function label(value: unknown, max: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex
+  const clean = value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max);
+  return clean || undefined;
+}
+
+/**
+ * The client a request came from, from the request alone: `clientInfo` on an
+ * `initialize`, or the per-request envelope (`_meta`) a 2026-07-28 client
+ * sends with every message, plus the `User-Agent` and a vendor header. Only
+ * names and versions are read; the rest of the body is never looked at here.
+ * For usage analytics only: nothing here is trusted or decides access.
+ */
+export function clientInfoOf(req: Pick<Request, 'body' | 'headers'>): McpClientInfo {
+  const params = (req.body as { params?: { clientInfo?: unknown; _meta?: Record<string, unknown> } } | undefined)?.params;
+  const meta = params?._meta?.['io.modelcontextprotocol/clientInfo'];
+  const info = (params?.clientInfo ?? meta) as { name?: unknown; version?: unknown } | undefined;
+  const userAgent = label(firstHeader(req.headers['user-agent']), 200);
+  const anthropic = label(firstHeader(req.headers['x-anthropic-client']), 64);
+  const vendor = anthropic || /\b(anthropic|claude)/i.test(userAgent ?? '')
+    ? 'anthropic'
+    : Object.keys(req.headers).some((h) => h.toLowerCase().startsWith('openai-')) || /\bopenai\b/i.test(userAgent ?? '')
+      ? 'openai'
+      : undefined;
+  const client: McpClientInfo = {};
+  const name = label(info && typeof info === 'object' ? info.name : undefined, 64);
+  const version = label(info && typeof info === 'object' ? info.version : undefined, 32);
+  if (name) client.name = name;
+  if (version) client.version = version;
+  if (userAgent) client.userAgent = userAgent;
+  if (vendor) client.vendor = vendor;
+  return client;
 }
 
 /**
@@ -244,7 +285,14 @@ export class McpController {
       }
     }
 
-    const call: McpCall = { requestId, protocolVersion: protocolVersionOf(req), ip, principal, ...(login ? { login } : {}) };
+    const call: McpCall = {
+      requestId,
+      protocolVersion: protocolVersionOf(req),
+      ip,
+      principal,
+      ...(login ? { login } : {}),
+      client: clientInfoOf(req),
+    };
     // The plaintext credential is never handed on: the handler gets the prefix and scopes.
     (req as Request & { auth?: unknown }).auth = {
       token: '[redacted]',

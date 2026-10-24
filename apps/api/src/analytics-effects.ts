@@ -29,12 +29,39 @@ type AnalyticsOutboxPayload =
   | { type: 'account'; update: AnalyticsAccountUpdate };
 
 /** The member and account a host event is about, resolved in one read. */
-interface HostIdentity {
+export interface HostIdentity {
   accountId: string;
   email: string;
   accountKey: string;
   isInternal: boolean;
 }
+
+/** An account acted for by a credential that is no member (an API key). */
+export interface AccountIdentity {
+  accountId: string;
+  accountKey: string;
+  isInternal: boolean;
+}
+
+/** Who a raw event is about, decided by its caller (see `captureRaw`). */
+export interface RawCaptureInput {
+  /** A member's email, or a non-personal id sent with `$process_person_profile: false`. */
+  distinctId: string;
+  /** The account the event belongs to, null when none: then it has no group. */
+  accountId: string | null;
+  /** The account's short code (the group key), null when none. */
+  accountKey: string | null;
+  isInternal: boolean;
+  properties: AnalyticsProps;
+}
+
+/**
+ * The only names that may skip the `calendars_` prefix: PostHog's MCP
+ * analytics vocabulary (`$mcp_tool_call`, ...). Its MCP screens read those
+ * exact names, and `product` plus the `calendars_account` group already tell
+ * our events apart from another product's MCP in a shared project.
+ */
+const RAW_EVENT_PATTERN = /^\$mcp_[a-z_]+$/;
 
 /** Longest string property sent. Properties are labels, never free text. */
 const PROPERTY_MAX = 200;
@@ -262,6 +289,66 @@ export class AnalyticsEffects {
   }
 
   /**
+   * One event under its name AS GIVEN, with no `calendars_` prefix. Only the
+   * vendor's MCP analytics names (`$mcp_*`) are accepted; any other name is
+   * refused and logged, so this can never become a way around the prefix.
+   * Who it is about is the caller's (see McpUsageReporter, which resolves it
+   * through `memberIdentity` / `accountIdentity`); the rest is the same as
+   * every event here: bounded properties, `product`, `is_internal`, the
+   * account's code and group when there is one, and `$host`.
+   *
+   * NEVER REJECTS, like every method here. With analytics off it returns at once.
+   */
+  async captureRaw(event: string, input: RawCaptureInput, now: number = Date.now()): Promise<void> {
+    if (!this.provider) return;
+    if (!RAW_EVENT_PATTERN.test(event)) {
+      this.log.error(`refused raw analytics event ${event}: only $mcp_* names skip the prefix`);
+      return;
+    }
+    try {
+      const capture: AnalyticsCapture = {
+        uuid: randomUUID(),
+        event,
+        distinctId: input.distinctId,
+        timestamp: now,
+        properties: { ...bounded(input.properties), ...this.envelope(input.isInternal, input.accountKey) },
+        accountKey: input.accountKey,
+      };
+      await this.enqueue(event, input.accountId, { type: 'capture', capture }, now);
+    } catch (err) {
+      this.log.error(`analytics ${event} not recorded: ${String(err)}`);
+    }
+  }
+
+  /**
+   * The member an event done with a credential is about, read like every host
+   * event's (`hostEvent`): null when it must be dropped (no email on file, or
+   * the member is not readable). May reject: for callers that cache it and
+   * catch, like McpUsageReporter.
+   */
+  memberIdentity(accountId: string, memberId: string, event: string): Promise<HostIdentity | null> {
+    return this.identity(accountId, memberId, event);
+  }
+
+  /**
+   * The account a credential that is no member acts for (an API key): its
+   * short code, and whether it is internal, decided like the account's own
+   * `is_internal`: by its first owner's email, the founder whose flag `signup`
+   * gives the account. Null when the account is not readable. May reject,
+   * like `memberIdentity`.
+   */
+  async accountIdentity(accountId: string): Promise<AccountIdentity | null> {
+    const row = await this.db.get<{ code: string; email: string | null }>(
+      sql`SELECT a.code AS code, m.email AS email
+            FROM account a LEFT JOIN member m ON m.account_id = a.id AND m.role = 'owner'
+           WHERE a.id = ${accountId}
+           ORDER BY m.created_at ASC, m.id ASC LIMIT 1`,
+    );
+    if (!row) return null;
+    return { accountId, accountKey: row.code, isInternal: isInternalEmail(row.email, this.internalPatterns) };
+  }
+
+  /**
    * The worker's executor for an `analytics` outbox row. A row left behind
    * after analytics was turned off is skipped once, never retried; so is an
    * event the vendor refused, since it will be refused the same way forever.
@@ -289,7 +376,7 @@ export class AnalyticsEffects {
 
   /* ------------------------------------------------------------ internal */
 
-  private async identity(accountId: string, memberId: string, event: ServerAnalyticsEvent): Promise<HostIdentity | null> {
+  private async identity(accountId: string, memberId: string, event: string): Promise<HostIdentity | null> {
     const row = await this.db.get<{ email: string | null; code: string }>(
       sql`SELECT m.email AS email, a.code AS code
             FROM member m JOIN account a ON a.id = m.account_id
@@ -329,17 +416,21 @@ export class AnalyticsEffects {
       // Stamped at ENQUEUE time: the row may drain much later, and the drain
       // time would smear the funnel and put events out of order.
       timestamp: now,
-      properties: {
-        ...bounded(properties),
-        product: ANALYTICS_PRODUCT,
-        is_internal: who.isInternal,
-        account_code: who.accountKey,
-        ...(this.host ? { $host: this.host } : {}),
-      },
+      properties: { ...bounded(properties), ...this.envelope(who.isInternal, who.accountKey) },
       ...(personSet ? { personSet } : {}),
       accountKey: who.accountKey,
     };
     await this.enqueue(name, who.accountId, { type: 'capture', capture }, now);
+  }
+
+  /** What every event carries whoever sent it: the product, the internal flag, the account's code and `$host`. */
+  private envelope(isInternal: boolean, accountKey: string | null): AnalyticsProps {
+    return {
+      product: ANALYTICS_PRODUCT,
+      is_internal: isInternal,
+      ...(accountKey ? { account_code: accountKey } : {}),
+      ...(this.host ? { $host: this.host } : {}),
+    };
   }
 
   private async enqueueAccount(who: HostIdentity, properties: AnalyticsProps, now: number): Promise<void> {
@@ -355,7 +446,7 @@ export class AnalyticsEffects {
 
   private async enqueue(
     action: string,
-    accountId: string,
+    accountId: string | null,
     payload: AnalyticsOutboxPayload,
     now: number,
   ): Promise<void> {
