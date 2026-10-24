@@ -368,8 +368,8 @@ token.
   and only active owners and admins (the same rule as the built-in server's
   consent). Checked on every request. None: the sign-in still connects, and
   acts nowhere. Only the public booking page tools run, under the address's
-  budget like an anonymous call (its holds and idempotency records stay the
-  person's); every other tool, whatever `account_id` it names, answers
+  tool budget like an anonymous call (its holds and idempotency records stay
+  the person's; its audit caller is `login`, with no account); every other tool, whatever `account_id` it names, answers
   `NOT_LINKED` with the step to take (open the web app once with that account,
   signing in again if it is already open, then try again). Never a 401, which
   would loop the client back into its sign-in, and never a 403 at connect:
@@ -410,10 +410,13 @@ token.
   (405 / 415); bodies over 100 kB get 413; each tool call has a timeout
   (`MCP_TOOL_TIMEOUT_MS`), and a timed-out write tells the agent to retry with the
   same `idempotency_key` to find out safely.
-- **Rate limits.** Per API key, or per client address for anonymous calls, with a
-  tighter bucket for write tools (`MCP_RATE_LIMIT_*`, `MCP_WRITE_RATE_LIMIT_*`).
-  Anonymous requests and failed key attempts also count against the address at the
-  door (the existing `RATE_LIMIT_*` bucket). An exhausted bucket is a tool error
+- **Rate limits.** Per API key, or per client address for anonymous calls and
+  for a sign-in that reaches no account, with a tighter bucket for write tools
+  (`MCP_RATE_LIMIT_*`, `MCP_WRITE_RATE_LIMIT_*`). Anonymous requests and failed
+  key attempts also count against the address at the door (the existing
+  `RATE_LIMIT_*` bucket); a sign-in that reaches no account counts there per
+  person instead, so people a hosted chat app connects from one address do not
+  share it. An exhausted bucket is a tool error
   `RATE_LIMITED` with a retry delay. **Buckets live in each process**: with N
   replicas the effective limit is up to N times higher. A shared limiter can be
   plugged in later behind the same `RateLimiter` interface.

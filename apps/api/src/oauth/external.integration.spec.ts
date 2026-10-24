@@ -701,15 +701,50 @@ describe('a sign-in that reaches no account, tool by tool', () => {
     expect(await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`)).toEqual(before);
   });
 
-  it('pays the address budget at the door like an anonymous caller, apart from a linked sign-in', async () => {
+  it('pays a door budget per person: two tokens of one person share it, another person and a linked sign-in do not', async () => {
     const { as, h } = await setup({ RATE_LIMIT_CAPACITY: '3', RATE_LIMIT_REFILL_PER_SEC: '0.01' });
     await link(h, await memberId(h, 'alex-rivera'), 'user_alex');
-    const nobody = await as.mint({ sub: 'user_budget_nobody' });
+    const first = await as.mint({ sub: 'user_budget_nobody' });
+    const second = await as.mint({ sub: 'user_budget_nobody', sid: 'another-session' });
     const codes: number[] = [];
-    for (let i = 0; i < 5; i += 1) codes.push((await rpc(h, 'tools/list', {}, nobody)).status);
+    for (const token of [first, second, first, second, first]) codes.push((await rpc(h, 'tools/list', {}, token)).status);
     expect(codes.slice(0, 3)).toEqual([200, 200, 200]);
     expect(codes).toContain(429);
-    // A linked sign-in from the same address is not charged there.
+    // Someone else from the same address, unlinked or linked, still connects.
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_budget_other' }))).status).toBe(200);
     expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_alex' }))).status).toBe(200);
+  });
+
+  it("counts its public tool calls against the address, like an anonymous caller's", async () => {
+    const { as, h } = await setup({ MCP_RATE_LIMIT_CAPACITY: '1', MCP_RATE_LIMIT_REFILL_PER_SEC: '0.01' });
+    const page = { booking_page_url: 'https://x.test/acme/alex-rivera/intro-call', time_zone: 'UTC' };
+    const anonymous = (await body(await rpc(h, 'tools/call', { name: 'find_available_slots', arguments: page }))).result as { isError?: boolean };
+    expect(anonymous.isError).toBeFalsy();
+    expect(errorText(await tool(h, await as.mint({ sub: 'user_shares_address' }), 'find_available_slots', page))).toMatch(/^RATE_LIMITED/);
+  });
+
+  it("keeps a hold it makes on a booking page the person's: nobody else books it, the same person does once linked", async () => {
+    const { as, h } = await setup();
+    const page = 'https://x.test/acme/alex-rivera/intro-call';
+    const token = await as.mint({ sub: 'user_hold_later_linked' });
+    const slots = structured<{ days: { slots: { start: string }[] }[] }>(await tool(h, token, 'find_available_slots', { booking_page_url: page, time_zone: 'UTC' }));
+    const start = slots.days.flatMap((d) => d.slots)[3]!.start;
+    const held = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { booking_page_url: page, start, time_zone: 'UTC', idempotency_key: idem('unlinked-hold-0001') }),
+    );
+    const attendee = { name: 'Later Linked', email: 'later@example.org', time_zone: 'UTC' };
+    const book = (tok: string | undefined, key: string) =>
+      rpc(h, 'tools/call', { name: 'book_meeting', arguments: { booking_page_url: page, start, attendee, answers: { company: 'L' }, hold_id: held.hold.hold_id, idempotency_key: idem(key) } }, tok);
+    const anonymous = (await body(await book(undefined, 'unlinked-hold-0002'))).result as { isError?: boolean; content?: { text: string }[] };
+    expect(anonymous.isError).toBe(true);
+    expect(anonymous.content![0]!.text).toMatch(/^HOLD_NOT_FOUND/);
+    const stranger = (await body(await book(await as.mint({ sub: 'user_someone_else' }), 'unlinked-hold-0003'))).result as { isError?: boolean; content?: { text: string }[] };
+    expect(stranger.content![0]!.text).toMatch(/^HOLD_NOT_FOUND/);
+    // The person opens the web app and becomes an admin linked to Acme: the same token books its own hold.
+    const member = await addMember(h, 'admin');
+    await link(h, member, 'user_hold_later_linked');
+    const booked = (await body(await book(token, 'unlinked-hold-0004'))).result as { isError?: boolean; structuredContent?: { booking: { status: string } } };
+    expect(booked.isError).toBeFalsy();
+    expect(booked.structuredContent!.booking.status).toBe('accepted');
   });
 });

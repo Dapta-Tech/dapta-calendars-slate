@@ -12,7 +12,7 @@ import { ExternalOAuthService, type ExternalLogin, type LoginAccount } from '../
 import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
-import { loginPrincipal, type McpCall } from './support';
+import { loginPrincipal, signInKey, type McpCall } from './support';
 import { TOOLS, accessOf } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
@@ -202,8 +202,10 @@ export class McpController {
         // already acts, with no new sign-in.
         const accounts = await this.external.accountsFor(token.subject);
         if (accounts.length === 0) {
-          // It may only do what an anonymous caller may, so it pays the address's budget like one.
-          const { allowed, retryAfterMs } = this.limiter.take(`mcp:${ip}`);
+          // A budget per person at the door, not per address: hosted chat apps
+          // connect many people from one address, and a 429 on connect would
+          // be the app's own error again. Its tool calls count per address.
+          const { allowed, retryAfterMs } = this.limiter.take(`mcp-login:${signInKey({ token, accounts })}`);
           if (!allowed) return this.tooMany(res, retryAfterMs);
         }
         login = { token, accounts };
