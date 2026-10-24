@@ -533,8 +533,8 @@ function defaultUuid(): string {
   // v4-shaped (version 4, variant 8), so an event store that checks the shape
   // keeps it: 48 bits of time, then a 24-bit counter around the fixed nibbles.
   const t = Date.now().toString(16).padStart(12, '0').slice(-12);
-  const c = uuidCounter.toString(16).padStart(6, '0');
-  return `${t.slice(0, 8)}-${t.slice(8, 12)}-4${c.slice(0, 3)}-8${c.slice(3, 6)}-000000000000`;
+  const n = uuidCounter.toString(16).padStart(6, '0');
+  return `${t.slice(0, 8)}-${t.slice(8, 12)}-4${n.slice(0, 3)}-8${n.slice(3, 6)}-000000000000`;
 }
 
 /** What makes two errors the same one: type, scrubbed message, and the failing frame. */
