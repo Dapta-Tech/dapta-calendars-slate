@@ -277,12 +277,13 @@ function parseV8Frame(raw: string): { fn: string; file: string; line: number; co
   const line = raw.trim();
   if (!line.startsWith('at ')) return null;
   let rest = line.slice(3);
+  // `at async fn (file:1:2)`, and `at async file:1:2` for an unnamed async callback.
+  if (rest.startsWith('async ')) rest = rest.slice(6);
   let fn = '';
   // The first ` (`, as V8 writes it: a path may hold one, a function name does not.
   const open = rest.endsWith(')') ? rest.indexOf(' (') : -1;
   if (open > 0) {
     fn = rest.slice(0, open);
-    if (fn.startsWith('async ')) fn = fn.slice(6);
     rest = rest.slice(open + 2, -1);
   }
   const colAt = rest.lastIndexOf(':');
@@ -328,6 +329,8 @@ export function parseStackFrames(stack: unknown, root?: string): ErrorFrame[] {
       colno: m.col,
       in_app: own !== undefined || !DEPENDENCY.test(file),
     });
+    // The newest frames are the ones kept: stop reading once there are enough.
+    if (frames.length >= MAX_FRAMES) break;
   }
   return frames.slice(0, MAX_FRAMES).reverse();
 }
@@ -526,8 +529,10 @@ function defaultUuid(): string {
     const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
   }
-  uuidCounter = (uuidCounter + 1) % 0x100000;
-  return `${Date.now().toString(16)}-${uuidCounter.toString(16)}`;
+  uuidCounter = (uuidCounter + 1) % 0x10000;
+  // UUID-shaped, so an event store that checks the shape keeps it: time, then a counter.
+  const h = `${Date.now().toString(16).padStart(12, '0')}${uuidCounter.toString(16).padStart(4, '0')}`.padEnd(32, '0');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 /** What makes two errors the same one: type, scrubbed message, and the failing frame. */
