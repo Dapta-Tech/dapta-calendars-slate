@@ -9,7 +9,7 @@ import { CalV2PilotService } from '../cal-v2-pilot.service';
 import { DB, ENV } from '../tokens';
 import { NoopRateLimiter, TokenBucketRateLimiter, type RateLimiter } from '../rate-limit';
 import { type McpCall, ToolFailure, argsHash, callerLabel, loginPrincipal, notFound, signInKey, toFailure, untrusted } from './support';
-import { TOOLS, accessOf, accountIdArg, requireScope, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
+import { TOOLS, accessOf, accountIdArg, notLinked, requireScope, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
 
 export const MCP_SERVER_NAME = 'dapta-calendars';
 const SERVER_VERSION = '1.0.0';
@@ -143,6 +143,9 @@ export class McpGateway {
       }
       ctx = scoped.call;
       this.takeToken(def, ctx);
+      // A sign-in that reaches no account: only what is public runs, as for an anonymous call.
+      if (ctx.login && ctx.login.accounts.length === 0 && accessOf(def, (scoped.args ?? {}) as Record<string, unknown>) !== 'public')
+        throw notLinked(this.deps.publicAppUrl);
       if (def.scope) requireScope(ctx, def.scope);
       result = await this.withTimeout(def.run(scoped.args as never, ctx, this.deps));
     } catch (error) {
@@ -161,7 +164,12 @@ export class McpGateway {
   }
 
   private takeToken(def: ToolDef, call: McpCall): void {
-    const identity = call.principal ? `key:${call.principal.keyId}` : call.login ? signInKey(call.login) : `ip:${call.ip}`;
+    // A sign-in that reaches no account counts like an anonymous caller: by address.
+    const identity = call.principal
+      ? `key:${call.principal.keyId}`
+      : call.login && call.login.accounts.length > 0
+        ? signInKey(call.login)
+        : `ip:${call.ip}`;
     const { allowed, retryAfterMs } = (def.write ? this.writeLimiter : this.readLimiter).take(identity);
     if (!allowed) {
       const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));

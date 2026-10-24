@@ -618,8 +618,10 @@ with no tokens, like the local stub, gives the request time; a token without
 `iat` stamps nothing, so your login tokens must carry it). The stamp is renewed
 in steps of a day (a quarter of the window when that is shorter) and never moves
 backwards; a sign-in reaches only members stamped within
-`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
-403 ("open the app on the web once, then reconnect").
+`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin still
+connects and acts nowhere: only the public booking page tools run, and every
+other tool answers `NOT_LINKED` ("open the app on the web once with this
+account, then try again"; no reconnect needed).
 
 Offboarding: removing the member in this app (or disabling them, or removing
 their admin role) cuts MCP access at once. Removing someone only in your
