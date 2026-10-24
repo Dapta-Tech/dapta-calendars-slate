@@ -45,14 +45,6 @@ export function toolCallNeeds(body: unknown): { credential: boolean; scopes: Api
   return { credential, scopes: [...scopes] };
 }
 
-/**
- * A valid sign-in that may act in no account: never linked (the person has
- * not opened the web app since the link was introduced), not seen on the web
- * within OAUTH_LINK_MAX_AGE_DAYS, or not an active owner or admin anywhere.
- */
-export const NOT_LINKED_MESSAGE =
-  'This sign-in is not an owner or admin of any account on this server yet. Open the app on the web once, then reconnect.';
-
 /** Credentials in the URL end up in access logs and proxies; refuse them outright. */
 const URL_CREDENTIAL_PARAMS = ['key', 'api_key', 'apikey', 'access_token', 'token', 'authorization'];
 
@@ -108,8 +100,10 @@ function protocolVersionOf(req: Request): string {
  * trigger the client's sign-in. API keys keep their tool-level scope errors,
  * because a key's scopes cannot be stepped up, and an external sign-in has no
  * step-up at all: it holds every scope its member's admin role allows. A valid
- * external sign-in that may act nowhere gets 403, never 401, so a client does
- * not loop back into its sign-in.
+ * external sign-in that may act nowhere still connects, never a 401 that
+ * loops the client back into its sign-in and never a 403 (chat apps show a
+ * refused connect as their own error, "Automatic client registration isn't
+ * supported", never ours): its tools answer NOT_LINKED (see `notLinked`).
  */
 @Controller('mcp')
 export class McpController {
@@ -202,14 +196,11 @@ export class McpController {
         return;
       }
       if (token) {
+        // No account yet still connects, acting nowhere: every tool that is not
+        // public says to open the app on the web once (`notLinked`). The server
+        // keeps nothing between requests, so the first call after that visit
+        // already acts, with no new sign-in.
         const accounts = await this.external.accountsFor(token.subject);
-        if (accounts.length === 0) {
-          // Each one costs a lookup too.
-          const { allowed, retryAfterMs } = this.limiter.take(`mcp-auth:${ip}`);
-          if (!allowed) return this.tooMany(res, retryAfterMs);
-          rpcError(res, 403, -32001, NOT_LINKED_MESSAGE);
-          return;
-        }
         login = { token, accounts };
         if (accounts.length === 1) principal = loginPrincipal(accounts[0]!, token);
       }

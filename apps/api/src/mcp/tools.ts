@@ -1927,6 +1927,20 @@ export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[
 }
 
 /**
+ * What a sign-in that reaches no account yet gets from every tool that is not
+ * public: never linked, not seen on the web within OAUTH_LINK_MAX_AGE_DAYS, or
+ * not an active owner or admin anywhere. One step covers every case, and the
+ * same connection works on the next call after it.
+ */
+export function notLinked(publicAppUrl: string): ToolFailure {
+  return new ToolFailure(
+    'NOT_LINKED',
+    'This sign-in is not an owner or admin of any account on this server yet.',
+    `Ask the user to open ${publicAppUrl || 'the app'} on the web once with this account (signing in again if it is already open), then try again. There is no need to reconnect.`,
+  );
+}
+
+/**
  * The tools that work with no credential at all (on a public booking page), in
  * catalog order: those whose access, with no event_type_id, is public.
  */

@@ -3,13 +3,13 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createApiKey, sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
-import { NOT_LINKED_MESSAGE } from '../mcp/mcp.controller';
 import { startFakeAs, type FakeAs } from './fake-as';
 
 /**
  * The MCP endpoint as a resource server for an external authorization server,
  * end to end over HTTP on the whole AppModule: discovery, the 401 challenge,
- * token checks, the person-to-member mapping (403 when there is none), one and
+ * token checks, the person-to-member mapping (a connection that acts nowhere
+ * when there is none), one and
  * several accounts, and the built-in server staying dormant even with its
  * issuer and key still configured (the dev rollout state).
  */
@@ -67,6 +67,9 @@ async function link(h: Harness, member: string, subject: string) {
 }
 
 const DAY = 86_400_000;
+/** What every non-public tool answers a sign-in that reaches no account (the harness serves PUBLIC_APP_URL). */
+const NOT_LINKED =
+  'NOT_LINKED: This sign-in is not an owner or admin of any account on this server yet. Ask the user to open https://calendar.example.test on the web once with this account (signing in again if it is already open), then try again. There is no need to reconnect.';
 const seenAt = (h: Harness, member: string, at: number | null) => h.db.run(sql`UPDATE member SET login_seen_at = ${at} WHERE id = ${member}`);
 
 /** A dashboard request as this member: what a web login does, through the local auth stub. */
@@ -204,7 +207,8 @@ describe('the door', () => {
     expect(key.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
   });
 
-  it('a valid sign-in that is not linked, not an admin, or disabled gets 403 with the plain message (no challenge)', async () => {
+  it('a valid sign-in that is not linked, not an admin, or disabled connects, acts nowhere, and every tool says to open the app (no challenge)', async () => {
+    const before = h.audit.length;
     const member = await addMember(h, 'member');
     await link(h, member, 'user_plain_member');
     const disabled = await addMember(h, 'admin', 'disabled');
@@ -213,11 +217,30 @@ describe('the door', () => {
     await h.db.run(sql`UPDATE member SET status = 'invited' WHERE id = ${invited}`);
     await link(h, invited, 'user_invited_admin');
     for (const subject of ['user_nobody', 'user_plain_member', 'user_disabled_admin', 'user_invited_admin']) {
-      const res = await rpc(h, 'tools/list', {}, await as.mint({ sub: subject }));
-      expect(res.status).toBe(403);
+      const token = await as.mint({ sub: subject });
+      // The chat app's connect succeeds, so it shows the tools' words, never its own failed-login error.
+      const res = await rpc(h, 'tools/list', {}, token);
+      expect(res.status).toBe(200);
       expect(res.headers.get('www-authenticate')).toBeNull();
-      expect((await body(res)).error!.message).toBe(NOT_LINKED_MESSAGE);
+      for (const [name, args] of [
+        ['whoami', {}],
+        ['list_my_accounts', {}],
+        ['list_event_types', {}],
+        ['list_event_types', { account_id: h.accountId }],
+        ['list_event_types', { account_id: h.other.accountId }],
+        ['list_bookings', {}],
+      ] as const) {
+        expect(errorText(await tool(h, token, name, args)), `${subject} ${name}`).toBe(NOT_LINKED);
+      }
     }
+    // What is public on a booking page still works, as for an anonymous call.
+    const nobody = await as.mint({ sub: 'user_nobody' });
+    const page = { booking_page_url: 'https://x.test/acme/alex-rivera/intro-call', time_zone: 'UTC' };
+    expect((await tool(h, nobody, 'find_available_slots', page)).isError).toBeFalsy();
+    // Nothing it called left an account behind on the audit line.
+    const lines = h.audit.slice(before).map((l) => JSON.parse(l) as { tool: string; accountId: string | null; error?: string });
+    expect(lines.length).toBe(25);
+    expect(lines.filter((l) => l.tool !== 'find_available_slots').every((l) => l.accountId === null && l.error === 'NOT_LINKED')).toBe(true);
   });
 
   it('one account: tools, whoami, list_my_accounts, list_event_types and a booking, acting as the member with every MCP scope', async () => {
@@ -263,13 +286,14 @@ describe('the door', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_revocable');
     const token = await as.mint({ sub: 'user_revocable' });
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    const acts = async () => !(await tool(h, token, 'list_event_types')).isError;
+    expect(await acts()).toBe(true);
     await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
     await h.db.run(sql`UPDATE member SET role = 'admin' WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect(await acts()).toBe(true);
     await h.db.run(sql`DELETE FROM member WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
   });
 });
 
@@ -279,17 +303,15 @@ describe('how long a link holds, and the accounts reached by switching', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_stale');
     const token = await as.mint({ sub: 'user_stale' });
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect((await tool(h, token, 'list_event_types')).isError).toBeFalsy();
     await seenAt(h, id, Date.now() - 31 * DAY);
-    const stale = await rpc(h, 'tools/list', {}, token);
-    expect(stale.status).toBe(403);
-    expect((await body(stale)).error!.message).toBe(NOT_LINKED_MESSAGE);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
     // Never stamped at all: the same.
     await seenAt(h, id, null);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
-    // A verified dashboard request stamps the member again.
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
+    // A verified dashboard request stamps the member again, and the same token acts on its next call.
     expect(await openWebApp(h, h.accountId, id)).toBe(200);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect((await tool(h, token, 'list_event_types')).isError).toBeFalsy();
   });
 
   it('OAUTH_LINK_MAX_AGE_DAYS sets the window', async () => {
@@ -297,7 +319,7 @@ describe('how long a link holds, and the accounts reached by switching', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_short');
     await seenAt(h, id, Date.now() - 2 * DAY);
-    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(403);
+    expect(errorText(await tool(h, await as.mint({ sub: 'user_short' }), 'list_event_types'))).toBe(NOT_LINKED);
     await seenAt(h, id, Date.now() - DAY / 2);
     expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(200);
   });

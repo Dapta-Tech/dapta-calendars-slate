@@ -366,9 +366,16 @@ token.
   `OAUTH_LINK_MAX_AGE_DAYS` (default 30: the issue time of the last token it
   minted for them, seen at a web login) count, the linking member included,
   and only active owners and admins (the same rule as the built-in server's
-  consent). Checked on every request. None: **HTTP 403** with a plain message
-  (open the web app once, then reconnect), never a 401, so the client does not
-  loop back into its sign-in.
+  consent). Checked on every request. None: the sign-in still connects, and
+  acts nowhere. Only the public booking page tools run (as for an anonymous
+  call); every other tool, whatever `account_id` it names, answers
+  `NOT_LINKED` with the step to take (open the web app once with that account,
+  signing in again if it is already open, then try again). Never a 401, which
+  would loop the client back into its sign-in, and never a 403 at connect:
+  chat apps show a refused connect as their own error ("Automatic client
+  registration isn't supported"), never these words. The server keeps nothing
+  between requests, so the first call after that web visit already acts, with
+  no reconnect.
 - **What it may do.** An external server has no scopes of ours, so a sign-in
   acts with the member's admin rights: every tool, no event-type allowlist, no
   step-up. For narrow access (read-only, one event type), use a scoped API key.
@@ -388,7 +395,7 @@ token.
   within `OAUTH_LINK_MAX_AGE_DAYS` of the last token it issued them for that
   account (its issue time, not when it was last used, so a token minted before
   the removal cannot keep the link alive): after that the link is stale and
-  every call is the 403. Set it to the
+  every call answers `NOT_LINKED`. Set it to the
   upstream session lifetime, so MCP access never outlives what the web allows;
   remove the member here too when it must end at once.
 
@@ -455,7 +462,7 @@ confirmed (twice) and declined, and a round-robin team booking.
 `pnpm e2e:mcp-login` does the same with an external authorization server: a
 stand-in server (RS256 keys made by the script, its metadata and JWKS on a
 loopback port) mints the tokens, and the script checks discovery, the dormant
-built-in server, the 401 challenge, the 403 for a sign-in linked to no member,
+built-in server, the 401 challenge, `NOT_LINKED` for a sign-in linked to no member,
 whoami, list_my_accounts, list_event_types, a booking, a hold booked with its
 `hold_id` and the pending requests with a sign-in, and a sign-in reaching two
 accounts (including a hold made naming one account, booked by `book_meeting`).
