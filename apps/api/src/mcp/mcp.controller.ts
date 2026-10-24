@@ -201,6 +201,11 @@ export class McpController {
         // keeps nothing between requests, so the first call after that visit
         // already acts, with no new sign-in.
         const accounts = await this.external.accountsFor(token.subject);
+        if (accounts.length === 0) {
+          // It may only do what an anonymous caller may, so it pays the address's budget like one.
+          const { allowed, retryAfterMs } = this.limiter.take(`mcp:${ip}`);
+          if (!allowed) return this.tooMany(res, retryAfterMs);
+        }
         login = { token, accounts };
         if (accounts.length === 1) principal = loginPrincipal(accounts[0]!, token);
       }

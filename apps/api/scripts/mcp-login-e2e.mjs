@@ -8,7 +8,7 @@
  *
  *   discovery (protected-resource metadata, the server's metadata served from
  *   this origin), the built-in server staying dormant with its settings still
- *   present, the 401 challenge, 403 for a sign-in linked to no member, then
+ *   present, the 401 challenge, NOT_LINKED for a sign-in linked to no member, then
  *   with a sign-in: tools/list, whoami, list_my_accounts, list_event_types,
  *   find_available_slots, create_booking, get_booking and cancel_booking, a
  *   hold booked with its hold_id and the pending requests; a sign-in reaching
@@ -153,7 +153,8 @@ try {
   const notLinkedText = async (token) => {
     const res = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_bookings', arguments: {} } }, token);
     const text = await res.text();
-    const json = text.startsWith('{') ? JSON.parse(text) : JSON.parse(text.split('\n').find((l) => l.startsWith('data: ')).slice(6));
+    const data = text.startsWith('{') ? text : text.split('\n').find((l) => l.startsWith('data: '))?.slice(6);
+    const json = data ? JSON.parse(data) : {};
     return json.result?.isError ? json.result.content[0].text : `(no tool error, HTTP ${res.status})`;
   };
   const strangerText = await notLinkedText(strangerToken);

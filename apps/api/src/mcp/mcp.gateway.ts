@@ -164,7 +164,12 @@ export class McpGateway {
   }
 
   private takeToken(def: ToolDef, call: McpCall): void {
-    const identity = call.principal ? `key:${call.principal.keyId}` : call.login ? signInKey(call.login) : `ip:${call.ip}`;
+    // A sign-in that reaches no account counts like an anonymous caller: by address.
+    const identity = call.principal
+      ? `key:${call.principal.keyId}`
+      : call.login && call.login.accounts.length > 0
+        ? signInKey(call.login)
+        : `ip:${call.ip}`;
     const { allowed, retryAfterMs } = (def.write ? this.writeLimiter : this.readLimiter).take(identity);
     if (!allowed) {
       const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));

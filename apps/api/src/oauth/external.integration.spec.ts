@@ -4,6 +4,8 @@ import { createApiKey, sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
 import { startFakeAs, type FakeAs } from './fake-as';
+import { TOOLS, accessOf } from '../mcp/tools';
+import type { McpCall } from '../mcp/support';
 
 /**
  * The MCP endpoint as a resource server for an external authorization server,
@@ -69,7 +71,7 @@ async function link(h: Harness, member: string, subject: string) {
 const DAY = 86_400_000;
 /** What every non-public tool answers a sign-in that reaches no account (the harness serves PUBLIC_APP_URL). */
 const NOT_LINKED =
-  'NOT_LINKED: This sign-in is not an owner or admin of any account on this server yet. Ask the user to open https://calendar.example.test on the web once with this account (signing in again if it is already open), then try again. There is no need to reconnect.';
+  'NOT_LINKED: This sign-in is not an owner or admin of any account on this server yet. Ask the user to open https://calendar.example.test on the web once with this account (signing in again if it is already open), then try again; a member who is not an admin asks an owner for the admin role. There is no need to reconnect.';
 const seenAt = (h: Harness, member: string, at: number | null) => h.db.run(sql`UPDATE member SET login_seen_at = ${at} WHERE id = ${member}`);
 
 /** A dashboard request as this member: what a web login does, through the local auth stub. */
@@ -665,5 +667,49 @@ describe('namespaces per member', () => {
     expect(replay.booking.uid).toBe(first.booking.uid);
     // ...and reusing it with other arguments is refused in its own namespace only.
     expect((await book(a, starts[1]!, 'one@example.org')).content![0]!.text).toMatch(/^IDEMPOTENCY_KEY_REUSED/);
+  });
+});
+
+describe('a sign-in that reaches no account, tool by tool', () => {
+  it('answers NOT_LINKED from every tool that is not public, whatever it names, before the tool runs', async () => {
+    // Every call here comes from one address, whose budget this sign-in pays: room for them all.
+    const { h } = await setup({ MCP_RATE_LIMIT_CAPACITY: '1000', MCP_WRITE_RATE_LIMIT_CAPACITY: '1000' });
+    const call: McpCall = {
+      requestId: 'spec',
+      protocolVersion: '2025-11-25',
+      ip: '203.0.113.9',
+      principal: null,
+      login: { token: { subject: 'user_no_account', expiresAtMs: Date.now() + 600_000 }, accounts: [] },
+    };
+    const eventTypeId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} LIMIT 1`))!.id;
+    const before = await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`);
+    let checked = 0;
+    const names = new Set<string>();
+    for (const def of TOOLS) {
+      for (const args of [{}, { event_type_id: eventTypeId }, { account_id: h.accountId }, { account_id: h.other.accountId, event_type_id: eventTypeId }]) {
+        if (accessOf(def, args) === 'public') continue;
+        const result = await h.gateway.execute(def, args, call);
+        expect(result.isError, `${def.name} ${JSON.stringify(args)}`).toBe(true);
+        expect(result.content[0]!.text, `${def.name} ${JSON.stringify(args)}`).toBe(NOT_LINKED);
+        checked += 1;
+        names.add(def.name);
+      }
+    }
+    // Every tool but book_meeting (public by design: its hold_id is the capability) is checked, most with every shape.
+    expect([...names].sort()).toEqual(TOOLS.map((d) => d.name).filter((n) => n !== 'book_meeting').sort());
+    expect(checked).toBeGreaterThan(TOOLS.length * 2);
+    expect(await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`)).toEqual(before);
+  });
+
+  it('pays the address budget at the door like an anonymous caller, apart from a linked sign-in', async () => {
+    const { as, h } = await setup({ RATE_LIMIT_CAPACITY: '3', RATE_LIMIT_REFILL_PER_SEC: '0.01' });
+    await link(h, await memberId(h, 'alex-rivera'), 'user_alex');
+    const nobody = await as.mint({ sub: 'user_budget_nobody' });
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i += 1) codes.push((await rpc(h, 'tools/list', {}, nobody)).status);
+    expect(codes.slice(0, 3)).toEqual([200, 200, 200]);
+    expect(codes).toContain(429);
+    // A linked sign-in from the same address is not charged there.
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_alex' }))).status).toBe(200);
   });
 });

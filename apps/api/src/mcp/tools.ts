@@ -1936,7 +1936,7 @@ export function notLinked(publicAppUrl: string): ToolFailure {
   return new ToolFailure(
     'NOT_LINKED',
     'This sign-in is not an owner or admin of any account on this server yet.',
-    `Ask the user to open ${publicAppUrl || 'the app'} on the web once with this account (signing in again if it is already open), then try again. There is no need to reconnect.`,
+    `Ask the user to open ${publicAppUrl || 'the app'} on the web once with this account (signing in again if it is already open), then try again; a member who is not an admin asks an owner for the admin role. There is no need to reconnect.`,
   );
 }
 

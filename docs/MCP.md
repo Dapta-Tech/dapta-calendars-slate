@@ -367,8 +367,9 @@ token.
   minted for them, seen at a web login) count, the linking member included,
   and only active owners and admins (the same rule as the built-in server's
   consent). Checked on every request. None: the sign-in still connects, and
-  acts nowhere. Only the public booking page tools run (as for an anonymous
-  call); every other tool, whatever `account_id` it names, answers
+  acts nowhere. Only the public booking page tools run, under the address's
+  budget like an anonymous call (its holds and idempotency records stay the
+  person's); every other tool, whatever `account_id` it names, answers
   `NOT_LINKED` with the step to take (open the web app once with that account,
   signing in again if it is already open, then try again). Never a 401, which
   would loop the client back into its sign-in, and never a 403 at connect:
