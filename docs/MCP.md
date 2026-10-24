@@ -57,8 +57,8 @@ Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint
 replaces a booking; open world means it emails people or writes to a host's
 calendar. Descriptions and the server instructions say what a tool does and
 never give the model orders, as the Claude and ChatGPT connector directories
-require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not exposed over MCP: webhooks, API keys, team
-administration, event-type edits.
+require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
+exposed over MCP: webhooks, API keys, team administration, event-type edits.
 
 Every tool that acts on the caller's account (all but `book_meeting` and
 `list_my_accounts`) takes an optional `account_id`. A key or a sign-in that

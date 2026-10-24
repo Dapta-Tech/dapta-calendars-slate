@@ -594,7 +594,7 @@ const findSlots: ToolDef = {
   name: 'find_available_slots',
   title: 'Find available time slots',
   description:
-    'List the open times for one event type, grouped by local date, each with its UTC offset. Works with no sign-in on any public booking link (pass booking_page_url), or signed in or with an API key holding availability:read (pass event_type_id). Only start times returned here can be booked. Team events are supported.',
+    'List the open times for one event type, grouped by local date, each with its UTC offset. Works with no sign-in on any public booking link (by booking_page_url), or, signed in or with an API key holding availability:read, by event_type_id. Only start times returned here can be booked. Team events are supported.',
   scope: null,
   // A public page needs nothing; an event type by id is the account's own data.
   access: (args) => (args.event_type_id ? { scope: 'availability:read' } : 'public'),
@@ -637,7 +637,7 @@ const findTeamSlots: ToolDef = {
   name: 'find_team_slots',
   title: 'Find open times with a team',
   description:
-    'Open times for one team event (round-robin, collective or fixed round-robin), grouped by local date with UTC beside each. A round-robin time is open when any host is free; a collective one when every host is. Works with no sign-in on a public team link (booking_page_url), or signed in or with an API key holding availability:read (event_type_id). A returned start is booked with book_team_meeting, which picks the host.',
+    'Open times for one team event (round-robin, collective or fixed round-robin), grouped by local date with UTC beside each. A round-robin time is open when any host is free; a collective one when every host is. Works with no sign-in on a public team link (by booking_page_url), or, signed in or with an API key holding availability:read, by event_type_id. A returned start is booked with book_team_meeting, which picks the host.',
   scope: null,
   access: (args) => (args.event_type_id ? { scope: 'availability:read' } : 'public'),
   write: false,
@@ -695,7 +695,7 @@ const bookMeetingInput = z.object({
 
 const bookMeeting: ToolDef = {
   name: 'book_meeting',
-  title: 'Book a meeting on a public booking page',
+  title: 'Book a meeting on a public booking link',
   description:
     'Book one slot on a public booking link, with no sign-in. It sends the invitee a confirmation email, so it is best called once the person has agreed to the time and the details. The start is a slot returned by find_available_slots; hold_id from hold_slot books a time that was held. A pending status means the host still has to confirm.',
   scope: null,
@@ -941,7 +941,7 @@ const holdSlot: ToolDef = {
   name: 'hold_slot',
   title: 'Hold a time slot for about 10 minutes',
   description:
-    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or signed in or with an API key holding bookings:write (event_type_id).',
+    'Keep one offered slot for about 10 minutes while the details are confirmed with the person: meanwhile no slot list offers it, the MCP booking tools do not book it for anyone else (reschedule_booking does not move any booking into it), and new team bookings leave its host out (a one-host booking made straight through the REST API is not checked against holds yet). book_meeting (public link) or create_booking (event_type_id) then books it with the returned hold_id and the same start. A hold made signed in or with an API key can be used only by that same person or key; the hold_id of an anonymous hold works for whoever presents it, so it is best kept within this conversation. An unused hold just expires. One-host events only: a team event picks its host at booking time, so team events go straight to book_team_meeting. Works with no sign-in on a public booking link, or, signed in or with an API key holding bookings:write, by event_type_id.',
   scope: null,
   // A public page holds like the booking page does; an event type by id is the account's own.
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
@@ -1091,7 +1091,7 @@ const bookTeamMeeting: ToolDef = {
   name: 'book_team_meeting',
   title: 'Book a meeting with a team',
   description:
-    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or signed in or with an API key holding bookings:write (event_type_id).',
+    'Book one slot on a team event. The host is picked at booking time from those free at that moment: round-robin picks one fairly (highest priority, then the lowest load for its weight, then the least recently booked), collective books every host, fixed round-robin books the fixed hosts plus one. Returns who was assigned. It emails the invitee, so it is best called once the person has agreed. The start comes from find_team_slots. Works with no sign-in on a public team link, or, signed in or with an API key holding bookings:write, by event_type_id.',
   scope: null,
   access: (args) => (args.event_type_id ? { scope: 'bookings:write' } : 'public'),
   write: true,
@@ -1267,7 +1267,7 @@ const listMyAccounts: ToolDef = {
   name: 'list_my_accounts',
   title: 'List the accounts this connection can act in',
   description:
-    'Lists the accounts this connection reaches, with their names and ids. A sign-in reaches every account where the person is an owner or admin; when there are several, pass the chosen id as account_id to the other tools. An API key reaches only its own account.',
+    'Lists the accounts this connection reaches, with their names and ids. A sign-in reaches every account where the person is an owner or admin; when there are several, the chosen id goes in account_id on the other tools. An API key reaches only its own account.',
   scope: null,
   access: () => ({ scope: null }),
   accountArg: false,
@@ -1347,7 +1347,7 @@ const linkInput = z.object({ event_type_id: z.string().min(1).max(64) });
 const getLink: ToolDef = {
   name: 'get_booking_page_link',
   title: 'Get the public booking link of an event type',
-  description: 'Returns the public URL where anyone can book one event type. Needs scope event-types:read. Hidden event types have no public page.',
+  description: 'Returns the public URL where anyone can book one event type. Needs scope event-types:read. Hidden event types have no public link.',
   scope: 'event-types:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1378,7 +1378,7 @@ const listBookingsInput = z.object({
     .optional()
     .describe('asc = soonest first, desc = latest first. Default asc, except for pending requests listed with no from: desc, so upcoming requests come before stale ones.'),
   limit: z.number().int().min(1).max(50).default(25),
-  cursor: z.string().max(300).optional().describe('next_cursor from the previous page; keep the other arguments identical.'),
+  cursor: z.string().max(300).optional().describe('next_cursor from the previous page, with the other arguments unchanged.'),
   time_zone: timeZone.optional().describe('Zone for the returned times. Defaults to the host\'s zone.'),
 });
 
@@ -1448,7 +1448,7 @@ const listBookings: ToolDef = {
   name: 'list_bookings',
   title: 'List bookings',
   description:
-    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects the key\'s event-type allowlist. get_booking returns one booking\'s details.',
+    'List bookings with minimal fields (no notes, answers or names). Needs scope bookings:read and respects an API key\'s event-type allowlist. get_booking returns one booking\'s details.',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1470,7 +1470,7 @@ const listPendingBookings: ToolDef = {
   name: 'list_pending_bookings',
   title: 'List bookings waiting for confirmation',
   description:
-    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), in start order, with minimal fields (no names, notes or answers). Requests whose time has already passed are included, since they still wait for an answer; with no from the list runs latest start first, so upcoming requests come before stale ones (pass from, or order asc, to change that). Needs scope bookings:read and respects the key\'s event-type allowlist. Each is answered with confirm_booking or decline_booking; get_booking reads one.',
+    'Booking requests waiting for the host to confirm or decline (event types that require confirmation), in start order, with minimal fields (no names, notes or answers). Requests whose time has already passed are included, since they still wait for an answer; with no from the list runs latest start first, so upcoming requests come before stale ones (from, or order asc, changes that). Needs scope bookings:read and respects an API key\'s event-type allowlist. Each is answered with confirm_booking or decline_booking; get_booking reads one.',
   scope: 'bookings:read',
   write: false,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -1865,7 +1865,7 @@ const confirmBooking: ToolDef = {
   name: 'confirm_booking',
   title: 'Confirm a booking request',
   description:
-    'Accept a booking that is waiting for the host (see list_pending_bookings). Needs scope bookings:write and respects the key\'s event-type allowlist. The host\'s calendar is checked first: a time that filled up meanwhile is SLOT_TAKEN and nothing is confirmed. Emails the invitee. Confirming an already confirmed booking succeeds with already_applied.',
+    'Accept a booking that is waiting for the host (see list_pending_bookings). Needs scope bookings:write and respects an API key\'s event-type allowlist. The host\'s calendar is checked first: a time that filled up meanwhile is SLOT_TAKEN and nothing is confirmed. Emails the invitee. Confirming an already confirmed booking succeeds with already_applied.',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -1878,7 +1878,7 @@ const declineBooking: ToolDef = {
   name: 'decline_booking',
   title: 'Decline a booking request',
   description:
-    'Turn down a booking that is waiting for the host (see list_pending_bookings) and free its time. Needs scope bookings:write and respects the key\'s event-type allowlist. Destructive: it emails the invitee (with reason, when given) and cannot be undone, so it is best confirmed with the user first. Declining an already declined request succeeds with already_applied.',
+    'Turn down a booking that is waiting for the host (see list_pending_bookings) and free its time. Needs scope bookings:write and respects an API key\'s event-type allowlist. Destructive: it emails the invitee (with reason, when given) and cannot be undone, so it is best confirmed with the user first. Declining an already declined request succeeds with already_applied.',
   scope: 'bookings:write',
   write: true,
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },

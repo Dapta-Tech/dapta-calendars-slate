@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod4';
 import { MCP_INSTRUCTIONS } from './mcp.gateway';
@@ -25,6 +26,15 @@ const BANNED: ReadonlyArray<[RegExp, string]> = [
 const banned = (text: string): string[] => BANNED.filter(([re]) => re.test(text)).map(([, label]) => label);
 
 const schemaText = (schema: z.ZodType): string => JSON.stringify(z.toJSONSchema(schema, { unrepresentable: 'any' }));
+
+/**
+ * The web app's own copy of the catalog (`apps/web/lib/mcp-connect.ts`), read
+ * as text because the two apps share no module: name and kind of each tool.
+ */
+const webCatalog = (): Map<string, string> => {
+  const source = readFileSync(new URL('../../../web/lib/mcp-connect.ts', import.meta.url), 'utf8');
+  return new Map([...source.matchAll(/\{ name: '([a-z_]+)', kind: '(read|write|destructive)'/g)].map((m) => [m[1]!, m[2]!]));
+};
 
 describe('connector directory review', () => {
   it('gives every tool a short name, a title and all four behaviour hints', () => {
@@ -75,6 +85,11 @@ describe('connector directory review', () => {
 
   it('keeps the server instructions descriptive', () => {
     expect(banned(MCP_INSTRUCTIONS), 'instructions').toEqual([]);
+  });
+
+  it('keeps the web app\'s tool list in step with the server: same tools, same read, write or destructive kind', () => {
+    const kindOf = (t: (typeof TOOLS)[number]) => (t.annotations.destructiveHint ? 'destructive' : t.write ? 'write' : 'read');
+    expect(Object.fromEntries(webCatalog())).toEqual(Object.fromEntries(TOOLS.map((t) => [t.name, kindOf(t)])));
   });
 
   it('catches the patterns it bans', () => {
