@@ -309,9 +309,28 @@ describe('parseStackFrames', () => {
       `    at x (${'/node_modules/@slate/'.repeat(20_000)}`,
       `    at f (${'a:1'.repeat(30_000)})`,
     ].join('\n');
+    // Under the 2000-character cap too, so the scan itself is what is timed.
+    const underCap = Array.from({ length: 15_000 }, () => `    at ${' (a'.repeat(600)}`).join('\n');
     const started = performance.now();
     expect(parseStackFrames(crafted.repeat(20))).toEqual([]);
+    expect(parseStackFrames(underCap)).toEqual([]);
     expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('reads an unnamed async callback and an unnamed frame whose path holds " (", relative to the root', () => {
+    const stack = ['Error: x', '    at async /srv/app/dist/x.js:3:51', '    at /srv/app/my (copy)/a.ts:3:4'].join('\n');
+    expect(parseStackFrames(stack, '/srv/app')).toEqual([
+      { filename: 'my (copy)/a.ts', lineno: 3, colno: 4, in_app: true },
+      { filename: 'dist/x.js', lineno: 3, colno: 51, in_app: true },
+    ]);
+  });
+
+  it('keeps the newest 50 frames and stops reading there', () => {
+    const lines = Array.from({ length: 100_000 }, (_, i) => `    at f${i} (/srv/app/a.ts:${i + 1}:1)`);
+    const frames = parseStackFrames(['Error: x', ...lines].join('\n'), '/srv/app');
+    expect(frames).toHaveLength(50);
+    expect(frames.at(-1)).toMatchObject({ function: 'f0', lineno: 1 });
+    expect(frames[0]).toMatchObject({ function: 'f49', lineno: 50 });
   });
 });
 
@@ -557,7 +576,10 @@ describe('a fresh id with no randomUUID', () => {
       expect(id).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       expect(reportableRequestId(undefined)).not.toBe(id);
       vi.stubGlobal('crypto', undefined);
-      expect(reportableRequestId(undefined)).toMatch(/^req_[0-9a-f]+-[0-9a-f]+$/);
+      const v4 = /^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+      const first = reportableRequestId(undefined);
+      expect(first).toMatch(v4);
+      expect(reportableRequestId(undefined)).not.toBe(first);
       expect(random).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
