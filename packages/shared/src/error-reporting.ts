@@ -264,8 +264,35 @@ const MAX_FRAMES = 50;
 /** The most causes followed (`error.cause`). */
 const MAX_CAUSES = 3;
 
-/** `    at fn (file:line:col)`, `    at file:line:col`, `    at async fn (file:line:col)`. */
-const V8_FRAME = /^\s*at (?:(?:async )?(.*?) \()?(.+?):(\d+):(\d+)\)?\s*$/;
+/** The longest stack line read as a frame; anything longer is not one a runtime writes. */
+const MAX_FRAME_LINE = 2000;
+
+/**
+ * One V8 stack line: `    at fn (file:line:col)`, `    at file:line:col`, or
+ * `    at async fn (file:line:col)`. Read with string scans, never a backtracking
+ * pattern, so a crafted stack costs time linear in its length.
+ */
+function parseV8Frame(raw: string): { fn: string; file: string; line: number; col: number } | null {
+  if (raw.length > MAX_FRAME_LINE) return null;
+  const line = raw.trim();
+  if (!line.startsWith('at ')) return null;
+  let rest = line.slice(3);
+  let fn = '';
+  // The first ` (`, as V8 writes it: a path may hold one, a function name does not.
+  const open = rest.endsWith(')') ? rest.indexOf(' (') : -1;
+  if (open > 0) {
+    fn = rest.slice(0, open);
+    if (fn.startsWith('async ')) fn = fn.slice(6);
+    rest = rest.slice(open + 2, -1);
+  }
+  const colAt = rest.lastIndexOf(':');
+  const lineAt = colAt > 0 ? rest.lastIndexOf(':', colAt - 1) : -1;
+  if (lineAt <= 0) return null;
+  const lineText = rest.slice(lineAt + 1, colAt);
+  const colText = rest.slice(colAt + 1);
+  if (!/^\d{1,9}$/.test(lineText) || !/^\d{1,9}$/.test(colText)) return null;
+  return { fn, file: rest.slice(0, lineAt), line: Number(lineText), col: Number(colText) };
+}
 
 /** The runtime's own code and installed dependencies: not this app. */
 const DEPENDENCY = /(^node:|^internal\/|\/node_modules\/)/;
@@ -273,9 +300,12 @@ const DEPENDENCY = /(^node:|^internal\/|\/node_modules\/)/;
 /**
  * This repository's own packages (`@slate/*`), as a deployed bundle installs
  * them (`node_modules/.pnpm/@slate+db@.../node_modules/@slate/db/src/x.ts`):
- * app code, reported as `@slate/db/src/x.ts`.
+ * app code, reported as `@slate/db/src/x.ts`. A string scan, not a pattern.
  */
-const OWN_PACKAGE = /\/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(@slate\/.+)$/;
+function ownPackagePath(file: string): string | undefined {
+  const at = file.indexOf('/node_modules/@slate/');
+  return at >= 0 && file.length > at + 21 ? file.slice(at + 14) : undefined;
+}
 
 /**
  * Parse a V8 stack (the server runtimes) into frames, oldest first. A line
@@ -285,17 +315,17 @@ export function parseStackFrames(stack: unknown, root?: string): ErrorFrame[] {
   if (typeof stack !== 'string') return [];
   const frames: ErrorFrame[] = [];
   for (const line of stack.split('\n')) {
-    const m = V8_FRAME.exec(line);
+    const m = parseV8Frame(line);
     if (!m) continue;
-    const file = m[2]!;
-    const own = OWN_PACKAGE.exec(file)?.[1];
+    const file = m.file;
+    const own = ownPackagePath(file);
     const filename = own ? scrubFrameFilename(own) : scrubFrameFilename(file, root);
-    const fn = m[1] ? scrubErrorText(m[1]).slice(0, 200) : '';
+    const fn = m.fn ? scrubErrorText(m.fn).slice(0, 200) : '';
     frames.push({
       ...(filename ? { filename } : {}),
       ...(fn ? { function: fn } : {}),
-      lineno: Number(m[3]),
-      colno: Number(m[4]),
+      lineno: m.line,
+      colno: m.col,
       in_app: own !== undefined || !DEPENDENCY.test(file),
     });
   }
@@ -463,7 +493,7 @@ const MAX_WINDOWS = 500;
 type Timers = {
   setImmediate?: (fn: () => void) => unknown;
   setTimeout: (fn: () => void, ms: number) => unknown;
-  crypto?: { randomUUID?: () => string };
+  crypto?: { randomUUID?: () => string; getRandomValues?: (array: Uint8Array) => Uint8Array };
 };
 
 const timers = globalThis as unknown as Timers;
@@ -478,10 +508,26 @@ function defaultTimer(fn: () => void, ms: number): void {
   handle?.unref?.();
 }
 
+let uuidCounter = 0;
+
+/**
+ * A random v4 UUID: `crypto.randomUUID`, else one built from
+ * `crypto.getRandomValues` (a browser page served over plain http has only
+ * that), never `Math.random`. With no crypto at all (no runtime this ships
+ * to), a time and counter id: unique per process, never presented as random.
+ */
 function defaultUuid(): string {
-  const random = timers.crypto?.randomUUID;
-  if (typeof random === 'function') return random.call(timers.crypto);
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  const c = timers.crypto;
+  if (typeof c?.randomUUID === 'function') return c.randomUUID.call(c);
+  if (typeof c?.getRandomValues === 'function') {
+    const b = c.getRandomValues.call(c, new Uint8Array(16));
+    b[6] = (b[6]! & 0x0f) | 0x40;
+    b[8] = (b[8]! & 0x3f) | 0x80;
+    const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  }
+  uuidCounter = (uuidCounter + 1) % 0x100000;
+  return `${Date.now().toString(16)}-${uuidCounter.toString(16)}`;
 }
 
 /** What makes two errors the same one: type, scrubbed message, and the failing frame. */
