@@ -46,14 +46,18 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes and intake answers sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
-| `reschedule_booking` | `bookings:write` | write, emails the invitee | Moves a booking to a new offered slot. The booking gets a **new uid**. |
+| `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. |
 | `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
-(plus a short text summary). Not exposed over MCP: webhooks, API keys, team
+(plus a short text summary). Destructive means the tool cancels, declines or
+replaces a booking; open world means it emails people or writes to a host's
+calendar. Descriptions and the server instructions say what a tool does and
+never give the model orders, as the Claude and ChatGPT connector directories
+require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not exposed over MCP: webhooks, API keys, team
 administration, event-type edits.
 
 Every tool that acts on the caller's account (all but `book_meeting` and
