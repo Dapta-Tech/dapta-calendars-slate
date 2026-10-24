@@ -288,6 +288,31 @@ describe('parseStackFrames', () => {
     expect(parseStackFrames(undefined)).toEqual([]);
     expect(parseStackFrames('just a message')).toEqual([]);
   });
+
+  it('reads a path holding " (", a Windows path and a frame with no function the way V8 writes them', () => {
+    const stack = [
+      'Error: x',
+      '    at Object.run (/srv/app/my (copy)/a.ts:3:4)',
+      '    at C:\\srv\\app\\b.ts:5:6',
+      '    at async Promise.all (index 0)',
+      '    at Array.map (<anonymous>)',
+    ].join('\n');
+    expect(parseStackFrames(stack, '/srv/app')).toEqual([
+      expect.objectContaining({ lineno: 5, colno: 6 }),
+      expect.objectContaining({ function: 'Object.run', filename: 'my (copy)/a.ts', lineno: 3, colno: 4 }),
+    ]);
+  });
+
+  it('takes time linear in a crafted stack, never a backtracking blow-up', () => {
+    const crafted = [
+      `at ${' (a'.repeat(50_000)}`,
+      `    at x (${'/node_modules/@slate/'.repeat(20_000)}`,
+      `    at f (${'a:1'.repeat(30_000)})`,
+    ].join('\n');
+    const started = performance.now();
+    expect(parseStackFrames(crafted.repeat(20))).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 describe('describeError', () => {
@@ -519,6 +544,25 @@ describe('createErrorReporter', () => {
     expect(deliver).not.toHaveBeenCalled();
     await new Promise((r) => setTimeout(r, 5));
     expect(deliver).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a fresh id with no randomUUID', () => {
+  it('comes from getRandomValues as a v4 UUID, and never from Math.random', () => {
+    const random = vi.spyOn(Math, 'random');
+    const real = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
+    try {
+      const id = reportableRequestId(undefined);
+      expect(id).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(reportableRequestId(undefined)).not.toBe(id);
+      vi.stubGlobal('crypto', undefined);
+      expect(reportableRequestId(undefined)).toMatch(/^req_[0-9a-f]+-[0-9a-f]+$/);
+      expect(random).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      random.mockRestore();
+    }
   });
 });
 
