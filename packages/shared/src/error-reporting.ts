@@ -529,10 +529,12 @@ function defaultUuid(): string {
     const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
   }
-  uuidCounter = (uuidCounter + 1) % 0x10000;
-  // UUID-shaped, so an event store that checks the shape keeps it: time, then a counter.
-  const h = `${Date.now().toString(16).padStart(12, '0')}${uuidCounter.toString(16).padStart(4, '0')}`.padEnd(32, '0');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  uuidCounter = (uuidCounter + 1) % 0x1000000;
+  // v4-shaped (version 4, variant 8), so an event store that checks the shape
+  // keeps it: 48 bits of time, then a 24-bit counter around the fixed nibbles.
+  const t = Date.now().toString(16).padStart(12, '0').slice(-12);
+  const c = uuidCounter.toString(16).padStart(6, '0');
+  return `${t.slice(0, 8)}-${t.slice(8, 12)}-4${c.slice(0, 3)}-8${c.slice(3, 6)}-000000000000`;
 }
 
 /** What makes two errors the same one: type, scrubbed message, and the failing frame. */

@@ -576,7 +576,10 @@ describe('a fresh id with no randomUUID', () => {
       expect(id).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       expect(reportableRequestId(undefined)).not.toBe(id);
       vi.stubGlobal('crypto', undefined);
-      expect(reportableRequestId(undefined)).toMatch(/^req_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      const v4 = /^req_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+      const first = reportableRequestId(undefined);
+      expect(first).toMatch(v4);
+      expect(reportableRequestId(undefined)).not.toBe(first);
       expect(random).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
