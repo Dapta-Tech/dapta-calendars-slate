@@ -13,6 +13,7 @@ import { BASELINE_SCOPES, trimSlash } from '../oauth/oauth.settings';
 import type { ApiScope } from '@slate/types';
 import { CALL_KEY, McpGateway } from './mcp.gateway';
 import { loginPrincipal, signInKey, type McpCall } from './support';
+import { clientInfoOf } from './mcp-usage';
 import { TOOLS, accessOf } from './tools';
 
 const TOOL_BY_NAME = new Map(TOOLS.map((def) => [def.name, def]));
@@ -244,7 +245,14 @@ export class McpController {
       }
     }
 
-    const call: McpCall = { requestId, protocolVersion: protocolVersionOf(req), ip, principal, ...(login ? { login } : {}) };
+    const call: McpCall = {
+      requestId,
+      protocolVersion: protocolVersionOf(req),
+      ip,
+      principal,
+      ...(login ? { login } : {}),
+      client: clientInfoOf(req),
+    };
     // The plaintext credential is never handed on: the handler gets the prefix and scopes.
     (req as Request & { auth?: unknown }).auth = {
       token: '[redacted]',

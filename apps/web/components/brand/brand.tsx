@@ -46,6 +46,21 @@ export function BrandMark({ className, labelled }: { className?: string; labelle
   return <FallbackChip />;
 }
 
+/**
+ * The mark inside a square tile someone else draws (an AI app's connector
+ * list, the connect walkthrough): the dC mark on a Dapta build, the product's
+ * initial on a fork. `size` is the tile's side in px; the ink is
+ * `currentColor`, so the tile sets it.
+ */
+export function BrandTileMark({ size }: { size: number }) {
+  if (IS_DAPTA_BRAND) return <CalendarsMark style={{ width: size * 0.74, height: 'auto' }} />;
+  return (
+    <span className="font-semibold leading-none" style={{ fontSize: Math.round(size * 0.55) }}>
+      {PRODUCT_NAME.charAt(0)}
+    </span>
+  );
+}
+
 /** The pre-logo placeholder, kept as the fork fallback rather than deleted. */
 function FallbackChip() {
   return (

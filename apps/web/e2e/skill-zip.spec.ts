@@ -6,7 +6,7 @@ import { E2E, HOST, signIn } from './stack';
 
 /**
  * The skill zip, in the real app on both projects: an owner downloads it from
- * the end of the setup guide on MCP, Connect and keys, and it is written for
+ * the API keys page (API and webhooks), and it is written for
  * this deployment (its public API address, every route the running API
  * describes and no other); a refused download says why under the button; a
  * plain member is refused at the route itself.
@@ -19,7 +19,7 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);
 });
 
-test('an owner downloads the skill from the setup guide, written for this deployment', async ({ page }) => {
+test('an owner downloads the skill from the API keys page, written for this deployment', async ({ page }) => {
   await page.goto('/admin/developers/keys');
   await signIn(page, HOST.email);
   await expect(page).toHaveURL(/\/admin\/developers\/keys$/);

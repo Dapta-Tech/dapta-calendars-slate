@@ -116,7 +116,7 @@ describe('protocol eras', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('mcp-session-id')).toBeNull();
       const text = await res.text();
-      expect(text).toContain('dapta-calendars');
+      expect(text).toContain('"dcal"');
       expect(text).toContain('"tools"');
     }
     const list = await h.post({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, { 'mcp-protocol-version': '2025-06-18' });

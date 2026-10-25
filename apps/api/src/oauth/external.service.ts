@@ -39,7 +39,7 @@ const METADATA_RETRY_MS = 30_000;
 /** Seconds of clock skew allowed on `exp` and `nbf`. */
 const CLOCK_TOLERANCE_S = 30;
 /** What `resource_name` says in the protected-resource metadata (the built-in server's value). */
-const RESOURCE_NAME = 'Dapta Calendars';
+const RESOURCE_NAME = 'dCal';
 
 export interface ExternalOAuthSettings {
   /** The external server's issuer, exactly as configured (and as its metadata and tokens write it). */

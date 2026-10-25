@@ -94,7 +94,7 @@ describe('discovery', () => {
       authorization_servers: [as.issuer],
       bearer_methods_supported: ['header'],
       scopes_supported: [],
-      resource_name: 'Dapta Calendars',
+      resource_name: 'dCal',
     });
     expect(s.challenge()).toBe('Bearer resource_metadata="https://calendar.example.test/.well-known/oauth-protected-resource/mcp"');
     expect(s.challenge('invalid_token', 'Bad "token"')).toBe(

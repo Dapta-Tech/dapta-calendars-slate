@@ -4,90 +4,93 @@ import {
   API_KEY_ENV,
   MCP_TOOLS,
   SCOPE_CATALOG,
+  SERVER_NAME,
   claudeCodeCommand,
-  claudeCodeSignInCommand,
-  claudeConnectorLink,
-  codexConfigToml,
+  codexAddCommand,
+  codexLoginCommand,
   cursorDeeplink,
   cursorMcpJson,
-  cursorServerEntry,
-  cursorSignInDeeplink,
-  cursorSignInJson,
   encodeCursorConfig,
   expiresAtMsFromDays,
   expiryState,
+  hermesConfig,
+  hermesLoginCommand,
+  isShellSafeUrl,
+  mcpSnippets,
+  openclawLoginCommand,
+  openclawSetCommand,
   scopeLabel,
   toMs,
 } from './mcp-connect';
 
 const URL_ = 'https://calendar.example.com/mcp';
 
-describe('sign-in snippets (an app that signs in itself)', () => {
-  it('Cursor gets the address alone, under the same server name, with no header and no variable', () => {
-    const link = cursorSignInDeeplink(URL_);
-    expect(link.startsWith('cursor://anysphere.cursor-deeplink/mcp/install?name=dapta-calendars&config=')).toBe(true);
-    const config = new URL(link.replace('cursor://', 'http://')).searchParams.get('config')!;
-    expect(JSON.parse(Buffer.from(config, 'base64').toString('utf8'))).toEqual({ url: URL_ });
-    expect(JSON.parse(cursorSignInJson(URL_))).toEqual({ mcpServers: { 'dapta-calendars': { url: URL_ } } });
-  });
-
-  it('Claude Code adds the server with no header', () => {
-    expect(claudeCodeSignInCommand(URL_)).toBe(`claude mcp add --transport http dapta-calendars ${URL_}`);
-    expect(claudeCodeSignInCommand(URL_)).not.toContain(API_KEY_ENV);
+describe('the server name', () => {
+  it('is dcal, the name the server announces, for every new install', () => {
+    expect(SERVER_NAME).toBe('dcal');
   });
 });
 
-describe('Cursor deeplink', () => {
-  const link = cursorDeeplink(URL_);
-  const config = new URL(link.replace('cursor://', 'http://')).searchParams.get('config')!;
-
-  it('is the install scheme with the server name', () => {
-    expect(link.startsWith('cursor://anysphere.cursor-deeplink/mcp/install?name=dapta-calendars&config=')).toBe(true);
+describe('snippets: the URL alone, the app signs in', () => {
+  it('Claude Code: added for every project by URL alone, the sign-in runs from /mcp', () => {
+    expect(claudeCodeCommand(URL_)).toBe(`claude mcp add --transport http --scope user dcal ${URL_}`);
   });
 
-  it('carries base64 of the single server entry, not the name wrapper', () => {
-    const decoded = JSON.parse(Buffer.from(config, 'base64').toString('utf8'));
-    expect(decoded).toEqual({ url: URL_, headers: { Authorization: `Bearer \${env:${API_KEY_ENV}}` } });
-    expect(decoded.mcpServers).toBeUndefined();
+  it('Codex: add by URL, then log in', () => {
+    expect(codexAddCommand(URL_)).toBe(`codex mcp add dcal --url ${URL_}`);
+    expect(codexLoginCommand).toBe('codex mcp login dcal');
   });
 
-  it('never contains a key: only the variable name', () => {
-    expect(link).not.toMatch(/dcl_/);
-    expect(Buffer.from(config, 'base64').toString('utf8')).toContain('${env:');
+  it('OpenClaw: a remote streamable-HTTP entry that logs in with OAuth, then login', () => {
+    expect(openclawSetCommand(URL_)).toBe(
+      `openclaw mcp set dcal '{"url":"${URL_}","transport":"streamable-http","auth":"oauth"}'`,
+    );
+    expect(openclawLoginCommand).toBe('openclaw mcp login dcal');
   });
 
-  it('url-encodes base64 padding so the query survives', () => {
+  it('Hermes: an mcp_servers entry with auth oauth, then login', () => {
+    expect(hermesConfig(URL_)).toBe(`mcp_servers:\n  dcal:\n    url: "${URL_}"\n    auth: oauth`);
+    expect(hermesLoginCommand).toBe('hermes mcp login dcal');
+  });
+
+  it('Cursor: the entry is the URL alone, in the file and in the one-click link (base64 JSON)', () => {
+    const json = JSON.parse(cursorMcpJson(URL_)) as { mcpServers: Record<string, { url: string }> };
+    expect(json.mcpServers[SERVER_NAME]).toEqual({ url: URL_ });
+    const link = new URL(cursorDeeplink(URL_));
+    expect(link.protocol).toBe('cursor:');
+    expect(link.searchParams.get('name')).toBe('dcal');
+    const config = JSON.parse(Buffer.from(link.searchParams.get('config')!, 'base64').toString('utf8'));
+    expect(config).toEqual({ url: URL_ });
+  });
+
+  it('url-encodes base64 padding so the Cursor link survives, and stays under its 10,000 character limit', () => {
     expect(encodeCursorConfig({ a: 1 })).toBe('eyJhIjoxfQ==');
-    expect(link).toContain(encodeURIComponent(encodeCursorConfig(cursorServerEntry(URL_))));
+    expect(cursorDeeplink(`https://${'a'.repeat(200)}.example.com/mcp`).length).toBeLessThan(10_000);
   });
 
-  it('stays under Cursor\'s 10,000 character limit', () => {
-    expect(link.length).toBeLessThan(10_000);
+  it('carries no key and no key variable: the app signs in instead', () => {
+    const all = JSON.stringify(mcpSnippets(URL_));
+    expect(all).not.toMatch(/dcl_[A-Za-z0-9]/);
+    expect(all).not.toContain(API_KEY_ENV);
+    expect(all).not.toMatch(/Authorization|bearer/i);
+  });
+
+  it('carries the Claude directory listing when there is one, null by default', () => {
+    expect(mcpSnippets(URL_).claudeDirectory).toBeNull();
+    expect(mcpSnippets(URL_, 'https://claude.ai/directory/dcal').claudeDirectory).toBe('https://claude.ai/directory/dcal');
   });
 });
 
-describe('snippets', () => {
-  it('mcp.json wraps the entry under mcpServers with env interpolation', () => {
-    const j = JSON.parse(cursorMcpJson(URL_));
-    expect(j.mcpServers['dapta-calendars']).toEqual(cursorServerEntry(URL_));
+describe('isShellSafeUrl', () => {
+  it('takes an address a shell reads as one word', () => {
+    for (const u of [URL_, 'http://localhost:4000/mcp', 'https://host.example.com/calendar/mcp', 'https://mcp.dcal.ai/mcp']) {
+      expect(isShellSafeUrl(u), u).toBe(true);
+    }
   });
-  it('Claude Code uses the http transport and the env var in the header', () => {
-    const c = claudeCodeCommand(URL_);
-    expect(c).toContain(`claude mcp add --transport http dapta-calendars ${URL_}`);
-    // Single-quoted so the shell leaves `${VAR}` for Claude Code to resolve; a
-    // double-quoted `$VAR` would be expanded and the key stored in plaintext.
-    expect(c).toContain(`--header 'Authorization: Bearer \${${API_KEY_ENV}}'`);
-    expect(c).not.toContain('"Authorization');
-  });
-  it('Codex reads the token from the environment', () => {
-    const c = codexConfigToml(URL_);
-    expect(c).toContain('[mcp_servers.dapta-calendars]');
-    expect(c).toContain(`url = "${URL_}"`);
-    expect(c).toContain(`bearer_token_env_var = "${API_KEY_ENV}"`);
-  });
-  it('no snippet embeds a real key', () => {
-    for (const s of [cursorMcpJson(URL_), claudeCodeCommand(URL_), codexConfigToml(URL_)]) {
-      expect(s).not.toMatch(/dcl_[0-9a-f]{8}_/);
+
+  it('refuses anything a shell would run, split or unquote, since the commands paste it bare', () => {
+    for (const u of ['https://x.example/mcp$(id)', "https://x.example/m'cp", 'https://x.example/a;b', 'https://x.example/a&b', 'https://x.example/a|b', 'https://x.example/a b', 'https://x.example/`id`', 'ftp://x.example/mcp']) {
+      expect(isShellSafeUrl(u), u).toBe(false);
     }
   });
 });
@@ -112,8 +115,8 @@ describe('scope and tool catalogs', () => {
     }
     expect(MCP_TOOLS).toHaveLength(17);
   });
-  it('declining a request and cancelling a booking are the destructive tools', () => {
-    expect(MCP_TOOLS.filter((t) => t.kind === 'destructive').map((t) => t.name)).toEqual(['decline_booking', 'cancel_booking']);
+  it('rescheduling, declining and cancelling are the destructive tools, as the server marks them', () => {
+    expect(MCP_TOOLS.filter((t) => t.kind === 'destructive').map((t) => t.name)).toEqual(['reschedule_booking', 'decline_booking', 'cancel_booking']);
   });
   it('falls back to the raw scope for one the catalog lacks', () => {
     expect(scopeLabel({}, 'future:scope')).toBe('future:scope');
@@ -140,17 +143,5 @@ describe('key details tolerance', () => {
   it('turns a day preset into an absolute time, and 0 into none', () => {
     expect(expiresAtMsFromDays(0, now)).toBeUndefined();
     expect(expiresAtMsFromDays(30, now)).toBe(now + 30 * 86_400_000);
-  });
-});
-
-describe('Claude connector link', () => {
-  it('pre-fills the add-custom-connector dialog with the name and the address, nothing else', () => {
-    const link = new URL(claudeConnectorLink(URL_, 'Dapta Calendars'));
-    expect(`${link.origin}${link.pathname}`).toBe('https://claude.ai/customize/connectors');
-    expect(Object.fromEntries(link.searchParams)).toEqual({
-      modal: 'add-custom-connector',
-      connectorName: 'Dapta Calendars',
-      connectorUrl: URL_,
-    });
   });
 });

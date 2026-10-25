@@ -6,11 +6,11 @@ import { DeveloperNoAccess, DeveloperPage, developerAccess } from '../developer-
 export const dynamic = 'force-dynamic';
 
 /**
- * MCP, Webhooks: the URLs this workspace calls when a booking is created,
- * rescheduled or cancelled. Its own page in the group rather than a corner of
- * Connect and keys: a webhook is the other direction (the workspace calls your
- * server; no key, no agent), with its own signing secrets and delivery log.
- * It stays in the group, and out of Settings, because it is the same
+ * API and webhooks, Webhooks: the URLs this workspace calls when a booking is
+ * created, rescheduled or cancelled. Its own page in the group rather than a
+ * corner of API keys: a webhook is the other direction (the workspace calls
+ * your server; no key, no agent), with its own signing secrets and delivery
+ * log. It stays in the group, and out of Settings, because it is the same
  * admin-only builder's surface it was beside on the old "MCP & API" page.
  */
 export default async function DeveloperWebhooksPage() {

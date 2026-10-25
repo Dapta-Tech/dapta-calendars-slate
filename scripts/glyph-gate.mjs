@@ -67,6 +67,21 @@ const ALLOW = [
     contains: 'desde Configuración → Miembros',
     why: 'the same breadcrumb, in Spanish',
   },
+  {
+    file: 'packages/shared/src/i18n/index.ts',
+    contains: '**Connectors → Add connector → Add custom connector**',
+    why: "a breadcrumb through Claude's own menus, inside a step of the connect guide; Claude names them in English in both locales",
+  },
+  {
+    file: 'packages/shared/src/i18n/index.ts',
+    contains: '**Connectors → Browse connectors**',
+    why: "a breadcrumb through Claude's own menus, inside a step of the connect guide (both locales)",
+  },
+  {
+    file: 'packages/shared/src/i18n/index.ts',
+    contains: '**Customize → MCPs → New MCP Server**',
+    why: "a breadcrumb through Cursor's own settings, inside a step of the connect guide (both locales)",
+  },
 ];
 
 /**

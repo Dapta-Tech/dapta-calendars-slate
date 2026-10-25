@@ -111,7 +111,7 @@ describe('discovery', () => {
         authorization_servers: [as.issuer],
         bearer_methods_supported: ['header'],
         scopes_supported: [],
-        resource_name: 'Dapta Calendars',
+        resource_name: 'dCal',
       });
     }
   });
