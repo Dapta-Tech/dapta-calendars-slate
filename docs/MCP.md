@@ -46,15 +46,19 @@ workspace, a booking outside the key's allowlist) is reported as `NOT_FOUND`.
 | `list_pending_bookings` | `bookings:read` | read | Requests waiting for the host to confirm or decline, same minimal fields. |
 | `get_booking` | `bookings:read` | read | One booking. Invitee name, email, notes and intake answers sit inside `invitee_supplied`. |
 | `create_booking` | `bookings:write` | write, emails the invitee | Books an offered slot on any event type of the workspace. Takes an optional `hold_id`. |
-| `reschedule_booking` | `bookings:write` | write, emails the invitee | Moves a booking to a new offered slot. The booking gets a **new uid**. |
+| `reschedule_booking` | `bookings:write` | **destructive**, emails the invitee | Moves a booking to a new offered slot. The original is replaced by a booking with a **new uid**, linked to it. |
 | `confirm_booking` | `bookings:write` | write, emails the invitee | Accepts a pending request, the way the host's Confirm button does. |
 | `decline_booking` | `bookings:write` | **destructive**, emails the invitee | Declines a pending request and frees its time. Never touches an accepted booking. |
 | `cancel_booking` | `bookings:cancel` | **destructive**, emails the invitee | Cancels. The scope is separate from `bookings:write` on purpose. |
 
 Every tool carries a title, `readOnlyHint` / `destructiveHint` / `idempotentHint` /
 `openWorldHint`, an input schema, and an output schema with `structuredContent`
-(plus a short text summary). Not exposed over MCP: webhooks, API keys, team
-administration, event-type edits.
+(plus a short text summary). Destructive means the tool cancels, declines or
+replaces a booking; open world means it emails people or writes to a host's
+calendar. Descriptions and the server instructions say what a tool does and
+never give the model orders, as the Claude and ChatGPT connector directories
+require; `apps/api/src/mcp/directory-review.spec.ts` pins all of this. Not
+exposed over MCP: webhooks, API keys, team administration, event-type edits.
 
 Every tool that acts on the caller's account (all but `book_meeting` and
 `list_my_accounts`) takes an optional `account_id`. A key or a sign-in that
@@ -430,6 +434,38 @@ token.
   latency. It never contains the key, names, emails, notes, answers or
   idempotency keys. Refused validation (a malformed call the SDK rejects before
   our code runs) is not audited.
+- **Usage analytics.** With product analytics configured
+  (`PRODUCT_ANALYTICS_PROVIDER` and its key), the API also enqueues one
+  `$mcp_tool_call` event per tool call through the analytics outbox (PostHog's
+  MCP analytics names, so no `calendars_` prefix, and
+  `$mcp_server_name: 'dCal'`): tool name, error flag and error code as a
+  lowercase label, duration, protocol version, client name, version and user
+  agent, the AI vendor when a header names it, server version,
+  `credential_type` (`api_key`, `oauth` or `none`), `is_internal` and
+  `staff_access`, plus `product`, the account's code and `$host` like every
+  server event. Client names and versions are caller text: one that is not a
+  plain label (letters, digits, spaces and `._()+-`, an optional npm scope,
+  nothing host-shaped or redacted) is sent as `other`, and the user agent is
+  reduced to its product tokens (a dot-free name, then a numeric version with
+  at most a pre-release tag, such as `claude-code/2.1.0`), with IP addresses
+  and keys redacted and at most 200 characters: comments, bare words, hosts,
+  ports, paths and free suffixes are dropped. Client
+  name and version usually arrive only from clients that send the per-call
+  `_meta` envelope; most clients send them on `initialize` alone, which is not
+  reported, so expect them to be missing on many events. Who it is about: a
+  call acting as a member (an OAuth connection, or a sign-in in an account) is
+  sent under the member's email and grouped by the account (no email on file:
+  not sent); an API key under its public prefix, grouped by its account; a
+  sign-in that acts in no account under a hashed per-person id (never the
+  external server's subject); a call with no credential under one constant id.
+  Events not sent under a member's email create no person profile. Never the
+  arguments (not even their hash), the result, an error message, an invitee's
+  name or email, a booking id, an account name, or the caller's address. Only
+  tool calls are sent, never `initialize` or `tools/list`. **Never reported,
+  so read error rates as a floor:** requests refused at the door (401, 403,
+  429), messages the SDK rejects as malformed before any tool runs, and calls
+  refused as `RATE_LIMITED`. Reporting runs after the tool has answered and is
+  never awaited by it, and with analytics off nothing is read or enqueued.
 - **Least privilege.** Separate read, write and cancel scopes, plus the optional
   event-type allowlist on the key. Create keys with only what the agent needs.
 

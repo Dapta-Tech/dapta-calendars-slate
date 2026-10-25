@@ -421,7 +421,7 @@ function mcpToolsMd({ mcpUrl, appUrl, productName }: SkillInputs): string {
 
 ${where}
 
-Read tools only look. Write tools change the calendar. Destructive ones cannot be undone: ask the user first.
+Read tools only look. Write tools change the calendar. Destructive ones cancel, decline or replace a booking: ask the user first.
 
 | Tool | Kind | Access it needs | What it does |
 |---|---|---|---|

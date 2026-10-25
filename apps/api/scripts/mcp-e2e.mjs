@@ -25,6 +25,8 @@ import { randomUUID } from 'node:crypto';
 import { createApiKey, createDb, migrate, seed, sql } from '@slate/db';
 
 const apiDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** Every MCP request says it is this script, so usage analytics can filter its calls out. */
+const USER_AGENT = 'dcal-mcp-e2e/1';
 const port = Number(process.argv[2] ?? 4792);
 const dir = mkdtempSync(join(tmpdir(), 'mcp-e2e-'));
 const databaseUrl = `file:${join(dir, 'e2e.db')}`;
@@ -86,7 +88,7 @@ try {
   // 1. A legacy (2025-era) initialize handshake, no session.
   const legacy = await fetch(`${base}/mcp`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'user-agent': USER_AGENT },
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
@@ -95,12 +97,12 @@ try {
     }),
   });
   const legacyText = await legacy.text();
-  if (legacy.status !== 200 || !legacyText.includes('dapta-calendars')) fail(`legacy initialize: ${legacy.status} ${legacyText}`);
+  if (legacy.status !== 200 || !legacyText.includes('"dcal"')) fail(`legacy initialize: ${legacy.status} ${legacyText}`);
   say(`legacy initialize (2025-06-18) -> ${legacy.status}, no session id: ${legacy.headers.get('mcp-session-id') === null}`);
 
   // 2. The SDK client, anonymous: public tools only.
   const anon = new Client({ name: 'e2e-anon', version: '1' });
-  await anon.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  await anon.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { 'user-agent': USER_AGENT } } }));
   const tools = (await anon.listTools()).tools.map((t) => t.name);
   say(`anonymous tools/list -> ${tools.length} tools: ${tools.join(', ')}`);
   if (tools.length !== 17) fail('expected 17 tools');
@@ -110,7 +112,7 @@ try {
 
   // 3. The same client with a key: the whole lifecycle.
   const c = new Client({ name: 'e2e-key', version: '1' });
-  await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${key}` } } }));
+  await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${key}`, 'user-agent': USER_AGENT } } }));
   const who = (await c.callTool({ name: 'whoami', arguments: {} })).structuredContent;
   say(`whoami -> account ${who.account.code}, key ${who.key.prefix}, ${who.key.scopes.length} scopes`);
   const types = (await c.callTool({ name: 'list_event_types', arguments: {} })).structuredContent.event_types;
@@ -196,7 +198,7 @@ try {
   if (keyHeld.isError) fail(`hold_slot with a key: ${keyHeld.content[0].text}`);
   const keyHold = keyHeld.structuredContent.hold;
   const o = new Client({ name: 'e2e-other-key', version: '1' });
-  await o.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${otherKey}` } } }));
+  await o.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${otherKey}`, 'user-agent': USER_AGENT } } }));
   const byKey = (client, name, key) =>
     client.callTool({
       name: 'create_booking',

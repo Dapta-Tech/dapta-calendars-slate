@@ -520,7 +520,7 @@ export class OAuthService implements OnModuleDestroy {
       // The minimal set; writes and cancel arrive by step-up. Never offline_access.
       scopes_supported: [...BASELINE_SCOPES],
       bearer_methods_supported: ['header'],
-      resource_name: 'Dapta Calendars',
+      resource_name: 'dCal',
     };
   }
 

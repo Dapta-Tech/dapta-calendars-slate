@@ -6,15 +6,17 @@ enqueues nothing and makes no request. Turning it on is described in
 [`SELF-HOSTING.md`](SELF-HOSTING.md#product-analytics-optional); this page is
 the event catalogue and the privacy model behind it.
 
-## Two audiences, two rules
+## Three audiences, three rules
 
 | Who | Identified? | How |
 |---|---|---|
 | **Hosts**: people who sign in (dashboard, first-run wizard) | Yes, by **email**, the same id on server and browser events | Server events from the API, plus dashboard pageviews and two clicks from the browser |
 | **Visitors**: anyone on a public booking page | **Never** | Anonymous counts tagged with the page's account. No person profile, nothing stored on the device (memory only), no session recording, no autocapture |
+| **Agents**: MCP clients calling tools | By the **credential** behind the call | One `$mcp_tool_call` per tool call, from the API. A call acting as a member (an OAuth connection, or a sign-in in an account) is filed under the **member's email**; an API key under its **public prefix** (`dcl_<8hex>`); a sign-in that acts in no account under a **hashed per-person id** (never the sign-in server's subject); a call with no credential under one constant, `dcal-mcp-anonymous`. Only the member's email creates a person profile; the others are sent with `$process_person_profile: false` |
 
 What is **never** sent, on any surface: a visitor's name, email, phone or
-answers; anything typed into a form; a query string or fragment of any URL; a
+answers; anything typed into a form; an MCP tool call's arguments, result or
+error message; a query string or fragment of any URL; a
 paid click id (`gclid`, `fbclid`, ...; reduced to a `has_click_id` flag on the
 server's `attribution_captured`); a full referrer URL (reduced to its domain on
 server events and to its origin on visitor events). Session recording,
@@ -53,7 +55,10 @@ is not serialized.
 
 ## Naming
 
-- Every event is prefixed **`calendars_`**, applied centrally, never at a call site.
+- Every event is prefixed **`calendars_`**, applied centrally, never at a call
+  site. The one exception is `$mcp_tool_call`, PostHog's own MCP analytics
+  name, which its MCP screens read as is: `AnalyticsEffects.captureRaw` lets
+  only `$mcp_*` names skip the prefix and refuses any other.
 - Every event carries `product: "calendars"`.
 - The account group type is **`calendars_account`**, keyed by the account's
   **short code**: the six-character code it was born with, which never changes
@@ -64,7 +69,10 @@ is not serialized.
 - `is_internal` marks the operator's own people, from
   `PRODUCT_ANALYTICS_INTERNAL_EMAILS`: on host events it describes the person
   the event is about; on the account group it describes the founder, so an
-  operator visiting a customer's workspace never marks it internal.
+  operator visiting a customer's workspace never marks it internal. On an MCP
+  tool call made with an API key it describes the account's oldest owner
+  (usually the founder, not always after an ownership change); with no
+  member and no account it is false.
 - Server events carry `$host` (from `PUBLIC_APP_URL`), so they filter by
   deployment the same way browser events do.
 
@@ -92,6 +100,7 @@ the deployment prunes it.
 | `calendars_booking_created` | A booking is created (not on an idempotent replay, nor a seat taken on an existing group booking). About the **host** who received it | `channel` (`booking_page`, `host`, `api`), `status`, `is_team`, `invitee_is_member`, `invitee_is_internal` |
 | `calendars_invite_sent` | An admin invites someone to the workspace, or resends a pending invitation. About the **admin** who sent it | `role` (the role offered), `resend`, `delivery` (`queued`, or `off` when this deployment sends no mail) |
 | `calendars_invite_accepted` | An invitation turns active: the invitee joins from the switcher or the invitation page, or a login through a token for that account adopts it. About the **invitee** | `role` |
+| `$mcp_tool_call` | An MCP tool call finished, whatever its result. Not `initialize` or `tools/list`, not a request refused at the door (401, 403, 429) or a message the SDK rejects as malformed, and never a call refused as `RATE_LIMITED`, so error rates are a floor. About the **agent's credential** (see the audiences above). Takes no place in the account's outbox order lane | `$mcp_tool_name`, `$mcp_resource_name` (both the tool), `$mcp_is_error`, `$mcp_error_type` (the error code as a lowercase label), `$mcp_duration_ms`, `$mcp_protocol_version`, `$mcp_client_name` and `$mcp_client_version` (a plain, not host-shaped label or `other`; usually only from clients that send the per-call `_meta` envelope), `$mcp_client_user_agent` (only the product tokens: a dot-free name and a numeric version with at most a pre-release tag, IP addresses and keys redacted; 200 characters at most), `$mcp_vendor_client` (`anthropic`, `openai`), `$mcp_server_name` (`dCal`), `$mcp_server_version`, `$mcp_source` (`posthog_mcp_analytics`), `credential_type` (`api_key`, `oauth`, `none`), `staff_access` (the same as `is_internal`, the name dForms uses), `$process_person_profile: false` unless filed under a member's email. Details in [`docs/MCP.md`](docs/MCP.md) |
 
 ### Browser, host (dashboard and wizard only)
 

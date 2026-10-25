@@ -183,7 +183,7 @@ export const MCP_TOOLS: readonly ToolInfo[] = [
   { name: 'list_pending_bookings', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'get_booking', kind: 'read', scope: 'bookings:read', publicOk: false },
   { name: 'create_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
-  { name: 'reschedule_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
+  { name: 'reschedule_booking', kind: 'destructive', scope: 'bookings:write', publicOk: false },
   { name: 'confirm_booking', kind: 'write', scope: 'bookings:write', publicOk: false },
   { name: 'decline_booking', kind: 'destructive', scope: 'bookings:write', publicOk: false },
   { name: 'cancel_booking', kind: 'destructive', scope: 'bookings:cancel', publicOk: false },
