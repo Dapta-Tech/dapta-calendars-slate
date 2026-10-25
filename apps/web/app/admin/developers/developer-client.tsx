@@ -12,8 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Select } from '@/components/ui/select';
 import type { ApiKeyRow, WebhookRow } from '@/lib/admin-api';
-import { EXPIRY_PRESET_DAYS, expiryState, SCOPE_CATALOG, scopeLabel, toMs } from '@/lib/mcp-connect';
-import { KindChip } from './connect-agent';
+import { cn } from '@/lib/cn';
+import { EXPIRY_PRESET_DAYS, expiryState, SCOPE_CATALOG, scopeLabel, toMs, type ToolKind } from '@/lib/mcp-connect';
 import {
   createApiKeyAction,
   createWebhookAction,
@@ -27,6 +27,22 @@ import {
 type DevMessages = BookingMessages['admin']['developer'];
 
 const DEFAULT_SCOPES = ['availability:read'];
+
+const KIND_CLASS: Record<ToolKind, string> = {
+  read: 'bg-muted text-muted-foreground',
+  write: 'bg-warning/20 text-foreground',
+  destructive: 'bg-destructive/15 text-destructive',
+};
+
+/** What a scope lets a key do (read, write, or a change that cannot be undone), beside it in the create form. */
+function KindChip({ kind, m }: { kind: ToolKind; m: DevMessages }) {
+  const label = kind === 'read' ? m.kindRead : kind === 'write' ? m.kindWrite : m.kindDestructive;
+  return (
+    <span className={cn('inline-flex shrink-0 items-center rounded-full px-inline py-tight text-xs font-medium', KIND_CLASS[kind])}>
+      {label}
+    </span>
+  );
+}
 
 /** A fixed, locale-free date so server and client render the same text. */
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -79,9 +95,6 @@ export function ApiKeys({
   now,
   messages: m,
   locale,
-  createOpen,
-  onCreateOpenChange,
-  showCreate = true,
 }: {
   keys: ApiKeyRow[];
   /** For the optional allowlist; empty hides the picker. */
@@ -91,15 +104,8 @@ export function ApiKeys({
   messages: DevMessages;
   /** Active admin locale — the ConfirmDialog's own confirm/cancel copy. */
   locale?: Locale;
-  /** The create dialog, when something else on the page opens it too (the setup guide). */
-  createOpen?: boolean;
-  onCreateOpenChange?: (open: boolean) => void;
-  /** Off while the setup guide's first step holds the page's one Create (R30). */
-  showCreate?: boolean;
 }) {
-  const [ownOpen, setOwnOpen] = useState(false);
-  const open = createOpen ?? ownOpen;
-  const setOpen = onCreateOpenChange ?? setOwnOpen;
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<string[]>(DEFAULT_SCOPES);
   const [limitTypes, setLimitTypes] = useState(false);
@@ -112,11 +118,9 @@ export function ApiKeys({
   const { success, error } = useToast();
   const { confirm, dialog } = useConfirmDialog(locale);
 
-  // The new key is shown once, here, below the setup guide: from the guide's
-  // step 1 that is a screen or more away, and the button that opened the dialog
-  // is gone as soon as a key exists, so the dialog has nothing to hand focus
-  // back to. Bring the key into view and put focus on it instead. Runs after
-  // the dialog's own focus restore (cleanups first), so it wins.
+  // The new key is shown once, here: bring it into view and put focus on it,
+  // so it is read and copied before anything else. Runs after the dialog's
+  // own focus restore (cleanups first), so it wins.
   useEffect(() => {
     if (!reveal) return;
     revealRef.current?.scrollIntoView({ block: 'center' });
@@ -168,11 +172,9 @@ export function ApiKeys({
     <section className="mb-section">
       <div className="mb-tight flex flex-wrap items-center justify-between gap-field">
         <h2 className="text-xl font-semibold">{m.apiKeys}</h2>
-        {showCreate ? (
-          <Button size="lg" onClick={() => setOpen(true)}>
-            {m.createKey}
-          </Button>
-        ) : null}
+        <Button size="lg" onClick={() => setOpen(true)}>
+          {m.createKey}
+        </Button>
       </div>
       {/* What this section is FOR — the page assumed its audience (QA2 fix 4). */}
       <p className="mb-field max-w-prose text-sm text-muted-foreground">{m.apiKeysLead}</p>

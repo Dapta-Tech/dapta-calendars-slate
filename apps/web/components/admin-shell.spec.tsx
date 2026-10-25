@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 /**
- * The rail's MCP group and Docs item, driven like a person would: who sees
- * them, the accordion in the wide rail and the mobile drawer, the flyout menu
- * on the collapsed rail (arrow keys, Escape, focus handed back), and the Docs
- * link leaving the app in a new tab.
+ * The rail's agent items ("Connect your agent", "Tools"), its "API and
+ * webhooks" group and its Docs item, driven like a person would: who sees
+ * them, the prominent connect row and its turning logos, the group's accordion
+ * in the wide rail and the mobile drawer, its flyout menu on the collapsed rail
+ * (arrow keys, Escape, focus handed back), and the Docs link leaving the app in
+ * a new tab.
  *
  * Both rails are in the markup at once (the drawer is translated off screen,
  * not unmounted), so one render covers the desktop rail and the drawer.
@@ -129,48 +131,123 @@ function rails(el: HTMLElement) {
   return { desktop: desktop!, drawer: drawer! };
 }
 
-const trigger = (rail: Element) => rail.querySelector<HTMLButtonElement>('[data-testid="nav-developers"]');
+const trigger = (rail: Element) => rail.querySelector<HTMLButtonElement>('[data-testid="nav-api"]');
+const connectLink = (rail: Element) => rail.querySelector<HTMLAnchorElement>('[data-testid="nav-connect"]');
+const toolsLink = (rail: Element) => rail.querySelector<HTMLAnchorElement>('[data-testid="nav-tools"]');
 const docsLink = (rail: Element) => rail.querySelector<HTMLAnchorElement>('[data-testid="nav-docs"]');
 const press = (el: Element, key: string) =>
   act(async () => {
     el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   });
 
-describe('AdminShell: the MCP group', () => {
-  it('is in both rails for an owner or admin, after Settings, with the rotating logos as its icon', async () => {
+describe('AdminShell: Connect your agent and Tools', () => {
+  it('follow Settings in both rails for an owner or admin, then the API and webhooks group', async () => {
     const el = await mount({});
     for (const rail of Object.values(rails(el))) {
-      const button = trigger(rail);
-      expect(button).not.toBeNull();
-      expect(button!.textContent).toContain('MCP');
-      const logos = Array.from(button!.querySelectorAll('[data-logo]')).map((l) => l.getAttribute('data-logo'));
-      expect(logos).toEqual(['claude', 'openai', 'cursor']);
-      expect(button!.querySelector('[data-testid="mcp-logos"]')!.getAttribute('aria-hidden')).toBe('true');
-      // After Settings, before Docs: the order dForms uses for the same two items.
       const labels = Array.from(rail.querySelectorAll('nav > ul > li')).map((li) => li.textContent?.trim());
-      expect(labels.indexOf('Settings')).toBe(labels.findIndex((l) => l?.startsWith('MCP')) - 1);
+      const at = labels.indexOf('Settings');
+      expect(labels.slice(at, at + 4)).toEqual(['Settings', 'Connect your agent', 'Tools', 'API and webhooks']);
+      expect(connectLink(rail)!.getAttribute('href')).toBe('/admin/developers/connect');
+      expect(toolsLink(rail)!.getAttribute('href')).toBe('/admin/developers/tools');
     }
   });
 
-  it('is not there for a plain member, who could only reach "no access" through it', async () => {
+  it('are not there for a plain member, who could only reach "no access" or a sign-in that fails', async () => {
     const el = await mount({ isAdmin: false });
-    expect(el.querySelector('[data-testid="nav-developers"]')).toBeNull();
+    for (const id of ['nav-connect', 'nav-tools', 'nav-api']) expect(el.querySelector(`[data-testid="${id}"]`)).toBeNull();
     expect(el.innerHTML).not.toContain('/admin/developers');
   });
 
+  it('draws Connect your agent as the prominent row, with the five logos as its icon, glowing until you are on it', async () => {
+    const el = await mount({ pathname: '/admin/bookings' });
+    for (const rail of Object.values(rails(el))) {
+      const a = connectLink(rail)!;
+      expect(a.dataset.prominent).toBe('true');
+      expect(a.className.split(' ')).toContain('rail-pulse');
+      const logos = Array.from(a.querySelectorAll('[data-logo]')).map((l) => l.getAttribute('data-logo'));
+      expect(logos).toEqual(['claude', 'openai', 'cursor', 'openclaw', 'hermes']);
+      expect(a.querySelector('[data-testid="mcp-logos"]')!.getAttribute('aria-hidden')).toBe('true');
+      expect(toolsLink(rail)!.dataset.prominent).toBeUndefined();
+      expect(toolsLink(rail)!.className).not.toContain('rail-pulse');
+    }
+    await navigate('/admin/developers/connect');
+    const a = connectLink(rails(el).desktop)!;
+    expect(a.getAttribute('aria-current')).toBe('page');
+    expect(a.className.split(' ')).not.toContain('rail-pulse');
+    expect(a.className).toContain('bg-signal/15');
+  });
+
+  it('keeps the connect row\'s name on the collapsed rail, where only the logos show', async () => {
+    const el = await mount({ collapsed: true });
+    const a = connectLink(rails(el).desktop)!;
+    expect(a.getAttribute('title')).toBe('Connect your agent');
+    expect(a.querySelector('.sr-only')!.textContent).toBe('Connect your agent');
+  });
+
+  it('turns the logos, holds them under the pointer and keyboard focus, and never in the closed drawer', async () => {
+    vi.useFakeTimers();
+    try {
+      const el = await mount({});
+      const { desktop, drawer } = rails(el);
+      expect(activeLogo(desktop)).toBe('claude');
+      await act(async () => vi.advanceTimersByTime(1600));
+      expect(activeLogo(desktop)).toBe('openai');
+      // Off screen: the closed drawer's copy has not moved.
+      expect(activeLogo(drawer)).toBe('claude');
+
+      await act(async () => connectLink(desktop)!.focus());
+      await act(async () => vi.advanceTimersByTime(1600 * 2));
+      expect(activeLogo(desktop)).toBe('openai');
+      await act(async () => connectLink(desktop)!.blur());
+      await act(async () => vi.advanceTimersByTime(1600));
+      expect(activeLogo(desktop)).toBe('cursor');
+
+      // jsdom has no PointerEvent; React reads the pointer entering the row
+      // from a pointerover that comes from outside the page.
+      await act(async () => {
+        connectLink(desktop)!.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+      });
+      await act(async () => vi.advanceTimersByTime(1600 * 2));
+      expect(activeLogo(desktop)).toBe('cursor');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads in Spanish for a Spanish reader', async () => {
+    const el = await mount({ locale: 'es' });
+    const { desktop } = rails(el);
+    expect(connectLink(desktop)!.textContent).toBe('Conecta tu agente');
+    expect(toolsLink(desktop)!.textContent).toBe('Herramientas');
+    expect(trigger(desktop)!.textContent).toContain('API y webhooks');
+  });
+});
+
+describe('AdminShell: the API and webhooks group', () => {
   it('opens by itself on one of its pages and marks that page, in the rail and the drawer', async () => {
     const el = await mount({ pathname: '/admin/developers/webhooks' });
     for (const rail of Object.values(rails(el))) {
       expect(trigger(rail)!.getAttribute('aria-expanded')).toBe('true');
-      const pages = rail.querySelector('[data-testid="nav-developers-pages"]')!;
+      const pages = rail.querySelector('[data-testid="nav-api-pages"]')!;
       expect(trigger(rail)!.getAttribute('aria-controls')).toBe(pages.id);
       const links = Array.from(pages.querySelectorAll('a'));
       expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
-        ['Connect and keys', '/admin/developers/keys'],
+        ['API keys', '/admin/developers/keys'],
         ['Webhooks', '/admin/developers/webhooks'],
         ['API docs', '/admin/developers/docs'],
       ]);
       expect(links.map((a) => a.getAttribute('aria-current'))).toEqual([null, 'page', null]);
+    }
+  });
+
+  it('stays closed and unmarked on the connect guide and Tools, which share its address prefix', async () => {
+    for (const path of ['/admin/developers/connect', '/admin/developers/tools']) {
+      const el = await mount({ pathname: path });
+      const button = trigger(rails(el).desktop)!;
+      expect(button.getAttribute('aria-expanded'), path).toBe('false');
+      expect(button.hasAttribute('data-current'), path).toBe(false);
+      act(() => root?.unmount());
+      host?.remove();
     }
   });
 
@@ -179,12 +256,12 @@ describe('AdminShell: the MCP group', () => {
     const { desktop } = rails(el);
     const button = trigger(desktop)!;
     expect(button.getAttribute('aria-expanded')).toBe('false');
-    expect(desktop.querySelector('[data-testid="nav-developers-pages"]')).toBeNull();
+    expect(desktop.querySelector('[data-testid="nav-api-pages"]')).toBeNull();
     await act(async () => button.click());
     expect(button.getAttribute('aria-expanded')).toBe('true');
-    expect(desktop.querySelectorAll('[data-testid="nav-developers-pages"] a')).toHaveLength(3);
+    expect(desktop.querySelectorAll('[data-testid="nav-api-pages"] a')).toHaveLength(3);
     await act(async () => button.click());
-    expect(desktop.querySelector('[data-testid="nav-developers-pages"]')).toBeNull();
+    expect(desktop.querySelector('[data-testid="nav-api-pages"]')).toBeNull();
   });
 
   it('is a menu button on the collapsed rail: arrows move, Escape closes and hands focus back', async () => {
@@ -194,15 +271,15 @@ describe('AdminShell: the MCP group', () => {
     expect(button.getAttribute('aria-haspopup')).toBe('menu');
     expect(button.getAttribute('aria-expanded')).toBe('false');
     // Icon only, but the name is still there for a screen reader.
-    expect(button.querySelector('.sr-only')!.textContent).toBe('MCP');
+    expect(button.querySelector('.sr-only')!.textContent).toBe('API and webhooks');
 
     await act(async () => button.click());
-    const menu = document.querySelector<HTMLElement>('[data-testid="nav-developers-flyout"]')!;
+    const menu = document.querySelector<HTMLElement>('[data-testid="nav-api-flyout"]')!;
     expect(menu.getAttribute('role')).toBe('menu');
-    expect(menu.getAttribute('aria-label')).toBe('MCP');
+    expect(menu.getAttribute('aria-label')).toBe('API and webhooks');
     expect(button.getAttribute('aria-expanded')).toBe('true');
     const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(items.map((i) => i.textContent)).toEqual(['Connect and keys', 'Webhooks', 'API docs']);
+    expect(items.map((i) => i.textContent)).toEqual(['API keys', 'Webhooks', 'API docs']);
     expect(items[0]!.getAttribute('aria-current')).toBe('page');
     expect(document.activeElement).toBe(items[0]);
 
@@ -216,18 +293,18 @@ describe('AdminShell: the MCP group', () => {
     expect(document.activeElement).toBe(items[2]);
 
     await press(document.activeElement!, 'Escape');
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
     expect(document.activeElement).toBe(button);
   });
 
-  it('closes the flyout on Tab and puts focus back on the MCP item, so Tab moves on from there', async () => {
+  it('closes the flyout on Tab and puts focus back on the group, so Tab moves on from there', async () => {
     const el = await mount({ pathname: '/admin', collapsed: true });
     const { desktop } = rails(el);
     const button = trigger(desktop)!;
     await act(async () => button.click());
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).not.toBeNull();
     await press(document.activeElement!, 'Tab');
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
     expect(document.activeElement).toBe(button);
   });
 
@@ -240,30 +317,8 @@ describe('AdminShell: the MCP group', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
     await navigate('/admin/developers/docs');
     expect(button.getAttribute('aria-expanded')).toBe('true');
-    const current = rails(el).desktop.querySelector('[data-testid="nav-developers-pages"] [aria-current="page"]');
+    const current = rails(el).desktop.querySelector('[data-testid="nav-api-pages"] [aria-current="page"]');
     expect(current?.textContent).toBe('API docs');
-  });
-
-  it('turns the logos, holds them under keyboard focus, and never in the closed drawer', async () => {
-    vi.useFakeTimers();
-    try {
-      const el = await mount({});
-      const { desktop, drawer } = rails(el);
-      expect(activeLogo(desktop)).toBe('claude');
-      await act(async () => vi.advanceTimersByTime(2600));
-      expect(activeLogo(desktop)).toBe('openai');
-      // Off screen: the closed drawer's copy has not moved.
-      expect(activeLogo(drawer)).toBe('claude');
-
-      await act(async () => trigger(desktop)!.focus());
-      await act(async () => vi.advanceTimersByTime(2600 * 2));
-      expect(activeLogo(desktop)).toBe('openai');
-      await act(async () => trigger(desktop)!.blur());
-      await act(async () => vi.advanceTimersByTime(2600));
-      expect(activeLogo(desktop)).toBe('cursor');
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('closes the flyout on a click elsewhere, and after a page is picked', async () => {
@@ -271,21 +326,21 @@ describe('AdminShell: the MCP group', () => {
     const { desktop } = rails(el);
     const button = trigger(desktop)!;
     await act(async () => button.click());
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).not.toBeNull();
     await act(async () => {
       el.querySelector('main')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
 
     await act(async () => button.click());
-    await act(async () => document.querySelector<HTMLElement>('[data-testid="nav-developers-flyout-docs"]')!.click());
-    expect(document.querySelector('[data-testid="nav-developers-flyout"]')).toBeNull();
+    await act(async () => document.querySelector<HTMLElement>('[data-testid="nav-api-flyout-docs"]')!.click());
+    expect(document.querySelector('[data-testid="nav-api-flyout"]')).toBeNull();
   });
 
   it('reads in Spanish for a Spanish reader', async () => {
     const el = await mount({ pathname: '/admin/developers/keys', locale: 'es' });
-    const pages = rails(el).desktop.querySelectorAll('[data-testid="nav-developers-pages"] a');
-    expect(Array.from(pages).map((a) => a.textContent)).toEqual(['Conexión y claves', 'Webhooks', 'Docs de la API']);
+    const pages = rails(el).desktop.querySelectorAll('[data-testid="nav-api-pages"] a');
+    expect(Array.from(pages).map((a) => a.textContent)).toEqual(['Claves API', 'Webhooks', 'Docs de la API']);
   });
 });
 
@@ -351,15 +406,15 @@ describe('AdminShell: the dForms rail look', () => {
     }
   });
 
-  it('marks the MCP group as the current row when its page is folded inside it', async () => {
+  it('marks the API and webhooks group as the current row when its page is folded inside it', async () => {
     const collapsed = rails(await mount({ pathname: '/admin/developers/keys', collapsed: true })).desktop;
-    expect(collapsed.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(true);
+    expect(collapsed.querySelector('[data-testid="nav-api"]')!.hasAttribute('data-current')).toBe(true);
     act(() => root?.unmount());
     host?.remove();
     // Open in the wide rail, the page's own row is the current one, not the group.
     const wide = rails(await mount({ pathname: '/admin/developers/keys' })).desktop;
-    expect(wide.querySelector('[data-testid="nav-developers"]')!.hasAttribute('data-current')).toBe(false);
-    expect(wide.querySelector('[aria-current="page"]')!.textContent).toBe('Connect and keys');
+    expect(wide.querySelector('[data-testid="nav-api"]')!.hasAttribute('data-current')).toBe(false);
+    expect(wide.querySelector('[aria-current="page"]')!.textContent).toBe('API keys');
   });
 
   it('marks the current row with the wash and the accent bar, and no other row', async () => {

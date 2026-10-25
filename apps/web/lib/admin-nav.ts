@@ -17,11 +17,19 @@ export type NavIcon =
   | 'calendarPlus'
   | 'cog'
   | 'mcp'
+  | 'tools'
+  | 'api'
   | 'book'
   | 'agents';
 
-/** The MCP group: the pages under it, and the prefix that marks it active. */
+/**
+ * Everything for agents and builders lives under `/admin/developers`: the
+ * connect guide and the Tools page (rail items of their own), then the API
+ * keys, webhooks and API docs (the "API and webhooks" group).
+ */
 export const DEVELOPERS_HREF = '/admin/developers';
+export const DEVELOPERS_CONNECT_HREF = '/admin/developers/connect';
+export const DEVELOPERS_TOOLS_HREF = '/admin/developers/tools';
 export const DEVELOPERS_KEYS_HREF = '/admin/developers/keys';
 export const DEVELOPERS_WEBHOOKS_HREF = '/admin/developers/webhooks';
 export const DEVELOPERS_DOCS_HREF = '/admin/developers/docs';
@@ -43,14 +51,19 @@ export interface NavItem {
   key: keyof AdminMessages['nav'];
   href: string;
   icon: NavIcon;
-  /** Active when the path starts with any of these (in addition to href). */
+  /** Active when the path starts with any of these (instead of href). */
   match?: string[];
   /** Leaves the app: a plain anchor in a new tab, never `aria-current`. */
   external?: true;
   /**
+   * The rail's one call to action: a tinted row that breathes a soft glow
+   * until you are on it, as the dForms rail draws the same item.
+   */
+  prominent?: true;
+  /**
    * Pages under this item. The item becomes a disclosure instead of a link: an
    * accordion in the wide rail and the drawer, a flyout menu on the collapsed
-   * rail. `href` is then the prefix that marks the group active.
+   * rail. `match` (or `href`) then marks the group active.
    */
   children?: readonly SubNavItem[];
 }
@@ -69,16 +82,35 @@ const PRODUCT_NAV: readonly NavItem[] = [
   { key: 'settings', href: '/admin/settings', icon: 'cog' },
 ];
 
+/** Connect your agent, Tools, then the API and webhooks group (owners and admins only). */
+const AGENT_NAV: readonly NavItem[] = [
+  { key: 'connect', href: DEVELOPERS_CONNECT_HREF, icon: 'mcp', prominent: true },
+  { key: 'tools', href: DEVELOPERS_TOOLS_HREF, icon: 'tools' },
+  {
+    key: 'api',
+    href: DEVELOPERS_HREF,
+    icon: 'api',
+    // The group is its three pages, not the whole `/admin/developers` prefix,
+    // which the connect guide and Tools share.
+    match: DEVELOPER_PAGES.map((page) => page.href),
+    children: DEVELOPER_PAGES,
+  },
+];
+
 /**
- * The rail for one viewer, in the order Dapta's other sidecar (dForms) uses for
- * the same two items: the product's own pages first, then "MCP", then "Docs".
+ * The rail for one viewer, in the order Dapta's other sidecar (dForms) uses:
+ * the product's own pages first, then "Connect your agent" and "Tools", then
+ * "Docs".
  *
- * MCP (keyed `developers`) holds the agent and API surface: connecting an agent
- * and its keys, webhooks, and the docs for what a key can call. Its own item
- * rather than a Settings tab, so it is found without being looked for, and its
- * icon is the rotating Claude, ChatGPT and Cursor logos. Only owners and admins
- * get it: the API refuses keys and webhooks to a plain member, and an item that
- * leads to "no access" is worse than no item.
+ * "Connect your agent" is the guide that connects an AI app to the MCP server
+ * with the person's account: its own prominent item (`prominent`), so it is
+ * found without being looked for, and its icon is the rotating AI app logos.
+ * "Tools" says what a connected agent can do, in plain words. After them, a
+ * quiet "API and webhooks" group holds what builders use: API keys, webhooks
+ * and the API docs. Only owners and admins get any of the three: a sign-in
+ * reaches only the workspaces where the person is an owner or admin, and the
+ * API refuses keys and webhooks to a plain member, so for a member each would
+ * lead to "no access" or to a connection that fails.
  *
  * Docs is the product documentation in the reader's language, external,
  * because it leaves the app. It exists only when the deployment says where its
@@ -101,9 +133,7 @@ export function adminNav({
 }): NavItem[] {
   return [
     ...PRODUCT_NAV,
-    ...(isAdmin
-      ? [{ key: 'developers', href: DEVELOPERS_HREF, icon: 'mcp', children: DEVELOPER_PAGES } as const]
-      : []),
+    ...(isAdmin ? AGENT_NAV : []),
     ...(docsHref ? [{ key: 'docs', href: docsHref, icon: 'book', external: true } as const] : []),
     ...(platformHref ? [{ key: 'agents', href: platformHref, icon: 'agents', external: true } as const] : []),
   ];

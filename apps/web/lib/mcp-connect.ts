@@ -1,33 +1,34 @@
 /**
- * Pure builders for the MCP pages: the Cursor deeplink, the config
- * snippets for each agent, the scope catalog and the tool list.
+ * Pure builders for the MCP pages: the snippet each AI app needs to connect,
+ * the scope catalog and the tool list.
  *
  * Nothing here reads the environment or the DOM, so the same functions run on the
  * server (the MCP URL is resolved there, at runtime, see `mcp-config.ts`) and in
  * tests. No host name is hard-coded: every snippet takes the MCP URL as input.
  *
- * KEY HANDLING. No snippet ever contains a key. Every one of them points at the
- * environment variable below, so a link, a chat paste or a committed `mcp.json`
- * cannot leak a credential.
+ * NO KEY. Every connect snippet carries the URL alone: the app signs in with the
+ * person's account (OAuth) the first time it calls the server, so a link, a
+ * pasted command or a committed config file carries no credential. The key
+ * variable below is for the skill zip, which teaches the REST API.
  */
 
-/** The environment variable every snippet reads the API key from. */
+/** The environment variable the skill reads the API key from. */
 export const API_KEY_ENV = 'DAPTA_CALENDARS_API_KEY';
 
 /** How every API key this product mints begins (`dcl_<8 hex>_<secret>`). */
 export const KEY_PREFIX = 'dcl_';
 
-/** The name the server is registered under in the agent's config. */
-export const SERVER_NAME = 'dapta-calendars';
+/**
+ * The name the server is registered under in each agent's config, the name it
+ * announces itself (decision D3). New installs use `dcal`; an install made
+ * under the old `dapta-calendars` keeps working, since the name is only the
+ * agent's own label for the server and never reaches it.
+ */
+export const SERVER_NAME = 'dcal';
 
-/** The single server entry Cursor stores under `mcpServers.<name>`. */
-export function cursorServerEntry(mcpUrl: string): {
-  url: string;
-  headers: { Authorization: string };
-} {
-  // `${env:NAME}` is Cursor's interpolation, resolved on the user's machine when
-  // the server starts: the link carries the variable's NAME, never its value.
-  return { url: mcpUrl, headers: { Authorization: `Bearer \${env:${API_KEY_ENV}}` } };
+/** The single entry Cursor stores under `mcpServers.dcal`: the URL alone, Cursor runs the sign-in. */
+export function cursorServerEntry(mcpUrl: string): { url: string } {
+  return { url: mcpUrl };
 }
 
 /** `base64(JSON.stringify(entry))`, the `config` of a Cursor install link. */
@@ -35,65 +36,82 @@ export function encodeCursorConfig(entry: object): string {
   return Buffer.from(JSON.stringify(entry), 'utf8').toString('base64');
 }
 
-/** The one-click link. Cursor asks the user to confirm; it never auto-installs. */
+/** The one-click link. Cursor asks the user to confirm; it never installs on its own. */
 export function cursorDeeplink(mcpUrl: string): string {
   const config = encodeURIComponent(encodeCursorConfig(cursorServerEntry(mcpUrl)));
   return `cursor://anysphere.cursor-deeplink/mcp/install?name=${SERVER_NAME}&config=${config}`;
 }
 
-/** The copyable `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global). */
+/** `~/.cursor/mcp.json` (every project) or `.cursor/mcp.json` (one project). */
 export function cursorMcpJson(mcpUrl: string): string {
   return JSON.stringify({ mcpServers: { [SERVER_NAME]: cursorServerEntry(mcpUrl) } }, null, 2);
 }
 
+/** Claude Code, for every project of this user; `/mcp` then runs the sign-in. */
 export function claudeCodeCommand(mcpUrl: string): string {
-  return [
-    `claude mcp add --transport http ${SERVER_NAME} ${mcpUrl} \\`,
-    // Single quotes on purpose: the shell must NOT expand the variable, or Claude
-    // Code would store the plaintext key in its config. It stores the literal
-    // `${VAR}` and resolves it each time the server starts.
-    `  --header 'Authorization: Bearer \${${API_KEY_ENV}}'`,
-  ].join('\n');
+  return `claude mcp add --transport http --scope user ${SERVER_NAME} ${mcpUrl}`;
 }
 
-// --- Sign-in (no key) ---------------------------------------------------------
-// For an app that signs in itself (OAuth): the address alone, no header. The
-// server's 401 points the app at the sign-in, so nothing here names a variable.
-
-/** Cursor's one-click link for a sign-in: the address, no header. */
-export function cursorSignInDeeplink(mcpUrl: string): string {
-  const config = encodeURIComponent(encodeCursorConfig({ url: mcpUrl }));
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${SERVER_NAME}&config=${config}`;
+/** Codex: add the server by URL, then `codexLoginCommand` runs the sign-in. */
+export function codexAddCommand(mcpUrl: string): string {
+  return `codex mcp add ${SERVER_NAME} --url ${mcpUrl}`;
 }
 
-/** `.cursor/mcp.json` for a sign-in: the address, no header. */
-export function cursorSignInJson(mcpUrl: string): string {
-  return JSON.stringify({ mcpServers: { [SERVER_NAME]: { url: mcpUrl } } }, null, 2);
-}
-
-/** Claude Code with a sign-in: the server added with no header, then `/mcp` signs in. */
-export function claudeCodeSignInCommand(mcpUrl: string): string {
-  return `claude mcp add --transport http ${SERVER_NAME} ${mcpUrl}`;
-}
-
-/** `~/.codex/config.toml`, or `.codex/config.toml` in a trusted project. */
-export function codexConfigToml(mcpUrl: string): string {
-  return [`[mcp_servers.${SERVER_NAME}]`, `url = "${mcpUrl}"`, `bearer_token_env_var = "${API_KEY_ENV}"`].join('\n');
-}
-
-/** What any other agent or SDK needs: the URL and the one header. */
-export function genericConnection(mcpUrl: string): { url: string; header: string } {
-  return { url: mcpUrl, header: `Authorization: Bearer <your ${API_KEY_ENV}>` };
-}
+export const codexLoginCommand = `codex mcp login ${SERVER_NAME}`;
 
 /**
- * Claude's "Add custom connector" dialog, pre-filled with the name and the
- * MCP address. It only fills the form: the person still confirms in Claude,
- * then signs in here (OAuth). Carries no credential.
+ * OpenClaw: save the server as a remote, streamable-HTTP entry that logs in
+ * with OAuth (`mcp.servers.dcal` in its config), per OpenClaw's
+ * `openclaw mcp set` docs; `openclawLoginCommand` then runs the sign-in.
  */
-export function claudeConnectorLink(mcpUrl: string, name: string): string {
-  const q = new URLSearchParams({ modal: 'add-custom-connector', connectorName: name, connectorUrl: mcpUrl });
-  return `https://claude.ai/customize/connectors?${q}`;
+export function openclawSetCommand(mcpUrl: string): string {
+  const entry = JSON.stringify({ url: mcpUrl, transport: 'streamable-http', auth: 'oauth' });
+  return `openclaw mcp set ${SERVER_NAME} '${entry}'`;
+}
+
+export const openclawLoginCommand = `openclaw mcp login ${SERVER_NAME}`;
+
+/**
+ * Hermes (Nous Research): an `mcp_servers` entry in `~/.hermes/config.yaml`
+ * with `auth: oauth`, per Hermes' MCP docs; `hermesLoginCommand` then runs
+ * the sign-in in the browser.
+ */
+export function hermesConfig(mcpUrl: string): string {
+  return `mcp_servers:\n  ${SERVER_NAME}:\n    url: "${mcpUrl}"\n    auth: oauth`;
+}
+
+export const hermesLoginCommand = `hermes mcp login ${SERVER_NAME}`;
+
+/** Everything the connect guide prints for one address, built on the server. */
+export interface McpSnippets {
+  url: string;
+  /** The connector's listing in Claude's directory, or null where there is none (`claudeDirectoryUrl`). */
+  claudeDirectory: string | null;
+  claudeCode: string;
+  codexAdd: string;
+  codexLogin: string;
+  openclawSet: string;
+  openclawLogin: string;
+  hermesConfig: string;
+  hermesLogin: string;
+  cursorDeeplink: string;
+  cursorJson: string;
+}
+
+export function mcpSnippets(mcpUrl: string, claudeDirectory: string | null = null): McpSnippets {
+  return {
+    url: mcpUrl,
+    claudeDirectory,
+    claudeCode: claudeCodeCommand(mcpUrl),
+    codexAdd: codexAddCommand(mcpUrl),
+    codexLogin: codexLoginCommand,
+    openclawSet: openclawSetCommand(mcpUrl),
+    openclawLogin: openclawLoginCommand,
+    hermesConfig: hermesConfig(mcpUrl),
+    hermesLogin: hermesLoginCommand,
+    cursorDeeplink: cursorDeeplink(mcpUrl),
+    cursorJson: cursorMcpJson(mcpUrl),
+  };
 }
 
 export function exportKeyCommand(): string {

@@ -105,8 +105,8 @@ export default defineConfig({
         // production build has no public address and offers no download.
         API_PUBLIC_URL: E2E.api,
         NEXT_PUBLIC_SIGNUP_URL: E2E.signupUrl,
-        // Runtime, like on a deployment: the address Connect and keys shows when the
-        // API reports MCP on (mcp-page.spec.ts). The suite's API serves it.
+        // Runtime, like on a deployment: the address the connect page shows when the
+        // API reports MCP on and a sign-in (mcp-page.spec.ts). The suite's API serves it.
         MCP_PUBLIC_URL: `${E2E.api}/mcp`,
         // Runtime, like on a deployment: the rail's Docs item, per language.
         DOCS_URL: E2E.docsUrl,

@@ -47,3 +47,26 @@ export function resolveMcpConfig(env: Record<string, string | undefined> = proce
   const mcpUrl = explicitMcp ?? (apiOrigin ? `${apiOrigin}/mcp` : null);
   return { mcpUrl, apiOrigin };
 }
+
+/**
+ * The connector listings in Claude's directory, by the MCP address each one
+ * connects to. A listing is for one hosted MCP only, so its own deployment
+ * shows the listing with no setting, while a dev or self-hosted deployment
+ * (another address) never sends people to someone else's server. Empty until
+ * the hosted MCP is listed.
+ */
+const CLAUDE_DIRECTORY_LISTINGS: Record<string, string> = {};
+
+/**
+ * The connector's page in Claude's directory for this deployment's MCP, or
+ * null. Read at RUNTIME: `MCP_CLAUDE_DIRECTORY_URL` (https only) for a
+ * deployment listed under its own address; otherwise the listing known for
+ * `MCP_PUBLIC_URL`. Null and the connect guide keeps the custom connector as
+ * Claude's only path. Never a `NEXT_PUBLIC_*` value, for the reason above.
+ */
+export function claudeDirectoryUrl(env: Record<string, string | undefined> = process.env): string | null {
+  const explicit = clean(env.MCP_CLAUDE_DIRECTORY_URL);
+  if (explicit?.startsWith('https://')) return explicit;
+  const mcp = clean(env.MCP_PUBLIC_URL);
+  return (mcp && CLAUDE_DIRECTORY_LISTINGS[mcp]) ?? null;
+}

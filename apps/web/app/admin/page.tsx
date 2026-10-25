@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { getMessages, t } from '@slate/shared';
 import { adminApi, isAdminRole } from '@/lib/admin-api';
-import { DEVELOPERS_KEYS_HREF } from '@/lib/admin-nav';
+import { fillMessages } from '@/lib/fill-messages';
 import { getLocale } from '@/lib/locale';
 import { CopyLink } from '@/components/copy-link';
 import { SetupChecklist } from '@/components/setup-checklist';
+import { AgentBanner } from './_components/agent-banner';
+import { AgentCard } from './_components/agent-card';
+import { CONNECT_VARS } from './developers/connect-vars';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +26,14 @@ export default async function AdminHome() {
   const admin = getMessages(await getLocale()).admin;
   const h = admin.home;
   const firstName = me?.displayName?.split(' ')[0];
+  // Connecting an agent is for owners and admins, like the rail's "Connect
+  // your agent": a sign-in reaches only the workspaces where the person is one,
+  // so a member is not shown a door that opens on "no access".
+  const agents = isAdminRole(me.role);
 
   return (
     <div className="mx-auto max-w-[1520px] px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
+      {agents ? <AgentBanner m={h.agentBanner} /> : null}
       <h1 className="mb-tight text-3xl font-semibold tracking-tight">
         {firstName ? t(h.welcomeNamed, { name: firstName }) : h.welcome}
       </h1>
@@ -62,15 +70,13 @@ export default async function AdminHome() {
         <Stat label={h.statTeams} value={teams.length} href="/admin/teams" />
       </div>
 
-      <div className="grid grid-cols-2 gap-card">
+      {/* After the figures, where the dForms home has the same card. */}
+      {agents ? <AgentCard m={fillMessages(h.agentCard, CONNECT_VARS)} /> : null}
+
+      <div className="grid gap-card sm:grid-cols-3">
         <Shortcut href="/admin/event-types" title={h.createEvent} desc={h.createEventDesc} />
         <Shortcut href="/admin/availability" title={h.setAvailability} desc={h.setAvailabilityDesc} />
         <Shortcut href="/admin/settings/booking-page" title={h.stylePage} desc={h.stylePageDesc} />
-        {/* Keys and webhooks are admin/owner-only, like the rail's MCP item:
-            a member is not shown a door that opens on "no access". */}
-        {isAdminRole(me.role) ? (
-          <Shortcut href={DEVELOPERS_KEYS_HREF} title={h.apiKeys} desc={h.apiKeysDesc} />
-        ) : null}
       </div>
     </div>
   );
