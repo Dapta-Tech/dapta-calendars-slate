@@ -15,7 +15,7 @@ a phone, what needs a computer becomes "Open this page on your computer to
 connect {app}". Shown only when the API serves MCP and takes a sign-in;
 otherwise a note says the connector is not available here.
 
-New runtime variable `MCP_CLAUDE_DIRECTORY_URL` (https only): set, Claude's tab
+New runtime variable `MCP_CLAUDE_DIRECTORY_URL` (a `https://claude.ai/` page): set, Claude's tab
 starts at the connector's page in Claude's directory, with the custom-connector
 steps folded under it. A map by MCP address can name a listing with no setting;
 it is empty until the hosted MCP is listed.

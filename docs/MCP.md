@@ -490,7 +490,7 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
 | `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
 | `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after the identity service last vouched for someone in an account a sign-in still reaches it) |
-| `MCP_CLAUDE_DIRECTORY_URL` (web) | unset (the connect page's Claude tab uses the custom connector; set, https only, it leads with the directory listing) |
+| `MCP_CLAUDE_DIRECTORY_URL` (web) | unset (the connect page's Claude tab uses the custom connector; set to a `https://claude.ai/` page, it leads with the directory listing) |
 
 ## Check it yourself
 
