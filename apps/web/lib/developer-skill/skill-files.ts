@@ -1,5 +1,5 @@
 import { getMessages } from '@slate/shared';
-import { DEVELOPERS_DOCS_HREF, DEVELOPERS_KEYS_HREF } from '../admin-nav';
+import { DEVELOPERS_CONNECT_HREF, DEVELOPERS_DOCS_HREF, DEVELOPERS_KEYS_HREF, DEVELOPERS_TOOLS_HREF } from '../admin-nav';
 import {
   API_KEY_ENV,
   KEY_PREFIX,
@@ -29,7 +29,7 @@ import {
 import { SKILL_DIR, SKILL_ZIP_NAME } from './skill-names';
 
 /**
- * The skill zip an owner or admin downloads from MCP, Connect and keys: what an
+ * The skill zip an owner or admin downloads from the API keys page: what an
  * agent with a terminal and no MCP needs to use this installation's API with
  * the same key. English only: it is read by a model, not shown in the UI.
  *
@@ -365,7 +365,8 @@ description: ${JSON.stringify(description)}
 - API base URL: \`${apiUrl}\`
 - MCP server: \`${mcpUrl}\`
 - API keys: ${appUrl}${DEVELOPERS_KEYS_HREF}
-- MCP tools and the API reference, for a person to read: ${appUrl}${DEVELOPERS_DOCS_HREF}
+- What each MCP tool does, for a person to read: ${appUrl}${DEVELOPERS_TOOLS_HREF}
+- The API reference, for a person to read: ${appUrl}${DEVELOPERS_DOCS_HREF}
 
 Every path below is relative to the API base URL. \`reference/endpoints.md\` lists the routes this installation's API documents for integrations.
 
@@ -412,7 +413,7 @@ function toolAccess(tool: ToolInfo): string {
 }
 
 function mcpToolsMd({ mcpUrl, appUrl, productName }: SkillInputs): string {
-  const where = `The ${productName} MCP server is at \`${mcpUrl}\`, registered in agents as \`${SERVER_NAME}\`. It takes the same key as the REST API, in the same header: \`${bearer}\`. To connect it, follow ${appUrl}${DEVELOPERS_KEYS_HREF}.`;
+  const where = `The ${productName} MCP server is at \`${mcpUrl}\`, registered in agents as \`${SERVER_NAME}\`. It takes the same key as the REST API, in the same header: \`${bearer}\`. To connect an app that signs in with your account instead of a key, follow ${appUrl}${DEVELOPERS_CONNECT_HREF}.`;
   const rows = MCP_TOOLS.map(
     (tool) => `| \`${tool.name}\` | ${KIND_LABEL[tool.kind]} | ${toolAccess(tool)} | ${en.toolDescriptions[tool.name] ?? ''} |`,
   );
@@ -474,7 +475,7 @@ A 401 means the key is not accepted. A 403 means it works but lacks ${
   return `# Installing the ${productName} API skill
 
 1. Create an API key on ${appUrl}${DEVELOPERS_KEYS_HREF}, with only the access the agent needs. It is shown once: copy it then.
-   Every MCP tool and the API reference are on ${appUrl}${DEVELOPERS_DOCS_HREF}.
+   What each MCP tool does is on ${appUrl}${DEVELOPERS_TOOLS_HREF}, and the API reference on ${appUrl}${DEVELOPERS_DOCS_HREF}.
 2. Put it in the environment the agent runs in, never in a file you commit:
 
 ~~~bash

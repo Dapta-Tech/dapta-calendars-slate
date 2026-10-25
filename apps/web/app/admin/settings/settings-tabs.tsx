@@ -9,7 +9,7 @@ type SettingsMessages = BookingMessages['admin']['settings'];
 // Second-level settings nav: General · Booking Page · Notifications · Members ·
 // Integrations. (Calendars is a top-level nav item at /admin/connections, not a
 // settings tab; a CRM is NOT one either until there is more than one of them —
-// #63. The old "MCP & API" tab is the rail's MCP group now, /admin/developers.)
+// #63. The old "MCP & API" tab lives in the rail now, under /admin/developers.)
 // Labels resolve per-locale. Notifications, Members and Integrations are
 // admin/owner-only: the CRM credential is an account-level resource.
 const TABS: {

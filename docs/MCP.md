@@ -20,7 +20,7 @@ without a custom integration.
 | API key | `Authorization: Bearer dcl_...` | Everything below, limited by the key's scopes and event-type allowlist |
 | OAuth (opt-in, `OAUTH_ENABLED`) | Sign in and approve; the app sends `Authorization: Bearer <access token>` | Everything below, limited by the scopes the person approved (this API's own server), or by the person's owner or admin role (an external authorization server) |
 
-A key is created by a workspace admin (MCP, then Connect and keys). Send it only in
+A key is created by a workspace admin (API and webhooks, then API keys). Send it only in
 the `Authorization` header. A key in the URL (`?api_key=`, `?access_token=`) is
 refused with 400 so it never lands in an access log. A wrong, expired or revoked
 key answers 401; it is never quietly treated as anonymous. The account always
@@ -296,7 +296,7 @@ every scope it needs, and asks the person to approve again (step-up). API keys
 keep their scope errors as tool results, because a key's scopes cannot be
 stepped up.
 
-**Connected apps.** MCP, Connect and keys lists every connection of the
+**Connected apps.** API and webhooks, API keys lists every connection of the
 workspace (app, host, scopes, who approved it, when, last used) with
 **Disconnect**. Disconnecting revokes the connection: its refresh token stops
 working at once; an access token it already holds keeps working until it
@@ -304,9 +304,11 @@ expires (at most `OAUTH_ACCESS_TOKEN_TTL_SECONDS`). A member who is disabled,
 removed or no longer an owner or admin can no longer refresh either.
 
 **Add it in Claude** (claude.ai, Desktop, mobile): Settings, then Connectors,
-then Add custom connector; paste the MCP URL; click Add, then Connect. The page
-in MCP, Connect and keys has an **Add to Claude** button that pre-fills the
-dialog. In Claude Code:
+then Add custom connector; paste the MCP URL; click Add, then Connect. The
+dashboard's **Connect your agent** page walks through it step by step for
+Claude, ChatGPT, Claude Code, Codex, Cursor, OpenClaw and Hermes, with this
+deployment's MCP URL (and, where the web sets `MCP_CLAUDE_DIRECTORY_URL`, a
+button to the connector's page in Claude's directory). In Claude Code:
 
 ```bash
 claude mcp add --transport http calendars https://api.example.com/mcp
@@ -488,6 +490,7 @@ All optional; unset means the safe default. See `SELF-HOSTING.md` for the table.
 | `OAUTH_AUTHORIZATION_SERVER` | unset (the built-in server; set: an external server's issuer, resource server only) |
 | `OAUTH_JWKS_URL` | unset (the external server's metadata `jwks_uri`) |
 | `OAUTH_LINK_MAX_AGE_DAYS` | `30` (how long after the identity service last vouched for someone in an account a sign-in still reaches it) |
+| `MCP_CLAUDE_DIRECTORY_URL` (web) | unset (the connect page's Claude tab uses the custom connector; set to a `https://claude.ai/` page, it leads with the directory listing) |
 
 ## Check it yourself
 

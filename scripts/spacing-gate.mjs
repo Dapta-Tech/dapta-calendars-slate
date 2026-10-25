@@ -89,7 +89,7 @@ const ALLOW = [
   {
     file: 'apps/web/components/admin-shell.tsx',
     utility: 'pl-11',
-    why: "Sets a page under the rail's MCP group on its parent's label column: the row's padding, the 20px icon and the gap after it. It tracks the icon's width, not a rhythm step.",
+    why: "Sets a page under a rail group (API and webhooks) on its parent's label column: the row's padding, the 20px icon and the gap after it. It tracks the icon's width, not a rhythm step.",
   },
   {
     file: 'apps/web/components/field-help.tsx',

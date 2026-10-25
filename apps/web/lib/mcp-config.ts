@@ -47,3 +47,38 @@ export function resolveMcpConfig(env: Record<string, string | undefined> = proce
   const mcpUrl = explicitMcp ?? (apiOrigin ? `${apiOrigin}/mcp` : null);
   return { mcpUrl, apiOrigin };
 }
+
+/**
+ * The MCP address to hand an app that signs in, or null: `MCP_PUBLIC_URL`
+ * only, never one derived from `API_PUBLIC_URL`. With sign-in on, the API
+ * checks every token's audience against its own `MCP_PUBLIC_URL`; a derived
+ * address could differ from it, and every sign-in through it would fail.
+ */
+export function signInMcpUrl(env: Record<string, string | undefined> = process.env): string | null {
+  return clean(env.MCP_PUBLIC_URL);
+}
+
+/**
+ * The connector listings in Claude's directory, by the MCP address each one
+ * connects to. A listing is for one hosted MCP only, so its own deployment
+ * shows the listing with no setting, while a dev or self-hosted deployment
+ * (another address) never sends people to someone else's server. Empty until
+ * the hosted MCP is listed.
+ */
+const CLAUDE_DIRECTORY_LISTINGS: Record<string, string> = {};
+
+/**
+ * The connector's page in Claude's directory for this deployment's MCP, or
+ * null. Read at RUNTIME: `MCP_CLAUDE_DIRECTORY_URL` for a deployment listed
+ * under its own address, taken only when it is a page of Claude's directory
+ * (`https://claude.ai/...`): the button says "Claude directory", so it never
+ * leads anywhere else. Otherwise the listing known for `MCP_PUBLIC_URL`. Null
+ * and the connect guide keeps the custom connector as Claude's only path.
+ * Never a `NEXT_PUBLIC_*` value, for the reason above.
+ */
+export function claudeDirectoryUrl(env: Record<string, string | undefined> = process.env): string | null {
+  const explicit = clean(env.MCP_CLAUDE_DIRECTORY_URL);
+  if (explicit?.startsWith('https://claude.ai/')) return explicit;
+  const mcp = clean(env.MCP_PUBLIC_URL);
+  return (mcp && CLAUDE_DIRECTORY_LISTINGS[mcp]) ?? null;
+}

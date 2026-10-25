@@ -21,6 +21,7 @@ import { McpLogos } from '@/components/mcp-logos';
 import { ProfileMenu, type ProfileUser } from '@/components/profile-menu';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AnchoredMenu } from '@/components/ui/anchored-menu';
+import { cn } from '@/lib/cn';
 import type { Theme } from '@/lib/theme';
 
 type AdminMessages = BookingMessages['admin'];
@@ -44,8 +45,8 @@ const PLATFORM_HREF = platformNavHref(process.env.NEXT_PUBLIC_PLATFORM_URL);
 
 // Dapta's icon system is PrimeIcons (pi pi-*) — the same set the production
 // Angular admin panel uses. Nav glyphs map 1:1 to their pi names; sized at the
-// design-system's 20px sidebar icon. MCP is the one exception: its icon is the
-// rotating AI app logos, same 20px.
+// design-system's 20px sidebar icon. "Connect your agent" is the one exception:
+// its icon is the rotating AI app logos, same 20px.
 const PI_BY_NAME: Record<Exclude<NavIcon, 'mcp'>, string> = {
   home: 'pi-home',
   calendar: 'pi-calendar',
@@ -54,6 +55,8 @@ const PI_BY_NAME: Record<Exclude<NavIcon, 'mcp'>, string> = {
   users: 'pi-users',
   calendarPlus: 'pi-calendar-plus',
   cog: 'pi-cog',
+  tools: 'pi-sparkles',
+  api: 'pi-code',
   book: 'pi-book',
   agents: 'pi-microchip-ai',
 };
@@ -91,7 +94,68 @@ const ACTIVE_BAR =
   'before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary-edge before:content-[""]';
 
 /**
- * A rail item with pages under it (MCP). One `<button>` in both rail widths:
+ * The rail link whose icon is the rotating AI app logos ("Connect your
+ * agent"). The logos hold still while the pointer or keyboard focus is on the
+ * row, so the mark someone is looking at does not change under them (see
+ * McpLogos), and while nobody can see this copy of the rail.
+ */
+function LogosLink({
+  href,
+  label,
+  collapsed,
+  active,
+  testId,
+  prominent,
+  className,
+  motionPaused,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  collapsed: boolean;
+  active: boolean;
+  testId: string;
+  prominent?: true;
+  className: string;
+  motionPaused?: boolean;
+  onNavigate?: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      title={collapsed ? label : undefined}
+      aria-current={active ? 'page' : undefined}
+      data-testid={testId}
+      data-prominent={prominent || undefined}
+      className={className}
+    >
+      <Icon name="mcp" paused={hovered || focused || motionPaused} />
+      <span className={collapsed ? 'sr-only' : 'min-w-0 truncate'}>{label}</span>
+    </Link>
+  );
+}
+
+/**
+ * The prominent row's look on top of the usual one: a signal-green tint and
+ * ring, and a slow glow (`rail-pulse`) until you are on the page; once there
+ * the glow stops and the tint deepens. As on the dForms rail.
+ */
+function prominentClass(active: boolean) {
+  return active
+    ? 'bg-signal/15 ring-1 ring-inset ring-signal/50'
+    : 'rail-pulse bg-signal/[0.08] font-medium text-foreground ring-1 ring-inset ring-signal/30 hover:bg-signal/15';
+}
+
+/**
+ * A rail item with pages under it ("API and webhooks"). One `<button>` in
+ * both rail widths:
  *
  *  - Wide rail and drawer: a disclosure. The pages show indented below it, and
  *    open on their own whenever the current route is one of them.
@@ -108,7 +172,6 @@ function NavGroup({
   collapsed,
   label,
   labels,
-  motionPaused,
   onNavigate,
 }: {
   item: NavItem;
@@ -116,18 +179,12 @@ function NavGroup({
   collapsed: boolean;
   label: string;
   labels: AdminMessages['developerNav'];
-  /** Nobody can see this copy of the rail right now (the closed drawer). */
-  motionPaused?: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const inside = isNavItemActive(pathname, item.href);
+  const inside = isNavItemActive(pathname, item.href, item.match);
   const [open, setOpen] = useState(inside);
   const [flyout, setFlyout] = useState(false);
-  // The rotating logos hold still under the pointer and under keyboard focus
-  // (see McpLogos): nobody should have to read a label beside a moving target.
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
 
@@ -156,10 +213,6 @@ function NavGroup({
         type="button"
         data-testid={`nav-${item.key}`}
         onClick={() => (collapsed ? setFlyout((v) => !v) : setOpen((v) => !v))}
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
         aria-haspopup={collapsed ? 'menu' : undefined}
         aria-expanded={collapsed ? flyout : open}
         // The current page is folded inside this group (collapsed rail, or the
@@ -169,7 +222,7 @@ function NavGroup({
         title={collapsed ? label : undefined}
         className={navRowClass(collapsed, state)}
       >
-        <Icon name={item.icon} paused={hovered || focused || motionPaused} />
+        <Icon name={item.icon} />
         <span className={collapsed ? 'sr-only' : 'min-w-0 flex-1 truncate'}>{label}</span>
         {!collapsed ? (
           <i
@@ -193,7 +246,7 @@ function NavGroup({
                   data-testid={`nav-${item.key}-${page.key}`}
                   // pl-11 sets the label on the parent label's column (12px
                   // padding + 20px icon + 12px gap), which is what reads as
-                  // "under MCP" without a second icon per row.
+                  // "under the group" without a second icon per row.
                   className={[
                     'relative flex min-h-control items-center rounded-md py-inline pl-11 pr-field text-sm transition-colors active:scale-[0.99]',
                     active
@@ -267,7 +320,7 @@ function NavLinks({
   items: readonly NavItem[];
   collapsed: boolean;
   nav: AdminMessages['nav'];
-  /** Labels of the pages under MCP. */
+  /** Labels of the pages under "API and webhooks". */
   pages: AdminMessages['developerNav'];
   /** "(opens in a new tab)", read out after an external item's label. */
   newTab: string;
@@ -289,7 +342,6 @@ function NavLinks({
                 collapsed={collapsed}
                 label={label}
                 labels={pages}
-                motionPaused={motionPaused}
                 onNavigate={onNavigate}
               />
             </li>
@@ -297,7 +349,26 @@ function NavLinks({
         }
         // An external item is never "here": its href is another origin.
         const active = !item.external && isNavItemActive(pathname, item.href, item.match);
-        const className = navRowClass(collapsed, active ? 'active' : 'idle');
+        // Merged, not joined: the prominent row's tint and ink replace the
+        // plain row's, rather than racing them in stylesheet order.
+        const className = cn(navRowClass(collapsed, active ? 'active' : 'idle'), item.prominent && prominentClass(active));
+        if (item.icon === 'mcp' && !item.external) {
+          return (
+            <li key={item.key}>
+              <LogosLink
+                href={item.href}
+                label={label}
+                collapsed={collapsed}
+                active={active}
+                testId={`nav-${item.key}`}
+                prominent={item.prominent}
+                className={className}
+                motionPaused={motionPaused}
+                onNavigate={onNavigate}
+              />
+            </li>
+          );
+        }
         // Label stays in the a11y tree when collapsed (sr-only) so the
         // icon-only link keeps a discernible name (WCAG 4.1.2).
         const body = (
@@ -333,6 +404,7 @@ function NavLinks({
                 onClick={onNavigate}
                 title={collapsed ? label : undefined}
                 aria-current={active ? 'page' : undefined}
+                data-testid={`nav-${item.key}`}
                 className={className}
               >
                 {body}
@@ -376,7 +448,7 @@ export function AdminShell({
   /** Server-read cookie value → the toggle's icon is right on the first paint,
    *  same reason and same shape as `initialCollapsed` (#90). */
   initialTheme: Theme;
-  /** Owner or admin: the only roles the MCP pages serve, so the only ones who get the item. */
+  /** Owner or admin: the only roles the agent and API pages serve, so the only ones who get those items. */
   isAdmin?: boolean;
   /** The documentation in the reader's language, already tagged; null hides the Docs item. */
   docsHref?: string | null;

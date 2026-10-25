@@ -6,11 +6,11 @@ import { E2E, HOST, rail, signIn } from './stack';
  * the 360 drawer): however far a long page scrolls, the footer (the theme
  * switch and the person, with Sign out behind it) stays on screen, and when the
  * nav is taller than the window only the nav scrolls, so the wordmark and the
- * footer stay put. Connect and keys is the page: it is long, and on it the MCP
- * group is open, which makes the nav its tallest.
+ * footer stay put. Tools is the page: it is long on both projects, and the
+ * nav carries every item an owner gets.
  */
 
-const PAGE = '/admin/developers/keys';
+const PAGE = '/admin/developers/tools';
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'slate.onboarding.skipped', value: '1', url: E2E.web }]);
@@ -34,8 +34,8 @@ async function expectOnScreen(page: Page, target: Locator) {
 async function openLongPage(page: Page) {
   await page.goto(PAGE);
   await signIn(page, HOST.email);
-  await expect(page).toHaveURL(/\/admin\/developers\/keys$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Connect and keys' })).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/developers\/tools$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Tools' })).toBeVisible();
 }
 
 /**
@@ -93,7 +93,7 @@ test('the footer stays on screen at the top, the middle and the end of a long pa
   await expect(page.getByRole('menu', { name: 'Account menu' })).toBeVisible();
 });
 
-test('the collapsed rail stays pinned, and its MCP menu opens beside it', async ({ page, context, isMobile }) => {
+test('the collapsed rail stays pinned, and its API and webhooks menu opens beside it', async ({ page, context, isMobile }) => {
   test.skip(isMobile, 'The collapsed rail is the desktop rail.');
   await context.addCookies([{ name: 'slate.nav.collapsed', value: '1', url: E2E.web }]);
   await openLongPage(page);
@@ -105,12 +105,12 @@ test('the collapsed rail stays pinned, and its MCP menu opens beside it', async 
     await expectOnScreen(page, nav.getByTestId('profile-menu-trigger'));
   }
   await scrollPage(page, 0.5);
-  const mcp = nav.getByTestId('nav-developers');
-  await mcp.click();
-  const flyout = page.getByRole('menu', { name: 'MCP' });
+  const group = nav.getByTestId('nav-api');
+  await group.click();
+  const flyout = page.getByRole('menu', { name: 'API and webhooks' });
   await expect(flyout).toBeVisible();
   await expectOnScreen(page, flyout);
-  const [trigger, panel] = [(await mcp.boundingBox())!, (await flyout.boundingBox())!];
+  const [trigger, panel] = [(await group.boundingBox())!, (await flyout.boundingBox())!];
   expect(panel.x).toBeGreaterThanOrEqual(trigger.x + trigger.width);
 });
 

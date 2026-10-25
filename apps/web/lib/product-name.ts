@@ -19,3 +19,12 @@ export const IS_DAPTA_BRAND = RAW_NAME === 'Dapta Calendars' || RAW_NAME === 'dC
 
 /** The customer-facing product name, exactly as the deployment set it. */
 export const PRODUCT_NAME = RAW_NAME;
+
+/**
+ * The short name the MCP connector goes by wherever a person meets it: the
+ * connect guide, the Tools page, the home promo and the name typed into an AI
+ * app. On Dapta's build it is `dCal` (decision D3: the connector's name, the
+ * one the rail's wordmark reads; the build's product name is longer); a fork
+ * gets its own product name and none of Dapta's.
+ */
+export const CONNECTOR_NAME = IS_DAPTA_BRAND ? 'dCal' : PRODUCT_NAME;

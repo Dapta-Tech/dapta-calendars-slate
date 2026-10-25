@@ -343,14 +343,18 @@ export interface BookingMessages {
       calendars: string;
       settings: string;
       bookingPage: string;
-      /** The MCP group in the rail: connecting an agent, keys, webhooks, API docs. */
-      developers: string;
+      /** The rail's prominent item: the guide that connects an AI app with the person's account. */
+      connect: string;
+      /** What a connected agent can do, in plain words. */
+      tools: string;
+      /** The quiet group for builders: API keys, webhooks and the API docs. */
+      api: string;
       /** The product documentation, an EXTERNAL link (see `lib/docs-url.ts`). */
       docs: string;
       /** The door to the wider platform, EXTERNAL, only with NEXT_PUBLIC_PLATFORM_URL. */
       agents: string;
     };
-    /** The pages under the rail's MCP group, in its accordion and its flyout. */
+    /** The pages under the rail's "API and webhooks" group, in its accordion and its flyout. */
     developerNav: {
       keys: string;
       webhooks: string;
@@ -440,8 +444,6 @@ export interface BookingMessages {
       setAvailabilityDesc: string;
       stylePage: string;
       stylePageDesc: string;
-      apiKeys: string;
-      apiKeysDesc: string;
       /** "Get bookable" first-run checklist (F1 §2 — driven by real setup status). */
       setupTitle: string;
       setupSubtitle: string;
@@ -455,6 +457,35 @@ export interface BookingMessages {
       setupEventDesc: string;
       setupEventAction: string;
       setupDone: string;
+      /** The banner at the top of the home: run the calendar from an AI agent. */
+      agentBanner: {
+        title: string;
+        body: string;
+        cta: string;
+      };
+      /**
+       * The big "Connect your agent" card: a prompt typed into an AI app and
+       * the meeting it books, cycling through `prompts` and the apps.
+       * `{product}` is filled on the server.
+       */
+      agentCard: {
+        eyebrow: string;
+        title: string;
+        body: string;
+        cta: string;
+        /** Accessible name of the animation. */
+        label: string;
+        /** What the user asks, one per turn. Written for a person, not a parser. */
+        prompts: string[];
+        /** The app's answer once the calendar changed. */
+        done: string;
+        /** The composer's placeholder before the prompt starts. `{app}` */
+        placeholder: string;
+        connected: string;
+        /** The demo's pause button: its name, and its tooltip while paused. */
+        pause: string;
+        play: string;
+      };
     };
     settings: {
       title: string;
@@ -1228,42 +1259,15 @@ export interface BookingMessages {
       revokedToast: string;
       deletedToast: string;
       toggledToast: string;
-      /** The MCP pages (Connect and keys, API docs): the agent tabs, tool list, key details. */
-      connectTitle: string;
-      tabCursor: string;
-      tabClaudeCode: string;
-      tabCodex: string;
-      tabOther: string;
-      tabChat: string;
-      stepKeyEnv: string;
-      mcpUrlLabel: string;
-      mcpUrlMissing: string;
-      /** The API does not serve MCP (or could not be asked): no steps, no address, no tool list. */
-      mcpUnavailable: string;
       copy: string;
       copied: string;
-      addToCursor: string;
-      cursorLead: string;
-      cursorKeyNote: string;
-      cursorFileLabel: string;
-      claudeCodeLead: string;
-      codexLead: string;
-      otherLead: string;
-      otherUrl: string;
-      otherHeader: string;
-      chatTitle: string;
-      chatBody: string;
-      toolsTitle: string;
-      toolsLead: string;
+      /** What a scope lets a key do, in the create form and the skill zip's tool table. */
       kindRead: string;
       kindWrite: string;
       kindDestructive: string;
       toolNeedsNoKey: string;
       toolNeedsAnyKey: string;
-      /** A tool with no particular scope, where this installation also signs agents in. */
-      toolNeedsAnyKeyOrSignIn: string;
       toolOrPublic: string;
-      toolNeeds: string;
       toolDescriptions: Record<string, string>;
       scopeLabels: Record<string, string>;
       scopesLead: string;
@@ -1286,36 +1290,6 @@ export interface BookingMessages {
       apiDocs: string;
       apiOpenApi: string;
       apiRefMissing: string;
-      /** OAuth on (the API serves its own authorization server): the chat-app tab. */
-      chatOAuthTitle: string;
-      chatOAuthLead: string;
-      addToClaude: string;
-      chatClaudeHeading: string;
-      chatClaudeStep1: string;
-      chatClaudeStep2: string;
-      chatClaudeStep3: string;
-      chatGptHeading: string;
-      chatGptStep1: string;
-      chatGptStep2: string;
-      chatGptStep3: string;
-      chatScopesNote: string;
-      /**
-       * OAuth through an external authorization server: people sign in with
-       * the account they use here, there is no consent page or Connected apps
-       * list of ours, and a connection acts with the member's admin role.
-       */
-      signInTitle: string;
-      signInBody: string;
-      signInAccess: string;
-      signInDisconnect: string;
-      chatSignInLead: string;
-      chatSignInClaudeStep3: string;
-      chatSignInGptStep3: string;
-      /** The sign-in tabs (external sign-in): Cursor, Claude Code and any other app, with no key. */
-      signInCursorLead: string;
-      /** Takes `{server}`, the name the server is registered under. */
-      signInClaudeCodeNext: string;
-      signInOtherLead: string;
       /** Connected apps: OAuth grants with revoke. */
       connectedTitle: string;
       connectedLead: string;
@@ -1331,37 +1305,10 @@ export interface BookingMessages {
       connectedRevokeBody: string;
       connectedRevokedToast: string;
       connectedExpiryNote: string;
-      /** Page headers of the MCP group's pages (Connect and keys reuses `pageLead`). */
+      /** The API docs page's lead (the API keys page uses `pageLead`). */
       docsPageLead: string;
       /**
-       * The three steps above the keys: create a key, connect the agent (the
-       * tabs of `connect*`), ask it something. Same shape as the dForms guide.
-       */
-      guideTitle: string;
-      guideIntro: string;
-      /** Screen-reader suffix of a finished step. */
-      guideStepDone: string;
-      guideKeyTitle: string;
-      guideKeyBody: string;
-      /** Step 1 once the workspace has a working key. */
-      guideKeyDone: string;
-      guideAgentBody: string;
-      /** Step 2 once a key has been used or an app has signed in. */
-      guideAgentDone: string;
-      /** Step 2 done from a used key alone (no app signed in that the page can see). */
-      guideKeyUsedDone: string;
-      /** External sign-in: the step for agents that use a key instead. */
-      guideKeyAltTitle: string;
-      guideKeyAltBody: string;
-      guideTryTitle: string;
-      guideTryHint: string;
-      /** A first request to paste into the agent. `{product}` is the product's name. */
-      guidePrompt: string;
-      copyPrompt: string;
-      /** Under the prompt: where to read what a key allows. */
-      guideTryNote: string;
-      /**
-       * Under the three steps: the way in for an agent without MCP, a zip that
+       * On the API keys page: the way in for an agent without MCP, a zip that
        * teaches it the REST API. `{product}` is the product's name. The
        * unavailable line replaces the button when the installation has no
        * public API address to write into the skill.
@@ -1380,6 +1327,189 @@ export interface BookingMessages {
       guideSkillErrorSession: string;
       guideSkillErrorForbidden: string;
       guideSkillErrorGeneric: string;
+    };
+    /**
+     * The connect page (/admin/developers/connect): connect an AI app to the
+     * MCP by logging in to the person's account (OAuth), no key. The page
+     * fills `{product}` (the connector's name, `CONNECTOR_NAME`), `{server}`
+     * (the name the server is registered under) and `{count}` (the number of
+     * tools) on the server; `{app}` and `{url}` stay for the guide. In step
+     * bodies, `**text**` renders bold and text between backticks renders as
+     * inline code. Product and button names inside other apps stay in
+     * English, as those apps show them. Never names the identity provider.
+     */
+    connect: {
+      /** The section's name above the heading, "MCP". */
+      eyebrow: string;
+      heading: string;
+      intro: string;
+      signinTitle: string;
+      /** The tag beside the sign-in card's title. */
+      recommended: string;
+      signinIntro: string;
+      benefits: {
+        noKey: { title: string; body: string };
+        workspaces: { title: string; body: string };
+        /** Who can connect: owners and admins, with their own access. */
+        access: { title: string; body: string };
+      };
+      /** Accessible name of the app tabs. */
+      appsLabel: string;
+      urlLabel: string;
+      promptLabel: string;
+      /** A first request to paste into the app: one that only reads. */
+      prompt: string;
+      copy: string;
+      copied: string;
+      copyFailed: string;
+      copyUrl: string;
+      copyCommand: string;
+      copyConfig: string;
+      copyPrompt: string;
+      addToCursor: string;
+      /**
+       * The way into each app from its first step, fitted to the device: a
+       * web link for Claude and ChatGPT, Claude Desktop's own link on a
+       * computer, a one-click copy of the add command for the CLIs, and on a
+       * phone a note for what only a computer can do. `{app}` in `phoneNote`.
+       */
+      open: {
+        claude: string;
+        claudeDesktop: string;
+        /** The button to the connector's page in Claude's connectors directory. */
+        claudeDirectory: string;
+        /** Read out after a button that opens another site in a new tab. */
+        newTab: string;
+        chatgpt: string;
+        copyCommand: string;
+        copied: string;
+        pasteHint: string;
+        phoneNote: string;
+      };
+      /** One numbered list per app, in the order the app asks for things. */
+      apps: {
+        claude: { steps: { title: string; body: string }[] };
+        /**
+         * Claude where the connector is listed in its connectors directory
+         * (`MCP_CLAUDE_DIRECTORY_URL`, or a known listing for the MCP
+         * address): the listing first, the custom connector folded under it
+         * for organizations that turned the directory off.
+         */
+        claudeDirectory: { steps: { title: string; body: string }[]; fallbackTitle: string; fallbackBody: string };
+        chatgpt: { steps: { title: string; body: string }[] };
+        /** `directoryTitle`/`directoryBody`: the card above the steps when the directory listing is on. */
+        claudeCode: { steps: { title: string; body: string }[]; note: string; directoryTitle: string; directoryBody: string };
+        codex: { steps: { title: string; body: string }[]; note: string };
+        cursor: { steps: { title: string; body: string }[] };
+        openclaw: { steps: { title: string; body: string }[] };
+        hermes: { steps: { title: string; body: string }[] };
+      };
+      /** Under the steps: one connector reaches every workspace. */
+      tip: string;
+      /**
+       * Only where this API runs its own sign-in server: a new connection can
+       * only read until the person approves writing too.
+       */
+      stepUpNote: string;
+      unavailableTitle: string;
+      unavailableBody: string;
+      /** The animated walkthrough above the steps. */
+      media: {
+        /** `{app}` */
+        terminalLabel: string;
+        play: string;
+        pause: string;
+      };
+      /**
+       * The animated walkthroughs. `ui` is the CLIs' own output (Claude Code,
+       * Codex, OpenClaw, Hermes), kept in English in both locales the way
+       * those tools print it; `prompt`, `signIn` and `answer` are ours and
+       * speak the reader's language.
+       */
+      walkthrough: {
+        /** What the person types in the animation: a request that books a meeting. */
+        prompt: string;
+        ui: {
+          ccWelcome: string;
+          ccHelp: string;
+          /** `{url}` */
+          ccAdded: string;
+          ccManage: string;
+          needsAuth: string;
+          authenticate: string;
+          ccBrowser: string;
+          ccAuthOk: string;
+          codexAdded: string;
+          codexAuthorize: string;
+          codexLoggedIn: string;
+          codexModel: string;
+          called: string;
+          working: string;
+          ocSaved: string;
+          ocLogin: string;
+          ocLoggedIn: string;
+          hmSaved: string;
+          hmLogin: string;
+          hmLoggedIn: string;
+        };
+        /** The sign-in the apps open: email, then the code by email. */
+        signIn: {
+          title: string;
+          emailLabel: string;
+          email: string;
+          continue: string;
+          checkEmail: string;
+          codeSentTo: string;
+          noCode: string;
+          /** `{app}` */
+          connected: string;
+          /** `{app}` */
+          consentTitle: string;
+          redirectNote: string;
+          warning: string;
+          allow: string;
+          cancel: string;
+        };
+        /** The agent's answer: the open times it found, then the meeting it booked. */
+        answer: {
+          found: string;
+          /** The open times, as the host's calendar shows them; the second one is booked. */
+          slots: string[];
+          booked: string;
+          meeting: string;
+          when: string;
+          calendar: string;
+        };
+      };
+      /** The short card that points to the Tools page. `{count}` in `toolsIntro`. */
+      toolsTitle: string;
+      toolsIntro: string;
+      toolsLink: string;
+    };
+    /**
+     * The Tools page (/admin/developers/tools): what an agent can do in the
+     * product, in plain words, grouped. `items` is keyed by the MCP tool's
+     * name; a spec holds it to the server's catalog in both languages.
+     * `{product}` and `{count}` are filled on the server.
+     */
+    tools: {
+      title: string;
+      intro: string;
+      /** Before each example request. */
+      askLabel: string;
+      /** A group's size: `countOne` for a single tool, `count` (`{n}`) for more. */
+      countOne: string;
+      count: string;
+      connectCta: string;
+      groups: {
+        availability: { title: string; body: string };
+        booking: { title: string; body: string };
+        holds: { title: string; body: string };
+        bookings: { title: string; body: string };
+        requests: { title: string; body: string };
+        account: { title: string; body: string };
+      };
+      items: Record<string, { what: string; ask: string }>;
     };
     /**
      * The OAuth consent page (`/auth/consent`): an app asks to act on the
@@ -1934,12 +2064,14 @@ export const en: BookingMessages = {
       calendars: 'Calendars',
       settings: 'Settings',
       bookingPage: 'Booking page',
-      developers: 'MCP',
+      connect: 'Connect your agent',
+      tools: 'Tools',
+      api: 'API and webhooks',
       docs: 'Docs',
       agents: 'Dapta Agents',
     },
     developerNav: {
-      keys: 'Connect and keys',
+      keys: 'API keys',
       webhooks: 'Webhooks',
       docs: 'API docs',
     },
@@ -2013,8 +2145,6 @@ export const en: BookingMessages = {
       setAvailabilityDesc: 'Weekly hours + date overrides.',
       stylePage: 'Style your booking page',
       stylePageDesc: 'Brand + 9-axis studio.',
-      apiKeys: 'Connect an agent',
-      apiKeysDesc: 'The MCP server and the API keys your AI agent uses.',
       setupTitle: 'Get bookable',
       setupSubtitle: 'Three steps so a real invite lands in your calendar — not just this dashboard.',
       setupConnectTitle: 'Connect a calendar',
@@ -2027,6 +2157,31 @@ export const en: BookingMessages = {
       setupEventDesc: 'Until one is live your booking page loads but has nothing to book.',
       setupEventAction: 'Create an event',
       setupDone: 'Done',
+      agentBanner: {
+        title: 'Control your calendar, bookings and requests from your AI agent',
+        body: 'Connect Claude, ChatGPT, Claude Code, Codex, Cursor, OpenClaw or Hermes with your account. No API key.',
+        cta: 'Connect your agent',
+      },
+      agentCard: {
+        eyebrow: 'Made for agents',
+        title: 'Connect your agent',
+        body: 'Ask in your own words. Your agent finds the open times, books the meeting, moves it when plans change and answers every request.',
+        cta: 'Connect your agent',
+        label: 'An AI agent booking a meeting in {product} from a prompt',
+        prompts: [
+          'Connect to the {product} MCP and book a 30-minute intro call with Sarah Collins on Thursday.',
+          'When is the whole Pulse sales team free for a demo next week? Book the first slot.',
+          'Move my 3:00 call tomorrow to Friday morning and let the invitee know.',
+          'Accept the booking requests waiting for me, except the one on Saturday.',
+          'Cancel my 4:00 call on Friday and tell the invitee I am traveling.',
+          'Decline the request for Saturday morning and offer a time next week instead.',
+        ],
+        done: 'Done. Your calendar is up to date.',
+        placeholder: 'Ask {app}…',
+        connected: '{product} connected',
+        pause: 'Pause the demo',
+        play: 'Play the demo',
+      },
     },
     settings: {
       title: 'Settings',
@@ -2676,7 +2831,7 @@ export const en: BookingMessages = {
     },
     developer: {
       pageLead:
-        'Tools for connecting external systems to your scheduling. If you only book through this dashboard, you don’t need anything here.',
+        'Keys for connecting your own systems to your scheduling. If you only book through this dashboard, or connect an AI app with your account, you don’t need anything here.',
       apiKeysLead:
         'Let another system (an AI agent, a CRM, your own app) check availability and create bookings through the API without using this dashboard. Each key is a password for that system — scopes limit what it can do.',
       webhooksLead:
@@ -2721,43 +2876,14 @@ export const en: BookingMessages = {
       revokedToast: 'Key revoked.',
       deletedToast: 'Webhook deleted.',
       toggledToast: 'Webhook updated.',
-      connectTitle: 'Connect your agent',
-      tabCursor: 'Cursor',
-      tabClaudeCode: 'Claude Code',
-      tabCodex: 'Codex',
-      tabOther: 'Other agents',
-      tabChat: 'Claude.ai and ChatGPT',
-      stepKeyEnv: 'Set the key in the terminal you start your agent from, so it is never pasted into a config:',
-      mcpUrlLabel: 'MCP address',
-      mcpUrlMissing:
-        'This installation has no public MCP address yet. Ask whoever runs it to set MCP_PUBLIC_URL (or API_PUBLIC_URL), then come back.',
-      mcpUnavailable:
-        'Agent connections are not turned on for this installation. When they are, the steps to connect your agent will show here.',
       copy: 'Copy',
       copied: 'Copied',
-      addToCursor: 'Add to Cursor',
-      cursorLead: 'One click opens Cursor and asks you to confirm. Then set your key as shown below.',
-      cursorKeyNote:
-        'The link carries the name of the variable, never the key itself. Cursor reads the key from your environment when it starts.',
-      cursorFileLabel: 'Or paste this into .cursor/mcp.json (project) or ~/.cursor/mcp.json (all projects):',
-      claudeCodeLead: 'Run this once in your terminal:',
-      codexLead: 'Add this to ~/.codex/config.toml, or .codex/config.toml in a trusted project:',
-      otherLead: 'Any agent or SDK that speaks MCP over HTTP needs two things.',
-      otherUrl: 'Server address',
-      otherHeader: 'Header on every request',
-      chatTitle: 'Claude.ai and ChatGPT',
-      chatBody:
-        'One-click sign-in for the Claude and ChatGPT apps is coming. Until then, the public booking tools work with no key: an agent can find a time and book on any public booking page. Everything else needs an API key from a terminal-based agent.',
-      toolsTitle: 'What an agent can do',
-      toolsLead: 'A key grants only the tools whose access you tick. Read tools only look; write tools change your calendar; destructive ones cancel, decline or replace a booking.',
       kindRead: 'Read',
       kindWrite: 'Write',
       kindDestructive: 'Destructive',
       toolNeedsNoKey: 'No key needed on a public booking page',
       toolNeedsAnyKey: 'Works with any key',
-      toolNeedsAnyKeyOrSignIn: 'Works with any key or a sign-in',
       toolOrPublic: '(or no key on a public booking page)',
-      toolNeeds: 'Needs: {scope}',
       toolDescriptions: {
         find_available_slots: 'Find free times for an event type.',
         find_team_slots: 'Find free times with a team, and how it assigns hosts.',
@@ -2805,35 +2931,6 @@ export const en: BookingMessages = {
       apiDocs: 'Interactive reference',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'This installation has no public API address yet. Ask whoever runs it to set API_PUBLIC_URL.',
-      chatOAuthTitle: 'Claude, Claude Desktop and ChatGPT',
-      chatOAuthLead:
-        'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in here and choose what the app may do.',
-      addToClaude: 'Add to Claude',
-      chatClaudeHeading: 'In Claude',
-      chatClaudeStep1: 'Click Add to Claude, or open Settings, then Connectors, and choose Add custom connector.',
-      chatClaudeStep2: 'Use the MCP address above as the server URL and click Add.',
-      chatClaudeStep3: 'Click Connect. You come back here to sign in and approve.',
-      chatGptHeading: 'In ChatGPT',
-      chatGptStep1: 'Open Plugins, choose the plus button and Add custom MCP server.',
-      chatGptStep2: 'Use the MCP address above as the server URL and choose OAuth for authentication.',
-      chatGptStep3: 'Create it, then approve the connection here when ChatGPT sends you.',
-      chatScopesNote:
-        'A new connection can only read. The first time you ask it to book, move or cancel a meeting, the app asks you to approve that too.',
-      signInTitle: 'Sign in from your app',
-      signInBody:
-        'Claude, ChatGPT, Cursor and other apps that support sign-in connect with no key: add the MCP address as a connector, then sign in with the same account you use for Dapta Calendars.',
-      signInAccess:
-        'A connection acts with your owner or admin access, so it can use every tool. For narrower access, such as read-only or a single event type, create an API key instead.',
-      signInDisconnect:
-        "To disconnect, remove the connector in the app. An owner can also cut a connection off at once by removing that person's admin role.",
-      chatSignInLead: 'Add Dapta Calendars as a custom connector. There is no key to paste: you sign in with your account.',
-      chatSignInClaudeStep3: 'Click Connect and sign in with your Dapta Calendars account.',
-      chatSignInGptStep3: 'Create it, then sign in with your Dapta Calendars account when ChatGPT asks.',
-      signInCursorLead:
-        'One click opens Cursor and asks you to confirm. Cursor then shows the server as needing sign-in: click it and sign in.',
-      signInClaudeCodeNext: 'Then type /mcp in Claude Code, pick {server} and choose Authenticate to sign in.',
-      signInOtherLead:
-        'Any app that supports MCP sign-in (OAuth) needs only the address: add it with no key, then sign in when the app asks.',
       connectedTitle: 'Connected apps',
       connectedLead:
         'Apps that signed in to this workspace, such as Claude or Cursor. Each one can do what is listed under it until you disconnect it.',
@@ -2851,26 +2948,7 @@ export const en: BookingMessages = {
       connectedRevokedToast: 'App disconnected.',
       connectedExpiryNote:
         'Disconnecting stops an app from renewing its access right away. Access it already holds runs out within {minutes} min.',
-      docsPageLead: 'Every tool an agent can call through the MCP server, and the reference for the API behind it.',
-      guideTitle: 'Connect your agent in 3 steps',
-      guideIntro:
-        'Your AI agent can find a free slot, book, reschedule and cancel for you through the MCP server, without opening this dashboard.',
-      guideStepDone: 'done',
-      guideKeyTitle: 'Create an API key',
-      guideKeyBody:
-        'The key connects the agent to this workspace. It is shown only once, so copy it when you create it, and give it only the access the agent needs.',
-      guideKeyDone: 'You already have a key. Create one per agent so you can revoke each on its own.',
-      guideAgentBody: 'Pick your agent. Each tab has the address and the exact setup it needs.',
-      guideAgentDone: 'A key has been used or an app has signed in: your agent is connected.',
-      guideKeyUsedDone: 'A key has been used: your agent is connected.',
-      guideKeyAltTitle: 'Or use an API key',
-      guideKeyAltBody:
-        'For headless agents and scripts, or for narrower access such as read-only or a single event type. A key is shown only once, so copy it when you create it.',
-      guideTryTitle: 'Ask it for something',
-      guideTryHint: 'Open your agent and paste this to check that everything works.',
-      guidePrompt: 'Use the {product} MCP to tell me which workspace you are connected to and what you are allowed to do there.',
-      copyPrompt: 'Copy prompt',
-      guideTryNote: 'An agent can only do what its key allows. What each tool needs is listed in',
+      docsPageLead: 'For your own code: every route a key can call, with a try-it console and the machine-readable spec.',
       guideSkillTitle: 'No MCP in your agent?',
       guideSkillBody:
         'Download the skill: a zip that teaches any agent with a terminal to use the {product} API with the same key.',
@@ -2880,6 +2958,298 @@ export const en: BookingMessages = {
       guideSkillErrorSession: 'Your session has ended. Sign in again, then download the skill.',
       guideSkillErrorForbidden: 'Only owners and admins can download the skill.',
       guideSkillErrorGeneric: 'The skill could not be downloaded. Try again.',
+    },
+    connect: {
+      eyebrow: 'MCP',
+      heading: 'Connect Claude, ChatGPT, Codex or Cursor to {product}',
+      intro:
+        'Ask your AI assistant to find open times, book, move and cancel meetings and answer booking requests, right from a chat. Log in once with your account and it can work in every workspace where you are an owner or admin.',
+      signinTitle: 'Connect with your account',
+      recommended: 'Recommended',
+      signinIntro: 'Pick your app and follow the steps.',
+      benefits: {
+        noKey: { title: 'No API key.', body: 'Simply log in to your account. Nothing to create or store.' },
+        workspaces: { title: 'One connector, all your workspaces.', body: 'Work in any workspace where you are an owner or admin.' },
+        access: {
+          title: 'Your access, nothing more.',
+          body: 'Owners and admins can connect it, and the agent acts with the access of whoever connected it. Remove an admin role and that connection stops.',
+        },
+      },
+      appsLabel: 'Your AI app',
+      urlLabel: 'MCP URL',
+      promptLabel: 'Try it',
+      prompt: 'What meetings do I have this week in {product}?',
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Could not copy. Select the text and copy it by hand.',
+      copyUrl: 'Copy URL',
+      copyCommand: 'Copy command',
+      copyConfig: 'Copy configuration',
+      copyPrompt: 'Copy prompt',
+      addToCursor: 'Add to Cursor',
+      open: {
+        claude: 'Open Claude',
+        claudeDesktop: 'Open Claude Desktop',
+        claudeDirectory: 'Open in the Claude directory',
+        newTab: '(opens in a new tab)',
+        chatgpt: 'Open ChatGPT',
+        copyCommand: 'Copy command',
+        copied: 'Copied',
+        pasteHint: 'Paste it in your terminal.',
+        phoneNote: 'Open this page on your computer to connect {app}.',
+      },
+      apps: {
+        claude: {
+          steps: [
+            {
+              title: 'Open Connectors in Claude',
+              body: 'In claude.ai, Claude Desktop or Cowork, click **+** in the chat box, then **Connectors → Add connector → Add custom connector**.',
+            },
+            {
+              title: 'Name it {product} and paste this URL',
+              body: 'Use `{product}` as the name and paste the URL below. Leave the advanced settings empty and click **Add**.',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Your browser opens the sign-in page. Enter your email and type the 6-digit code we send you. Back in Claude, {product} shows as **Connected**.',
+            },
+            {
+              title: 'Ask',
+              body: 'Open a new chat and ask, for example:',
+            },
+          ],
+        },
+        claudeDirectory: {
+          steps: [
+            {
+              title: 'Open {product} in the Claude directory',
+              body: 'Click the button below. Or, in Claude, click **+** in the chat box, then **Connectors → Browse connectors**, and search for `{product}`.',
+            },
+            {
+              title: 'Click Connect',
+              body: 'On the {product} page of the directory, click **Connect**. Claude opens the {product} sign-in.',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Enter your email and type the 6-digit code we send you. Back in Claude, {product} shows as **Connected**.',
+            },
+            {
+              title: 'Ask',
+              body: 'Open a new chat and ask, for example:',
+            },
+          ],
+          fallbackTitle: 'Your organization does not allow the directory?',
+          fallbackBody:
+            'Add {product} as a custom connector instead: in Claude click **+**, then **Connectors → Add connector → Add custom connector**. Use `{product}` as the name, paste this URL and click **Add**.',
+        },
+        chatgpt: {
+          steps: [
+            {
+              title: 'Create the app in ChatGPT',
+              body: 'In the ChatGPT desktop app, switch to **Work** mode. Open **Plugins**, click **Add** and choose **Create MCP App**.',
+            },
+            {
+              title: 'Fill in the form',
+              body: 'Name: `{product}`. Server URL: paste the address below. Leave Authentication on **OAuth**. Check **I understand and want to continue** and create it.',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Click **Continue**. Your browser opens: log in if it asks, then click **Open ChatGPT** to come back.',
+            },
+            {
+              title: 'Install the plugin',
+              body: 'In **Plugins**, open the **Personal** tab, choose **{product}** and click **Install plugin**. The browser opens once more to link your account: click **Open ChatGPT** again. That second sign-in is expected.',
+            },
+            {
+              title: 'Ask',
+              body: 'Click **Try now**, type `@{product}` and ask, for example:',
+            },
+          ],
+        },
+        claudeCode: {
+          steps: [
+            {
+              title: 'Add {product} to Claude Code',
+              body: 'In a terminal, run:',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Open Claude Code, run `/mcp`, choose **{server}** and then **Authenticate**. Log in in the browser and come back to the terminal.',
+            },
+            {
+              title: 'Ask',
+              body: 'Ask, for example:',
+            },
+          ],
+          note: 'Already connected {product} in Claude? Claude Code logged in with the same Claude account uses that connector too: run `/mcp` to check.',
+          directoryTitle: 'Already connected {product} in Claude?',
+          directoryBody:
+            'Claude Code logged in with the same Claude account brings the {product} connector with it. Run `/mcp` and look for **{product}**. Not there yet? Connect it from the Claude directory, or follow the steps below.',
+        },
+        codex: {
+          steps: [
+            {
+              title: 'Add {product} to Codex',
+              body: 'In a terminal, run:',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Run this command. Your browser opens: log in and come back to the terminal.',
+            },
+            {
+              title: 'Ask',
+              body: 'Open Codex and ask, for example:',
+            },
+          ],
+          note: 'Using the Codex or ChatGPT desktop app? Follow the **ChatGPT** tab.',
+        },
+        cursor: {
+          steps: [
+            {
+              title: 'Add {product} to Cursor',
+              body: 'With Cursor installed, click **Add to Cursor**. Or open **Customize → MCPs → New MCP Server**, choose **User** and paste this into `mcp.json`:',
+            },
+            {
+              title: 'Log in to your account',
+              body: '**{server}** shows up with **Needs authentication**. Click **Authenticate**, log in in the browser, click **Allow access** and then **Open Cursor**.',
+            },
+            {
+              title: 'Ask',
+              body: 'Open a **New Chat** and ask, for example. Cursor asks before it runs a tool: click **Run**.',
+            },
+          ],
+        },
+        openclaw: {
+          steps: [
+            {
+              title: 'Add {product} to OpenClaw',
+              body: 'In a terminal, save {product} as a remote MCP server that logs in with your account:',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Run this command. Your browser opens: log in and come back to the terminal. `openclaw mcp status --verbose` then shows {server} as authorized.',
+            },
+            {
+              title: 'Ask',
+              body: 'Ask your OpenClaw agent, for example:',
+            },
+          ],
+        },
+        hermes: {
+          steps: [
+            {
+              title: 'Add {product} to Hermes',
+              body: 'Open `~/.hermes/config.yaml` (or run `hermes config edit`) and add {product} under `mcp_servers`:',
+            },
+            {
+              title: 'Log in to your account',
+              body: 'Run this command. Your browser opens: log in and come back to the terminal. Then start a new session, or run `/reload-mcp` in the one you have open.',
+            },
+            {
+              title: 'Ask',
+              body: 'Ask your Hermes agent, for example:',
+            },
+          ],
+        },
+      },
+      tip: '**One connector for every workspace.** If you are an owner or admin in several, your AI app asks which one to use. To change, just say “switch to <workspace>”.',
+      stepUpNote:
+        'On this installation a new connection can only read: the first time you ask your agent to book, move or cancel a meeting, your AI app asks you to approve that too.',
+      unavailableTitle: 'The connector is not available on this installation',
+      unavailableBody:
+        'This installation’s MCP server does not take a sign-in yet, so AI apps cannot connect here. Ask whoever runs it to turn on `MCP_ENABLED` and `OAUTH_ENABLED` and to set `MCP_PUBLIC_URL`.',
+      media: {
+        terminalLabel: 'Animation: how to connect {product} in {app}',
+        play: 'Play the walkthrough',
+        pause: 'Pause the walkthrough',
+      },
+      walkthrough: {
+        prompt: 'Find a 30-minute slot on Thursday and book it with Sarah Collins',
+        ui: {
+          ccWelcome: 'Welcome to Claude Code!',
+          ccHelp: '/help for help, /status for your current setup',
+          ccAdded: 'Added HTTP MCP server {server} with URL: {url} to user config',
+          ccManage: 'Manage MCP servers',
+          needsAuth: 'needs authentication',
+          authenticate: 'Authenticate',
+          ccBrowser: 'Opening your browser to authenticate…',
+          ccAuthOk: 'Authentication successful. Connected to {server}.',
+          codexAdded: "Added global MCP server '{server}'.",
+          codexAuthorize: 'Authorize {server} in your browser to continue.',
+          codexLoggedIn: "Successfully logged in to MCP server '{server}'.",
+          codexModel: 'model: gpt-5-codex  directory: ~/pulse',
+          called: 'Called',
+          working: 'Working',
+          ocSaved: 'Saved MCP server "{server}" (streamable-http, auth: oauth).',
+          ocLogin: 'Opening the browser to sign in to {server}…',
+          ocLoggedIn: '{server}: authorized. {count} tools available.',
+          hmSaved: 'Saved. Run hermes mcp login {server} to sign in.',
+          hmLogin: 'Opening your browser to authorize {server}…',
+          hmLoggedIn: '{server}: authorized. Tokens saved.',
+        },
+        signIn: {
+          title: 'Log in to your account',
+          emailLabel: 'Email',
+          email: 'laura@example.com',
+          continue: 'Continue with email',
+          checkEmail: 'Check your email',
+          codeSentTo: 'Enter the code sent to',
+          noCode: 'Didn’t receive a code? You can request a new one in 30 seconds.',
+          connected: '{product} is connected to {app}',
+          consentTitle: '{app} would like access to your account',
+          redirectNote: 'After allowing access, you will be redirected to:',
+          warning: 'This redirect points to an application running on your machine. Only allow access if you started this from {app}.',
+          allow: 'Allow access',
+          cancel: 'Cancel',
+        },
+        answer: {
+          found: 'Thursday has these open times:',
+          slots: ['9:30', '10:00', '11:30'],
+          booked: 'Booked',
+          meeting: 'Intro call with Sarah Collins',
+          when: 'Thursday, 10:00 to 10:30',
+          calendar: 'On Laura Mendez’s calendar, Pulse',
+        },
+      },
+      toolsTitle: 'What you can do with the MCP',
+      toolsIntro: '{count} tools for your open times, bookings and booking requests. Ask in your own words: your AI app picks the tool.',
+      toolsLink: 'See every tool',
+    },
+    tools: {
+      title: 'Tools',
+      intro:
+        'Everything your agent can do in {product} once it is connected: {count} tools. You never call them yourself. Ask in your own words and your agent picks the right one.',
+      askLabel: 'Ask:',
+      countOne: '1 tool',
+      count: '{n} tools',
+      connectCta: 'Connect your agent',
+      groups: {
+        availability: { title: 'Open times', body: 'Find free times on your event types and with a team, the same times your booking page offers.' },
+        booking: { title: 'Booking', body: 'Book meetings on your event types, on public booking pages and with a team. The invitee gets the confirmation email.' },
+        holds: { title: 'Holds', body: 'Keep a time for a few minutes while the person decides, so nobody else takes it.' },
+        bookings: { title: 'Your bookings', body: 'See your meetings, read their details, move them to another time or cancel them.' },
+        requests: { title: 'Booking requests', body: 'See the requests waiting for your answer, then accept or decline them.' },
+        account: { title: 'Account and event types', body: 'Who is connected, the workspaces you can work in, your event types and their links.' },
+      },
+      items: {
+        find_available_slots: { what: 'See the open times of one event type, day by day.', ask: 'When am I free for a 30-minute call this week?' },
+        find_team_slots: { what: 'See when a team event has a free host, or when everyone on the team is free.', ask: 'When is the sales team free for a demo next week?' },
+        book_meeting: { what: 'Book a time on a public booking page and email the invitee.', ask: 'Book Thursday at 10:00 on my intro call page for Sarah Collins' },
+        book_team_meeting: { what: 'Book with a team. A free host is picked for you.', ask: 'Book the sales demo with whoever is free on Tuesday at 3:00' },
+        create_booking: { what: 'Put a meeting on one of your event types for someone, and email them.', ask: 'Add a 30-minute intro call with Sarah Collins on Thursday at 10:00' },
+        hold_slot: { what: 'Keep a time for about 10 minutes while the person decides.', ask: 'Hold Thursday at 10:00 while I check with Sarah' },
+        list_bookings: { what: 'See your meetings over a range of dates.', ask: 'What meetings do I have this week?' },
+        get_booking: { what: 'Open one meeting and read what the invitee wrote.', ask: 'What did Sarah write when she booked?' },
+        reschedule_booking: { what: 'Move a meeting to another time. The invitee is told.', ask: 'Move my call with Sarah to Friday at 11:00' },
+        cancel_booking: { what: 'Cancel a meeting and tell the invitee.', ask: 'Cancel my 4:00 call on Friday and tell them I am traveling' },
+        list_pending_bookings: { what: 'See the booking requests waiting for your answer.', ask: 'Which booking requests are waiting for me?' },
+        confirm_booking: { what: 'Accept a booking request and tell the invitee.', ask: 'Accept the request for Thursday' },
+        decline_booking: { what: 'Decline a booking request, free its time and tell the invitee.', ask: 'Decline the request for Saturday and say I am away' },
+        whoami: { what: 'See which workspace the agent is connected to and what it may do there.', ask: 'Which workspace are you connected to?' },
+        list_my_accounts: { what: 'See every workspace you can work in.', ask: 'Which workspaces can you work in?' },
+        list_event_types: { what: 'See your event types, personal and team.', ask: 'Which event types do I have?' },
+        get_booking_page_link: { what: 'Get the link where anyone can book one event type.', ask: 'Give me the link to my intro call' },
+      },
     },
     oauthConsent: {
       pageTitle: 'Connect an app',
@@ -2892,7 +3262,7 @@ export const en: BookingMessages = {
       workspace: 'Workspace',
       signedInAs: 'Signed in as {who}',
       scopesLead: 'It will be able to',
-      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it under MCP, in Connect and keys.',
+      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it under API and webhooks, in API keys.',
       shortLived: 'Its access lasts about an hour; after that it has to ask again.',
       approve: 'Allow',
       deny: 'Deny',
@@ -3375,12 +3745,14 @@ export const es: BookingMessages = {
       calendars: 'Calendarios',
       settings: 'Ajustes',
       bookingPage: 'Página de reservas',
-      developers: 'MCP',
+      connect: 'Conecta tu agente',
+      tools: 'Herramientas',
+      api: 'API y webhooks',
       docs: 'Documentación',
       agents: 'Dapta Agents',
     },
     developerNav: {
-      keys: 'Conexión y claves',
+      keys: 'Claves API',
       webhooks: 'Webhooks',
       docs: 'Docs de la API',
     },
@@ -3454,8 +3826,6 @@ export const es: BookingMessages = {
       setAvailabilityDesc: 'Horas semanales + excepciones por fecha.',
       stylePage: 'Personaliza tu página de reservas',
       stylePageDesc: 'Marca + estudio de 9 ejes.',
-      apiKeys: 'Conecta un agente',
-      apiKeysDesc: 'El servidor MCP y las claves API que usa tu agente de IA.',
       setupTitle: 'Queda lista para reservas',
       setupSubtitle: 'Tres pasos para que una invitación real llegue a tu calendario — no solo a este panel.',
       setupConnectTitle: 'Conecta un calendario',
@@ -3468,6 +3838,31 @@ export const es: BookingMessages = {
       setupEventDesc: 'Hasta que publiques uno tu página de reservas carga, pero no hay nada que reservar.',
       setupEventAction: 'Crear un evento',
       setupDone: 'Listo',
+      agentBanner: {
+        title: 'Controla tu calendario, tus reservas y solicitudes desde tu agente de IA',
+        body: 'Conecta Claude, ChatGPT, Claude Code, Codex, Cursor, OpenClaw o Hermes con tu cuenta. Sin clave API.',
+        cta: 'Conecta tu agente',
+      },
+      agentCard: {
+        eyebrow: 'Hecho para agentes',
+        title: 'Conecta tu agente',
+        body: 'Pide con tus palabras. Tu agente busca los horarios libres, agenda la reunión, la mueve si cambian los planes y responde cada solicitud.',
+        cta: 'Conecta tu agente',
+        label: 'Un agente de IA agendando una reunión en {product} a partir de un prompt',
+        prompts: [
+          'Conéctate al MCP de {product} y agenda una llamada inicial de 30 minutos con Sarah Collins el jueves.',
+          '¿Cuándo está libre todo el equipo de ventas de Pulse para una demo la próxima semana? Reserva el primer horario.',
+          'Mueve mi llamada de mañana a las 3:00 al viernes en la mañana y avísale al invitado.',
+          'Acepta las solicitudes de reserva que me esperan, menos la del sábado.',
+          'Cancela mi llamada del viernes a las 4:00 y dile al invitado que estoy de viaje.',
+          'Rechaza la solicitud del sábado en la mañana y ofrece un horario la próxima semana.',
+        ],
+        done: 'Listo. Tu calendario está al día.',
+        placeholder: 'Pregúntale a {app}…',
+        connected: '{product} conectado',
+        pause: 'Pausar la demostración',
+        play: 'Reproducir la demostración',
+      },
     },
     settings: {
       title: 'Ajustes',
@@ -4119,7 +4514,7 @@ export const es: BookingMessages = {
     },
     developer: {
       pageLead:
-        'Herramientas para conectar sistemas externos con tu agenda. Si solo reservas desde este panel, no necesitas nada de esta página.',
+        'Claves para conectar tus propios sistemas con tu agenda. Si solo reservas desde este panel, o conectas una app de IA con tu cuenta, no necesitas nada de esta página.',
       apiKeysLead:
         'Permiten que otro sistema (un agente de IA, un CRM, tu propia app) consulte disponibilidad y cree reservas por API sin usar este panel. Cada clave es una contraseña para ese sistema — los permisos limitan qué puede hacer.',
       webhooksLead:
@@ -4164,43 +4559,14 @@ export const es: BookingMessages = {
       revokedToast: 'Clave revocada.',
       deletedToast: 'Webhook eliminado.',
       toggledToast: 'Webhook actualizado.',
-      connectTitle: 'Conecta tu agente',
-      tabCursor: 'Cursor',
-      tabClaudeCode: 'Claude Code',
-      tabCodex: 'Codex',
-      tabOther: 'Otros agentes',
-      tabChat: 'Claude.ai y ChatGPT',
-      stepKeyEnv: 'Define la clave en la terminal desde la que abres tu agente, así nunca queda pegada en una configuración:',
-      mcpUrlLabel: 'Dirección MCP',
-      mcpUrlMissing:
-        'Esta instalación aún no tiene una dirección MCP pública. Pide a quien la administra que defina MCP_PUBLIC_URL (o API_PUBLIC_URL) y vuelve.',
-      mcpUnavailable:
-        'Las conexiones de agentes no están activadas en esta instalación. Cuando lo estén, aquí verás los pasos para conectar tu agente.',
       copy: 'Copiar',
       copied: 'Copiado',
-      addToCursor: 'Añadir a Cursor',
-      cursorLead: 'Un clic abre Cursor y te pide confirmar. Después define tu clave como se muestra abajo.',
-      cursorKeyNote:
-        'El enlace lleva el nombre de la variable, nunca la clave. Cursor lee la clave de tu entorno al iniciar.',
-      cursorFileLabel: 'O pega esto en .cursor/mcp.json (proyecto) o ~/.cursor/mcp.json (todos los proyectos):',
-      claudeCodeLead: 'Ejecuta esto una vez en tu terminal:',
-      codexLead: 'Agrega esto a ~/.codex/config.toml, o a .codex/config.toml en un proyecto de confianza:',
-      otherLead: 'Cualquier agente o SDK que hable MCP por HTTP necesita dos cosas.',
-      otherUrl: 'Dirección del servidor',
-      otherHeader: 'Encabezado en cada solicitud',
-      chatTitle: 'Claude.ai y ChatGPT',
-      chatBody:
-        'Pronto habrá inicio de sesión con un clic para las apps de Claude y ChatGPT. Mientras tanto, las herramientas de reserva pública funcionan sin clave: un agente puede buscar un horario y reservar en cualquier página pública. Todo lo demás necesita una clave API desde un agente de terminal.',
-      toolsTitle: 'Qué puede hacer un agente',
-      toolsLead: 'Una clave solo da las herramientas cuyo acceso marques. Las de lectura solo miran; las de escritura cambian tu agenda; las destructivas cancelan, rechazan o reemplazan una reserva.',
       kindRead: 'Lectura',
       kindWrite: 'Escritura',
       kindDestructive: 'Destructiva',
       toolNeedsNoKey: 'Sin clave en una página de reservas pública',
       toolNeedsAnyKey: 'Funciona con cualquier clave',
-      toolNeedsAnyKeyOrSignIn: 'Funciona con cualquier clave o con un inicio de sesión',
       toolOrPublic: '(o sin clave en una página de reservas pública)',
-      toolNeeds: 'Requiere: {scope}',
       toolDescriptions: {
         find_available_slots: 'Busca horarios libres de un tipo de evento.',
         find_team_slots: 'Busca horarios libres con un equipo y cómo asigna anfitriones.',
@@ -4248,35 +4614,6 @@ export const es: BookingMessages = {
       apiDocs: 'Referencia interactiva',
       apiOpenApi: 'openapi.json',
       apiRefMissing: 'Esta instalación aún no tiene una dirección pública de la API. Pide a quien la administra que defina API_PUBLIC_URL.',
-      chatOAuthTitle: 'Claude, Claude Desktop y ChatGPT',
-      chatOAuthLead:
-        'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión aquí y eliges qué puede hacer la app.',
-      addToClaude: 'Agregar a Claude',
-      chatClaudeHeading: 'En Claude',
-      chatClaudeStep1: 'Haz clic en Agregar a Claude, o abre Configuración, luego Conectores, y elige Agregar conector personalizado.',
-      chatClaudeStep2: 'Usa la dirección MCP de arriba como URL del servidor y haz clic en Agregar.',
-      chatClaudeStep3: 'Haz clic en Conectar. Vuelves aquí para iniciar sesión y aprobar.',
-      chatGptHeading: 'En ChatGPT',
-      chatGptStep1: 'Abre Plugins, elige el botón más y Agregar servidor MCP personalizado.',
-      chatGptStep2: 'Usa la dirección MCP de arriba como URL del servidor y elige OAuth como autenticación.',
-      chatGptStep3: 'Créalo y aprueba la conexión aquí cuando ChatGPT te traiga.',
-      chatScopesNote:
-        'Una conexión nueva solo puede leer. La primera vez que le pidas agendar, mover o cancelar una reunión, la app te pedirá aprobar también eso.',
-      signInTitle: 'Inicia sesión desde tu app',
-      signInBody:
-        'Claude, ChatGPT, Cursor y otras apps que admiten inicio de sesión se conectan sin clave: agrega la dirección MCP como conector y luego inicia sesión con la misma cuenta que usas en Dapta Calendars.',
-      signInAccess:
-        'Una conexión actúa con tu acceso de propietario o administrador, así que puede usar todas las herramientas. Para un acceso más acotado, como solo lectura o un único tipo de evento, crea una clave de API.',
-      signInDisconnect:
-        'Para desconectar, elimina el conector en la app. Un propietario también puede cortar una conexión al instante quitándole a esa persona el rol de administrador.',
-      chatSignInLead: 'Agrega Dapta Calendars como conector personalizado. No hay clave que pegar: inicias sesión con tu cuenta.',
-      chatSignInClaudeStep3: 'Haz clic en Conectar e inicia sesión con tu cuenta de Dapta Calendars.',
-      chatSignInGptStep3: 'Créalo e inicia sesión con tu cuenta de Dapta Calendars cuando ChatGPT te lo pida.',
-      signInCursorLead:
-        'Un clic abre Cursor y te pide confirmar. Luego Cursor muestra que el servidor necesita inicio de sesión: haz clic en él e inicia sesión.',
-      signInClaudeCodeNext: 'Luego escribe /mcp en Claude Code, elige {server} y selecciona Authenticate para iniciar sesión.',
-      signInOtherLead:
-        'Cualquier app que admita inicio de sesión en MCP (OAuth) solo necesita la dirección: agrégala sin clave e inicia sesión cuando la app te lo pida.',
       connectedTitle: 'Apps conectadas',
       connectedLead:
         'Apps que iniciaron sesión en este espacio de trabajo, como Claude o Cursor. Cada una puede hacer lo que aparece debajo hasta que la desconectes.',
@@ -4294,26 +4631,7 @@ export const es: BookingMessages = {
       connectedRevokedToast: 'App desconectada.',
       connectedExpiryNote:
         'Desconectar impide de inmediato que la app renueve su acceso. El acceso que ya tiene se agota en menos de {minutes} min.',
-      docsPageLead: 'Cada herramienta que un agente puede usar a través del servidor MCP, y la referencia de la API que hay detrás.',
-      guideTitle: 'Conecta tu agente en 3 pasos',
-      guideIntro:
-        'Tu agente de IA puede buscar un espacio libre, reservar, reagendar y cancelar por ti a través del servidor MCP, sin abrir este panel.',
-      guideStepDone: 'hecho',
-      guideKeyTitle: 'Crea una clave API',
-      guideKeyBody:
-        'La clave conecta al agente con este espacio de trabajo. Solo se muestra una vez, así que cópiala al crearla, y dale solo el acceso que el agente necesita.',
-      guideKeyDone: 'Ya tienes una clave. Crea una por agente para poder revocar cada una por separado.',
-      guideAgentBody: 'Elige tu agente. Cada pestaña tiene la dirección y la configuración exacta que necesita.',
-      guideAgentDone: 'Ya se usó una clave o una app inició sesión: tu agente está conectado.',
-      guideKeyUsedDone: 'Ya se usó una clave: tu agente está conectado.',
-      guideKeyAltTitle: 'O usa una clave API',
-      guideKeyAltBody:
-        'Para agentes y scripts que corren sin interfaz, o para un acceso más acotado, como solo lectura o un único tipo de evento. La clave solo se muestra una vez, así que cópiala al crearla.',
-      guideTryTitle: 'Pídele algo',
-      guideTryHint: 'Abre tu agente y pega esto para comprobar que todo funciona.',
-      guidePrompt: 'Usa el MCP de {product} para decirme a qué espacio de trabajo estás conectado y qué puedes hacer ahí.',
-      copyPrompt: 'Copiar prompt',
-      guideTryNote: 'Un agente solo puede hacer lo que su clave permite. Lo que necesita cada herramienta está en',
+      docsPageLead: 'Para tu propio código: cada ruta que una clave puede llamar, con una consola de prueba y la especificación legible por máquinas.',
       guideSkillTitle: '¿Tu agente no tiene MCP?',
       guideSkillBody:
         'Descarga el skill: un zip que le enseña a cualquier agente con terminal a usar la API de {product} con la misma clave API.',
@@ -4323,6 +4641,298 @@ export const es: BookingMessages = {
       guideSkillErrorSession: 'Tu sesión terminó. Vuelve a iniciar sesión y descarga el skill.',
       guideSkillErrorForbidden: 'Solo los propietarios y administradores pueden descargar el skill.',
       guideSkillErrorGeneric: 'No se pudo descargar el skill. Inténtalo de nuevo.',
+    },
+    connect: {
+      eyebrow: 'MCP',
+      heading: 'Conecta Claude, ChatGPT, Codex o Cursor con {product}',
+      intro:
+        'Pídele a tu asistente de IA que busque horarios libres, agende, mueva y cancele reuniones y responda solicitudes de reserva, directamente desde un chat. Inicia sesión una vez con tu cuenta y podrá trabajar en todos los espacios donde eres propietario o administrador.',
+      signinTitle: 'Conecta con tu cuenta',
+      recommended: 'Recomendado',
+      signinIntro: 'Elige tu app y sigue los pasos.',
+      benefits: {
+        noKey: { title: 'Sin clave API.', body: 'Solo inicia sesión con tu cuenta. Nada que crear ni guardar.' },
+        workspaces: { title: 'Un conector, todos tus espacios.', body: 'Trabaja en cualquier espacio donde seas propietario o administrador.' },
+        access: {
+          title: 'Tu acceso, nada más.',
+          body: 'Pueden conectarlo propietarios y administradores, y el agente actúa con el acceso de quien lo conectó. Si se quita el rol de administrador, esa conexión se detiene.',
+        },
+      },
+      appsLabel: 'Tu app de IA',
+      urlLabel: 'URL del MCP',
+      promptLabel: 'Pruébalo',
+      prompt: '¿Qué reuniones tengo esta semana en {product}?',
+      copy: 'Copiar',
+      copied: 'Copiado',
+      copyFailed: 'No se pudo copiar. Selecciona el texto y cópialo a mano.',
+      copyUrl: 'Copiar URL',
+      copyCommand: 'Copiar comando',
+      copyConfig: 'Copiar configuración',
+      copyPrompt: 'Copiar prompt',
+      addToCursor: 'Add to Cursor',
+      open: {
+        claude: 'Abrir Claude',
+        claudeDesktop: 'Abrir Claude Desktop',
+        claudeDirectory: 'Abrir en el directorio de Claude',
+        newTab: '(se abre en una pestaña nueva)',
+        chatgpt: 'Abrir ChatGPT',
+        copyCommand: 'Copiar comando',
+        copied: 'Copiado',
+        pasteHint: 'Pégalo en tu terminal.',
+        phoneNote: 'Abre esta página en tu computadora para conectar {app}.',
+      },
+      apps: {
+        claude: {
+          steps: [
+            {
+              title: 'Abre Connectors en Claude',
+              body: 'En claude.ai, Claude Desktop o Cowork, haz clic en **+** en la caja del chat y luego en **Connectors → Add connector → Add custom connector**.',
+            },
+            {
+              title: 'Ponle {product} de nombre y pega esta URL',
+              body: 'Usa `{product}` como nombre y pega la URL de abajo. Deja vacía la configuración avanzada y haz clic en **Add**.',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Tu navegador abre la página de inicio de sesión. Escribe tu correo y el código de 6 dígitos que te enviamos. De vuelta en Claude, {product} aparece como **Connected**.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Abre un chat nuevo y pregunta, por ejemplo:',
+            },
+          ],
+        },
+        claudeDirectory: {
+          steps: [
+            {
+              title: 'Abre {product} en el directorio de Claude',
+              body: 'Haz clic en el botón de abajo. O, en Claude, haz clic en **+** en la caja del chat, luego en **Connectors → Browse connectors**, y busca `{product}`.',
+            },
+            {
+              title: 'Haz clic en Connect',
+              body: 'En la página de {product} del directorio, haz clic en **Connect**. Claude abre el inicio de sesión de {product}.',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Escribe tu correo y el código de 6 dígitos que te enviamos. De vuelta en Claude, {product} aparece como **Connected**.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Abre un chat nuevo y pregunta, por ejemplo:',
+            },
+          ],
+          fallbackTitle: '¿Tu organización no deja usar el directorio?',
+          fallbackBody:
+            'Agrega {product} como conector personalizado: en Claude haz clic en **+** y luego en **Connectors → Add connector → Add custom connector**. Usa `{product}` como nombre, pega esta URL y haz clic en **Add**.',
+        },
+        chatgpt: {
+          steps: [
+            {
+              title: 'Crea la app en ChatGPT',
+              body: 'En la app de escritorio de ChatGPT, cambia a modo **Work**. Abre **Plugins**, haz clic en **Add** y elige **Create MCP App**.',
+            },
+            {
+              title: 'Llena el formulario',
+              body: 'Name: `{product}`. Server URL: pega la dirección de abajo. Deja Authentication en **OAuth**. Marca **I understand and want to continue** y créala.',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Haz clic en **Continue**. Se abre tu navegador: inicia sesión si te lo pide y luego haz clic en **Open ChatGPT** para volver.',
+            },
+            {
+              title: 'Instala el plugin',
+              body: 'En **Plugins**, abre la pestaña **Personal**, elige **{product}** y haz clic en **Install plugin**. El navegador se abre una vez más para vincular tu cuenta: haz clic otra vez en **Open ChatGPT**. Ese segundo inicio de sesión es normal.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Haz clic en **Try now**, escribe `@{product}` y pregunta, por ejemplo:',
+            },
+          ],
+        },
+        claudeCode: {
+          steps: [
+            {
+              title: 'Agrega {product} a Claude Code',
+              body: 'En una terminal, ejecuta:',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Abre Claude Code, ejecuta `/mcp`, elige **{server}** y luego **Authenticate**. Inicia sesión en el navegador y vuelve a la terminal.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Pregunta, por ejemplo:',
+            },
+          ],
+          note: '¿Ya conectaste {product} en Claude? Claude Code con la misma cuenta de Claude también usa ese conector: ejecuta `/mcp` para revisarlo.',
+          directoryTitle: '¿Ya conectaste {product} en Claude?',
+          directoryBody:
+            'Claude Code con la misma cuenta de Claude trae el conector de {product}. Ejecuta `/mcp` y busca **{product}**. ¿Todavía no está? Conéctalo desde el directorio de Claude o sigue los pasos de abajo.',
+        },
+        codex: {
+          steps: [
+            {
+              title: 'Agrega {product} a Codex',
+              body: 'En una terminal, ejecuta:',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Ejecuta este comando. Se abre tu navegador: inicia sesión y vuelve a la terminal.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Abre Codex y pregunta, por ejemplo:',
+            },
+          ],
+          note: '¿Usas la app de escritorio de Codex o ChatGPT? Sigue la pestaña **ChatGPT**.',
+        },
+        cursor: {
+          steps: [
+            {
+              title: 'Agrega {product} a Cursor',
+              body: 'Si tienes Cursor instalado, haz clic en **Add to Cursor**. O abre **Customize → MCPs → New MCP Server**, elige **User** y pega esto en `mcp.json`:',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: '**{server}** aparece con **Needs authentication**. Haz clic en **Authenticate**, inicia sesión en el navegador, haz clic en **Allow access** y luego en **Open Cursor**.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Abre un **New Chat** y pregunta, por ejemplo. Cursor te pregunta antes de usar una herramienta: haz clic en **Run**.',
+            },
+          ],
+        },
+        openclaw: {
+          steps: [
+            {
+              title: 'Agrega {product} a OpenClaw',
+              body: 'En una terminal, guarda {product} como servidor MCP remoto que inicia sesión con tu cuenta:',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Ejecuta este comando. Se abre tu navegador: inicia sesión y vuelve a la terminal. Después, `openclaw mcp status --verbose` muestra {server} como autorizado.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Pregúntale a tu agente de OpenClaw, por ejemplo:',
+            },
+          ],
+        },
+        hermes: {
+          steps: [
+            {
+              title: 'Agrega {product} a Hermes',
+              body: 'Abre `~/.hermes/config.yaml` (o ejecuta `hermes config edit`) y agrega {product} dentro de `mcp_servers`:',
+            },
+            {
+              title: 'Inicia sesión con tu cuenta',
+              body: 'Ejecuta este comando. Se abre tu navegador: inicia sesión y vuelve a la terminal. Después abre una sesión nueva, o ejecuta `/reload-mcp` en la que tengas abierta.',
+            },
+            {
+              title: 'Pregunta',
+              body: 'Pregúntale a tu agente de Hermes, por ejemplo:',
+            },
+          ],
+        },
+      },
+      tip: '**Un conector para todos tus espacios.** Si eres propietario o administrador en varios, tu app de IA te pregunta en cuál trabajar. Para cambiar, solo di «cambia a <espacio>».',
+      stepUpNote:
+        'En esta instalación una conexión nueva solo puede leer: la primera vez que le pidas a tu agente agendar, mover o cancelar una reunión, tu app de IA te pide aprobarlo también.',
+      unavailableTitle: 'El conector no está disponible en esta instalación',
+      unavailableBody:
+        'El servidor MCP de esta instalación todavía no acepta inicio de sesión, así que las apps de IA no pueden conectarse aquí. Pídele a quien la administra que active `MCP_ENABLED` y `OAUTH_ENABLED` y configure `MCP_PUBLIC_URL`.',
+      media: {
+        terminalLabel: 'Animación: cómo conectar {product} en {app}',
+        play: 'Reproducir el recorrido',
+        pause: 'Pausar el recorrido',
+      },
+      walkthrough: {
+        prompt: 'Busca un horario de 30 minutos el jueves y agéndalo con Sarah Collins',
+        ui: {
+          ccWelcome: 'Welcome to Claude Code!',
+          ccHelp: '/help for help, /status for your current setup',
+          ccAdded: 'Added HTTP MCP server {server} with URL: {url} to user config',
+          ccManage: 'Manage MCP servers',
+          needsAuth: 'needs authentication',
+          authenticate: 'Authenticate',
+          ccBrowser: 'Opening your browser to authenticate…',
+          ccAuthOk: 'Authentication successful. Connected to {server}.',
+          codexAdded: "Added global MCP server '{server}'.",
+          codexAuthorize: 'Authorize {server} in your browser to continue.',
+          codexLoggedIn: "Successfully logged in to MCP server '{server}'.",
+          codexModel: 'model: gpt-5-codex  directory: ~/pulse',
+          called: 'Called',
+          working: 'Working',
+          ocSaved: 'Saved MCP server "{server}" (streamable-http, auth: oauth).',
+          ocLogin: 'Opening the browser to sign in to {server}…',
+          ocLoggedIn: '{server}: authorized. {count} tools available.',
+          hmSaved: 'Saved. Run hermes mcp login {server} to sign in.',
+          hmLogin: 'Opening your browser to authorize {server}…',
+          hmLoggedIn: '{server}: authorized. Tokens saved.',
+        },
+        signIn: {
+          title: 'Inicia sesión con tu cuenta',
+          emailLabel: 'Correo',
+          email: 'laura@example.com',
+          continue: 'Continuar con correo',
+          checkEmail: 'Revisa tu correo',
+          codeSentTo: 'Escribe el código que enviamos a',
+          noCode: '¿No te llegó el código? Puedes pedir otro en 30 segundos.',
+          connected: '{product} está conectado a {app}',
+          consentTitle: '{app} quiere acceder a tu cuenta',
+          redirectNote: 'Después de permitir el acceso, te redirigimos a:',
+          warning: 'Esta redirección apunta a una aplicación en tu computadora. Permite el acceso solo si lo iniciaste desde {app}.',
+          allow: 'Permitir acceso',
+          cancel: 'Cancelar',
+        },
+        answer: {
+          found: 'El jueves tiene estos horarios libres:',
+          slots: ['9:30', '10:00', '11:30'],
+          booked: 'Agendada',
+          meeting: 'Llamada inicial con Sarah Collins',
+          when: 'Jueves, de 10:00 a 10:30',
+          calendar: 'En el calendario de Laura Mendez, Pulse',
+        },
+      },
+      toolsTitle: 'Qué puedes hacer con el MCP',
+      toolsIntro: '{count} herramientas para tus horarios libres, reservas y solicitudes. Pide las cosas con tus palabras: tu app de IA elige la herramienta.',
+      toolsLink: 'Ver todas las herramientas',
+    },
+    tools: {
+      title: 'Herramientas',
+      intro:
+        'Todo lo que tu agente puede hacer en {product} una vez conectado: {count} herramientas. Nunca las llamas tú. Pide con tus palabras y tu agente elige la correcta.',
+      askLabel: 'Pide:',
+      countOne: '1 herramienta',
+      count: '{n} herramientas',
+      connectCta: 'Conecta tu agente',
+      groups: {
+        availability: { title: 'Horarios libres', body: 'Busca horarios libres en tus tipos de evento y con un equipo, los mismos que ofrece tu página de reservas.' },
+        booking: { title: 'Reservas nuevas', body: 'Agenda reuniones en tus tipos de evento, en páginas públicas de reserva y con un equipo. El invitado recibe el correo de confirmación.' },
+        holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
+        bookings: { title: 'Tus reservas', body: 'Mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
+        requests: { title: 'Solicitudes de reserva', body: 'Mira las solicitudes que esperan tu respuesta y acéptalas o recházalas.' },
+        account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento y sus enlaces.' },
+      },
+      items: {
+        find_available_slots: { what: 'Mira los horarios libres de un tipo de evento, día por día.', ask: '¿Cuándo estoy libre para una llamada de 30 minutos esta semana?' },
+        find_team_slots: { what: 'Mira cuándo un evento de equipo tiene un anfitrión libre, o cuándo está libre todo el equipo.', ask: '¿Cuándo está libre el equipo de ventas para una demo la próxima semana?' },
+        book_meeting: { what: 'Agenda un horario en una página pública de reserva y envía el correo al invitado.', ask: 'Agenda a Sarah Collins el jueves a las 10:00 en mi página de llamada inicial' },
+        book_team_meeting: { what: 'Agenda con un equipo. Elegimos por ti un anfitrión libre.', ask: 'Agenda la demo de ventas con quien esté libre el martes a las 3:00' },
+        create_booking: { what: 'Agenda una reunión en uno de tus tipos de evento para alguien y envíale el correo.', ask: 'Agrega una llamada inicial de 30 minutos con Sarah Collins el jueves a las 10:00' },
+        hold_slot: { what: 'Aparta un horario unos 10 minutos mientras la persona decide.', ask: 'Aparta el jueves a las 10:00 mientras lo confirmo con Sarah' },
+        list_bookings: { what: 'Mira tus reuniones en un rango de fechas.', ask: '¿Qué reuniones tengo esta semana?' },
+        get_booking: { what: 'Abre una reunión y lee lo que escribió el invitado.', ask: '¿Qué escribió Sarah cuando reservó?' },
+        reschedule_booking: { what: 'Mueve una reunión a otro horario. Se le avisa al invitado.', ask: 'Mueve mi llamada con Sarah al viernes a las 11:00' },
+        cancel_booking: { what: 'Cancela una reunión y avísale al invitado.', ask: 'Cancela mi llamada del viernes a las 4:00 y dile que estoy de viaje' },
+        list_pending_bookings: { what: 'Mira las solicitudes de reserva que esperan tu respuesta.', ask: '¿Qué solicitudes de reserva me están esperando?' },
+        confirm_booking: { what: 'Acepta una solicitud de reserva y avísale al invitado.', ask: 'Acepta la solicitud del jueves' },
+        decline_booking: { what: 'Rechaza una solicitud de reserva, libera su horario y avísale al invitado.', ask: 'Rechaza la solicitud del sábado y avisa que no estaré' },
+        whoami: { what: 'Mira a qué espacio está conectado el agente y qué puede hacer ahí.', ask: '¿A qué espacio estás conectado?' },
+        list_my_accounts: { what: 'Mira todos los espacios en los que puedes trabajar.', ask: '¿En qué espacios puedes trabajar?' },
+        list_event_types: { what: 'Mira tus tipos de evento, personales y de equipo.', ask: '¿Qué tipos de evento tengo?' },
+        get_booking_page_link: { what: 'Obtén el enlace donde cualquiera puede reservar un tipo de evento.', ask: 'Dame el enlace de mi llamada inicial' },
+      },
     },
     oauthConsent: {
       pageTitle: 'Conectar una app',
@@ -4335,7 +4945,7 @@ export const es: BookingMessages = {
       workspace: 'Espacio de trabajo',
       signedInAs: 'Sesión iniciada como {who}',
       scopesLead: 'Podrá',
-      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en MCP, en Conexión y claves.',
+      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en API y webhooks, en Claves API.',
       shortLived: 'Su acceso dura cerca de una hora; después tendrá que pedirlo de nuevo.',
       approve: 'Permitir',
       deny: 'Rechazar',
