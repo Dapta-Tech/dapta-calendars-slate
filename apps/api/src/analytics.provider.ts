@@ -30,9 +30,13 @@ import {
 export interface AnalyticsCapture {
   /** Idempotency key: the same event retried is the same event. */
   uuid: string;
-  /** The full wire name, already prefixed (`calendars_...`). */
+  /** The full wire name: prefixed (`calendars_...`), or one of the vendor's own `$mcp_*` names. */
   event: string;
-  /** Who the event is about: a host's email. Never a visitor. */
+  /**
+   * Who the event is about: a host's email, never a visitor. An MCP tool call
+   * made with no member behind it carries a non-personal id instead (see
+   * McpUsageReporter), sent with no person profile.
+   */
   distinctId: string;
   /** Epoch ms the event HAPPENED, not when it was delivered. */
   timestamp: number;

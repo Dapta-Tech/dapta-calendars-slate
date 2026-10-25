@@ -1,8 +1,9 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { McpServer, createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
 import type { Db } from '@slate/db';
 import type { ServerEnv } from '@slate/config/env';
 import { AdminService } from '../admin.service';
+import { AnalyticsEffects } from '../analytics-effects';
 import { BookingService } from '../booking.service';
 import { CalV2Service } from '../cal-v2.service';
 import { CalV2PilotService } from '../cal-v2-pilot.service';
@@ -10,6 +11,7 @@ import { DB, ENV } from '../tokens';
 import { NoopRateLimiter, TokenBucketRateLimiter, type RateLimiter } from '../rate-limit';
 import { type McpCall, ToolFailure, argsHash, callerLabel, loginPrincipal, notFound, signInKey, toFailure, untrusted } from './support';
 import { TOOLS, accessOf, accountIdArg, notLinked, requireScope, takesAccount, type McpToolDeps, type ToolDef, type ToolResult } from './tools';
+import { McpUsageReporter, toolCallEvent } from './mcp-usage';
 
 export const MCP_SERVER_NAME = 'dcal';
 const SERVER_VERSION = '1.0.0';
@@ -85,6 +87,8 @@ export class McpGateway {
   readonly handler: McpHttpHandler;
   /** Where audit lines go (one JSON object per line). A field so specs can read it. */
   auditSink: (line: string) => void = (line) => process.stdout.write(`${line}\n`);
+  /** Reports each tool call to product analytics. A field so specs can reach it. */
+  readonly usage: McpUsageReporter;
 
   constructor(
     @Inject(ENV) private readonly env: ServerEnv,
@@ -93,8 +97,11 @@ export class McpGateway {
     @Inject(CalV2PilotService) pilot: CalV2PilotService,
     @Inject(BookingService) bookings: BookingService,
     @Inject(AdminService) admin: AdminService,
+    // Product analytics: one `$mcp_tool_call` per tool call, only with a provider configured.
+    @Optional() @Inject(AnalyticsEffects) analytics?: AnalyticsEffects,
   ) {
     this.deps = { publicAppUrl: env.PUBLIC_APP_URL, db, calV2, pilot, bookings, admin };
+    this.usage = new McpUsageReporter(analytics ?? null, SERVER_VERSION);
     // Per pod, like the public limiter: a replica counts only what it served.
     this.readLimiter = env.RATE_LIMIT_ENABLED
       ? new TokenBucketRateLimiter(env.MCP_RATE_LIMIT_CAPACITY, env.MCP_RATE_LIMIT_REFILL_PER_SEC)
@@ -154,7 +161,21 @@ export class McpGateway {
       if (failure.code === 'INTERNAL_ERROR')
         this.logger.error(`tool ${def.name} failed (${ctx.requestId})`, error instanceof Error ? error.stack : String(error));
     }
-    this.audit(def, args, ctx, started, result, failure);
+    const latencyMs = Math.round(Number(process.hrtime.bigint() - started) / 1e6);
+    this.audit(def, args, ctx, latencyMs, result, failure);
+    try {
+      const usage = toolCallEvent(def.name, ctx, failure, latencyMs);
+      // Fire and forget, and only after this call has returned: a cache miss's
+      // read (synchronous on SQLite) never runs before the tool's result.
+      // `report` never rejects; the catch is for a throw before it returns.
+      setImmediate(() => {
+        Promise.resolve()
+          .then(() => this.usage.report(usage))
+          .catch(() => undefined);
+      });
+    } catch {
+      /* usage reporting must never break a call */
+    }
     if (failure || !result) {
       return {
         isError: true,
@@ -204,7 +225,7 @@ export class McpGateway {
    * idempotency keys: the arguments are reduced to a hash of their redacted
    * shape. The key is its public prefix, never the secret.
    */
-  private audit(def: ToolDef, args: unknown, call: McpCall, started: bigint, result: ToolResult | undefined, failure: ToolFailure | undefined): void {
+  private audit(def: ToolDef, args: unknown, call: McpCall, latencyMs: number, result: ToolResult | undefined, failure: ToolFailure | undefined): void {
     const line = {
       ts: new Date().toISOString(),
       level: failure ? 'warn' : 'info',
@@ -220,7 +241,7 @@ export class McpGateway {
       affected: result?.affected ?? [],
       result: failure ? 'error' : 'ok',
       ...(failure ? { error: failure.code } : {}),
-      latencyMs: Math.round(Number(process.hrtime.bigint() - started) / 1e6),
+      latencyMs,
     };
     try {
       this.auditSink(JSON.stringify(line));
