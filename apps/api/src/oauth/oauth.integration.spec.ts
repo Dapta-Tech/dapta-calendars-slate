@@ -103,7 +103,7 @@ describe('discovery', () => {
         authorization_servers: [h.issuer],
         scopes_supported: READ.split(' '),
         bearer_methods_supported: ['header'],
-        resource_name: 'Dapta Calendars',
+        resource_name: 'dCal',
       });
     }
   });

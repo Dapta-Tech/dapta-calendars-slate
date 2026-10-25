@@ -95,7 +95,7 @@ try {
     }),
   });
   const legacyText = await legacy.text();
-  if (legacy.status !== 200 || !legacyText.includes('dapta-calendars')) fail(`legacy initialize: ${legacy.status} ${legacyText}`);
+  if (legacy.status !== 200 || !legacyText.includes('"dcal"')) fail(`legacy initialize: ${legacy.status} ${legacyText}`);
   say(`legacy initialize (2025-06-18) -> ${legacy.status}, no session id: ${legacy.headers.get('mcp-session-id') === null}`);
 
   // 2. The SDK client, anonymous: public tools only.
