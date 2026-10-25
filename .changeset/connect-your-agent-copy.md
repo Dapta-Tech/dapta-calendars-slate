@@ -1,5 +1,5 @@
 ---
-'@slate/shared': minor
+'@slate/shared': major
 ---
 
 Copy for "Connect your agent", the Tools page and the home promo, in both
@@ -13,7 +13,7 @@ and `admin.nav.api` ("API and webhooks"). `{product}`, `{server}` and `{count}`
 are filled in by the web app. `admin.oauthConsent.staysConnected` and
 `admin.developer.pageLead` now point at the new places.
 
-**Minor, not patch:** members are REMOVED from the exported `BookingMessages`
+**Major:** members are REMOVED from the exported `BookingMessages`
 interface: `admin.nav.developers`, `admin.home.apiKeys` and `apiKeysDesc`, and
 the old key-first setup guide's keys under `admin.developer` (`connectTitle`,
 the `tab*`, `chat*`, `signIn*` and `guide*` keys other than `guideSkill*`,
