@@ -26,19 +26,23 @@ const IDENTITY_CACHE_MAX = 2_000;
 /**
  * What a client's name or version may look like to be sent as given: letters,
  * digits, spaces and `._()+-`, with an optional npm scope in front
- * (`@modelcontextprotocol/inspector`). No `:` or other `/`, so no host, port
- * or path fits. Anything else is sent as `other`.
+ * (`@modelcontextprotocol/inspector`). No `:` or other `/`, so no port or
+ * path fits, and see `HOST_SHAPED`. Anything else is sent as `other`.
  */
 const CLIENT_LABEL = /^(?:@[A-Za-z0-9._-]{1,40}\/)?[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,63}$/;
 
+/** A dot before a letter (`example.com`, `x.xn--p1ai`) or a punycode label: a host name, never sent. */
+const HOST_SHAPED = /\.[A-Za-z]|xn--/i;
+
 /**
- * The only part of a user agent that is kept: product tokens, a name then a
- * dotted numeric version with an optional short `-` or `+` suffix
- * (`claude-code/2.1.0`, `Mozilla/5.0`, `mcp-remote/1.0.0-beta.1`). Comments,
- * bare words, hosts, ports, paths and anything else are dropped, so free text
- * has nowhere to go.
+ * The only part of a user agent that is kept: product tokens, a name with no
+ * dot (so never a host) then a dotted numeric version with at most a
+ * pre-release tag (`claude-code/2.1.0`, `Mozilla/5.0`,
+ * `mcp-remote/1.0.0-beta.1`). Comments, bare words, hosts, ports, paths, free
+ * suffixes and anything else are dropped, so free text has nowhere to go.
  */
-const PRODUCT_TOKEN = /^[A-Za-z][A-Za-z0-9._+-]{0,39}\/\d{1,8}(?:\.\d{1,8}){0,4}(?:[-+][0-9A-Za-z.]{1,16})?$/;
+const PRODUCT_TOKEN =
+  /^[A-Za-z][A-Za-z0-9_+-]{0,39}\/\d{1,8}(?:\.\d{1,8}){0,4}(?:[-+](?:alpha|beta|rc|dev|pre|preview|canary|nightly|next|build)(?:\.?\d{1,8})?)?$/;
 
 /** An IPv4 address, not part of a longer dotted number (`Chrome/120.0.6099.109` stays). */
 const IPV4_IN_TEXT = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g;
@@ -68,14 +72,15 @@ function redactClientText(text: string, rules: typeof SCRUB_RULES): string {
 
 /**
  * A client's name or version, from the caller and so untrusted: sent as given
- * only when it fits `CLIENT_LABEL` and nothing in it is redacted (an IP
- * address, a long number, a key), else `other`. Undefined when it is missing.
+ * only when it fits `CLIENT_LABEL`, is not host-shaped and nothing in it is
+ * redacted (an IP address, a long number, a key), else `other`. Undefined
+ * when it is missing.
  */
 export function clientLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
   if (!text) return undefined;
-  const plain = CLIENT_LABEL.test(text) && redactClientText(text, SCRUB_RULES) === text;
+  const plain = CLIENT_LABEL.test(text) && !HOST_SHAPED.test(text) && redactClientText(text, SCRUB_RULES) === text;
   return plain ? text : 'other';
 }
 
@@ -89,7 +94,7 @@ export function userAgentLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const tokens = untrusted(value, USER_AGENT_MAX * 4)
     .split(/[\s();,]+/)
-    .filter((token) => PRODUCT_TOKEN.test(token));
+    .filter((token) => PRODUCT_TOKEN.test(token) && !HOST_SHAPED.test(token));
   const clean = redactClientText(tokens.join(' '), USER_AGENT_RULES).slice(0, USER_AGENT_MAX).trim();
   return clean || undefined;
 }

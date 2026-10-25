@@ -376,7 +376,7 @@ describe('client text', () => {
   });
 
   it('sends a client name or version as given only when it is a plain label', () => {
-    for (const plain of ['Claude Code', '@modelcontextprotocol/inspector', 'claude-ai (web)', '2.1.0+build.7', '1.2.3', 'Node.js', 'mcp-remote 0.1.29']) {
+    for (const plain of ['Claude Code', '@modelcontextprotocol/inspector', 'claude-ai (web)', '2.1.0+build.7', '1.2.3-rc.1', 'mcp-remote 0.1.29']) {
       expect(clientLabel(plain), plain).toBe(plain);
     }
     for (const odd of [
@@ -394,6 +394,9 @@ describe('client text', () => {
       'example.com/reset',
       'example.xn--p1ai/reset/S3nsitiveValue',
       'localhost:3000/reset/secret',
+      'example.com',
+      'Node.js',
+      'xn--p1ai 1.0',
       '120.0.6099.10000000',
     ]) {
       expect(clientLabel(odd), odd).toBe('other');
@@ -408,8 +411,8 @@ describe('client text', () => {
     expect(userAgentLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0.6099.109 Safari/537.36')).toBe(
       'Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36',
     );
-    expect(userAgentLabel('Node.js/22.15.0 undici/6.21 mcp-remote/1.0.0-beta.1 bot.example.test')).toBe(
-      'Node.js/22.15.0 undici/6.21 mcp-remote/1.0.0-beta.1',
+    expect(userAgentLabel('Node.js/22.15.0 undici/6.21 mcp-remote/1.0.0-beta.1 python-httpx/0.27.0 bot.example.test')).toBe(
+      'undici/6.21 mcp-remote/1.0.0-beta.1 python-httpx/0.27.0',
     );
     // Built at run time, so secret scanners do not read the test input as a key.
     const fakeKey = ['dcl', 'abcdef123456'].join('_');
@@ -421,6 +424,10 @@ describe('client text', () => {
       'bot/1 https%3A%2F%2Fexample.com%2Freset',
       'bot/1 example.xn--p1ai/reset/S3nsitiveValue localhost:3000/reset/secret',
       'bot/1 x/1S3nsitiveValue',
+      // Host-shaped names and version-shaped paths with a free suffix.
+      'bot/1 example.xn--p1ai/1.0-S3nsitiveValue',
+      'bot/1 xn--p1ai/1.0 example.com/1.2.3',
+      'bot/1 localhost:3000/1.0 x/1.0-S3nsitiveValue x/1.0+S3nsitive.1',
     ]) {
       expect(userAgentLabel(noise), noise).toBe('bot/1');
     }

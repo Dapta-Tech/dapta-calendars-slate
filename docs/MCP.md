@@ -439,10 +439,11 @@ token.
   `staff_access`, plus `product`, the account's code and `$host` like every
   server event. Client names and versions are caller text: one that is not a
   plain label (letters, digits, spaces and `._()+-`, an optional npm scope,
-  nothing redacted) is sent as `other`, and the user agent is reduced to its
-  product tokens (`name/version`, such as `claude-code/2.1.0`), with IP
-  addresses and keys redacted and at most 200 characters: comments, bare
-  words, hosts, ports and paths are dropped. Client
+  nothing host-shaped or redacted) is sent as `other`, and the user agent is
+  reduced to its product tokens (a dot-free name, then a numeric version with
+  at most a pre-release tag, such as `claude-code/2.1.0`), with IP addresses
+  and keys redacted and at most 200 characters: comments, bare words, hosts,
+  ports, paths and free suffixes are dropped. Client
   name and version usually arrive only from clients that send the per-call
   `_meta` envelope; most clients send them on `initialize` alone, which is not
   reported, so expect them to be missing on many events. Who it is about: a
