@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { SCRUB_RULES, scrubErrorText, type AnalyticsProps } from '@slate/shared';
 import { analyticsLabel, type AnalyticsEffects, type RawCaptureInput } from '../analytics-effects';
+import { header, type ReqLike } from '../auth.provider';
 import { signInKey, untrusted, type McpCall, type McpClientInfo, type ToolFailure } from './support';
 
 /** The vendor's name for one tool call in its MCP analytics. */
@@ -22,17 +23,22 @@ const IDENTITY_TTL_MS = 5 * 60_000;
 /** At most this many identities are remembered; the oldest go first. */
 const IDENTITY_CACHE_MAX = 2_000;
 
-/** What a client's name or version may look like to be sent as given; anything else is sent as `other`. */
-const CLIENT_LABEL = /^[A-Za-z0-9 ._()/@+:-]{1,64}$/;
+/**
+ * What a client's name or version may look like to be sent as given: letters,
+ * digits, spaces and `._()+-`, with an optional npm scope in front
+ * (`@modelcontextprotocol/inspector`). No `:` or other `/`, so no host, port
+ * or path fits. Anything else is sent as `other`.
+ */
+const CLIENT_LABEL = /^(?:@[A-Za-z0-9._-]{1,40}\/)?[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,63}$/;
 
-/** A URL with a scheme, up to the next space, bracket, quote or separator. */
-const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"'<>`()[\]{};,]*/gi;
-
-/** A word carrying a percent escape: an encoded URL or query (`https%3A%2F%2F...`). */
-const ENCODED_IN_TEXT = /[^\s"'<>`()[\]{};,]*%[0-9a-f]{2}[^\s"'<>`()[\]{};,]*/gi;
-
-/** A host name with a dot and a top-level domain, then an optional port and path. */
-const HOST_IN_TEXT = /\b(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}(?![\w-])(:\d{1,5})?(\/[^\s"'<>`()[\]{};,]*)?/gi;
+/**
+ * The only part of a user agent that is kept: product tokens, a name then a
+ * dotted numeric version with an optional short `-` or `+` suffix
+ * (`claude-code/2.1.0`, `Mozilla/5.0`, `mcp-remote/1.0.0-beta.1`). Comments,
+ * bare words, hosts, ports, paths and anything else are dropped, so free text
+ * has nowhere to go.
+ */
+const PRODUCT_TOKEN = /^[A-Za-z][A-Za-z0-9._+-]{0,39}\/\d{1,8}(?:\.\d{1,8}){0,4}(?:[-+][0-9A-Za-z.]{1,16})?$/;
 
 /** An IPv4 address, not part of a longer dotted number (`Chrome/120.0.6099.109` stays). */
 const IPV4_IN_TEXT = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g;
@@ -46,38 +52,24 @@ const USER_AGENT_MAX = 200;
 /**
  * The error scrubber's rules minus the two that read version numbers as
  * phone or account numbers (`Chrome/120.0.6099.109`): a user agent is mostly
- * version numbers. Addresses, tokens and international phones still go.
+ * version numbers.
  */
 const USER_AGENT_RULES = SCRUB_RULES.filter((rule) => rule.name !== 'phone-national' && rule.name !== 'digit-run');
 
-/** The first value of a header that may repeat. */
-function firstHeader(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 /**
- * Client text with everything that can point at a person or a secret
- * replaced: URLs with or without a scheme (a host with a port, or with a path
- * that is not a version like `Node.js/22`), encoded URLs, IP addresses, then
- * the scrubber's addresses, phones and tokens. A bare host name stays.
+ * Client text with IP addresses and whatever the error scrubber's `rules`
+ * recognize (keys and tokens, email addresses, phones) replaced. A second
+ * line behind the allowlists above, which already leave no room for a URL,
+ * a host with a path or an email address.
  */
 function redactClientText(text: string, rules: typeof SCRUB_RULES): string {
-  const withoutUrls = text
-    .replace(URL_IN_TEXT, '[url]')
-    .replace(ENCODED_IN_TEXT, '[url]')
-    .replace(HOST_IN_TEXT, (host: string, port: string | undefined, path: string | undefined) =>
-      port || (path && !/^\/[\d.]*$/.test(path)) ? '[url]' : host,
-    )
-    .replace(IPV6_IN_TEXT, '[ip]')
-    .replace(IPV4_IN_TEXT, '[ip]');
-  return scrubErrorText(withoutUrls, rules);
+  return scrubErrorText(text.replace(IPV6_IN_TEXT, '[ip]').replace(IPV4_IN_TEXT, '[ip]'), rules);
 }
 
 /**
  * A client's name or version, from the caller and so untrusted: sent as given
- * only when it is a plain label (letters, digits and a little punctuation)
- * that carries no URL, IP address, email address, phone or token (every
- * scrubber rule applies here), else `other`. Undefined when it is missing.
+ * only when it fits `CLIENT_LABEL` and nothing in it is redacted (an IP
+ * address, a long number, a key), else `other`. Undefined when it is missing.
  */
 export function clientLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -88,15 +80,17 @@ export function clientLabel(value: unknown): string | undefined {
 }
 
 /**
- * A `User-Agent`, from the caller and so untrusted: invisible, bidi and
- * control characters go first (as for any untrusted text, so none can hide an
- * address from what follows), then URLs, IP addresses, email addresses and
- * tokens, then it is cut to 200 characters. Undefined when nothing is left.
+ * A `User-Agent`, from the caller and so untrusted, reduced to its product
+ * tokens (`PRODUCT_TOKEN`): invisible, bidi and control characters go first,
+ * then everything that is not a product token, then IP addresses and keys,
+ * then it is cut to 200 characters. Undefined when no product token is left.
  */
 export function userAgentLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const visible = untrusted(value, USER_AGENT_MAX * 4);
-  const clean = redactClientText(visible, USER_AGENT_RULES).slice(0, USER_AGENT_MAX).trim();
+  const tokens = untrusted(value, USER_AGENT_MAX * 4)
+    .split(/[\s();,]+/)
+    .filter((token) => PRODUCT_TOKEN.test(token));
+  const clean = redactClientText(tokens.join(' '), USER_AGENT_RULES).slice(0, USER_AGENT_MAX).trim();
   return clean || undefined;
 }
 
@@ -107,12 +101,12 @@ export function userAgentLabel(value: unknown): string | undefined {
  * names and versions are read; the rest of the body is never looked at here.
  * For usage analytics only: nothing here is trusted or decides access.
  */
-export function clientInfoOf(req: { body?: unknown; headers: Record<string, string | string[] | undefined> }): McpClientInfo {
+export function clientInfoOf(req: ReqLike & { body?: unknown }): McpClientInfo {
   const params = (req.body as { params?: { clientInfo?: unknown; _meta?: Record<string, unknown> } } | undefined)?.params;
   const meta = params?._meta?.['io.modelcontextprotocol/clientInfo'];
   const info = (params?.clientInfo ?? meta) as { name?: unknown; version?: unknown } | undefined;
-  const agent = firstHeader(req.headers['user-agent']) ?? '';
-  const vendor = firstHeader(req.headers['x-anthropic-client'])?.trim() || /\b(anthropic|claude)/i.test(agent)
+  const agent = header(req, 'user-agent') ?? '';
+  const vendor = header(req, 'x-anthropic-client')?.trim() || /\b(anthropic|claude)/i.test(agent)
     ? 'anthropic'
     : Object.keys(req.headers).some((h) => h.toLowerCase().startsWith('openai-')) || /\bopenai\b/i.test(agent)
       ? 'openai'

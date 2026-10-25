@@ -438,10 +438,11 @@ token.
   `credential_type` (`api_key`, `oauth` or `none`), `is_internal` and
   `staff_access`, plus `product`, the account's code and `$host` like every
   server event. Client names and versions are caller text: one that is not a
-  plain label (or one carrying a URL, an IP or email address, a phone or a
-  token) is sent as `other`, and the user agent loses invisible characters,
-  URLs (with or without a scheme, encoded too), IP and email addresses and
-  tokens and is cut to 200 characters. Client
+  plain label (letters, digits, spaces and `._()+-`, an optional npm scope,
+  nothing redacted) is sent as `other`, and the user agent is reduced to its
+  product tokens (`name/version`, such as `claude-code/2.1.0`), with IP
+  addresses and keys redacted and at most 200 characters: comments, bare
+  words, hosts, ports and paths are dropped. Client
   name and version usually arrive only from clients that send the per-call
   `_meta` envelope; most clients send them on `initialize` alone, which is not
   reported, so expect them to be missing on many events. Who it is about: a

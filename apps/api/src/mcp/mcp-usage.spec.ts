@@ -376,32 +376,58 @@ describe('client text', () => {
   });
 
   it('sends a client name or version as given only when it is a plain label', () => {
-    for (const plain of ['Claude Code', '@modelcontextprotocol/inspector', 'claude-ai (web)', '2.1.0+build:7']) expect(clientLabel(plain)).toBe(plain);
-    for (const odd of ['ada@example.com', 'https://evil.test/x', 'x'.repeat(65), '<script>', 'Ada\u200BBot', '\u00f1and\u00fa', ['phc', 'abcdefghijkl'].join('_')]) {
+    for (const plain of ['Claude Code', '@modelcontextprotocol/inspector', 'claude-ai (web)', '2.1.0+build.7', '1.2.3', 'Node.js', 'mcp-remote 0.1.29']) {
+      expect(clientLabel(plain), plain).toBe(plain);
+    }
+    for (const odd of [
+      'ada@example.com',
+      'https://evil.test/x',
+      'x'.repeat(65),
+      '<script>',
+      'Ada\u200BBot',
+      '\u00F1and\u00FA',
+      ['phc', 'abcdefghijkl'].join('_'),
+      // Hosts, ports, paths and addresses, with or without a scheme.
+      '203.0.113.9',
+      '2001:db8::1',
+      'example.com:8443/reset',
+      'example.com/reset',
+      'example.xn--p1ai/reset/S3nsitiveValue',
+      'localhost:3000/reset/secret',
+      '120.0.6099.10000000',
+    ]) {
       expect(clientLabel(odd), odd).toBe('other');
     }
-    // Addresses and URLs without a scheme, which pass the character list.
-    for (const odd of ['203.0.113.9', '2001:db8::1', 'example.com:8443/reset', 'example.com/reset', '120.0.6099.10000000']) {
-      expect(clientLabel(odd), odd).toBe('other');
-    }
-    for (const plain of ['1.2.3', 'Node.js', 'mcp-remote 0.1.29']) expect(clientLabel(plain)).toBe(plain);
     expect(clientLabel('  ')).toBeUndefined();
     expect(clientLabel(42)).toBeUndefined();
     expect(clientInfoOf(req({}, { params: { clientInfo: { name: 'bob@example.com', version: 7 } } }))).toEqual({ name: 'other' });
   });
 
-  it('cleans a user agent: no invisible characters, URLs, addresses or tokens, at most 200 characters', () => {
-    expect(userAgentLabel('claude-code/2.1.0 (external, cli)')).toBe('claude-code/2.1.0 (external, cli)');
-    expect(userAgentLabel('Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36')).toBe('Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36');
-    expect(userAgentLabel('bot/1 (+https://bot.example.test/about?who=me; ada\u200B@example.com)')).toBe('bot/1 (+[url]; [email])');
+  it('keeps only the product tokens of a user agent, with IPs and keys redacted, at most 200 characters', () => {
+    expect(userAgentLabel('claude-code/2.1.0 (external, cli)')).toBe('claude-code/2.1.0');
+    expect(userAgentLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0.6099.109 Safari/537.36')).toBe(
+      'Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36',
+    );
+    expect(userAgentLabel('Node.js/22.15.0 undici/6.21 mcp-remote/1.0.0-beta.1 bot.example.test')).toBe(
+      'Node.js/22.15.0 undici/6.21 mcp-remote/1.0.0-beta.1',
+    );
     // Built at run time, so secret scanners do not read the test input as a key.
     const fakeKey = ['dcl', 'abcdef123456'].join('_');
-    expect(userAgentLabel(`agent/1\u202E\u0007 ${fakeKey}`)).toBe('agent/1 [token]');
-    expect(userAgentLabel('agent/1 (203.0.113.9; example.com:8443/reset/secret)')).toBe('agent/1 ([ip]; [url])');
-    expect(userAgentLabel('agent/1 2001:db8::1 ::1 www.example.com/reset?code=1')).toBe('agent/1 [ip] [ip] [url]');
-    expect(userAgentLabel('agent/1 https%3A%2F%2Fexample.com%2Freset')).toBe('agent/1 [url]');
-    expect(userAgentLabel('Node.js/22.15.0 undici/6.21 bot.example.test')).toBe('Node.js/22.15.0 undici/6.21 bot.example.test');
-    expect(userAgentLabel(`agent/1 ${'x'.repeat(400)}`)).toHaveLength(200);
+    for (const noise of [
+      'bot/1 (+https://bot.example.test/about?who=me; ada\u200B@example.com)',
+      `bot/1\u202E\u0007 ${fakeKey}`,
+      'bot/1 (203.0.113.9; example.com:8443/reset/secret)',
+      'bot/1 2001:db8::1 ::1 www.example.com/reset?code=1',
+      'bot/1 https%3A%2F%2Fexample.com%2Freset',
+      'bot/1 example.xn--p1ai/reset/S3nsitiveValue localhost:3000/reset/secret',
+      'bot/1 x/1S3nsitiveValue',
+    ]) {
+      expect(userAgentLabel(noise), noise).toBe('bot/1');
+    }
+    // A version shaped like an address is still redacted.
+    expect(userAgentLabel('ip/203.0.113.9 claude-code/2.1.0')).toBe('ip/[ip] claude-code/2.1.0');
+    expect(userAgentLabel(Array.from({ length: 30 }, (_, i) => `tool${i}/1.0.${i}`).join(' '))).toHaveLength(200);
+    expect(userAgentLabel('curl')).toBeUndefined();
     expect(userAgentLabel('\u200B')).toBeUndefined();
   });
 
