@@ -4,9 +4,17 @@ import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import { AnalyticsEffects } from '../analytics-effects';
 import type { AnalyticsProvider } from '../analytics.provider';
 import type { MachinePrincipal } from '../auth.service';
-import { clientInfoOf } from './mcp.controller';
-import { MCP_ANONYMOUS_DISTINCT_ID, MCP_TOOL_CALL_EVENT, McpUsageReporter, toolCallEvent, type McpToolCallEvent } from './mcp-usage';
-import { ToolFailure, type McpCall } from './support';
+import {
+  MCP_ANONYMOUS_DISTINCT_ID,
+  MCP_TOOL_CALL_EVENT,
+  McpUsageReporter,
+  clientInfoOf,
+  clientLabel,
+  toolCallEvent,
+  userAgentLabel,
+  type McpToolCallEvent,
+} from './mcp-usage';
+import { ToolFailure, signInKey, type McpCall } from './support';
 
 /**
  * MCP usage reporting: one `$mcp_tool_call` per tool call, enqueued under the
@@ -51,10 +59,12 @@ function event(overrides: Partial<McpToolCallEvent> = {}): McpToolCallEvent {
     accountId,
     memberId: alex,
     keyPrefix: null,
-    subject: null,
+    signInId: null,
     ...overrides,
   };
 }
+
+const KEYED = { credentialType: 'api_key', memberId: null, keyPrefix: 'dcl_1a2b3c4d' } as const;
 
 const reporter = (fx: AnalyticsEffects | null, clock?: () => number) => new McpUsageReporter(fx, '1.0.0', clock);
 
@@ -92,6 +102,15 @@ describe('AnalyticsEffects.captureRaw', () => {
   it('enqueues nothing with analytics off', async () => {
     await new AnalyticsEffects(db, null, env()).captureRaw('$mcp_tool_call', input);
     expect(await rows()).toEqual([]);
+  });
+
+  it('takes no place in the account order lane, which host events keep', async () => {
+    const fx = new AnalyticsEffects(db, provider, env(ON));
+    await fx.captureRaw('$mcp_tool_call', { ...input, accountId, accountKey: 'acme' });
+    await fx.hostEvent('hours_set', { accountId, memberId: alex });
+    const [raw, host] = await rows();
+    expect(raw).toMatchObject({ action: '$mcp_tool_call', accountId, orderKey: null });
+    expect(host).toMatchObject({ action: 'calendars_hours_set', accountId, orderKey: accountId });
   });
 });
 
@@ -132,10 +151,21 @@ describe('McpUsageReporter', () => {
     expect(JSON.stringify(c)).not.toContain('Acme');
   });
 
-  it('reports a failure by its code, lowercased', async () => {
-    await reporter(fx).report(event({ ok: false, errorCode: 'RATE_LIMITED' }));
-    const [c] = await captures();
-    expect(c!.properties).toMatchObject({ $mcp_is_error: true, $mcp_error_type: 'rate_limited' });
+  it('reports a failure by its code as a label', async () => {
+    const r = reporter(fx);
+    await r.report(event({ ok: false, errorCode: 'NOT_FOUND' }));
+    await r.report(event({ ok: false, errorCode: 'Bad Request' }));
+    expect((await captures()).map((c) => [c.properties['$mcp_is_error'], c.properties['$mcp_error_type']])).toEqual([
+      [true, 'not_found'],
+      [true, 'other'],
+    ]);
+  });
+
+  it('never reports a rate-limited call; other refusals before the tool runs are reported', async () => {
+    const r = reporter(fx);
+    await r.report(event({ ok: false, errorCode: 'RATE_LIMITED' }));
+    for (const code of ['INSUFFICIENT_SCOPE', 'ACCOUNT_REQUIRED', 'NOT_LINKED']) await r.report(event({ ok: false, errorCode: code }));
+    expect((await captures()).map((c) => c.properties['$mcp_error_type'])).toEqual(['insufficient_scope', 'account_required', 'not_linked']);
   });
 
   it('leaves out the client fields it was not given', async () => {
@@ -146,7 +176,7 @@ describe('McpUsageReporter', () => {
     }
   });
 
-  it('flags the operator’s own people as internal, under both names', async () => {
+  it('flags the operator\'s own people as internal, under both names', async () => {
     await reporter(fx).report(event({ memberId: jordan }));
     const [c] = await captures();
     expect(c).toMatchObject({ distinctId: 'jordan@example.com' });
@@ -160,7 +190,7 @@ describe('McpUsageReporter', () => {
   });
 
   it('files an API key under its public handle, grouped by the account, without a person profile', async () => {
-    await reporter(fx).report(event({ credentialType: 'api_key', memberId: null, keyPrefix: 'dcl_1a2b3c4d' }));
+    await reporter(fx).report(event(KEYED));
     const [row] = await rows();
     expect(row!.accountId).toBe(accountId);
     const [c] = await captures();
@@ -174,19 +204,19 @@ describe('McpUsageReporter', () => {
     });
   });
 
-  it('an API key is internal when its account’s owner is', async () => {
+  it('an API key is internal when its account\'s oldest owner is', async () => {
     const own = new AnalyticsEffects(db, provider, env({ ...ON, PRODUCT_ANALYTICS_INTERNAL_EMAILS: 'alex@' }));
-    await reporter(own).report(event({ credentialType: 'api_key', memberId: null, keyPrefix: 'dcl_1a2b3c4d' }));
+    await reporter(own).report(event(KEYED));
     const [c] = await captures();
     expect(c!.properties).toMatchObject({ is_internal: true, staff_access: true });
   });
 
-  it('sends a sign-in that reached no account under the person there, without a person profile or group', async () => {
-    await reporter(fx).report(event({ tool: 'whoami', accountId: null, memberId: null, subject: 'user_01HSUBJECT' }));
+  it('sends a sign-in that reached no account under its hashed id, without a person profile or group', async () => {
+    await reporter(fx).report(event({ tool: 'whoami', accountId: null, memberId: null, signInId: 'login:0123abcd' }));
     const [row] = await rows();
     expect(row!.accountId).toBeNull();
     const [c] = await captures();
-    expect(c).toMatchObject({ distinctId: 'user_01HSUBJECT', accountKey: null });
+    expect(c).toMatchObject({ distinctId: 'login:0123abcd', accountKey: null });
     expect(c!.properties).toMatchObject({ $process_person_profile: false, credential_type: 'oauth', is_internal: false, staff_access: false });
     expect(c!.properties).not.toHaveProperty('account_code');
   });
@@ -207,8 +237,8 @@ describe('McpUsageReporter', () => {
     await r.report(event());
     await db.run(sql`UPDATE member SET email = ${'new@example.com'} WHERE id = ${alex}`);
     await r.report(event());
-    await r.report(event({ credentialType: 'api_key', memberId: null, keyPrefix: 'dcl_1a2b3c4d' }));
-    await r.report(event({ credentialType: 'api_key', memberId: null, keyPrefix: 'dcl_1a2b3c4d' }));
+    await r.report(event(KEYED));
+    await r.report(event(KEYED));
     expect(reads).toHaveBeenCalledTimes(2);
     now += 6 * 60_000;
     await r.report(event());
@@ -219,6 +249,28 @@ describe('McpUsageReporter', () => {
       'dcl_1a2b3c4d',
       'new@example.com',
     ]);
+  });
+
+  it('concurrent misses share one read', async () => {
+    const r = reporter(fx);
+    const reads = vi.spyOn(db, 'get');
+    await Promise.all([r.report(event()), r.report(event()), r.report(event())]);
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(await rows()).toHaveLength(3);
+  });
+
+  it('remembers a member with no email, but reads an unreadable one again', async () => {
+    await db.run(sql`UPDATE member SET email = NULL WHERE id = ${alex}`);
+    const r = reporter(fx);
+    const reads = vi.spyOn(db, 'get');
+    await r.report(event());
+    await r.report(event());
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockClear();
+    await r.report(event({ memberId: 'not-written-yet' }));
+    await r.report(event({ memberId: 'not-written-yet' }));
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(await rows()).toEqual([]);
   });
 
   it('with analytics off reads nothing and enqueues nothing', async () => {
@@ -278,28 +330,26 @@ describe('toolCallEvent', () => {
       accountId: 'acct-1',
       memberId: null,
       keyPrefix: 'dcl_1a2b3c4d',
-      subject: null,
+      signInId: null,
     });
   });
 
   it('an OAuth connection or a sign-in in an account acts as its member', () => {
     const e = toolCallEvent('get_booking', { ...base, principal: { ...key, kind: 'oauth', prefix: 'login:abcd1234', memberId: 'm1' } }, undefined, 1);
-    expect(e).toMatchObject({ credentialType: 'oauth', accountId: 'acct-1', memberId: 'm1', keyPrefix: null, subject: null });
+    expect(e).toMatchObject({ credentialType: 'oauth', accountId: 'acct-1', memberId: 'm1', keyPrefix: null, signInId: null });
   });
 
-  it('a sign-in that acted in no account is the person there; no credential is nobody', () => {
-    expect(toolCallEvent('whoami', { ...base, login }, undefined, 1)).toMatchObject({
-      credentialType: 'oauth',
-      accountId: null,
-      memberId: null,
-      subject: 'user_01HSUBJECT',
-    });
+  it('a sign-in that acted in no account is its hashed id, never the raw subject; no credential is nobody', () => {
+    const e = toolCallEvent('whoami', { ...base, login }, undefined, 1);
+    expect(e).toMatchObject({ credentialType: 'oauth', accountId: null, memberId: null, signInId: signInKey(login) });
+    expect(e.signInId).toMatch(/^login:[0-9a-f]{32}$/);
+    expect(JSON.stringify(e)).not.toContain('user_01HSUBJECT');
     expect(toolCallEvent('find_available_slots', base, undefined, 1)).toMatchObject({
       credentialType: 'none',
       accountId: null,
       memberId: null,
       keyPrefix: null,
-      subject: null,
+      signInId: null,
     });
   });
 
@@ -312,8 +362,8 @@ describe('toolCallEvent', () => {
   });
 });
 
-describe('clientInfoOf', () => {
-  const req = (headers: Record<string, string | string[]>, body: unknown = {}) => ({ headers, body }) as Parameters<typeof clientInfoOf>[0];
+describe('client text', () => {
+  const req = (headers: Record<string, string | string[]>, body: unknown = {}) => ({ headers, body });
 
   it('reads clientInfo from initialize, or the per-request _meta envelope', () => {
     expect(clientInfoOf(req({}, { method: 'initialize', params: { clientInfo: { name: 'Claude', version: '1.2.3' } } }))).toEqual({
@@ -325,14 +375,25 @@ describe('clientInfoOf', () => {
     ).toEqual({ name: 'Cursor', version: '2.0' });
   });
 
-  it('keeps labels short and printable, and reads nothing that is not a string', () => {
-    const info = clientInfoOf(
-      req({ 'user-agent': `agent/1.0\u0007 ${'x'.repeat(400)}` }, { params: { clientInfo: { name: `N\u0000ame${'y'.repeat(100)}`, version: 42 } } }),
-    );
-    expect(info.name).toBe(`Name${'y'.repeat(60)}`);
-    expect(info).not.toHaveProperty('version');
-    expect(info.userAgent).toHaveLength(200);
-    expect(info.userAgent).not.toContain('\u0007');
+  it('sends a client name or version as given only when it is a plain label', () => {
+    for (const plain of ['Claude Code', '@modelcontextprotocol/inspector', 'claude-ai (web)', '2.1.0+build:7']) expect(clientLabel(plain)).toBe(plain);
+    for (const odd of ['ada@example.com', 'https://evil.test/x', 'x'.repeat(65), '<script>', 'Ada\u200BBot', '\u00f1and\u00fa', ['phc', 'abcdefghijkl'].join('_')]) {
+      expect(clientLabel(odd), odd).toBe('other');
+    }
+    expect(clientLabel('  ')).toBeUndefined();
+    expect(clientLabel(42)).toBeUndefined();
+    expect(clientInfoOf(req({}, { params: { clientInfo: { name: 'bob@example.com', version: 7 } } }))).toEqual({ name: 'other' });
+  });
+
+  it('cleans a user agent: no invisible characters, URLs, addresses or tokens, at most 200 characters', () => {
+    expect(userAgentLabel('claude-code/2.1.0 (external, cli)')).toBe('claude-code/2.1.0 (external, cli)');
+    expect(userAgentLabel('Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36')).toBe('Mozilla/5.0 Chrome/120.0.6099.109 Safari/537.36');
+    expect(userAgentLabel('bot/1 (+https://bot.example.test/about?who=me; ada\u200B@example.com)')).toBe('bot/1 (+[url]; [email])');
+    // Built at run time, so secret scanners do not read the test input as a key.
+    const fakeKey = ['dcl', 'abcdef123456'].join('_');
+    expect(userAgentLabel(`agent/1\u202E\u0007 ${fakeKey}`)).toBe('agent/1 [token]');
+    expect(userAgentLabel(`agent/1 ${'x'.repeat(400)}`)).toHaveLength(200);
+    expect(userAgentLabel('\u200B')).toBeUndefined();
   });
 
   it('names the vendor from a header or the user agent', () => {

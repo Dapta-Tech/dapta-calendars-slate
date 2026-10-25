@@ -432,21 +432,30 @@ token.
   (`PRODUCT_ANALYTICS_PROVIDER` and its key), the API also enqueues one
   `$mcp_tool_call` event per tool call through the analytics outbox (PostHog's
   MCP analytics names, so no `calendars_` prefix, and
-  `$mcp_server_name: 'dCal'`): tool name, error flag and lowercased error code,
-  duration, protocol version, client name, version and user agent, the AI
-  vendor when a header names it, server version, `credential_type` (`api_key`,
-  `oauth` or `none`), `is_internal` and `staff_access`, plus `product`, the
-  account's code and `$host` like every server event. Who it is about: a call
-  acting as a member (an OAuth connection, or a sign-in in an account) is sent
-  under the member's email and grouped by the account (no email on file: not
-  sent); an API key under its public prefix, grouped by its account; a sign-in
-  that acts in no account under the external server's subject; a call with no
-  credential under one constant id. All but the member's email go with no
-  person profile. Never the arguments (not even their hash), the result, an
-  error message, an invitee's name or email, a booking id, an account name, or
-  the caller's address. Only tool calls are sent, never `initialize` or
-  `tools/list`. Reporting is never awaited by the tool call, and with analytics
-  off nothing is read or enqueued.
+  `$mcp_server_name: 'dCal'`): tool name, error flag and error code as a
+  lowercase label, duration, protocol version, client name, version and user
+  agent, the AI vendor when a header names it, server version,
+  `credential_type` (`api_key`, `oauth` or `none`), `is_internal` and
+  `staff_access`, plus `product`, the account's code and `$host` like every
+  server event. Client names and versions are caller text: one that is not a
+  plain label is sent as `other`, and the user agent loses invisible
+  characters, URLs, addresses and tokens and is cut to 200 characters. Client
+  name and version usually arrive only from clients that send the per-call
+  `_meta` envelope; most clients send them on `initialize` alone, which is not
+  reported, so expect them to be missing on many events. Who it is about: a
+  call acting as a member (an OAuth connection, or a sign-in in an account) is
+  sent under the member's email and grouped by the account (no email on file:
+  not sent); an API key under its public prefix, grouped by its account; a
+  sign-in that acts in no account under a hashed per-person id (never the
+  external server's subject); a call with no credential under one constant id.
+  Events not sent under a member's email create no person profile. Never the
+  arguments (not even their hash), the result, an error message, an invitee's
+  name or email, a booking id, an account name, or the caller's address. Only
+  tool calls are sent, never `initialize` or `tools/list`. **Never reported,
+  so read error rates as a floor:** requests refused at the door (401, 403,
+  429), messages the SDK rejects as malformed before any tool runs, and calls
+  refused as `RATE_LIMITED`. Reporting runs after the tool has answered and is
+  never awaited by it, and with analytics off nothing is read or enqueued.
 - **Least privilege.** Separate read, write and cancel scopes, plus the optional
   event-type allowlist on the key. Create keys with only what the agent needs.
 

@@ -163,8 +163,15 @@ export class McpGateway {
     const latencyMs = Math.round(Number(process.hrtime.bigint() - started) / 1e6);
     this.audit(def, args, ctx, latencyMs, result, failure);
     try {
-      // Fire and forget: the tool's result never waits on reporting, and `report` never rejects.
-      void this.usage.report(toolCallEvent(def.name, ctx, failure, latencyMs));
+      const usage = toolCallEvent(def.name, ctx, failure, latencyMs);
+      // Fire and forget, and only after this call has returned: a cache miss's
+      // read (synchronous on SQLite) never runs before the tool's result.
+      // `report` never rejects; the catch is for a throw before it returns.
+      setImmediate(() => {
+        Promise.resolve()
+          .then(() => this.usage.report(usage))
+          .catch(() => undefined);
+      });
     } catch {
       /* usage reporting must never break a call */
     }

@@ -32,6 +32,8 @@ import { createDb, migrate, noteMemberLogin, recordMemberIdpSubject, seed, sql }
 import { startFakeAs } from '../src/oauth/fake-as.ts';
 
 const apiDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** Every MCP request says it is this script, so usage analytics can filter its calls out. */
+const USER_AGENT = 'dcal-mcp-e2e/1';
 const port = Number(process.argv[2] ?? 4798);
 const base = `http://localhost:${port}`;
 const resource = `${base}/mcp`;
@@ -108,12 +110,17 @@ say(`started API pid ${child.pid} on :${port} (tsx + tsconfig.runtime.json)`);
 const post = (body, token) =>
   fetch(resource, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'user-agent': USER_AGENT,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
 const connect = async (token) => {
   const c = new Client({ name: 'login-e2e', version: '1' });
-  await c.connect(new StreamableHTTPClientTransport(new URL(resource), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+  await c.connect(new StreamableHTTPClientTransport(new URL(resource), { requestInit: { headers: { Authorization: `Bearer ${token}`, 'user-agent': USER_AGENT } } }));
   return c;
 };
 

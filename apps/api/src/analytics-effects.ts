@@ -36,7 +36,14 @@ export interface HostIdentity {
   isInternal: boolean;
 }
 
-/** An account acted for by a credential that is no member (an API key). */
+/**
+ * A member read for an event: who they are, or why the event is dropped. No
+ * email on file is a lasting state (an invite not yet answered); unreadable
+ * is a passing one (a member just written, on a lagging replica).
+ */
+export type MemberIdentityResult = HostIdentity | 'no_email' | 'unreadable';
+
+/** An account acted for by a credential that is not a member (an API key). */
 export interface AccountIdentity {
   accountId: string;
   accountKey: string;
@@ -112,7 +119,10 @@ export type BookingChannel = 'booking_page' | 'host' | 'api';
  * once. Nothing is read, nothing is enqueued, nothing is sent.
  *
  * Privacy is decided HERE rather than at each call site:
- *  - the distinct id is always a HOST's email, never a visitor's;
+ *  - the distinct id is a HOST's email, never a visitor's. The one exception
+ *    is `captureRaw` (MCP tool calls): a call made with no member behind it
+ *    is filed under a non-personal id (an API key's public prefix, a hashed
+ *    sign-in id, one constant for anonymous calls) with no person profile;
  *  - a visitor's email is used only to compute two booleans
  *    (`invitee_is_member`, `invitee_is_internal`) and is never serialized;
  *  - call sites pass flat, non-personal properties (ids of choices, counts,
@@ -295,7 +305,10 @@ export class AnalyticsEffects {
    * Who it is about is the caller's (see McpUsageReporter, which resolves it
    * through `memberIdentity` / `accountIdentity`); the rest is the same as
    * every event here: bounded properties, `product`, `is_internal`, the
-   * account's code and group when there is one, and `$host`.
+   * account's code and group when there is one, and `$host`. Raw events take
+   * no place in the account's order lane: tool calls need no ordering, and
+   * they must never queue in front of an account's funnel events or share
+   * their backoff.
    *
    * NEVER REJECTS, like every method here. With analytics off it returns at once.
    */
@@ -314,7 +327,7 @@ export class AnalyticsEffects {
         properties: { ...bounded(input.properties), ...this.envelope(input.isInternal, input.accountKey) },
         accountKey: input.accountKey,
       };
-      await this.enqueue(event, input.accountId, { type: 'capture', capture }, now);
+      await this.enqueue(event, input.accountId, { type: 'capture', capture }, now, null);
     } catch (err) {
       this.log.error(`analytics ${event} not recorded: ${String(err)}`);
     }
@@ -322,20 +335,20 @@ export class AnalyticsEffects {
 
   /**
    * The member an event done with a credential is about, read like every host
-   * event's (`hostEvent`): null when it must be dropped (no email on file, or
-   * the member is not readable). May reject: for callers that cache it and
-   * catch, like McpUsageReporter.
+   * event's (`hostEvent`), or why it must be dropped: `no_email` (lasting, a
+   * caller may remember it) or `unreadable` (passing, read again next time).
+   * May reject: for callers that cache it and catch, like McpUsageReporter.
    */
-  memberIdentity(accountId: string, memberId: string, event: string): Promise<HostIdentity | null> {
-    return this.identity(accountId, memberId, event);
+  memberIdentity(accountId: string, memberId: string, event: string): Promise<MemberIdentityResult> {
+    return this.lookup(accountId, memberId, event);
   }
 
   /**
-   * The account a credential that is no member acts for (an API key): its
-   * short code, and whether it is internal, decided like the account's own
-   * `is_internal`: by its first owner's email, the founder whose flag `signup`
-   * gives the account. Null when the account is not readable. May reject,
-   * like `memberIdentity`.
+   * The account a credential that is not a member acts for (an API key): its
+   * short code, and whether it is internal, by the email of its oldest owner.
+   * That is usually the founder whose flag `signup` gave the account, but not
+   * after an ownership change. Null when the account is not readable. May
+   * reject, like `memberIdentity`.
    */
   async accountIdentity(accountId: string): Promise<AccountIdentity | null> {
     const row = await this.db.get<{ code: string; email: string | null }>(
@@ -377,6 +390,11 @@ export class AnalyticsEffects {
   /* ------------------------------------------------------------ internal */
 
   private async identity(accountId: string, memberId: string, event: string): Promise<HostIdentity | null> {
+    const found = await this.lookup(accountId, memberId, event);
+    return typeof found === 'string' ? null : found;
+  }
+
+  private async lookup(accountId: string, memberId: string, event: string): Promise<MemberIdentityResult> {
     const row = await this.db.get<{ email: string | null; code: string }>(
       sql`SELECT m.email AS email, a.code AS code
             FROM member m JOIN account a ON a.id = m.account_id
@@ -387,9 +405,9 @@ export class AnalyticsEffects {
     // (an invite not yet answered) and drops quietly.
     if (!row) {
       this.log.warn(`analytics ${event} dropped: member ${memberId} not readable`);
-      return null;
+      return 'unreadable';
     }
-    if (!row.email) return null;
+    if (!row.email) return 'no_email';
     return {
       accountId,
       email: row.email,
@@ -444,11 +462,16 @@ export class AnalyticsEffects {
     await this.enqueue('$groupidentify', who.accountId, { type: 'account', update }, now);
   }
 
+  /**
+   * `orderKey` left out: the account's lane (see `defaultOrderKey`), so an
+   * account's events go out in the order they happened. Null: no lane at all.
+   */
   private async enqueue(
     action: string,
     accountId: string | null,
     payload: AnalyticsOutboxPayload,
     now: number,
+    orderKey?: string | null,
   ): Promise<void> {
     await enqueueOutbox(this.db, {
       kind: 'analytics',
@@ -457,6 +480,7 @@ export class AnalyticsEffects {
       payload: JSON.stringify(payload),
       maxAttempts: ANALYTICS_MAX_ATTEMPTS,
       now,
+      ...(orderKey !== undefined ? { orderKey } : {}),
     });
   }
 }

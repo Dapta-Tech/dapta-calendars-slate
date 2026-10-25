@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import { listOutbox, sql, type OutboxRow } from '@slate/db';
 import { startFakeAs, type FakeAs } from '../oauth/fake-as';
 import { bootHarness, structured, type Harness } from './mcp-harness';
+import { signInKey } from './support';
 
 /**
  * Usage analytics through the real door: a tool call enqueues exactly one
@@ -95,6 +96,48 @@ describe('MCP usage analytics through the door', () => {
     }
     expect(fresh[1]!.properties).toMatchObject({ $mcp_is_error: true, $mcp_error_type: 'insufficient_scope' });
   });
+
+  it('a report that never settles, or throws at once, never holds up or breaks the tool result', async () => {
+    const client = await h.connect();
+    const args = { booking_page_url: PAGE, time_zone: 'UTC' };
+    const report = vi.spyOn(h.gateway.usage, 'report').mockImplementation(() => new Promise<void>(() => undefined));
+    try {
+      structured(await client.callTool({ name: 'find_available_slots', arguments: args }));
+      report.mockImplementation(() => {
+        throw new Error('reporter exploded');
+      });
+      structured(await client.callTool({ name: 'find_available_slots', arguments: args }));
+      await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2));
+    } finally {
+      report.mockRestore();
+    }
+  });
+});
+
+describe('MCP usage analytics under a batch', () => {
+  let small: Harness;
+  beforeAll(async () => {
+    small = await bootHarness({ ...ANALYTICS_ON, MCP_RATE_LIMIT_CAPACITY: '5', MCP_RATE_LIMIT_REFILL_PER_SEC: '0.001' });
+  });
+  afterAll(async () => {
+    await small.close();
+  });
+
+  it('one POST carrying more calls than the limiter allows enqueues at most its capacity of events', async () => {
+    const batch = Array.from({ length: 40 }, (_, i) => ({
+      jsonrpc: '2.0',
+      id: i + 1,
+      method: 'tools/call',
+      params: { name: 'find_available_slots', arguments: { booking_page_url: PAGE, time_zone: 'UTC' } },
+    }));
+    const res = await small.post(batch);
+    expect(res.status).toBe(200);
+    // Every call ran or was refused: 5 took a token, 35 were rate limited.
+    expect((await res.text()).match(/RATE_LIMITED/g)?.length).toBe(35);
+    const events = await settled(small);
+    expect(events).toHaveLength(5);
+    expect(events.every((c) => c.properties['$mcp_error_type'] !== 'rate_limited')).toBe(true);
+  });
 });
 
 describe('MCP usage analytics for a sign-in through an external server', () => {
@@ -119,14 +162,16 @@ describe('MCP usage analytics for a sign-in through an external server', () => {
   const call = async (token: string, name: string) =>
     ext.post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} } }, { authorization: `Bearer ${token}` });
 
-  it('a sign-in that reaches no account is the person there; one in an account is its member', async () => {
+  it('a sign-in that reaches no account is its hashed id; one in an account is its member', async () => {
     expect((await call(await as.mint({ sub: 'user_nobody' }), 'whoami')).status).toBe(200);
     const alex = (await ext.db.get<{ id: string }>(sql`SELECT id FROM member WHERE handle = 'alex-rivera'`))!.id;
     await ext.db.run(sql`UPDATE member SET idp_subject = ${'user_alex'}, login_seen_at = ${Date.now()} WHERE id = ${alex}`);
     expect((await call(await as.mint({ sub: 'user_alex' }), 'list_event_types')).status).toBe(200);
     const [nobody, member, ...rest] = await settled(ext);
     expect(rest).toEqual([]);
-    expect(nobody).toMatchObject({ distinctId: 'user_nobody', accountKey: null });
+    // The hashed per-person id, never the external server's raw subject.
+    expect(nobody).toMatchObject({ distinctId: signInKey({ token: { subject: 'user_nobody', expiresAtMs: 0 }, accounts: [] }), accountKey: null });
+    expect(JSON.stringify(nobody)).not.toContain('user_nobody');
     expect(nobody!.properties).toMatchObject({ $mcp_tool_name: 'whoami', credential_type: 'oauth', $process_person_profile: false });
     expect(member).toMatchObject({ distinctId: 'alex@example.com', accountKey: 'acme' });
     expect(member!.properties).toMatchObject({ $mcp_tool_name: 'list_event_types', credential_type: 'oauth', account_code: 'acme' });
