@@ -16,7 +16,11 @@ export interface CopyLabels {
   copyFailed: string;
 }
 
-/** Copies `text`; says so for two seconds, or says it could not. */
+/**
+ * Copies `text`; says so for two seconds, or says it could not. The button's
+ * name stays what it copies; only the outcome is announced, once (the live
+ * region empties again instead of going back to "Copy").
+ */
 export function CopyButton({
   text,
   label,
@@ -56,7 +60,7 @@ export function CopyButton({
       onClick={() => void copy()}
       data-testid={testId}
       data-state={state}
-      aria-label={state === 'idle' ? label : shown}
+      aria-label={label}
       title={label}
       className={cn(
         // A 44px target on a phone (R28), the panel's compact 32px from `sm` up.
@@ -69,7 +73,10 @@ export function CopyButton({
       )}
     >
       <i aria-hidden className={`pi ${state === 'copied' ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 12 }} />
-      <span aria-live="polite">{shown}</span>
+      <span aria-hidden>{shown}</span>
+      <span aria-live="polite" className="sr-only">
+        {state === 'idle' ? '' : shown}
+      </span>
     </button>
   );
 }

@@ -18,7 +18,7 @@ export function AgentBanner({ m }: { m: BannerMessages }) {
     <section
       aria-labelledby="agent-banner-title"
       data-testid="home-agent-banner"
-      className="relative mb-section overflow-hidden rounded-2xl border border-signal/40 bg-gradient-to-r from-signal/[0.12] via-signal/[0.05] to-card"
+      className="ap-banner relative mb-section overflow-hidden rounded-2xl border border-signal/40 bg-gradient-to-r from-signal/[0.12] via-signal/[0.05] to-card"
     >
       <div className="flex flex-col gap-card p-card sm:p-group lg:flex-row lg:items-center lg:gap-section">
         <div className="min-w-0 lg:max-w-md">

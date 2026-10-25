@@ -119,6 +119,39 @@ describe('AgentCard', () => {
     }
   });
 
+  it('gives every app its turn, Hermes included, though there are fewer prompts than apps', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount(<AgentCard m={card()} />);
+      const demo = () => $('[data-testid="home-agent-demo"]')!;
+      const seen = new Set([demo().dataset.app]);
+      for (let i = 0; i < 2000 && seen.size < 7; i++) {
+        await act(async () => void vi.advanceTimersByTime(100));
+        seen.add(demo().dataset.app);
+      }
+      expect([...seen].sort()).toEqual(['chatgpt', 'claude', 'claude-code', 'codex', 'cursor', 'hermes', 'openclaw']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds still from the keyboard: a real pause button, pressed while paused', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount(<AgentCard m={card()} />);
+      const toggle = $('[data-testid="home-agent-demo-toggle"]')!;
+      expect(toggle.tagName).toBe('BUTTON');
+      expect(toggle.getAttribute('aria-label')).toBe(card().pause);
+      await act(async () => toggle.click());
+      expect(toggle.getAttribute('aria-pressed')).toBe('true');
+      expect($('[data-testid="home-agent-demo"]')!.dataset.paused).toBe('true');
+      await act(async () => void vi.advanceTimersByTime(30000));
+      expect($('[data-testid="home-agent-demo"]')!.dataset.app).toBe('claude');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('gives every prompt the same time on screen, whatever its length', async () => {
     vi.useFakeTimers();
     try {

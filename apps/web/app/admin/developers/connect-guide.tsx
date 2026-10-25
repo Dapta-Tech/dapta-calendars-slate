@@ -111,7 +111,16 @@ function captionsOf(m: ConnectMessages, app: McpApp, directory: boolean): string
  * renders this card only when the MCP takes a sign-in, so every snippet
  * connects with the URL alone: no key, no key variable.
  */
-export function ConnectGuide({ m, snippets }: { m: ConnectMessages; snippets: McpSnippets }) {
+export function ConnectGuide({
+  m,
+  snippets,
+  stepUp = false,
+}: {
+  m: ConnectMessages;
+  snippets: McpSnippets;
+  /** This API runs its own sign-in server: a new connection reads until the person approves more. */
+  stepUp?: boolean;
+}) {
   const [app, setApp] = useState<McpApp>('claude');
   const [step, setStep] = useState(0);
   const [userPaused, setUserPaused] = useState(false);
@@ -133,10 +142,23 @@ export function ConnectGuide({ m, snippets }: { m: ConnectMessages; snippets: Mc
   const shown = reduced ? lastStep : Math.min(step, lastStep);
   // Only a click pauses it (on the frame or the button), never the pointer passing over.
   const paused = userPaused;
+  // How much of the current step has already played: a pause stops the clock
+  // and a resume waits only for the rest, so the frame, the progress bar
+  // (paused by CSS) and the timer stay together. A new step starts at zero;
+  // this effect is declared first so it runs before the timer's.
+  const played = useRef(0);
+  useEffect(() => {
+    played.current = 0;
+  }, [app, shown]);
   useEffect(() => {
     if (reduced || paused) return;
-    const timer = setTimeout(() => setStep((s) => (s >= lastStep ? 0 : s + 1)), WALK_DURATIONS[app][shown]);
-    return () => clearTimeout(timer);
+    const started = Date.now();
+    const left = Math.max(0, WALK_DURATIONS[app][shown]! - played.current);
+    const timer = setTimeout(() => setStep((s) => (s >= lastStep ? 0 : s + 1)), left);
+    return () => {
+      clearTimeout(timer);
+      played.current += Date.now() - started;
+    };
   }, [app, shown, lastStep, reduced, paused]);
 
   const jump = (i: number) => setStep(i);
@@ -163,7 +185,9 @@ export function ConnectGuide({ m, snippets }: { m: ConnectMessages; snippets: Mc
             {m.recommended}
           </span>
         </div>
-        <ul className="mt-group grid gap-field sm:grid-cols-3" data-testid="mcp-connect-benefits">
+        {/* Three across only from lg: at md the rail takes 240px and three
+            columns leave a word or two per line. */}
+        <ul className="mt-group grid gap-field lg:grid-cols-3" data-testid="mcp-connect-benefits">
           <Benefit icon="pi-key" title={m.benefits.noKey.title} body={m.benefits.noKey.body} />
           <Benefit icon="pi-building" title={m.benefits.workspaces.title} body={m.benefits.workspaces.body} />
           <Benefit icon="pi-shield" title={m.benefits.access.title} body={m.benefits.access.body} />
@@ -200,6 +224,14 @@ export function ConnectGuide({ m, snippets }: { m: ConnectMessages; snippets: Mc
           <LineIcon icon="pi-check-circle" size={16} className="text-signal-ink" />
           <span>{stepText(m.tip)}</span>
         </p>
+        {stepUp ? (
+          <p data-testid="mcp-connect-step-up" className="mt-field flex gap-inline text-xs text-muted-foreground">
+            <span aria-hidden className="flex h-4 shrink-0 items-center">
+              <i className="pi pi-info-circle" style={{ fontSize: 12 }} />
+            </span>
+            <span>{m.stepUpNote}</span>
+          </p>
+        ) : null}
       </div>
     </section>
   );
@@ -247,7 +279,19 @@ function AppTabs({
   children: ReactNode;
 }) {
   const base = useId();
+  const strip = useRef<HTMLDivElement>(null);
   const tabs = useRef<Partial<Record<McpApp, HTMLButtonElement | null>>>({});
+  const reduced = useReducedMotion();
+
+  // The picked tab in view, a remembered one included, by scrolling the strip
+  // sideways only: `scrollIntoView` would move the page too.
+  useEffect(() => {
+    const box = strip.current?.getBoundingClientRect();
+    const at = tabs.current[app]?.getBoundingClientRect();
+    if (!box || !at || !strip.current) return;
+    const by = at.left < box.left ? at.left - box.left : at.right > box.right ? at.right - box.right : 0;
+    if (by !== 0) strip.current.scrollBy({ left: by, behavior: reduced ? 'auto' : 'smooth' });
+  }, [app, reduced]);
   const tabId = (a: McpApp) => `${base}-tab-${a}`;
   const panelId = `${base}-panel`;
 
@@ -267,7 +311,10 @@ function AppTabs({
 
   return (
     <div className="min-w-0">
-      <div className="-mx-card overflow-x-auto px-card pb-tight sm:mx-0 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={strip}
+        className="-mx-card overflow-x-auto px-card pb-tight sm:mx-0 sm:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         <div
           role="tablist"
           aria-label={label}
@@ -290,14 +337,13 @@ function AppTabs({
                 aria-controls={panelId}
                 tabIndex={selected ? 0 : -1}
                 data-testid={`mcp-app-${a}`}
-                onClick={(e) => {
-                  onPick(a);
-                  e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-                }}
+                onClick={() => onPick(a)}
                 className={cn(
                   'flex shrink-0 items-center gap-inline rounded-xl border px-field py-inline text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]',
+                  // `signal-edge`, not `signal`: the plain green is under 3:1 on
+                  // white, too faint to mark the picked tab (WCAG 1.4.11).
                   selected
-                    ? 'border-signal bg-signal/10 text-foreground shadow-sm'
+                    ? 'border-signal-edge bg-signal/10 text-foreground shadow-sm'
                     : 'border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground',
                 )}
               >
@@ -372,7 +418,13 @@ function AppSteps({
         phoneNote
       ) : (
         <div className="flex flex-wrap items-center gap-field">
-          <CopyCommandButton code={code} label={m.open.copyCommand} copied={m.open.copied} testId={`${testId}-big-copy`} />
+          <CopyCommandButton
+            code={code}
+            label={m.open.copyCommand}
+            copied={m.open.copied}
+            failed={m.copyFailed}
+            testId={`${testId}-big-copy`}
+          />
           <span className="text-sm text-muted-foreground">{m.open.pasteHint}</span>
         </div>
       )}
@@ -384,7 +436,7 @@ function AppSteps({
   // Claude's tab and opens Claude Code's: a button straight to it.
   const directory = snippets.claudeDirectory;
   const directoryLink = directory ? (
-    <OpenLink href={directory} label={m.open.claudeDirectory} app="claude" testId="mcp-claude-directory" external />
+    <OpenLink href={directory} label={m.open.claudeDirectory} app="claude" testId="mcp-claude-directory" external={m.open.newTab} />
   ) : null;
 
   let steps: { copy: StepCopy; extra?: ReactNode }[];
@@ -422,7 +474,7 @@ function AppSteps({
           copy: s[0]!,
           extra: (
             <div className="flex flex-wrap gap-inline">
-              <OpenLink href={OPEN_LINKS.claude} label={m.open.claude} app="claude" testId="mcp-open-claude" external />
+              <OpenLink href={OPEN_LINKS.claude} label={m.open.claude} app="claude" testId="mcp-open-claude" external={m.open.newTab} />
               {phone ? null : (
                 <OpenLink href={OPEN_LINKS.claudeDesktop} label={m.open.claudeDesktop} app="claude" testId="mcp-open-claude-desktop" soft />
               )}
@@ -438,7 +490,7 @@ function AppSteps({
     case 'chatgpt': {
       const s = m.apps.chatgpt.steps;
       steps = [
-        { copy: s[0]!, extra: <OpenLink href={OPEN_LINKS.chatgpt} label={m.open.chatgpt} app="chatgpt" testId="mcp-open-chatgpt" external /> },
+        { copy: s[0]!, extra: <OpenLink href={OPEN_LINKS.chatgpt} label={m.open.chatgpt} app="chatgpt" testId="mcp-open-chatgpt" external={m.open.newTab} /> },
         { copy: s[1]!, extra: url },
         { copy: s[2]! },
         { copy: s[3]! },
@@ -536,7 +588,13 @@ function AppSteps({
               {phone ? (
                 phoneNote
               ) : (
-                <CopyCommandButton code={snippets.hermesConfig} label={m.copyConfig} copied={m.open.copied} testId="mcp-hermes-config-big-copy" />
+                <CopyCommandButton
+                  code={snippets.hermesConfig}
+                  label={m.copyConfig}
+                  copied={m.open.copied}
+                  failed={m.copyFailed}
+                  testId="mcp-hermes-config-big-copy"
+                />
               )}
               <CodePanel
                 label="~/.hermes/config.yaml"
@@ -609,6 +667,8 @@ function Step({
           type="button"
           tabIndex={-1}
           aria-hidden
+          // A shortcut for the pointer: it must not leave focus on a hidden element.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={onSelect}
           className={cn(
             'flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300',
@@ -649,7 +709,8 @@ function OpenLink({
   label: string;
   app: McpApp;
   testId: string;
-  external?: boolean;
+  /** Opens in a new tab: the text a screen reader hears after the label. */
+  external?: string;
   soft?: boolean;
 }) {
   return (
@@ -664,13 +725,31 @@ function OpenLink({
       <AgentLogo app={app} size={15} />
       {label}
       {external ? <i aria-hidden className="pi pi-external-link" style={{ fontSize: 11 }} /> : null}
+      {external ? <span className="sr-only"> {external}</span> : null}
     </a>
   );
 }
 
-/** The big "Copy command": one click puts the add command on the clipboard. */
-function CopyCommandButton({ code, label, copied, testId }: { code: string; label: string; copied: string; testId: string }) {
-  const [done, setDone] = useState(false);
+/**
+ * The big "Copy command": one click puts the add command on the clipboard, and
+ * says so, or says it could not (no clipboard on a plain http page). Only that
+ * outcome is announced, once: the live region empties again instead of going
+ * back to the label.
+ */
+function CopyCommandButton({
+  code,
+  label,
+  copied,
+  failed,
+  testId,
+}: {
+  code: string;
+  label: string;
+  copied: string;
+  failed: string;
+  testId: string;
+}) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -681,17 +760,31 @@ function CopyCommandButton({ code, label, copied, testId }: { code: string; labe
   const onClick = async () => {
     try {
       await navigator.clipboard.writeText(code);
-      setDone(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setDone(false), 2000);
+      setState('copied');
     } catch {
-      setDone(false);
+      setState('failed');
     }
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState('idle'), 2000);
   };
+  const said = state === 'copied' ? copied : state === 'failed' ? failed : '';
   return (
-    <button type="button" data-testid={testId} data-state={done ? 'copied' : 'idle'} onClick={() => void onClick()} className={buttonVariants({ variant: 'default' })}>
-      <i aria-hidden className={`pi ${done ? 'pi-check' : 'pi-copy'}`} style={{ fontSize: 13 }} />
-      <span aria-live="polite">{done ? copied : label}</span>
+    <button
+      type="button"
+      data-testid={testId}
+      data-state={state}
+      onClick={() => void onClick()}
+      className={cn(buttonVariants({ variant: 'default' }), 'h-auto min-h-10 py-inline')}
+    >
+      <i
+        aria-hidden
+        className={`pi ${state === 'copied' ? 'pi-check' : state === 'failed' ? 'pi-times-circle' : 'pi-copy'}`}
+        style={{ fontSize: 13 }}
+      />
+      <span aria-hidden={state !== 'idle' || undefined}>{state === 'copied' ? copied : state === 'failed' ? failed : label}</span>
+      <span aria-live="polite" className="sr-only">
+        {said}
+      </span>
     </button>
   );
 }

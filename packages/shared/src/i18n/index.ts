@@ -482,6 +482,9 @@ export interface BookingMessages {
         /** The composer's placeholder before the prompt starts. `{app}` */
         placeholder: string;
         connected: string;
+        /** The demo's pause button: its name, and its tooltip while paused. */
+        pause: string;
+        play: string;
       };
     };
     settings: {
@@ -1375,6 +1378,8 @@ export interface BookingMessages {
         claudeDesktop: string;
         /** The button to the connector's page in Claude's connectors directory. */
         claudeDirectory: string;
+        /** Read out after a button that opens another site in a new tab. */
+        newTab: string;
         chatgpt: string;
         copyCommand: string;
         copied: string;
@@ -1401,6 +1406,11 @@ export interface BookingMessages {
       };
       /** Under the steps: one connector reaches every workspace. */
       tip: string;
+      /**
+       * Only where this API runs its own sign-in server: a new connection can
+       * only read until the person approves writing too.
+       */
+      stepUpNote: string;
       unavailableTitle: string;
       unavailableBody: string;
       /** The animated walkthrough above the steps. */
@@ -2169,6 +2179,8 @@ export const en: BookingMessages = {
         done: 'Done. Your calendar is up to date.',
         placeholder: 'Ask {app}…',
         connected: '{product} connected',
+        pause: 'Pause the demo',
+        play: 'Play the demo',
       },
     },
     settings: {
@@ -2819,7 +2831,7 @@ export const en: BookingMessages = {
     },
     developer: {
       pageLead:
-        'Tools for connecting external systems to your scheduling. If you only book through this dashboard, you don’t need anything here.',
+        'Keys for connecting your own systems to your scheduling. If you only book through this dashboard, or connect an AI app with your account, you don’t need anything here.',
       apiKeysLead:
         'Let another system (an AI agent, a CRM, your own app) check availability and create bookings through the API without using this dashboard. Each key is a password for that system — scopes limit what it can do.',
       webhooksLead:
@@ -2958,7 +2970,10 @@ export const en: BookingMessages = {
       benefits: {
         noKey: { title: 'No API key.', body: 'Simply log in to your account. Nothing to create or store.' },
         workspaces: { title: 'One connector, all your workspaces.', body: 'Work in any workspace where you are an owner or admin.' },
-        access: { title: 'Owners and admins connect.', body: 'The agent acts with your own access. Remove an admin role and that connection stops.' },
+        access: {
+          title: 'Your access, nothing more.',
+          body: 'Owners and admins can connect it, and the agent acts with the access of whoever connected it. Remove an admin role and that connection stops.',
+        },
       },
       appsLabel: 'Your AI app',
       urlLabel: 'MCP URL',
@@ -2976,6 +2991,7 @@ export const en: BookingMessages = {
         claude: 'Open Claude',
         claudeDesktop: 'Open Claude Desktop',
         claudeDirectory: 'Open in the Claude directory',
+        newTab: '(opens in a new tab)',
         chatgpt: 'Open ChatGPT',
         copyCommand: 'Copy command',
         copied: 'Copied',
@@ -3137,6 +3153,8 @@ export const en: BookingMessages = {
         },
       },
       tip: '**One connector for every workspace.** If you are an owner or admin in several, your AI app asks which one to use. To change, just say “switch to <workspace>”.',
+      stepUpNote:
+        'On this installation a new connection can only read: the first time you ask your agent to book, move or cancel a meeting, your AI app asks you to approve that too.',
       unavailableTitle: 'The connector is not available on this installation',
       unavailableBody:
         'This installation’s MCP server does not take a sign-in yet, so AI apps cannot connect here. Ask whoever runs it to turn on `MCP_ENABLED` and `OAUTH_ENABLED` and to set `MCP_PUBLIC_URL`.',
@@ -3194,7 +3212,7 @@ export const en: BookingMessages = {
         },
       },
       toolsTitle: 'What you can do with the MCP',
-      toolsIntro: '{count} tools, the same things you do in the dashboard. Ask in your own words: your AI app picks the tool.',
+      toolsIntro: '{count} tools for your open times, bookings and booking requests. Ask in your own words: your AI app picks the tool.',
       toolsLink: 'See every tool',
     },
     tools: {
@@ -3244,7 +3262,7 @@ export const en: BookingMessages = {
       workspace: 'Workspace',
       signedInAs: 'Signed in as {who}',
       scopesLead: 'It will be able to',
-      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it under MCP, in Connect and keys.',
+      staysConnected: 'It stays connected for up to {days} days, or until you disconnect it under API and webhooks, in API keys.',
       shortLived: 'Its access lasts about an hour; after that it has to ask again.',
       approve: 'Allow',
       deny: 'Deny',
@@ -3842,6 +3860,8 @@ export const es: BookingMessages = {
         done: 'Listo. Tu calendario está al día.',
         placeholder: 'Pregúntale a {app}…',
         connected: '{product} conectado',
+        pause: 'Pausar la demostración',
+        play: 'Reproducir la demostración',
       },
     },
     settings: {
@@ -4494,7 +4514,7 @@ export const es: BookingMessages = {
     },
     developer: {
       pageLead:
-        'Herramientas para conectar sistemas externos con tu agenda. Si solo reservas desde este panel, no necesitas nada de esta página.',
+        'Claves para conectar tus propios sistemas con tu agenda. Si solo reservas desde este panel, o conectas una app de IA con tu cuenta, no necesitas nada de esta página.',
       apiKeysLead:
         'Permiten que otro sistema (un agente de IA, un CRM, tu propia app) consulte disponibilidad y cree reservas por API sin usar este panel. Cada clave es una contraseña para ese sistema — los permisos limitan qué puede hacer.',
       webhooksLead:
@@ -4633,7 +4653,10 @@ export const es: BookingMessages = {
       benefits: {
         noKey: { title: 'Sin clave API.', body: 'Solo inicia sesión con tu cuenta. Nada que crear ni guardar.' },
         workspaces: { title: 'Un conector, todos tus espacios.', body: 'Trabaja en cualquier espacio donde seas propietario o administrador.' },
-        access: { title: 'Se conectan propietarios y administradores.', body: 'El agente actúa con tu propio acceso. Si se quita el rol de administrador, esa conexión se detiene.' },
+        access: {
+          title: 'Tu acceso, nada más.',
+          body: 'Pueden conectarlo propietarios y administradores, y el agente actúa con el acceso de quien lo conectó. Si se quita el rol de administrador, esa conexión se detiene.',
+        },
       },
       appsLabel: 'Tu app de IA',
       urlLabel: 'URL del MCP',
@@ -4651,6 +4674,7 @@ export const es: BookingMessages = {
         claude: 'Abrir Claude',
         claudeDesktop: 'Abrir Claude Desktop',
         claudeDirectory: 'Abrir en el directorio de Claude',
+        newTab: '(se abre en una pestaña nueva)',
         chatgpt: 'Abrir ChatGPT',
         copyCommand: 'Copiar comando',
         copied: 'Copiado',
@@ -4812,6 +4836,8 @@ export const es: BookingMessages = {
         },
       },
       tip: '**Un conector para todos tus espacios.** Si eres propietario o administrador en varios, tu app de IA te pregunta en cuál trabajar. Para cambiar, solo di «cambia a <espacio>».',
+      stepUpNote:
+        'En esta instalación una conexión nueva solo puede leer: la primera vez que le pidas a tu agente agendar, mover o cancelar una reunión, tu app de IA te pide aprobarlo también.',
       unavailableTitle: 'El conector no está disponible en esta instalación',
       unavailableBody:
         'El servidor MCP de esta instalación todavía no acepta inicio de sesión, así que las apps de IA no pueden conectarse aquí. Pídele a quien la administra que active `MCP_ENABLED` y `OAUTH_ENABLED` y configure `MCP_PUBLIC_URL`.',
@@ -4821,7 +4847,7 @@ export const es: BookingMessages = {
         pause: 'Pausar el recorrido',
       },
       walkthrough: {
-        prompt: 'Busca un espacio de 30 minutos el jueves y agéndalo con Sarah Collins',
+        prompt: 'Busca un horario de 30 minutos el jueves y agéndalo con Sarah Collins',
         ui: {
           ccWelcome: 'Welcome to Claude Code!',
           ccHelp: '/help for help, /status for your current setup',
@@ -4869,7 +4895,7 @@ export const es: BookingMessages = {
         },
       },
       toolsTitle: 'Qué puedes hacer con el MCP',
-      toolsIntro: '{count} herramientas, lo mismo que haces en el dashboard. Pide las cosas con tus palabras: tu app de IA elige la herramienta.',
+      toolsIntro: '{count} herramientas para tus horarios libres, reservas y solicitudes. Pide las cosas con tus palabras: tu app de IA elige la herramienta.',
       toolsLink: 'Ver todas las herramientas',
     },
     tools: {
@@ -4883,17 +4909,17 @@ export const es: BookingMessages = {
       groups: {
         availability: { title: 'Horarios libres', body: 'Busca horarios libres en tus tipos de evento y con un equipo, los mismos que ofrece tu página de reservas.' },
         booking: { title: 'Reservas nuevas', body: 'Agenda reuniones en tus tipos de evento, en páginas públicas de reserva y con un equipo. El invitado recibe el correo de confirmación.' },
-        holds: { title: 'Apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
+        holds: { title: 'Horarios apartados', body: 'Aparta un horario unos minutos mientras la persona decide, para que nadie más lo tome.' },
         bookings: { title: 'Tus reservas', body: 'Mira tus reuniones, lee sus detalles, muévelas a otro horario o cancélalas.' },
         requests: { title: 'Solicitudes de reserva', body: 'Mira las solicitudes que esperan tu respuesta y acéptalas o recházalas.' },
         account: { title: 'Cuenta y tipos de evento', body: 'Quién está conectado, en qué espacios puedes trabajar, tus tipos de evento y sus enlaces.' },
       },
       items: {
-        find_available_slots: { what: 'Mira los horarios libres de un tipo de evento, día por día.', ask: '¿Cuándo tengo libre para una llamada de 30 minutos esta semana?' },
+        find_available_slots: { what: 'Mira los horarios libres de un tipo de evento, día por día.', ask: '¿Cuándo estoy libre para una llamada de 30 minutos esta semana?' },
         find_team_slots: { what: 'Mira cuándo un evento de equipo tiene un anfitrión libre, o cuándo está libre todo el equipo.', ask: '¿Cuándo está libre el equipo de ventas para una demo la próxima semana?' },
-        book_meeting: { what: 'Agenda un horario en una página pública de reserva y envía el correo al invitado.', ask: 'Agenda el jueves a las 10:00 en mi página de llamada inicial para Sarah Collins' },
-        book_team_meeting: { what: 'Agenda con un equipo. Se elige por ti un anfitrión libre.', ask: 'Agenda la demo de ventas con quien esté libre el martes a las 3:00' },
-        create_booking: { what: 'Pon una reunión en uno de tus tipos de evento para alguien y envíale el correo.', ask: 'Agrega una llamada inicial de 30 minutos con Sarah Collins el jueves a las 10:00' },
+        book_meeting: { what: 'Agenda un horario en una página pública de reserva y envía el correo al invitado.', ask: 'Agenda a Sarah Collins el jueves a las 10:00 en mi página de llamada inicial' },
+        book_team_meeting: { what: 'Agenda con un equipo. Elegimos por ti un anfitrión libre.', ask: 'Agenda la demo de ventas con quien esté libre el martes a las 3:00' },
+        create_booking: { what: 'Agenda una reunión en uno de tus tipos de evento para alguien y envíale el correo.', ask: 'Agrega una llamada inicial de 30 minutos con Sarah Collins el jueves a las 10:00' },
         hold_slot: { what: 'Aparta un horario unos 10 minutos mientras la persona decide.', ask: 'Aparta el jueves a las 10:00 mientras lo confirmo con Sarah' },
         list_bookings: { what: 'Mira tus reuniones en un rango de fechas.', ask: '¿Qué reuniones tengo esta semana?' },
         get_booking: { what: 'Abre una reunión y lee lo que escribió el invitado.', ask: '¿Qué escribió Sarah cuando reservó?' },
@@ -4901,7 +4927,7 @@ export const es: BookingMessages = {
         cancel_booking: { what: 'Cancela una reunión y avísale al invitado.', ask: 'Cancela mi llamada del viernes a las 4:00 y dile que estoy de viaje' },
         list_pending_bookings: { what: 'Mira las solicitudes de reserva que esperan tu respuesta.', ask: '¿Qué solicitudes de reserva me están esperando?' },
         confirm_booking: { what: 'Acepta una solicitud de reserva y avísale al invitado.', ask: 'Acepta la solicitud del jueves' },
-        decline_booking: { what: 'Rechaza una solicitud de reserva, libera su horario y avísale al invitado.', ask: 'Rechaza la solicitud del sábado y di que no estoy' },
+        decline_booking: { what: 'Rechaza una solicitud de reserva, libera su horario y avísale al invitado.', ask: 'Rechaza la solicitud del sábado y avisa que no estaré' },
         whoami: { what: 'Mira a qué espacio está conectado el agente y qué puede hacer ahí.', ask: '¿A qué espacio estás conectado?' },
         list_my_accounts: { what: 'Mira todos los espacios en los que puedes trabajar.', ask: '¿En qué espacios puedes trabajar?' },
         list_event_types: { what: 'Mira tus tipos de evento, personales y de equipo.', ask: '¿Qué tipos de evento tengo?' },
@@ -4919,7 +4945,7 @@ export const es: BookingMessages = {
       workspace: 'Espacio de trabajo',
       signedInAs: 'Sesión iniciada como {who}',
       scopesLead: 'Podrá',
-      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en MCP, en Conexión y claves.',
+      staysConnected: 'Queda conectada hasta {days} días, o hasta que la desconectes en API y webhooks, en Claves API.',
       shortLived: 'Su acceso dura cerca de una hora; después tendrá que pedirlo de nuevo.',
       approve: 'Permitir',
       deny: 'Rechazar',

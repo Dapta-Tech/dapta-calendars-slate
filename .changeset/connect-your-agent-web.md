@@ -1,5 +1,6 @@
 ---
 '@slate/web': minor
+'@slate/api': patch
 ---
 
 "Connect your agent", the same page as dForms': `/admin/developers/connect`
@@ -29,4 +30,7 @@ before. `/admin/developers` and `/admin/settings/developer` now redirect to the
 connect page. The API keys page loses its setup guide (keys, the skill download
 and Connected apps stay); the API docs page keeps the API reference, and the
 tool list moved to Tools. The home shows owners and admins an agent banner and
-a "Connect your agent" card with a typed demo, in place of the old shortcut.
+a "Connect your agent" card with a typed demo (with a pause button), in place
+of the old shortcut. The API's key hints for agents and the consent page now
+name "API and webhooks, then API keys" instead of the old "MCP, then Connect
+and keys".

@@ -27,11 +27,13 @@ export const CLAUDE_UI = {
   /**
    * The connector's listing in the connectors directory, as Claude shows it.
    * Drawn only where the deployment has a listing (`claudeDirectoryUrl`);
-   * keep `listing` the same as the listing's one-line description.
+   * keep `listing` the same as the listing's one-line description, with
+   * `{product}` for the connector's name.
    */
   directorySearch: 'Search connectors',
   community: 'Community',
-  listing: 'Find open times, book, reschedule and cancel meetings from Claude: availability, bookings, requests and team scheduling.',
+  listing:
+    'Find open times and book, move, confirm and cancel meetings on your {product} calendars from Claude: holds, team round-robin, booking requests and invitee emails.',
   connect: 'Connect',
   tools: 'Tools',
   directoryApps: ['Gmail', 'HubSpot', 'Google Drive'],

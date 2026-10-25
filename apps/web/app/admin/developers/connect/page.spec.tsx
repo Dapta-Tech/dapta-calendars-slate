@@ -76,9 +76,15 @@ describe('the connect page', () => {
     }
   });
 
-  it('works with this API\'s own sign-in too, not only an external one', async () => {
+  it('works with this API\'s own sign-in too, and says a new connection starts read only there', async () => {
     admin.connectedApps.mockResolvedValue({ enabled: true, mcpEnabled: true, accessTokenTtlSeconds: 3600, grants: [] });
-    expect(has(await render(), 'mcp-connect')).toBe(true);
+    const html = await render();
+    expect(has(html, 'mcp-connect')).toBe(true);
+    expect(has(html, 'mcp-connect-step-up')).toBe(true);
+  });
+
+  it('says nothing about read only with an external sign-in, which acts with the person\'s role', async () => {
+    expect(has(await render(), 'mcp-connect-step-up')).toBe(false);
   });
 
   it('never asks for a key and never names the identity provider', async () => {
@@ -109,8 +115,10 @@ describe('the connect page', () => {
       expect(has(html, 'mcp-open-claude')).toBe(false);
     });
 
-    it('ignores a listing that is not https', async () => {
+    it('ignores a listing that is not https, or not on claude.ai', async () => {
       vi.stubEnv('MCP_CLAUDE_DIRECTORY_URL', 'http://claude.ai/directory/acme-calendars');
+      expect(has(await render(), 'mcp-claude-directory')).toBe(false);
+      vi.stubEnv('MCP_CLAUDE_DIRECTORY_URL', 'https://example.com/directory/acme-calendars');
       expect(has(await render(), 'mcp-claude-directory')).toBe(false);
     });
   });
@@ -134,6 +142,21 @@ describe('the connect page', () => {
       expectUnavailable(await render());
       admin.connectedApps.mockResolvedValue({ enabled: false, accessTokenTtlSeconds: null, grants: [] });
       expectUnavailable(await render());
+    });
+
+    it('says so with no MCP_PUBLIC_URL, even where one could be derived from API_PUBLIC_URL: the API checks tokens against its own', async () => {
+      vi.stubEnv('MCP_PUBLIC_URL', '');
+      vi.stubEnv('API_PUBLIC_URL', 'https://api.calendar.example.com');
+      const html = await render();
+      expect(has(html, 'mcp-connect-unavailable')).toBe(true);
+      expect(html).not.toContain('https://api.calendar.example.com/mcp');
+    });
+
+    it('says so when the MCP address is one a shell could misread in a pasted command', async () => {
+      vi.stubEnv('MCP_PUBLIC_URL', 'https://mcp.calendar.example.com/mcp$(id)');
+      const html = await render();
+      expect(has(html, 'mcp-connect-unavailable')).toBe(true);
+      expect(html).not.toContain('$(id)');
     });
 
     it('fails closed when the API cannot be asked', async () => {

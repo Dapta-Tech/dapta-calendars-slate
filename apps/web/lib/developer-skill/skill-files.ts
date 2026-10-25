@@ -29,7 +29,7 @@ import {
 import { SKILL_DIR, SKILL_ZIP_NAME } from './skill-names';
 
 /**
- * The skill zip an owner or admin downloads from MCP, Connect and keys: what an
+ * The skill zip an owner or admin downloads from the API keys page: what an
  * agent with a terminal and no MCP needs to use this installation's API with
  * the same key. English only: it is read by a model, not shown in the UI.
  *

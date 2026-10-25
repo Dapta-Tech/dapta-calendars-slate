@@ -557,10 +557,12 @@ export function Progress({
           type="button"
           data-testid="mcp-walkthrough-toggle"
           onClick={toggle.onToggle}
+          // One name, "Pause the walkthrough", pressed while paused: a label
+          // that also flipped to "Play" would read "Play, pressed".
           aria-pressed={toggle.paused}
-          aria-label={toggle.paused ? toggle.playLabel : toggle.pauseLabel}
+          aria-label={toggle.pauseLabel}
           title={toggle.paused ? toggle.playLabel : toggle.pauseLabel}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-7 sm:w-7"
         >
           <i aria-hidden className={`pi ${toggle.paused ? 'pi-play' : 'pi-pause'}`} style={{ fontSize: 12 }} />
         </button>

@@ -21,6 +21,7 @@ import { McpLogos } from '@/components/mcp-logos';
 import { ProfileMenu, type ProfileUser } from '@/components/profile-menu';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AnchoredMenu } from '@/components/ui/anchored-menu';
+import { cn } from '@/lib/cn';
 import type { Theme } from '@/lib/theme';
 
 type AdminMessages = BookingMessages['admin'];
@@ -348,9 +349,9 @@ function NavLinks({
         }
         // An external item is never "here": its href is another origin.
         const active = !item.external && isNavItemActive(pathname, item.href, item.match);
-        const className = [navRowClass(collapsed, active ? 'active' : 'idle'), item.prominent && prominentClass(active)]
-          .filter(Boolean)
-          .join(' ');
+        // Merged, not joined: the prominent row's tint and ink replace the
+        // plain row's, rather than racing them in stylesheet order.
+        const className = cn(navRowClass(collapsed, active ? 'active' : 'idle'), item.prominent && prominentClass(active));
         if (item.icon === 'mcp' && !item.external) {
           return (
             <li key={item.key}>

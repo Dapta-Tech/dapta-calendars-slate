@@ -6,10 +6,11 @@ import { NoAccess } from '@/components/no-access';
 import { PageHeader } from '@/components/ui/page-header';
 
 /**
- * Who may open the MCP pages, asked once per page. Keys and webhooks are
- * admin/owner-only (the API 403s a plain member), so a member never gets the
- * rail item; this answers one who arrives by address, with a message rather
- * than an error. Checked on every page and not in a layout: a layout is not
+ * Who may open the agent and API pages (connect, Tools, keys, webhooks, API
+ * docs), asked once per page. They are admin/owner-only (the API 403s a plain
+ * member, and a sign-in reaches only workspaces where the person is an owner
+ * or admin), so a member never gets the rail items; this answers one who
+ * arrives by address, with a message rather than an error. Checked on every page and not in a layout: a layout is not
  * re-rendered on client navigation, and the page's own reads would 403 first.
  */
 export async function developerAccess(): Promise<{ locale: Locale; allowed: boolean }> {
@@ -18,9 +19,9 @@ export async function developerAccess(): Promise<{ locale: Locale; allowed: bool
 }
 
 /**
- * The frame every MCP page shares: the settings width, a list-page header,
- * prose-width content. Without a `title` the content brings its own header
- * (Webhooks, whose create action lives with the list's state).
+ * The frame the API and webhooks pages share: the settings width, a list-page
+ * header, prose-width content. Without a `title` the content brings its own
+ * header (Webhooks, whose create action lives with the list's state).
  */
 export function DeveloperPage({
   title,

@@ -15,6 +15,7 @@ import {
   expiryState,
   hermesConfig,
   hermesLoginCommand,
+  isShellSafeUrl,
   mcpSnippets,
   openclawLoginCommand,
   openclawSetCommand,
@@ -77,6 +78,20 @@ describe('snippets: the URL alone, the app signs in', () => {
   it('carries the Claude directory listing when there is one, null by default', () => {
     expect(mcpSnippets(URL_).claudeDirectory).toBeNull();
     expect(mcpSnippets(URL_, 'https://claude.ai/directory/dcal').claudeDirectory).toBe('https://claude.ai/directory/dcal');
+  });
+});
+
+describe('isShellSafeUrl', () => {
+  it('takes an address a shell reads as one word', () => {
+    for (const u of [URL_, 'http://localhost:4000/mcp', 'https://host.example.com/calendar/mcp', 'https://mcp.dcal.ai/mcp']) {
+      expect(isShellSafeUrl(u), u).toBe(true);
+    }
+  });
+
+  it('refuses anything a shell would run, split or unquote, since the commands paste it bare', () => {
+    for (const u of ['https://x.example/mcp$(id)', "https://x.example/m'cp", 'https://x.example/a;b', 'https://x.example/a&b', 'https://x.example/a|b', 'https://x.example/a b', 'https://x.example/`id`', 'ftp://x.example/mcp']) {
+      expect(isShellSafeUrl(u), u).toBe(false);
+    }
   });
 });
 

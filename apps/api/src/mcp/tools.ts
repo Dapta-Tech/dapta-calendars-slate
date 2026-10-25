@@ -1209,7 +1209,7 @@ const bookTeamMeeting: ToolDef = {
  * only with OAuth off: with it on, the HTTP door answers such a call with the
  * 401 that starts the sign-in, so a key is the one thing left to send.
  */
-const CREDENTIAL_HINT = 'Send `Authorization: Bearer dcl_...`. Create a key in the web app (MCP, then Connect and keys).';
+const CREDENTIAL_HINT = 'Send `Authorization: Bearer dcl_...`. Create a key in the web app (API and webhooks, then API keys).';
 
 const whoamiInput = z.object({});
 const whoami: ToolDef = {
@@ -1907,7 +1907,7 @@ export function requireScope(call: McpCall, scope: ApiScope | readonly ApiScope[
     throw new ToolFailure(
       'AUTH_REQUIRED',
       `This tool needs an API key with scope \`${accepted.join('` or `')}\`.`,
-      `Create a key in the web app (MCP, then Connect and keys) and send it as the header \`Authorization: Bearer dcl_...\`. Without a key only the public booking page tools work: ${publicToolNames().join(', ')}.`,
+      `Create a key in the web app (API and webhooks, then API keys) and send it as the header \`Authorization: Bearer dcl_...\`. Without a key only the public booking page tools work: ${publicToolNames().join(', ')}.`,
     );
   }
   if (!accepted.some((s) => call.principal!.scopes.includes(s))) {

@@ -239,6 +239,33 @@ describe('ConnectGuide', () => {
     }
   });
 
+  it('resumes a paused step for what was left of it, so the frame and the progress bar stay together', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount();
+      const d = WALK_DURATIONS.claude;
+      await act(async () => void vi.advanceTimersByTime(d[0]! - 1000));
+      await act(async () => $('[data-testid="mcp-walkthrough-toggle"]')!.click());
+      await act(async () => void vi.advanceTimersByTime(30000));
+      expect(walk().dataset.step).toBe('0');
+      await act(async () => $('[data-testid="mcp-walkthrough-toggle"]')!.click());
+      await act(async () => void vi.advanceTimersByTime(1000));
+      expect(walk().dataset.step).toBe('1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('names the pause button one way, pressed while paused', async () => {
+    await mount();
+    const toggle = $('[data-testid="mcp-walkthrough-toggle"]')!;
+    expect(toggle.getAttribute('aria-label')).toBe(copy().media.pause);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => toggle.click());
+    expect(toggle.getAttribute('aria-label')).toBe(copy().media.pause);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('pauses only on a click, on the frame or the button, never on the pointer passing over', async () => {
     vi.useFakeTimers();
     try {
@@ -285,7 +312,7 @@ describe('ConnectGuide', () => {
     expect($('[data-testid="mcp-phone-note"]')).toBeNull();
   });
 
-  it('says so when the clipboard refuses a copy', async () => {
+  it('says so when the clipboard refuses a copy, on the small buttons and the big one', async () => {
     await mount();
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) },
@@ -293,7 +320,40 @@ describe('ConnectGuide', () => {
     });
     await act(async () => $('[data-testid="mcp-url-copy"]')!.click());
     expect($('[data-testid="mcp-url-copy"]')!.dataset.state).toBe('failed');
-    expect($('[data-testid="mcp-url-copy"]')!.textContent).toContain(copy().copyFailed);
+    expect($('[data-testid="mcp-url-copy"] [aria-live]')!.textContent).toBe(copy().copyFailed);
+    // The button keeps its name: what it copies.
+    expect($('[data-testid="mcp-url-copy"]')!.getAttribute('aria-label')).toBe(copy().copyUrl);
+    await pick('codex');
+    await act(async () => $('[data-testid="mcp-codex-add-big-copy"]')!.click());
+    expect($('[data-testid="mcp-codex-add-big-copy"]')!.dataset.state).toBe('failed');
+    expect($('[data-testid="mcp-codex-add-big-copy"] [aria-live]')!.textContent).toBe(copy().copyFailed);
+  });
+
+  it('announces a copy once: the live region empties again instead of going back to "Copy"', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount();
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => undefined) }, configurable: true });
+      await act(async () => $('[data-testid="mcp-url-copy"]')!.click());
+      expect($('[data-testid="mcp-url-copy"] [aria-live]')!.textContent).toBe(copy().copied);
+      await act(async () => void vi.advanceTimersByTime(2000));
+      expect($('[data-testid="mcp-url-copy"] [aria-live]')!.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves no placeholder unfilled on any tab, and says a link opens a new tab', async () => {
+    await mount();
+    for (const app of APPS) {
+      await pick(app);
+      for (let i = 0; i < WALK_DURATIONS[app].length; i++) {
+        await act(async () => stepButton(i).click());
+        expect(host.textContent, `${app} ${i}`).not.toMatch(/\{(product|server|count|app|url|n)\}/);
+      }
+    }
+    await pick('claude');
+    expect($('[data-testid="mcp-open-claude"] .sr-only')!.textContent).toContain(copy().open.newTab);
   });
 
   it('on a phone, keeps the web links and swaps what needs a computer for a note', async () => {

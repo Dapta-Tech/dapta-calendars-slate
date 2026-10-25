@@ -1,8 +1,9 @@
 /* ── Home: the "Connect your agent" banner and card ────────────────────────── */
 
 /* The banner's logo marquee: the list twice in a row, slid by one copy's width,
-   so the loop has no seam. It stops under the pointer and with reduced motion,
-   where the second copy is hidden and the first sits still. */
+   so the loop has no seam. It stops under the pointer, while the keyboard is in
+   the banner, and with reduced motion, where the second copy is hidden and the
+   first sits still. */
 .ap-marquee {
   mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
 }
@@ -11,7 +12,8 @@
   width: max-content;
   animation: ap-marquee 26s linear infinite;
 }
-.ap-marquee:hover .ap-marquee__track {
+.ap-marquee:hover .ap-marquee__track,
+.ap-banner:focus-within .ap-marquee__track {
   animation-play-state: paused;
 }
 @keyframes ap-marquee {

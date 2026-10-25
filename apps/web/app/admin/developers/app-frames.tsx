@@ -156,7 +156,7 @@ function DirectoryRow({ name, tile, hl, d }: { name: string; tile: ReactNode; hl
           {name}
           {hl ? <span className="rounded bg-white/10 px-1 py-px text-[7.5px] font-medium text-[#c2c0b6]">{C.community}</span> : null}
         </span>
-        {hl ? <span className="block truncate text-[8.5px] text-[#9b9890]">{C.listing}</span> : null}
+        {hl ? <span className="block truncate text-[8.5px] text-[#9b9890]">{t(C.listing, { product: PRODUCT })}</span> : null}
       </span>
     </div>
   );
@@ -207,7 +207,7 @@ function ClaudeDirectoryFrame({ step, url, directory }: { step: 0 | 1; url: stri
               {PRODUCT}
               <span className="rounded bg-white/10 px-1.5 py-px text-[8px] font-medium text-[#c2c0b6]">{C.community}</span>
             </p>
-            <p className="mt-1 text-[9.5px] leading-[1.45] text-[#b8b5ab]">{C.listing}</p>
+            <p className="mt-1 text-[9.5px] leading-[1.45] text-[#b8b5ab]">{t(C.listing, { product: PRODUCT })}</p>
           </div>
           <span className="wt-press shrink-0 rounded-md bg-white px-3 py-1.5 font-semibold text-black" style={at(1.6)}>
             {C.connect}
@@ -828,7 +828,7 @@ function CursorFrame({ step, m, prompt, url, cursorJson }: AppFrameProps) {
           <p className="font-sans text-[9px]">
             ◌ {K.running} <span className="font-semibold text-white">find_available_slots</span> {K.in} {SERVER_NAME}
           </p>
-          <p className="mt-1 text-[#9a9a9a]">{'{ "event_slug": "intro-call" }'}</p>
+          <p className="mt-1 text-[#9a9a9a]">{'{ "event_type_id": "et_8f2c41" }'}</p>
           <div className="mt-1 flex justify-end gap-2 font-sans">
             <span className="text-[#8a8a8a]">{K.skip}</span>
             <span className="rounded bg-white/10 px-1.5">{K.alwaysRun}</span>

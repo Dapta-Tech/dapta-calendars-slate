@@ -3,8 +3,8 @@ import { getMessages } from '@slate/shared';
 import { adminApi } from '@/lib/admin-api';
 import { DEVELOPERS_TOOLS_HREF } from '@/lib/admin-nav';
 import { fillMessages } from '@/lib/fill-messages';
-import { claudeDirectoryUrl, resolveMcpConfig } from '@/lib/mcp-config';
-import { mcpSnippets } from '@/lib/mcp-connect';
+import { claudeDirectoryUrl, signInMcpUrl } from '@/lib/mcp-config';
+import { isShellSafeUrl, mcpSnippets } from '@/lib/mcp-connect';
 import { buttonVariants } from '@/components/ui/button';
 import { McpLogos } from '@/components/mcp-logos';
 import { ConnectGuide } from '../connect-guide';
@@ -26,9 +26,10 @@ export const dynamic = 'force-dynamic';
  * dForms' connect page.
  *
  * The guide shows only when the API says it serves MCP and takes a sign-in
- * (its own authorization server or an external one), and the MCP address is
- * known (`resolveMcpConfig`, runtime env). Otherwise a note says the connector
- * is not available on this installation. The API answering 404 here (older
+ * (its own authorization server or an external one), and `MCP_PUBLIC_URL` is
+ * set (`signInMcpUrl`, runtime env: the address the API checks tokens
+ * against). Otherwise a note says the connector is not available on this
+ * installation. The API answering 404 here (older
  * than OAuth) or erroring reads as no: the page never offers a sign-in that
  * cannot work. Where the connector is listed in Claude's directory
  * (`claudeDirectoryUrl`), Claude's tab starts there.
@@ -42,12 +43,18 @@ export default async function DeveloperConnectPage() {
   if (!allowed) return <DeveloperNoAccess locale={locale} title={admin.nav.connect} />;
   const c = fillMessages(admin.connect, CONNECT_VARS);
   const tools = fillMessages(admin.tools, CONNECT_VARS);
-  const signIn = await adminApi.connectedApps().then(
-    (r) => r.mcpEnabled === true && (r.enabled || r.external === true),
-    () => false,
+  const { signIn, stepUp } = await adminApi.connectedApps().then(
+    (r) => ({
+      signIn: r.mcpEnabled === true && (r.enabled || r.external === true),
+      // This API's own sign-in server starts a connection read only.
+      stepUp: r.enabled && r.external !== true,
+    }),
+    () => ({ signIn: false, stepUp: false }),
   );
-  const { mcpUrl } = resolveMcpConfig();
-  const url = signIn ? mcpUrl : null;
+  const mcpUrl = signInMcpUrl();
+  // The commands paste the address unquoted: one a shell could misread is
+  // not offered at all (it is set by whoever runs the installation).
+  const url = signIn && mcpUrl && isShellSafeUrl(mcpUrl) ? mcpUrl : null;
 
   return (
     <div className="mx-auto max-w-5xl px-gutter py-section sm:px-gutter-wide sm:py-gutter-y">
@@ -72,7 +79,7 @@ export default async function DeveloperConnectPage() {
 
       <div className="flex flex-col gap-group">
         {url ? (
-          <ConnectGuide m={c} snippets={mcpSnippets(url, claudeDirectoryUrl())} />
+          <ConnectGuide m={c} snippets={mcpSnippets(url, claudeDirectoryUrl())} stepUp={stepUp} />
         ) : (
           <section
             data-testid="mcp-connect-unavailable"

@@ -1,5 +1,5 @@
 /**
- * Pure builders for the MCP pages: the snippet each AI app needs to connect,
+ * Pure builders for the agent pages: the snippet each AI app needs to connect,
  * the scope catalog and the tool list.
  *
  * Nothing here reads the environment or the DOM, so the same functions run on the
@@ -19,12 +19,22 @@ export const API_KEY_ENV = 'DAPTA_CALENDARS_API_KEY';
 export const KEY_PREFIX = 'dcl_';
 
 /**
- * The name the server is registered under in each agent's config, the name it
- * announces itself (decision D3). New installs use `dcal`; an install made
- * under the old `dapta-calendars` keeps working, since the name is only the
- * agent's own label for the server and never reaches it.
+ * The name the server is registered under in each agent's config: `dcal`, the
+ * connector's name (decision D3). An install made under the old
+ * `dapta-calendars` keeps working, since the name is only the agent's own
+ * label for the server and never reaches it.
  */
 export const SERVER_NAME = 'dcal';
+
+/**
+ * An address that can go into a shell command as it is: a scheme, a host,
+ * an optional port and a path of URL-safe characters, nothing a shell reads
+ * (`$`, quotes, `;`, `&`, `|`, spaces). The snippets paste the address
+ * unquoted, so one that is not safe is not printed at all.
+ */
+export function isShellSafeUrl(url: string): boolean {
+  return /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~%/-]*)?$/.test(url);
+}
 
 /** The single entry Cursor stores under `mcpServers.dcal`: the URL alone, Cursor runs the sign-in. */
 export function cursorServerEntry(mcpUrl: string): { url: string } {

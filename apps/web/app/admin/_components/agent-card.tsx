@@ -85,7 +85,9 @@ function usePromptLoop(prompts: readonly string[], reduced: boolean, visible: bo
       timer = setTimeout(() => setTick((n) => n - 1), ERASE_TOTAL_MS / ERASE_TICKS);
     } else {
       timer = setTimeout(() => {
-        setIndex((i) => (i + 1) % prompts.length);
+        // A turn count, not a prompt index: the apps (seven) and the prompts
+        // (six) each cycle on their own, so every app gets its turn.
+        setIndex((i) => i + 1);
         setPhase('typing');
       }, BETWEEN_MS);
     }
@@ -93,7 +95,7 @@ function usePromptLoop(prompts: readonly string[], reduced: boolean, visible: bo
   }, [prompts.length, tick, phase, reduced, visible]);
 
   if (reduced) return { index: 0, text: prompts[0] ?? '', phase: 'done' as Phase };
-  const text = prompts[index] ?? '';
+  const text = prompts[index % prompts.length] ?? '';
   const shown = Math.ceil((text.length * tick) / (phase === 'erasing' ? ERASE_TICKS : TYPE_TICKS));
   return { index, text: text.slice(0, shown), phase };
 }
@@ -150,7 +152,7 @@ export function AgentCard({ m }: { m: CardMessages }) {
   const [paused, setPaused] = useState(false);
   const { index, text, phase } = usePromptLoop(m.prompts, reduced, visible && !paused);
   const app = CARD_APPS[index % CARD_APPS.length]!;
-  const tools = CARD_TOOLS[index % CARD_TOOLS.length]!;
+  const tools = CARD_TOOLS[index % m.prompts.length % CARD_TOOLS.length]!;
   const answered = phase === 'done';
 
   return (
@@ -281,6 +283,22 @@ export function AgentCard({ m }: { m: CardMessages }) {
               </div>
             </div>
           </div>
+          {/* The keyboard's way to hold the demo still (a click on it works too). */}
+          {reduced ? null : (
+            <div className="mt-inline flex justify-end">
+              <button
+                type="button"
+                data-testid="home-agent-demo-toggle"
+                onClick={() => setPaused((p) => !p)}
+                aria-pressed={paused}
+                aria-label={m.pause}
+                title={paused ? m.play : m.pause}
+                className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98] sm:h-8 sm:w-8"
+              >
+                <i aria-hidden className={`pi ${paused ? 'pi-play' : 'pi-pause'}`} style={{ fontSize: 12 }} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </section>
