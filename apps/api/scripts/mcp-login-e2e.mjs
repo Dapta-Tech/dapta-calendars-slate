@@ -8,7 +8,7 @@
  *
  *   discovery (protected-resource metadata, the server's metadata served from
  *   this origin), the built-in server staying dormant with its settings still
- *   present, the 401 challenge, 403 for a sign-in linked to no member, then
+ *   present, the 401 challenge, NOT_LINKED for a sign-in linked to no member, then
  *   with a sign-in: tools/list, whoami, list_my_accounts, list_event_types,
  *   find_available_slots, create_booking, get_booking and cancel_booking, a
  *   hold booked with its hold_id and the pending requests; a sign-in reaching
@@ -146,11 +146,21 @@ try {
   check(anon.status === 401 && challenge === `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"`, `no token: 401 ${challenge}`);
   const expired = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, await as.mint({ sub: 'user_01E2EALEX', exp: Math.floor(Date.now() / 1000) - 120 }));
   check(expired.status === 401 && (expired.headers.get('www-authenticate') ?? '').startsWith('Bearer error="invalid_token"'), 'expired token: 401 invalid_token');
-  const stranger = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, await as.mint({ sub: 'user_01NOBODY' }));
-  const strangerBody = await stranger.json();
-  check(stranger.status === 403 && stranger.headers.get('www-authenticate') === null && strangerBody.error.message.includes('Open the app on the web once'), `unlinked sign-in: 403 "${strangerBody.error.message}"`);
-  const stale = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, await as.mint({ sub: 'user_01E2EED' }));
-  check(stale.status === 403, 'a link not seen on the web for 40 days: 403');
+  // A valid sign-in that reaches no account connects and acts nowhere: its tools say to open the app.
+  const strangerToken = await as.mint({ sub: 'user_01NOBODY' });
+  const stranger = await post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, strangerToken);
+  check(stranger.status === 200 && stranger.headers.get('www-authenticate') === null, `unlinked sign-in: tools/list ${stranger.status}`);
+  const notLinkedText = async (token) => {
+    const res = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_bookings', arguments: {} } }, token);
+    const text = await res.text();
+    const data = text.startsWith('{') ? text : text.split('\n').find((l) => l.startsWith('data: '))?.slice(6);
+    const json = data ? JSON.parse(data) : {};
+    return json.result?.isError ? json.result.content[0].text : `(no tool error, HTTP ${res.status})`;
+  };
+  const strangerText = await notLinkedText(strangerToken);
+  check(strangerText.startsWith('NOT_LINKED:') && strangerText.includes('on the web once'), `unlinked sign-in: "${strangerText}"`);
+  const staleText = await notLinkedText(await as.mint({ sub: 'user_01E2EED' }));
+  check(staleText.startsWith('NOT_LINKED:'), 'a link not seen on the web for 40 days: NOT_LINKED');
 
   // --- One account -------------------------------------------------------------
   const token = await as.mint({ sub: 'user_01E2EALEX', client_id: 'https://client.example.test/metadata.json' });

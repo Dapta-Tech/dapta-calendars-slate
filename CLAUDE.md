@@ -48,7 +48,7 @@ verdict always agree.
 ## How to run (zero-infra SQLite path)
 
 ```bash
-pnpm install     # Node >= 20, pnpm >= 10
+pnpm install     # Node >= 22.13, pnpm >= 10
 pnpm dev         # builds packages, migrates + seeds a SQLite DB, starts web + api
 ```
 

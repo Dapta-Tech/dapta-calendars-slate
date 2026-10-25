@@ -5,6 +5,8 @@ import {
   LANDING_ID_COOKIE,
   LANDING_ID_QUERY_KEY,
   parseAttribution,
+  reportableRequestId,
+  resolveAnalyticsConfig,
   sanitizeLandingDistinctId,
 } from '@slate/shared';
 import { PATH_HEADER, QUERY_HEADER } from '@/lib/theme';
@@ -144,7 +146,14 @@ export function middleware(req: NextRequest) {
   // downstream reads out of it is one short enum. `URL` has already
   // percent-encoded any C0 control, so the cap is about size, not injection.
   requestHeaders.set(QUERY_HEADER, req.nextUrl.search.slice(0, 2048));
+  // With error tracking on, one id per request, kept when what arrived is
+  // safe to echo (as the API does): the response says it (`X-Request-Id`) and
+  // an error the server reports for this request carries the same id, so the
+  // two meet. Off (every bare fork), no header is added.
+  const requestId = errorTrackingOn() ? reportableRequestId(req.headers.get('x-request-id')) : null;
+  if (requestId) requestHeaders.set('x-request-id', requestId);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
+  if (requestId) res.headers.set('X-Request-Id', requestId);
 
   // Framing policy, BOTH halves (E, #67). `frame-ancestors *` on the public
   // booking routes is the promise the embed rests on; `'self'` on the admin,
@@ -163,6 +172,18 @@ export function middleware(req: NextRequest) {
   if (deploymentNoindex()) res.headers.set('X-Robots-Tag', NOINDEX_HEADER_VALUE);
 
   return parkLandingId(req, parkAttribution(req, res));
+}
+
+/** Error tracking's runtime switch, from the same settings the rest of analytics reads. */
+function errorTrackingOn(): boolean {
+  return (
+    resolveAnalyticsConfig({
+      provider: process.env.PRODUCT_ANALYTICS_PROVIDER,
+      key: process.env.PRODUCT_ANALYTICS_KEY,
+      host: process.env.PRODUCT_ANALYTICS_HOST,
+      errors: process.env.PRODUCT_ANALYTICS_ERRORS,
+    })?.errors === true
+  );
 }
 
 export const config = {

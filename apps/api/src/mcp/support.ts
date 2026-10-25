@@ -39,14 +39,16 @@ export interface McpCall {
   /** Client address (rate-limit key for anonymous calls). Never logged. */
   ip: string;
   /**
-   * Null: no credential presented, only the public tools are callable; or a
-   * sign-in that reaches several accounts, until a tool call names one.
+   * Null: no credential presented, only the public tools are callable; a
+   * sign-in that reaches several accounts, until a tool call names one; or a
+   * sign-in that reaches none, which may only call the public tools.
    */
   principal: MachinePrincipal | null;
   /**
    * A sign-in through an external authorization server: the verified token and
-   * every account it may act in (at least one). With one account `principal`
-   * is already that account's; with several the call picks one (`account_id`).
+   * every account it may act in. With one account `principal` is already that
+   * account's; with several the call picks one (`account_id`); with none every
+   * tool that is not public answers NOT_LINKED.
    */
   login?: { token: ExternalLogin; accounts: LoginAccount[] };
 }

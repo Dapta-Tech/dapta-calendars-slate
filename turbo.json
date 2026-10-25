@@ -22,6 +22,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["PRODUCT_ANALYTICS_SOURCEMAPS"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "dev": {

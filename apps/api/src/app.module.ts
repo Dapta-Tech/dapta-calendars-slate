@@ -1,5 +1,5 @@
 import { Logger, Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { createDb } from '@slate/db';
 import {
   createEmailProvider,
@@ -7,7 +7,7 @@ import {
   mailSupportAddress,
   type EmailProvider,
 } from '@slate/notifications';
-import { ANALYTICS_GROUP_TYPE, badgeHidden, buildSignupUrl } from '@slate/shared';
+import { ANALYTICS_GROUP_TYPE, analyticsErrorsSettingUnknown, badgeHidden, buildSignupUrl } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
   ANALYTICS,
@@ -18,6 +18,7 @@ import {
   EMAIL,
   ENTITLEMENTS,
   ENV,
+  ERROR_REPORTER,
   NOTIFIER,
   PREMIUM_MODE,
   RATE_LIMITER,
@@ -39,8 +40,9 @@ import { resolveEntitlementsProvider } from './entitlements.provider';
 import { entitlementGateProvider } from './entitlement-gate';
 import { resolveCrmProvider } from '@slate/crm';
 import { createAuthProvider } from './auth.provider';
-import { createAnalyticsProvider } from './analytics.provider';
+import { createAnalyticsProvider, type AnalyticsProvider } from './analytics.provider';
 import { AnalyticsEffects } from './analytics-effects';
+import { ErrorReportingFilter, createApiErrorReporter } from './error-reporting';
 import type { Db } from '@slate/db';
 import { HealthController, DocsController } from './controllers';
 import { PublicController } from './public.controller';
@@ -182,6 +184,22 @@ import { ExternalOAuthService } from './oauth/external.service';
       },
       inject: [ENV],
     },
+    // Error tracking on the same provider (`error-reporting.ts`): null unless
+    // analytics is on and PRODUCT_ANALYTICS_ERRORS is not `off`. Reports wait
+    // in memory, never in the outbox, so a database outage is still reported.
+    {
+      provide: ERROR_REPORTER,
+      useFactory: (env: ServerEnv, provider: AnalyticsProvider | null) => {
+        if (analyticsErrorsSettingUnknown(env.PRODUCT_ANALYTICS_ERRORS)) {
+          new Logger('ErrorTracking').warn('PRODUCT_ANALYTICS_ERRORS is neither `on` nor `off`; error tracking is off.');
+        }
+        return createApiErrorReporter(env, provider);
+      },
+      inject: [ENV, ANALYTICS],
+    },
+    // Reports every failed request (5xx, or anything unhandled), then answers
+    // exactly as Nest's default filter would.
+    { provide: APP_FILTER, useClass: ErrorReportingFilter },
     AnalyticsEffects,
     // Host auth backend selected by AUTH_PROVIDER (local stub / WorkOS overlay).
     // Signups are reported through a plain callback, because accounts and

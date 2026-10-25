@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyticsConfig, hostAnalyticsIdentity, isInternalViewer } from './config';
+import { analyticsConfig, errorAnalyticsConfig, hostAnalyticsIdentity, isInternalViewer } from './config';
 
 const env = (over: Record<string, string> = {}) => ({ NODE_ENV: 'test', ...over }) as NodeJS.ProcessEnv;
 const ME = { email: 'Host@Example.test', memberId: 'm1', accountShortCode: 'abc123', role: 'owner' };
@@ -18,7 +18,19 @@ describe('analyticsConfig', () => {
           PRODUCT_ANALYTICS_HOST: 'https://e.example.test/',
         }),
       ),
-    ).toEqual({ provider: 'posthog', key: 'phc_x', host: 'https://e.example.test' });
+    ).toEqual({ provider: 'posthog', key: 'phc_x', host: 'https://e.example.test', errors: true });
+  });
+});
+
+describe('errorAnalyticsConfig', () => {
+  const ON = { PRODUCT_ANALYTICS_PROVIDER: 'posthog', PRODUCT_ANALYTICS_KEY: 'phc_x' };
+
+  it('is the analytics config while errors are on, and null (nothing reaches the page) otherwise', () => {
+    expect(errorAnalyticsConfig(env(ON))).toMatchObject({ provider: 'posthog', key: 'phc_x', errors: true });
+    expect(errorAnalyticsConfig(env({ ...ON, PRODUCT_ANALYTICS_ERRORS: 'off' }))).toBeNull();
+    expect(errorAnalyticsConfig(env({ ...ON, PRODUCT_ANALYTICS_ERRORS: 'mistyped' }))).toBeNull();
+    expect(errorAnalyticsConfig(env({ PRODUCT_ANALYTICS_ERRORS: 'on' }))).toBeNull();
+    expect(analyticsConfig(env({ ...ON, PRODUCT_ANALYTICS_ERRORS: 'off' }))).toMatchObject({ errors: false });
   });
 });
 

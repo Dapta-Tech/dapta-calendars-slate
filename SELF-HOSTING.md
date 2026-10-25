@@ -2,7 +2,7 @@
 
 Dapta Calendars is **deployment-agnostic**: two Node apps (a Next.js web frontend
 and a NestJS API) plus a database. No host-only APIs, no managed-platform lock-in —
-anywhere Node ≥ 20 or Docker runs, it runs. This guide takes you from a clean host
+anywhere Node ≥ 22.13 or Docker runs, it runs. This guide takes you from a clean host
 to a running, double-booking-safe production deployment.
 
 For the architecture behind these choices, read [`ARCHITECTURE.md`](ARCHITECTURE.md);
@@ -21,7 +21,7 @@ skill.
 
 ## Prerequisites
 
-- **Node ≥ 20** and **pnpm ≥ 10** (only if you build from source), or **Docker +
+- **Node ≥ 22.13** and **pnpm ≥ 10** (only if you build from source), or **Docker +
   Docker Compose** (if you deploy the prebuilt images).
 - A **PostgreSQL 14+** database for production (SQLite is dev-only — see below).
 - A TLS-terminating reverse proxy (nginx, Caddy, Traefik, or a cloud load
@@ -51,9 +51,15 @@ Notes carried straight from that file:
   under `NODE_ENV=production`**, so the smoke-test stack runs
   `NODE_ENV=development` by default. For a real deployment set
   `NODE_ENV=production` **and** a real provider together (see Auth options).
-- `NEXT_PUBLIC_API_URL` is **inlined into the web client bundle at build time** (a
-  Docker `--build-arg`), not read at runtime. If your API is at
-  `https://calendars-api.example.com`, build the web image with that value.
+- The web **server** calls the API at `API_URL`, read at runtime: pages rendered
+  on the server, server actions and sign-in all use it (no browser code calls
+  the API directly). Inside the web container `localhost` is the web itself, so
+  the file sets `API_URL=http://api:4000`, the API's name on the Compose network.
+  Without it every booking page and the dashboard show the error page.
+- `NEXT_PUBLIC_API_URL` is **inlined at build time** (a Docker `--build-arg`), not
+  read at runtime: it is the API address the web uses when `API_URL` is unset.
+- The web starts once the API's healthcheck (`/health/ready`: the API answers and
+  its database is up) passes.
 
 Use `docker-compose.prod.yml` as the template for your orchestrator (Compose,
 Kubernetes, Nomad, a PaaS) — the two images and the migrate-then-serve ordering are
@@ -124,7 +130,8 @@ set** boots on the zero-infra path.
 | `API_PORT` | `4000` | — | no |
 | `KEEP_ALIVE_TIMEOUT` | `65000` | behind a load balancer, keep it above the balancer's idle timeout (60 s on AWS ALB), or the balancer can reuse a socket the server is closing and answer with a 502. Milliseconds, at most `86400000` (a day). The web's standalone server reads the same variable, but only when set (Node's 5 s otherwise), so set it on the web too | no |
 | `PUBLIC_APP_URL` | `http://localhost:3000` | production (used to build manage/booking links, and the host's "Confirm or decline" button, which opens `/admin/bookings` there) | no |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | production; **build-time** for web | no |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:4000` | **build-time** for web: inlined into the image, the web server's API address when `API_URL` is unset. No browser code calls the API directly | no |
+| `API_URL` | unset (falls back to the `NEXT_PUBLIC_API_URL` the web image was **built** with) | production, on the **web**: the address the web **server** calls (server-rendered pages, server actions, sign-in), read at runtime. Set it whenever the web container cannot reach the API at the built-in address, as in `docker-compose.prod.yml` (`http://api:4000`); a private or in-cluster address is best either way. `INTERNAL_API_SECRET` is sent only to this address | no |
 | `API_PUBLIC_URL` | unset | the API's public base URL (http or https, no credentials, query or fragment; anything else reads as unset). The API names it in `/openapi.json` `servers`, the `/docs` examples and the explorer's document link (unset: all relative to wherever the API is served); the web shows it on the developer pages and in the agent skill. Serving the API under a path prefix requires `API_PUBLIC_URL`: unset, `/openapi.json` names `/` and `/docs` loads `/openapi.json` from the host root | no |
 
 ### Auth (dashboard only — public booking pages are always open)
@@ -317,6 +324,99 @@ turn on your project's "discard client IP" setting.
 A provider without a usable key or host turns analytics off with one warning at
 boot; it never stops either app from starting. Turning analytics off later
 leaves any queued rows to drain as `skipped`.
+
+#### Error tracking
+
+With analytics on, unhandled errors are reported to the same project as
+`$exception` events, which PostHog's Error Tracking groups into issues. Off with
+analytics, and a fork that sets nothing sends nothing and loads nothing.
+
+| Var | Default | Set when | Secret? |
+|---|---|---|---|
+| `PRODUCT_ANALYTICS_ERRORS` | `on` whenever analytics is on | `off` to stop error capture only (product analytics keeps running). Any other value is read as `off`, with one warning at boot | no |
+| `PRODUCT_ANALYTICS_SOURCEMAPS` | unset (no maps) | **build time**, web image only: `1` to emit browser source maps for upload and keep the web server's own maps in the image (see below) | no |
+
+What is reported, from each surface (every event carries `product: "calendars"`,
+a `surface`, and `$host`, the public host it belongs to):
+
+- **Browser** (`browser_host` on the dashboard and wizard, `browser_visitor` on
+  public booking pages): uncaught errors and unhandled promise rejections, plus
+  every error an error boundary shows. Never the console. A host's errors are
+  filed under the host, through the dashboard's own analytics (a wizard page
+  that fails in the browser before its analytics starts goes unreported);
+  a visitor's are anonymous like every other visitor
+  event (no person profile, nothing stored). The manage page, one-off links and
+  sign-in report nothing from the browser. An error the server already reported
+  (it reaches the browser with a `digest`) is not sent again.
+- **Web server** (`next_server`): every error Next reports through
+  `onRequestError` (a render, route handler, server action or middleware), with
+  the route template (`/[accountCode]/[handle]/[slug]`), method, status, request
+  id, what failed (`route_type`), the `digest` the browser shows, and as `$host`
+  the request's Host header when it is a public name (else `PUBLIC_APP_URL`;
+  never a private, loopback or cluster address). With error tracking on,
+  every web response carries `X-Request-Id` (a safe incoming one is kept), the
+  same id the report carries.
+- **API** (`api`): every response of 500 or more and anything thrown that is not
+  an HTTP error, with the route template, method, status, request id, the
+  `:accountCode` route parameter and `is_internal` when known, plus crashes
+  (an uncaught exception, an unhandled rejection), after which the process still
+  exits as Node would (it keeps running after a rejection when started with
+  `--unhandled-rejections=warn`, `warn-with-error-code` or `none`, as before).
+  A reported failure's response carries its `X-Request-Id`, the id the report
+  carries. `$host` is `API_PUBLIC_URL`'s host, else the request's public Host
+  header, never a pod or cluster address. A handled 4xx is not an error and is
+  never reported. An upstream service's response body is never sent: a
+  calendar backend's failure is reported by its operation and status only.
+  Reports wait in memory, never in the database: at most 100 queued, at most
+  60 sent a minute per process, the same error (type, message, failing line)
+  sent once a minute with a `count` of the rest. The web server counts its
+  repeats the same way.
+
+What is scrubbed before anything leaves either app: email addresses (plain and
+URL-encoded), phone numbers (`+`-led and national formats), runs of seven or
+more digits, bearer and basic credentials, JWTs, prefixed keys (`sk_`, `pk_`,
+`phc_`, `phx_`, `dcl_`, `whsec_`, ...), `key=`/`token=`/`password=`-style
+secrets, the parameter list of a failed database query, the input a database
+quotes back as invalid, and the query string,
+fragment and credentials of every URL; stack frame files lose everything after
+`?` or `#`. Request bodies, form answers, headers and cookies are never attached.
+The rules live in `scrubErrorText` (`@slate/shared`, `error-reporting.ts`), each
+with its own test.
+
+**Readable stacks.** The API runs its TypeScript with source maps on, so its
+frames name `.ts` lines without any setup. The web server's frames name source
+lines when the web image is built with `PRODUCT_ANALYTICS_SOURCEMAPS=1`, which
+keeps the server's maps beside its chunks (they are never served). Browser
+bundles are minified; to read them, build the web image with maps and register
+them with your error tracking:
+
+1. Build with `--build-arg PRODUCT_ANALYTICS_SOURCEMAPS=1`.
+2. Hand in an upload script as the BuildKit secret `sourcemaps_upload`
+   (`docker build --secret id=sourcemaps_upload,src=upload.sh ...`). The web
+   Dockerfile runs it after `next build` with the browser assets directory as
+   its argument, before the run stage copies them. With PostHog's CLI:
+
+   ```sh
+   set -eu
+   export POSTHOG_CLI_HOST=https://us.posthog.com     # your PostHog app host
+   export POSTHOG_CLI_PROJECT_ID=<project id>
+   export POSTHOG_CLI_API_KEY=<personal API key: error tracking write, organization read>
+   npx -y @posthog/cli@0.18.12 sourcemap inject --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
+   npx -y @posthog/cli@0.18.12 sourcemap upload --directory "$1" --release-name calendars-web --release-version "$SOURCEMAPS_RELEASE"
+   ```
+
+   `inject` stamps each chunk with an id the browser library reports with
+   every frame, so it must run before the chunks are copied into the image.
+3. The Dockerfile then deletes every browser `.map` file, whatever the script
+   did: no source map is ever served. A failed upload is logged and costs
+   readable stacks, never the build. Pass the release to the script as the
+   build arg `SOURCEMAPS_RELEASE` (the script reads `$SOURCEMAPS_RELEASE`): a
+   new value also makes BuildKit run the upload step again instead of reusing
+   a cached one.
+
+**Outside the web Dockerfile** (a plain `next build` and `next start`, a
+platform's build), `PRODUCT_ANALYTICS_SOURCEMAPS=1` maps are **served** from
+`/_next/static` unless your own pipeline deletes them after the upload.
 
 **What a visitor's browser stores.** Nothing, from analytics itself. The one
 cookie this feature adds is `slate.ph_id`: when a link to one of the product's
@@ -518,8 +618,10 @@ with no tokens, like the local stub, gives the request time; a token without
 `iat` stamps nothing, so your login tokens must carry it). The stamp is renewed
 in steps of a day (a quarter of the window when that is shorter) and never moves
 backwards; a sign-in reaches only members stamped within
-`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin gets
-403 ("open the app on the web once, then reconnect").
+`OAUTH_LINK_MAX_AGE_DAYS`. A token that reaches no active owner or admin still
+connects and acts nowhere: only the public booking page tools run, and every
+other tool answers `NOT_LINKED` ("open the app on the web once with this
+account, then try again"; no reconnect needed).
 
 Offboarding: removing the member in this app (or disabling them, or removing
 their admin role) cuts MCP access at once. Removing someone only in your
@@ -551,8 +653,9 @@ If your proxy reuses idle connections to the apps (AWS ALB does, for 60 s), keep
 first: the API defaults to 65 s, the web needs it set (see "Core" above).
 
 Behind a proxy, derive the request origin from `X-Forwarded-*` headers (the app
-does this) — set `PUBLIC_APP_URL` to the public web URL and build the web image with
-`NEXT_PUBLIC_API_URL` set to the public API URL. If you embed the booking widget on
+does this). Set `PUBLIC_APP_URL` to the public web URL and set `API_URL` on the web
+to the address the web server reaches the API at (unset, it uses the
+`NEXT_PUBLIC_API_URL` the image was built with). If you embed the booking widget on
 other domains, add them to `CORS_ORIGINS`.
 
 ## Auth options
@@ -741,7 +844,8 @@ reference it by `CALENDAR_BACKEND_MODULE`.
 | "Refusing to boot: AUTH_PROVIDER=local … production" | You set `NODE_ENV=production` with the dev stub — switch to `workos` (with `JWT_SECRET`) or another real provider. |
 | Migrations fail on `CREATE EXTENSION btree_gist` | The DB role lacks the privilege — have a superuser run `CREATE EXTENSION IF NOT EXISTS btree_gist;` once, then re-run migrations. |
 | Login redirect bounces away from your app | Your identity service must allow your web origin, and `PUBLIC_APP_URL` / `NEXT_PUBLIC_API_URL` must match the public hostnames. |
-| Web calls the wrong API URL | `NEXT_PUBLIC_API_URL` is build-time-inlined — rebuild the web image with the correct value. |
+| Booking pages and the dashboard show the error page; the web log shows `ECONNREFUSED 127.0.0.1:4000` | The web server has no `API_URL`, so it calls itself. Set `API_URL` on the web to the API's address as the web container sees it (`http://api:4000` in Compose). |
+| Web calls the wrong API URL | Set `API_URL` on the web; it is read at runtime. Without it the web uses the `NEXT_PUBLIC_API_URL` the image was built with, which only a rebuild changes. |
 | Booking confirmations never arrive | Default `EMAIL_PROVIDER=log-only` only logs — configure `smtp` or `http`. |
 | `CALENDAR_PROVIDER=external` fails loud at boot | No backend configured — set `CALENDAR_API_BASE_URL` + `CALENDAR_API_TOKEN`, or `CALENDAR_BACKEND_MODULE`, or use `disabled`. |
 | Browser requests blocked by CORS | Add the embedding origin(s) to `CORS_ORIGINS`. |

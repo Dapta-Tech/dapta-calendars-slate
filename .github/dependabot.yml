@@ -25,8 +25,9 @@ updates:
     # routine bumps red. Each needs its own PR with the code changes done; that
     # PR deletes its rule here. Patches and minors on the current line still flow.
     ignore:
-      # 3.x needs Node 22.11+ (it calls module.enableCompileCache) and CI, .nvmrc
-      # and the web image run Node 20, so `changeset status` crashes on start.
+      # 3.x needs Node 22.11+ (it calls module.enableCompileCache), which CI,
+      # .nvmrc and both images now have. It moves in its own PR that checks
+      # `changeset status` and the changeset docs on 3.x.
       - dependency-name: "@changesets/cli"
         versions: [">=3.0.0"]
       # 2.x to 5.x is three majors of config, mocking and coverage changes; 4.x
@@ -59,18 +60,21 @@ updates:
       # The MCP SDK already gets 4.x through the `zod4` alias in apps/api.
       - dependency-name: "zod"
         versions: [">=4.0.0"]
-      # Stay on the 22 line, the Node the API image runs. Newer lines describe
-      # APIs none of our runtimes have (CI and the web image are on Node 20).
+      # Stay on the 22 line, the Node CI and both images run. Newer lines describe
+      # APIs none of our runtimes have.
       - dependency-name: "@types/node"
         versions: [">=23.0.0"]
-      # 10.x needs Node 20.19+, above .nvmrc's 20.18.0, and its recommended set
-      # adds error-level rules. Move it with @eslint/js and a Node floor bump.
+      # 10.x needs Node 22.13+ on the 22 line, which the `engines` floor and CI
+      # now meet; its recommended set adds error-level rules. Move it with
+      # @eslint/js.
       - dependency-name: "eslint"
         versions: [">=10.0.0"]
       - dependency-name: "@eslint/js"
         versions: [">=10.0.0"]
-      # From 27.x jsdom raises its Node floor (27.4+ needs 20.19+, 30.x needs
-      # 22.22+) and CI runs the web tests on Node 20. Its types move with it.
+      # From 27.x jsdom raises its Node floor (27.1+ needs 22.12+, 29.x 22.13+,
+      # 30.x 22.22.2+, above the 22.13 `engines` floor); CI runs the web tests
+      # on .nvmrc's Node. It moves in its own PR with the web specs watched, and
+      # 30.x with an `engines` raise. Its types move with it.
       - dependency-name: "jsdom"
         versions: [">=27.0.0"]
       - dependency-name: "@types/jsdom"

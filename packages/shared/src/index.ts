@@ -11,6 +11,7 @@ export * from './handle';
 export * from './branding';
 export * from './growth';
 export * from './analytics';
+export * from './error-reporting';
 export * from './dapta-branding';
 export * from './location';
 export * from './i18n';

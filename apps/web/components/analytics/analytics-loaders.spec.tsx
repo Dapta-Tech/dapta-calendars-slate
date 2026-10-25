@@ -10,10 +10,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { AnalyticsConfig } from '@slate/shared';
 import { HostAnalytics } from './host-analytics';
 import { VisitorAnalytics } from './visitor-analytics';
+import { ErrorAnalytics } from './error-analytics';
 import { resetPosthogForTests } from '@/lib/analytics/posthog';
-import { track } from '@/lib/analytics/port';
+import { captureError, resetAnalyticsPortsForTests, track } from '@/lib/analytics/port';
 
-const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test' };
+const CONFIG: AnalyticsConfig = { provider: 'posthog', key: 'phc_test', host: 'https://ingest.example.test', errors: true };
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -30,6 +31,8 @@ afterEach(() => {
   delete (window as unknown as { posthog?: unknown }).posthog;
   window.localStorage.clear();
   resetPosthogForTests();
+  resetAnalyticsPortsForTests();
+  window.history.pushState({}, '', '/');
 });
 
 /** A loaded vendor global that records every call per instance. */
@@ -137,5 +140,51 @@ describe('VisitorAnalytics', () => {
   it('does nothing at all with analytics off', async () => {
     await mount(<VisitorAnalytics config={null} page="event" accountKey="abc123" embed={false} />);
     expect((window as unknown as { posthog?: unknown }).posthog).toBeUndefined();
+  });
+});
+
+describe('ErrorAnalytics (root layout) and a boundary report', () => {
+  it('a booking page that failed before its loader mounted still reports, through an anonymous visitor', async () => {
+    const v = vendor();
+    window.history.pushState({}, '', '/acme/ana/intro');
+    await mount(<ErrorAnalytics config={CONFIG} />);
+    // Nothing is connected or loaded until there is an error to report.
+    expect(v.init).not.toHaveBeenCalled();
+    const error = new Error('first paint failed');
+    captureError(error, 'booking_page');
+    await vi.waitFor(() => expect(v.calls.map(([, m]) => m)).toContain('captureException'));
+    expect(v.init.mock.calls.map((c) => c[2])).toEqual(['calendars_visitor']);
+    expect(v.calls).toEqual([
+      ['calendars_visitor', 'captureException', [error, { product: 'calendars', error_boundary: 'booking_page' }]],
+    ]);
+  });
+
+  it('a mounted loader is used as it is, identity and all', async () => {
+    const v = vendor();
+    window.history.pushState({}, '', '/admin/bookings');
+    await mount(
+      <>
+        <ErrorAnalytics config={CONFIG} />
+        <HostAnalytics config={CONFIG} identity={{ ...IDENTITY, landingId: null }} />
+      </>,
+    );
+    const error = new Error('dashboard broke');
+    captureError(error, 'dashboard');
+    expect(v.calls.at(-1)).toEqual([
+      'calendars_host',
+      'captureException',
+      [error, { product: 'calendars', error_boundary: 'dashboard' }],
+    ]);
+  });
+
+  it('with error tracking off, or analytics off, a boundary report connects and sends nothing', async () => {
+    window.history.pushState({}, '', '/acme/ana/intro');
+    await mount(<ErrorAnalytics config={{ ...CONFIG, errors: false }} />);
+    captureError(new Error('a'), 'booking_page');
+    act(() => root!.render(<ErrorAnalytics config={null} />));
+    captureError(new Error('b'), 'booking_page');
+    await new Promise((r) => setTimeout(r, 10));
+    expect((window as unknown as { posthog?: unknown }).posthog).toBeUndefined();
+    expect(document.querySelector('script')).toBeNull();
   });
 });

@@ -41,10 +41,11 @@ export function VisitorAnalytics({
   const provider = config?.provider ?? null;
   const key = config?.key ?? null;
   const host = config?.host ?? null;
+  const errors = config?.errors ?? false;
 
   useEffect(() => {
     if (!provider || !key || !host) return;
-    const port = connectAnalytics({ provider, key, host }, 'visitor');
+    const port = connectAnalytics({ provider, key, host, errors }, 'visitor');
     if (!port) return;
     setActiveAnalyticsPort(port);
     port.register({
@@ -75,7 +76,7 @@ export function VisitorAnalytics({
       document.removeEventListener('click', onClick, true);
       clearActiveAnalyticsPort(port);
     };
-  }, [provider, key, host, page, accountKey, embed]);
+  }, [provider, key, host, errors, page, accountKey, embed]);
 
   return null;
 }

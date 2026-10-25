@@ -5,18 +5,27 @@ name: CI
 # overlay, never here.
 
 on:
+  # develop too: without it the merged develop head is first tested on the
+  # develop-to-main release PR, long after the merge that broke it.
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A new push to a PR replaces its old run. Each push to develop or main gets
+  # a group of its own (branch plus sha), so a quick train of merges neither
+  # cancels nor queues behind another and every merged head keeps its verdict.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: true
 
 jobs:
   build-test:
     name: Lint · Typecheck · Test (SQLite) · Build
     runs-on: ubuntu-latest
+    # Every job's limit is three to five times its slowest recent green run (a
+    # few minutes at least), so a hung step fails in minutes instead of after
+    # GitHub's 6-hour default.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -25,13 +34,14 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Reads and validates every changeset, so a malformed one or one that
       # mixes ignored and versioned packages fails here. It does not ask a PR
       # for a new changeset. git resolves `main` only as a local branch, which
-      # a pull_request checkout does not have, so create it from origin first.
+      # a pull_request or develop checkout does not have, so create it from
+      # origin first (fetch-depth 0 fetched origin/main).
       - name: Changesets are valid
         run: |
           git rev-parse --verify --quiet refs/heads/main >/dev/null || git branch main origin/main
@@ -47,6 +57,7 @@ jobs:
   postgres:
     name: Test on Postgres (source of truth — EXCLUDE / double-booking)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:16
@@ -68,7 +79,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:packages
@@ -86,6 +97,7 @@ jobs:
   e2e:
     name: Browser suite (${{ matrix.engine }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -114,14 +126,17 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:packages
       - run: pnpm --filter @slate/web exec playwright install --with-deps chromium
       # The real web build and API process, a stand-in calendar backend, both
       # canvases (1440 and 360), then the server checks. See apps/web/e2e.
+      # A step timeout counts as a failure, so the upload below still runs; a
+      # job timeout cancels the job and skips it, losing the report and traces.
       - run: pnpm --filter @slate/web e2e
+        timeout-minutes: 15
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -138,9 +153,63 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  compose:
+    name: Self-host compose (production images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Throwaway password for a database that lives only inside this job.
+      POSTGRES_PASSWORD: slate
+    steps:
+      - uses: actions/checkout@v7
+      # Assembled here rather than written out, so the publish gate's secret
+      # scan has no credential-shaped URL to flag in this file.
+      - name: Point the stack at its own database
+        run: echo "DATABASE_URL=postgres://slate:${POSTGRES_PASSWORD}@db:5432/slate" >> "$GITHUB_ENV"
+      # SELF-HOSTING.md's quickstart, as written: both images built from this
+      # tree, migrations in the one-shot service, the web started once the
+      # API's healthcheck passes.
+      # A step timeout fails the step, so the logs step below still runs; a job
+      # timeout would cancel the job and skip it.
+      - name: Build and start docker-compose.prod.yml
+        timeout-minutes: 8
+        run: docker compose -f docker-compose.prod.yml up -d --build
+      - name: Seed the demo account
+        timeout-minutes: 3
+        run: >-
+          docker compose -f docker-compose.prod.yml run --rm --no-deps migrate
+          node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.runtime.json
+          node_modules/@slate/db/src/cli/seed.ts
+      # Both pages are rendered on the web server, so both prove the web
+      # container reaches the API (API_URL), not only that it is up.
+      - name: A booking page and a dashboard page render
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          base=http://localhost:3000
+          page="$(curl -fsS --max-time 20 --retry 10 --retry-all-errors --retry-delay 2 "$base/acme/alex-rivera/intro-call")"
+          grep -q '<title>Intro Call with Alex Rivera</title>' <<<"$page" \
+            || { echo "::error::the booking page did not render the event"; head -c 2000 <<<"$page"; exit 1; }
+          # The cookie the local dev sign-in sets for the seeded owner. It is
+          # unsigned because this stack sets no WEB_SESSION_SECRET.
+          session="$(printf '{"provider":"local","email":"alex@example.com"}' | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+          code="$(curl -sS --max-time 20 -o admin.html -w '%{http_code}' -H "Cookie: slate_session=$session" "$base/admin/event-types")"
+          # The event's public path is in the list only, never in the admin copy,
+          # so this fails if the list did not render (an error under a 200).
+          { test "$code" = 200 && grep -q 'alex-rivera/intro-call' admin.html; } \
+            || { echo "::error::the event types page answered $code without the event list"; head -c 2000 admin.html; exit 1; }
+      - if: failure() || cancelled()
+        run: |
+          docker compose -f docker-compose.prod.yml ps -a
+          docker inspect --format '{{json .State.Health}}' "$(docker compose -f docker-compose.prod.yml ps -aq api)" || true
+          docker compose -f docker-compose.prod.yml logs --no-color
+      - if: always()
+        run: docker compose -f docker-compose.prod.yml down -v
+
   publish-gate:
     name: Publish gate (secret scan)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:

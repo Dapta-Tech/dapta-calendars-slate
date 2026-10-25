@@ -3,13 +3,15 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { createApiKey, sql } from '@slate/db';
 import { AnalyticsEffects } from '../analytics-effects';
 import { bootHarness, errorText, idem, structured, type Harness } from '../mcp/mcp-harness';
-import { NOT_LINKED_MESSAGE } from '../mcp/mcp.controller';
 import { startFakeAs, type FakeAs } from './fake-as';
+import { TOOLS, accessOf } from '../mcp/tools';
+import type { McpCall } from '../mcp/support';
 
 /**
  * The MCP endpoint as a resource server for an external authorization server,
  * end to end over HTTP on the whole AppModule: discovery, the 401 challenge,
- * token checks, the person-to-member mapping (403 when there is none), one and
+ * token checks, the person-to-member mapping (a connection that acts nowhere
+ * when there is none), one and
  * several accounts, and the built-in server staying dormant even with its
  * issuer and key still configured (the dev rollout state).
  */
@@ -67,6 +69,9 @@ async function link(h: Harness, member: string, subject: string) {
 }
 
 const DAY = 86_400_000;
+/** What every non-public tool answers a sign-in that reaches no account (the harness serves PUBLIC_APP_URL). */
+const NOT_LINKED =
+  'NOT_LINKED: This sign-in is not an owner or admin of any account on this server yet. Ask the user to open https://calendar.example.test on the web once with this account (signing in again if it is already open), then try again; a member who is not an admin asks an owner for the admin role. There is no need to reconnect.';
 const seenAt = (h: Harness, member: string, at: number | null) => h.db.run(sql`UPDATE member SET login_seen_at = ${at} WHERE id = ${member}`);
 
 /** A dashboard request as this member: what a web login does, through the local auth stub. */
@@ -204,7 +209,8 @@ describe('the door', () => {
     expect(key.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
   });
 
-  it('a valid sign-in that is not linked, not an admin, or disabled gets 403 with the plain message (no challenge)', async () => {
+  it('a valid sign-in that is not linked, not an admin, or disabled connects, acts nowhere, and every tool says to open the app (no challenge)', async () => {
+    const before = h.audit.length;
     const member = await addMember(h, 'member');
     await link(h, member, 'user_plain_member');
     const disabled = await addMember(h, 'admin', 'disabled');
@@ -213,11 +219,30 @@ describe('the door', () => {
     await h.db.run(sql`UPDATE member SET status = 'invited' WHERE id = ${invited}`);
     await link(h, invited, 'user_invited_admin');
     for (const subject of ['user_nobody', 'user_plain_member', 'user_disabled_admin', 'user_invited_admin']) {
-      const res = await rpc(h, 'tools/list', {}, await as.mint({ sub: subject }));
-      expect(res.status).toBe(403);
+      const token = await as.mint({ sub: subject });
+      // The chat app's connect succeeds, so it shows the tools' words, never its own failed-login error.
+      const res = await rpc(h, 'tools/list', {}, token);
+      expect(res.status).toBe(200);
       expect(res.headers.get('www-authenticate')).toBeNull();
-      expect((await body(res)).error!.message).toBe(NOT_LINKED_MESSAGE);
+      for (const [name, args] of [
+        ['whoami', {}],
+        ['list_my_accounts', {}],
+        ['list_event_types', {}],
+        ['list_event_types', { account_id: h.accountId }],
+        ['list_event_types', { account_id: h.other.accountId }],
+        ['list_bookings', {}],
+      ] as const) {
+        expect(errorText(await tool(h, token, name, args)), `${subject} ${name}`).toBe(NOT_LINKED);
+      }
     }
+    // What is public on a booking page still works, as for an anonymous call.
+    const nobody = await as.mint({ sub: 'user_nobody' });
+    const page = { booking_page_url: 'https://x.test/acme/alex-rivera/intro-call', time_zone: 'UTC' };
+    expect((await tool(h, nobody, 'find_available_slots', page)).isError).toBeFalsy();
+    // Nothing it called left an account behind on the audit line.
+    const lines = h.audit.slice(before).map((l) => JSON.parse(l) as { tool: string; accountId: string | null; error?: string });
+    expect(lines.length).toBe(25);
+    expect(lines.filter((l) => l.tool !== 'find_available_slots').every((l) => l.accountId === null && l.error === 'NOT_LINKED')).toBe(true);
   });
 
   it('one account: tools, whoami, list_my_accounts, list_event_types and a booking, acting as the member with every MCP scope', async () => {
@@ -263,13 +288,14 @@ describe('the door', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_revocable');
     const token = await as.mint({ sub: 'user_revocable' });
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    const acts = async () => !(await tool(h, token, 'list_event_types')).isError;
+    expect(await acts()).toBe(true);
     await h.db.run(sql`UPDATE member SET role = 'member' WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
     await h.db.run(sql`UPDATE member SET role = 'admin' WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect(await acts()).toBe(true);
     await h.db.run(sql`DELETE FROM member WHERE id = ${id}`);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
   });
 });
 
@@ -279,17 +305,15 @@ describe('how long a link holds, and the accounts reached by switching', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_stale');
     const token = await as.mint({ sub: 'user_stale' });
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect((await tool(h, token, 'list_event_types')).isError).toBeFalsy();
     await seenAt(h, id, Date.now() - 31 * DAY);
-    const stale = await rpc(h, 'tools/list', {}, token);
-    expect(stale.status).toBe(403);
-    expect((await body(stale)).error!.message).toBe(NOT_LINKED_MESSAGE);
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
     // Never stamped at all: the same.
     await seenAt(h, id, null);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(403);
-    // A verified dashboard request stamps the member again.
+    expect(errorText(await tool(h, token, 'list_event_types'))).toBe(NOT_LINKED);
+    // A verified dashboard request stamps the member again, and the same token acts on its next call.
     expect(await openWebApp(h, h.accountId, id)).toBe(200);
-    expect((await rpc(h, 'tools/list', {}, token)).status).toBe(200);
+    expect((await tool(h, token, 'list_event_types')).isError).toBeFalsy();
   });
 
   it('OAUTH_LINK_MAX_AGE_DAYS sets the window', async () => {
@@ -297,7 +321,7 @@ describe('how long a link holds, and the accounts reached by switching', () => {
     const id = await addMember(h, 'admin');
     await link(h, id, 'user_short');
     await seenAt(h, id, Date.now() - 2 * DAY);
-    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(403);
+    expect(errorText(await tool(h, await as.mint({ sub: 'user_short' }), 'list_event_types'))).toBe(NOT_LINKED);
     await seenAt(h, id, Date.now() - DAY / 2);
     expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_short' }))).status).toBe(200);
   });
@@ -643,5 +667,84 @@ describe('namespaces per member', () => {
     expect(replay.booking.uid).toBe(first.booking.uid);
     // ...and reusing it with other arguments is refused in its own namespace only.
     expect((await book(a, starts[1]!, 'one@example.org')).content![0]!.text).toMatch(/^IDEMPOTENCY_KEY_REUSED/);
+  });
+});
+
+describe('a sign-in that reaches no account, tool by tool', () => {
+  it('answers NOT_LINKED from every tool that is not public, whatever it names, before the tool runs', async () => {
+    // Every call here comes from one address, whose budget this sign-in pays: room for them all.
+    const { h } = await setup({ MCP_RATE_LIMIT_CAPACITY: '1000', MCP_WRITE_RATE_LIMIT_CAPACITY: '1000' });
+    const call: McpCall = {
+      requestId: 'spec',
+      protocolVersion: '2025-11-25',
+      ip: '203.0.113.9',
+      principal: null,
+      login: { token: { subject: 'user_no_account', expiresAtMs: Date.now() + 600_000 }, accounts: [] },
+    };
+    const eventTypeId = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE account_id = ${h.accountId} LIMIT 1`))!.id;
+    const before = await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`);
+    let checked = 0;
+    const names = new Set<string>();
+    for (const def of TOOLS) {
+      for (const args of [{}, { event_type_id: eventTypeId }, { account_id: h.accountId }, { account_id: h.other.accountId, event_type_id: eventTypeId }]) {
+        if (accessOf(def, args) === 'public') continue;
+        const result = await h.gateway.execute(def, args, call);
+        expect(result.isError, `${def.name} ${JSON.stringify(args)}`).toBe(true);
+        expect(result.content[0]!.text, `${def.name} ${JSON.stringify(args)}`).toBe(NOT_LINKED);
+        checked += 1;
+        names.add(def.name);
+      }
+    }
+    // Every tool but book_meeting (public by design: its hold_id is the capability) is checked, most with every shape.
+    expect([...names].sort()).toEqual(TOOLS.map((d) => d.name).filter((n) => n !== 'book_meeting').sort());
+    expect(checked).toBeGreaterThan(TOOLS.length * 2);
+    expect(await h.db.get<{ n: number }>(sql`SELECT COUNT(*) AS n FROM booking`)).toEqual(before);
+  });
+
+  it('pays a door budget per person: two tokens of one person share it, another person and a linked sign-in do not', async () => {
+    const { as, h } = await setup({ RATE_LIMIT_CAPACITY: '3', RATE_LIMIT_REFILL_PER_SEC: '0.01' });
+    await link(h, await memberId(h, 'alex-rivera'), 'user_alex');
+    const first = await as.mint({ sub: 'user_budget_nobody' });
+    const second = await as.mint({ sub: 'user_budget_nobody', sid: 'another-session' });
+    const codes: number[] = [];
+    for (const token of [first, second, first, second, first]) codes.push((await rpc(h, 'tools/list', {}, token)).status);
+    expect(codes.slice(0, 3)).toEqual([200, 200, 200]);
+    expect(codes).toContain(429);
+    // Someone else from the same address, unlinked or linked, still connects.
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_budget_other' }))).status).toBe(200);
+    expect((await rpc(h, 'tools/list', {}, await as.mint({ sub: 'user_alex' }))).status).toBe(200);
+  });
+
+  it("counts its public tool calls against the address, like an anonymous caller's", async () => {
+    const { as, h } = await setup({ MCP_RATE_LIMIT_CAPACITY: '1', MCP_RATE_LIMIT_REFILL_PER_SEC: '0.01' });
+    const page = { booking_page_url: 'https://x.test/acme/alex-rivera/intro-call', time_zone: 'UTC' };
+    const anonymous = (await body(await rpc(h, 'tools/call', { name: 'find_available_slots', arguments: page }))).result as { isError?: boolean };
+    expect(anonymous.isError).toBeFalsy();
+    expect(errorText(await tool(h, await as.mint({ sub: 'user_shares_address' }), 'find_available_slots', page))).toMatch(/^RATE_LIMITED/);
+  });
+
+  it("keeps a hold it makes on a booking page the person's: nobody else books it, the same person does once linked", async () => {
+    const { as, h } = await setup();
+    const page = 'https://x.test/acme/alex-rivera/intro-call';
+    const token = await as.mint({ sub: 'user_hold_later_linked' });
+    const slots = structured<{ days: { slots: { start: string }[] }[] }>(await tool(h, token, 'find_available_slots', { booking_page_url: page, time_zone: 'UTC' }));
+    const start = slots.days.flatMap((d) => d.slots)[3]!.start;
+    const held = structured<{ hold: { hold_id: string } }>(
+      await tool(h, token, 'hold_slot', { booking_page_url: page, start, time_zone: 'UTC', idempotency_key: idem('unlinked-hold-0001') }),
+    );
+    const attendee = { name: 'Later Linked', email: 'later@example.org', time_zone: 'UTC' };
+    const book = (tok: string | undefined, key: string) =>
+      rpc(h, 'tools/call', { name: 'book_meeting', arguments: { booking_page_url: page, start, attendee, answers: { company: 'L' }, hold_id: held.hold.hold_id, idempotency_key: idem(key) } }, tok);
+    const anonymous = (await body(await book(undefined, 'unlinked-hold-0002'))).result as { isError?: boolean; content?: { text: string }[] };
+    expect(anonymous.isError).toBe(true);
+    expect(anonymous.content![0]!.text).toMatch(/^HOLD_NOT_FOUND/);
+    const stranger = (await body(await book(await as.mint({ sub: 'user_someone_else' }), 'unlinked-hold-0003'))).result as { isError?: boolean; content?: { text: string }[] };
+    expect(stranger.content![0]!.text).toMatch(/^HOLD_NOT_FOUND/);
+    // The person opens the web app and becomes an admin linked to Acme: the same token books its own hold.
+    const member = await addMember(h, 'admin');
+    await link(h, member, 'user_hold_later_linked');
+    const booked = (await body(await book(token, 'unlinked-hold-0004'))).result as { isError?: boolean; structuredContent?: { booking: { status: string } } };
+    expect(booked.isError).toBeFalsy();
+    expect(booked.structuredContent!.booking.status).toBe('accepted');
   });
 });

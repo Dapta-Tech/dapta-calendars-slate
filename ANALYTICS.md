@@ -18,8 +18,10 @@ answers; anything typed into a form; a query string or fragment of any URL; a
 paid click id (`gclid`, `fbclid`, ...; reduced to a `has_click_id` flag on the
 server's `attribution_captured`); a full referrer URL (reduced to its domain on
 server events and to its origin on visitor events). Session recording,
-autocapture, heatmaps, dead-click and exception capture, surveys and remote
-configuration are switched off in the browser on every surface.
+autocapture, heatmaps, dead-click capture, surveys and remote configuration
+are switched off in the browser on every surface. Uncaught errors are the one
+thing captured without a hand-written event, scrubbed first (see "Errors"
+below), and only while error tracking is on.
 
 How the browser half holds that, whatever the vendor library adds on its own
 (it adds more than one would guess: the session's full entry URL and entry
@@ -124,6 +126,27 @@ manage page or on one-off links, whose URLs carry a token.
 Every visitor event also carries `account_code`, `surface: "booking_page"`
 and `embed`.
 
+### Errors (`$exception`, every surface)
+
+With analytics on, error tracking is on too (`PRODUCT_ANALYTICS_ERRORS=off`
+turns it off alone): unhandled errors of the browser, the web server and the
+API reach the same project as `$exception` events, grouped into issues by the
+vendor's error tracking. Every one carries `product: "calendars"`, `$host` (the
+public host it belongs to, never an internal address) and `surface`:
+`browser_host` (dashboard and wizard, filed under the host), `browser_visitor`
+(public booking pages, anonymous and allowlisted like every visitor event),
+`next_server` (route template, method, status, request id, `digest`) or `api`
+(route template, method, status, request id, `account_code`, `is_internal`;
+5xx and crashes only, never a handled 4xx). Messages, types and stack frames
+are scrubbed on every surface before they leave: emails, phone numbers, long
+digit runs, tokens and keys, a failed query's parameters, and every query
+string. Bodies, form answers, headers and cookies are never attached, and
+breadcrumbs are not sent. The browser reports uncaught errors and unhandled
+rejections (never the console) plus what an error boundary shows; a booking
+page reports them too, because the booking flow fails in handlers and async
+calls that no boundary sees. Details, limits and the source map recipe:
+[`SELF-HOSTING.md`](SELF-HOSTING.md#error-tracking).
+
 ## The seams
 
 - **Contract** (`@slate/shared`, `analytics.ts`): event names, the prefix, the
@@ -132,12 +155,20 @@ and `embed`.
   internal-email matcher, the landing id sanitizer. Vendor-neutral and pure.
 - **API port** (`apps/api/src/analytics.provider.ts`): `AnalyticsProvider`,
   with the committed PostHog adapter (one JSON POST per event to `/capture/`,
-  no SDK). `AnalyticsEffects` enqueues; the outbox worker delivers.
-- **Browser port** (`apps/web/lib/analytics/`): `AnalyticsPort` and `track()`.
+  no SDK). `AnalyticsEffects` enqueues; the outbox worker delivers. Errors go
+  through the port's optional `captureException`, from memory
+  (`error-reporting.ts`), never the outbox.
+- **Errors, shared** (`@slate/shared`, `error-reporting.ts`): the scrubber, the
+  stack parser and the bounded, rate-limited, de-duplicating reporter the API
+  and the web server both use.
+- **Browser port** (`apps/web/lib/analytics/`): `AnalyticsPort`, `track()`
+  and `captureError()` (the error boundaries); `server-errors.ts` is the web
+  server's reporter (`onRequestError` in `instrumentation.ts`).
   The PostHog adapter installs the vendor's loader stub and loads the library
   from the configured host, so nothing is bundled. Each audience runs in its
   own named instance with its own settings.
 
 To support another vendor, implement both ports and select them in
-`createAnalyticsProvider` (API) and `connectAnalytics` (web). Nothing else
+`createAnalyticsProvider` (API) and `connectAnalytics` (web), and give the web
+server's errors a delivery in `deliveryFor` (`server-errors.ts`). Nothing else
 names a vendor.
