@@ -25,8 +25,20 @@ const IDENTITY_CACHE_MAX = 2_000;
 /** What a client's name or version may look like to be sent as given; anything else is sent as `other`. */
 const CLIENT_LABEL = /^[A-Za-z0-9 ._()/@+:-]{1,64}$/;
 
-/** A URL anywhere in a client's text, up to the next space, bracket, quote or separator. */
+/** A URL with a scheme, up to the next space, bracket, quote or separator. */
 const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"'<>`()[\]{};,]*/gi;
+
+/** A word carrying a percent escape: an encoded URL or query (`https%3A%2F%2F...`). */
+const ENCODED_IN_TEXT = /[^\s"'<>`()[\]{};,]*%[0-9a-f]{2}[^\s"'<>`()[\]{};,]*/gi;
+
+/** A host name with a dot and a top-level domain, then an optional port and path. */
+const HOST_IN_TEXT = /\b(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}(?![\w-])(:\d{1,5})?(\/[^\s"'<>`()[\]{};,]*)?/gi;
+
+/** An IPv4 address, not part of a longer dotted number (`Chrome/120.0.6099.109` stays). */
+const IPV4_IN_TEXT = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])/g;
+
+/** An IPv6 address, full or compressed (`2001:db8::1`, `::1`). */
+const IPV6_IN_TEXT = /(?<![\w:])(?:[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7}|::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?)(?![\w:])/gi;
 
 /** Longest user agent sent. */
 const USER_AGENT_MAX = 200;
@@ -36,7 +48,7 @@ const USER_AGENT_MAX = 200;
  * phone or account numbers (`Chrome/120.0.6099.109`): a user agent is mostly
  * version numbers. Addresses, tokens and international phones still go.
  */
-const CLIENT_TEXT_RULES = SCRUB_RULES.filter((rule) => rule.name !== 'phone-national' && rule.name !== 'digit-run');
+const USER_AGENT_RULES = SCRUB_RULES.filter((rule) => rule.name !== 'phone-national' && rule.name !== 'digit-run');
 
 /** The first value of a header that may repeat. */
 function firstHeader(value: string | string[] | undefined): string | undefined {
@@ -44,28 +56,47 @@ function firstHeader(value: string | string[] | undefined): string | undefined {
 }
 
 /**
+ * Client text with everything that can point at a person or a secret
+ * replaced: URLs with or without a scheme (a host with a port, or with a path
+ * that is not a version like `Node.js/22`), encoded URLs, IP addresses, then
+ * the scrubber's addresses, phones and tokens. A bare host name stays.
+ */
+function redactClientText(text: string, rules: typeof SCRUB_RULES): string {
+  const withoutUrls = text
+    .replace(URL_IN_TEXT, '[url]')
+    .replace(ENCODED_IN_TEXT, '[url]')
+    .replace(HOST_IN_TEXT, (host: string, port: string | undefined, path: string | undefined) =>
+      port || (path && !/^\/[\d.]*$/.test(path)) ? '[url]' : host,
+    )
+    .replace(IPV6_IN_TEXT, '[ip]')
+    .replace(IPV4_IN_TEXT, '[ip]');
+  return scrubErrorText(withoutUrls, rules);
+}
+
+/**
  * A client's name or version, from the caller and so untrusted: sent as given
- * only when it is a plain label (letters, digits and a little punctuation, no
- * URL, no address), else `other`. Undefined when it is missing.
+ * only when it is a plain label (letters, digits and a little punctuation)
+ * that carries no URL, IP address, email address, phone or token (every
+ * scrubber rule applies here), else `other`. Undefined when it is missing.
  */
 export function clientLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
   if (!text) return undefined;
-  const plain = CLIENT_LABEL.test(text) && !text.includes('://') && scrubErrorText(text, CLIENT_TEXT_RULES) === text;
+  const plain = CLIENT_LABEL.test(text) && redactClientText(text, SCRUB_RULES) === text;
   return plain ? text : 'other';
 }
 
 /**
  * A `User-Agent`, from the caller and so untrusted: invisible, bidi and
  * control characters go first (as for any untrusted text, so none can hide an
- * address from what follows), then URLs, addresses and tokens, then it is cut
- * to 200 characters. Undefined when nothing is left.
+ * address from what follows), then URLs, IP addresses, email addresses and
+ * tokens, then it is cut to 200 characters. Undefined when nothing is left.
  */
 export function userAgentLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const visible = untrusted(value, USER_AGENT_MAX * 4);
-  const clean = scrubErrorText(visible.replace(URL_IN_TEXT, '[url]'), CLIENT_TEXT_RULES).slice(0, USER_AGENT_MAX).trim();
+  const clean = redactClientText(visible, USER_AGENT_RULES).slice(0, USER_AGENT_MAX).trim();
   return clean || undefined;
 }
 

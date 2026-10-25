@@ -380,6 +380,11 @@ describe('client text', () => {
     for (const odd of ['ada@example.com', 'https://evil.test/x', 'x'.repeat(65), '<script>', 'Ada\u200BBot', '\u00f1and\u00fa', ['phc', 'abcdefghijkl'].join('_')]) {
       expect(clientLabel(odd), odd).toBe('other');
     }
+    // Addresses and URLs without a scheme, which pass the character list.
+    for (const odd of ['203.0.113.9', '2001:db8::1', 'example.com:8443/reset', 'example.com/reset', '120.0.6099.10000000']) {
+      expect(clientLabel(odd), odd).toBe('other');
+    }
+    for (const plain of ['1.2.3', 'Node.js', 'mcp-remote 0.1.29']) expect(clientLabel(plain)).toBe(plain);
     expect(clientLabel('  ')).toBeUndefined();
     expect(clientLabel(42)).toBeUndefined();
     expect(clientInfoOf(req({}, { params: { clientInfo: { name: 'bob@example.com', version: 7 } } }))).toEqual({ name: 'other' });
@@ -392,6 +397,10 @@ describe('client text', () => {
     // Built at run time, so secret scanners do not read the test input as a key.
     const fakeKey = ['dcl', 'abcdef123456'].join('_');
     expect(userAgentLabel(`agent/1\u202E\u0007 ${fakeKey}`)).toBe('agent/1 [token]');
+    expect(userAgentLabel('agent/1 (203.0.113.9; example.com:8443/reset/secret)')).toBe('agent/1 ([ip]; [url])');
+    expect(userAgentLabel('agent/1 2001:db8::1 ::1 www.example.com/reset?code=1')).toBe('agent/1 [ip] [ip] [url]');
+    expect(userAgentLabel('agent/1 https%3A%2F%2Fexample.com%2Freset')).toBe('agent/1 [url]');
+    expect(userAgentLabel('Node.js/22.15.0 undici/6.21 bot.example.test')).toBe('Node.js/22.15.0 undici/6.21 bot.example.test');
     expect(userAgentLabel(`agent/1 ${'x'.repeat(400)}`)).toHaveLength(200);
     expect(userAgentLabel('\u200B')).toBeUndefined();
   });
