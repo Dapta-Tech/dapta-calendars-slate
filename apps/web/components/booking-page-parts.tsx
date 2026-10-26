@@ -10,6 +10,7 @@ import {
   type CalendarMonth,
   type DisplaySlot,
 } from '@slate/shared';
+import { CONNECTOR_NAME } from '@/lib/product-name';
 
 /**
  * The event page's presentational pieces, split out of `booking-flow.tsx` so
@@ -746,7 +747,8 @@ export function GrowthCta({
 }) {
   return (
     <aside aria-label={m.growth.ctaButton} className="bp-growth">
-      <p className="bp-muted bp-growth-line">{m.growth.ctaLine}</p>
+      {/* Names the product once: `dCal` on Dapta's build, the fork's own name otherwise. */}
+      <p className="bp-muted bp-growth-line">{t(m.growth.ctaLine, { product: CONNECTOR_NAME })}</p>
       <a
         href={href}
         target="_blank"

@@ -180,9 +180,9 @@ describe('BookingNotifier: the footer line and the invite', () => {
 
   it('a deployment with a signup destination: the invitee reads it once, and keeps the invite', async () => {
     const { sent, provider } = capture();
-    await new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/' }).sendConfirmation(booking);
+    await new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/', daptaBrand: true }).sendConfirmation(booking);
     const m = sent[0]!;
-    expect(m.html!.match(/Dapta Calendars/g)).toHaveLength(1);
+    expect(m.html!.match(/dCal\.ai by Dapta/g)).toHaveLength(1);
     expect(m.html).toContain('https://signup.example.test/');
     expect(m.headers?.['X-Booking-Uid']).toBe('bk_footer_1');
     expect(String(m.attachments?.[0]?.content)).toContain('UID:bk_footer_1');

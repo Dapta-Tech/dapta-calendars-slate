@@ -1,10 +1,13 @@
-import { getMessages } from '@slate/shared';
+import { getMessages, t } from '@slate/shared';
 import { signupHref } from '@/lib/growth';
+import { PRODUCT_NAME } from '@/lib/product-name';
 import { BrandMark, IS_DAPTA_BRAND } from '@/components/brand/brand';
 
 /**
- * "Made with Dapta Calendars": the growth-loop attribution on every public
- * surface (R11). A discreet centered footer pill: semantic tokens only, so it
+ * "Made with dCal.ai by Dapta": the growth-loop attribution on every public
+ * surface (R11). The copy names the product AND the company on a Dapta build,
+ * the way dForms signs its forms; a fork's pill names the fork's own product
+ * (`{product}`), never dCal or Dapta. A discreet centered footer pill: semantic tokens only, so it
  * follows dark/light and any host branding without competing with it. Renders
  * only when the deployment configures NEXT_PUBLIC_SIGNUP_URL, never when
  * NEXT_PUBLIC_HIDE_BADGE is set (open-core: forks aren't forced to carry
@@ -44,7 +47,7 @@ export function MadeWithBadge({
             that set a signup URL, and the brand gate's letter chip is a heading
             mark, too heavy for a 12px footer line. A fork's badge is its words. */}
         {IS_DAPTA_BRAND ? <BrandMark className="h-3.5 w-auto shrink-0" /> : null}
-        <span>{m.madeWith}</span>
+        <span>{IS_DAPTA_BRAND ? m.madeWithDapta : t(m.madeWith, { product: PRODUCT_NAME })}</span>
         <span className="sr-only">(opens in a new tab)</span>
       </a>
     </footer>

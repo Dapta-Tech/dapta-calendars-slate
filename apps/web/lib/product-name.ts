@@ -12,10 +12,12 @@
  * this ahead of a pipeline change cannot silently turn Dapta's own build into a
  * fork (the marks would vanish and the chrome would fall back to a letter chip).
  */
+import { isDaptaProductName } from '@slate/shared';
+
 const RAW_NAME = process.env.NEXT_PUBLIC_PRODUCT_NAME || 'Calendars';
 
-/** True only on a build that identifies itself as Dapta's own. */
-export const IS_DAPTA_BRAND = RAW_NAME === 'Dapta Calendars' || RAW_NAME === 'dCalendars';
+/** True only on a build that identifies itself as Dapta's own (the one rule the API's emails apply too). */
+export const IS_DAPTA_BRAND = isDaptaProductName(RAW_NAME);
 
 /** The customer-facing product name, exactly as the deployment set it. */
 export const PRODUCT_NAME = RAW_NAME;

@@ -1,5 +1,5 @@
 /**
- * Growth loop — the "Made with Dapta Calendars" attribution on public pages.
+ * Growth loop — the "Made with dCal.ai by Dapta" attribution on public pages.
  *
  * Open-core rule: like the app-switcher's platform URL, the signup destination
  * comes ONLY from the deployment (NEXT_PUBLIC_SIGNUP_URL) — no internal host
@@ -9,6 +9,19 @@
  * All URL construction is pure here so the UTM scheme is testable and
  * identical on every surface.
  */
+
+/**
+ * Whether a deployment's product name identifies Dapta's own build. Both
+ * spellings Dapta's pipeline has used count, so a pipeline change cannot
+ * silently turn Dapta's build into a fork. The web reads it off
+ * `NEXT_PUBLIC_PRODUCT_NAME`; the API off `PRODUCT_NAME`, else the mail
+ * sender name, which Dapta's pipeline sets to the same value. A fork, with
+ * its own name, is never forced to carry Dapta branding.
+ */
+export function isDaptaProductName(name: string | null | undefined): boolean {
+  const n = (name ?? '').trim();
+  return n === 'Dapta Calendars' || n === 'dCalendars' || n === 'dCal';
+}
 
 /** UTM values are fixed product-wide; only the medium varies by surface. */
 export type SignupMedium = 'badge' | 'confirmation' | 'profile' | 'email';

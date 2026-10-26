@@ -85,6 +85,13 @@ export const serverEnvSchema = z.object({
   EMAIL_PROVIDER: z.enum(['log-only', 'noop', 'smtp', 'http']).default('log-only'),
   MAIL_FROM_EMAIL: z.string().default('bookings@example.com'),
   MAIL_FROM_NAME: z.string().default('Calendars'),
+  /**
+   * What this deployment calls the product, for the invitee emails' "Made
+   * with" line (the web reads NEXT_PUBLIC_PRODUCT_NAME for the same purpose).
+   * Unset, the mail sender name stands in, which Dapta's pipeline sets to the
+   * product name; a fork names itself either way and never carries Dapta.
+   */
+  PRODUCT_NAME: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   // The support address booking emails name in their footer ("Need help?
   // <address>"). UNSET (a bare fork) prints no such line: an email must never
   // send a fork's readers to someone else's support desk. Not `.email()` on
