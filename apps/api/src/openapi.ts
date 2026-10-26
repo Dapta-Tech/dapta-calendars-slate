@@ -867,7 +867,9 @@ export const openapiSpec = {
           '403': errorResponse('API key lacks bookings:write.'),
           '404': errorResponse('Booking is absent, cross-tenant, or outside the key allowlist.'),
           '409': errorResponse('Idempotency-Key was reused with a different request.'),
-          '422': errorResponse('Seated bookings are not implemented.'),
+          '422': errorResponse(
+            'LIMIT_EXCEEDED: the booking would hold more than 30 people in all, attendees and guests each counted once (or its event seats, when more).',
+          ),
         },
       },
     },

@@ -57,6 +57,7 @@ import {
   duplicateGuardApplies,
   hasUpcomingBookingForEmail,
   normalizeAttendeeEmail,
+  normalizedEmailSql,
 } from './duplicate-guard';
 import {
   consumeOneOffLink,
@@ -246,7 +247,7 @@ export async function insertHoldGuarded(
         AND (b.host_member_id = ${h.memberId}
              OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${h.memberId}))
         AND NOT (b.event_type_id = ${h.eventTypeId} AND b.start_ms = ${h.startMs}
-             AND (SELECT COUNT(*) FROM booking_attendee ba WHERE ba.booking_id = b.id)
+             AND (SELECT COUNT(DISTINCT ${normalizedEmailSql}) FROM booking_attendee a WHERE a.booking_id = b.id)
                < (SELECT COALESCE(et.seats_per_time_slot, 1) FROM event_type et WHERE et.id = ${h.eventTypeId}))
       LIMIT 1`;
   const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
@@ -2156,9 +2157,9 @@ export async function loadBookingNotificationContext(
   );
   const named = parseJsonColumn<{ _primaryAttendee?: { email?: unknown } }>(row.booking_metadata, {})
     ._primaryAttendee?.email;
-  const namedKey = typeof named === 'string' ? named.trim().toLowerCase() : null;
+  const namedKey = typeof named === 'string' ? normalizeAttendeeEmail(named) : null;
   const invitee =
-    (namedKey && attendeeRows.find((a) => a.email?.trim().toLowerCase() === namedKey)) || attendeeRows[0];
+    (namedKey && attendeeRows.find((a) => normalizeAttendeeEmail(a.email) === namedKey)) || attendeeRows[0];
   if (!invitee?.email) return null;
   // Multi-host bookings: every assigned co-host (excluding the organizer) is
   // notified too. Round-robin bookings have no booking_host rows → empty.
@@ -2178,10 +2179,10 @@ export async function loadBookingNotificationContext(
     sql`SELECT name, email FROM booking_guest WHERE booking_id = ${row.id} ORDER BY created_at ASC`,
   );
   const others = [...attendeeRows.filter((a) => a.id !== invitee.id), ...addedGuests];
-  const seen = new Set<string>([invitee.email.trim().toLowerCase()]);
+  const seen = new Set<string>([normalizeAttendeeEmail(invitee.email)]);
   const guests: Array<{ name: string | null; email: string }> = [];
   for (const g of others) {
-    const key = g.email?.trim().toLowerCase();
+    const key = normalizeAttendeeEmail(g.email);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     guests.push({ name: g.name, email: g.email!.trim() });

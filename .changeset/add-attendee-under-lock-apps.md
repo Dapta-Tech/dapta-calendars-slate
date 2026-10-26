@@ -11,4 +11,6 @@ them. Adding v2 guests and taking a seat on a group slot (the booking page, v1,
 v2, MCP and the host's own new booking) queue it the same way, now also when
 the shared render after the commit did not land: the newcomer came with the
 shared text in the same write, and a newcomer left off then was never written
-out, since a retry changes nothing. The OpenAPI document lists the new answers.
+out, since a retry changes nothing. The OpenAPI document lists the new answers,
+and the v2 guests route's 422 now says what it is: `LIMIT_EXCEEDED`, the
+booking holding 30 people in all (or its event's seats, when more).

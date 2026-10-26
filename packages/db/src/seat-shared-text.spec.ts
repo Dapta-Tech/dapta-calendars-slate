@@ -3,7 +3,7 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
-import { createTeamBooking, getTeamAvailability } from './parity';
+import { createTeamBooking, getTeamAvailability, insertHoldGuarded } from './parity';
 import { addAttendeeToBooking, addGuestsToBooking } from './v2-pilot';
 import { createEventType, deleteEventType, updateEventType } from './crud';
 import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
@@ -207,6 +207,47 @@ describe('a seat taken on a group slot', () => {
       sql`SELECT email FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid}) ORDER BY created_at`,
     );
     expect(rows.map((r) => r.email.toLowerCase())).toEqual(['alice@example.com', 'carl@example.com']);
+  });
+
+  it('seats count each person once, however their row was written', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    await db.run(sql`UPDATE event_type SET seats_per_time_slot = 3 WHERE slug = 'office'`);
+    const { id: bookingId, event_type_id: eventTypeId } = (await db.get<{ id: string; event_type_id: string }>(
+      sql`SELECT id, event_type_id FROM booking WHERE uid = ${uid}`,
+    ))!;
+    // Alice again, written before the normalized column was filled, and Carl with a tab SQL's trim keeps.
+    for (const [id, email] of [
+      ['legacy-alice', ' ALICE@example.com '],
+      ['legacy-carl', '\tCarl@example.com'],
+    ])
+      await db.run(sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, created_at)
+          VALUES (${id}, ${bookingId}, 'Legacy', ${email}, NULL, 'UTC', ${Date.now()})`);
+    // Three rows, two people: one of the three seats is left.
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'office',
+      fromMs: startMs,
+      toMs: startMs + 60_000,
+    });
+    expect(a!.slots.find((s) => new Date(s.startUtc).getTime() === startMs)).toMatchObject({ spotsLeft: 1, capacity: 3 });
+    // A hold still fits beside them.
+    const hold = {
+      accountId,
+      eventTypeId,
+      memberId: alexId,
+      startMs,
+      endMs: startMs + 30 * 60_000,
+      uid: 'seat-hold',
+      releaseAtMs: Date.now() + 600_000,
+      now: Date.now(),
+    };
+    expect(await insertHoldGuarded(db, hold)).toBe('ok');
+    await db.run(sql`DELETE FROM slot_reservation WHERE uid = 'seat-hold'`);
+    // Carl asking again is a replay, not a second seat; Bob takes the last one.
+    expect(await book(startMs, 'Carl', 'carl@example.com')).toMatchObject({ ok: true, deduplicated: true });
+    expect(await book(startMs, 'Bob Other', 'bob@example.com')).toMatchObject({ ok: true, seatTaken: true });
+    expect(await book(startMs, 'Dana', 'dana@example.com')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
 });
 
@@ -480,5 +521,59 @@ describe('a booking whose calendar event has others on it is shared from the sta
                  (SELECT COUNT(*) FROM booking_guest WHERE booking_id = ${bookingId}) AS guests`,
     );
     expect({ attendees: Number(people!.attendees), guests: Number(people!.guests) }).toEqual({ attendees: 4, guests: 0 });
+  });
+
+  it('a guest is stored under the normalized address every reader compares', async () => {
+    const one = await book([]);
+    expect(await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: ' Pat@Example.com ' }] })).toEqual({
+      ok: true,
+      added: 1,
+    });
+    expect(
+      await db.get<{ email_normalized: string }>(
+        sql`SELECT email_normalized FROM booking_guest WHERE booking_id = (SELECT id FROM booking WHERE uid = ${one.uid})`,
+      ),
+    ).toEqual({ email_normalized: 'pat@example.com' });
+  });
+
+  it('v2 guests are capped on everyone on the booking, each person counted once', async () => {
+    const bo = { name: 'Bo Added', timeZone: 'UTC' };
+    const guests = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ email: `${prefix}${i}@example.com` }));
+    // Attendees the machine API added count too: the invitee and 24 more are 25 people.
+    const crowded = await book([]);
+    for (let i = 0; i < 24; i++)
+      expect(await addAttendeeToBooking(db, crowded.uid, accountId, { ...bo, email: `m${i}@example.com` })).toMatchObject({
+        added: true,
+      });
+    expect(await addGuestsToBooking(db, { accountId, uid: crowded.uid, guests: guests(5, 'g') })).toEqual({ ok: true, added: 5 });
+    expect(await addGuestsToBooking(db, { accountId, uid: crowded.uid, guests: guests(1, 'late') })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
+    // A guest on the guest list and in the booking's metadata is one person:
+    // the invitee and 10 guests are 11, so 19 more fit.
+    const listed = await book([]);
+    expect(await addGuestsToBooking(db, { accountId, uid: listed.uid, guests: guests(10, 'g') })).toEqual({ ok: true, added: 10 });
+    await db.run(
+      sql`UPDATE booking SET metadata = ${JSON.stringify({ _guests: guests(10, 'G').map((g) => g.email) })} WHERE uid = ${listed.uid}`,
+    );
+    expect(await addGuestsToBooking(db, { accountId, uid: listed.uid, guests: guests(19, 'n') })).toEqual({ ok: true, added: 19 });
+    expect(await addGuestsToBooking(db, { accountId, uid: listed.uid, guests: guests(1, 'late') })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
+    // Someone already on a full booking is not refused: there is nobody to add.
+    expect(await addGuestsToBooking(db, { accountId, uid: listed.uid, guests: [{ email: 'G3@example.com' }] })).toEqual({
+      ok: true,
+      added: 0,
+    });
+    // An event with more seats than 30 takes as many people as it seats.
+    const roomy = await book([]);
+    await db.run(sql`UPDATE event_type SET seats_per_time_slot = 40 WHERE slug = 'call'`);
+    expect(await addGuestsToBooking(db, { accountId, uid: roomy.uid, guests: guests(39, 'r') })).toEqual({ ok: true, added: 39 });
+    expect(await addGuestsToBooking(db, { accountId, uid: roomy.uid, guests: guests(1, 'late') })).toEqual({
+      ok: false,
+      reason: 'LIMIT_EXCEEDED',
+    });
   });
 });

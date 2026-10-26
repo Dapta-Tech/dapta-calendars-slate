@@ -5,7 +5,13 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAccountByCode, getAvailability } from './repository';
-import { createTeamBooking, getTeamAvailability, loadBookingNotificationContext, rescheduleBooking } from './parity';
+import {
+  createTeamBooking,
+  getTeamAvailability,
+  insertHoldGuarded,
+  loadBookingNotificationContext,
+  rescheduleBooking,
+} from './parity';
 import { addAttendeeToBooking, addGuestsToBooking, rescheduleBookingV2 } from './v2-pilot';
 import { loadBookingForCalendarWrite } from './calendar-refs';
 import { createEventType, updateEventType, type EventTypeInputRepo } from './crud';
@@ -266,5 +272,50 @@ describePg('calendar title and description templates (real Postgres)', () => {
     ))!;
     expect(Number(row.hits)).toBe(0);
     expect(row.seated).toBeNull();
+  });
+
+  it('a group slot counts each person once for its seats, its holds and its seat writes', async () => {
+    const et = await eventType('people', { seatsPerTimeSlot: 3 });
+    const startMs = (await slots(et.slug))[1]!;
+    const seat = (name: string) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: et.slug,
+        startMs,
+        attendee: { name, email: `${name.toLowerCase()}-${run}@example.com`, timeZone: 'UTC' },
+      });
+    const first = await seat('Alice');
+    if (!first.ok) throw new Error('first seat failed');
+    const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${first.booking.uid}`))!.id;
+    // Alice again, written before the normalized column was filled, and Carl with a tab SQL's trim keeps.
+    for (const email of [` ALICE-${run}@Example.com `, `\tCarl-${run}@example.com`])
+      await db.run(sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, created_at)
+          VALUES (${randomUUID()}, ${bookingId}, 'Legacy', ${email}, NULL, 'UTC', ${Date.now()})`);
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: et.slug,
+      fromMs: startMs,
+      toMs: startMs + 60_000,
+    });
+    expect(a!.slots.find((s) => new Date(s.startUtc).getTime() === startMs)).toMatchObject({ spotsLeft: 1, capacity: 3 });
+    const holdUid = `people-hold-${run}`;
+    expect(
+      await insertHoldGuarded(db, {
+        accountId,
+        eventTypeId: et.id,
+        memberId: alexId,
+        startMs,
+        endMs: startMs + 30 * 60_000,
+        uid: holdUid,
+        releaseAtMs: Date.now() + 600_000,
+        now: Date.now(),
+      }),
+    ).toBe('ok');
+    await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${holdUid}`);
+    expect(await seat('Carl')).toMatchObject({ ok: true, deduplicated: true });
+    expect(await seat('Bob')).toMatchObject({ ok: true, seatTaken: true });
+    expect(await seat('Dana')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
 });
