@@ -1,5 +1,5 @@
 /**
- * Growth loop — the "Made with Dapta Calendars" attribution on public pages.
+ * Growth loop — the "Made with dCal.ai by Dapta" attribution on public pages.
  *
  * Open-core rule: like the app-switcher's platform URL, the signup destination
  * comes ONLY from the deployment (NEXT_PUBLIC_SIGNUP_URL) — no internal host

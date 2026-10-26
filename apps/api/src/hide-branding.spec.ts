@@ -361,7 +361,7 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
       audience: 'attendee',
       showBranding: false,
     });
-    const madeWith = () => sent.at(-1)!.includes('Made with Dapta Calendars');
+    const madeWith = () => sent.at(-1)!.includes('Made with dCal.ai by Dapta');
 
     await email.deliver('confirmation', row);
     expect(madeWith()).toBe(true); // on by default

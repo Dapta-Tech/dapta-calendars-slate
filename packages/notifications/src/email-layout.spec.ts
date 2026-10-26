@@ -78,7 +78,7 @@ describe('renderBrandedHtml', () => {
 
     const url = 'https://signup.example.test/?utm_medium=email';
     const withUrl = renderBrandedHtml('confirmation', vars(), 'en', 'attendee', { signupUrl: url });
-    expect(withUrl.match(/Dapta Calendars/g)).toHaveLength(1);
+    expect(withUrl.match(/dCal\.ai by Dapta/g)).toHaveLength(1);
     expect(withUrl).toContain('Create your free calendar');
     expect(withUrl).toContain(`href="${url}"`);
     expect(renderBrandedHtml('confirmation', vars(), 'es', 'attendee', { signupUrl: url })).toContain(

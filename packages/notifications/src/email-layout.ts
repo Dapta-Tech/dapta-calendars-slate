@@ -344,7 +344,7 @@ export function renderBrandedHtml(
   // (the same switch as the page's badge). The host's own copy never carries it.
   const signup = audience === 'attendee' ? growth.signupUrl : null;
   const madeWith = signup
-    ? `<div style="margin:0 0 6px;">${esc(es ? 'Hecho con Dapta Calendars' : 'Made with Dapta Calendars')} · ` +
+    ? `<div style="margin:0 0 6px;">${esc(es ? 'Hecho con dCal.ai de Dapta' : 'Made with dCal.ai by Dapta')} · ` +
       `<a href="${safeHref(signup)}" style="color:${C.ink};text-decoration:underline;">${esc(es ? 'Crea tu calendario gratis' : 'Create your free calendar')}</a></div>`
     : '';
   return frame(

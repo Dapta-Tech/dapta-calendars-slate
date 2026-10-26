@@ -227,7 +227,10 @@ export interface BookingMessages {
   };
   /** Growth loop — public-page attribution badge + confirmation signup CTA. */
   growth: {
+    /** The attribution pill on a fork: `{product}` is the deployment's name. */
     madeWith: string;
+    /** The same pill on a Dapta build: the product and the company, as the brand writes them. */
+    madeWithDapta: string;
     /** The one short line above the free-calendar button. It names the product
      *  once; the "Made with" badge below is the only other mention. */
     ctaLine: string;
@@ -2020,8 +2023,9 @@ export const en: BookingMessages = {
     manageBody: 'Your booking has not changed. Try again in a moment, or open the link in your most recent email.',
   },
   growth: {
-    madeWith: 'Made with Dapta Calendars',
-    ctaLine: 'Dapta Calendars is free for anyone.',
+    madeWith: 'Made with {product}',
+    madeWithDapta: 'Made with dCal.ai by Dapta',
+    ctaLine: 'dCal is free for anyone.',
     ctaButton: 'Create your free calendar',
     ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
@@ -2761,7 +2765,7 @@ export const en: BookingMessages = {
     },
     brandingSetting: {
       title: 'Dapta branding',
-      hint: 'The "Made with Dapta Calendars" badge and the free-calendar invitation on your public pages.',
+      hint: 'The "Made with dCal.ai by Dapta" badge and the free-calendar invitation on your public pages.',
       switchLabel: 'Show Dapta branding on my pages',
       included: 'Included with your Dapta AI subscription',
       lapsed: 'Your Dapta AI subscription ended, the branding is showing again',
@@ -3701,8 +3705,9 @@ export const es: BookingMessages = {
     manageBody: 'Tu reserva no ha cambiado. Inténtalo de nuevo en un momento, o abre el enlace de tu correo más reciente.',
   },
   growth: {
-    madeWith: 'Hecho con Dapta Calendars',
-    ctaLine: 'Dapta Calendars es gratis para todos.',
+    madeWith: 'Hecho con {product}',
+    madeWithDapta: 'Hecho con dCal.ai de Dapta',
+    ctaLine: 'dCal es gratis para todos.',
     ctaButton: 'Crea tu calendario gratis',
     ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',
@@ -4444,7 +4449,7 @@ export const es: BookingMessages = {
     },
     brandingSetting: {
       title: 'Marca de Dapta',
-      hint: 'La insignia "Hecho con Dapta Calendars" y la invitación a crear un calendario gratis en tus páginas públicas.',
+      hint: 'La insignia "Hecho con dCal.ai de Dapta" y la invitación a crear un calendario gratis en tus páginas públicas.',
       switchLabel: 'Mostrar la marca de Dapta en mis páginas',
       included: 'Incluido con tu suscripción de Dapta AI',
       lapsed: 'Tu suscripción de Dapta AI terminó, la marca se muestra de nuevo',
