@@ -1,7 +1,6 @@
 ---
 "@slate/shared": patch
 "@slate/notifications": patch
-"@slate/web": patch
 ---
 
 The public attribution pill now reads "Made with dCal.ai by Dapta" ("Hecho con
