@@ -867,7 +867,9 @@ export const openapiSpec = {
           '403': errorResponse('API key lacks bookings:write.'),
           '404': errorResponse('Booking is absent, cross-tenant, or outside the key allowlist.'),
           '409': errorResponse('Idempotency-Key was reused with a different request.'),
-          '422': errorResponse('Seated bookings are not implemented.'),
+          '422': errorResponse(
+            'LIMIT_EXCEEDED: the booking would hold more than 30 people in all, attendees and guests each counted once (or its event seats, when more).',
+          ),
         },
       },
     },
@@ -1438,8 +1440,12 @@ export const openapiSpec = {
           properties: { attendee: { $ref: '#/components/schemas/Attendee' } },
         }),
         responses: {
-          '201': { description: 'attendee added' },
+          '201': { description: 'attendee added, or already on the booking (nothing written again)' },
           '403': { description: 'out-of-scope' },
+          '410': { description: 'the booking is cancelled or otherwise no longer active' },
+          '422': {
+            description: 'LIMIT_EXCEEDED: the booking already holds 30 attendees and guests (or its event seats, when more)',
+          },
         },
       },
     },

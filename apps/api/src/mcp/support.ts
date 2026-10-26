@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { HttpException } from '@nestjs/common';
 import { ZodError } from 'zod';
 import { hashApiValue } from '@slate/db';
+import { zonedWallClockToUtc } from '@slate/engine';
 import { zoneOffsetMinutes } from '@slate/shared';
 import type { MachinePrincipal } from '../auth.service';
 import type { ExternalLogin, LoginAccount } from '../oauth/external.service';
@@ -352,12 +353,13 @@ export function instantFrom(input: string, timeZone: string, endOfDay = false): 
     const [y, m, d] = input.split('-').map(Number);
     if (new Date(Date.UTC(y!, m! - 1, d!)).toISOString().slice(0, 10) !== input)
       throw new ToolFailure('INVALID_ARGUMENT', `Invalid date: ${input}.`);
-    const midnightUtc = Date.UTC(y!, m! - 1, d! + (endOfDay ? 1 : 0));
-    // First guess assumes UTC; correct by the zone's offset at that instant,
-    // then once more in case the correction crossed a DST change.
-    let guess = midnightUtc - zoneOffsetMinutes(new Date(midnightUtc), timeZone) * 60_000;
-    guess = midnightUtc - zoneOffsetMinutes(new Date(guess), timeZone) * 60_000;
-    const out = new Date(guess);
+    // The engine's projection, the one the slots come from: a day whose
+    // midnight is skipped (America/Santiago, 2026-09-06) starts at the
+    // transition, so each slot falls in the window of its own local day.
+    const out = zonedWallClockToUtc(
+      { year: y!, month: m!, day: d! + (endOfDay ? 1 : 0), hour: 0, minute: 0 },
+      timeZone,
+    );
     if (Number.isNaN(out.getTime())) throw new ToolFailure('INVALID_ARGUMENT', `Invalid date: ${input}.`);
     return out;
   }

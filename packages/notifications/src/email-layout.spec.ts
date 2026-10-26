@@ -77,15 +77,20 @@ describe('renderBrandedHtml', () => {
     expect(none).not.toContain('Create your free calendar');
 
     const url = 'https://signup.example.test/?utm_medium=email';
-    const withUrl = renderBrandedHtml('confirmation', vars(), 'en', 'attendee', { signupUrl: url });
-    expect(withUrl.match(/Dapta Calendars/g)).toHaveLength(1);
+    const withUrl = renderBrandedHtml('confirmation', vars(), 'en', 'attendee', { signupUrl: url, daptaBrand: true });
+    expect(withUrl.match(/dCal\.ai by Dapta/g)).toHaveLength(1);
+    // A fork names its own product, never dCal or Dapta.
+    const fork = renderBrandedHtml('confirmation', vars(), 'en', 'attendee', { signupUrl: url, productName: 'Acme Scheduling' });
+    expect(fork).toContain('Made with Acme Scheduling');
+    expect(fork).not.toContain('dCal');
+    expect(fork).not.toContain('Dapta');
     expect(withUrl).toContain('Create your free calendar');
     expect(withUrl).toContain(`href="${url}"`);
-    expect(renderBrandedHtml('confirmation', vars(), 'es', 'attendee', { signupUrl: url })).toContain(
+    expect(renderBrandedHtml('confirmation', vars(), 'es', 'attendee', { signupUrl: url, daptaBrand: true })).toContain(
       'Crea tu calendario gratis',
     );
 
-    const host = renderBrandedHtml('confirmation', vars(), 'en', 'host', { signupUrl: url });
+    const host = renderBrandedHtml('confirmation', vars(), 'en', 'host', { signupUrl: url, daptaBrand: true });
     expect(host).not.toContain('Dapta Calendars');
   });
 

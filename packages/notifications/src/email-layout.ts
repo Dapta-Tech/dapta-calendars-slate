@@ -47,6 +47,17 @@ export interface EmailGrowth {
    * sends its readers to someone else's support desk.
    */
   supportEmail?: string | null;
+  /**
+   * The deployment's product name, for the "Made with" line of a fork
+   * (`PRODUCT_NAME`, else the mail sender name). Absent: `Calendars`.
+   */
+  productName?: string | null;
+  /**
+   * Dapta's own build: the line names the product and the company as the
+   * brand writes them ("Made with dCal.ai by Dapta"), the same split as the
+   * web badge. A fork is never forced to carry Dapta branding.
+   */
+  daptaBrand?: boolean;
 }
 
 /**
@@ -344,7 +355,7 @@ export function renderBrandedHtml(
   // (the same switch as the page's badge). The host's own copy never carries it.
   const signup = audience === 'attendee' ? growth.signupUrl : null;
   const madeWith = signup
-    ? `<div style="margin:0 0 6px;">${esc(es ? 'Hecho con Dapta Calendars' : 'Made with Dapta Calendars')} · ` +
+    ? `<div style="margin:0 0 6px;">${esc(madeWithLine(es, growth))} · ` +
       `<a href="${safeHref(signup)}" style="color:${C.ink};text-decoration:underline;">${esc(es ? 'Crea tu calendario gratis' : 'Create your free calendar')}</a></div>`
     : '';
   return frame(
@@ -365,6 +376,13 @@ export function renderBrandedHtml(
  * no help line at all: never a hard-coded address, which a fork would
  * otherwise send its readers to.
  */
+/** The attribution the invitee reads: Dapta's lockup on Dapta's build, the fork's own product name otherwise. */
+function madeWithLine(es: boolean, growth: EmailGrowth): string {
+  if (growth.daptaBrand) return es ? 'Hecho con dCal.ai de Dapta' : 'Made with dCal.ai by Dapta';
+  const product = growth.productName?.trim() || 'Calendars';
+  return es ? `Hecho con ${product}` : `Made with ${product}`;
+}
+
 function automatedLine(es: boolean, growth: EmailGrowth): string {
   const auto = es ? 'Este es un mensaje automático.' : 'This is an automated message.';
   const help = es ? '¿Necesitas ayuda?' : 'Need help?';

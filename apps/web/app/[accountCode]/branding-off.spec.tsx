@@ -218,7 +218,7 @@ describe('every public surface obeys showBranding', () => {
       it('with the branding: the badge (and the free-calendar block where it lives)', async () => {
         const on = await html(s, true);
         expect(on).toContain('bp-embed-footer');
-        expect(on).toContain('Made with Dapta Calendars');
+        expect(on).toContain('Made with dCal.ai by Dapta');
         expect(on).toContain('example.com/signup');
         expect(on.includes('class="bp-growth"')).toBe(s.cta);
       });
@@ -226,7 +226,7 @@ describe('every public surface obeys showBranding', () => {
       it('an account that hid it while paying: no badge, no block, no signup link', async () => {
         const off = await html(s, false);
         expect(off).not.toContain('bp-embed-footer');
-        expect(off).not.toContain('Made with Dapta Calendars');
+        expect(off).not.toContain('Made with dCal.ai by Dapta');
         expect(off).not.toContain('class="bp-growth"');
         expect(off).not.toContain('example.com/signup');
       });

@@ -7,7 +7,7 @@ import {
   mailSupportAddress,
   type EmailProvider,
 } from '@slate/notifications';
-import { ANALYTICS_GROUP_TYPE, analyticsErrorsSettingUnknown, badgeHidden, buildSignupUrl } from '@slate/shared';
+import { ANALYTICS_GROUP_TYPE, analyticsErrorsSettingUnknown, badgeHidden, buildSignupUrl, isDaptaProductName } from '@slate/shared';
 import { loadServerEnv, type ServerEnv } from '@slate/config/env';
 import {
   ANALYTICS,
@@ -125,11 +125,17 @@ import { ExternalOAuthService } from './oauth/external.service';
             'MAIL_SUPPORT_EMAIL is not a bare email address; booking emails carry no support line.',
           );
         }
+        // The product the footer names: PRODUCT_NAME, else the mail sender name.
+        // Dapta's build gets the brand's lockup, a fork its own name (same split
+        // as the web badge, same recogniser).
+        const productName = env.PRODUCT_NAME?.trim() || env.MAIL_FROM_NAME?.trim() || null;
         return new BookingNotifier(email, {
           signupUrl: badgeHidden(env.HIDE_BADGE ?? env.NEXT_PUBLIC_HIDE_BADGE)
             ? null
             : buildSignupUrl({ baseUrl: env.SIGNUP_URL ?? env.NEXT_PUBLIC_SIGNUP_URL, medium: 'email' }),
           supportEmail,
+          productName,
+          daptaBrand: isDaptaProductName(productName),
         });
       },
       inject: [EMAIL, ENV],

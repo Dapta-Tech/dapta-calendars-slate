@@ -5,8 +5,14 @@ import { createDb, sql, type Db } from './client';
 import { migrate } from './migrate';
 import { seed } from './seed';
 import { createBooking, getAccountByCode, getAvailability } from './repository';
-import { createTeamBooking, getTeamAvailability, loadBookingNotificationContext, rescheduleBooking } from './parity';
-import { addGuestsToBooking, rescheduleBookingV2 } from './v2-pilot';
+import {
+  createTeamBooking,
+  getTeamAvailability,
+  insertHoldGuarded,
+  loadBookingNotificationContext,
+  rescheduleBooking,
+} from './parity';
+import { addAttendeeToBooking, addGuestsToBooking, rescheduleBookingV2 } from './v2-pilot';
 import { loadBookingForCalendarWrite } from './calendar-refs';
 import { createEventType, updateEventType, type EventTypeInputRepo } from './crud';
 
@@ -215,5 +221,101 @@ describePg('calendar title and description templates (real Postgres)', () => {
         expect(Number(copy.guests), `round ${round}`).toBe(0);
       }
     }
+  });
+
+  it('an attendee the machine API adds while a v2 move copies the booking never reaches a copy that shows the invitee', async () => {
+    const et = await eventType('race-attendee', { calendarTitleTemplate: 'Call {{name}}' });
+    const times = await slots(et.slug);
+    for (let round = 0; round < 4; round++) {
+      const created = await book(et.slug, times[round * 2]!, `Ana${round} Private`);
+      const email = `a${round}-${run}@example.com`;
+      const [added, moved] = await Promise.all([
+        addAttendeeToBooking(db, created.uid, accountId, { name: 'Bo Added', email, timeZone: 'UTC' }),
+        rescheduleBookingV2(db, { accountId, uid: created.uid, newStartMs: times[round * 2 + 1]! }),
+      ]);
+      if (!moved.ok) throw new Error(`v2 reschedule failed: ${moved.reason}`);
+      // The attendee lands either on the booking before the move (and is
+      // copied with the mark) or not at all (the move cancelled it first).
+      const copy = (await db.get<{ title: string; seated: number | null; hits: number | string }>(
+        sql`SELECT b.title, b.seated,
+              (SELECT COUNT(*) FROM booking_attendee a WHERE a.booking_id = b.id AND a.email = ${email}) AS hits
+            FROM booking b WHERE b.uid = ${moved.uid}`,
+      ))!;
+      if (added.ok) {
+        expect(Number(copy.hits), `round ${round}`).toBe(1);
+        expect(copy.seated, `round ${round}`).toBe(1);
+        expect(copy.title, `round ${round}`).toBe('Call');
+      } else {
+        expect(added, `round ${round}`).toEqual({ ok: false, reason: 'GONE' });
+        expect(Number(copy.hits), `round ${round}`).toBe(0);
+      }
+    }
+  });
+
+  it('an attendee waiting on the booking lock reads its status again there, and never joins it once cancelled', async () => {
+    const et = await eventType('lock-attendee');
+    const created = await book(et.slug, (await slots(et.slug))[0]!, 'Ana Private');
+    const email = `late-${run}@example.com`;
+    let pending: ReturnType<typeof addAttendeeToBooking> | undefined;
+    // Another writer holds the row (as a v2 move does) while the add starts:
+    // the add reads the booking live, then waits; the holder cancels it.
+    await db.pg!.drizzle.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM booking WHERE uid = ${created.uid} FOR UPDATE`);
+      pending = addAttendeeToBooking(db, created.uid, accountId, { name: 'Bo Late', email, timeZone: 'UTC' });
+      await new Promise((r) => setTimeout(r, 200));
+      await tx.execute(sql`UPDATE booking SET status = 'cancelled' WHERE uid = ${created.uid}`);
+    });
+    expect(await pending).toEqual({ ok: false, reason: 'GONE' });
+    const row = (await db.get<{ hits: number | string; seated: number | null }>(
+      sql`SELECT (SELECT COUNT(*) FROM booking_attendee a WHERE a.booking_id = b.id AND a.email = ${email}) AS hits, b.seated
+          FROM booking b WHERE b.uid = ${created.uid}`,
+    ))!;
+    expect(Number(row.hits)).toBe(0);
+    expect(row.seated).toBeNull();
+  });
+
+  it('a group slot counts each person once for its seats, its holds and its seat writes', async () => {
+    const et = await eventType('people', { seatsPerTimeSlot: 3 });
+    const startMs = (await slots(et.slug))[1]!;
+    const seat = (name: string) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: et.slug,
+        startMs,
+        attendee: { name, email: `${name.toLowerCase()}-${run}@example.com`, timeZone: 'UTC' },
+      });
+    const first = await seat('Alice');
+    if (!first.ok) throw new Error('first seat failed');
+    const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${first.booking.uid}`))!.id;
+    // Alice again, written before the normalized column was filled, and Carl with a tab SQL's trim keeps.
+    for (const email of [` ALICE-${run}@Example.com `, `\tCarl-${run}@example.com`])
+      await db.run(sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, created_at)
+          VALUES (${randomUUID()}, ${bookingId}, 'Legacy', ${email}, NULL, 'UTC', ${Date.now()})`);
+    const a = await getAvailability(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: et.slug,
+      fromMs: startMs,
+      toMs: startMs + 60_000,
+    });
+    expect(a!.slots.find((s) => new Date(s.startUtc).getTime() === startMs)).toMatchObject({ spotsLeft: 1, capacity: 3 });
+    const holdUid = `people-hold-${run}`;
+    expect(
+      await insertHoldGuarded(db, {
+        accountId,
+        eventTypeId: et.id,
+        memberId: alexId,
+        startMs,
+        endMs: startMs + 30 * 60_000,
+        uid: holdUid,
+        releaseAtMs: Date.now() + 600_000,
+        now: Date.now(),
+      }),
+    ).toBe('ok');
+    await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${holdUid}`);
+    expect(await seat('Carl')).toMatchObject({ ok: true, deduplicated: true });
+    expect(await seat('Bob')).toMatchObject({ ok: true, seatTaken: true });
+    expect(await seat('Dana')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
 });

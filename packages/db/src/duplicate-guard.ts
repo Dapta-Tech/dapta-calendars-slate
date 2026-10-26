@@ -51,8 +51,14 @@ export function normalizeAttendeeEmail(email: string | null | undefined): string
  * API that writes it, so rows inserted in that window — and any row an
  * external writer creates — carry NULL. Reads coalesce onto the same
  * expression the column stores, so those rows still match.
+ *
+ * Reads the attendee row aliased `a`. Every read that dedupes or counts the
+ * people on a booking uses it, and a caller comparing in code passes the
+ * value through `normalizeAttendeeEmail` again (see the trim note above).
+ *
+ * @internal Shared by the reads of a booking's people in this package.
  */
-const normalizedEmailSql = sql`COALESCE(a.email_normalized, lower(trim(a.email)))`;
+export const normalizedEmailSql = sql`COALESCE(a.email_normalized, lower(trim(a.email)))`;
 
 /**
  * True when `email` already holds an upcoming booking on `eventTypeId`.
