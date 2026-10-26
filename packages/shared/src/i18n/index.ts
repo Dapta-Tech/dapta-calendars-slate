@@ -232,7 +232,8 @@ export interface BookingMessages {
     /** The same pill on a Dapta build: the product and the company, as the brand writes them. */
     madeWithDapta: string;
     /** The one short line above the free-calendar button. It names the product
-     *  once; the "Made with" badge below is the only other mention. */
+     *  once (`{product}`: dCal on Dapta's build, the fork's own name otherwise);
+     *  the "Made with" badge below is the only other mention. */
     ctaLine: string;
     /** The button under a confirmation and at the foot of a profile. */
     ctaButton: string;
@@ -2025,7 +2026,7 @@ export const en: BookingMessages = {
   growth: {
     madeWith: 'Made with {product}',
     madeWithDapta: 'Made with dCal.ai by Dapta',
-    ctaLine: 'dCal is free for anyone.',
+    ctaLine: '{product} is free for anyone.',
     ctaButton: 'Create your free calendar',
     ctaOpensNewTab: '(opens in a new tab)',
     seoProfile: 'Book time with {name} online.',
@@ -3707,7 +3708,7 @@ export const es: BookingMessages = {
   growth: {
     madeWith: 'Hecho con {product}',
     madeWithDapta: 'Hecho con dCal.ai de Dapta',
-    ctaLine: 'dCal es gratis para todos.',
+    ctaLine: '{product} es gratis para todos.',
     ctaButton: 'Crea tu calendario gratis',
     ctaOpensNewTab: '(se abre en una pestaña nueva)',
     seoProfile: 'Reserva un horario con {name} en línea.',

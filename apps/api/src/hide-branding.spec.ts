@@ -339,7 +339,7 @@ describe('hiding the Dapta branding (included with a paying Dapta AI subscriptio
       },
     };
     const email = new EmailEffects(
-      new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/' }),
+      new BookingNotifier(provider as never, { signupUrl: 'https://signup.example.test/', daptaBrand: true }),
       db,
       undefined,
       undefined,
