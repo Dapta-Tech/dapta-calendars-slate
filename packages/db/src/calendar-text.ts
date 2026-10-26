@@ -121,20 +121,31 @@ export async function applyCalendarTemplates(db: Db, uid: string): Promise<Calen
 }
 
 /**
+ * The title a shared booking falls back to: the event's name, or, when its
+ * event type was deleted (bookings outlive it, so `eventName` is null), a
+ * neutral one in the host's language. Never the stored title, which may be
+ * the first invitee's own.
+ */
+export function sharedFallbackTitle(eventName: string | null, hostLocale: string | null): string {
+  return eventName ?? getMessages(hostLocale === 'es' ? 'es' : 'en').calendarEvent.sharedTitle;
+}
+
+/**
  * The statement that marks a booking shared (`seated`) as someone else joins
  * its one calendar event: a seat, an added guest or attendee. Run in the same
  * transaction that adds them. A booking not shared until now also gets the
- * safe shared text there (the event's name, no description), so no reader
- * ever sees the newcomer beside the first invitee's own text, not even before
- * the shared render that follows the commit (which may write a richer one).
- * A booking with no event type has no template, so its text is left alone.
+ * safe shared text there (`title`, from `sharedFallbackTitle`, and no
+ * description), so no reader ever sees the newcomer beside the first
+ * invitee's own text, not even before the shared render that follows the
+ * commit (which may write a richer one). That holds when the event type is
+ * gone too: nothing renders after the commit then, and this text stands.
+ * Either way the event may be written out to the newcomer once this commits.
  *
  * @internal Shared by the paths that add people to a booking.
  */
-export function markSharedSql(bookingId: string, eventName: string | null) {
-  if (eventName === null) return sql`UPDATE booking SET seated = 1 WHERE id = ${bookingId}`;
+export function markSharedSql(bookingId: string, title: string) {
   return sql`UPDATE booking SET seated = 1,
-        title = CASE WHEN seated = 1 THEN title ELSE ${plainCalendarTitle(eventName)} END,
+        title = CASE WHEN seated = 1 THEN title ELSE ${plainCalendarTitle(title)} END,
         calendar_description = CASE WHEN seated = 1 OR calendar_description IS NULL
           THEN calendar_description ELSE '' END
       WHERE id = ${bookingId}`;
@@ -147,8 +158,9 @@ export function markSharedSql(bookingId: string, eventName: string | null) {
  * render: a move that landed meanwhile has rendered its own text, already
  * shared (the event type has seats, or this would not be a seat), and its
  * calendar move carries every guest. Returns what was written, or null when
- * nothing was (the booking moved, or this failed); then the caller must not
- * rewrite the event for the new seat-taker.
+ * nothing was (the booking moved, or this failed). The text written with the
+ * newcomer (`markSharedSql`) is already a shared one, so a null here never
+ * stops the event being written out to them.
  */
 export async function applySharedFallback(
   db: Db,

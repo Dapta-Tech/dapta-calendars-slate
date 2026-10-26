@@ -4,7 +4,7 @@ import { generateManageToken } from '@slate/engine';
 import type { Db } from './client';
 import { sql } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
+import { applyCalendarTemplates, applySharedFallback, markSharedSql, sharedFallbackTitle } from './calendar-text';
 import { normalizeAttendeeEmail } from './duplicate-guard';
 import {
   bookingStartOutOfRange,
@@ -352,14 +352,13 @@ export async function addGuestsToBooking(
 ): Promise<
   | {
       ok: true;
-      added: number;
       /**
-       * The booking's calendar text is the shared one, so its event may be
-       * rewritten for the new guests. False when guests were added but neither
-       * the shared render nor its reset landed: then the event must not be
-       * written out to them.
+       * How many guests were written. The text stored with them is already a
+       * shared one (`markSharedSql`), so when this is above 0 the event is
+       * written out to them, whether or not the richer render after the
+       * commit lands.
        */
-      shared: boolean;
+      added: number;
     }
   | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }
 > {
@@ -370,9 +369,11 @@ export async function addGuestsToBooking(
     start_ms: number;
     end_ms: number;
     event_name: string | null;
+    host_locale: string | null;
   }>(
-    sql`SELECT b.id, b.status, b.metadata, b.start_ms, b.end_ms, et.title AS event_name
+    sql`SELECT b.id, b.status, b.metadata, b.start_ms, b.end_ms, et.title AS event_name, m.locale AS host_locale
         FROM booking b LEFT JOIN event_type et ON et.id = b.event_type_id
+        LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.account_id = ${args.accountId} AND b.uid = ${args.uid} LIMIT 1`,
   );
   if (!booking) return { ok: false, reason: 'NOT_FOUND' };
@@ -383,14 +384,11 @@ export async function addGuestsToBooking(
   // booking), and read everything again there: a move can never copy the new
   // guests without the mark, nor add them to a booking it already cancelled.
   const lockedRowSql = sql`SELECT status, metadata FROM booking WHERE id = ${booking.id}`;
-  const takenSql = sql`SELECT email FROM booking_attendee WHERE booking_id = ${booking.id}
-        UNION ALL
-        SELECT email FROM booking_guest WHERE booking_id = ${booking.id}`;
   const countSql = sql`SELECT COUNT(*) AS count FROM booking_guest WHERE booking_id = ${booking.id}`;
-  const markShared = markSharedSql(booking.id, booking.event_name);
+  const markShared = markSharedSql(booking.id, sharedFallbackTitle(booking.event_name, booking.host_locale));
   const byEmail = new Map<string, (typeof args.guests)[number]>();
   for (const guest of args.guests) {
-    const normalized = guest.email.toLowerCase();
+    const normalized = normalizeAttendeeEmail(guest.email);
     if (!byEmail.has(normalized)) byEmail.set(normalized, guest);
   }
   type Plan = { kind: 'gone' } | { kind: 'limit' } | { kind: 'add'; guests: Array<(typeof args.guests)[number]> };
@@ -401,9 +399,9 @@ export async function addGuestsToBooking(
   ): Plan => {
     if (!row || (row.status !== 'accepted' && row.status !== 'pending')) return { kind: 'gone' };
     const metadata = parseJsonColumn<{ _guests?: string[] }>(row.metadata, {});
-    const existing = new Set((metadata._guests ?? []).map((email) => email.toLowerCase()));
-    for (const r of taken) existing.add(r.email.toLowerCase());
-    const unique = [...byEmail.values()].filter((guest) => !existing.has(guest.email.toLowerCase()));
+    const existing = new Set((metadata._guests ?? []).map(normalizeAttendeeEmail));
+    for (const r of taken) existing.add(normalizeAttendeeEmail(r.email));
+    const unique = [...byEmail.entries()].filter(([email]) => !existing.has(email)).map(([, guest]) => guest);
     if ((metadata._guests ?? []).length + guestRows + unique.length > 30) return { kind: 'limit' };
     return { kind: 'add', guests: unique };
   };
@@ -421,7 +419,7 @@ export async function addGuestsToBooking(
     result = db.sqlite!.txn<Result>(() => {
       const p = plan(
         db.sqlite!.drizzle.get<{ status: string; metadata: unknown }>(lockedRowSql),
-        db.sqlite!.drizzle.all<{ email: string }>(takenSql),
+        db.sqlite!.drizzle.all<{ email: string }>(takenSql(booking.id)),
         Number(db.sqlite!.drizzle.get<{ count: number }>(countSql)?.count ?? 0),
       );
       if (p.kind !== 'add') return p;
@@ -436,7 +434,7 @@ export async function addGuestsToBooking(
         status: string;
         metadata: unknown;
       }>;
-      const taken = (await tx.execute(takenSql)) as unknown as Array<{ email: string }>;
+      const taken = (await tx.execute(takenSql(booking.id))) as unknown as Array<{ email: string }>;
       const count = (await tx.execute(countSql)) as unknown as Array<{ count: number | string }>;
       const p = plan(rows[0], taken, Number(count[0]?.count ?? 0));
       if (p.kind !== 'add') return p;
@@ -450,21 +448,46 @@ export async function addGuestsToBooking(
   if (result.kind === 'gone') return { ok: false, reason: 'GONE' };
   if (result.kind === 'limit') return { ok: false, reason: 'LIMIT_EXCEEDED' };
   const added = result.added;
-  if (added === 0) return { ok: true, added, shared: true };
+  if (added === 0) return { ok: true, added };
   // The guests are on the booking's one calendar event now: it is shared (and
-  // marked so, above), and its title and description must never carry the
-  // invitee's own data. Rendered again as shared (or reset to the event's
-  // name), as a seat is.
-  const shared =
-    (await applyCalendarTemplates(db, args.uid)) ??
-    (booking.event_name !== null
-      ? await applySharedFallback(
-          db,
-          { id: booking.id, startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) },
-          booking.event_name,
-        )
-      : null);
-  return { ok: true, added, shared: shared !== null };
+  // marked so, with its safe text, above), and its title and description must
+  // never carry the invitee's own data. Rendered again as shared (or reset to
+  // the event's name), as a seat is.
+  await renderShared(db, args.uid, booking);
+  return { ok: true, added };
+}
+
+/**
+ * The addresses already on a booking, by their normalized column: the
+ * attendees as the duplicate guard reads them (`normalizedEmailSql`), the
+ * guests as their unique key does. The caller normalizes each again
+ * (`normalizeAttendeeEmail`): SQL's `lower` and `trim` fold less than it does
+ * on some engines, so a row whose column was never filled still reads as one
+ * written today.
+ */
+function takenSql(bookingId: string) {
+  return sql`SELECT COALESCE(email_normalized, lower(trim(email))) AS email FROM booking_attendee WHERE booking_id = ${bookingId}
+        UNION ALL
+        SELECT email_normalized AS email FROM booking_guest WHERE booking_id = ${bookingId}`;
+}
+
+/**
+ * After someone joined a booking: render its calendar text again as shared,
+ * or reset it to the event's name. The text written with them already is a
+ * shared one, so this only makes it richer; when the event type is gone there
+ * is no template and no name, and that text stands.
+ */
+async function renderShared(
+  db: Db,
+  uid: string,
+  booking: { id: string; start_ms: number; end_ms: number; event_name: string | null },
+): Promise<void> {
+  if ((await applyCalendarTemplates(db, uid)) !== null || booking.event_name === null) return;
+  await applySharedFallback(
+    db,
+    { id: booking.id, startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) },
+    booking.event_name,
+  );
 }
 
 /** The most people a booking takes through `addAttendeeToBooking`, unless its event seats more. */
@@ -475,17 +498,19 @@ export const MACHINE_ATTENDEE_LIMIT = 30;
  * uid outside the account resolves to not-found (anti-uid-probing upstream).
  *
  * The same flow as adding v2 guests (`addGuestsToBooking`): the attendee and
- * the mark that the booking is now shared land together under the booking's
- * row lock, after its status is read again there, so a move never copies the
- * attendee without the mark and a cancelled booking never gains one. The
- * calendar text is then rendered as shared (or reset to the event's name):
- * the event carries no one invitee's own data once others are on it.
- * `shared` false means neither landed, and the event must not be written out.
+ * the mark that the booking is now shared, with its safe shared text, land
+ * together under the booking's row lock, after its status is read again
+ * there, so a move never copies the attendee without the mark and a cancelled
+ * booking never gains one. The calendar text is then rendered as shared (or
+ * reset to the event's name): the event carries no one invitee's own data
+ * once others are on it. `added` true means the event is to be written out to
+ * the attendee, whether or not that richer render lands.
  *
  * Like guests, an address already on the booking (as an attendee or a guest)
  * is not written again (`added` false: a retry changes nothing and sends
  * nothing), and the booking takes at most `MACHINE_ATTENDEE_LIMIT` people in
- * all, or its event's seats when those are more (`LIMIT_EXCEEDED`).
+ * all, or its event's seats when those are more (`LIMIT_EXCEEDED`). Addresses
+ * are compared by their normalized form, the one the duplicate guard reads.
  */
 export async function addAttendeeToBooking(
   db: Db,
@@ -498,19 +523,20 @@ export async function addAttendeeToBooking(
     notes?: string;
     phone?: string;
   },
-): Promise<
-  { ok: true; added: boolean; shared: boolean } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }
-> {
+): Promise<{ ok: true; added: boolean } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }> {
   const booking = await db.get<{
     id: string;
     status: string;
     start_ms: number;
     end_ms: number;
     event_name: string | null;
+    host_locale: string | null;
     seats: number | null;
   }>(
-    sql`SELECT b.id, b.status, b.start_ms, b.end_ms, et.title AS event_name, et.seats_per_time_slot AS seats
+    sql`SELECT b.id, b.status, b.start_ms, b.end_ms, et.title AS event_name, m.locale AS host_locale,
+               et.seats_per_time_slot AS seats
         FROM booking b LEFT JOIN event_type et ON et.id = b.event_type_id
+        LEFT JOIN member m ON m.id = b.host_member_id
         WHERE b.account_id = ${accountId} AND b.uid = ${uid} LIMIT 1`,
   );
   if (!booking) return { ok: false, reason: 'NOT_FOUND' };
@@ -520,15 +546,12 @@ export async function addAttendeeToBooking(
   const limit = Math.max(MACHINE_ATTENDEE_LIMIT, Number(booking.seats ?? 0));
   const email = normalizeAttendeeEmail(attendee.email);
   const lockedRowSql = sql`SELECT status, metadata FROM booking WHERE id = ${booking.id}`;
-  const takenSql = sql`SELECT email FROM booking_attendee WHERE booking_id = ${booking.id}
-        UNION ALL
-        SELECT email FROM booking_guest WHERE booking_id = ${booking.id}`;
   const insertAttendee = sql`INSERT INTO booking_attendee
         (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)
       VALUES (${randomUUID()}, ${booking.id}, ${attendee.name}, ${attendee.email},
         ${email}, ${attendee.timeZone},
         ${attendee.phone ?? null}, ${attendee.notes ?? null}, ${Date.now()})`;
-  const markShared = markSharedSql(booking.id, booking.event_name);
+  const markShared = markSharedSql(booking.id, sharedFallbackTitle(booking.event_name, booking.host_locale));
   type Plan = 'gone' | 'limit' | 'present' | 'add';
   const plan = (row: { status: string; metadata: unknown } | undefined, taken: ReadonlyArray<{ email: string }>): Plan => {
     if (!row || !live(row.status)) return 'gone';
@@ -546,7 +569,7 @@ export async function addAttendeeToBooking(
     outcome = db.sqlite!.txn<Plan>(() => {
       const p = plan(
         db.sqlite!.drizzle.get<{ status: string; metadata: unknown }>(lockedRowSql),
-        db.sqlite!.drizzle.all<{ email: string }>(takenSql),
+        db.sqlite!.drizzle.all<{ email: string }>(takenSql(booking.id)),
       );
       if (p !== 'add') return p;
       db.sqlite!.drizzle.run(insertAttendee);
@@ -559,7 +582,7 @@ export async function addAttendeeToBooking(
         status: string;
         metadata: unknown;
       }>;
-      const p = plan(rows[0], (await tx.execute(takenSql)) as unknown as Array<{ email: string }>);
+      const p = plan(rows[0], (await tx.execute(takenSql(booking.id))) as unknown as Array<{ email: string }>);
       if (p !== 'add') return p;
       await tx.execute(insertAttendee);
       await tx.execute(markShared);
@@ -568,17 +591,9 @@ export async function addAttendeeToBooking(
   }
   if (outcome === 'gone') return { ok: false, reason: 'GONE' };
   if (outcome === 'limit') return { ok: false, reason: 'LIMIT_EXCEEDED' };
-  if (outcome === 'present') return { ok: true, added: false, shared: true };
-  const shared =
-    (await applyCalendarTemplates(db, uid)) ??
-    (booking.event_name !== null
-      ? await applySharedFallback(
-          db,
-          { id: booking.id, startMs: Number(booking.start_ms), endMs: Number(booking.end_ms) },
-          booking.event_name,
-        )
-      : null);
-  return { ok: true, added: true, shared: shared !== null };
+  if (outcome === 'present') return { ok: true, added: false };
+  await renderShared(db, uid, booking);
+  return { ok: true, added: true };
 }
 
 interface RescheduleSource {

@@ -116,8 +116,9 @@ export type BookingOutcome =
       /**
        * A seat was added to an existing group booking (no manage token is
        * minted for it). Its calendar event already exists and now has one more
-       * guest and, possibly, a re-rendered shared title and body: the caller
-       * rewrites it (`afterGuestsChanged`), which a fresh booking never needs.
+       * guest and a shared title and body (written with the seat, possibly
+       * rendered again since): the caller rewrites it (`afterGuestsChanged`),
+       * which a fresh booking never needs.
        */
       seatTaken?: true;
     }
@@ -1257,8 +1258,9 @@ export async function createBooking(
       if (live) await consumeOneOffLink(db, live.id, existing.id);
       // Seat-takers join the shared group booking; the manage link stays with
       // the first booker (per-seat manage tokens are a follow-up). The event
-      // is rewritten for them only once its stored text is the shared one.
-      return { ok: true, booking: rec, manageToken: '', ...(shared ? { seatTaken: true as const } : {}) };
+      // is rewritten for them even when the render above did not land: the
+      // seat wrote the shared text with it (`markSharedSql`).
+      return { ok: true, booking: rec, manageToken: '', seatTaken: true };
     }
   }
 

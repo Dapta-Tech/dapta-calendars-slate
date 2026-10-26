@@ -272,6 +272,74 @@ describe('REST machine attendee', () => {
     );
     expect(Number(rows!.n)).toBe(0);
   });
+
+  it('writes the event out to a newcomer even when the text render after the commit fails, for an attendee and for v2 guests', async () => {
+    const h = await boot();
+    const key = await h.key(['bookings:write']);
+    const rewrite = vi.spyOn(h.app.get(BookingService), 'afterGuestsChanged');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Every text write onto a booking already shared fails: the add's own
+    // write, which marks it shared with its safe text, still lands.
+    await h.db.run(sql`CREATE TRIGGER shared_text_down BEFORE UPDATE OF title ON booking WHEN OLD.seated = 1
+        BEGIN SELECT RAISE(ABORT, 'calendar text is down'); END`);
+    try {
+      const attendee = await h.newBooking();
+      const added = await fetch(`${h.base}/v1/machine/bookings/${attendee}/attendees`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ attendee: { name: 'Bo Added', email: 'bo@example.com' } }),
+      });
+      expect(added.status).toBe(201);
+      const guests = await h.newBooking();
+      const invited = await fetch(`${h.base}/v2/bookings/${guests}/guests`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${key}`,
+          'cal-api-version': '2024-08-13',
+          'idempotency-key': idem('guests-render-down'),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ guests: [{ email: 'gi@example.com' }] }),
+      });
+      expect(invited.status).toBe(200);
+      // Both renders failed (and said so); the newcomers are written out all the same.
+      expect(warn).toHaveBeenCalled();
+      expect(rewrite.mock.calls).toEqual([[attendee], [guests]]);
+      const texts = await h.db.all<{ title: string; seated: number | null }>(
+        sql`SELECT title, seated FROM booking WHERE uid IN (${attendee}, ${guests})`,
+      );
+      expect(texts).toEqual([
+        { title: 'Intro Call', seated: 1 },
+        { title: 'Intro Call', seated: 1 },
+      ]);
+    } finally {
+      await h.db.run(sql`DROP TRIGGER shared_text_down`);
+      warn.mockRestore();
+    }
+  });
+
+  it('writes the event out with a neutral title when the booking outlived its event type', async () => {
+    const h = await boot();
+    const key = await h.key(['bookings:write']);
+    const rewrite = vi.spyOn(h.app.get(BookingService), 'afterGuestsChanged');
+    const uid = await h.newBooking();
+    // The first invitee's own text, then the event type deleted (its bookings stay).
+    await h.db.run(sql`UPDATE booking SET title = 'Intro Call - Ana Private', calendar_description = 'Phone +57 300'
+        WHERE uid = ${uid}`);
+    await h.db.run(sql`DELETE FROM event_type WHERE id = (SELECT event_type_id FROM booking WHERE uid = ${uid})`);
+    const added = await fetch(`${h.base}/v1/machine/bookings/${uid}/attendees`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ attendee: { name: 'Bo Added', email: 'bo@example.com' } }),
+    });
+    expect(added.status).toBe(201);
+    expect(rewrite.mock.calls).toEqual([[uid]]);
+    expect(
+      await h.db.get<{ title: string; calendar_description: string | null; seated: number | null }>(
+        sql`SELECT title, calendar_description, seated FROM booking WHERE uid = ${uid}`,
+      ),
+    ).toEqual({ title: 'Meeting', calendar_description: '', seated: 1 });
+  });
 });
 
 describe('config', () => {

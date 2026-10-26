@@ -5,7 +5,7 @@ import { seed } from './seed';
 import { createBooking, getAvailability } from './repository';
 import { createTeamBooking, getTeamAvailability } from './parity';
 import { addAttendeeToBooking, addGuestsToBooking } from './v2-pilot';
-import { createEventType, updateEventType } from './crud';
+import { createEventType, deleteEventType, updateEventType } from './crud';
 import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
 
 // Both renders are spied on, so a test can make one of them not land.
@@ -19,9 +19,10 @@ vi.mock('./calendar-text', async (importOriginal) => {
 });
 
 /**
- * Taking a seat on a group slot: the slot's text must be the shared one before
- * its calendar event is rewritten for the person joining (`seatTaken`), and a
- * repeated seat is a replay. Its own file, so the renders can be made to fail.
+ * Taking a seat on a group slot: the slot's text is the shared one, written
+ * with the seat, before its calendar event is rewritten for the person joining
+ * (`seatTaken`), and a repeated seat is a replay. Its own file, so the renders
+ * can be made to fail.
  */
 describe('a seat taken on a group slot', () => {
   let db: Db;
@@ -90,13 +91,14 @@ describe('a seat taken on a group slot', () => {
     expect(await stored(uid)).toEqual({ title: 'Office hours', calendar_description: '' });
   });
 
-  it('when even the reset fails, the event is not rewritten for the new seat-taker', async () => {
+  it('when even the reset fails, the event is still rewritten for the new seat-taker, with the text the seat wrote', async () => {
     const { startMs, uid } = await slotBookedBeforeSeats();
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
     const bob = await book(startMs, 'Bob Other', 'bob@example.com');
     if (!bob.ok) throw new Error('seat failed');
-    expect(bob.seatTaken).toBeUndefined();
+    // Not rewriting would leave Bob off the event for good: a repeat is a replay.
+    expect(bob.seatTaken).toBe(true);
     expect(bob.booking).toMatchObject({ title: 'Office hours', calendarDescription: null });
     // The seat itself wrote the safe text with it: no reader sees Bob beside Alice's own text.
     expect(await stored(uid)).toEqual({ title: 'Office hours', calendar_description: '' });
@@ -307,24 +309,24 @@ describe('a booking whose calendar event has others on it is shared from the sta
     expect(rows.map((r) => r.email.toLowerCase())).toEqual(['ana@example.com', 'bob@example.com']);
   });
 
-  it('guests added later make it shared and render it again; the event is rewritten only then', async () => {
+  it('guests added later make it shared and render it again', async () => {
     const alone = await book([]);
     expect((await stored(alone.uid)).title).toBe('Call Ana Private Secret Co');
     expect(
       await addGuestsToBooking(db, { accountId, uid: alone.uid, guests: [{ email: 'guest@example.com' }] }),
-    ).toEqual({ ok: true, added: 1, shared: true });
+    ).toEqual({ ok: true, added: 1 });
     expect(await stored(alone.uid)).toEqual({ title: 'Call', calendar_description: 'With Alex Rivera', seated: 1 });
     // No guest added: nothing to rewrite, nothing changed.
     expect(await addGuestsToBooking(db, { accountId, uid: alone.uid, guests: [{ email: 'GUEST@example.com' }] })).toEqual(
-      { ok: true, added: 0, shared: true },
+      { ok: true, added: 0 },
     );
-    // Neither the render nor its reset landing: the guests are kept but not written out.
+    // Neither the render nor its reset landing: the guests are still added (and written out by the caller).
     const other = await book([]);
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
     expect(
       await addGuestsToBooking(db, { accountId, uid: other.uid, guests: [{ email: 'late@example.com' }] }),
-    ).toEqual({ ok: true, added: 1, shared: false });
+    ).toEqual({ ok: true, added: 1 });
     // The guests came with the safe text, in the same write.
     expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
   });
@@ -339,7 +341,7 @@ describe('a booking whose calendar event has others on it is shared from the sta
       ).map((r) => r.email);
     const alone = await book([]);
     expect((await stored(alone.uid)).title).toBe('Call Ana Private Secret Co');
-    expect(await addAttendeeToBooking(db, alone.uid, accountId, bo)).toEqual({ ok: true, added: true, shared: true });
+    expect(await addAttendeeToBooking(db, alone.uid, accountId, bo)).toEqual({ ok: true, added: true });
     expect(await stored(alone.uid)).toEqual({ title: 'Call', calendar_description: 'With Alex Rivera', seated: 1 });
     expect(await attendees(alone.uid)).toEqual(['ana@example.com', 'bo@example.com']);
     // Another account's uid, or none at all, is not found.
@@ -350,11 +352,11 @@ describe('a booking whose calendar event has others on it is shared from the sta
     expect(await addAttendeeToBooking(db, gone.uid, accountId, bo)).toEqual({ ok: false, reason: 'GONE' });
     expect(await attendees(gone.uid)).toEqual(['ana@example.com']);
     expect((await stored(gone.uid)).seated).toBeNull();
-    // Neither the render nor its reset landing: the attendee is kept but the event is not written out.
+    // Neither the render nor its reset landing: the attendee is still added (and written out by the caller).
     const other = await book([]);
     vi.mocked(applyCalendarTemplates).mockResolvedValueOnce(null);
     vi.mocked(applySharedFallback).mockResolvedValueOnce(null);
-    expect(await addAttendeeToBooking(db, other.uid, accountId, bo)).toEqual({ ok: true, added: true, shared: false });
+    expect(await addAttendeeToBooking(db, other.uid, accountId, bo)).toEqual({ ok: true, added: true });
     // The attendee came with the safe text, in the same write.
     expect(await stored(other.uid)).toEqual({ title: 'Call', calendar_description: '', seated: 1 });
   });
@@ -371,11 +373,7 @@ describe('a booking whose calendar event has others on it is shared from the sta
     expect(await addAttendeeToBooking(db, one.uid, accountId, bo)).toMatchObject({ ok: true, added: true });
     // A retry, the invitee, or a guest's address: nothing written again (so nothing sent).
     for (const email of [' BO@example.com ', 'ana@example.com']) {
-      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email })).toEqual({
-        ok: true,
-        added: false,
-        shared: true,
-      });
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email })).toEqual({ ok: true, added: false });
     }
     expect(await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: 'gi@example.com' }] })).toMatchObject({
       ok: true,
@@ -420,5 +418,67 @@ describe('a booking whose calendar event has others on it is shared from the sta
       ok: false,
       reason: 'LIMIT_EXCEEDED',
     });
+  });
+
+  it('once its event type is deleted, a newcomer gets a neutral title in the host language and no description', async () => {
+    // Event types are deleted outright and their bookings stay: nothing renders
+    // after the commit, so the text written with the newcomer is the one that stands.
+    const byMachine = await book([]);
+    const byGuests = await book([]);
+    expect(await stored(byMachine.uid)).toEqual({
+      title: 'Call Ana Private Secret Co',
+      calendar_description: 'Phone +57 300\nWith Alex Rivera',
+      seated: null,
+    });
+    const eventTypeId = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'call'`))!.id;
+    expect(await deleteEventType(db, accountId, eventTypeId)).toBe(true);
+
+    const bo = { name: 'Bo Added', email: 'bo@example.com', timeZone: 'UTC' };
+    expect(await addAttendeeToBooking(db, byMachine.uid, accountId, bo)).toEqual({ ok: true, added: true });
+    expect(await stored(byMachine.uid)).toEqual({ title: 'Meeting', calendar_description: '', seated: 1 });
+
+    await db.run(sql`UPDATE member SET locale = 'es' WHERE id = ${alexId}`);
+    expect(await addGuestsToBooking(db, { accountId, uid: byGuests.uid, guests: [{ email: 'gi@example.com' }] })).toEqual({
+      ok: true,
+      added: 1,
+    });
+    expect(await stored(byGuests.uid)).toEqual({ title: 'Reunión', calendar_description: '', seated: 1 });
+
+    // Already shared: the next newcomer leaves the shared text as it is.
+    expect(await addAttendeeToBooking(db, byGuests.uid, accountId, bo)).toEqual({ ok: true, added: true });
+    expect(await stored(byGuests.uid)).toEqual({ title: 'Reunión', calendar_description: '', seated: 1 });
+  });
+
+  it('an address is compared by its normalized form, whoever wrote the row', async () => {
+    const one = await book([]);
+    const bookingId = (await db.get<{ id: string }>(sql`SELECT id FROM booking WHERE uid = ${one.uid}`))!.id;
+    const legacy = (email: string, normalized: string | null) =>
+      db.run(sql`INSERT INTO booking_attendee (id, booking_id, name, email, email_normalized, time_zone, created_at)
+          VALUES (${`legacy-${email}`}, ${bookingId}, 'Legacy', ${email}, ${normalized}, 'UTC', ${Date.now()})`);
+    // Written before the column was filled: mixed case and spaces, or a tab SQL's trim keeps.
+    await legacy('  Cy@Example.COM ', null);
+    await legacy('\tEve@Example.com', null);
+    // Written by a tool that keeps a display form beside the normalized address.
+    await legacy('Dee Display <dee@example.com>', 'dee@example.com');
+    const bo = { name: 'Bo Added', timeZone: 'UTC' };
+    expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email: 'cy@example.com' })).toEqual({
+      ok: true,
+      added: false,
+    });
+    for (const email of ['DEE@example.com', 'eve@example.com'])
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { ...bo, email })).toEqual({ ok: true, added: false });
+    // v2 guests read the same way: neither is added again as a guest.
+    expect(
+      await addGuestsToBooking(db, {
+        accountId,
+        uid: one.uid,
+        guests: [{ email: 'cy@example.com' }, { email: 'dee@example.com' }, { email: 'eve@example.com' }],
+      }),
+    ).toEqual({ ok: true, added: 0 });
+    const people = await db.get<{ attendees: number; guests: number }>(
+      sql`SELECT (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = ${bookingId}) AS attendees,
+                 (SELECT COUNT(*) FROM booking_guest WHERE booking_id = ${bookingId}) AS guests`,
+    );
+    expect({ attendees: Number(people!.attendees), guests: Number(people!.guests) }).toEqual({ attendees: 4, guests: 0 });
   });
 });

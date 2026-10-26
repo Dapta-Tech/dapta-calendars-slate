@@ -275,9 +275,10 @@ export class MachineController {
       throw new UnprocessableEntityException({ error: 'LIMIT_EXCEEDED', message: 'The booking has no room for more attendees.' });
     if (!outcome.ok) throw new GoneException({ error: 'GONE', message: 'booking is no longer active' });
     // The calendar event is written out again for a new attendee, as for v2
-    // guests, only when its text is the shared one; an address already on the
-    // booking changes nothing and sends nothing.
-    if (outcome.added && outcome.shared) this.svc.afterGuestsChanged(uid);
+    // guests: the attendee came with the shared text, in the same write, so
+    // this holds even when the richer render after it did not land. An
+    // address already on the booking changes nothing and sends nothing.
+    if (outcome.added) this.svc.afterGuestsChanged(uid);
     return { ok: true, uid };
   }
 }
