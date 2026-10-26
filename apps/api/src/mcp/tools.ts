@@ -1,6 +1,7 @@
 import * as z from 'zod4';
 import type { Db } from '@slate/db';
 import {
+  canonicalPublicCode,
   claimApiIdempotency,
   completeApiIdempotency,
   getAccountByCode,
@@ -374,6 +375,19 @@ function questionsOf(raw: unknown) {
     required: f['required'] === true,
     options: Array.isArray(f['options']) ? (f['options'] as unknown[]).slice(0, 30).map((o) => untrusted(o, 100)) : undefined,
   }));
+}
+
+/**
+ * The first segment of the account's public links: the claimed vanity slug
+ * when there is one, else the short code (`canonicalPublicCode`). The short
+ * code alone would hand an agent a link the web layer 308-redirects, and would
+ * disagree with the link the admin shows the host.
+ */
+async function canonicalCode(db: Db, accountId: string): Promise<string> {
+  const row = await db.get<{ code: string; vanity_slug: string | null }>(
+    sql`SELECT code, vanity_slug FROM account WHERE id = ${accountId} LIMIT 1`,
+  );
+  return row ? canonicalPublicCode({ code: row.code, vanity_slug: row.vanity_slug }) : '';
 }
 
 function pageUrl(base: string, code: string, kind: 'personal' | 'team', owner: string, slug: string): string {
@@ -1324,7 +1338,7 @@ const listEventTypes: ToolDef = {
   }),
   async run(_args: z.infer<typeof listEventTypesInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
-    const code = (await deps.db.get<{ code: string }>(sql`SELECT code FROM account WHERE id = ${p.accountId} LIMIT 1`))?.code ?? '';
+    const code = await canonicalCode(deps.db, p.accountId);
     const rows = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
     const items = rows.slice(0, 100).map((r) => ({
       id: r.daptaId,
@@ -1355,7 +1369,7 @@ const getLink: ToolDef = {
   output: z.object({ event_type_id: z.string(), title: z.string(), booking_page_url: z.string() }),
   async run(args: z.infer<typeof linkInput>, call, deps) {
     const p = requireScope(call, 'event-types:read');
-    const code = (await deps.db.get<{ code: string }>(sql`SELECT code FROM account WHERE id = ${p.accountId} LIMIT 1`))?.code ?? '';
+    const code = await canonicalCode(deps.db, p.accountId);
     const rows = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
     const r = rows.find((x) => x.daptaId === args.event_type_id);
     if (!r) throw notFound('Event type');

@@ -325,6 +325,24 @@ describe('keyed tools', () => {
     expect(errorText(await narrow.callTool({ name: 'get_booking_page_link', arguments: { event_type_id: team.id } }))).toContain('NOT_FOUND');
   });
 
+  it('links use the claimed vanity slug, not the short code the web layer redirects', async () => {
+    await h.db.run(sql`UPDATE account SET vanity_slug = 'acme-inc' WHERE id = ${h.accountId}`);
+    try {
+      const c = await h.connect(await h.key(['event-types:read']));
+      const all = structured<{ event_types: { id: string; slug: string; booking_page_url: string }[] }>(
+        await c.callTool({ name: 'list_event_types', arguments: {} }),
+      );
+      const intro = all.event_types.find((e) => e.slug === 'intro-call')!;
+      const team = all.event_types.find((e) => e.slug === 'team-demo')!;
+      expect(intro.booking_page_url).toBe('https://calendar.example.test/acme-inc/alex-rivera/intro-call');
+      expect(team.booking_page_url).toMatch(/^https:\/\/calendar\.example\.test\/acme-inc\/team\/[^/]+\/team-demo$/);
+      const link = structured<{ booking_page_url: string }>(await c.callTool({ name: 'get_booking_page_link', arguments: { event_type_id: intro.id } }));
+      expect(link.booking_page_url).toBe(intro.booking_page_url);
+    } finally {
+      await h.db.run(sql`UPDATE account SET vanity_slug = NULL WHERE id = ${h.accountId}`);
+    }
+  });
+
   it('find_available_slots by event type id needs availability:read and honours the allowlist', async () => {
     const intro = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'intro-call' AND account_id = ${h.accountId}`))!.id;
     const team = (await h.db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = 'team-demo' AND account_id = ${h.accountId}`))!.id;
