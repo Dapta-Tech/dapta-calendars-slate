@@ -5,6 +5,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { createTeamBooking, getTeamAvailability } from './parity';
 import { createEventType, createTeam } from './crud';
+import { memberWithHours, WEEKDAYS } from './member-hours.fixture';
 
 /**
  * A team booking goes only to a host whose OWN hours offer the time.
@@ -84,42 +85,36 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
 
     /** A member whose only hours are 03:00 to 04:00 UTC on weekdays, never in Alex's day. */
     async function nightOwl() {
-      const id = randomUUID();
-      const scheduleId = randomUUID();
-      await db.run(
-        sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
-            VALUES (${id}, ${accountId}, ${`owl-${tag}-${++made}`}, ${'Taylor Brooks'}, ${`taylor-${tag}-${made}@example.com`},
-              ${'UTC'}, ${scheduleId}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
-            VALUES (${scheduleId}, ${accountId}, ${id}, ${'Nights'}, ${'UTC'}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
-            VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'03:00'}, ${'04:00'}, ${null})`,
-      );
-      return id;
+      const n = ++made;
+      const owl = await memberWithHours(db, {
+        accountId,
+        handle: `owl-${tag}-${n}`,
+        name: 'Taylor Brooks',
+        email: `taylor-${tag}-${n}@example.com`,
+        timeZone: 'UTC',
+        scheduleName: 'Nights',
+        days: WEEKDAYS,
+        startTime: '03:00',
+        endTime: '04:00',
+      });
+      return owl.id;
     }
 
     /** A member in Alex's zone whose weekday hours start at 9:15, off Alex's half-hour grid. */
     async function quarterPast() {
-      const id = randomUUID();
-      const scheduleId = randomUUID();
-      await db.run(
-        sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
-            VALUES (${id}, ${accountId}, ${`qp-${tag}-${++made}`}, ${'Riley Chen'}, ${`riley-${tag}-${made}@example.com`},
-              ${'America/New_York'}, ${scheduleId}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
-            VALUES (${scheduleId}, ${accountId}, ${id}, ${'Quarter past'}, ${'America/New_York'}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
-            VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'09:15'}, ${'17:00'}, ${null})`,
-      );
-      return id;
+      const n = ++made;
+      const host = await memberWithHours(db, {
+        accountId,
+        handle: `qp-${tag}-${n}`,
+        name: 'Riley Chen',
+        email: `riley-${tag}-${n}@example.com`,
+        timeZone: 'America/New_York',
+        scheduleName: 'Quarter past',
+        days: WEEKDAYS,
+        startTime: '09:15',
+        endTime: '17:00',
+      });
+      return host.id;
     }
 
     /** Past accepted bookings, so `memberId` carries load without busy time ahead. */

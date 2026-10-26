@@ -11,6 +11,7 @@ import { seed } from './seed';
 import { getAvailability } from './repository';
 import { insertHoldGuarded } from './parity';
 import { createEventType } from './crud';
+import { memberWithHours } from './member-hours.fixture';
 
 /**
  * Two API processes on one SQLite file, holding the same time. The guarded
@@ -40,21 +41,19 @@ describe('a hold across two processes on one SQLite file', () => {
     await migrate(db);
     await seed(db);
     accountId = (await db.get<{ id: string }>(sql`SELECT id FROM account WHERE code='acme'`))!.id;
-    memberId = randomUUID();
-    const scheduleId = randomUUID();
-    const now = Date.now();
-    await db.run(
-      sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
-          VALUES (${memberId}, ${accountId}, ${handle}, ${'Race Host'}, ${`${handle}@example.com`}, ${'UTC'}, ${scheduleId}, ${now})`,
-    );
-    await db.run(
-      sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
-          VALUES (${scheduleId}, ${accountId}, ${memberId}, ${'Always'}, ${'UTC'}, ${now})`,
-    );
-    await db.run(
-      sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
-          VALUES (${randomUUID()}, ${scheduleId}, ${JSON.stringify([0, 1, 2, 3, 4, 5, 6])}, ${'00:00'}, ${'23:59'}, ${null})`,
-    );
+    const host = await memberWithHours(db, {
+      accountId,
+      handle,
+      name: 'Race Host',
+      email: `${handle}@example.com`,
+      timeZone: 'UTC',
+      scheduleName: 'Always',
+      days: [0, 1, 2, 3, 4, 5, 6],
+      startTime: '00:00',
+      endTime: '23:59',
+    });
+    memberId = host.id;
+    const scheduleId = host.scheduleId;
     const ev = await createEventType(db, accountId, memberId, { slug, title: 'Race', lengthMinutes: 30, scheduleId });
     if (!ev.ok) throw new Error(`setup: event create failed (${ev.reason})`);
     eventTypeId = (await db.get<{ id: string }>(sql`SELECT id FROM event_type WHERE slug = ${slug}`))!.id;

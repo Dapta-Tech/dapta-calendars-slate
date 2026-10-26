@@ -318,4 +318,55 @@ describePg('calendar title and description templates (real Postgres)', () => {
     expect(await seat('Bob')).toMatchObject({ ok: true, seatTaken: true });
     expect(await seat('Dana')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
+
+  it('guests on a group slot take its seats in availability, holds and the seat write', async () => {
+    const et = await eventType('guest-seats', { seatsPerTimeSlot: 3 });
+    const startMs = (await slots(et.slug))[2]!;
+    const seat = (name: string) =>
+      createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: et.slug,
+        startMs,
+        attendee: { name, email: `${name.toLowerCase()}-${run}@example.com`, timeZone: 'UTC' },
+      });
+    const first = await seat('Alice');
+    if (!first.ok) throw new Error('first seat failed');
+    const spotsLeft = async () =>
+      (
+        await getAvailability(db, {
+          accountCode: 'acme',
+          handle: 'alex-rivera',
+          slug: et.slug,
+          fromMs: startMs,
+          toMs: startMs + 60_000,
+        })
+      )!.slots.find((s) => new Date(s.startUtc).getTime() === startMs)?.spotsLeft ?? 0;
+    const hold = (uid: string) =>
+      insertHoldGuarded(db, {
+        accountId,
+        eventTypeId: et.id,
+        memberId: alexId,
+        startMs,
+        endMs: startMs + 30 * 60_000,
+        uid,
+        releaseAtMs: Date.now() + 600_000,
+        now: Date.now(),
+      });
+    // Alice and a guest added through v2: two people in three seats.
+    expect(
+      await addGuestsToBooking(db, { accountId, uid: first.booking.uid, guests: [{ email: `gail-${run}@example.com` }] }),
+    ).toEqual({ ok: true, added: 1 });
+    expect(await spotsLeft()).toBe(1);
+    expect(await hold(`guest-seats-a-${run}`)).toBe('ok');
+    await db.run(sql`DELETE FROM slot_reservation WHERE uid = ${`guest-seats-a-${run}`}`);
+    // A guest the booking names in its metadata is the third: the slot is full everywhere.
+    await db.run(
+      sql`UPDATE booking SET metadata = ${JSON.stringify({ _guests: [`Meta-${run}@example.com`] })}::jsonb
+          WHERE uid = ${first.booking.uid}`,
+    );
+    expect(await spotsLeft()).toBe(0);
+    expect(await hold(`guest-seats-b-${run}`)).toBe('INVALID_SLOT');
+    expect(await seat('Bob')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+  });
 });

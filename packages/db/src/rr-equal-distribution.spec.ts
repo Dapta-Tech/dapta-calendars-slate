@@ -6,6 +6,7 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { createTeamBooking, getTeamAvailability } from './parity';
 import { createEventType, createTeam, getEventTypeById, updateEventType } from './crud';
+import { memberWithHours, WEEKDAYS } from './member-hours.fixture';
 
 /**
  * Round robin's distribution method (`event_type.rr_distribution`), the
@@ -253,22 +254,19 @@ function cases(engine: string, open: () => Promise<{ db: Db; fresh: boolean }>) 
 
     /** A member with working hours like the seeded hosts (weekdays 09:00 to 17:00, New York) and no bookings. */
     async function workingHost(name: string) {
-      const id = randomUUID();
-      const scheduleId = randomUUID();
-      await db.run(
-        sql`INSERT INTO member (id, account_id, handle, display_name, email, time_zone, default_schedule_id, created_at)
-            VALUES (${id}, ${accountId}, ${`wh-${tag}-${++made}`}, ${name}, ${`wh-${tag}-${made}@example.com`},
-              ${'America/New_York'}, ${scheduleId}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO schedule (id, account_id, member_id, name, time_zone, created_at)
-            VALUES (${scheduleId}, ${accountId}, ${id}, ${'Working hours'}, ${'America/New_York'}, ${Date.now()})`,
-      );
-      await db.run(
-        sql`INSERT INTO availability (id, schedule_id, days, start_time, end_time, date)
-            VALUES (${randomUUID()}, ${scheduleId}, ${'[1,2,3,4,5]'}, ${'09:00'}, ${'17:00'}, ${null})`,
-      );
-      return id;
+      const n = ++made;
+      const host = await memberWithHours(db, {
+        accountId,
+        handle: `wh-${tag}-${n}`,
+        name,
+        email: `wh-${tag}-${n}@example.com`,
+        timeZone: 'America/New_York',
+        scheduleName: 'Working hours',
+        days: WEEKDAYS,
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      return host.id;
     }
 
     /**

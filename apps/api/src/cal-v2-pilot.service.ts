@@ -588,7 +588,9 @@ export class CalV2PilotService {
               ? 404
               : outcome.reason === "GONE"
                 ? 410
-                : 422;
+                : outcome.reason === "INVALID"
+                  ? 400
+                  : 422;
           v2Error(status, outcome.reason, "Guests could not be added.");
         }
         // Rewritten for the new guests: they came with the booking's shared

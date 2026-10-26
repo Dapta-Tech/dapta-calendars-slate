@@ -7,6 +7,7 @@ import {
   getEventTypeRowById,
   getMemberById,
   jsonParam,
+  normalizeAttendeeEmail,
   parseJsonColumn,
   scopedIdempotencyKey,
   sql,
@@ -560,11 +561,11 @@ export class CalV2Service {
       sql`SELECT email, name, time_zone FROM booking_guest
           WHERE booking_id = ${booking.id} ORDER BY created_at ASC, id ASC`,
     );
-    const guestSet = new Set(
-      (internal._guests ?? []).map((email) => email.toLowerCase()),
-    );
+    // Every address compared the way the booking's people are counted
+    // (`normalizeAttendeeEmail`), so one person is listed once.
+    const guestSet = new Set((internal._guests ?? []).map(normalizeAttendeeEmail));
     const attendees = attendeeRows
-      .filter((attendee) => !guestSet.has(attendee.email.toLowerCase()))
+      .filter((attendee) => !guestSet.has(normalizeAttendeeEmail(attendee.email)))
       .map((attendee) => ({
         name: attendee.name,
         email: attendee.email,
@@ -572,8 +573,9 @@ export class CalV2Service {
         timeZone: attendee.time_zone ?? "UTC",
         absent: false,
         language:
-          attendee.email.toLowerCase() ===
-          internal._primaryAttendee?.email.toLowerCase()
+          internal._primaryAttendee &&
+          normalizeAttendeeEmail(attendee.email) ===
+            normalizeAttendeeEmail(internal._primaryAttendee.email)
             ? internal._primaryAttendee.language
             : "en",
         ...(attendee.phone ? { phoneNumber: attendee.phone } : {}),
@@ -614,12 +616,7 @@ export class CalV2Service {
         ...(internal._guests ?? []),
         ...persistedGuests
           .map((guest) => guest.email)
-          .filter(
-            (email) =>
-              !(internal._guests ?? []).some(
-                (stored) => stored.toLowerCase() === email.toLowerCase(),
-              ),
-          ),
+          .filter((email) => !guestSet.has(normalizeAttendeeEmail(email))),
       ],
       metadata: internal._publicMetadata ?? {},
       meetingUrl: booking.meeting_url,
@@ -698,9 +695,10 @@ export class CalV2Service {
         input.guests
           .filter(
             (email) =>
-              email.toLowerCase() !== input.attendee.email.toLowerCase(),
+              normalizeAttendeeEmail(email) !==
+              normalizeAttendeeEmail(input.attendee.email),
           )
-          .map((email) => [email.toLowerCase(), email]),
+          .map((email) => [normalizeAttendeeEmail(email), email]),
       ).values(),
     ];
     const requestHash = nonCredentialDigest(stableStringify(input));
