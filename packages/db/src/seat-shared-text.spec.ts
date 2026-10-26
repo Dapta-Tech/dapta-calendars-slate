@@ -249,6 +249,75 @@ describe('a seat taken on a group slot', () => {
     expect(await book(startMs, 'Bob Other', 'bob@example.com')).toMatchObject({ ok: true, seatTaken: true });
     expect(await book(startMs, 'Dana', 'dana@example.com')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
   });
+
+  it("guests added to a group slot take its seats too, in availability, holds and the seat write", async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    await db.run(sql`UPDATE event_type SET seats_per_time_slot = 4 WHERE slug = 'office'`);
+    const eventTypeId = (await db.get<{ id: string }>(sql`SELECT event_type_id AS id FROM booking WHERE uid = ${uid}`))!.id;
+    // Alice, one guest added through v2 and one the booking names in its metadata: three people in four seats.
+    expect(await addGuestsToBooking(db, { accountId, uid, guests: [{ email: 'gail@example.com' }] })).toEqual({
+      ok: true,
+      added: 1,
+    });
+    await db.run(sql`UPDATE booking SET metadata = ${JSON.stringify({ _guests: ['Meta@example.com'] })} WHERE uid = ${uid}`);
+    const spotsLeft = async () => {
+      const a = await getAvailability(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'office',
+        fromMs: startMs,
+        toMs: startMs + 60_000,
+      });
+      return a!.slots.find((s) => new Date(s.startUtc).getTime() === startMs)?.spotsLeft ?? 0;
+    };
+    expect(await spotsLeft()).toBe(1);
+    // The guest asking for a seat is already on the slot: a replay, no seat spent.
+    expect(await book(startMs, 'Gail', 'GAIL@example.com')).toMatchObject({ ok: true, deduplicated: true });
+    // Bob takes the last seat; then the slot is full everywhere.
+    expect(await book(startMs, 'Bob Other', 'bob@example.com')).toMatchObject({ ok: true, seatTaken: true });
+    expect(await spotsLeft()).toBe(0);
+    expect(await book(startMs, 'Dana', 'dana@example.com')).toMatchObject({ ok: false, reason: 'SLOT_TAKEN' });
+    expect(
+      await insertHoldGuarded(db, {
+        accountId,
+        eventTypeId,
+        memberId: alexId,
+        startMs,
+        endMs: startMs + 30 * 60_000,
+        uid: 'full-slot-hold',
+        releaseAtMs: Date.now() + 600_000,
+        now: Date.now(),
+      }),
+    ).toBe('INVALID_SLOT');
+  });
+
+  it('a seat request with a blank address is refused, so it can never take seats unseen', async () => {
+    const { startMs, uid } = await slotBookedBeforeSeats();
+    const before = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+    );
+    for (const email of ['   ', ''])
+      expect(await book(startMs, 'Nobody', email)).toEqual({
+        ok: false,
+        reason: 'INVALID',
+        message: 'Every attendee needs an email address.',
+      });
+    // A blank additional attendee is refused the same way.
+    expect(
+      await createBooking(db, {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'office',
+        startMs,
+        attendee: { name: 'Bob', email: 'bob@example.com', timeZone: 'UTC' },
+        additionalAttendees: [{ name: 'Blank', email: ' ', timeZone: 'UTC' }],
+      }),
+    ).toMatchObject({ ok: false, reason: 'INVALID' });
+    const after = await db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+    );
+    expect(Number(after!.n)).toBe(Number(before!.n));
+  });
 });
 
 describe('a booking whose calendar event has others on it is shared from the start', () => {
@@ -575,5 +644,57 @@ describe('a booking whose calendar event has others on it is shared from the sta
       ok: false,
       reason: 'LIMIT_EXCEEDED',
     });
+  });
+
+  it('an address that is blank once normalized is refused on every add path, and writes nothing', async () => {
+    const one = await book([]);
+    const people = async () =>
+      Number(
+        (await db.get<{ n: number }>(
+          sql`SELECT (SELECT COUNT(*) FROM booking_attendee WHERE booking_id = b.id)
+                   + (SELECT COUNT(*) FROM booking_guest WHERE booking_id = b.id) AS n
+              FROM booking b WHERE b.uid = ${one.uid}`,
+        ))!.n,
+      );
+    const before = await people();
+    // Repeated blank adds would each be nobody to the cap and the dedupe.
+    for (let i = 0; i < 3; i++)
+      expect(await addAttendeeToBooking(db, one.uid, accountId, { name: 'Blank', email: '   ', timeZone: 'UTC' })).toEqual({
+        ok: false,
+        reason: 'INVALID',
+      });
+    expect(
+      await addGuestsToBooking(db, { accountId, uid: one.uid, guests: [{ email: 'fine@example.com' }, { email: ' ' }] }),
+    ).toEqual({ ok: false, reason: 'INVALID' });
+    expect(await people()).toBe(before);
+    expect((await stored(one.uid)).seated).toBeNull();
+  });
+
+  it('the team path refuses a blank attendee address too', async () => {
+    const team = await createEventType(db, accountId, null, {
+      slug: 'team-blank',
+      title: 'Team call',
+      lengthMinutes: 30,
+      teamId: (await db.get<{ id: string }>(sql`SELECT id FROM team WHERE slug='sales'`))!.id,
+      schedulingType: 'round_robin',
+      hostMemberIds: [alexId, jordanId],
+    });
+    if (!team.ok) throw new Error('team event type failed');
+    const avail = await getTeamAvailability(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-blank',
+      fromMs: Date.now(),
+      toMs: Date.now() + 14 * 86_400_000,
+    });
+    const out = await createTeamBooking(db, {
+      accountCode: 'acme',
+      teamSlug: 'sales',
+      slug: 'team-blank',
+      startMs: new Date(avail!.slots[0]!).getTime(),
+      attendee: { name: 'Ana', email: 'ana@example.com', timeZone: 'UTC' },
+      additionalAttendees: [{ name: 'Blank', email: '  ', timeZone: 'UTC' }],
+    });
+    expect(out).toMatchObject({ ok: false, reason: 'INVALID', message: 'Every attendee needs an email address.' });
   });
 });

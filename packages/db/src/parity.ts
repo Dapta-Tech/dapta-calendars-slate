@@ -31,6 +31,7 @@ import type { CalendarProvider } from '@slate/calendar';
 import { decryptSecret, encryptSecret, SecretCryptoError, webhookSecretAad } from './crypto';
 import { sql, type Db } from './client';
 import {
+  attendeeWithoutAddress,
   bookingLocale,
   bookingStartOutOfRange,
   busyReadSpan,
@@ -46,6 +47,9 @@ import {
   loadBusyForHost,
   loadReservationBusy,
   parseJsonColumn,
+  peopleOn,
+  peopleRowsByBooking,
+  peopleRowsSql,
   resolveScheduleTimeZone,
   scopedIdempotencyKey,
   type BookingFieldDef,
@@ -57,7 +61,6 @@ import {
   duplicateGuardApplies,
   hasUpcomingBookingForEmail,
   normalizeAttendeeEmail,
-  normalizedEmailSql,
 } from './duplicate-guard';
 import {
   consumeOneOffLink,
@@ -239,17 +242,29 @@ export async function insertHoldGuarded(
   },
 ): Promise<'ok' | 'INVALID_SLOT' | 'RATE_LIMITED'> {
   const overlap = memberHeldSql(h.memberId, h.startMs, h.endMs, h.now);
-  // Any booking of this host over the time (as organizer or co-host), except
-  // this event's own group booking at this start while it still has a seat.
-  const booked = sql`SELECT b.id FROM booking b
+  // Any booking of this host over the time (as organizer or co-host) blocks
+  // the hold, except this event's own group booking at this start while it
+  // still has a seat: while the people on it (`peopleOn`, as the seat write
+  // and availability count them, guests included) are fewer than its seats.
+  type Booked = { id: string; event_type_id: string | null; start_ms: number | string; metadata: unknown };
+  const booked = sql`SELECT b.id, b.event_type_id, b.start_ms, b.metadata FROM booking b
       WHERE b.status IN ('accepted','pending')
         AND b.start_ms < ${h.endMs} AND b.end_ms > ${h.startMs}
         AND (b.host_member_id = ${h.memberId}
-             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${h.memberId}))
-        AND NOT (b.event_type_id = ${h.eventTypeId} AND b.start_ms = ${h.startMs}
-             AND (SELECT COUNT(DISTINCT ${normalizedEmailSql}) FROM booking_attendee a WHERE a.booking_id = b.id)
-               < (SELECT COALESCE(et.seats_per_time_slot, 1) FROM event_type et WHERE et.id = ${h.eventTypeId}))
-      LIMIT 1`;
+             OR EXISTS (SELECT 1 FROM booking_host bh WHERE bh.booking_id = b.id AND bh.member_id = ${h.memberId}))`;
+  const seatsSql = sql`SELECT COALESCE(seats_per_time_slot, 1) AS seats FROM event_type WHERE id = ${h.eventTypeId}`;
+  const ownGroup = (b: Booked) => b.event_type_id === h.eventTypeId && Number(b.start_ms) === h.startMs;
+  // Another booking blocks outright, before anyone is counted; the people on
+  // this event's own group bookings are then read in one statement.
+  const peopleSql = (groups: Booked[]) =>
+    peopleRowsSql(sql`b.id IN (${sql.join(
+      groups.map((b) => sql`${b.id}`),
+      sql`, `,
+    )})`);
+  const full = (groups: Booked[], rows: Array<{ booking_id: string; email: string | null }>, seats: number) => {
+    const byBooking = peopleRowsByBooking(rows);
+    return groups.some((b) => peopleOn(byBooking.get(b.id) ?? [], b.metadata).size >= seats);
+  };
   const active = sql`SELECT COUNT(*) AS n FROM slot_reservation
       WHERE member_id = ${h.memberId} AND release_at_ms > ${h.now}`;
   const insert = sql`INSERT INTO slot_reservation (id, account_id, event_type_id, member_id, slot_start_ms,
@@ -265,7 +280,13 @@ export async function insertHoldGuarded(
     return native.txn(
       () => {
         if (native.drizzle.get(overlap)) return 'INVALID_SLOT' as const;
-        if (native.drizzle.get(booked)) return 'INVALID_SLOT' as const;
+        const bookedRows = native.drizzle.all<Booked>(booked);
+        if (!bookedRows.every(ownGroup)) return 'INVALID_SLOT' as const;
+        if (bookedRows.length > 0) {
+          const seats = Number(native.drizzle.get<{ seats: number }>(seatsSql)?.seats ?? 1);
+          const rows = native.drizzle.all<{ booking_id: string; email: string | null }>(peopleSql(bookedRows));
+          if (full(bookedRows, rows, seats)) return 'INVALID_SLOT' as const;
+        }
         const n = native.drizzle.get<{ n: number }>(active);
         if (Number(n?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
         native.drizzle.run(insert);
@@ -278,7 +299,13 @@ export async function insertHoldGuarded(
     await tx.execute(sql`SELECT id FROM member WHERE id = ${h.memberId} FOR UPDATE`);
     const hit = (await tx.execute(overlap)) as unknown as unknown[];
     if (hit.length > 0) return 'INVALID_SLOT' as const;
-    if (((await tx.execute(booked)) as unknown as unknown[]).length > 0) return 'INVALID_SLOT' as const;
+    const bookedRows = (await tx.execute(booked)) as unknown as Booked[];
+    if (!bookedRows.every(ownGroup)) return 'INVALID_SLOT' as const;
+    if (bookedRows.length > 0) {
+      const seats = Number(((await tx.execute(seatsSql)) as unknown as Array<{ seats: number | string }>)[0]?.seats ?? 1);
+      const rows = (await tx.execute(peopleSql(bookedRows))) as unknown as Array<{ booking_id: string; email: string | null }>;
+      if (full(bookedRows, rows, seats)) return 'INVALID_SLOT' as const;
+    }
     const rows = (await tx.execute(active)) as unknown as Array<{ n: number | string }>;
     if (Number(rows[0]?.n ?? 0) >= MAX_ACTIVE_HOLDS_PER_MEMBER) return 'RATE_LIMITED' as const;
     await tx.execute(insert);
@@ -995,6 +1022,8 @@ export async function createTeamBooking(
 
   const invalid = validateTeamIntake(et, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
+  const unnamed = attendeeWithoutAddress(args.attendee, args.additionalAttendees);
+  if (unnamed) return { ok: false, reason: 'INVALID', message: unnamed };
 
   // Start-instant sanity (QA fix 8) — same range policy as createBooking.
   const rangeErr = bookingStartOutOfRange(args.startMs);

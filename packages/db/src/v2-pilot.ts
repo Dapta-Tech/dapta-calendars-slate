@@ -13,6 +13,8 @@ import {
   lockMembers,
   memberHeldSql,
   parseJsonColumn,
+  peopleOn,
+  peopleRowsSql,
   scopedIdempotencyKey,
 } from './repository';
 
@@ -347,7 +349,9 @@ export async function completeApiIdempotency(
  * attendee (`addAttendeeToBooking`): an address already on the booking is not
  * written again, and the booking takes at most `BOOKING_PEOPLE_LIMIT` people
  * in all, or its event's seats when those are more, each person counted once
- * wherever they are listed (`peopleOn`).
+ * wherever they are listed (`peopleOn`). A guest with no address once
+ * normalized (empty or blank) is refused (`INVALID`): it would be nobody to
+ * `peopleOn`, so nothing would count or dedupe it.
  */
 export async function addGuestsToBooking(
   db: Db,
@@ -367,8 +371,9 @@ export async function addGuestsToBooking(
        */
       added: number;
     }
-  | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }
+  | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' | 'INVALID' }
 > {
+  if (args.guests.some((guest) => normalizeAttendeeEmail(guest.email) === '')) return { ok: false, reason: 'INVALID' };
   const booking = await db.get<{
     id: string;
     status: string;
@@ -457,33 +462,8 @@ export async function addGuestsToBooking(
   return { ok: true, added };
 }
 
-/**
- * The addresses already on a booking, by their normalized column: the
- * attendees as the duplicate guard reads them (`normalizedEmailSql`), the
- * guests as their unique key does. Read through `peopleOn`, never counted as
- * rows: one person can be listed in more than one place.
- */
-function takenSql(bookingId: string) {
-  return sql`SELECT ${normalizedEmailSql} AS email FROM booking_attendee a WHERE a.booking_id = ${bookingId}
-        UNION ALL
-        SELECT email_normalized AS email FROM booking_guest WHERE booking_id = ${bookingId}`;
-}
-
-/**
- * Everyone on a booking, each person once: its attendee and guest rows
- * (`takenSql`) and the guests a v2 booking names in its metadata, who are also
- * its attendee rows. Each address goes through `normalizeAttendeeEmail` again,
- * since SQL's `lower` and `trim` fold less than it does on some engines. The
- * dedupe and the cap of both add paths read this one set.
- */
-function peopleOn(taken: ReadonlyArray<{ email: string | null }>, metadata: unknown): Set<string> {
-  const named = parseJsonColumn<{ _guests?: unknown[] }>(metadata, {})._guests ?? [];
-  return new Set(
-    [...taken.map((r) => r.email), ...(Array.isArray(named) ? named : [])]
-      .map((email) => normalizeAttendeeEmail(typeof email === 'string' ? email : null))
-      .filter((email) => email !== ''),
-  );
-}
+/** The rows `peopleOn` reads for one booking. */
+const takenSql = (bookingId: string) => peopleRowsSql(sql`b.id = ${bookingId}`);
 
 /** The most people a booking takes through `addAttendeeToBooking` and `addGuestsToBooking`, unless its event seats more. */
 export const BOOKING_PEOPLE_LIMIT = 30;
@@ -529,7 +509,8 @@ async function renderShared(
  * is not written again (`added` false: a retry changes nothing and sends
  * nothing), and the booking takes at most `BOOKING_PEOPLE_LIMIT` people in
  * all, or its event's seats when those are more (`LIMIT_EXCEEDED`), each
- * person counted once wherever they are listed (`peopleOn`).
+ * person counted once wherever they are listed (`peopleOn`). An address that
+ * normalizes to nothing (empty or blank) is refused (`INVALID`), as for guests.
  */
 export async function addAttendeeToBooking(
   db: Db,
@@ -542,7 +523,9 @@ export async function addAttendeeToBooking(
     notes?: string;
     phone?: string;
   },
-): Promise<{ ok: true; added: boolean } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' }> {
+): Promise<{ ok: true; added: boolean } | { ok: false; reason: 'NOT_FOUND' | 'GONE' | 'LIMIT_EXCEEDED' | 'INVALID' }> {
+  const email = normalizeAttendeeEmail(attendee.email);
+  if (email === '') return { ok: false, reason: 'INVALID' };
   const booking = await db.get<{
     id: string;
     status: string;
@@ -563,7 +546,6 @@ export async function addAttendeeToBooking(
   if (!live(booking.status)) return { ok: false, reason: 'GONE' };
 
   const limit = peopleLimit(booking.seats);
-  const email = normalizeAttendeeEmail(attendee.email);
   const lockedRowSql = sql`SELECT status, metadata FROM booking WHERE id = ${booking.id}`;
   const insertAttendee = sql`INSERT INTO booking_attendee
         (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)

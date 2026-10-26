@@ -258,7 +258,10 @@ export class MachineController {
   ) {
     const { principal } = await this.scopedBooking(req, uid, 'bookings:write');
     const a = body?.attendee;
-    if (!a?.name || !a?.email)
+    // A blank name or address is none: an address of spaces normalizes to
+    // nothing, and nobody counts or dedupes it (the 30-person cap included).
+    const filled = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+    if (!a || !filled(a.name) || !filled(a.email))
       throw new BadRequestException({ error: 'BAD_REQUEST', message: 'attendee name + email required' });
     const outcome = await addAttendeeToBooking(this.db, uid, principal.accountId, {
       name: a.name,
@@ -271,6 +274,8 @@ export class MachineController {
     // answers a uid it cannot see (no uid probing).
     if (!outcome.ok && outcome.reason === 'NOT_FOUND')
       throw new ForbiddenException({ error: 'FORBIDDEN', message: 'Not permitted.' });
+    if (!outcome.ok && outcome.reason === 'INVALID')
+      throw new BadRequestException({ error: 'BAD_REQUEST', message: 'attendee name + email required' });
     if (!outcome.ok && outcome.reason === 'LIMIT_EXCEEDED')
       throw new UnprocessableEntityException({ error: 'LIMIT_EXCEEDED', message: 'The booking has no room for more attendees.' });
     if (!outcome.ok) throw new GoneException({ error: 'GONE', message: 'booking is no longer active' });
