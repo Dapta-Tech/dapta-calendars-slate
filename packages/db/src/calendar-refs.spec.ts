@@ -6,6 +6,8 @@ import { migrate } from './migrate';
 import { seed } from './seed';
 import { sql } from 'drizzle-orm';
 import { createBooking, getAvailability } from './repository';
+import { createEventType } from './crud';
+import { addAttendeeToBooking } from './v2-pilot';
 import {
   deleteBookingReferences,
   loadBookingForCalendarWrite,
@@ -111,6 +113,53 @@ describe('calendar-refs (CalendarProvider wiring, SQLite in-memory)', () => {
   });
 
   // --- booking_reference persistence (C14) ----------------------------------
+
+  it('never pairs an attendee who joined between its reads with the first invitee\'s own text', async () => {
+    const et = await createEventType(db, accountId, memberId, {
+      slug: 'call',
+      title: 'Call',
+      lengthMinutes: 30,
+      calendarTitleTemplate: 'Call {{name}}',
+    });
+    if (!et.ok) throw new Error('event type failed');
+    const { fromMs, toMs } = WINDOW();
+    const avail = await getAvailability(db, { accountCode: 'acme', handle: 'alex-rivera', slug: 'call', fromMs, toMs });
+    const booked = await createBooking(db, {
+      accountCode: 'acme',
+      handle: 'alex-rivera',
+      slug: 'call',
+      startMs: new Date(avail!.slots[0]!.startUtc).getTime(),
+      attendee: { name: 'Ana Private', email: 'ana@example.com', timeZone: 'UTC' },
+    });
+    if (!booked.ok) throw new Error('booking failed');
+    expect(booked.booking.title).toBe('Call Ana Private');
+    // Bo is added (and commits) right after the reader's first statement.
+    let joined = false;
+    const racing = new Proxy(db, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver) as unknown;
+        if ((prop === 'get' || prop === 'all') && typeof value === 'function')
+          return async (...args: unknown[]) => {
+            const result = await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args);
+            if (!joined) {
+              joined = true;
+              await addAttendeeToBooking(db, booked.booking.uid, accountId, {
+                name: 'Bo Added',
+                email: 'bo@example.com',
+                timeZone: 'UTC',
+              });
+            }
+            return result;
+          };
+        return value;
+      },
+    });
+    const ctx = await loadBookingForCalendarWrite(racing, booked.booking.uid);
+    expect(joined).toBe(true);
+    if (ctx!.attendeeEmails.includes('bo@example.com')) expect(ctx!.title).not.toContain('Ana');
+    // Read in this order, Bo is not on this write at all; the next write carries him.
+    expect(ctx!.attendeeEmails).not.toContain('bo@example.com');
+  });
 
   it('loads the write context (destination refs + attendees) and round-trips a reference', async () => {
     await connectCalendar({ destination: true, conflicts: true });

@@ -1822,6 +1822,15 @@ export interface BookingMessages {
     /** Prefixed onto the meeting title when the booking is cancelled. */
     cancelledTitlePrefix: string;
   };
+  /** Text written onto the calendar event itself, in the host's language. */
+  calendarEvent: {
+    /**
+     * The title of a shared booking (others were added to it) whose event type
+     * was deleted: the event's name is gone with it, and the stored title may
+     * carry the first invitee's own data, so everyone on it reads this.
+     */
+    sharedTitle: string;
+  };
   /**
    * The inline embed (E). Every string here is read by a HOST inside the admin
    * — the embedded booking page itself carries no copy of its own, because it
@@ -3515,6 +3524,9 @@ export const en: BookingMessages = {
     no: 'No',
     cancelledTitlePrefix: '[Canceled] ',
   },
+  calendarEvent: {
+    sharedTitle: 'Meeting',
+  },
   embed: {
     action: 'Embed on your site',
     title: 'Embed on your site',
@@ -5198,6 +5210,9 @@ export const es: BookingMessages = {
     yes: 'Sí',
     no: 'No',
     cancelledTitlePrefix: '[Cancelada] ',
+  },
+  calendarEvent: {
+    sharedTitle: 'Reunión',
   },
   embed: {
     action: 'Insertar en tu sitio',

@@ -25,12 +25,13 @@ import {
 import type { CalendarProvider } from '@slate/calendar';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
-import { applyCalendarTemplates, applySharedFallback } from './calendar-text';
+import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
 import { canonicalPublicCode } from './short-links';
 import {
   duplicateGuardApplies,
   hasUpcomingBookingForEmail,
   normalizeAttendeeEmail,
+  normalizedEmailSql,
 } from './duplicate-guard';
 import {
   consumeOneOffLink,
@@ -116,8 +117,9 @@ export type BookingOutcome =
       /**
        * A seat was added to an existing group booking (no manage token is
        * minted for it). Its calendar event already exists and now has one more
-       * guest and, possibly, a re-rendered shared title and body: the caller
-       * rewrites it (`afterGuestsChanged`), which a fresh booking never needs.
+       * guest and a shared title and body (written with the seat, possibly
+       * rendered again since): the caller rewrites it (`afterGuestsChanged`),
+       * which a fresh booking never needs.
        */
       seatTaken?: true;
     }
@@ -819,8 +821,9 @@ export async function getAvailability(
 }
 
 /**
- * Seats consumed per start instant for a group event = attendee rows across its
- * accepted/pending bookings (one booking row per slot, N attendees ≤ capacity).
+ * Seats consumed per start instant for a group event = the people among the
+ * attendee rows of its accepted/pending bookings (one booking row per slot, N
+ * attendees ≤ capacity), each address once, as the seat write counts them.
  */
 async function seatsTakenByStart(
   db: Db,
@@ -829,7 +832,7 @@ async function seatsTakenByStart(
   toMs: number,
 ): Promise<Map<number, number>> {
   const rows = await db.all<{ start_ms: number; seats: number }>(
-    sql`SELECT b.start_ms AS start_ms, COUNT(a.id) AS seats
+    sql`SELECT b.start_ms AS start_ms, COUNT(DISTINCT ${normalizedEmailSql}) AS seats
         FROM booking b JOIN booking_attendee a ON a.booking_id = b.id
         WHERE b.event_type_id = ${eventTypeId} AND b.status IN ('accepted','pending')
               AND b.start_ms >= ${fromMs} AND b.start_ms < ${toMs}
@@ -1133,8 +1136,12 @@ export async function createBooking(
       // address is enough to take seats: the ones already held are left out.
       // Checked here and again under the lock below, where a concurrent
       // repeat would otherwise slip in.
-      const takenSql = sql`SELECT COALESCE(email_normalized, lower(trim(email))) AS email
-          FROM booking_attendee WHERE booking_id = ${existing.id}`;
+      const takenSql = sql`SELECT ${normalizedEmailSql} AS email
+          FROM booking_attendee a WHERE a.booking_id = ${existing.id}`;
+      // The seat-takers, each person once, compared the way every other read of
+      // a booking's people compares them (normalized again in code).
+      const heldBy = (taken: ReadonlyArray<{ email: string | null }>) =>
+        new Set(taken.map((r) => normalizeAttendeeEmail(r.email)).filter((email) => email !== ''));
       const replay = (): BookingOutcome => ({
         ok: true,
         booking: {
@@ -1152,7 +1159,7 @@ export async function createBooking(
         deduplicated: true,
       });
       const allHeld = (taken: ReadonlyArray<{ email: string | null }>) => {
-        const held = new Set(taken.map((r) => r.email));
+        const held = heldBy(taken);
         return requested.every((attendee) => held.has(normalizeAttendeeEmail(attendee.email)));
       };
       if (allHeld(await db.all<{ email: string | null }>(takenSql))) return replay();
@@ -1167,8 +1174,7 @@ export async function createBooking(
       // One seat per address: the request's attendees (`requested`, each
       // address once) less those that already hold a seat on the slot. Only
       // those are inserted and counted against the seats left.
-      const seatInserts = (taken: ReadonlyArray<{ email: string | null }>) => {
-        const held = new Set(taken.map((r) => r.email));
+      const seatInserts = (held: ReadonlySet<string>) => {
         return requested
           .filter((attendee) => !held.has(normalizeAttendeeEmail(attendee.email)))
           .map(
@@ -1182,7 +1188,7 @@ export async function createBooking(
       // The slot is now shared by people who booked separately: its calendar
       // title and description must never carry one of them, whatever the
       // event type's seats become. Marked with the seat, in one transaction.
-      const markShared = sql`UPDATE booking SET seated = 1 WHERE id = ${existing.id}`;
+      const markShared = markSharedSql(existing.id, eventType.title);
       const heldElsewhere = args.refuseHeld
         ? memberHeldSql(member.id, startMs, endMs, seatTime, args.reservationUid)
         : null;
@@ -1198,11 +1204,11 @@ export async function createBooking(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} LIMIT 1`,
           );
           if (!stillThere(now)) return null;
-          const taken = db.sqlite!.drizzle.all<{ email: string | null }>(takenSql);
-          const inserts = seatInserts(taken);
+          const held = heldBy(db.sqlite!.drizzle.all<{ email: string | null }>(takenSql));
+          const inserts = seatInserts(held);
           if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
-          if (taken.length + inserts.length > capacity) return null;
+          if (held.size + inserts.length > capacity) return null;
           if (heldElsewhere && db.sqlite!.drizzle.get(heldElsewhere)) return null;
           for (const insert of inserts) db.sqlite!.drizzle.run(insert);
           db.sqlite!.drizzle.run(markShared);
@@ -1215,11 +1221,11 @@ export async function createBooking(
             sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} FOR UPDATE`,
           )) as unknown as Array<{ status: string; start_ms: number | string }>;
           if (!stillThere(now[0])) return null;
-          const taken = (await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>;
-          const inserts = seatInserts(taken);
+          const held = heldBy((await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>);
+          const inserts = seatInserts(held);
           if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
-          if (taken.length + inserts.length > capacity) return null;
+          if (held.size + inserts.length > capacity) return null;
           if (heldElsewhere && ((await tx.execute(heldElsewhere)) as unknown as unknown[]).length > 0) return null;
           for (const insert of inserts) await tx.execute(insert);
           await tx.execute(markShared);
@@ -1257,8 +1263,9 @@ export async function createBooking(
       if (live) await consumeOneOffLink(db, live.id, existing.id);
       // Seat-takers join the shared group booking; the manage link stays with
       // the first booker (per-seat manage tokens are a follow-up). The event
-      // is rewritten for them only once its stored text is the shared one.
-      return { ok: true, booking: rec, manageToken: '', ...(shared ? { seatTaken: true as const } : {}) };
+      // is rewritten for them even when the render above did not land: the
+      // seat wrote the shared text with it (`markSharedSql`).
+      return { ok: true, booking: rec, manageToken: '', seatTaken: true };
     }
   }
 
