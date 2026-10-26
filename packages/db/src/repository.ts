@@ -7,7 +7,7 @@
  * as a 23P01 → conflict). See migration plan §5.
  */
 import { randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import {
   classifyEmptyReason,
   computeSlots,
@@ -54,6 +54,58 @@ export function parseJsonColumn<T>(value: unknown, fallback: T): T {
     }
   }
   return value as T;
+}
+
+/**
+ * The addresses on the bookings `bookingWhere` selects (a condition on the
+ * booking aliased `b`), by their normalized column: the attendees as the
+ * duplicate guard reads them (`normalizedEmailSql`), the guests as their
+ * unique key does. Read through `peopleOn`, never counted as rows: one person
+ * can be listed in more than one place.
+ *
+ * @internal Shared by every count and dedupe of a booking's people.
+ */
+export function peopleRowsSql(bookingWhere: SQL) {
+  return sql`SELECT a.booking_id AS booking_id, ${normalizedEmailSql} AS email
+        FROM booking_attendee a JOIN booking b ON b.id = a.booking_id WHERE ${bookingWhere}
+      UNION ALL
+      SELECT g.booking_id AS booking_id, g.email_normalized AS email
+        FROM booking_guest g JOIN booking b ON b.id = g.booking_id WHERE ${bookingWhere}`;
+}
+
+/**
+ * Everyone on one booking, each person once: its attendee and guest rows
+ * (`peopleRowsSql`) and the guests a v2 booking names in its metadata, who are
+ * also its attendee rows. Each address goes through `normalizeAttendeeEmail`
+ * again, since SQL's `lower` and `trim` fold less than it does on some
+ * engines; an address that normalizes to nothing is nobody. The seats of a
+ * group slot, its holds and the add paths' cap and dedupe all read this set.
+ *
+ * @internal Shared by every count and dedupe of a booking's people.
+ */
+export function peopleOn(rows: ReadonlyArray<{ email: string | null }>, metadata: unknown): Set<string> {
+  const named = parseJsonColumn<{ _guests?: unknown[] }>(metadata, {})._guests ?? [];
+  return new Set(
+    [...rows.map((r) => r.email), ...(Array.isArray(named) ? named : [])]
+      .map((email) => normalizeAttendeeEmail(typeof email === 'string' ? email : null))
+      .filter((email) => email !== ''),
+  );
+}
+
+/**
+ * `peopleRowsSql` rows read for several bookings at once, grouped by booking,
+ * so each booking's `peopleOn` reads only its own rows.
+ *
+ * @internal Shared by the reads that count several bookings' people.
+ */
+export function peopleRowsByBooking<T extends { booking_id: string }>(rows: readonly T[]): Map<string, T[]> {
+  const byBooking = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = byBooking.get(row.booking_id);
+    if (list) list.push(row);
+    else byBooking.set(row.booking_id, [row]);
+  }
+  return byBooking;
 }
 
 /** Build a JSON write value: cast text → jsonb on Postgres, bind text on SQLite. */
@@ -821,9 +873,10 @@ export async function getAvailability(
 }
 
 /**
- * Seats consumed per start instant for a group event = the people among the
- * attendee rows of its accepted/pending bookings (one booking row per slot, N
- * attendees ≤ capacity), each address once, as the seat write counts them.
+ * Seats consumed per start instant for a group event = the people on its
+ * accepted/pending bookings there (one booking row per slot), counted the way
+ * the seat write counts them (`peopleOn`): attendees, guests added to the
+ * booking and the guests it names, each address once.
  */
 async function seatsTakenByStart(
   db: Db,
@@ -831,14 +884,22 @@ async function seatsTakenByStart(
   fromMs: number,
   toMs: number,
 ): Promise<Map<number, number>> {
-  const rows = await db.all<{ start_ms: number; seats: number }>(
-    sql`SELECT b.start_ms AS start_ms, COUNT(DISTINCT ${normalizedEmailSql}) AS seats
-        FROM booking b JOIN booking_attendee a ON a.booking_id = b.id
-        WHERE b.event_type_id = ${eventTypeId} AND b.status IN ('accepted','pending')
-              AND b.start_ms >= ${fromMs} AND b.start_ms < ${toMs}
-        GROUP BY b.start_ms`,
+  const inWindow = sql`b.event_type_id = ${eventTypeId} AND b.status IN ('accepted','pending')
+        AND b.start_ms >= ${fromMs} AND b.start_ms < ${toMs}`;
+  const bookings = await db.all<{ id: string; start_ms: number; metadata: unknown }>(
+    sql`SELECT b.id, b.start_ms, b.metadata FROM booking b WHERE ${inWindow}`,
   );
-  return new Map(rows.map((r) => [Number(r.start_ms), Number(r.seats)]));
+  if (bookings.length === 0) return new Map();
+  const rows = peopleRowsByBooking(
+    await db.all<{ booking_id: string; email: string | null }>(peopleRowsSql(inWindow)),
+  );
+  const people = new Map<number, Set<string>>();
+  for (const b of bookings) {
+    const start = Number(b.start_ms);
+    const onBooking = peopleOn(rows.get(b.id) ?? [], b.metadata);
+    people.set(start, new Set([...(people.get(start) ?? []), ...onBooking]));
+  }
+  return new Map([...people].map(([start, set]) => [start, set.size]));
 }
 
 // --- Create booking (the atomic, dual-enforced write) ---------------------
@@ -1013,6 +1074,8 @@ export async function createBooking(
   const fields = parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []);
   const invalid = validateIntakeAnswers(fields, args.answers);
   if (invalid) return { ok: false, reason: 'INVALID', message: invalid };
+  const unnamed = attendeeWithoutAddress(args.attendee, args.additionalAttendees);
+  if (unnamed) return { ok: false, reason: 'INVALID', message: unnamed };
 
   // QA fix 13: a PUBLIC booking that isn't consuming a hold must land on a
   // genuinely offered slot — before this, an unauthenticated caller could
@@ -1122,8 +1185,9 @@ export async function createBooking(
       status: string;
       start_ms: number;
       end_ms: number;
+      metadata: unknown;
     }>(
-      sql`SELECT id, uid, status, start_ms, end_ms FROM booking
+      sql`SELECT id, uid, status, start_ms, end_ms, metadata FROM booking
           WHERE event_type_id = ${eventType.id} AND host_member_id = ${member.id}
                 AND start_ms = ${startMs} AND status IN ('accepted','pending') LIMIT 1`,
     );
@@ -1136,12 +1200,10 @@ export async function createBooking(
       // address is enough to take seats: the ones already held are left out.
       // Checked here and again under the lock below, where a concurrent
       // repeat would otherwise slip in.
-      const takenSql = sql`SELECT ${normalizedEmailSql} AS email
-          FROM booking_attendee a WHERE a.booking_id = ${existing.id}`;
-      // The seat-takers, each person once, compared the way every other read of
-      // a booking's people compares them (normalized again in code).
-      const heldBy = (taken: ReadonlyArray<{ email: string | null }>) =>
-        new Set(taken.map((r) => normalizeAttendeeEmail(r.email)).filter((email) => email !== ''));
+      // Everyone on the slot holds a seat, each person once: its seat-takers,
+      // and guests added to it count too, or a slot could hold more people
+      // than it seats (`peopleOn`, as availability and holds count them).
+      const takenSql = peopleRowsSql(sql`b.id = ${existing.id}`);
       const replay = (): BookingOutcome => ({
         ok: true,
         booking: {
@@ -1158,11 +1220,9 @@ export async function createBooking(
         manageToken: '',
         deduplicated: true,
       });
-      const allHeld = (taken: ReadonlyArray<{ email: string | null }>) => {
-        const held = heldBy(taken);
-        return requested.every((attendee) => held.has(normalizeAttendeeEmail(attendee.email)));
-      };
-      if (allHeld(await db.all<{ email: string | null }>(takenSql))) return replay();
+      const allHeld = (held: ReadonlySet<string>) =>
+        requested.every((attendee) => held.has(normalizeAttendeeEmail(attendee.email)));
+      if (allHeld(peopleOn(await db.all<{ email: string | null }>(takenSql), existing.metadata))) return replay();
       // Seats, holds and the booking itself are read again under the host's
       // lock (the one every guarded booking write and the hold write take),
       // then the booking's own row (member first, booking second, the order a
@@ -1200,11 +1260,11 @@ export async function createBooking(
       let seated: SeatResult;
       if (db.dialect === 'sqlite') {
         seated = db.sqlite!.txn<SeatResult>(() => {
-          const now = db.sqlite!.drizzle.get<{ status: string; start_ms: number }>(
-            sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} LIMIT 1`,
+          const now = db.sqlite!.drizzle.get<{ status: string; start_ms: number; metadata: unknown }>(
+            sql`SELECT status, start_ms, metadata FROM booking WHERE id = ${existing.id} LIMIT 1`,
           );
           if (!stillThere(now)) return null;
-          const held = heldBy(db.sqlite!.drizzle.all<{ email: string | null }>(takenSql));
+          const held = peopleOn(db.sqlite!.drizzle.all<{ email: string | null }>(takenSql), now!.metadata);
           const inserts = seatInserts(held);
           if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
@@ -1218,10 +1278,13 @@ export async function createBooking(
         seated = await db.pg!.drizzle.transaction(async (tx): Promise<SeatResult> => {
           await tx.execute(sql`SELECT id FROM member WHERE id = ${member.id} FOR UPDATE`);
           const now = (await tx.execute(
-            sql`SELECT status, start_ms FROM booking WHERE id = ${existing.id} FOR UPDATE`,
-          )) as unknown as Array<{ status: string; start_ms: number | string }>;
+            sql`SELECT status, start_ms, metadata FROM booking WHERE id = ${existing.id} FOR UPDATE`,
+          )) as unknown as Array<{ status: string; start_ms: number | string; metadata: unknown }>;
           if (!stillThere(now[0])) return null;
-          const held = heldBy((await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>);
+          const held = peopleOn(
+            (await tx.execute(takenSql)) as unknown as Array<{ email: string | null }>,
+            now[0]!.metadata,
+          );
           const inserts = seatInserts(held);
           if (inserts.length === 0) return 'repeat';
           // Every seat this request takes must fit, not only the first.
@@ -1420,6 +1483,20 @@ async function withCalendarText(db: Db, record: BookingRecord): Promise<BookingR
     // An emptied description ('') is none, as far as anyone reading the booking goes.
     ...(text?.description !== undefined ? { calendarDescription: text.description || null } : {}),
   };
+}
+
+/**
+ * Refuses an attendee with no address once normalized (empty or blank): they
+ * are nobody to `peopleOn`, so no seat count, cap or dedupe would see them and
+ * the same request could take seats without end. Null when every one has one.
+ */
+export function attendeeWithoutAddress(
+  invitee: { email: string },
+  additional: ReadonlyArray<{ email: string }> | undefined,
+): string | null {
+  return [invitee, ...(additional ?? [])].some((attendee) => normalizeAttendeeEmail(attendee.email) === '')
+    ? 'Every attendee needs an email address.'
+    : null;
 }
 
 /**

@@ -216,7 +216,7 @@ describe.each(engines)('team assignment skips a held host (%s)', (_engine, dbUrl
         if (prop !== 'get') return Reflect.get(target, prop, receiver);
         return async (q: unknown) => {
           const row = await (target.get as (query: unknown) => Promise<unknown>).call(target, q);
-          if (!fired && sqlText(q).includes('SELECT id, uid, status, start_ms, end_ms FROM booking')) {
+          if (!fired && sqlText(q).includes('SELECT id, uid, status, start_ms, end_ms, metadata FROM booking')) {
             fired = true;
             await onRead();
           }

@@ -318,6 +318,33 @@ describe('REST machine attendee', () => {
     }
   });
 
+  it('refuses a blank attendee name or address with 400, and writes nothing', async () => {
+    const h = await boot();
+    const key = await h.key(['bookings:write']);
+    const rewrite = vi.spyOn(h.app.get(BookingService), 'afterGuestsChanged');
+    const uid = await h.newBooking();
+    const add = (attendee: Record<string, unknown>) =>
+      fetch(`${h.base}/v1/machine/bookings/${uid}/attendees`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ attendee }),
+      });
+    for (const attendee of [
+      { name: 'Bo Added', email: '   ' },
+      { name: '  ', email: 'bo@example.com' },
+      { name: 'Bo Added', email: 5 },
+    ]) {
+      const res = await add(attendee);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('BAD_REQUEST');
+    }
+    expect(rewrite).not.toHaveBeenCalled();
+    const rows = await h.db.get<{ n: number }>(
+      sql`SELECT COUNT(*) AS n FROM booking_attendee WHERE booking_id = (SELECT id FROM booking WHERE uid = ${uid})`,
+    );
+    expect(Number(rows!.n)).toBe(0);
+  });
+
   it('writes the event out with a neutral title when the booking outlived its event type', async () => {
     const h = await boot();
     const key = await h.key(['bookings:write']);
