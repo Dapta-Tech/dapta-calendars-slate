@@ -5,9 +5,10 @@
  * §6). No luxon/date-fns-tz dependency added.
  *
  * The core trick: to place a wall-clock time in a zone onto the UTC line we
- * guess "as if UTC", read the zone's actual offset at that guess via
- * `Intl.DateTimeFormat`, then correct — re-reading once so a guess that landed
- * on the wrong side of a DST transition still resolves correctly.
+ * read the zone's offsets a day either side of it via `Intl.DateTimeFormat`,
+ * try the time under each, and keep the reading the zone agrees with. Near a
+ * DST transition that tells a time that happens once from one that happens
+ * twice (a fall-back overlap) or never (a spring-forward gap).
  */
 
 /** Civil (zone-less) calendar date + time. `month` is 1-12, `day` 1-31. */
@@ -51,20 +52,47 @@ export function tzOffsetMs(instant: Date, timeZone: string): number {
   return asUtcMs - instant.getTime();
 }
 
+const DAY_MS = 86_400_000;
+
 /**
- * The UTC instant of a wall-clock time in `timeZone`. Correct across DST:
- * spring-forward gaps resolve forward, fall-back ambiguity picks the first
- * (pre-transition) offset — deterministic either way.
+ * The UTC instant of a wall-clock time in `timeZone`. Correct across DST on
+ * either side of UTC, and deterministic: a time in a fall-back overlap (it
+ * happens twice) resolves to its first occurrence, and a time in a
+ * spring-forward gap (it never happens) resolves forward to the first valid
+ * instant after the gap, the transition itself. So a Sunday that starts at
+ * 00:00 in America/Santiago starts at 01:00 on the day the clocks skip from
+ * 00:00 to 01:00, never at 23:00 the evening before. The gap rule is on
+ * purpose, unlike java.time or Temporal's "compatible" (which move 02:30 to
+ * 03:30): a block that ends inside a gap then ends where the hours before it
+ * end, not past them.
  */
 export function zonedWallClockToUtc(wc: WallClock, timeZone: string): Date {
   const naiveUtcMs = Date.UTC(wc.year, wc.month - 1, wc.day, wc.hour, wc.minute, 0);
-  const off1 = tzOffsetMs(new Date(naiveUtcMs), timeZone);
-  let candidate = naiveUtcMs - off1;
-  const off2 = tzOffsetMs(new Date(candidate), timeZone);
-  if (off2 !== off1) {
-    candidate = naiveUtcMs - off2;
+  // The zone's offsets a day either side bracket any transition near the time.
+  const offA = tzOffsetMs(new Date(naiveUtcMs - DAY_MS), timeZone);
+  const offB = tzOffsetMs(new Date(naiveUtcMs + DAY_MS), timeZone);
+  // No transition within a day either side: the one offset is the answer.
+  if (offA === offB) return new Date(naiveUtcMs - offA);
+  const early = naiveUtcMs - Math.max(offA, offB);
+  const late = naiveUtcMs - Math.min(offA, offB);
+  // A reading is real when the zone's offset at that instant is the one used.
+  // Early first: the only occurrence, or in an overlap the first.
+  if (naiveUtcMs - tzOffsetMs(new Date(early), timeZone) === early) return new Date(early);
+  const offLate = tzOffsetMs(new Date(late), timeZone);
+  if (naiveUtcMs - offLate === late) return new Date(late);
+  // Neither is real: the time is inside a spring-forward gap, and the
+  // transition lies between the two readings (early is still on the old
+  // offset, late already on offLate, the new one). Find it to the second:
+  // transitions and offsets fall on whole seconds, so both readings do too.
+  let lo = early;
+  let hi = late;
+  while (hi - lo > 1000) {
+    // At least a second forward, so the loop ends whatever the gap's length.
+    const mid = lo + Math.max(1000, Math.floor((hi - lo) / 2000) * 1000);
+    if (tzOffsetMs(new Date(mid), timeZone) === offLate) hi = mid;
+    else lo = mid;
   }
-  return new Date(candidate);
+  return new Date(hi);
 }
 
 /** The civil Y-M-D (and weekday 0=Sun..6=Sat) of an instant, seen in `timeZone`. */
