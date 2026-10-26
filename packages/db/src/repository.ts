@@ -92,6 +92,22 @@ export function peopleOn(rows: ReadonlyArray<{ email: string | null }>, metadata
   );
 }
 
+/**
+ * `peopleRowsSql` rows read for several bookings at once, grouped by booking,
+ * so each booking's `peopleOn` reads only its own rows.
+ *
+ * @internal Shared by the reads that count several bookings' people.
+ */
+export function peopleRowsByBooking<T extends { booking_id: string }>(rows: readonly T[]): Map<string, T[]> {
+  const byBooking = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = byBooking.get(row.booking_id);
+    if (list) list.push(row);
+    else byBooking.set(row.booking_id, [row]);
+  }
+  return byBooking;
+}
+
 /** Build a JSON write value: cast text → jsonb on Postgres, bind text on SQLite. */
 export function jsonParam(db: Db, value: unknown) {
   const text = value == null ? null : JSON.stringify(value);
@@ -874,14 +890,13 @@ async function seatsTakenByStart(
     sql`SELECT b.id, b.start_ms, b.metadata FROM booking b WHERE ${inWindow}`,
   );
   if (bookings.length === 0) return new Map();
-  const rows = await db.all<{ booking_id: string; email: string | null }>(peopleRowsSql(inWindow));
+  const rows = peopleRowsByBooking(
+    await db.all<{ booking_id: string; email: string | null }>(peopleRowsSql(inWindow)),
+  );
   const people = new Map<number, Set<string>>();
   for (const b of bookings) {
     const start = Number(b.start_ms);
-    const onBooking = peopleOn(
-      rows.filter((r) => r.booking_id === b.id),
-      b.metadata,
-    );
+    const onBooking = peopleOn(rows.get(b.id) ?? [], b.metadata);
     people.set(start, new Set([...(people.get(start) ?? []), ...onBooking]));
   }
   return new Map([...people].map(([start, set]) => [start, set.size]));
