@@ -2,7 +2,7 @@
 "@slate/db": minor
 "@slate/engine": minor
 "@slate/types": minor
-"@slate/shared": minor
+"@slate/shared": major
 ---
 
 An event type can limit how far ahead it is booked: "invitees can book up to N calendar days ahead". A new nullable column, `event_type.booking_window_days` (Postgres migration 0035, SQLite 0034, additive, bounded by `lock_timeout`), holds N from 1 to 730; NULL, every existing event, keeps today's behavior (no limit).
