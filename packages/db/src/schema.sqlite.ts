@@ -195,6 +195,8 @@ export const eventType = sqliteTable('event_type', {
   reminders: text('reminders'),
   metadata: text('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
+  /** Booking window in calendar days ahead; NULL = no limit. See schema.pg.ts. */
+  bookingWindowDays: integer('booking_window_days'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),

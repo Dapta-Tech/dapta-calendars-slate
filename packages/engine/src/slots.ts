@@ -5,7 +5,8 @@
  *   schedule wall-clock  --project per date in schedule.timeZone (DST-safe)-->
  *   available windows (UTC)  --step by slotInterval-->  candidate slots
  *   --drop any whose [start−beforeBuffer, end+afterBuffer] overlaps busy-->
- *   --drop before now+minimumBookingNotice, cap at the window-->  free slots.
+ *   --drop before now+minimumBookingNotice, cap at the window (and at the
+ *   booking window, N calendar days ahead)-->  free slots.
  *
  * `busy` is the UNION the caller assembles: vendor busy-times (all
  * check-conflict calendars of the qualified hosts) + existing `accepted`
@@ -56,11 +57,44 @@ export interface ComputeSlotsInput {
   afterBufferMin?: number;
   /** Earliest lead time (minutes from `now`). */
   minimumBookingNoticeMin?: number;
+  /**
+   * Latest booking: how many calendar days ahead of today, in `timeZone`, a
+   * slot may start (see {@link bookingWindowEnd}). null or absent = no limit.
+   */
+  bookingWindowDays?: number | null;
   /** "Now" (UTC) — injected for deterministic tests. */
   now: Date;
 }
 
 const MINUTE_MS = 60_000;
+/** The furthest a booking window is ever computed: a century of days (see `bookingWindowEnd`). */
+const MAX_WINDOW_DAYS_COMPUTED = 36_500;
+
+/**
+ * The first instant past an event's booking window: the start of the calendar
+ * day `days + 1` after today, both read in `timeZone`. Today is day 0, so a
+ * 14-day window on Monday the 1st ends with Monday the 15th, whatever the
+ * hour: the rolling "calendar days into the future" rule cal.com uses. A
+ * midnight that a DST change skips starts its day at the transition
+ * (`zonedWallClockToUtc`), so no slot of that day is lost. null when the event
+ * has no window (`days` null or absent).
+ */
+export function bookingWindowEnd(now: Date, timeZone: string, days: number | null | undefined): Date | null {
+  if (days === null || days === undefined || Number.isNaN(days)) return null;
+  // The API takes 1..730. Bounded here as well, so a value written past it
+  // (straight into the column) cannot build an Invalid Date and throw a
+  // RangeError out of every slot read: below 0 is today only, and anything
+  // past a century is as good as no limit.
+  const span = Math.min(Math.max(Math.trunc(days), 0), MAX_WINDOW_DAYS_COMPUTED);
+  const today = localDateParts(now, timeZone);
+  // Civil arithmetic in UTC, where every day has 24 hours: month and year
+  // rollover are Date's, and no zone offset can move the day.
+  const end = new Date(Date.UTC(today.year, today.month - 1, today.day + span + 1));
+  return zonedWallClockToUtc(
+    { year: end.getUTCFullYear(), month: end.getUTCMonth() + 1, day: end.getUTCDate(), hour: 0, minute: 0 },
+    timeZone,
+  );
+}
 
 /**
  * Combine several hosts' free-slot instant sets for a team event.
@@ -144,7 +178,11 @@ export function computeSlots(input: ComputeSlotsInput): Date[] {
   const beforeMs = beforeBufferMin * MINUTE_MS;
   const afterMs = afterBufferMin * MINUTE_MS;
   const earliest = Math.max(fromUtc.getTime(), now.getTime() + minimumBookingNoticeMin * MINUTE_MS);
-  const windowEnd = toUtc.getTime();
+  // The search window's end, pulled in to the booking window's when the event
+  // has one: a slot at or past it is neither offered nor bookable, because
+  // every hold, booking and reschedule check runs through here too.
+  const bookingEnd = bookingWindowEnd(now, timeZone, input.bookingWindowDays);
+  const windowEnd = bookingEnd ? Math.min(toUtc.getTime(), bookingEnd.getTime()) : toUtc.getTime();
 
   const busy = mergeIntervals(input.busy);
 

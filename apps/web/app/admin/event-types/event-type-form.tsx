@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
+import { COUNTRIES, countryName, isReservedFieldName, t, type BookingMessages } from '@slate/shared';
 import {
   LOCATION_KINDS,
+  MAX_BOOKING_WINDOW_DAYS,
   MAX_REMINDERS_PER_EVENT,
   MAX_REMINDER_BODY,
   MAX_REMINDER_LEAD_MINUTES,
@@ -942,6 +943,14 @@ export function EventTypeForm({
   // Hydrate from the stored event — these used to default silently, so EDITING
   // an event reset its notice/interval/buffers on save (QA2 fix 2).
   const [minNotice, setMinNotice] = useState(initial?.minimumBookingNotice ?? 120);
+  // Booking window, hydrated for the same reason: '' is "no limit", which is
+  // what every event that predates it reads as. The error waits for a blur or
+  // a save attempt.
+  const [windowDays, setWindowDays] = useState<number | ''>(initial?.bookingWindowDays ?? '');
+  const [windowChecked, setWindowChecked] = useState(false);
+  const windowInputRef = useRef<HTMLInputElement>(null);
+  const windowInvalid =
+    windowDays !== '' && (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > MAX_BOOKING_WINDOW_DAYS);
   const [slotInterval, setSlotInterval] = useState<number | ''>(
     initial?.slotInterval ?? initial?.lengthMinutes ?? 30,
   );
@@ -1070,6 +1079,13 @@ export function EventTypeForm({
   };
 
   const save = () => {
+    // The API refuses it too; stopping here keeps the reason beside the field,
+    // and focus goes there, since the field sits far below the Save button.
+    if (windowInvalid) {
+      setWindowChecked(true);
+      windowInputRef.current?.focus();
+      return;
+    }
     // Reserved names are a hard stop, not just the inline warning — saving one
     // would make the public page ask the attendee twice (QA3 fix 3).
     if (fields.some((f) => f.name && isReservedFieldName(f.name))) {
@@ -1092,6 +1108,7 @@ export function EventTypeForm({
           : null,
         lengthMinutes: Number(lengthMinutes),
         minimumBookingNotice: Number(minNotice),
+        bookingWindowDays: windowDays === '' ? null : Number(windowDays),
         slotInterval: slotInterval === '' ? null : Number(slotInterval),
         beforeEventBuffer: Number(beforeBuf),
         afterEventBuffer: Number(afterBuf),
@@ -1214,6 +1231,14 @@ export function EventTypeForm({
           <input type="number" min={1} placeholder="1" value={seats} onChange={(e) => setSeats(e.target.value === '' ? '' : Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
+      <BookingWindowField
+        inputRef={windowInputRef}
+        value={windowDays}
+        onChange={setWindowDays}
+        onBlur={() => setWindowChecked(true)}
+        invalid={windowChecked && windowInvalid}
+        m={m.bookingWindow}
+      />
       <Field label={m.fSchedule}>
         <select value={scheduleId} onChange={(e) => setScheduleId(e.target.value)} className={inputCls}>
           <option value="">
@@ -1587,6 +1612,61 @@ function HostCell({ label, children }: { label: string; children: React.ReactNod
         {label}
       </span>
       {children}
+    </div>
+  );
+}
+
+/**
+ * The booking window: one number on the grid of the timing fields above it
+ * (same column width, so it lines up under Length and Buffer before), with its
+ * hint below the row. The hint always shows, because it says how the days are
+ * counted; the error joins it.
+ */
+function BookingWindowField({
+  inputRef,
+  value,
+  onChange,
+  onBlur,
+  invalid,
+  m,
+}: {
+  inputRef: React.Ref<HTMLInputElement>;
+  value: number | '';
+  onChange: (v: number | '') => void;
+  onBlur: () => void;
+  invalid: boolean;
+  m: EventTypeMessages['bookingWindow'];
+}) {
+  const hintId = useId();
+  const errorId = useId();
+  return (
+    <div className="flex flex-col gap-tight">
+      <div className="grid grid-cols-3 gap-field">
+        <Field label={m.label}>
+          {/* No `min`/`max`/`step`: this form has no `noValidate`, so the
+              browser's own bubble would fire before the error below. */}
+          <input
+            ref={inputRef}
+            type="number"
+            inputMode="numeric"
+            placeholder={m.placeholder}
+            value={value}
+            onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
+            onBlur={onBlur}
+            aria-invalid={invalid ? true : undefined}
+            aria-describedby={invalid ? `${errorId} ${hintId}` : hintId}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      {invalid ? (
+        <p id={errorId} className="text-xs text-destructive" role="alert">
+          {t(m.invalid, { max: MAX_BOOKING_WINDOW_DAYS })}
+        </p>
+      ) : null}
+      <p id={hintId} className="text-xs text-muted-foreground">
+        {m.hint}
+      </p>
     </div>
   );
 }

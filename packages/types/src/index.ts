@@ -299,6 +299,14 @@ export function clampAvailabilityWindow(fromMs: number, toMs: number): number {
 }
 
 /**
+ * The longest booking window a host may set on an event type: two years of
+ * calendar days ahead. Unlike {@link MAX_AVAILABILITY_WINDOW_DAYS} this is a
+ * scheduling rule the host chooses (`bookingWindowDays`), not a bound on what
+ * one read may ask for.
+ */
+export const MAX_BOOKING_WINDOW_DAYS = 730;
+
+/**
  * Query for the public TEAM availability route
  * (`GET /v1/public/teams/{accountCode}/{teamSlug}/availability`, #136).
  *
@@ -1138,6 +1146,17 @@ export const eventTypeInputSchema = z.object({
   /** Round robin only; NULL keeps `availability`. See `rrDistribution`. */
   rrDistribution: z.enum(rrDistribution).nullable().optional(),
   minimumBookingNotice: z.number().int().min(0).optional(),
+  /** Booking window: invitees may book up to this many calendar days ahead,
+   *  today being day 0, counted in the schedule's time zone. Omitted ⇒
+   *  unchanged; null ⇒ no limit, which is what every event type that predates
+   *  it reads as. Enforced wherever the minimum notice is. */
+  bookingWindowDays: z
+    .number()
+    .int()
+    .min(1, 'The booking window must be at least 1 day.')
+    .max(MAX_BOOKING_WINDOW_DAYS, `The booking window can be at most ${MAX_BOOKING_WINDOW_DAYS} days.`)
+    .nullable()
+    .optional(),
   beforeEventBuffer: z.number().int().min(0).optional(),
   afterEventBuffer: z.number().int().min(0).optional(),
   slotInterval: z.number().int().positive().nullable().optional(),

@@ -545,6 +545,8 @@ interface TeamEventType {
   locations: unknown;
   slot_interval: number | null;
   minimum_booking_notice: number;
+  /** Booking window in calendar days ahead; NULL on every event without one. */
+  booking_window_days: number | null;
   before_event_buffer: number;
   after_event_buffer: number;
   scheduling_type: string | null;
@@ -570,7 +572,7 @@ async function getTeamEventType(
 ) {
   const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<TeamEventType>(
-    sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval,
+    sql`SELECT id, account_id, team_id, slug, title, length_minutes, locations, slot_interval, booking_window_days,
                minimum_booking_notice, before_event_buffer, after_event_buffer, scheduling_type,
                rr_distribution, booking_fields, prevent_duplicate_bookings
         FROM event_type
@@ -590,6 +592,7 @@ type SlotShapedEventType = Pick<
   | 'length_minutes'
   | 'slot_interval'
   | 'minimum_booking_notice'
+  | 'booking_window_days'
   | 'before_event_buffer'
   | 'after_event_buffer'
 >;
@@ -683,6 +686,7 @@ async function hostFreeSlotMs(
     beforeBufferMin: et.before_event_buffer,
     afterBufferMin: et.after_event_buffer,
     minimumBookingNoticeMin: et.minimum_booking_notice,
+    bookingWindowDays: et.booking_window_days,
     now,
   });
   return { free: new Set(slots.map((d) => d.getTime())), reason: null };
