@@ -9,12 +9,19 @@ import {
   AVAILABILITY_EMPTY_REASONS,
   LOCATION_DETAIL_MAX,
   LOCATION_KINDS,
+  MAX_SUCCESS_REDIRECT_URL,
   ONBOARDING_COHORTS,
   ONBOARDING_QUESTION_KEYS,
   ONBOARDING_TEMPLATE_IDS,
+  isSuccessRedirectUrl,
 } from '@slate/engine';
 
-export { LOCATION_KINDS, parseEventLocation } from '@slate/engine';
+export {
+  LOCATION_KINDS,
+  MAX_SUCCESS_REDIRECT_URL,
+  isSuccessRedirectUrl,
+  parseEventLocation,
+} from '@slate/engine';
 export type { EventLocation, LocationKind } from '@slate/engine';
 
 // --- Enums (string unions — portable across SQLite & Postgres) -------------
@@ -152,6 +159,18 @@ export const MAX_REMINDER_BODY = 5000;
  */
 export const MAX_CALENDAR_TITLE_TEMPLATE = 500;
 export const MAX_CALENDAR_DESCRIPTION_TEMPLATE = 5000;
+
+/**
+ * The event type's redirect-after-booking URL on input. Trimmed, and blank is
+ * "none" (stored as NULL), so clearing the editor's field turns it off.
+ */
+export const successRedirectUrlSchema = z
+  .string()
+  .trim()
+  .max(MAX_SUCCESS_REDIRECT_URL)
+  .refine((v) => v === '' || isSuccessRedirectUrl(v), {
+    message: 'The redirect URL must be a full https:// address.',
+  });
 
 /**
  * ONE reminder on an event type: its own switch, its own lead time, its own
@@ -746,6 +765,10 @@ export const bookingViewSchema = z.object({
   calendarDescription: z.string().nullable().optional(),
   /** One-time manage token URL (cancel/reschedule) — returned only on create. */
   manageUrl: z.string().optional(),
+  /** Where the booking page sends the invitee next: the event type's redirect
+   *  after booking. Returned only by the public create routes, and only when
+   *  the event has one, so the address is not readable before anyone books. */
+  successRedirectUrl: z.string().optional(),
   /** The organizer a TEAM booking's scheduling method resolved to (#102).
    *  Additive and team-only — the personal path never sets it, and a booking
    *  read back later carries its host in `host` instead. It belongs on this
@@ -1184,6 +1207,11 @@ export const eventTypeInputSchema = z.object({
    *  Checked by the API against the variables catalog before they are stored. */
   calendarTitleTemplate: z.string().max(MAX_CALENDAR_TITLE_TEMPLATE).nullable().optional(),
   calendarDescriptionTemplate: z.string().max(MAX_CALENDAR_DESCRIPTION_TEMPLATE).nullable().optional(),
+  /** Where the booking page sends the invitee once a booking is made, instead
+   *  of leaving them on the confirmation. An absolute https URL. Omitted ⇒
+   *  unchanged; null or blank ⇒ none, which is what every event type that
+   *  predates it reads as. Reschedules and cancellations never redirect. */
+  successRedirectUrl: successRedirectUrlSchema.nullable().optional(),
 });
 export type EventTypeInput = z.infer<typeof eventTypeInputSchema>;
 

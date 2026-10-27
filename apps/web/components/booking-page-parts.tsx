@@ -782,6 +782,7 @@ export function BookingConfirmation({
   locationLabel,
   locationKind,
   sentTo,
+  redirect,
   actions,
   footer,
   titleRef,
@@ -797,6 +798,8 @@ export function BookingConfirmation({
   locationKind?: string | null;
   /** "A confirmation was sent to …", already localised; null drops the line. */
   sentTo: string | null;
+  /** The redirect-after-booking line, under `sentTo`; absent on most events. */
+  redirect?: ReactNode;
   actions: ReactNode;
   /** Rendered below the card (the free-calendar call to action). */
   footer?: ReactNode;
@@ -811,6 +814,7 @@ export function BookingConfirmation({
         {pending ? m.booking.requested : m.booking.confirmed}
       </h2>
       {sentTo ? <p className="bp-muted">{sentTo}</p> : null}
+      {redirect}
 
       <dl className="bp-facts bp-confirmation-facts">
         <div className="bp-fact">

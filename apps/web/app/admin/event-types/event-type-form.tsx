@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { COUNTRIES, countryName, isReservedFieldName, type BookingMessages } from '@slate/shared';
 import {
@@ -11,7 +11,9 @@ import {
   MAX_REMINDER_LEAD_MINUTES,
   MAX_REMINDER_SUBJECT,
   MIN_REMINDER_LEAD_MINUTES,
+  MAX_SUCCESS_REDIRECT_URL,
   defaultEventReminders,
+  isSuccessRedirectUrl,
   type CrmPropertyCatalog,
   type CrmPropertyMapping,
   type EventReminder,
@@ -958,6 +960,16 @@ export function EventTypeForm({
     initial?.preventDuplicateBookings ?? false,
   );
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
+  // Redirect after booking. '' is "none", the same absent value the column has.
+  // The error waits for a blur or a save attempt, so typing the address is not
+  // interrupted by it on the first keystroke.
+  const [redirectUrl, setRedirectUrl] = useState(initial?.successRedirectUrl ?? '');
+  const [redirectChecked, setRedirectChecked] = useState(false);
+  const redirectTrimmed = redirectUrl.trim();
+  const redirectInvalid = redirectTrimmed !== '' && !isSuccessRedirectUrl(redirectTrimmed);
+  const redirectHintId = useId();
+  const redirectErrorId = useId();
+  const redirectInputRef = useRef<HTMLInputElement>(null);
   // Reminders + follow-up (#68). Editing opens on the effective list the API
   // returns (a never-configured event surfaces the shipped 24h + 1h with the
   // follow-up off). CREATE has no `initial`, so it seeds the same shipped list
@@ -1076,6 +1088,13 @@ export function EventTypeForm({
       setRes({ ok: false, message: m.reservedBlocked });
       return;
     }
+    // The API refuses it too; stopping here keeps the reason beside the field,
+    // and focus goes there, since the field sits far below the Save button.
+    if (redirectInvalid) {
+      setRedirectChecked(true);
+      redirectInputRef.current?.focus();
+      return;
+    }
     start(async () => {
       const payload: EventTypePayload = {
         id: initial?.id,
@@ -1104,6 +1123,7 @@ export function EventTypeForm({
         hidden,
         bookingFields: fields.filter((f) => f.name && f.label),
         reminders,
+        successRedirectUrl: redirectTrimmed || null,
         // Re-keyed by provider, and only sent when an adapter is wired: a
         // deployment with no CRM must not rewrite this column at all, so an
         // event configured on a CRM-enabled deployment keeps its mappings if it
@@ -1401,6 +1421,40 @@ export function EventTypeForm({
         m={m}
         locale={locale}
       />
+
+      {/* Redirect after booking: what happens once somebody books, so it sits
+          with the booking-policy settings above rather than in a section of
+          its own. The hint stays visible and the error joins it, because the
+          hint is what says reschedules and cancellations never redirect. */}
+      <div className="flex flex-col gap-tight">
+        <Field label={m.successRedirect.label}>
+          {/* `text` with a URL keyboard, not `type="url"`: this form has no
+              `noValidate`, and the browser's own bubble would fire first. */}
+          <input
+            ref={redirectInputRef}
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={MAX_SUCCESS_REDIRECT_URL}
+            placeholder={m.successRedirect.placeholder}
+            value={redirectUrl}
+            onChange={(e) => setRedirectUrl(e.target.value)}
+            onBlur={() => setRedirectChecked(true)}
+            aria-invalid={redirectChecked && redirectInvalid ? true : undefined}
+            aria-describedby={redirectChecked && redirectInvalid ? `${redirectErrorId} ${redirectHintId}` : redirectHintId}
+            className={inputCls}
+          />
+        </Field>
+        {redirectChecked && redirectInvalid ? (
+          <p id={redirectErrorId} className="text-xs text-destructive" role="alert">
+            {m.successRedirect.invalid}
+          </p>
+        ) : null}
+        <p id={redirectHintId} className="text-xs text-muted-foreground">
+          {m.successRedirect.hint}
+        </p>
+      </div>
 
       {/* Intake questions */}
       <div className="flex flex-col gap-inline">

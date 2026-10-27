@@ -228,6 +228,13 @@ export const eventType = pgTable('event_type', {
    */
   calendarTitleTemplate: text('calendar_title_template'),
   calendarDescriptionTemplate: text('calendar_description_template'),
+  /**
+   * Where the booking page sends the invitee after a booking, instead of
+   * leaving them on the confirmation: an absolute https URL, checked by the API
+   * (`isSuccessRedirectUrl`). NULL = none, the confirmation stays, as before
+   * this existed. See migration 0034 (pg).
+   */
+  successRedirectUrl: text('success_redirect_url'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

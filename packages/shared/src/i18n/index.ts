@@ -146,6 +146,11 @@ export interface BookingMessages {
     hostTimeZone: string;
     /** The quiet link under a short day's times: "Next day with times: Tue, Oct 13". */
     nextTimes: string;
+    /** The confirmation's line when the event redirects after booking:
+     *  "Taking you to example.com." `{site}` is the destination's host name. */
+    redirecting: string;
+    /** The link beside it, for when the browser did not follow on its own. */
+    redirectContinue: string;
   };
   manage: {
     title: string;
@@ -550,6 +555,17 @@ export interface BookingMessages {
       duplicateGuard: {
         label: string;
         hint: string;
+      };
+      /**
+       * Redirect after booking: where the booking page sends the invitee
+       * once a booking is made, instead of the confirmation.
+       */
+      successRedirect: {
+        label: string;
+        hint: string;
+        placeholder: string;
+        /** Inline error for anything but a full https address. */
+        invalid: string;
       };
       /**
        * One-off links (#69 / AB2, #110) — the editor half.
@@ -1943,6 +1959,8 @@ export const en: BookingMessages = {
     zoneAll: 'All time zones',
     hostTimeZone: "{zone}, the host's time",
     nextTimes: 'Next day with times: {day}',
+    redirecting: 'Taking you to {site}.',
+    redirectContinue: 'Continue',
   },
   scheduling: {
     round_robin: 'Round-robin',
@@ -2250,6 +2268,13 @@ export const en: BookingMessages = {
       duplicateGuard: {
         label: 'One booking per person',
         hint: 'Counts upcoming bookings only — cancelling frees the slot, and past bookings never count. You and your API keys are never affected. Anyone who guesses an invitee’s address is told a booking exists for it, though never when it is.',
+      },
+      // Redirect after booking. Says where the invitee goes, and what never redirects.
+      successRedirect: {
+        label: 'Redirect after booking',
+        hint: 'Invitees go to this page once they book, requests you still have to confirm included, instead of staying on the confirmation. Only someone who books is sent the address. Leave it empty to keep the confirmation. Rescheduling or cancelling never redirects.',
+        placeholder: 'https://example.com/thanks',
+        invalid: 'Use a full address that starts with https://',
       },
       // One-off links (#110). Not a security control; say what it does.
       oneOffLinks: {
@@ -3627,6 +3652,8 @@ export const es: BookingMessages = {
     zoneAll: 'Todas las zonas horarias',
     hostTimeZone: '{zone}, hora del anfitrión',
     nextTimes: 'Siguiente día con horarios: {day}',
+    redirecting: 'Te llevamos a {site}.',
+    redirectContinue: 'Continuar',
   },
   scheduling: {
     round_robin: 'Por turnos',
@@ -3935,6 +3962,13 @@ export const es: BookingMessages = {
       duplicateGuard: {
         label: 'Una reserva por persona',
         hint: 'Solo cuenta las reservas próximas — cancelar libera el espacio y las reservas pasadas nunca cuentan. Ni tú ni tus claves de API se ven afectados. A quien adivine el correo de un invitado se le dirá que existe una reserva, aunque nunca cuándo es.',
+      },
+      // Redirigir después de reservar. Dice adónde va el invitado y qué nunca redirige.
+      successRedirect: {
+        label: 'Redirigir después de reservar',
+        hint: 'Los invitados van a esta página después de reservar, también en las solicitudes que aún debes confirmar, en lugar de quedarse en la confirmación. Solo quien reserva recibe la dirección. Déjalo vacío para mantener la confirmación. Reprogramar o cancelar nunca redirige.',
+        placeholder: 'https://ejemplo.com/gracias',
+        invalid: 'Usa una dirección completa que empiece por https://',
       },
       // Enlaces de un solo uso (#110). No es un control de seguridad.
       oneOffLinks: {

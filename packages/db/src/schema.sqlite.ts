@@ -216,6 +216,8 @@ export const eventType = sqliteTable('event_type', {
   /** The calendar title and description templates; NULL = none. See schema.pg.ts. */
   calendarTitleTemplate: text('calendar_title_template'),
   calendarDescriptionTemplate: text('calendar_description_template'),
+  /** Redirect after booking (https URL); NULL = none. See schema.pg.ts. */
+  successRedirectUrl: text('success_redirect_url'),
   createdAt: integer('created_at').notNull(),
 });
 
