@@ -12,7 +12,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('CONNECTOR_NAME', () => {
   it('is dCal on a Dapta build, whatever long name the build carries', async () => {
-    for (const name of ['Dapta Calendars', 'dCalendars']) {
+    for (const name of ['dCal', 'Dapta Calendars', 'dCalendars']) {
       const m = await load(name);
       expect(m.PRODUCT_NAME).toBe(name);
       expect(m.CONNECTOR_NAME).toBe('dCal');

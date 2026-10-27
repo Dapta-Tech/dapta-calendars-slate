@@ -99,7 +99,7 @@ const webEnv = {
   MCP_PUBLIC_URL: resource,
   API_PUBLIC_URL: issuer,
   AUTH_PROVIDER: 'local',
-  NEXT_PUBLIC_PRODUCT_NAME: 'Dapta Calendars',
+  NEXT_PUBLIC_PRODUCT_NAME: 'dCal',
 };
 
 let ok = false;
@@ -189,7 +189,7 @@ try {
   await page.getByRole('heading', { level: 1 }).waitFor();
   const heading = await page.getByRole('heading', { level: 1 }).innerText();
   const body = await page.locator('main').innerText();
-  check(heading.includes('E2E Agent') && heading.includes('Dapta Calendars'), `consent heading: "${heading}"`);
+  check(heading.includes('E2E Agent') && heading.includes('dCal'), `consent heading: "${heading}"`);
   check(body.includes(`Identified as 127.0.0.1:${cbPort}`) && body.includes('Acme Inc.'), 'consent shows the identifying host and the workspace');
   check(body.includes('See event types') && body.includes('Check free times') && body.includes('Read bookings'), 'consent lists the scopes in plain words');
   check(body.includes('runs on your own computer'), 'consent warns about a loopback redirect');

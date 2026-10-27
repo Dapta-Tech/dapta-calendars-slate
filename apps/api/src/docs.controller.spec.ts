@@ -63,8 +63,28 @@ describe('DocsController: the deployment address', () => {
     expect(html).not.toContain('a"<b>');
   });
 
+  it("names the deployment's product: PRODUCT_NAME, else the mail sender name", () => {
+    const named = new DocsController({ API_PUBLIC_URL: undefined, PRODUCT_NAME: 'dCal', MAIL_FROM_NAME: 'Other' });
+    expect(named.spec().info.title).toBe('dCal API');
+    expect(named.docs()).toContain('<title>dCal API</title>');
+    expect(named.docs()).toContain('<h1>dCal API</h1>');
+    expect(new DocsController({ API_PUBLIC_URL: undefined, MAIL_FROM_NAME: 'Acme' }).spec().info.title).toBe('Acme API');
+    // A fork with nothing set reads the env schema's default sender name.
+    expect(docsFor().spec().info.title).toBe('Calendars API');
+    expect(docsFor().docs()).toContain('<title>Calendars API</title>');
+    expect(JSON.stringify(openapiSpec)).not.toMatch(/dapta calendars/i);
+  });
+
+  it('escapes the product name in the page', () => {
+    const html = new DocsController({ API_PUBLIC_URL: undefined, PRODUCT_NAME: 'A<b>"c' }).docs();
+    expect(html).toContain('<title>A&lt;b&gt;&quot;c API</title>');
+    expect(html).not.toContain('A<b>');
+  });
+
   it('keeps every path of the document whichever address it names', () => {
     expect(openapiFor('https://api.example.com').paths).toBe(openapiSpec.paths);
+    expect(openapiFor(undefined, 'dCal').paths).toBe(openapiSpec.paths);
+    expect(openapiFor(undefined, 'dCal').servers).toEqual(openapiSpec.servers);
   });
 
   it('gets API_PUBLIC_URL from the ENV provider when Nest builds it', async () => {

@@ -1,5 +1,5 @@
 /**
- * Hand-curated OpenAPI 3.1 description of Dapta Calendars' integrator-facing
+ * Hand-curated OpenAPI 3.1 description of the scheduling API's integrator-facing
  * surfaces. Dependency-free (the API validates with zod,
  * not class-validator, so there is no decorator metadata to auto-generate from).
  * Kept intentionally focused on the endpoints external integrations consume;
@@ -119,7 +119,8 @@ const errorResponse = (description: string) => ({
 export const openapiSpec = {
   openapi: '3.1.0',
   info: {
-    title: 'Dapta Calendars API',
+    // The served title names the deployment's product (`openapiFor`).
+    title: 'Calendars API',
     version: '2.0.0-mvp',
     description:
       'Production-pilot scheduling API for generic Flow Studio HTTP nodes. Cal-compatible operations keep their current wire names; multi-calendar availability is an explicit Dapta extension.',
@@ -139,7 +140,7 @@ export const openapiSpec = {
     },
     {
       name: 'Legacy v1',
-      description: 'Existing Dapta Calendars v1 operations; behavior is preserved.',
+      description: 'Existing v1 operations; behavior is preserved.',
     },
   ],
   'x-dapta-compatibility': {
@@ -1457,7 +1458,9 @@ export const openapiSpec = {
  * when one is configured (API_PUBLIC_URL), and otherwise stays relative to
  * wherever the document is served, so a fork never points at someone else's API.
  */
-export function openapiFor(apiPublicUrl?: string) {
+export function openapiFor(apiPublicUrl?: string, productName?: string) {
   // Already normalized by the env schema (`cleanPublicUrl`).
-  return apiPublicUrl ? { ...openapiSpec, servers: [{ url: apiPublicUrl, description: 'This deployment' }] } : openapiSpec;
+  const servers = apiPublicUrl ? [{ url: apiPublicUrl, description: 'This deployment' }] : openapiSpec.servers;
+  const info = productName ? { ...openapiSpec.info, title: `${productName} API` } : openapiSpec.info;
+  return apiPublicUrl || productName ? { ...openapiSpec, info, servers } : openapiSpec;
 }

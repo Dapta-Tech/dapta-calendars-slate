@@ -1,4 +1,4 @@
-# Dapta Calendars public API contract
+# dCal public API contract
 
 Status: production-pilot contract
 Last reviewed: 2026-07-23

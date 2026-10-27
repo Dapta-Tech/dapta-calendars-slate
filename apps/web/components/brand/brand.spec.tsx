@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('BrandMark', () => {
   it('renders the dC artwork on a Dapta build', async () => {
-    for (const name of ['Dapta Calendars', 'dCalendars']) {
+    for (const name of ['dCal', 'Dapta Calendars', 'dCalendars']) {
       const html = await renderMark(name);
       expect(html).toContain('<svg');
       expect(html).toContain('viewBox="0 0 1141.464 715.8"');
@@ -66,7 +66,7 @@ async function renderWordmark(productName: string | undefined) {
 
 describe('BrandWordmark', () => {
   it('renders the dCal. wordmark on a Dapta build: ink follows the theme, the green is literal', async () => {
-    for (const name of ['Dapta Calendars', 'dCalendars']) {
+    for (const name of ['dCal', 'Dapta Calendars', 'dCalendars']) {
       const html = await renderWordmark(name);
       expect(html).toContain('viewBox="0 0 2074.804 715.8"');
       expect(html).toContain('fill="currentColor"');

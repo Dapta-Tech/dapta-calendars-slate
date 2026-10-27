@@ -1,5 +1,5 @@
 /*!
- * Dapta Calendars — inline embed host script.
+ * dCal: inline embed host script.
  *
  * Drop this beside a declarative iframe and every embedded booking page on the
  * page sizes itself to its own content:
