@@ -241,6 +241,13 @@ export const eventType = pgTable('event_type', {
    * this existed. See migration 0034 (pg).
    */
   successRedirectUrl: text('success_redirect_url'),
+  /**
+   * Tracking and pixels on this event's booking page: `{ gtmId, metaPixelId,
+   * posthogKey, posthogHost, hubspotTrackingId }`, each optional
+   * (`eventTrackingSchema` in @slate/types). NULL = none, every event type
+   * saved before this existed. See migration 0036.
+   */
+  tracking: jsonb('tracking'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 

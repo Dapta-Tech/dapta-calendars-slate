@@ -220,6 +220,8 @@ export const eventType = sqliteTable('event_type', {
   calendarDescriptionTemplate: text('calendar_description_template'),
   /** Redirect after booking (https URL); NULL = none. See schema.pg.ts. */
   successRedirectUrl: text('success_redirect_url'),
+  /** Tracking and pixels on the booking page, as JSON text; NULL = none. See schema.pg.ts. */
+  tracking: text('tracking'),
   createdAt: integer('created_at').notNull(),
 });
 

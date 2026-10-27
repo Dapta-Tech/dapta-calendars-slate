@@ -254,3 +254,21 @@ describe('without a signup destination', () => {
   });
 });
 
+
+describe('the host’s own tags on the event page', () => {
+  it('an event with tracking ids gets their fallbacks; the page without stays as it was', async () => {
+    api.getAvailability.mockResolvedValue(availability());
+    const plain = profile({ ...BASE_STYLE, theme: 'light' });
+    api.getProfile.mockResolvedValue(plain);
+    const without = await render(eventPage());
+    expect(without).not.toContain('tracking-');
+
+    const tracked = profile({ ...BASE_STYLE, theme: 'light' });
+    tracked.eventTypes[0] = { ...tracked.eventTypes[0]!, tracking: { gtmId: 'GTM-AB12', metaPixelId: '42' } };
+    api.getProfile.mockResolvedValue(tracked);
+    const html = await render(eventPage());
+    expect(html).toContain('data-testid="tracking-gtm-noscript"');
+    expect(html).toContain('data-testid="tracking-meta-pixel-noscript"');
+    expect(html).toContain('https://www.googletagmanager.com/ns.html?id=GTM-AB12');
+  });
+});

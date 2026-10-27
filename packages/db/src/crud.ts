@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { parseEventLocation, type EventLocation, type EventLocationInput } from '@slate/engine';
-import type { CrmPropertyMappings } from '@slate/types';
+import { normalizeEventTracking, type CrmPropertyMappings, type EventTracking } from '@slate/types';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 import {
@@ -87,6 +87,9 @@ export interface EventTypeView {
   /** Where the booking page sends the invitee after a booking. NULL ⇒ none:
    *  the confirmation stays, which is what every older event type reads as. */
   successRedirectUrl: string | null;
+  /** Tracking and pixels on the booking page. NULL ⇒ none, which is what every
+   *  event type that predates it reads as. */
+  tracking: EventTracking | null;
 }
 
 interface EventTypeDbRow {
@@ -117,6 +120,7 @@ interface EventTypeDbRow {
   calendar_title_template: string | null;
   calendar_description_template: string | null;
   success_redirect_url: string | null;
+  tracking: unknown;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
@@ -124,7 +128,7 @@ const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_min
   before_event_buffer, after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
   crm_property_mappings, calendar_title_template, calendar_description_template,
-  success_redirect_url`;
+  success_redirect_url, tracking`;
 
 /** A template as stored: blank is "none" (NULL), so the booking keeps today's text. */
 function templateOrNull(text: string | null | undefined): string | null {
@@ -179,6 +183,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     calendarTitleTemplate: templateOrNull(r.calendar_title_template),
     calendarDescriptionTemplate: templateOrNull(r.calendar_description_template),
     successRedirectUrl: redirectUrlOrNull(r.success_redirect_url),
+    tracking: normalizeEventTracking(parseJsonColumn<unknown>(r.tracking, null)),
   };
 }
 
@@ -307,6 +312,8 @@ export interface EventTypeInputRepo {
   /** Redirect after booking. UNDEFINED ⇒ unchanged; null or blank ⇒ none.
    *  Validated by the API (`isSuccessRedirectUrl`) before it reaches this layer. */
   successRedirectUrl?: string | null;
+  /** Tracking and pixels. UNDEFINED ⇒ unchanged; null, or every id blank ⇒ none. */
+  tracking?: EventTracking | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -346,7 +353,7 @@ export async function createEventType(
           minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
-          calendar_description_template, success_redirect_url, created_at)
+          calendar_description_template, success_redirect_url, tracking, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -359,7 +366,8 @@ export async function createEventType(
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
           ${jsonParam(db, input.crmPropertyMappings ?? null)},
           ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
-          ${redirectUrlOrNull(input.successRedirectUrl)}, ${now})`,
+          ${redirectUrlOrNull(input.successRedirectUrl)},
+          ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -413,6 +421,7 @@ export async function updateEventType(
     set('calendar_description_template', sql`${templateOrNull(input.calendarDescriptionTemplate)}`);
   if (input.successRedirectUrl !== undefined)
     set('success_redirect_url', sql`${redirectUrlOrNull(input.successRedirectUrl)}`);
+  if (input.tracking !== undefined) set('tracking', jsonParam(db, normalizeEventTracking(input.tracking)));
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
   // back the reminder they just deleted.

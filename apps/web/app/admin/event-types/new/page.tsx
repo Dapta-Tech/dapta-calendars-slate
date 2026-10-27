@@ -53,6 +53,7 @@ export default async function NewEventType({
         teamName={teamId ? teams.find((t) => t.id === teamId)?.name : undefined}
         teams={teamId ? undefined : teams.map((t) => ({ id: t.id, name: t.name }))}
         canManageTeams={isAdminRole(me.role)}
+        trackingEnabled={isAdminRole(me.role) && me.eventTrackingEnabled === true}
         connections={teamId ? undefined : connections}
         redirectOnSuccess={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
         backHref={teamId ? `/admin/teams/${teamId}` : '/admin/event-types'}
