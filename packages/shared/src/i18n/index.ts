@@ -49,6 +49,7 @@ export interface BookingMessages {
     holdExpired: string;
     pickAnother: string;
     retry: string;
+    poweredBy: string;
     with: string;
     seatsLeft: string;
     full: string;
@@ -1892,6 +1893,7 @@ export const en: BookingMessages = {
     holdExpired: 'Your hold expired',
     pickAnother: 'Pick another time',
     retry: 'Try again',
+    poweredBy: 'Powered by {product}',
     with: 'with',
     seatsLeft: '{n} left',
     full: 'Full',
@@ -3576,6 +3578,7 @@ export const es: BookingMessages = {
     holdExpired: 'Tu reserva temporal expiró',
     pickAnother: 'Elige otro horario',
     retry: 'Reintentar',
+    poweredBy: 'Con la tecnología de {product}',
     with: 'con',
     seatsLeft: '{n} disponibles',
     full: 'Lleno',
