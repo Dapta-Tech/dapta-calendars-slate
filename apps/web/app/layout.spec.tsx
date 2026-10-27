@@ -44,35 +44,37 @@ afterEach(() => {
 
 describe('root metadata', () => {
   it('is product copy, with no em dash, in English and Spanish', async () => {
-    const { generateMetadata } = await loadLayout('Dapta Calendars');
+    const { generateMetadata } = await loadLayout('dCal');
     const en = await generateMetadata();
-    expect(en.title).toBe('Dapta Calendars: free online scheduling and booking pages');
-    expect(en.description).toMatch(/^Dapta Calendars gives you a booking page/);
+    expect(en.title).toBe('dCal: calendars for AI agents');
+    expect(en.description).toMatch(/^With dCal, your agent finds a free time/);
 
     request.headers['accept-language'] = 'es-CO';
     const es = await generateMetadata();
-    expect(es.title).toBe('Dapta Calendars: agenda de citas en línea gratis');
-    expect(es.description).toMatch(/^Dapta Calendars te da una página de reservas/);
+    expect(es.title).toBe('dCal: calendarios para agentes de IA');
+    expect(es.description).toMatch(/^Con dCal, tu agente busca un horario libre/);
 
     for (const text of [en.title, en.description, es.title, es.description]) {
       expect(String(text)).not.toMatch(/[\u2014\u2013]/);
       expect(String(text)).not.toMatch(/clone|open-source scheduling/i);
+      // dCal is a calendar for agents, never a page builder.
+      expect(String(text)).not.toMatch(/booking page|página de reservas/i);
     }
   });
 
   it("reads well under a fork's neutral default name", async () => {
     const { generateMetadata } = await loadLayout();
     const meta = await generateMetadata();
-    expect(meta.title).toBe('Calendars: free online scheduling and booking pages');
+    expect(meta.title).toBe('Calendars: calendars for AI agents');
     expect(String(meta.description)).not.toMatch(/dapta/i);
   });
 
   it('is in the admin language on a product route', async () => {
-    const { generateMetadata } = await loadLayout('Dapta Calendars');
+    const { generateMetadata } = await loadLayout('dCal');
     request.headers = { 'x-slate-path': '/admin', 'accept-language': 'es-ES' };
-    expect((await generateMetadata()).title).toBe('Dapta Calendars: agenda de citas en línea gratis');
+    expect((await generateMetadata()).title).toBe('dCal: calendarios para agentes de IA');
     request.cookie = 'en';
-    expect((await generateMetadata()).title).toBe('Dapta Calendars: free online scheduling and booking pages');
+    expect((await generateMetadata()).title).toBe('dCal: calendars for AI agents');
   });
 
   it('carries no robots rule by default, and noindex when the deployment says so', async () => {

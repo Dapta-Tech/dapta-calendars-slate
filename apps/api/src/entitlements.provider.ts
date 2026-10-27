@@ -1,7 +1,7 @@
 /**
  * Entitlements PORT — "is this account a paying Dapta AI customer?"
  *
- * Dapta Calendars is ALWAYS free: there is no Calendars-side plan or billing,
+ * dCal is ALWAYS free: there is no Calendars-side plan or billing,
  * ever. Premium unlocks (vanity slug, future perks) come with the customer's
  * Dapta AI subscription, validated against the upstream entitlement service.
  * Open-core split, same shape as the CalendarProvider port:

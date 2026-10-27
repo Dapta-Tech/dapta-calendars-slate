@@ -45,7 +45,7 @@ test.describe('status codes', () => {
       expect(res.status).toBe(404);
       expect(res.html).toMatch(/<meta name="robots" content="noindex"/);
       // The site's own title, never a guess at a host or event that is not there.
-      expect(titleOf(res.html)).toBe('Calendars: free online scheduling and booking pages');
+      expect(titleOf(res.html)).toBe('Calendars: calendars for AI agents');
     });
   }
 
@@ -54,7 +54,7 @@ test.describe('status codes', () => {
   test("the 404 head speaks the visitor's language", async ({ request }) => {
     const res = await page(request, '/acme/nobody', { 'accept-language': 'es-CO,es;q=0.9' });
     expect(res.status).toBe(404);
-    expect(titleOf(res.html)).toBe('Calendars: agenda de citas en línea gratis');
+    expect(titleOf(res.html)).toBe('Calendars: calendarios para agentes de IA');
   });
 });
 

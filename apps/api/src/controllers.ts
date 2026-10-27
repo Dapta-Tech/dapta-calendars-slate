@@ -80,14 +80,17 @@ const escapeHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => HTML_ESCA
 export class DocsController {
   /** Normalized by the env schema (`cleanPublicUrl`): no trailing slash, query or credentials. */
   private readonly apiPublicUrl: string | undefined;
+  /** The product the docs name: PRODUCT_NAME, else the mail sender name, as the email footer does. */
+  private readonly productName: string;
 
-  constructor(@Inject(ENV) env: Pick<ServerEnv, 'API_PUBLIC_URL'>) {
+  constructor(@Inject(ENV) env: Pick<ServerEnv, 'API_PUBLIC_URL'> & Partial<Pick<ServerEnv, 'PRODUCT_NAME' | 'MAIL_FROM_NAME'>>) {
     this.apiPublicUrl = env.API_PUBLIC_URL;
+    this.productName = env.PRODUCT_NAME?.trim() || env.MAIL_FROM_NAME?.trim() || 'Calendars';
   }
 
   @Get('openapi.json')
   spec() {
-    return openapiFor(this.apiPublicUrl);
+    return openapiFor(this.apiPublicUrl, this.productName);
   }
 
   @Get('docs')
@@ -95,6 +98,7 @@ export class DocsController {
   docs(): string {
     const base = this.apiPublicUrl ? escapeHtml(this.apiPublicUrl) : null;
     const baseUrl = base ?? 'https://api.your-domain.example';
+    const title = escapeHtml(`${this.productName} API`);
     // Root-relative when unset: serving under a path prefix needs API_PUBLIC_URL.
     const openapiUrl = base ? `${base}/openapi.json` : '/openapi.json';
     // The explorer fetches its document from the page's own origin (the prefix
@@ -113,7 +117,7 @@ export class DocsController {
       : `<script>(function(){var p=location.pathname.replace(/\\/docs\\/?$/i,'');document.getElementById('base-url').textContent=location.origin+(/^[A-Za-z0-9._~%\\/-]*$/.test(p)?p:'');})();</script>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Dapta Calendars API</title>
+<title>${title}</title>
 <style>
 body{margin:0;font:15px/1.55 system-ui,sans-serif;color:#17202a;background:#fff}
 .intro{max-width:1040px;margin:0 auto;padding:32px 24px 8px}
@@ -123,7 +127,7 @@ pre{background:#111827;color:#f9fafb;padding:16px;border-radius:8px;overflow:aut
 a{color:#2563eb}.pins{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}
 </style></head><body>
 <main class="intro">
-<h1>Dapta Calendars API</h1>
+<h1>${title}</h1>
 <p>OpenAPI 3.1 source: <a href="${openapiUrl}"><code>/openapi.json</code></a>.
 This production-pilot surface covers discovery, availability, and the booking lifecycle.</p>
 <div class="notice"><strong>Authentication:</strong> choose <em>Authorize</em> below and enter a

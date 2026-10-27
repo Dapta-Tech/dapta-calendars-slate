@@ -1,4 +1,4 @@
-# Dapta Calendars
+# dCal
 
 [![CI](https://github.com/Dapta-Tech/dapta-calendars-slate/actions/workflows/ci.yml/badge.svg)](https://github.com/Dapta-Tech/dapta-calendars-slate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-a3e635.svg)](LICENSE)
@@ -12,7 +12,7 @@ is a zero-infra dev accelerator** so you can clone-and-run in 60 seconds.
 Self-host anywhere Node or Docker runs.
 
 > Package scope note: internal packages use the `@slate/*` scope — the
-> project's original codename. The product is **Dapta Calendars**.
+> project's original codename. The product is **dCal**.
 
 ## 60-second quickstart
 
@@ -131,7 +131,7 @@ Everything has a safe default (see [`.env.example`](.env.example)). Copy it to
 
 ## Deploy
 
-Dapta Calendars is **deployment-agnostic** (Node runtime, no host-only APIs).
+dCal is **deployment-agnostic** (Node runtime, no host-only APIs).
 See **[`SELF-HOSTING.md`](SELF-HOSTING.md)** for the full production guide —
 Docker Compose quickstart, building the two images, the complete environment
 reference, reverse-proxy/TLS, auth & email options, connecting an external

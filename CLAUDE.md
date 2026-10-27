@@ -1,16 +1,16 @@
-# Dapta Calendars — guide for Claude Code (and any AI coding agent)
+# dCal — guide for Claude Code (and any AI coding agent)
 
 This file is loaded automatically by Claude Code for anyone working in this repo.
-It is the operating summary: how to run, test, and change **Dapta Calendars**
+It is the operating summary: how to run, test, and change **dCal**
 without breaking the invariants that keep the project self-hostable and open.
 Deeper rationale (request flow, package boundaries, the ports/adapters seams)
 lives in [`ARCHITECTURE.md`](ARCHITECTURE.md); contribution mechanics (DCO, PR
 gates) live in [`CONTRIBUTING.md`](CONTRIBUTING.md); self-hosting is
 [`SELF-HOSTING.md`](SELF-HOSTING.md). Read those when this summary points at them.
 
-> **Naming:** the product is **Dapta Calendars**. Internal packages use the
-> `@slate/*` scope — `slate` is the codename, nothing more. Prefer "Dapta
-> Calendars" in user-facing text and `@slate/*` only when naming a package.
+> **Naming:** the product is **dCal**. Internal packages use the
+> `@slate/*` scope — `slate` is the codename, nothing more. Prefer "dCal" in
+> user-facing text and `@slate/*` only when naming a package.
 
 ## What this is
 

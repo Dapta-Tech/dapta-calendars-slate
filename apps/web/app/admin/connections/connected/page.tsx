@@ -13,7 +13,7 @@ export const metadata = { title: `Connected — ${PRODUCT_NAME}` };
  * `?connectionId=<id>`, failure as
  * `?error=<message>&errorData=<json>&connectionId=<id>` — instead of
  * stranding the user on that backend's own "you can close this tab" page. The
- * LAST thing the user sees is Dapta Calendars, branded, with an immediate
+ * LAST thing the user sees is dCal, branded, with an immediate
  * auto-close (success) or a readable failure (error present) + a signal back
  * to the opener modal (see connected-client.tsx). No admin data is read
  * here; this is a pure landing — `errorData` (vendor-shaped JSON) is

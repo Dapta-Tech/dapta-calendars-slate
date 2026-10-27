@@ -1,6 +1,6 @@
-# Self-hosting Dapta Calendars
+# Self-hosting dCal
 
-Dapta Calendars is **deployment-agnostic**: two Node apps (a Next.js web frontend
+dCal is **deployment-agnostic**: two Node apps (a Next.js web frontend
 and a NestJS API) plus a database. No host-only APIs, no managed-platform lock-in —
 anywhere Node ≥ 22.13 or Docker runs, it runs. This guide takes you from a clean host
 to a running, double-booking-safe production deployment.

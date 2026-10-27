@@ -1,6 +1,6 @@
 # Architecture
 
-Dapta Calendars is a Turborepo + pnpm-workspaces monorepo: two deployable apps
+dCal is a Turborepo + pnpm-workspaces monorepo: two deployable apps
 over eight packages. This page is the map — the request flows, the dependency
 direction, and the ports/adapters seams that keep the project self-hostable. For
 how to run and change it, see [`CLAUDE.md`](CLAUDE.md); for self-hosting, see

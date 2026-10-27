@@ -29,7 +29,7 @@ WORKDIR /repo
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # Brand + growth-loop link — also NEXT_PUBLIC (inlined at build). Vendor-neutral
-# defaults keep the OSS build generic; Dapta's CI passes "Dapta Calendars" + the
+# defaults keep the OSS build generic; Dapta's CI passes "dCal" + the
 # platform URL. (Deploy-enabling change per ECR-CI-PLAN §3.)
 ARG NEXT_PUBLIC_PRODUCT_NAME=Calendars
 ENV NEXT_PUBLIC_PRODUCT_NAME=$NEXT_PUBLIC_PRODUCT_NAME
