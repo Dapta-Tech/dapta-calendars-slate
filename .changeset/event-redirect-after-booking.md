@@ -2,7 +2,7 @@
 "@slate/db": minor
 "@slate/engine": minor
 "@slate/types": minor
-"@slate/shared": minor
+"@slate/shared": major
 ---
 
 An event type can send the invitee to an external page once a booking is made, instead of leaving them on the confirmation. A new nullable column, `event_type.success_redirect_url` (Postgres migration 0034, SQLite 0033, additive, bounded by `lock_timeout`), holds an absolute https URL; NULL, every existing event, keeps the confirmation exactly as it is.

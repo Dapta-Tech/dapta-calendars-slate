@@ -1,4 +1,5 @@
 import { isSuccessRedirectUrl } from '@slate/types';
+import { urlHost } from '@/lib/url-host';
 
 /**
  * Redirect after booking: the event type's `successRedirectUrl`, as the booking
@@ -29,11 +30,7 @@ export function redirectTarget(url: string | null | undefined): string | null {
 
 /** The destination as the confirmation names it: its host, without `www.`. */
 export function redirectSite(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./i, '');
-  } catch {
-    return url;
-  }
+  return urlHost(url).replace(/^www\./i, '');
 }
 
 /** The parts of a window a redirect touches; a parameter so a test can hand in its own. */

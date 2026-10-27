@@ -31,6 +31,7 @@ describe('redirectSite', () => {
   it('names the destination by its host, without www', () => {
     expect(redirectSite('https://www.example.com/thanks?x=1')).toBe('example.com');
     expect(redirectSite('https://book.example.co/a')).toBe('book.example.co');
+    expect(redirectSite('https://www.example.com:8443/a')).toBe('example.com:8443');
   });
 });
 
