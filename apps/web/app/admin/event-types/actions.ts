@@ -50,6 +50,8 @@ export interface EventTypePayload {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. `null` clears
    *  them; omitted leaves whatever the event already had. */
   crmPropertyMappings?: CrmPropertyMappings | null;
+  /** Redirect after booking: an https URL, or null for none. */
+  successRedirectUrl?: string | null;
 }
 
 export async function saveEventTypeAction(p: EventTypePayload): Promise<ActionResult> {

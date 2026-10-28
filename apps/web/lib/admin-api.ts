@@ -425,6 +425,9 @@ export interface EventType {
   /** H2 (#108) — CRM contact property mappings, provider-keyed. Null on every
    *  event nobody has configured, which is what "never configured" reads as. */
   crmPropertyMappings: CrmPropertyMappings | null;
+  /** Where the booking page sends the invitee after booking; null ⇒ the
+   *  confirmation stays. Optional on the wire, so an older API reads as none. */
+  successRedirectUrl?: string | null;
 }
 export interface Schedule {
   id: string;

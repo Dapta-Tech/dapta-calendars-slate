@@ -177,11 +177,12 @@ export class CalV2PilotService {
       locations: unknown;
       booking_fields: unknown;
       team_name: string | null;
+      success_redirect_url: string | null;
     }>(
       sql`SELECT et.id, et.title, et.slug, et.description, et.length_minutes,
                  et.hidden, et.member_id, et.team_id, m.handle,
                  t.slug AS team_slug, t.name AS team_name, et.scheduling_type,
-                 et.locations, et.booking_fields
+                 et.locations, et.booking_fields, et.success_redirect_url
           FROM event_type et
           LEFT JOIN member m ON m.id = et.member_id
           LEFT JOIN team t ON t.id = et.team_id
@@ -213,6 +214,8 @@ export class CalV2PilotService {
           return loc ? [loc] : [];
         })(),
         bookingFields: parseJsonColumn<unknown[]>(row.booking_fields, []),
+        // Cal.com's name for the same setting, so a v2 client reads it as-is.
+        successRedirectUrl: row.success_redirect_url ?? null,
         team:
           row.team_id && row.team_slug && row.team_name
             ? {

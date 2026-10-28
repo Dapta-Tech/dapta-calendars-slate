@@ -8,6 +8,7 @@ import {
   getAccountByCode,
   getBrandingSwitchByCode,
   getAvailability,
+  getBookingSuccessRedirectUrl,
   getPublicProfile,
   getBookingRescheduleAvailability,
   getTeamAvailability,
@@ -568,6 +569,11 @@ export class BookingService {
         .catch(() => undefined);
     }
 
+    // Redirect after booking, read once the booking is committed, so only an
+    // invitee who booked learns the address. It must not throw from here
+    // (#102): a failed read costs the redirect, never the confirmation.
+    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, b.uid).catch(() => null);
+
     return {
       uid: b.uid,
       status: b.status as BookingView['status'],
@@ -578,6 +584,7 @@ export class BookingService {
       attendee: b.attendee,
       calendarDescription: b.calendarDescription || undefined,
       manageUrl,
+      ...(successRedirectUrl ? { successRedirectUrl } : {}),
       deduplicated: outcome.deduplicated || undefined,
     };
   }
@@ -1121,6 +1128,8 @@ export class BookingService {
     // ways is the class of drift this fix exists to close.
     const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
     const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
+    // As on the personal path: read after the commit, and never thrown.
+    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, out.uid).catch(() => null);
     return {
       uid: out.uid,
       // A team booking is created `accepted` (it has no confirmation gate), so
@@ -1141,6 +1150,7 @@ export class BookingService {
       calendarDescription: row?.calendar_description || undefined,
       hostMemberId: out.hostMemberId,
       manageUrl,
+      ...(successRedirectUrl ? { successRedirectUrl } : {}),
     };
   }
 }

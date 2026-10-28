@@ -81,6 +81,9 @@ export interface EventTypeView {
    *  NULL ⇒ none: the title is the event's name and there is no description. */
   calendarTitleTemplate: string | null;
   calendarDescriptionTemplate: string | null;
+  /** Where the booking page sends the invitee after a booking. NULL ⇒ none:
+   *  the confirmation stays, which is what every older event type reads as. */
+  successRedirectUrl: string | null;
 }
 
 interface EventTypeDbRow {
@@ -109,17 +112,24 @@ interface EventTypeDbRow {
   crm_property_mappings: unknown;
   calendar_title_template: string | null;
   calendar_description_template: string | null;
+  success_redirect_url: string | null;
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
   schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, before_event_buffer,
   after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
-  crm_property_mappings, calendar_title_template, calendar_description_template`;
+  crm_property_mappings, calendar_title_template, calendar_description_template,
+  success_redirect_url`;
 
 /** A template as stored: blank is "none" (NULL), so the booking keeps today's text. */
 function templateOrNull(text: string | null | undefined): string | null {
   return text?.trim() ? text : null;
+}
+
+/** A redirect URL as stored: trimmed, and blank is "none" (NULL). Validated by the API. */
+function redirectUrlOrNull(url: string | null | undefined): string | null {
+  return url?.trim() || null;
 }
 
 async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView> {
@@ -163,6 +173,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     crmPropertyMappings: parseJsonColumn<CrmPropertyMappings | null>(r.crm_property_mappings, null),
     calendarTitleTemplate: templateOrNull(r.calendar_title_template),
     calendarDescriptionTemplate: templateOrNull(r.calendar_description_template),
+    successRedirectUrl: redirectUrlOrNull(r.success_redirect_url),
   };
 }
 
@@ -286,6 +297,9 @@ export interface EventTypeInputRepo {
    *  or blank ⇒ none. Validated by the API before they reach this layer. */
   calendarTitleTemplate?: string | null;
   calendarDescriptionTemplate?: string | null;
+  /** Redirect after booking. UNDEFINED ⇒ unchanged; null or blank ⇒ none.
+   *  Validated by the API (`isSuccessRedirectUrl`) before it reaches this layer. */
+  successRedirectUrl?: string | null;
 }
 
 /** Host detail as accepted on input — every weighting field is optional. */
@@ -325,7 +339,7 @@ export async function createEventType(
           minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
-          calendar_description_template, created_at)
+          calendar_description_template, success_redirect_url, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -338,7 +352,7 @@ export async function createEventType(
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
           ${jsonParam(db, input.crmPropertyMappings ?? null)},
           ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
-          ${now})`,
+          ${redirectUrlOrNull(input.successRedirectUrl)}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
   else if (input.hostMemberIds) await setEventTypeHosts(db, accountId, id, input.hostMemberIds);
@@ -389,6 +403,8 @@ export async function updateEventType(
     set('calendar_title_template', sql`${templateOrNull(input.calendarTitleTemplate)}`);
   if (input.calendarDescriptionTemplate !== undefined)
     set('calendar_description_template', sql`${templateOrNull(input.calendarDescriptionTemplate)}`);
+  if (input.successRedirectUrl !== undefined)
+    set('success_redirect_url', sql`${redirectUrlOrNull(input.successRedirectUrl)}`);
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
   // back the reminder they just deleted.
@@ -415,6 +431,22 @@ export async function updateEventType(
   }
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
+}
+
+/**
+ * The redirect-after-booking URL of the event type a booking was made on, or
+ * null when it has none. Read by the public booking routes AFTER the booking
+ * commits, so the address reaches an invitee who booked and nobody else: the
+ * availability reads, which anyone can make, never carry it. `uid` is the one
+ * the booking write just returned, never a caller's.
+ */
+export async function getBookingSuccessRedirectUrl(db: Db, uid: string): Promise<string | null> {
+  const row = await db.get<{ url: string | null }>(
+    sql`SELECT et.success_redirect_url AS url
+        FROM booking b JOIN event_type et ON et.id = b.event_type_id
+        WHERE b.uid = ${uid} LIMIT 1`,
+  );
+  return redirectUrlOrNull(row?.url);
 }
 
 export async function deleteEventType(db: Db, accountId: string, id: string): Promise<boolean> {

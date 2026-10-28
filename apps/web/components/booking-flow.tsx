@@ -47,6 +47,7 @@ import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
+import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
 import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
@@ -306,6 +307,10 @@ export function BookingFlow({
   );
   const bookedUid = booked?.uid ?? null;
   const bookedStart = booked?.startUtc ?? null;
+  // Redirect after booking: the booking write answers it (only to someone who
+  // booked; no availability read carries it), and only an https address is
+  // ever followed, whatever came back.
+  const redirectTo = redirectTarget(booked?.successRedirectUrl);
   useEffect(() => {
     if (!embed || !bookedUid || !bookedStart) return;
     // The uid is the booking's IDENTITY. `useActionState` hands back a fresh
@@ -327,6 +332,17 @@ export function BookingFlow({
     trackedUid.current = bookedUid;
     track('booking_confirmed', { status: bookedStatus, mode });
   }, [bookedUid, bookedStatus, mode]);
+
+  // Redirect after booking, once per booking and AFTER the two effects above
+  // (effects run in the order they are declared), so the host page has its
+  // message and the count is queued before the page goes. The analytics
+  // adapter flushes on unload, so leaving at once loses nothing.
+  const redirectedUid = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bookedUid || !redirectTo || redirectedUid.current === bookedUid) return;
+    redirectedUid.current = bookedUid;
+    followRedirect(redirectTo);
+  }, [bookedUid, redirectTo]);
 
   /** Full client-side gate, replacing native validation (noValidate): native
    *  bubbles doubled up with the inline errors and can't be themed. Returns
@@ -724,6 +740,26 @@ export function BookingFlow({
         locationLabel={bookedLocation}
         locationKind={b.locationKind ?? location?.kind ?? null}
         sentTo={sentTo}
+        redirect={
+          redirectTo ? (
+            // What the invitee sees for the moment the next page takes to load,
+            // and the way on when a framed page was not allowed to move the
+            // window: `_top` leaves the frame, and is this window when unframed.
+            // The link keeps the sentence's size and colour (not `.bp-link`,
+            // which is a small accent-coloured control link), underlined.
+            <p className="bp-muted" role="status">
+              {t(bp.redirecting, { site: redirectSite(redirectTo) })}{' '}
+              <a
+                href={redirectTo}
+                target="_top"
+                referrerPolicy="no-referrer"
+                className="font-medium underline underline-offset-4"
+              >
+                {bp.redirectContinue}
+              </a>
+            </p>
+          ) : null
+        }
         titleRef={doneTitleRef}
         actions={
           <>
