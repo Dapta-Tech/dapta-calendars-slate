@@ -151,6 +151,8 @@ export interface EventTypeRow {
   scheduling_type: string | null;
   booking_fields: unknown;
   minimum_booking_notice: number;
+  /** Booking window in calendar days ahead; NULL on every event without one. */
+  booking_window_days: number | null;
   before_event_buffer: number;
   after_event_buffer: number;
   slot_interval: number | null;
@@ -389,7 +391,7 @@ export async function getEventType(
   const visibility = opts?.includeHidden ? sql`` : sql` AND hidden = 0`;
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
-               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type
@@ -409,7 +411,7 @@ export async function getMemberById(db: Db, id: string): Promise<MemberRow | und
 export async function getEventTypeRowById(db: Db, id: string): Promise<EventTypeRow | undefined> {
   return db.get<EventTypeRow>(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
-               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice,
+               locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
                prevent_duplicate_bookings, seats_per_time_slot
         FROM event_type WHERE id = ${id} LIMIT 1`,
@@ -499,6 +501,7 @@ export async function isSlotBookable(
     beforeBufferMin: eventType.before_event_buffer,
     afterBufferMin: eventType.after_event_buffer,
     minimumBookingNoticeMin: eventType.minimum_booking_notice,
+    bookingWindowDays: eventType.booking_window_days,
     now: args.now ?? new Date(),
   });
   return slots.some((d) => d.getTime() === args.startMs);
@@ -851,6 +854,7 @@ export async function getAvailability(
     beforeBufferMin: eventType.before_event_buffer,
     afterBufferMin: eventType.after_event_buffer,
     minimumBookingNoticeMin: eventType.minimum_booking_notice,
+    bookingWindowDays: eventType.booking_window_days,
     now: args.now ?? new Date(),
   });
 
@@ -1110,6 +1114,7 @@ export async function createBooking(
         beforeBufferMin: eventType.before_event_buffer,
         afterBufferMin: eventType.after_event_buffer,
         minimumBookingNoticeMin: eventType.minimum_booking_notice,
+        bookingWindowDays: eventType.booking_window_days,
         now: new Date(),
       }).some((d) => d.getTime() === args.startMs);
     if (!offered) return { ok: false, reason: 'INVALID', message: 'That time is not available.' };

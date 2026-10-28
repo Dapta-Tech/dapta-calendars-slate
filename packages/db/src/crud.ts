@@ -50,6 +50,9 @@ export interface EventTypeView {
   /** Round robin only: 'availability' (NULL) or 'equal'. */
   rrDistribution: string | null;
   minimumBookingNotice: number;
+  /** Booking window in calendar days ahead (today = day 0). NULL ⇒ no limit,
+   *  which is what every event type that predates it reads as. */
+  bookingWindowDays: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;
   slotInterval: number | null;
@@ -100,6 +103,7 @@ interface EventTypeDbRow {
   scheduling_type: string | null;
   rr_distribution: string | null;
   minimum_booking_notice: number;
+  booking_window_days: number | null;
   before_event_buffer: number;
   after_event_buffer: number;
   slot_interval: number | null;
@@ -116,8 +120,8 @@ interface EventTypeDbRow {
 }
 
 const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_minutes, locations,
-  schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, before_event_buffer,
-  after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
+  schedule_id, hidden, scheduling_type, rr_distribution, minimum_booking_notice, booking_window_days,
+  before_event_buffer, after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
   crm_property_mappings, calendar_title_template, calendar_description_template,
   success_redirect_url`;
@@ -153,6 +157,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     schedulingType: r.scheduling_type,
     rrDistribution: r.rr_distribution,
     minimumBookingNotice: r.minimum_booking_notice,
+    bookingWindowDays: r.booking_window_days ?? null,
     beforeEventBuffer: r.before_event_buffer,
     afterEventBuffer: r.after_event_buffer,
     slotInterval: r.slot_interval,
@@ -266,6 +271,8 @@ export interface EventTypeInputRepo {
   schedulingType?: string | null;
   rrDistribution?: string | null;
   minimumBookingNotice?: number;
+  /** Booking window. UNDEFINED ⇒ unchanged (no limit on create); null ⇒ no limit. */
+  bookingWindowDays?: number | null;
   beforeEventBuffer?: number;
   afterEventBuffer?: number;
   slotInterval?: number | null;
@@ -336,7 +343,7 @@ export async function createEventType(
   await db.run(
     sql`INSERT INTO event_type (id, account_id, member_id, team_id, slug, title, description,
           length_minutes, locations, schedule_id, hidden, scheduling_type, rr_distribution, booking_fields, reminders,
-          minimum_booking_notice, before_event_buffer, after_event_buffer, slot_interval,
+          minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
           calendar_description_template, success_redirect_url, created_at)
@@ -346,7 +353,7 @@ export async function createEventType(
           ${input.schedulingType ?? null}, ${input.rrDistribution ?? null},
           ${jsonParam(db, input.bookingFields ?? null)},
           ${jsonParam(db, normalizeEventReminders(input.reminders ?? defaultEventReminders()))},
-          ${input.minimumBookingNotice ?? 120},
+          ${input.minimumBookingNotice ?? 120}, ${input.bookingWindowDays ?? null},
           ${input.beforeEventBuffer ?? 0}, ${input.afterEventBuffer ?? 0}, ${input.slotInterval ?? null},
           ${input.requiresConfirmation ? 1 : 0}, ${input.preventDuplicateBookings ? 1 : 0},
           ${input.seatsPerTimeSlot ?? null}, ${destinationCalendarId},
@@ -387,6 +394,7 @@ export async function updateEventType(
   if (input.schedulingType !== undefined) set('scheduling_type', sql`${input.schedulingType ?? null}`);
   if (input.rrDistribution !== undefined) set('rr_distribution', sql`${input.rrDistribution ?? null}`);
   if (input.minimumBookingNotice !== undefined) set('minimum_booking_notice', sql`${input.minimumBookingNotice}`);
+  if (input.bookingWindowDays !== undefined) set('booking_window_days', sql`${input.bookingWindowDays ?? null}`);
   if (input.beforeEventBuffer !== undefined) set('before_event_buffer', sql`${input.beforeEventBuffer}`);
   if (input.afterEventBuffer !== undefined) set('after_event_buffer', sql`${input.afterEventBuffer}`);
   if (input.slotInterval !== undefined) set('slot_interval', sql`${input.slotInterval ?? null}`);

@@ -23,6 +23,8 @@ export interface EventTypePayload {
   /** The location kind + its detail; null clears the Where. */
   location: EventLocationDto | null;
   minimumBookingNotice: number;
+  /** Booking window in calendar days ahead; null ⇒ no limit. */
+  bookingWindowDays: number | null;
   slotInterval: number | null;
   beforeEventBuffer: number;
   afterEventBuffer: number;

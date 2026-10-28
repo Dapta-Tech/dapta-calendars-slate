@@ -195,6 +195,12 @@ export const eventType = pgTable('event_type', {
   reminders: jsonb('reminders'),
   metadata: jsonb('metadata'),
   minimumBookingNotice: integer('minimum_booking_notice').notNull().default(120),
+  /**
+   * Booking window: invitees may book up to this many calendar days ahead
+   * (today = day 0, in the schedule's zone; `bookingWindowEnd` in
+   * @slate/engine). NULL = no limit, as before this existed. See migration 0035.
+   */
+  bookingWindowDays: integer('booking_window_days'),
   beforeEventBuffer: integer('before_event_buffer').notNull().default(0),
   afterEventBuffer: integer('after_event_buffer').notNull().default(0),
   slotInterval: integer('slot_interval'),

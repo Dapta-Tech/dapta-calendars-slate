@@ -539,6 +539,17 @@ export interface BookingMessages {
       fLength: string;
       fSlotInterval: string;
       fMinNotice: string;
+      /**
+       * Booking window: how many calendar days ahead invitees can book (today
+       * is day 0), in the schedule's time zone. Empty is no limit.
+       */
+      bookingWindow: {
+        label: string;
+        placeholder: string;
+        hint: string;
+        /** Inline error for anything but a whole number in range; `{max}` is the cap. */
+        invalid: string;
+      };
       fBufferBefore: string;
       fBufferAfter: string;
       fSeats: string;
@@ -2256,6 +2267,12 @@ export const en: BookingMessages = {
       fLength: 'Length (min)',
       fSlotInterval: 'Slot interval (min)',
       fMinNotice: 'Min. notice (min)',
+      bookingWindow: {
+        label: 'Booking window (days)',
+        placeholder: 'No limit',
+        hint: 'Invitees can book up to this many calendar days ahead, counting from today in the time zone of the schedule (on a team event, each host’s own). With 14, the last day they can pick is 14 days from today. Leave it empty for no limit.',
+        invalid: 'Use a whole number from 1 to {max}, or leave it empty.',
+      },
       fBufferBefore: 'Buffer before (min)',
       fBufferAfter: 'Buffer after (min)',
       fSeats: 'Seats / slot (group)',
@@ -3950,6 +3967,12 @@ export const es: BookingMessages = {
       fLength: 'Duración (min)',
       fSlotInterval: 'Intervalo entre horarios (min)',
       fMinNotice: 'Antelación mínima (min)',
+      bookingWindow: {
+        label: 'Antelación máxima (días)',
+        placeholder: 'Sin límite',
+        hint: 'Los invitados pueden reservar hasta esta cantidad de días calendario hacia adelante, contando desde hoy en la zona horaria del horario (en un evento de equipo, la de cada anfitrión). Con 14, el último día que pueden elegir es dentro de 14 días. Déjalo vacío para no poner límite.',
+        invalid: 'Usa un número entero de 1 a {max}, o déjalo vacío.',
+      },
       fBufferBefore: 'Margen antes (min)',
       fBufferAfter: 'Margen después (min)',
       fSeats: 'Cupos / horario (grupo)',
