@@ -12,6 +12,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { VisitorAnalytics } from '@/components/analytics/visitor-analytics';
+import { EventTracking } from '@/components/event-tracking';
 import { analyticsConfig } from '@/lib/analytics/config';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import { logoOf } from '@/lib/brand-kit';
@@ -189,6 +190,9 @@ export default async function BookingPage({
         accountKey={profile.account.shortCode ?? null}
         embed={embed}
       />
+      {/* The host's own tags for this event (GTM, Meta Pixel, their PostHog,
+          HubSpot), apart from dCal's anonymous counts above. Nothing without ids. */}
+      <EventTracking tracking={listing.tracking} />
     </BrandedShell>
   );
 }

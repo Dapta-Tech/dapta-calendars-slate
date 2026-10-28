@@ -17,6 +17,7 @@ import { BrandedShell } from '@/components/branded-shell';
 import { EmbedResizeReporter } from '@/components/embed-resize-reporter';
 import { MadeWithBadge } from '@/components/made-with-badge';
 import { brandingShown } from '@/lib/growth';
+import { EventTracking } from '@/components/event-tracking';
 import { resolveAvatarUrl } from '@/lib/avatar';
 import {
   EMBED_ROOT_CLASS,
@@ -266,6 +267,8 @@ export default async function OneOffBookingPage({
         </main>
         <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(team)} />
         {embed ? <EmbedResizeReporter /> : null}
+        {/* The host's own tags: a hidden event is on no listing, so its ids come with the read. */}
+        <EventTracking tracking={availability.eventType.tracking} />
       </BrandedShell>
     );
   }
@@ -323,6 +326,7 @@ export default async function OneOffBookingPage({
       </main>
       <MadeWithBadge locale={locale} accountCode={target.accountCode} show={brandingShown(profile)} />
       {embed ? <EmbedResizeReporter /> : null}
+      <EventTracking tracking={availability.eventType.tracking} />
     </BrandedShell>
   );
 }

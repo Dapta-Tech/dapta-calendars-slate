@@ -12,12 +12,19 @@ import {
   MAX_REMINDER_LEAD_MINUTES,
   MAX_REMINDER_SUBJECT,
   MIN_REMINDER_LEAD_MINUTES,
+  EVENT_TRACKING_KEYS,
+  MAX_POSTHOG_HOST,
+  MAX_POSTHOG_KEY,
   MAX_SUCCESS_REDIRECT_URL,
+  MAX_TRACKING_ID,
   defaultEventReminders,
+  eventTrackingSchema,
   isSuccessRedirectUrl,
+  normalizeEventTracking,
   type CrmPropertyCatalog,
   type CrmPropertyMapping,
   type EventReminder,
+  type EventTracking,
   type LocationKind,
   type OneOffLinkView,
 } from '@slate/types';
@@ -877,6 +884,7 @@ export function EventTypeForm({
   teamName,
   teams,
   canManageTeams = false,
+  trackingEnabled = false,
   connections,
   redirectOnSuccess,
   backHref,
@@ -907,6 +915,10 @@ export function EventTypeForm({
   /** Owner or admin: the team links (new team event, team page) are theirs
    *  alone; the API refuses them to a plain member. */
   canManageTeams?: boolean;
+  /** Owner or admin of a workspace this deployment lets load tracking and
+   *  pixels (`/me`'s `eventTrackingEnabled`). Off: the section is not shown and
+   *  the save never sends the field, so the stored ids stay as they are. */
+  trackingEnabled?: boolean;
   /** The host's connected calendars, for the editable "Calendars for this
    *  event" section (PHASE 2) — omitted for TEAM events (each host has their
    *  own connection; a single per-event picker here would be misleading). */
@@ -979,6 +991,12 @@ export function EventTypeForm({
   const redirectHintId = useId();
   const redirectErrorId = useId();
   const redirectInputRef = useRef<HTMLInputElement>(null);
+  // Tracking and pixels: one text per vendor, '' = off. Same wait as above
+  // before an error shows: a blur of that field, or a save attempt.
+  const [trackingDraft, setTrackingDraft] = useState<TrackingDraft>(() => trackingDraftOf(initial?.tracking));
+  const [trackingChecked, setTrackingChecked] = useState<Set<TrackingKey>>(() => new Set());
+  const trackingInvalid = invalidTrackingKeys(trackingDraft);
+  const trackingInputRefs = useRef<Partial<Record<TrackingKey, HTMLInputElement | null>>>({});
   // Reminders + follow-up (#68). Editing opens on the effective list the API
   // returns (a never-configured event surfaces the shipped 24h + 1h with the
   // follow-up off). CREATE has no `initial`, so it seeds the same shipped list
@@ -1111,6 +1129,11 @@ export function EventTypeForm({
       redirectInputRef.current?.focus();
       return;
     }
+    if (trackingEnabled && trackingInvalid.length > 0) {
+      setTrackingChecked(new Set(EVENT_TRACKING_KEYS));
+      trackingInputRefs.current[trackingInvalid[0]!]?.focus();
+      return;
+    }
     start(async () => {
       const payload: EventTypePayload = {
         id: initial?.id,
@@ -1141,6 +1164,8 @@ export function EventTypeForm({
         bookingFields: fields.filter((f) => f.name && f.label),
         reminders,
         successRedirectUrl: redirectTrimmed || null,
+        // Blank ids are left out, and nothing left is null ("no tracking").
+        ...(trackingEnabled ? { tracking: normalizeEventTracking(trackingDraft) } : {}),
         // Re-keyed by provider, and only sent when an adapter is wired: a
         // deployment with no CRM must not rewrite this column at all, so an
         // event configured on a CRM-enabled deployment keeps its mappings if it
@@ -1481,6 +1506,17 @@ export function EventTypeForm({
         </p>
       </div>
 
+      {trackingEnabled ? (
+        <TrackingSection
+          draft={trackingDraft}
+          onChange={(key, value) => setTrackingDraft((d) => ({ ...d, [key]: value }))}
+          onBlur={(key) => setTrackingChecked((c) => new Set(c).add(key))}
+          invalid={trackingInvalid.filter((key) => trackingChecked.has(key))}
+          inputRefs={trackingInputRefs}
+          m={m.tracking}
+        />
+      ) : null}
+
       {/* Intake questions */}
       <div className="flex flex-col gap-inline">
         <span className="text-sm font-semibold text-muted-foreground">{m.intakeQuestions}</span>
@@ -1722,6 +1758,104 @@ function BookingWindowField({
         {m.hint}
       </p>
     </div>
+  );
+}
+
+type TrackingKey = (typeof EVENT_TRACKING_KEYS)[number];
+type TrackingDraft = Record<TrackingKey, string>;
+
+/** The editor's text per vendor, '' for an id the event does not set. */
+function trackingDraftOf(tracking: EventTracking | null | undefined): TrackingDraft {
+  const draft = {} as TrackingDraft;
+  for (const key of EVENT_TRACKING_KEYS) draft[key] = tracking?.[key] ?? '';
+  return draft;
+}
+
+/** The fields the API would refuse, in the order the section lists them. */
+function invalidTrackingKeys(draft: TrackingDraft): TrackingKey[] {
+  return EVENT_TRACKING_KEYS.filter((key) => !eventTrackingSchema.shape[key].safeParse(draft[key]).success);
+}
+
+const TRACKING_FIELDS: ReadonlyArray<{
+  key: TrackingKey;
+  label: 'gtmLabel' | 'metaLabel' | 'posthogKeyLabel' | 'posthogHostLabel' | 'hubspotLabel';
+  help: 'gtmHelp' | 'metaHelp' | 'posthogKeyHelp' | 'posthogHostHelp' | 'hubspotHelp';
+  placeholder: string;
+  max: number;
+}> = [
+  { key: 'gtmId', label: 'gtmLabel', help: 'gtmHelp', placeholder: 'GTM-XXXXXXX', max: MAX_TRACKING_ID },
+  { key: 'metaPixelId', label: 'metaLabel', help: 'metaHelp', placeholder: '123456789012345', max: MAX_TRACKING_ID },
+  { key: 'posthogKey', label: 'posthogKeyLabel', help: 'posthogKeyHelp', placeholder: 'phc_...', max: MAX_POSTHOG_KEY },
+  { key: 'posthogHost', label: 'posthogHostLabel', help: 'posthogHostHelp', placeholder: 'https://eu.i.posthog.com', max: MAX_POSTHOG_HOST },
+  { key: 'hubspotTrackingId', label: 'hubspotLabel', help: 'hubspotHelp', placeholder: '12345678', max: MAX_TRACKING_ID },
+];
+
+/**
+ * Tracking and pixels on the event's booking page (dForms' section, per event
+ * type): one field per vendor, each with the line that says when its tag
+ * fires. Saved with the event, live at once (there is no draft here).
+ */
+function TrackingSection({
+  draft,
+  onChange,
+  onBlur,
+  invalid,
+  inputRefs,
+  m,
+}: {
+  draft: TrackingDraft;
+  onChange: (key: TrackingKey, value: string) => void;
+  onBlur: (key: TrackingKey) => void;
+  /** Fields to show an error on (invalid AND already left or saved). */
+  invalid: TrackingKey[];
+  inputRefs: React.MutableRefObject<Partial<Record<TrackingKey, HTMLInputElement | null>>>;
+  m: EventTypeMessages['tracking'];
+}) {
+  const baseId = useId();
+  return (
+    <section className="flex flex-col gap-inline" aria-labelledby={`${baseId}-title`}>
+      <span id={`${baseId}-title`} className="text-sm font-semibold text-muted-foreground">
+        {m.title}
+      </span>
+      <p className="text-xs text-muted-foreground">{m.subtitle}</p>
+      <div className="grid gap-field sm:grid-cols-2">
+        {TRACKING_FIELDS.map(({ key, label, help, placeholder, max }) => {
+          const bad = invalid.includes(key);
+          const hintId = `${baseId}-${key}-hint`;
+          const errorId = `${baseId}-${key}-error`;
+          return (
+            <div key={key} className="flex flex-col gap-tight">
+              <Field label={m[label]}>
+                <input
+                  ref={(el) => {
+                    inputRefs.current[key] = el;
+                  }}
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={max}
+                  placeholder={placeholder}
+                  value={draft[key]}
+                  onChange={(e) => onChange(key, e.target.value)}
+                  onBlur={() => onBlur(key)}
+                  aria-invalid={bad ? true : undefined}
+                  aria-describedby={bad ? `${errorId} ${hintId}` : hintId}
+                  className={inputCls}
+                />
+              </Field>
+              {bad ? (
+                <p id={errorId} className="text-xs text-destructive" role="alert">
+                  {key === 'posthogHost' ? m.posthogHostInvalid : m.idInvalid}
+                </p>
+              ) : null}
+              <p id={hintId} className="text-xs text-muted-foreground">
+                {m[help]}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

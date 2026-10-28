@@ -23,6 +23,7 @@ import {
   type Interval,
 } from '@slate/engine';
 import type { CalendarProvider } from '@slate/calendar';
+import { normalizeEventTracking, type EventTracking } from '@slate/types';
 import type { Db } from './client';
 import { loadExternalBusy } from './calendar-refs';
 import { applyCalendarTemplates, applySharedFallback, markSharedSql } from './calendar-text';
@@ -160,6 +161,8 @@ export interface EventTypeRow {
   /** Duplicate-booking guard (#69); 0 on every event type nobody switched on. */
   prevent_duplicate_bookings: number;
   seats_per_time_slot: number | null;
+  /** Tracking and pixels on the booking page (JSON); NULL on every event without them. */
+  tracking: unknown;
 }
 
 export type BookingOutcome =
@@ -393,7 +396,7 @@ export async function getEventType(
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               prevent_duplicate_bookings, seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot, tracking
         FROM event_type
         WHERE account_id = ${accountId} AND member_id = ${memberId} AND slug = ${slug}
               ${visibility} LIMIT 1`,
@@ -413,7 +416,7 @@ export async function getEventTypeRowById(db: Db, id: string): Promise<EventType
     sql`SELECT id, account_id, member_id, team_id, slug, title, description, length_minutes,
                locations, schedule_id, scheduling_type, booking_fields, minimum_booking_notice, booking_window_days,
                before_event_buffer, after_event_buffer, slot_interval, requires_confirmation,
-               prevent_duplicate_bookings, seats_per_time_slot
+               prevent_duplicate_bookings, seats_per_time_slot, tracking
         FROM event_type WHERE id = ${id} LIMIT 1`,
   );
 }
@@ -535,6 +538,8 @@ export interface PublicProfile {
     lengthMinutes: number;
     location: ReturnType<typeof parseEventLocation>;
     timeZone: string;
+    /** The event's tracking ids, loaded on its booking page; null = none. */
+    tracking: EventTracking | null;
   }>;
 }
 
@@ -559,8 +564,9 @@ export async function getPublicProfile(
     length_minutes: number;
     locations: unknown;
     schedule_time_zone: string | null;
+    tracking: unknown;
   }>(
-    sql`SELECT e.slug, e.title, e.description, e.length_minutes, e.locations,
+    sql`SELECT e.slug, e.title, e.description, e.length_minutes, e.locations, e.tracking,
                COALESCE(own.time_zone, dflt.time_zone) AS schedule_time_zone
         FROM event_type e
         LEFT JOIN schedule own ON own.id = e.schedule_id
@@ -607,6 +613,7 @@ export async function getPublicProfile(
       lengthMinutes: r.length_minutes,
       location: parseEventLocation(parseJsonColumn<unknown>(r.locations, null)),
       timeZone: r.schedule_time_zone ?? member.time_zone,
+      tracking: normalizeEventTracking(parseJsonColumn<unknown>(r.tracking, null)),
     })),
   };
 }
@@ -630,6 +637,8 @@ export interface AvailabilityResult {
     bookingFields: BookingFieldDef[];
     /** Where the meeting happens — rendered on the public booking page. */
     location: EventLocation | null;
+    /** Tracking and pixels on the booking page; set only by the invitee's read. */
+    tracking?: EventTracking | null;
   };
   timeZone: string;
   /** Each offered instant. `spotsLeft`/`capacity` are set only for group events (R23). */
@@ -802,6 +811,7 @@ export async function getAvailability(
     lengthMinutes: eventType.length_minutes,
     bookingFields: parseJsonColumn<BookingFieldDef[]>(eventType.booking_fields, []),
     location: parseEventLocation(parseJsonColumn<unknown>(eventType.locations, null)),
+    tracking: normalizeEventTracking(parseJsonColumn<unknown>(eventType.tracking, null)),
   };
   const displayTz = args.displayTimeZone ?? scheduleTimeZone;
 

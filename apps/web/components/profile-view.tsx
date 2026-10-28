@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import type { EventTracking } from '@slate/types';
 import { t, type BookingMessages } from '@slate/shared';
 import { ChevronIcon, HostAvatar } from '@/components/booking-page-parts';
+import { hasAnyTracking, resolveTracking } from '@/lib/event-tracking';
 
 /**
  * A host's (or a team's) public landing: the cover, who they are, and what can
@@ -22,6 +24,8 @@ export interface ProfileEvent {
   title: string;
   description: string | null;
   lengthMinutes: number;
+  /** The event's own tracking ids: an event with any opens as a full page load (see below). */
+  tracking?: EventTracking | null;
 }
 
 /** A name as a reader compares it: case, accents and spacing do not count. */
@@ -106,31 +110,40 @@ export function ProfileView({
 
       {events.length ? (
         <ul className="bp-card bp-event-list">
-          {events.map((et) => (
-            <li key={et.slug}>
-              <Link href={hrefFor(et.slug)} className="bp-event-row">
-                <span className="bp-event-row-text">
-                  <span className="bp-event-row-title">{et.title}</span>
-                  {et.description ? <span className="bp-event-row-description">{et.description}</span> : null}
-                </span>
-                {/* The duration as a figure: the number set large with tabular
-                    digits, so a list of them reads as a column. The whole phrase
-                    is what a screen reader hears. */}
-                <span className="bp-event-row-length">
-                  <span className="sr-only">{t(m.booking.durationMinutes, { minutes: et.lengthMinutes })}</span>
-                  <span aria-hidden className="bp-figure">
-                    {et.lengthMinutes}
+          {events.map((et) => {
+            // An event that loads the host's own tags opens as a full page load,
+            // not a client navigation: its tags then live and die with its own
+            // document, so they never ride on to this page (GTM would count it)
+            // or onto another event's page (a second pixel would hear that
+            // event's bookings). Every other event keeps the prefetched client
+            // navigation.
+            const RowLink = hasAnyTracking(resolveTracking(et.tracking)) ? 'a' : Link;
+            return (
+              <li key={et.slug}>
+                <RowLink href={hrefFor(et.slug)} className="bp-event-row">
+                  <span className="bp-event-row-text">
+                    <span className="bp-event-row-title">{et.title}</span>
+                    {et.description ? <span className="bp-event-row-description">{et.description}</span> : null}
                   </span>
-                  <span aria-hidden className="bp-unit">
-                    {m.bookingPage.minutesUnit}
+                  {/* The duration as a figure: the number set large with tabular
+                      digits, so a list of them reads as a column. The whole phrase
+                      is what a screen reader hears. */}
+                  <span className="bp-event-row-length">
+                    <span className="sr-only">{t(m.booking.durationMinutes, { minutes: et.lengthMinutes })}</span>
+                    <span aria-hidden className="bp-figure">
+                      {et.lengthMinutes}
+                    </span>
+                    <span aria-hidden className="bp-unit">
+                      {m.bookingPage.minutesUnit}
+                    </span>
                   </span>
-                </span>
-                <span aria-hidden className="bp-event-row-chevron">
-                  <ChevronIcon direction="right" />
-                </span>
-              </Link>
-            </li>
-          ))}
+                  <span aria-hidden className="bp-event-row-chevron">
+                    <ChevronIcon direction="right" />
+                  </span>
+                </RowLink>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="bp-muted bp-profile-empty">{emptyText}</p>

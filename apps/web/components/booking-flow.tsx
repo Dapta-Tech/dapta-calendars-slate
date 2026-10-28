@@ -48,6 +48,7 @@ import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled } from '@/lib/embed-messages';
 import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
+import { reportBookingConversion } from '@/lib/booking-conversion';
 import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
@@ -61,6 +62,14 @@ import { useProgressiveSlots, type ProgressiveAvailability } from '@/lib/use-pro
  * only touched when there is a link to wait for.
  */
 const askMeetingLink = (uid: string, token: string) => meetingLinkAction(uid, token);
+
+/**
+ * How long a redirect after booking waits when the host's own tags were just
+ * told of the booking: their requests are fire-and-forget, and a navigation
+ * that commits first cancels them. Well inside the few seconds after the
+ * Confirm click in which a browser still lets an embed move the top window.
+ */
+const CONVERSION_GRACE_MS = 300;
 
 interface Props {
   accountCode: string;
@@ -333,15 +342,37 @@ export function BookingFlow({
     track('booking_confirmed', { status: bookedStatus, mode });
   }, [bookedUid, bookedStatus, mode]);
 
-  // Redirect after booking, once per booking and AFTER the two effects above
+  // The host's own tags (`lib/event-tracking.ts`) hear of the booking: Meta's
+  // `Schedule` and GTM's `booking_scheduled`, once per booking, after the write
+  // confirmed it and before any redirect below. Nothing at all when the page
+  // loads no tag. Nothing about the invitee is sent.
+  const conversionUid = useRef<string | null>(null);
+  const conversionSent = useRef(false);
+  useEffect(() => {
+    if (!bookedUid || conversionUid.current === bookedUid) return;
+    conversionUid.current = bookedUid;
+    conversionSent.current = reportBookingConversion(bookedUid);
+  }, [bookedUid]);
+
+  // Redirect after booking, once per booking and AFTER the three effects above
   // (effects run in the order they are declared), so the host page has its
-  // message and the count is queued before the page goes. The analytics
-  // adapter flushes on unload, so leaving at once loses nothing.
+  // message and the counts are queued before the page goes. dCal's analytics
+  // adapter flushes on unload; the host's tags get CONVERSION_GRACE_MS. The
+  // uid is marked when the redirect runs, not when it is scheduled, so a
+  // cleared timer (React's development double effect) schedules it again.
   const redirectedUid = useRef<string | null>(null);
   useEffect(() => {
     if (!bookedUid || !redirectTo || redirectedUid.current === bookedUid) return;
-    redirectedUid.current = bookedUid;
-    followRedirect(redirectTo);
+    const go = () => {
+      redirectedUid.current = bookedUid;
+      followRedirect(redirectTo);
+    };
+    if (!conversionSent.current) {
+      go();
+      return;
+    }
+    const timer = setTimeout(go, CONVERSION_GRACE_MS);
+    return () => clearTimeout(timer);
   }, [bookedUid, redirectTo]);
 
   /** Full client-side gate, replacing native validation (noValidate): native

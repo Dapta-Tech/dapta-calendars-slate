@@ -51,6 +51,7 @@ import {
   updateSchedule,
   updateTeam,
   updateTeamMemberRole,
+  sql,
   type CrudResult,
 } from '@slate/db';
 import {
@@ -59,11 +60,14 @@ import {
   memberResendInviteSchema,
   type OneOffLinkView,
   memberPatchSchema,
+  normalizeEventTracking,
   scheduleInputSchema,
   teamInputSchema,
   teamMemberInputSchema,
   type CrmPropertyMappings,
+  type EventTracking,
 } from '@slate/types';
+import type { ServerEnv } from '@slate/config/env';
 import { oneOffLinkPath } from '@slate/engine';
 import { isCompatible, sourceExists, type MappableField } from '@slate/crm/mapping';
 import { ZodError } from 'zod';
@@ -74,7 +78,8 @@ import { EmailEffects } from './email-effects';
 import { GrowthService } from './growth.service';
 import { assertAdmin, assertCanManageTarget, assertNotSelf, assertOwner, assertOwnsOrAdmin } from './permissions';
 import { assertCalendarTemplates, assertReminderTemplates } from './template-validation';
-import { DB } from './tokens';
+import { trackingAllowedFor } from './event-tracking-gate';
+import { DB, ENV } from './tokens';
 import { withNewHostBranding } from '@slate/shared';
 
 /**
@@ -177,7 +182,39 @@ export class AdminCrudController {
     // The invitation email. LAST and @Optional() for the same reason: absent,
     // an invite creates the member and sends nothing, as it always did.
     @Optional() @Inject(EmailEffects) private readonly email?: EmailEffects,
+    // EVENT_TRACKING_ACCOUNTS. LAST and @Optional() for the same reason:
+    // absent, no workspace may set tracking, which is also the env's default.
+    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
   ) {}
+
+  /**
+   * Tracking and pixels change only by an owner or admin, and only in a
+   * workspace the deployment allows (`trackingAllowedFor`): the tags run the
+   * host's JavaScript on the dashboard's origin. A save that leaves them as
+   * they are (every editor save sends them) passes untouched, so a member can
+   * still edit their event. Clearing them needs an owner or admin too, but
+   * never the deployment's permission.
+   */
+  private async assertTrackingChange(
+    p: Parameters<typeof assertAdmin>[0] & { accountId: string },
+    next: EventTracking | null | undefined,
+    current: EventTracking | null,
+  ): Promise<void> {
+    if (next === undefined) return;
+    const normalized = normalizeEventTracking(next);
+    if (JSON.stringify(normalized) === JSON.stringify(normalizeEventTracking(current))) return;
+    assertAdmin(p);
+    if (!normalized) return;
+    const account = await this.db.get<{ code: string; vanity_slug: string | null }>(
+      sql`SELECT code, vanity_slug FROM account WHERE id = ${p.accountId} LIMIT 1`,
+    );
+    if (!account || !trackingAllowedFor(this.env, { code: account.code, vanitySlug: account.vanity_slug })) {
+      throw new BadRequestException({
+        error: 'TRACKING_DISABLED',
+        message: 'Tracking and pixels are not enabled for this workspace on this deployment.',
+      });
+    }
+  }
 
   /** The language the host reads template errors in (their own UI locale). */
   private async hostLocale(p: { accountId: string; memberId: string }): Promise<'en' | 'es'> {
@@ -388,6 +425,7 @@ export class AdminCrudController {
     // A team event-type is a cross-member resource → admin/owner only. A plain
     // member may only create their OWN personal event-type.
     if (input.teamId) assertAdmin(p);
+    await this.assertTrackingChange(p, input.tracking, null);
     const locale = await this.hostLocale(p);
     if (input.reminders) assertReminderTemplates(input.reminders, [], locale);
     assertCalendarTemplates(input, null, locale);
@@ -414,6 +452,7 @@ export class AdminCrudController {
     if (!existing) throw new NotFoundException({ error: 'NOT_FOUND', message: 'Not found.' });
     assertOwnsOrAdmin(p, existing.memberId);
     const input = parse(eventTypeInputSchema.partial(), body);
+    await this.assertTrackingChange(p, input.tracking, existing.tracking);
     const locale = await this.hostLocale(p);
     if (input.reminders) assertReminderTemplates(input.reminders, existing.reminders, locale);
     assertCalendarTemplates(input, existing, locale);

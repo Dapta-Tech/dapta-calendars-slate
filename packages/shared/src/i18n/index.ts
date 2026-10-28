@@ -579,6 +579,27 @@ export interface BookingMessages {
         invalid: string;
       };
       /**
+       * Tracking and pixels on this event's booking page (the dForms section,
+       * per event type). Each help line says WHEN its tag fires.
+       */
+      tracking: {
+        title: string;
+        subtitle: string;
+        gtmLabel: string;
+        gtmHelp: string;
+        metaLabel: string;
+        metaHelp: string;
+        posthogKeyLabel: string;
+        posthogKeyHelp: string;
+        posthogHostLabel: string;
+        posthogHostHelp: string;
+        posthogHostInvalid: string;
+        hubspotLabel: string;
+        hubspotHelp: string;
+        /** Inline error for an id with characters no vendor uses. */
+        idInvalid: string;
+      };
+      /**
        * One-off links (#69 / AB2, #110) — the editor half.
        *
        * Never call it a security control in either locale: it stops a link
@@ -2293,6 +2314,26 @@ export const en: BookingMessages = {
         placeholder: 'https://example.com/thanks',
         invalid: 'Use a full address that starts with https://',
       },
+      // Tracking and pixels. Each help line says when its tag fires.
+      tracking: {
+        title: 'Tracking and pixels',
+        subtitle:
+          'Measure visits and bookings on this event’s booking page, embedded or not. Each tag loads only when its ID is set, and never in your dashboard.',
+        gtmLabel: 'Google Tag Manager ID',
+        gtmHelp: 'Loads your GTM container so your tags fire, and pushes a booking_scheduled event when someone books.',
+        metaLabel: 'Meta Pixel ID',
+        metaHelp:
+          'Fires a PageView when the booking page loads, and a Schedule when someone books. If automatic advanced matching is on in Meta, it can also read the booking form.',
+        posthogKeyLabel: 'PostHog project key',
+        posthogKeyHelp: 'Captures one pageview per visit in your own PostHog project.',
+        posthogHostLabel: 'PostHog host (optional)',
+        posthogHostHelp: 'Defaults to PostHog US cloud; set your EU or self-hosted address.',
+        posthogHostInvalid: 'Enter a full https:// address, e.g. https://eu.i.posthog.com.',
+        hubspotLabel: 'HubSpot tracking ID',
+        hubspotHelp:
+          'Loads the HubSpot tracking code for your portal on the booking page, so its visits count in HubSpot. If collected forms is on in your portal, HubSpot can also capture the booking form. Bookings reach HubSpot through Integrations.',
+        idInvalid: 'Use only letters, numbers, - and _.',
+      },
       // One-off links (#110). Not a security control; say what it does.
       oneOffLinks: {
         title: 'One-off invite links',
@@ -3992,6 +4033,27 @@ export const es: BookingMessages = {
         hint: 'Los invitados van a esta página después de reservar, también en las solicitudes que aún debes confirmar, en lugar de quedarse en la confirmación. Solo quien reserva recibe la dirección. Déjalo vacío para mantener la confirmación. Reprogramar o cancelar nunca redirige.',
         placeholder: 'https://ejemplo.com/gracias',
         invalid: 'Usa una dirección completa que empiece por https://',
+      },
+      // Seguimiento y píxeles. Cada ayuda dice cuándo se dispara su etiqueta.
+      tracking: {
+        title: 'Seguimiento y píxeles',
+        subtitle:
+          'Mide visitas y reservas en la página de reservas de este evento, insertada o no. Cada etiqueta se carga solo cuando su ID está configurado, y nunca en tu panel.',
+        gtmLabel: 'ID de Google Tag Manager',
+        gtmHelp:
+          'Carga tu contenedor de GTM para que se disparen tus etiquetas, y empuja un evento booking_scheduled cuando alguien reserva.',
+        metaLabel: 'ID del píxel de Meta',
+        metaHelp:
+          'Dispara un PageView al cargar la página de reservas y un Schedule cuando alguien reserva. Si la coincidencia avanzada automática está activa en Meta, también puede leer el formulario de reserva.',
+        posthogKeyLabel: 'Clave del proyecto de PostHog',
+        posthogKeyHelp: 'Captura una pageview por visita en tu propio proyecto de PostHog.',
+        posthogHostLabel: 'Host de PostHog (opcional)',
+        posthogHostHelp: 'Por defecto usa la nube de PostHog en EE. UU.; configura tu dirección de la UE o autoalojada.',
+        posthogHostInvalid: 'Introduce una dirección https:// completa, p. ej. https://eu.i.posthog.com.',
+        hubspotLabel: 'ID de seguimiento de HubSpot',
+        hubspotHelp:
+          'Carga el código de seguimiento de HubSpot de tu portal en la página de reservas, para que sus visitas cuenten en HubSpot. Si los formularios recopilados están activos en tu portal, HubSpot también puede capturar el formulario de reserva. Las reservas llegan a HubSpot por Integraciones.',
+        idInvalid: 'Usa solo letras, números, - y _.',
       },
       // Enlaces de un solo uso (#110). No es un control de seguridad.
       oneOffLinks: {
