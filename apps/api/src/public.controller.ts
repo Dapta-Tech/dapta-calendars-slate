@@ -284,7 +284,14 @@ export class PublicController {
     @Param('accountCode') accountCode: string,
     @Param('teamSlug') teamSlug: string,
     @Body()
-    body: { slug: string; startUtc: string; attendee: never; answers?: Record<string, unknown>; locale?: unknown },
+    body: {
+      slug: string;
+      startUtc: string;
+      attendee: never;
+      answers?: Record<string, unknown>;
+      locale?: unknown;
+      utm?: unknown;
+    },
     @Headers(ONE_OFF_HEADER) token?: string,
   ) {
     // Forward an EXPLICIT pick, never the raw body. Nest hands this handler the
@@ -308,6 +315,9 @@ export class PublicController {
           answers: body?.answers,
           // The page's language: only ever `en`/`es` is stored (F6).
           locale: body?.locale,
+          // The campaign the visitor came from: only the five `utm_*` keys,
+          // cleaned, are ever stored (`normalizeBookingUtm`).
+          utm: body?.utm,
         },
         // CONTEXT, from the header — never `body`. A one-off token read off the
         // raw body here would join `metadata` and `idempotencyKey` in the list

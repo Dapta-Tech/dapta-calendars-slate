@@ -8,7 +8,8 @@ import {
   getAccountByCode,
   getBrandingSwitchByCode,
   getAvailability,
-  getBookingSuccessRedirectUrl,
+  getBookingSuccessRedirect,
+  setBookingUtm,
   getPublicProfile,
   getBookingRescheduleAvailability,
   getTeamAvailability,
@@ -21,7 +22,7 @@ import {
   parseJsonColumn,
   sql,
 } from '@slate/db';
-import { isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
+import { bookingRedirectUrl, isLocationKind, isOneOffTokenShape, verifyManageToken } from '@slate/engine';
 import { safeTimeZone } from '@slate/shared';
 import type { ServerEnv } from '@slate/config/env';
 import { AnalyticsEffects, type BookingChannel } from './analytics-effects';
@@ -44,6 +45,7 @@ import {
   type PublicProfile,
   type TeamProfile,
   hasHostScriptTracking,
+  normalizeBookingUtm,
   withoutHostScriptTracking,
 } from '@slate/types';
 import { z } from 'zod';
@@ -551,6 +553,17 @@ export class BookingService {
     // Idempotent replay returns an empty token → do NOT reissue a manage link
     // (single-active-token invariant); only mint a URL for a fresh booking.
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
+    // The campaign the visitor came from, kept on a fresh booking before the
+    // webhook reads it. A failed write costs the UTMs, never the booking.
+    // Anything else writes nothing and answers the request's own campaign: a
+    // seat on an existing group booking (the row keeps its first campaign;
+    // per-seat UTMs are a follow-up) and a replay, so a retry's answer and
+    // redirect keep their UTMs. Never the row's on a replay: on a group slot
+    // that is the first seat-taker's, another visitor's campaign. A replay by
+    // key carries the same request, so the same campaign.
+    const utm = outcome.manageToken
+      ? await setBookingUtm(this.db, b.uid, input.utm).catch(() => null)
+      : normalizeBookingUtm(input.utm);
 
     // A seat on an existing group booking: its calendar event already exists,
     // with one guest fewer and the text it was first written with. Rewrite it
@@ -598,6 +611,7 @@ export class BookingService {
                 startUtc,
                 endUtc,
                 title: b.title,
+                ...(utm ? { utm } : {}),
               })
             : undefined,
         )
@@ -607,7 +621,19 @@ export class BookingService {
     // Redirect after booking, read once the booking is committed, so only an
     // invitee who booked learns the address. It must not throw from here
     // (#102): a failed read costs the redirect, never the confirmation.
-    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, b.uid).catch(() => null);
+    const redirect = await getBookingSuccessRedirect(this.db, b.uid).catch(() => null);
+    const successRedirectUrl = redirect
+      ? bookingRedirectUrl(redirect.url, redirect.data, {
+          eventTypeSlug: redirect.eventTypeSlug,
+          eventTypeName: redirect.eventTypeName,
+          startUtc,
+          endUtc,
+          status: b.status,
+          hostName: b.hostName,
+          utm,
+          invitee: { name: b.attendee.name, email: b.attendee.email },
+        })
+      : null;
 
     return {
       uid: b.uid,
@@ -620,6 +646,7 @@ export class BookingService {
       calendarDescription: b.calendarDescription || undefined,
       manageUrl,
       ...(successRedirectUrl ? { successRedirectUrl } : {}),
+      ...(utm ? { utm } : {}),
       deduplicated: outcome.deduplicated || undefined,
     };
   }
@@ -1023,6 +1050,8 @@ export class BookingService {
       metadata?: Record<string, unknown>;
       /** The booking page's language, as `book()` reads `locale`; unvalidated here. */
       locale?: unknown;
+      /** The campaign the visitor came from; cleaned by `normalizeBookingUtm`. */
+      utm?: unknown;
     },
     /**
      * Caller-supplied context, NEVER request body. `PublicController` passes
@@ -1113,6 +1142,13 @@ export class BookingService {
     this.calendar.onBookingAccepted(out.uid);
     this.crm?.onBookingAccepted(out.uid);
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
+    // As on the personal path: a fresh booking keeps its campaign before the
+    // webhook reads it, and anything else answers the request's own. (The CRM
+    // write-out above does not read it.) Every team booking is fresh today:
+    // `createTeamBooking` mints a token on each.
+    const utm = out.manageToken
+      ? await setBookingUtm(this.db, out.uid, body.utm).catch(() => null)
+      : normalizeBookingUtm(body.utm);
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });
     void this.email.enqueueFollowUps(out.uid, { manageUrl });
@@ -1120,6 +1156,7 @@ export class BookingService {
       uid: out.uid,
       status: 'accepted',
       startUtc: body.startUtc,
+      ...(utm ? { utm } : {}),
     });
     // Fresh bookings only, as on the personal path: a replay mints no token.
     if (out.manageToken) {
@@ -1171,7 +1208,19 @@ export class BookingService {
     const startUtc = new Date(Number(row?.start_ms ?? Date.parse(body.startUtc))).toISOString();
     const endUtc = row ? new Date(Number(row.end_ms)).toISOString() : startUtc;
     // As on the personal path: read after the commit, and never thrown.
-    const successRedirectUrl = await getBookingSuccessRedirectUrl(this.db, out.uid).catch(() => null);
+    const redirect = await getBookingSuccessRedirect(this.db, out.uid).catch(() => null);
+    const successRedirectUrl = redirect
+      ? bookingRedirectUrl(redirect.url, redirect.data, {
+          eventTypeSlug: redirect.eventTypeSlug,
+          eventTypeName: redirect.eventTypeName,
+          startUtc,
+          endUtc,
+          status: (row?.status as string | undefined) ?? 'accepted',
+          hostName: row?.host_name ?? null,
+          utm,
+          invitee: { name: body.attendee.name, email: body.attendee.email },
+        })
+      : null;
     return {
       uid: out.uid,
       // A team booking is created `accepted` (it has no confirmation gate), so
@@ -1193,6 +1242,7 @@ export class BookingService {
       hostMemberId: out.hostMemberId,
       manageUrl,
       ...(successRedirectUrl ? { successRedirectUrl } : {}),
+      ...(utm ? { utm } : {}),
     };
   }
 }

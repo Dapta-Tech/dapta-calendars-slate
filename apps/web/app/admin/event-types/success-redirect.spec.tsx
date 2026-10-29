@@ -188,4 +188,49 @@ describe('Redirect after booking, in the event type editor', () => {
     await save(el);
     expect(saved()?.successRedirectUrl).toBe('https://example.com/team');
   });
+
+  describe('what the redirect carries to that page', () => {
+    const dataSelect = (el: HTMLElement, locale: Locale = 'en') => {
+      const label = getMessages(locale).admin.eventTypes.successRedirect.dataLabel;
+      return [...el.querySelectorAll('label')].find((l) => l.textContent?.startsWith(label))?.querySelector('select') ?? null;
+    };
+    async function pick(select: HTMLSelectElement, value: string) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
+    it('is offered only once there is an address, and says what the invitee’s details mean', async () => {
+      const el = await mount(event());
+      expect(dataSelect(el)).toBeNull();
+      await typeInto(field(el), 'https://example.com/thanks');
+      const select = dataSelect(el)!;
+      const m = getMessages('en').admin.eventTypes.successRedirect;
+      expect([...select.querySelectorAll('option')].map((o) => [o.value, o.textContent])).toEqual([
+        ['', m.dataNone],
+        ['event', m.dataEvent],
+        ['event_and_invitee', m.dataEventAndInvitee],
+      ]);
+      expect(el.textContent).toContain(m.dataHint);
+    });
+
+    it('saves the choice with the address, and none when the address is cleared', async () => {
+      const el = await mount(event({ successRedirectUrl: 'https://example.com/thanks', successRedirectData: 'event' }));
+      expect(dataSelect(el)!.value).toBe('event');
+      await pick(dataSelect(el)!, 'event_and_invitee');
+      await save(el);
+      expect(saved()).toMatchObject({ successRedirectUrl: 'https://example.com/thanks', successRedirectData: 'event_and_invitee' });
+      await typeInto(field(el), '');
+      await save(el);
+      expect(saved()).toMatchObject({ successRedirectUrl: null, successRedirectData: null });
+    });
+
+    it('in Spanish too', async () => {
+      const el = await mount(event({ successRedirectUrl: 'https://example.com/gracias' }), 'es');
+      expect(el.textContent).toContain(getMessages('es').admin.eventTypes.successRedirect.dataHint);
+      expect(dataSelect(el, 'es')!.value).toBe('');
+    });
+  });
 });
+

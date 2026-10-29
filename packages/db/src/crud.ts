@@ -5,7 +5,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { parseEventLocation, type EventLocation, type EventLocationInput } from '@slate/engine';
-import { normalizeEventTracking, type CrmPropertyMappings, type EventTracking } from '@slate/types';
+import {
+  SUCCESS_REDIRECT_DATA_MODES,
+  normalizeBookingUtm,
+  normalizeEventTracking,
+  type BookingUtm,
+  type CrmPropertyMappings,
+  type EventTracking,
+  type SuccessRedirectData,
+} from '@slate/types';
 import { sql, type Db } from './client';
 import { jsonParam, parseJsonColumn } from './repository';
 import {
@@ -87,6 +95,9 @@ export interface EventTypeView {
   /** Where the booking page sends the invitee after a booking. NULL ⇒ none:
    *  the confirmation stays, which is what every older event type reads as. */
   successRedirectUrl: string | null;
+  /** What that redirect carries to the host's page. NULL ⇒ the address as
+   *  typed, which is what every older event type reads as. */
+  successRedirectData: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page. NULL ⇒ none, which is what every
    *  event type that predates it reads as. */
   tracking: EventTracking | null;
@@ -120,6 +131,7 @@ interface EventTypeDbRow {
   calendar_title_template: string | null;
   calendar_description_template: string | null;
   success_redirect_url: string | null;
+  success_redirect_data: string | null;
   tracking: unknown;
 }
 
@@ -128,7 +140,7 @@ const ET_COLS = sql`id, member_id, team_id, slug, title, description, length_min
   before_event_buffer, after_event_buffer, slot_interval, requires_confirmation, prevent_duplicate_bookings,
   seats_per_time_slot, booking_fields, reminders, destination_calendar_id,
   crm_property_mappings, calendar_title_template, calendar_description_template,
-  success_redirect_url, tracking`;
+  success_redirect_url, success_redirect_data, tracking`;
 
 /** A template as stored: blank is "none" (NULL), so the booking keeps today's text. */
 function templateOrNull(text: string | null | undefined): string | null {
@@ -183,6 +195,7 @@ async function toEventTypeView(db: Db, r: EventTypeDbRow): Promise<EventTypeView
     calendarTitleTemplate: templateOrNull(r.calendar_title_template),
     calendarDescriptionTemplate: templateOrNull(r.calendar_description_template),
     successRedirectUrl: redirectUrlOrNull(r.success_redirect_url),
+    successRedirectData: redirectDataOrNull(r.success_redirect_data),
     tracking: normalizeEventTracking(parseJsonColumn<unknown>(r.tracking, null)),
   };
 }
@@ -312,6 +325,7 @@ export interface EventTypeInputRepo {
   /** Redirect after booking. UNDEFINED ⇒ unchanged; null or blank ⇒ none.
    *  Validated by the API (`isSuccessRedirectUrl`) before it reaches this layer. */
   successRedirectUrl?: string | null;
+  successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels. UNDEFINED ⇒ unchanged; null, or every id blank ⇒ none. */
   tracking?: EventTracking | null;
 }
@@ -353,7 +367,7 @@ export async function createEventType(
           minimum_booking_notice, booking_window_days, before_event_buffer, after_event_buffer, slot_interval,
           requires_confirmation, prevent_duplicate_bookings, seats_per_time_slot,
           destination_calendar_id, crm_property_mappings, calendar_title_template,
-          calendar_description_template, success_redirect_url, tracking, created_at)
+          calendar_description_template, success_redirect_url, success_redirect_data, tracking, created_at)
         VALUES (${id}, ${accountId}, ${ownerMemberId}, ${input.teamId ?? null},
           ${input.slug}, ${input.title}, ${input.description ?? null}, ${input.lengthMinutes},
           ${jsonParam(db, parseEventLocation(input.location ?? null))}, ${input.scheduleId ?? null}, ${input.hidden ? 1 : 0},
@@ -367,6 +381,7 @@ export async function createEventType(
           ${jsonParam(db, input.crmPropertyMappings ?? null)},
           ${templateOrNull(input.calendarTitleTemplate)}, ${templateOrNull(input.calendarDescriptionTemplate)},
           ${redirectUrlOrNull(input.successRedirectUrl)},
+          ${redirectUrlOrNull(input.successRedirectUrl) ? redirectDataOrNull(input.successRedirectData) : null},
           ${jsonParam(db, normalizeEventTracking(input.tracking ?? null))}, ${now})`,
   );
   if (input.hosts) await setEventTypeHostsDetailed(db, accountId, id, input.hosts);
@@ -421,6 +436,11 @@ export async function updateEventType(
     set('calendar_description_template', sql`${templateOrNull(input.calendarDescriptionTemplate)}`);
   if (input.successRedirectUrl !== undefined)
     set('success_redirect_url', sql`${redirectUrlOrNull(input.successRedirectUrl)}`);
+  // A cleared address takes what it carried with it, so a later address never
+  // brings back an older choice (the editor clears both; the API must too).
+  const clearsRedirect = input.successRedirectUrl !== undefined && !redirectUrlOrNull(input.successRedirectUrl);
+  if (input.successRedirectData !== undefined || clearsRedirect)
+    set('success_redirect_data', sql`${clearsRedirect ? null : redirectDataOrNull(input.successRedirectData)}`);
   if (input.tracking !== undefined) set('tracking', jsonParam(db, normalizeEventTracking(input.tracking)));
   // An empty array is a deliberate "no reminders" and is stored as `[]`, never
   // as NULL — NULL would read back as the shipped defaults and hand the host
@@ -448,6 +468,52 @@ export async function updateEventType(
   }
   const view = await getEventTypeById(db, accountId, id);
   return { ok: true, value: view! };
+}
+
+/** A stored mode, or null for none or anything this build does not know. */
+function redirectDataOrNull(value: string | null | undefined): SuccessRedirectData | null {
+  return (SUCCESS_REDIRECT_DATA_MODES as readonly string[]).includes(value ?? '') ? (value as SuccessRedirectData) : null;
+}
+
+/**
+ * The booking's event type redirect after booking, what it may carry
+ * (`successRedirectData`) and the event type's own slug and name for it (never
+ * the booking's title, which a calendar title template can fill with the
+ * invitee's name). Read once the booking is committed; null when the event has
+ * no redirect.
+ */
+export async function getBookingSuccessRedirect(
+  db: Db,
+  uid: string,
+): Promise<{ url: string; data: SuccessRedirectData | null; eventTypeSlug: string; eventTypeName: string } | null> {
+  const row = await db.get<{ url: string | null; data: string | null; slug: string; title: string }>(
+    sql`SELECT et.success_redirect_url AS url, et.success_redirect_data AS data, et.slug AS slug, et.title AS title
+        FROM booking b JOIN event_type et ON et.id = b.event_type_id
+        WHERE b.uid = ${uid} LIMIT 1`,
+  );
+  const url = redirectUrlOrNull(row?.url);
+  return url && row
+    ? { url, data: redirectDataOrNull(row.data), eventTypeSlug: row.slug, eventTypeName: row.title }
+    : null;
+}
+
+/**
+ * Keep the campaign a booking came from (`booking.utm`), cleaned by
+ * `normalizeBookingUtm`. Written right after the booking is created, by the
+ * same request; nothing at all when there is none. Never overwrites: a group
+ * booking (one row, several seats) keeps the campaign of its first seat.
+ */
+export async function setBookingUtm(db: Db, uid: string, utm: unknown): Promise<BookingUtm | null> {
+  const clean = normalizeBookingUtm(utm);
+  if (!clean) return null;
+  await db.run(sql`UPDATE booking SET utm = ${jsonParam(db, clean)} WHERE uid = ${uid} AND utm IS NULL`);
+  return clean;
+}
+
+/** The campaign a booking came from, or null. */
+export async function getBookingUtm(db: Db, uid: string): Promise<BookingUtm | null> {
+  const row = await db.get<{ utm: unknown }>(sql`SELECT utm FROM booking WHERE uid = ${uid} LIMIT 1`);
+  return normalizeBookingUtm(parseJsonColumn<unknown>(row?.utm ?? null, null));
 }
 
 /**

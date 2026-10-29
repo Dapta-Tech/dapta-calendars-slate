@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, t } from '@slate/shared';
 import { getAvailability, getProfile } from '@/lib/api';
@@ -173,6 +174,7 @@ export default async function BookingPage({
           location={listing.location ?? null}
           nowUtc={from}
           embed={embed}
+          utm={utmFromQuery(query)}
           showBranding={brandingShown(profile)}
         />
       </main>

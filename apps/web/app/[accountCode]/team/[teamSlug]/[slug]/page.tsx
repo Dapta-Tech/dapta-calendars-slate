@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, schedulingMethodLabel, t } from '@slate/shared';
 import { getTeamAvailability, getTeamProfile } from '@/lib/api';
@@ -156,6 +157,7 @@ export default async function TeamBookingPage({
           methodLabel={schedulingMethodLabel(messages, listing.schedulingType)}
           nowUtc={from}
           embed={embed}
+          utm={utmFromQuery(query)}
           showBranding={brandingShown(team)}
         />
       </main>

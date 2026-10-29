@@ -34,7 +34,7 @@ import {
 /** Mirror of the server's attendee-email rule: catches the 400 before a
  *  round-trip, so a typo never costs the visitor their filled-in form. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-import type { BookingField } from '@slate/types';
+import type { BookingField, BookingUtm } from '@slate/types';
 import {
   bookAction,
   meetingLinkAction,
@@ -49,6 +49,7 @@ import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
 import { postBookingScheduled, postBookingStep } from '@/lib/embed-messages';
 import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
 import { reportBookingConversion, reportBookingStep, type BookingEventDetails } from '@/lib/booking-conversion';
+import { requestHostUtm } from '@/lib/booking-utm';
 import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
@@ -145,6 +146,12 @@ interface Props {
    */
   oneOffToken?: string;
   /**
+   * The campaign in this page's own address (`utm_*`, `lib/booking-utm.ts`),
+   * kept on the booking. Embedded and without one, the page asks the framing
+   * page for its own instead.
+   */
+  utm?: BookingUtm | null;
+  /**
    * The page's `showBranding` from the API (see `signupHref`): false for an
    * account that turned the Dapta branding off while it is a paying Dapta AI
    * customer, and the confirmation then carries no free-calendar block.
@@ -215,6 +222,7 @@ export function BookingFlow({
   nowUtc,
   embed = false,
   oneOffToken,
+  utm = null,
   showBranding,
   followBrowserZone = true,
 }: Props) {
@@ -224,6 +232,14 @@ export function BookingFlow({
   const pm = messages.phonePicker;
   const progress = useProgressiveSlots({ staticSlots: slots, availability, nowUtc });
   const fields = progress.bookingFields ?? bookingFields;
+  // The campaign the booking keeps: this page's own, or else the framing
+  // page's (all or nothing, `lib/booking-utm.ts`).
+  const [hostUtm, setHostUtm] = useState<BookingUtm | null>(null);
+  useEffect(() => {
+    if (!embed || utm) return;
+    return requestHostUtm(setHostUtm);
+  }, [embed, utm]);
+  const bookingUtm = utm ?? hostUtm;
   // Reserved names (name/email/notes) are fixed attendee fields this form
   // always asks by itself — a legacy custom question reusing one would ask
   // the attendee twice (QA3 fix 3).
@@ -1028,6 +1044,11 @@ export function BookingFlow({
                 value={locale.toLowerCase().startsWith('es') ? 'es' : 'en'}
               />
               {hold ? <input type="hidden" name="reservationUid" value={hold.uid} /> : null}
+              {bookingUtm
+                ? Object.entries(bookingUtm).map(([key, value]) => (
+                    <input key={key} type="hidden" name={key} value={value ?? ''} />
+                  ))
+                : null}
               {/* The one-off token (#110). A hidden field so the token reaches
                   the server action without this island holding an API base URL;
                   the action forwards it as a header. */}

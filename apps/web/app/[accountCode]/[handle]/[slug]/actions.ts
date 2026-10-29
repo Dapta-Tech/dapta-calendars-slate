@@ -1,6 +1,6 @@
 'use server';
 
-import { createBookingSchema } from '@slate/types';
+import { BOOKING_UTM_KEYS, createBookingSchema, normalizeBookingUtm } from '@slate/types';
 import {
   getManageView,
   postBooking,
@@ -108,6 +108,15 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
   // language, as before.
   const localeField = String(formData.get('language') ?? '');
   const locale = localeField === 'es' || localeField === 'en' ? localeField : undefined;
+  // The campaign the page carried (`lib/booking-utm.ts`): only the five
+  // `utm_*` keys, cleaned again by the API, which never refuses a booking
+  // over them.
+  const utmFields: Record<string, string> = {};
+  for (const key of BOOKING_UTM_KEYS) {
+    const value = formData.get(key);
+    if (typeof value === 'string' && value) utmFields[key] = value;
+  }
+  const utm = normalizeBookingUtm(utmFields);
   const attendee = {
     name: String(formData.get('name') ?? ''),
     email: String(formData.get('email') ?? ''),
@@ -119,7 +128,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     return postTeamBooking(
       accountCode,
       ownerSlug,
-      { slug, startUtc, attendee, answers: answersObj, ...(locale ? { locale } : {}) },
+      { slug, startUtc, attendee, answers: answersObj, ...(locale ? { locale } : {}), ...(utm ? { utm } : {}) },
       oneOffToken,
     );
   }
@@ -133,6 +142,7 @@ export async function bookAction(_prev: BookResult | null, formData: FormData): 
     answers: answersObj,
     locale,
     reservationUid,
+    ...(utm ? { utm } : {}),
   });
   if (!parsed.success) {
     return { ok: false, status: 400, error: 'BAD_REQUEST', message: parsed.error.issues[0]?.message };
