@@ -49,7 +49,7 @@ describe('root metadata', () => {
     expect(en.title).toBe('dCal: calendars for AI agents');
     expect(en.description).toMatch(/^With dCal, your agent finds a free time/);
 
-    request.headers['accept-language'] = 'es-CO';
+    request.headers['x-slate-query'] = '?lang=es';
     const es = await generateMetadata();
     expect(es.title).toBe('dCal: calendarios para agentes de IA');
     expect(es.description).toMatch(/^Con dCal, tu agente busca un horario libre/);
@@ -72,9 +72,9 @@ describe('root metadata', () => {
   it('is in the admin language on a product route', async () => {
     const { generateMetadata } = await loadLayout('dCal');
     request.headers = { 'x-slate-path': '/admin', 'accept-language': 'es-ES' };
-    expect((await generateMetadata()).title).toBe('dCal: calendarios para agentes de IA');
-    request.cookie = 'en';
     expect((await generateMetadata()).title).toBe('dCal: calendars for AI agents');
+    request.cookie = 'es';
+    expect((await generateMetadata()).title).toBe('dCal: calendarios para agentes de IA');
   });
 
   it('carries no robots rule by default, and noindex when the deployment says so', async () => {
@@ -92,9 +92,9 @@ describe('<html lang>', () => {
     return html.props.lang;
   }
 
-  it("is the visitor's language on a booking page", async () => {
+  it('is English on a booking page unless ?lang= says otherwise', async () => {
     request.headers['accept-language'] = 'es-CO,es;q=0.9';
-    expect(await langOf()).toBe('es');
+    expect(await langOf()).toBe('en');
     request.headers = { 'x-slate-path': '/acme/alex-rivera', 'x-slate-query': '?lang=es' };
     expect(await langOf()).toBe('es');
     request.headers = { 'x-slate-path': '/acme/alex-rivera', 'accept-language': 'en-US' };
@@ -103,8 +103,8 @@ describe('<html lang>', () => {
 
   it("is the admin's language on a product route", async () => {
     request.headers = { 'x-slate-path': '/onboarding', 'accept-language': 'es-PE' };
-    expect(await langOf()).toBe('es');
-    request.cookie = 'en';
     expect(await langOf()).toBe('en');
+    request.cookie = 'es';
+    expect(await langOf()).toBe('es');
   });
 });

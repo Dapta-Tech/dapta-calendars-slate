@@ -52,7 +52,7 @@ test.describe('status codes', () => {
   // The 404 body itself is drawn by the browser (Next renders a 404 decided
   // during render that way), so what it says is checked in language.spec.ts.
   test("the 404 head speaks the visitor's language", async ({ request }) => {
-    const res = await page(request, '/acme/nobody', { 'accept-language': 'es-CO,es;q=0.9' });
+    const res = await page(request, '/acme/nobody?lang=es');
     expect(res.status).toBe(404);
     expect(titleOf(res.html)).toBe('Calendars: calendarios para agentes de IA');
   });
@@ -61,9 +61,10 @@ test.describe('status codes', () => {
 test.describe('<html lang>', () => {
   test('is the language the booking page renders in', async ({ request }) => {
     expect(langOf((await page(request, EVENT, { 'accept-language': 'en-US' })).html)).toBe('en');
-    expect(langOf((await page(request, EVENT, { 'accept-language': 'es-CO,es;q=0.9' })).html)).toBe('es');
+    // A Spanish browser alone does not switch the language: English is the default.
+    expect(langOf((await page(request, EVENT, { 'accept-language': 'es-CO,es;q=0.9' })).html)).toBe('en');
     expect(langOf((await page(request, `${EVENT}?lang=es`, { 'accept-language': 'en-US' })).html)).toBe('es');
-    expect(langOf((await page(request, '/acme/team/sales', { 'accept-language': 'es-MX' })).html)).toBe('es');
+    expect(langOf((await page(request, '/acme/team/sales?lang=es')).html)).toBe('es');
   });
 });
 
@@ -72,7 +73,7 @@ test.describe('titles', () => {
     expect(titleOf((await page(request, EVENT, { 'accept-language': 'en-US' })).html)).toBe(
       'Intro Call with Alex Rivera',
     );
-    expect(titleOf((await page(request, EVENT, { 'accept-language': 'es' })).html)).toBe(
+    expect(titleOf((await page(request, `${EVENT}?lang=es`)).html)).toBe(
       'Intro Call con Alex Rivera',
     );
   });

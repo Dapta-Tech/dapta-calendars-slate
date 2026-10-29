@@ -8,17 +8,19 @@ import './globals.css';
 const subscribe = () => () => undefined;
 
 /**
- * The reader's language from the browser alone: this boundary replaces the
- * root layout, so nothing the server resolved reaches it. English on the
- * server render and the first paint, so hydration never mismatches.
+ * The reader's language: this boundary replaces the root layout, so nothing
+ * the server resolved reaches it. An explicit `?lang=es` is honored; otherwise
+ * English (the browser's language is not consulted). English on the server
+ * render and the first paint, so hydration never mismatches.
  */
 function useBrowserLocale(): Locale {
-  const language = useSyncExternalStore(
+  const search = useSyncExternalStore(
     subscribe,
-    () => (typeof navigator !== 'undefined' ? navigator.language : ''),
+    () => (typeof location !== 'undefined' ? location.search : ''),
     () => '',
   );
-  return language.trim().toLowerCase().startsWith('es') ? 'es' : 'en';
+  const lang = new URLSearchParams(search).get('lang') ?? '';
+  return lang.trim().toLowerCase().startsWith('es') ? 'es' : 'en';
 }
 
 /**
