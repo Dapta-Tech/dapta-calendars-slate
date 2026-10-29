@@ -365,8 +365,9 @@ describe('track', () => {
 describe('expireSharedPosthogCookie', () => {
   it('expires the site-wide identity cookie on the parent domain, and does nothing on a short host', () => {
     const doc = { cookie: '' };
-    expireSharedPosthogCookie('phc_key', { location: { hostname: 'app.dcal.ai' } as Location, document: doc as Document });
-    expect(doc.cookie).toBe('ph_phc_key_posthog=; Domain=.dcal.ai; Path=/; Max-Age=0; SameSite=Lax');
+    expireSharedPosthogCookie('phc_key', { location: { hostname: 'app.dcal.ai', protocol: 'https:' } as Location, document: doc as Document });
+    // Secure on https, or the browser keeps the Secure cookie posthog-js wrote.
+    expect(doc.cookie).toBe('ph_phc_key_posthog=; Domain=.dcal.ai; Path=/; Max-Age=0; SameSite=Lax; Secure');
     const local = { cookie: '' };
     expireSharedPosthogCookie('phc_key', { location: { hostname: 'localhost' } as Location, document: local as Document });
     expect(local.cookie).toBe('');

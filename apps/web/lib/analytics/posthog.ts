@@ -402,7 +402,10 @@ export function expireSharedPosthogCookie(key: string, w: Pick<Window, 'location
     const labels = w.location.hostname.split('.');
     if (labels.length < 3) return;
     const parent = labels.slice(1).join('.');
-    w.document.cookie = `ph_${key}_posthog=; Domain=.${parent}; Path=/; Max-Age=0; SameSite=Lax`;
+    // Secure on https: a browser refuses to replace a Secure cookie (as
+    // posthog-js writes it there) with a write that is not.
+    const secure = w.location.protocol === 'https:' ? '; Secure' : '';
+    w.document.cookie = `ph_${key}_posthog=; Domain=.${parent}; Path=/; Max-Age=0; SameSite=Lax${secure}`;
   } catch {
     /* a blocked cookie store loses nothing here */
   }
