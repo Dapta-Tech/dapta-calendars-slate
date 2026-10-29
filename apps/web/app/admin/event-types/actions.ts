@@ -10,6 +10,7 @@ import type {
   EventReminder,
   EventTracking,
   OneOffLinkView,
+  SuccessRedirectData,
 } from '@slate/types';
 import { adminApi } from '@/lib/admin-api';
 
@@ -55,6 +56,7 @@ export interface EventTypePayload {
   crmPropertyMappings?: CrmPropertyMappings | null;
   /** Redirect after booking: an https URL, or null for none. */
   successRedirectUrl?: string | null;
+  successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null clears every id. */
   tracking?: EventTracking | null;
 }

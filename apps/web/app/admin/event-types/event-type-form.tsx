@@ -29,6 +29,7 @@ import {
   type EventTracking,
   type LocationKind,
   type OneOffLinkView,
+  type SuccessRedirectData,
 } from '@slate/types';
 import { sourceExists } from '@slate/crm/mapping';
 import type { Connection, EventType } from '@/lib/admin-api';
@@ -994,10 +995,12 @@ export function EventTypeForm({
   // The error waits for a blur or a save attempt, so typing the address is not
   // interrupted by it on the first keystroke.
   const [redirectUrl, setRedirectUrl] = useState(initial?.successRedirectUrl ?? '');
+  const [redirectData, setRedirectData] = useState<SuccessRedirectData | ''>(initial?.successRedirectData ?? '');
   const [redirectChecked, setRedirectChecked] = useState(false);
   const redirectTrimmed = redirectUrl.trim();
   const redirectInvalid = redirectTrimmed !== '' && !isSuccessRedirectUrl(redirectTrimmed);
   const redirectHintId = useId();
+  const redirectDataHintId = useId();
   const redirectErrorId = useId();
   const redirectInputRef = useRef<HTMLInputElement>(null);
   // Tracking and pixels: one text per vendor, '' = off. Same wait as above
@@ -1174,6 +1177,8 @@ export function EventTypeForm({
         bookingFields: fields.filter((f) => f.name && f.label),
         reminders,
         successRedirectUrl: redirectTrimmed || null,
+        // Nothing to carry without an address: cleared with it.
+        successRedirectData: redirectTrimmed && redirectData ? redirectData : null,
         // Blank ids are left out, and nothing left is null ("no tracking").
         ...(trackingEnabled ? { tracking: normalizeEventTracking(trackingDraft) } : {}),
         // Re-keyed by provider, and only sent when an adapter is wired: a
@@ -1514,6 +1519,25 @@ export function EventTypeForm({
         <p id={redirectHintId} className="text-xs text-muted-foreground">
           {m.successRedirect.hint}
         </p>
+        {redirectUrl.trim() ? (
+          <>
+            <Field label={m.successRedirect.dataLabel}>
+              <select
+                value={redirectData}
+                onChange={(e) => setRedirectData(e.target.value as SuccessRedirectData | '')}
+                aria-describedby={redirectDataHintId}
+                className={inputCls}
+              >
+                <option value="">{m.successRedirect.dataNone}</option>
+                <option value="event">{m.successRedirect.dataEvent}</option>
+                <option value="event_and_invitee">{m.successRedirect.dataEventAndInvitee}</option>
+              </select>
+            </Field>
+            <p id={redirectDataHintId} className="text-xs text-muted-foreground">
+              {m.successRedirect.dataHint}
+            </p>
+          </>
+        ) : null}
       </div>
 
       {trackingEnabled ? (

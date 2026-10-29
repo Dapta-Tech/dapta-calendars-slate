@@ -777,7 +777,7 @@ export async function rescheduleBookingV2(
      calendar_description, seated, responses, metadata, cancellation_reason, cancelled_by, rescheduled,
      from_reschedule, rescheduled_from_uid, rescheduled_to_uid,
      rescheduling_reason, rescheduled_by_email, recurring_event_id,
-     idempotency_key, created_at, updated_at)
+     idempotency_key, utm, created_at, updated_at)
     VALUES (${newId}, ${source.account_id}, ${newUid}, ${source.event_type_id},
       ${source.host_member_id}, ${source.team_id}, ${source.title},
       ${args.newStartMs}, ${newEndMs}, ${source.status}, ${source.location},
@@ -788,6 +788,7 @@ export async function rescheduleBookingV2(
       ${args.reason ?? null}, ${args.rescheduledBy ?? null},
       ${source.recurring_event_id},
       ${args.idempotencyKey ? scopedIdempotencyKey(args.accountId, args.idempotencyKey) : null},
+      (SELECT utm FROM booking WHERE id = ${source.id}),
       ${now}, ${now})`;
   const copyAttendees = sql`INSERT INTO booking_attendee
     (id, booking_id, name, email, email_normalized, time_zone, phone, notes, created_at)

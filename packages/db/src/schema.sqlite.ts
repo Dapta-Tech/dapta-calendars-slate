@@ -222,6 +222,12 @@ export const eventType = sqliteTable('event_type', {
   successRedirectUrl: text('success_redirect_url'),
   /** Tracking and pixels on the booking page, as JSON text; NULL = none. See schema.pg.ts. */
   tracking: text('tracking'),
+  /**
+   * What the redirect after booking carries to the host's page: 'event' or
+   * 'event_and_invitee' (`SUCCESS_REDIRECT_DATA_MODES` in @slate/types). NULL =
+   * the address as typed. See migration 0037 (pg).
+   */
+  successRedirectData: text('success_redirect_data'),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -296,6 +302,12 @@ export const booking = sqliteTable('booking', {
    *  GLOBAL, so a raw caller-supplied key would be claimable across
    *  tenants. Go through `scopedIdempotencyKey` on every read and write. */
   idempotencyKey: text('idempotency_key').unique(),
+  /**
+   * The campaign the booking came from: `{ utm_source, utm_medium,
+   * utm_campaign, utm_term, utm_content }`, each optional (`bookingUtmSchema`
+   * in @slate/types). NULL = none. See migration 0037 (pg).
+   */
+  utm: text('utm'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });

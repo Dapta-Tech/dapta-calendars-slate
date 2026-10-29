@@ -565,6 +565,60 @@ export const intakeAnswersSchema = z.record(
 );
 export type IntakeAnswers = z.infer<typeof intakeAnswersSchema>;
 
+/**
+ * The campaign a booking came from: the five `utm_*` parameters of the booking
+ * page's URL or, embedded, of the page that frames it. Nothing else is kept
+ * (no click ids, no referrer).
+ */
+export const BOOKING_UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
+export type BookingUtmKey = (typeof BOOKING_UTM_KEYS)[number];
+/** The longest UTM value a booking keeps (the signup attribution's cap). */
+export const MAX_BOOKING_UTM_VALUE = 128;
+export const bookingUtmSchema = z.object(
+  Object.fromEntries(BOOKING_UTM_KEYS.map((key) => [key, z.string().min(1).max(MAX_BOOKING_UTM_VALUE).optional()])) as Record<
+    BookingUtmKey,
+    z.ZodOptional<z.ZodString>
+  >,
+);
+export type BookingUtm = z.infer<typeof bookingUtmSchema>;
+
+/**
+ * The UTMs a booking keeps, from whatever a page sent: the five keys only, each
+ * trimmed, a blank one left out, one over {@link MAX_BOOKING_UTM_VALUE} or with
+ * a control character dropped, and null when none is left. Never a refusal: a
+ * booking must not fail over its attribution.
+ */
+export function normalizeBookingUtm(input: unknown): BookingUtm | null {
+  if (!input || typeof input !== 'object') return null;
+  const raw = input as Record<string, unknown>;
+  const out: BookingUtm = {};
+  for (const key of BOOKING_UTM_KEYS) {
+    const value = raw[key];
+    if (typeof value !== 'string') continue;
+    const v = value.trim();
+    if (!v || v.length > MAX_BOOKING_UTM_VALUE || hasControlChar(v)) continue;
+    out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+function hasControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * What the redirect after booking may carry to the host's page (Calendly's
+ * "pass event details"): `event` adds the event type, the time, the status,
+ * the host's name and the booking's UTMs; `event_and_invitee` adds the
+ * invitee's name and email too. Null: the address as the host typed it.
+ */
+export const SUCCESS_REDIRECT_DATA_MODES = ['event', 'event_and_invitee'] as const;
+export type SuccessRedirectData = (typeof SUCCESS_REDIRECT_DATA_MODES)[number];
+
 export const createBookingSchema = z.object({
   accountCode: z.string().min(1),
   handle: z.string().min(1),
@@ -583,6 +637,9 @@ export const createBookingSchema = z.object({
   locale: z.enum(['en', 'es']).optional(),
   /** Consume a held reservation (slot hold) if one exists. */
   reservationUid: z.string().max(200).optional(),
+  /** The campaign the visitor came from (`BOOKING_UTM_KEYS`). Taken as sent
+   *  and cleaned by `normalizeBookingUtm`, never refused. */
+  utm: z.unknown().optional(),
   // NO `idempotencyKey` here, deliberately (#104). This schema is what the
   // UNAUTHENTICATED `POST /v1/bookings` parses, and the booking page never
   // sends a key — only the API-key surfaces do. It reaches the service as
@@ -918,6 +975,8 @@ export const bookingViewSchema = z.object({
    *  after booking. Returned only by the public create routes, and only when
    *  the event has one, so the address is not readable before anyone books. */
   successRedirectUrl: z.string().optional(),
+  /** The campaign the booking came from, when the page had one. */
+  utm: bookingUtmSchema.nullable().optional(),
   /** The organizer a TEAM booking's scheduling method resolved to (#102).
    *  Additive and team-only — the personal path never sets it, and a booking
    *  read back later carries its host in `host` instead. It belongs on this
@@ -1378,6 +1437,9 @@ export const eventTypeInputSchema = z.object({
    *  unchanged; null or blank ⇒ none, which is what every event type that
    *  predates it reads as. Reschedules and cancellations never redirect. */
   successRedirectUrl: successRedirectUrlSchema.nullable().optional(),
+  /** What the redirect after booking carries to that page; see
+   *  `SUCCESS_REDIRECT_DATA_MODES`. Omitted ⇒ unchanged; null ⇒ nothing. */
+  successRedirectData: z.enum(SUCCESS_REDIRECT_DATA_MODES).nullable().optional(),
   /** Tracking and pixels on this event's booking page. Omitted ⇒ unchanged;
    *  null, or every id blank ⇒ none. See `eventTrackingSchema`. */
   tracking: eventTrackingSchema.nullable().optional(),

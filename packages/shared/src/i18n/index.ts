@@ -577,6 +577,12 @@ export interface BookingMessages {
         placeholder: string;
         /** Inline error for anything but a full https address. */
         invalid: string;
+        /** What the redirect carries to that page (Calendly's "pass event details"). */
+        dataLabel: string;
+        dataNone: string;
+        dataEvent: string;
+        dataEventAndInvitee: string;
+        dataHint: string;
       };
       /**
        * Tracking and pixels on this event's booking page (the dForms section,
@@ -2326,6 +2332,12 @@ export const en: BookingMessages = {
         hint: 'Invitees go to this page once they book, requests you still have to confirm included, instead of staying on the confirmation. Only someone who books is sent the address. Leave it empty to keep the confirmation. Rescheduling or cancelling never redirects.',
         placeholder: 'https://example.com/thanks',
         invalid: 'Use a full address that starts with https://',
+        dataLabel: 'Booking details on that page',
+        dataNone: 'None: the address as you typed it',
+        dataEvent: 'The event, its time and the campaign (UTMs)',
+        dataEventAndInvitee: 'The event, its time, the campaign, and the invitee’s name and email',
+        dataHint:
+          'Added to the address as parameters (event_type, event_start_time, utm_source and the like), so your thank-you page can count the booking. The invitee’s name and email end up in that page’s address and in whatever analytics runs there: add them only if that page needs them.',
       },
       // Tracking and pixels. Each help line says when its tag fires.
       tracking: {
@@ -4059,6 +4071,12 @@ export const es: BookingMessages = {
         hint: 'Los invitados van a esta página después de reservar, también en las solicitudes que aún debes confirmar, en lugar de quedarse en la confirmación. Solo quien reserva recibe la dirección. Déjalo vacío para mantener la confirmación. Reprogramar o cancelar nunca redirige.',
         placeholder: 'https://ejemplo.com/gracias',
         invalid: 'Usa una dirección completa que empiece por https://',
+        dataLabel: 'Datos de la reserva en esa página',
+        dataNone: 'Ninguno: la dirección tal como la escribiste',
+        dataEvent: 'El evento, su hora y la campaña (UTMs)',
+        dataEventAndInvitee: 'El evento, su hora, la campaña, y el nombre y el correo del invitado',
+        dataHint:
+          'Se añaden a la dirección como parámetros (event_type, event_start_time, utm_source y similares), para que tu página de gracias pueda contar la reserva. El nombre y el correo del invitado quedan en la dirección de esa página y en la analítica que corra allí: añádelos solo si esa página los necesita.',
       },
       // Seguimiento y píxeles. Cada ayuda dice cuándo se dispara su etiqueta.
       tracking: {

@@ -11,7 +11,7 @@
  * treats as "sign in again", so the session survives and the page shows
  * something the person can retry.
  */
-import type { BrandKit, EventTracking, WorkspaceView } from '@slate/types';
+import type { BrandKit, EventTracking, SuccessRedirectData, WorkspaceView } from '@slate/types';
 import type {
   EventLocationDto,
   EventReminder,
@@ -437,6 +437,8 @@ export interface EventType {
   /** Where the booking page sends the invitee after booking; null ⇒ the
    *  confirmation stays. Optional on the wire, so an older API reads as none. */
   successRedirectUrl?: string | null;
+  /** What the redirect after booking carries to that page; null = nothing. */
+  successRedirectData?: SuccessRedirectData | null;
   /** Tracking and pixels on the booking page; null ⇒ none. Optional on the wire. */
   tracking?: EventTracking | null;
 }

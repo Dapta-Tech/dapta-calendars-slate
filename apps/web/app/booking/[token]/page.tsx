@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound } from 'next/navigation';
 import { getMessages, schedulingMethodLabel } from '@slate/shared';
 import { MAX_AVAILABILITY_WINDOW_MS } from '@slate/types';
@@ -261,6 +262,7 @@ export default async function OneOffBookingPage({
             methodLabel={schedulingMethodLabel(messages, availability.eventType.schedulingType)}
             nowUtc={from}
             embed={embed}
+            utm={utmFromQuery(query)}
             oneOffToken={token}
             showBranding={brandingShown(team)}
           />
@@ -320,6 +322,7 @@ export default async function OneOffBookingPage({
           location={availability.eventType.location}
           nowUtc={from}
           embed={embed}
+          utm={utmFromQuery(query)}
           oneOffToken={token}
           showBranding={brandingShown(profile)}
         />

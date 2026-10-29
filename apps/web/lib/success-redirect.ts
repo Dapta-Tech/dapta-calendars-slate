@@ -12,9 +12,12 @@ import { urlHost } from '@/lib/url-host';
  *   - It fires once a booking lands, accepted or pending, and never on a
  *     reschedule or a cancellation: those live on the manage page, which does
  *     not read it.
- *   - The URL goes as the host saved it. Nothing about the booking or the
- *     invitee is added to it, so no name or email reaches a third-party page
- *     through a query string or its access logs.
+ *   - The URL goes as the API answered it: as the host saved it, or with the
+ *     booking's details appended when the host chose to pass them
+ *     (`successRedirectData`, built by `bookingRedirectUrl` in @slate/engine).
+ *     The invitee's name and email are added only when the host turned that
+ *     on; otherwise no name or email reaches a third-party page through a
+ *     query string or its access logs.
  *   - Inside an embed it is the TOP window that moves. Loading a host's thank-you
  *     page inside a frame sized for a calendar would read as broken, and most
  *     sites refuse to be framed at all.
