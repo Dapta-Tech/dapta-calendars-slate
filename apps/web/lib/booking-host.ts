@@ -90,7 +90,13 @@ export function isBookingPath(path: string): boolean {
  * another host's script would let that script finish it with a session of its
  * own choosing (login CSRF). Finishing one counts for the same reason: the
  * identity service's return trip is a navigation, so only a script's fetch or
- * image to the callback is refused. A sibling host
+ * image to the callback is refused. A navigation to the callback is not, from
+ * this host or any other: any site can already send one carrying the state
+ * cookie (`SameSite=Lax` cookies ride top-level navigations), so refusing the
+ * same-site ones would stop nothing a cross-site page cannot do. Only binding
+ * the state (the identity service echoing it) closes that path. What a sibling
+ * host adds is the same-site subresource, which carries `Lax` cookies and is
+ * refused here. A sibling host
  * on the same site can make the browser request them with the session cookie
  * from an image, a script or a fetch; on the app host those same-site
  * subresource requests are refused. A full-page navigation is not: any site
