@@ -12,8 +12,9 @@ import { isProductPath } from '@/lib/theme';
  * and nothing here changes anything.
  *
  * The move happens in steps, each one undone by reverting its setting:
- *   1. `PUBLIC_BOOKING_URL` set: the booking host serves every public page and
- *      bounces the dashboard's paths to the app host; links the app writes
+ *   1. `PUBLIC_BOOKING_URL` set: the booking host serves every public page,
+ *      bounces the dashboard's pages to the app host and answers the app's
+ *      route handlers (`/api/*` but the shared ones) with a 404; links the app writes
  *      (emails, the dashboard, MCP) name it. The app host still serves public
  *      pages too, so nothing that was shared before breaks.
  *   2. `BOOKING_HOST_REDIRECTS=temporary`: every other host answers a public
@@ -81,13 +82,15 @@ export function isBookingPath(path: string): boolean {
 }
 
 /**
- * Route handlers that change the signed-in state on a GET (start a sign-in,
- * sign out, refresh, reset or switch the workspace, install the developer
- * skill). Starting a sign-in counts: it sets the short-lived OAuth state
- * cookie, and the callback's only binding is that the cookie exists (the
- * identity service does not echo a state), so a sign-in started by another
- * host's script would let that script finish it with a session of its own
- * choosing (login CSRF). A sibling host
+ * Route handlers that change the signed-in state on a GET (start or finish a
+ * sign-in, sign out, refresh, reset or switch the workspace, install the
+ * developer skill). Starting a sign-in counts: it sets the short-lived OAuth
+ * state cookie, and the callback's only binding is that the cookie exists
+ * (the identity service does not echo a state), so a sign-in started by
+ * another host's script would let that script finish it with a session of its
+ * own choosing (login CSRF). Finishing one counts for the same reason: the
+ * identity service's return trip is a navigation, so only a script's fetch or
+ * image to the callback is refused. A sibling host
  * on the same site can make the browser request them with the session cookie
  * from an image, a script or a fetch; on the app host those same-site
  * subresource requests are refused. A full-page navigation is not: any site
@@ -97,6 +100,7 @@ export function isBookingPath(path: string): boolean {
  */
 const STATE_CHANGING_GETS: readonly string[] = [
   '/api/auth/login',
+  '/api/auth/callback',
   '/api/auth/logout',
   '/api/auth/refresh',
   '/api/workspace/reset',
@@ -135,6 +139,11 @@ export function routeForHost(
 
   if (onBookingHost) {
     if (isSharedPath(req.pathname) || !isProductPath(req.pathname)) return { kind: 'next', bookingHost: true };
+    // The app's own route handlers are not pages a person follows a link to:
+    // no link names one on the booking host, so none is bounced to the app
+    // host either. A page's script here cannot use this host to reach sign-in,
+    // sign-out or any other handler, by navigation or otherwise.
+    if (isApiPath(req.pathname)) return { kind: 'refuse', status: 404 };
     // The dashboard's paths, and `/`, belong to the app host.
     const app = appOrigin(env);
     if (!safe || !app) return { kind: 'refuse', status: 404 };
@@ -173,6 +182,10 @@ export function routeForHost(
 /** The query asks for embed mode, by the one rule the pages use (`lib/embed-mode.ts`). */
 function inEmbedMode(search: string): boolean {
   return isEmbedValue(new URLSearchParams(search).get(EMBED_PARAM));
+}
+
+function isApiPath(path: string): boolean {
+  return path === '/api' || path.startsWith('/api/');
 }
 
 function isStateChangingGet(path: string): boolean {

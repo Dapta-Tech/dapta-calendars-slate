@@ -132,7 +132,8 @@ export function middleware(req: NextRequest) {
   }
 
   // Booking pages on a host of their own (`lib/booking-host.ts`): the booking
-  // host bounces the dashboard's paths to the app host, other hosts send public
+  // host bounces the dashboard's pages to the app host (and refuses its route
+  // handlers), other hosts send public
   // pages there once the redirects are on, and the app host refuses writes a
   // page on another host of the same site made the browser send. Inert while
   // `PUBLIC_BOOKING_URL` is unset.
