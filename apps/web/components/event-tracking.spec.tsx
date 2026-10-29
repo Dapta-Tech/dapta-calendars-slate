@@ -35,14 +35,14 @@ const mount = async (tracking: Parameters<typeof EventTracking>[0]['tracking'], 
 
 describe('EventTracking', () => {
   it('renders no markup and starts no tag for an event without ids', async () => {
-    expect(renderToStaticMarkup(<EventTracking tracking={null} />)).toBe('');
-    expect(renderToStaticMarkup(<EventTracking tracking={{ gtmId: '  ' }} />)).toBe('');
+    expect(renderToStaticMarkup(<EventTracking tracking={null} hostScriptsOrigin={null} />)).toBe('');
+    expect(renderToStaticMarkup(<EventTracking tracking={{ gtmId: '  ' }} hostScriptsOrigin={null} />)).toBe('');
     await mount(null);
     expect(document.head.querySelectorAll('script')).toHaveLength(0);
   });
 
   it('server-renders only the noscript fallbacks, their ids encoded', () => {
-    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242', hubspotTrackingId: '7' }} />);
+    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242', hubspotTrackingId: '7' }} hostScriptsOrigin={null} />);
     expect(html).toContain('<noscript data-testid="tracking-gtm-noscript">');
     expect(html).toContain('https://www.googletagmanager.com/ns.html?id=GTM-AB12');
     expect(html).toContain('<noscript data-testid="tracking-meta-pixel-noscript">');

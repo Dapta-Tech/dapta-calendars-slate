@@ -22,17 +22,18 @@ import {
  */
 export function EventTracking({
   tracking,
-  hostScriptsOrigin = null,
+  hostScriptsOrigin,
 }: {
   tracking: EventTracking | null | undefined;
   /**
-   * The booking host's origin when booking pages have one (`bookingOrigin()`):
-   * Google Tag Manager, Google Analytics and HubSpot then start only when this
-   * document is on it, so a page still served on the dashboard's origin (the
-   * move's first step, or a single-origin fork) never runs them next to a
-   * session. Null: no such host, and the API's allowlist alone decides.
+   * The booking host's origin when booking pages have one
+   * (`bookingPageTracking`, which pages spread in): Google Tag Manager, Google
+   * Analytics and HubSpot then start only when this document is on it, so a
+   * page still served on the dashboard's origin (an old link, an old embed)
+   * never runs them next to a session. Null: no such host, and the API's
+   * allowlist alone decides. Required, so a new page cannot forget it.
    */
-  hostScriptsOrigin?: string | null;
+  hostScriptsOrigin: string | null;
 }) {
   const t = resolveTracking(tracking);
   const { gtmId, ga4Id, metaPixelId, posthogKey, posthogHost, hubspotTrackingId } = t;

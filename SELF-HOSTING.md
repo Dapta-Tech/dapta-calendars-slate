@@ -228,19 +228,28 @@ origin with a signed-in session. Cloud: `app.<domain>` for the dashboard,
 Move in steps, each undone by reverting its setting:
 
 1. Point the new host at the web, then set `PUBLIC_BOOKING_URL` on the **web
-   first and the API last** (and the reverse to roll back). The API is what
-   opens Google Tag Manager, Google Analytics and HubSpot to every workspace,
-   and it hands the booking origin over with them, so the page starts them
-   only there even if the web's own setting is missing. Both hosts now serve
-   booking pages, and new links name the new one. `PUBLIC_APP_URL` must be set
-   on the web too: the booking host sends the dashboard's paths there.
+   first**. Once every web instance runs with it, set it on the **API**. To
+   roll back, take it off the API first. The API is what opens Google Tag
+   Manager, Google Analytics and HubSpot to every workspace and hands the
+   booking origin over with them. The web keeps them only when that origin
+   matches its own setting, and starts them only on it. With the setting on
+   the API alone, or the two apart, the web drops them. The order still
+   matters while instances roll: a web instance without the setting still
+   reads the session's pre-`__Host-` name, so the API may not open the tags
+   to every workspace until every instance has it. Both hosts now serve
+   booking pages, and new links name the new one. `PUBLIC_APP_URL` must be
+   set on the web too: the booking host sends the dashboard's paths there.
 2. Once every route type and your real traffic answer on the new host, set
    `BOOKING_HOST_REDIRECTS=temporary`; after a stable month, `permanent`.
 
 From the moment `PUBLIC_BOOKING_URL` names an origin other than
 `PUBLIC_APP_URL`, the web stops reading the session cookie's pre-`__Host-`
 name, because a page on that other host could have planted one: a session
-that has not moved to the `__Host-` name by then signs in once more.
+that has not moved to the `__Host-` name by then signs in once more. Taking
+the setting off the web again makes it read that name again, and a cookie a
+tag planted meanwhile can still be in a browser. So once tags have run on the
+booking host, undo the move by taking the setting off the API (the tags stop)
+and keep it on the web, unless the booking host itself has to go.
 
 What keeps working: a POST is served where it lands (an open tab), except a
 write another host of the same site made the browser send, which the app host

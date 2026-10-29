@@ -57,6 +57,9 @@ describe('a booking host of its own', () => {
     expect(bookingHostIsSeparate(SEPARATE)).toBe(true);
     expect(bookingHostIsSeparate(SINGLE)).toBe(false);
     expect(bookingHostIsSeparate({ PUBLIC_APP_URL: 'https://app.example.com', PUBLIC_BOOKING_URL: 'https://app.example.com/' })).toBe(false);
+    // Only an http(s) address names a host, as the web reads it.
+    expect(bookingHostIsSeparate({ PUBLIC_APP_URL: 'https://app.example.com', PUBLIC_BOOKING_URL: 'ftp://book.example.com' })).toBe(false);
+    expect(publicBookingBase({ PUBLIC_APP_URL: 'https://app.example.com', PUBLIC_BOOKING_URL: 'ftp://book.example.com' })).toBe('https://app.example.com');
   });
 
   it('the manage link a booking answers (and its emails carry) is on the booking host', async () => {

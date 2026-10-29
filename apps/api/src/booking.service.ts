@@ -215,9 +215,10 @@ export class BookingService {
 
   /**
    * Name the only origin a page may start the host-script tags on, when they
-   * came through because booking pages have a host of their own. The web
-   * refuses them anywhere else, so a web whose own setting is missing or late
-   * never runs them on the dashboard's origin (fail closed).
+   * came through because booking pages have a host of their own. The web keeps
+   * them only when its own setting names the same origin and starts them only
+   * there, so a web whose setting is missing, late or different never runs
+   * them (fail closed).
    */
   private withHostScriptsOrigin<T extends { tracking?: unknown }>(eventType: T): T {
     const origin = hostScriptsOriginFor(this.env);

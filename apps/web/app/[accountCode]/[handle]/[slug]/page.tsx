@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { bookingOrigin } from '@/lib/booking-host';
+import { bookingPageTracking } from '@/lib/booking-page-tracking';
 import { utmFromQuery } from '@/lib/booking-utm';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { eventPageTitle, getMessages, t } from '@slate/shared';
@@ -195,7 +195,7 @@ export default async function BookingPage({
       />
       {/* The host's own tags for this event (GTM, Meta Pixel, their PostHog,
           HubSpot), apart from dCal's anonymous counts above. Nothing without ids. */}
-      <EventTracking tracking={listing.tracking} hostScriptsOrigin={listing.trackingHostScriptsOrigin ?? bookingOrigin() ?? null} />
+      <EventTracking {...bookingPageTracking(listing)} />
     </BrandedShell>
   );
 }
