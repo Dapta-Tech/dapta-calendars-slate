@@ -10,7 +10,12 @@ import type { RawSearchParams } from '@/lib/embed';
  * which would credit one visit to two campaigns.
  */
 
-/** The page's own campaign, from its query: the first value of each key. */
+/**
+ * The page's own campaign, from its query: the first value of each key. Null
+ * when the address names none of the five keys; an empty campaign when it
+ * names some but no value survives cleaning (blank, too long), so the booking
+ * keeps none and never takes the framing page's in its place.
+ */
 export function utmFromQuery(query: RawSearchParams | undefined): BookingUtm | null {
   if (!query) return null;
   const raw: Record<string, string> = {};
@@ -19,7 +24,8 @@ export function utmFromQuery(query: RawSearchParams | undefined): BookingUtm | n
     const first = Array.isArray(value) ? value[0] : value;
     if (typeof first === 'string') raw[key] = first;
   }
-  return normalizeBookingUtm(raw);
+  if (Object.keys(raw).length === 0) return null;
+  return normalizeBookingUtm(raw) ?? {};
 }
 
 export const CONTEXT_REQUEST_MESSAGE = 'dapta-calendars:context-request';

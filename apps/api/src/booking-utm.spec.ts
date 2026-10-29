@@ -135,6 +135,28 @@ describe('UTMs on bookings and booking details on the redirect', () => {
       expect(await getBookingUtm(db, first.uid)).toEqual({ utm_source: 'google' });
     });
 
+    it('a retry under the same idempotency key answers the same campaign and redirect, and writes nothing twice', async () => {
+      await crud.updateEventType(REQ, introId, { successRedirectUrl: 'https://example.com/thanks', successRedirectData: 'event' });
+      const avail = await bookings.availability({ accountCode: 'acme', handle: 'alex-rivera', slug: 'intro-call', ...span() });
+      const input = {
+        accountCode: 'acme',
+        handle: 'alex-rivera',
+        slug: 'intro-call',
+        startUtc: avail!.slots[0]!.startUtc,
+        attendee: attendee('retry@example.org'),
+        answers: { company: 'Example Co' },
+        utm: { utm_source: 'google', utm_campaign: 'q4' },
+      };
+      const first = await bookings.book(input, false, { idempotencyKey: 'retry-utm-1' });
+      const again = await bookings.book(input, false, { idempotencyKey: 'retry-utm-1' });
+      if ('error' in first || 'error' in again) throw new Error('book failed');
+      expect(again.deduplicated).toBe(true);
+      expect(again.uid).toBe(first.uid);
+      expect(again.utm).toEqual({ utm_source: 'google', utm_campaign: 'q4' });
+      expect(Object.fromEntries(new URL(again.successRedirectUrl!).searchParams)).toMatchObject({ utm_source: 'google', utm_campaign: 'q4' });
+      expect(await getBookingUtm(db, first.uid)).toEqual({ utm_source: 'google', utm_campaign: 'q4' });
+    });
+
     it('rides on the booking.created webhook', async () => {
       await createWebhook(db, {
         accountId,

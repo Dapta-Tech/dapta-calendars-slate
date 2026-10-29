@@ -554,15 +554,16 @@ export class BookingService {
     // (single-active-token invariant); only mint a URL for a fresh booking.
     const manageUrl = outcome.manageToken ? this.manageUrl(b.uid, outcome.manageToken) : undefined;
     // The campaign the visitor came from, kept on a fresh booking before the
-    // webhook reads it. A failed write costs the UTMs, never the booking; a
-    // replay writes nothing. A seat on an existing group booking keeps the
-    // row's first campaign (per-seat UTMs are a follow-up), but its own
-    // visitor's still go to the answer and to the redirect below.
+    // webhook reads it. A failed write costs the UTMs, never the booking.
+    // Anything else writes nothing and answers the request's own campaign: a
+    // seat on an existing group booking (the row keeps its first campaign;
+    // per-seat UTMs are a follow-up) and a replay, so a retry's answer and
+    // redirect keep their UTMs. Never the row's on a replay: on a group slot
+    // that is the first seat-taker's, another visitor's campaign. A replay by
+    // key carries the same request, so the same campaign.
     const utm = outcome.manageToken
       ? await setBookingUtm(this.db, b.uid, input.utm).catch(() => null)
-      : outcome.seatTaken
-        ? normalizeBookingUtm(input.utm)
-        : null;
+      : normalizeBookingUtm(input.utm);
 
     // A seat on an existing group booking: its calendar event already exists,
     // with one guest fewer and the text it was first written with. Rewrite it
@@ -1142,9 +1143,12 @@ export class BookingService {
     this.crm?.onBookingAccepted(out.uid);
     const manageUrl = out.manageToken ? this.manageUrl(out.uid, out.manageToken) : undefined;
     // As on the personal path: a fresh booking keeps its campaign before the
-    // webhook reads it; a replay writes nothing. (The CRM write-out above
-    // does not read it.)
-    const utm = out.manageToken ? await setBookingUtm(this.db, out.uid, body.utm).catch(() => null) : null;
+    // webhook reads it, and anything else answers the request's own. (The CRM
+    // write-out above does not read it.) Every team booking is fresh today:
+    // `createTeamBooking` mints a token on each.
+    const utm = out.manageToken
+      ? await setBookingUtm(this.db, out.uid, body.utm).catch(() => null)
+      : normalizeBookingUtm(body.utm);
     void this.email.enqueueConfirmation(out.uid, { manageUrl });
     void this.email.enqueueReminders(out.uid, { manageUrl });
     void this.email.enqueueFollowUps(out.uid, { manageUrl });

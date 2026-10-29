@@ -169,4 +169,20 @@ describe('the booking form carries the campaign', () => {
     await book(el);
     expect(sentUtm()).toEqual({ utm_source: 'google' });
   });
+
+  it('embedded with keys that cleaned to nothing: none, and the framing page is not asked', async () => {
+    const post = vi.spyOn(window.parent, 'postMessage');
+    const el = await mount({ embed: true, utm: {} });
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'dapta-calendars:context', utm: { utm_source: 'newsletter' } },
+          source: window.parent,
+        }),
+      );
+    });
+    await book(el);
+    expect(post).not.toHaveBeenCalledWith({ type: 'dapta-calendars:context-request' }, '*');
+    expect(sentUtm()).toEqual({});
+  });
 });

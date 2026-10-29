@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_BOOKING_UTM_VALUE } from '@slate/types';
 import {
   CONTEXT_MESSAGE,
   CONTEXT_REQUEST_MESSAGE,
@@ -35,6 +36,11 @@ describe('utmFromQuery', () => {
   it('is null for a page without any', () => {
     expect(utmFromQuery({ embed: '1' })).toBeNull();
     expect(utmFromQuery(undefined)).toBeNull();
+  });
+
+  it('is an empty campaign when the address names a key but no value survives, so the framing page is not asked', () => {
+    expect(utmFromQuery({ utm_source: '' })).toEqual({});
+    expect(utmFromQuery({ utm_campaign: 'x'.repeat(MAX_BOOKING_UTM_VALUE + 1) })).toEqual({});
   });
 });
 
