@@ -264,7 +264,7 @@ describe('the host’s own tags on the event page', () => {
     expect(without).not.toContain('tracking-');
 
     const tracked = profile({ ...BASE_STYLE, theme: 'light' });
-    tracked.eventTypes[0] = { ...tracked.eventTypes[0]!, tracking: { gtmId: 'GTM-AB12', metaPixelId: '42' } };
+    tracked.eventTypes[0] = { ...tracked.eventTypes[0]!, tracking: { gtmId: 'GTM-AB12', metaPixelId: '424242424242' } };
     api.getProfile.mockResolvedValue(tracked);
     const html = await render(eventPage());
     expect(html).toContain('data-testid="tracking-gtm-noscript"');

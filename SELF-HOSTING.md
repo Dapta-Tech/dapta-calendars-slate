@@ -207,16 +207,41 @@ connection per minute (`busy cache: event=stale_served|read_failed conn=<hash>
 
 ### Tracking and pixels per event type
 
+Owners and admins of every workspace can set a **Meta Pixel** and a **PostHog**
+project (US or EU cloud) on each event type, with no configuration here. Those
+load only the vendor's own code: each ID is checked against its vendor's format
+on save and again on every read, it reaches the page only as data (a URL query
+or a function argument), and the PostHog project can load nothing of its own
+(no remote config, flags, toolbar, surveys, site apps or extensions, on a pinned
+posthog-js release, with its ids kept in memory). A self-hosted PostHog address
+is refused, because posthog-js loads scripts from whatever host it is given.
+
+**Google Tag Manager**, **Google Analytics 4** and **HubSpot** are different: a
+GTM container can carry any script, a HubSpot portal decides which of its apps,
+pop-ups and ad pixels load, and gtag.js can load scripts from a server container
+named in the Google tag's settings. On this deployment they would run on the
+same origin as the dashboard and its session cookie, so a host could act as
+anyone signed in who opens their booking page. They load only for the
+workspaces you name:
+
 | Var | Default | Required when | Secret? |
 |---|---|---|---|
-| `EVENT_TRACKING_ACCOUNTS` | — (nobody) | to let workspaces load GTM, Meta Pixel, PostHog or HubSpot on their booking pages: account short codes or vanity slugs, comma-separated, or `*` for every workspace | no |
+| `EVENT_TRACKING_ACCOUNTS` | — (nobody) | to let workspaces load Google Tag Manager, Google Analytics 4 or HubSpot on their booking pages: account short codes or vanity slugs, comma-separated, or `*` for every workspace | no |
 
-An event's tags run that host's own JavaScript (a GTM container can carry any
-script) on the same origin as the dashboard and its session cookie, so a host
-could act as anyone signed in who opens their booking page. Only name
-workspaces you trust, or use `*` only when every workspace on the deployment is
-yours. Only owners and admins can set the ids. Taking a workspace off the list
-takes its tags off its pages at once.
+Only name workspaces you trust, or use `*` only when every workspace on the
+deployment is yours. Taking a workspace off the list takes its GTM, GA4 and
+HubSpot off its pages at once; its other IDs stay.
+
+What each tool hears: the page view, a day picked, a time picked and the
+booking (`booking_date_selected`, `booking_time_selected`, `booking_scheduled`
+on GTM, GA4 and PostHog; `BookingDateSelected`, `BookingTimeSelected` and the
+standard `Schedule` on Meta), each with the event type's slug, length, personal
+or team, the picked start and, once booked, accepted or pending. Never the
+invitee's name, email, answers or the booking's ID. GA4 runs on a data layer of
+its own, so a GTM container on the same page never hears an event twice. An
+embedded page posts the same steps to the framing page
+(`dapta-calendars.event_type_viewed`, `.date_selected`, `.time_selected`,
+`.booking_scheduled`).
 
 ### Onboarding cohort probe (first-run wizard)
 

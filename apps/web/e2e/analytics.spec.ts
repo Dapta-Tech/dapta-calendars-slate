@@ -123,7 +123,8 @@ test('a visitor is counted anonymously, and nothing personal leaves the page', a
   expect(paths.filter((p) => !/^\/static\/[\w.-]+\/exception-autocapture\.js$/.test(p)).sort()).toEqual([
     '/capture/',
     '/e/',
-    '/static/array.js',
+    // The pinned release (`POSTHOG_JS_VERSION` in lib/analytics/posthog.ts).
+    '/static/1.441.0/array.js',
   ]);
 
   // The API's half: the booking, about the HOST who received it, by when it

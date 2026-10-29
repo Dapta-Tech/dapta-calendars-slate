@@ -28,7 +28,7 @@ describe('ProfileView rows and the host’s own tags', () => {
         m={getMessages('en')}
         name="Riley Chen"
         events={[
-          { slug: 'tracked', title: 'Tracked', description: null, lengthMinutes: 30, tracking: { metaPixelId: '42' } },
+          { slug: 'tracked', title: 'Tracked', description: null, lengthMinutes: 30, tracking: { metaPixelId: '424242424242' } },
           { slug: 'plain', title: 'Plain', description: null, lengthMinutes: 15, tracking: null },
           { slug: 'blank', title: 'Blank', description: null, lengthMinutes: 15, tracking: { gtmId: '  ' } },
         ]}

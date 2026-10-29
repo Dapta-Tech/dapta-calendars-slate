@@ -1,12 +1,14 @@
 import type { ServerEnv } from '@slate/config/env';
 
 /**
- * Whether a workspace may load tracking and pixels on its booking pages
- * (`EVENT_TRACKING_ACCOUNTS`). The tags run the host's own JavaScript on this
- * deployment's origin, where the dashboard and its session cookie live too: a
- * GTM container with a custom HTML tag could act as any signed-in person who
- * opens the page. So it is off unless the operator names the workspace, or
- * writes `*` for a deployment whose every workspace is trusted.
+ * Whether a workspace may load the tags that can run its own code on its
+ * booking pages, Google Tag Manager, Google Analytics and HubSpot
+ * (`EVENT_TRACKING_HOST_SCRIPT_KEYS`, `EVENT_TRACKING_ACCOUNTS`). They would run
+ * on this deployment's origin, where the dashboard and its session cookie live
+ * too: a GTM container with a custom HTML tag could act as any signed-in person
+ * who opens the page. So they are off unless the operator names the workspace,
+ * or writes `*` for a deployment whose every workspace is trusted. Meta Pixel
+ * and PostHog load only vendor code and need no permission.
  *
  * Matched on the account's short code or its vanity slug, case-insensitively.
  */

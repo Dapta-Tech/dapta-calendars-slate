@@ -42,11 +42,11 @@ describe('EventTracking', () => {
   });
 
   it('server-renders only the noscript fallbacks, their ids encoded', () => {
-    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '42', hubspotTrackingId: '7' }} />);
+    const html = renderToStaticMarkup(<EventTracking tracking={{ gtmId: 'GTM-AB12', metaPixelId: '424242424242', hubspotTrackingId: '7' }} />);
     expect(html).toContain('<noscript data-testid="tracking-gtm-noscript">');
     expect(html).toContain('https://www.googletagmanager.com/ns.html?id=GTM-AB12');
     expect(html).toContain('<noscript data-testid="tracking-meta-pixel-noscript">');
-    expect(html).toContain('https://www.facebook.com/tr?id=42&amp;ev=PageView&amp;noscript=1');
+    expect(html).toContain('https://www.facebook.com/tr?id=424242424242&amp;ev=PageView&amp;noscript=1');
     expect(html).not.toContain('<script');
   });
 

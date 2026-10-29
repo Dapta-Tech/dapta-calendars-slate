@@ -46,9 +46,9 @@ import type { BookResult } from '@/lib/api';
 import { signupHref } from '@/lib/growth';
 import { ZonePicker } from '@/components/zone-picker';
 import { PhoneField, isPhoneValueTooShort } from '@/components/ui/phone-field';
-import { postBookingScheduled } from '@/lib/embed-messages';
+import { postBookingScheduled, postBookingStep } from '@/lib/embed-messages';
 import { followRedirect, redirectSite, redirectTarget } from '@/lib/success-redirect';
-import { reportBookingConversion } from '@/lib/booking-conversion';
+import { reportBookingConversion, reportBookingStep, type BookingEventDetails } from '@/lib/booking-conversion';
 import { track } from '@/lib/analytics/port';
 import { calendarFileHref, calendarFileName } from '@/lib/ics';
 import { useBookingMonth } from '@/lib/use-booking-month';
@@ -306,6 +306,20 @@ export function BookingFlow({
    */
   const announcedUid = useRef<string | null>(null);
   const booked = result?.ok && result.booking ? result.booking : null;
+
+  // What the host's own tags hear with every step (`lib/booking-conversion.ts`):
+  // the event, its length and personal or team, never anything about the
+  // invitee.
+  const tagDetails: BookingEventDetails = { eventTypeSlug: slug, durationMinutes: lengthMinutes, isTeam: mode === 'team' };
+
+  // The first host-facing step: the framing page learns this event type is on
+  // screen, once per document.
+  const viewedAnnounced = useRef(false);
+  useEffect(() => {
+    if (!embed || viewedAnnounced.current) return;
+    viewedAnnounced.current = true;
+    postBookingStep('event_type_viewed', { eventTypeSlug: slug });
+  }, [embed, slug]);
   // F5: an online meeting's room is minted after the booking answers, so the
   // calendar file below picks the link up once it exists. The create response
   // names no location kind; the page's own is the one the booking snapshotted,
@@ -343,16 +357,23 @@ export function BookingFlow({
   }, [bookedUid, bookedStatus, mode]);
 
   // The host's own tags (`lib/event-tracking.ts`) hear of the booking: Meta's
-  // `Schedule` and GTM's `booking_scheduled`, once per booking, after the write
-  // confirmed it and before any redirect below. Nothing at all when the page
-  // loads no tag. Nothing about the invitee is sent.
+  // `Schedule`, and `booking_scheduled` on GTM, GA4 and the host's PostHog,
+  // once per booking, after the write confirmed it and before any redirect
+  // below. Nothing at all when the page loads no tag. Nothing about the invitee
+  // is sent.
   const conversionUid = useRef<string | null>(null);
   const conversionSent = useRef(false);
   useEffect(() => {
     if (!bookedUid || conversionUid.current === bookedUid) return;
     conversionUid.current = bookedUid;
-    conversionSent.current = reportBookingConversion(bookedUid);
-  }, [bookedUid]);
+    conversionSent.current = reportBookingConversion(bookedUid, window, {
+      eventTypeSlug: slug,
+      durationMinutes: lengthMinutes,
+      isTeam: mode === 'team',
+      startUtc: bookedStart,
+      status: bookedStatus,
+    });
+  }, [bookedUid, bookedStart, bookedStatus, slug, lengthMinutes, mode]);
 
   // Redirect after booking, once per booking and AFTER the three effects above
   // (effects run in the order they are declared), so the host page has its
@@ -539,6 +560,8 @@ export function BookingFlow({
     // a day picked.
     if (selectedDay) noteDay(selectedDay, false);
     track('slot_picked', { mode });
+    reportBookingStep('time_selected', { ...tagDetails, startUtc: slot.startUtc });
+    if (embed) postBookingStep('time_selected', { eventTypeSlug: slug, startUtc: slot.startUtc });
     const seq = ++pickSeq.current;
     setDir('forward');
     setSelected(slot.startUtc);
@@ -692,6 +715,8 @@ export function BookingFlow({
     if (trackedDay.current === dayKey) return;
     trackedDay.current = dayKey;
     track('day_picked', { mode, preselected: !chosen });
+    reportBookingStep('date_selected', { ...tagDetails, date: dayKey });
+    if (embed) postBookingStep('date_selected', { eventTypeSlug: slug, date: dayKey });
   }
 
   /** Choosing a day is the first move forward: on a phone the times take over. */
