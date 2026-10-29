@@ -67,7 +67,7 @@ export class HostController {
     @Optional() @Inject(AnalyticsEffects) private readonly analytics?: AnalyticsEffects,
     // EVENT_TRACKING_ACCOUNTS, for `eventTrackingHostScriptsEnabled` on /me. LAST and
     // @Optional() for the same reason: absent, it reads false.
-    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS'>,
+    @Optional() @Inject(ENV) private readonly env?: Pick<ServerEnv, 'EVENT_TRACKING_ACCOUNTS' | 'PUBLIC_APP_URL' | 'PUBLIC_BOOKING_URL'>,
   ) {}
 
   /**

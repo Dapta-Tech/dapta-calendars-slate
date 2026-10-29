@@ -26,11 +26,11 @@ afterEach(() => {
   resetTrackingForTests();
 });
 
-const mount = async (tracking: Parameters<typeof EventTracking>[0]['tracking']) => {
+const mount = async (tracking: Parameters<typeof EventTracking>[0]['tracking'], hostScriptsOrigin: string | null = null) => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => root!.render(<EventTracking tracking={tracking} />));
+  await act(async () => root!.render(<EventTracking tracking={tracking} hostScriptsOrigin={hostScriptsOrigin} />));
 };
 
 describe('EventTracking', () => {
@@ -55,4 +55,17 @@ describe('EventTracking', () => {
     const srcs = [...document.head.querySelectorAll('script')].map((s) => s.src);
     expect(srcs).toEqual(['https://www.googletagmanager.com/gtm.js?id=GTM-AB12', 'https://js.hs-scripts.com/7.js']);
   });
+
+  it('with a booking host of its own, starts GTM, GA4 and HubSpot only on that origin; Meta and PostHog anywhere', async () => {
+    await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7', metaPixelId: '424242424242' }, 'https://book.example.com');
+    const offOrigin = [...document.head.querySelectorAll('script')].map((s) => s.src);
+    expect(offOrigin).toEqual(['https://connect.facebook.net/en_US/fbevents.js']);
+  });
+
+  it('on the booking origin itself, starts them all', async () => {
+    await mount({ gtmId: 'GTM-AB12', hubspotTrackingId: '7' }, window.location.origin);
+    const srcs = [...document.head.querySelectorAll('script')].map((s) => s.src);
+    expect(srcs).toEqual(['https://www.googletagmanager.com/gtm.js?id=GTM-AB12', 'https://js.hs-scripts.com/7.js']);
+  });
 });
+

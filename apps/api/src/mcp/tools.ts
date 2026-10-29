@@ -39,6 +39,8 @@ import {
 /** What the tools need from the app. Built once by the gateway. */
 export interface McpToolDeps {
   publicAppUrl: string;
+  /** The base booking links name: the booking host when there is one (`publicBookingBase`). Absent: `publicAppUrl`. */
+  publicBookingUrl?: string;
   db: Db;
   calV2: CalV2Service;
   pilot: CalV2PilotService;
@@ -1350,7 +1352,7 @@ const listEventTypes: ToolDef = {
       host_handle: r.username,
       team_slug: r.teamSlug,
       scheduling_type: r.schedulingType,
-      booking_page_url: pageUrl(deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug),
+      booking_page_url: pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug),
       questions: questionsOf(r.bookingFields),
     }));
     return { data: { event_types: items, count: items.length }, summary: `${items.length} event type(s): ${items.map((i) => i.title).slice(0, 10).join(', ')}.` };
@@ -1373,7 +1375,7 @@ const getLink: ToolDef = {
     const rows = await deps.pilot.eventTypes(p.accountId, {}, p.eventTypeIds);
     const r = rows.find((x) => x.daptaId === args.event_type_id);
     if (!r) throw notFound('Event type');
-    const url = pageUrl(deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
+    const url = pageUrl(deps.publicBookingUrl ?? deps.publicAppUrl, code, r.type === 'team' ? 'team' : 'personal', (r.type === 'team' ? r.teamSlug : r.username) ?? '', r.slug);
     return { data: { event_type_id: r.daptaId, title: untrusted(r.title, 200), booking_page_url: url }, summary: url };
   },
 };

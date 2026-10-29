@@ -73,6 +73,15 @@ export const serverEnvSchema = z.object({
   // timeout, so a larger value is a typo and fails the boot.
   KEEP_ALIVE_TIMEOUT: blankIsDefault(z.coerce.number().int().positive().max(86_400_000).default(65_000)),
   PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
+  // Where public booking pages live when they have a host of their own (cloud:
+  // `https://book.<domain>`), apart from the dashboard on PUBLIC_APP_URL, so
+  // hosts' own tags never share an origin with a signed-in session. UNSET (a
+  // bare fork) or equal to PUBLIC_APP_URL: one origin, as before. Set on the
+  // web too, with the same value. See SELF-HOSTING.md.
+  PUBLIC_BOOKING_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().url().optional(),
+  ),
   // This API's own public base URL (path prefix included), e.g.
   // https://api.calendar.example.com. Named in `/openapi.json` `servers` and
   // the `/docs` copy-paste examples. UNSET (a bare fork) keeps both relative to

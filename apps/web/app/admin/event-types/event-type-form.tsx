@@ -58,6 +58,7 @@ import {
   type ActionResult,
   type EventTypePayload,
 } from './actions';
+import { usePublicOrigin } from '@/components/public-origin';
 
 export type EventTypeMessages = BookingMessages['admin']['eventTypes'];
 
@@ -750,9 +751,10 @@ function OneOffLinksSection({
    * full in the row beside the button and stays selectable, which is the
    * fallback that matters over plain HTTP and in embedded webviews.
    */
+  const publicOrigin = usePublicOrigin();
   const copy = async (link: OneOffLinkView, opts?: { quiet?: boolean }): Promise<boolean> => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}${link.path}`);
+      await navigator.clipboard.writeText(`${publicOrigin()}${link.path}`);
       track('link_copied', { link: 'one_off' });
       setCopiedId(link.id);
       // Let the row settle back to "Copy". Without this the button reads
