@@ -75,7 +75,10 @@ export default async function BookingPageSettings() {
         locale={locale}
         accountCode={me?.accountCode ?? ''}
         vanity={{ ...vanity, shortCode: vanity.shortCode || me?.accountShortCode || '' }}
-        subscriptionUrl={process.env.NEXT_PUBLIC_SIGNUP_URL ?? null}
+        // The Dapta AI app, like the branding setting's "Included with your Dapta
+        // AI subscription". Not the signup URL: that one is where the "Made
+        // with" links send visitors, which can be the product's own site.
+        subscriptionUrl={process.env.NEXT_PUBLIC_PLATFORM_URL || null}
         // The profile preview ends as the live profile does: with the
         // free-calendar block only while the account's pages carry the branding.
         showBranding={brandingShown(profile)}
