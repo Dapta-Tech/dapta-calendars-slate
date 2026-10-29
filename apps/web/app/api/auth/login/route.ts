@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { authProvider } from '@/lib/auth-session';
 import { requestOrigin } from '@/lib/request-origin';
 import { RETURN_TO_COOKIE, RETURN_TO_PARAM, safeReturnTo, withReturnTo } from '@/lib/return-to';
+import { deleteHostCookie, writeHostCookie } from '@/lib/session';
 
 const OAUTH_STATE_COOKIE = 'slate_oauth_state';
 /** As long as the state cookie: the return target lives exactly as long as the login. */
@@ -39,9 +40,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     secure: process.env.NODE_ENV === 'production',
     maxAge: LOGIN_ROUND_TRIP_SEC, // 10 min, just long enough to finish the round-trip
   } as const;
-  jar.set(OAUTH_STATE_COOKIE, state, short);
-  if (next) jar.set(RETURN_TO_COOKIE, next, short);
-  else jar.delete(RETURN_TO_COOKIE);
+  writeHostCookie(jar, OAUTH_STATE_COOKIE, state, short);
+  if (next) writeHostCookie(jar, RETURN_TO_COOKIE, next, short);
+  else deleteHostCookie(jar, RETURN_TO_COOKIE, short);
 
   // `prompt=login` makes the hosted login show its sign-in screen even when the
   // provider's own session cookie is still alive, which is what turns the button

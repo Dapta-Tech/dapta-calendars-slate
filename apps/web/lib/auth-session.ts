@@ -5,7 +5,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getMessages } from '@slate/shared';
 import { getLocale } from './locale';
 import { safeReturnTo, withReturnTo } from './return-to';
-import { SESSION_COOKIE } from './session';
+import { SESSION_COOKIE, deleteHostCookie, legacySessionReadable, readHostCookie, writeHostCookie } from './session';
 import { PATH_HEADER, QUERY_HEADER } from './theme';
 import { WORKSPACE_REFUSALS, WORKSPACE_RESET_PATH, chosenWorkspace, clearWorkspace, workspaceHeader } from './workspace';
 
@@ -128,7 +128,7 @@ export function decodeSession(raw: string | undefined): Session | null {
 
 export async function getSession(): Promise<Session | null> {
   const jar = await cookies();
-  return decodeSession(jar.get(SESSION_COOKIE)?.value);
+  return decodeSession(readHostCookie(jar, SESSION_COOKIE, { legacy: legacySessionReadable() }));
 }
 
 /**
@@ -382,12 +382,12 @@ export async function leaveForbiddenWorkspace(res: Response): Promise<void> {
  */
 async function sessionCookieIsWritable(): Promise<boolean> {
   const jar = await cookies();
-  const current = jar.get(SESSION_COOKIE)?.value;
+  const current = readHostCookie(jar, SESSION_COOKIE, { legacy: legacySessionReadable() });
   /* Defensive: the only caller arrives after `getSession()` returned a workos
      session, which cannot happen without the cookie. */
   if (current === undefined) return false;
   try {
-    jar.set(SESSION_COOKIE, current, sessionCookieOptions());
+    writeHostCookie(jar, SESSION_COOKIE, current, sessionCookieOptions());
     return true;
   } catch {
     return false;
@@ -549,13 +549,13 @@ const sessionCookieOptions = () =>
 export async function setSession(s: Session): Promise<void> {
   requireSecretUnlessLocal();
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, encodeSession(s), sessionCookieOptions());
+  writeHostCookie(jar, SESSION_COOKIE, encodeSession(s), sessionCookieOptions());
 }
 
 /** Clear the session cookie (only valid in a Server Action or Route Handler). */
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
+  deleteHostCookie(jar, SESSION_COOKIE, sessionCookieOptions());
   // The workspace choice belongs to the session it was made in: the next
   // person to sign in on this browser starts in their own account.
   await clearWorkspace();

@@ -255,7 +255,8 @@ describe('hostFetch 401 refresh path', () => {
 
     await expect(hostFetch('/v1/me')).rejects.toThrow('NEXT_REDIRECT:/login?signedout=1');
 
-    expect(cookieJar.delete).toHaveBeenCalled();
+    // The session's removal: an expired write, as a `__Host-` cookie needs.
+    expect(cookieJar.set).toHaveBeenCalledWith('slate_session', '', expect.objectContaining({ maxAge: 0 }));
     // Read-then-clear: the revoke has to be sent the id the cookie carried.
     const revoke = fetchMock.mock.calls.find((c) => String(c[0]).includes('/auth/logout'));
     expect(revoke?.[1]).toMatchObject({

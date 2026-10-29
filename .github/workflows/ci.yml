@@ -190,10 +190,11 @@ jobs:
           page="$(curl -fsS --max-time 20 --retry 10 --retry-all-errors --retry-delay 2 "$base/acme/alex-rivera/intro-call")"
           grep -q '<title>Intro Call with Alex Rivera</title>' <<<"$page" \
             || { echo "::error::the booking page did not render the event"; head -c 2000 <<<"$page"; exit 1; }
-          # The cookie the local dev sign-in sets for the seeded owner. It is
-          # unsigned because this stack sets no WEB_SESSION_SECRET.
+          # The cookie the local dev sign-in sets for the seeded owner, under its
+          # production name (`__Host-`, lib/session.ts). It is unsigned because
+          # this stack sets no WEB_SESSION_SECRET.
           session="$(printf '{"provider":"local","email":"alex@example.com"}' | base64 -w0 | tr '+/' '-_' | tr -d '=')"
-          code="$(curl -sS --max-time 20 -o admin.html -w '%{http_code}' -H "Cookie: slate_session=$session" "$base/admin/event-types")"
+          code="$(curl -sS --max-time 20 -o admin.html -w '%{http_code}' -H "Cookie: __Host-slate_session=$session" "$base/admin/event-types")"
           # The event's public path is in the list only, never in the admin copy,
           # so this fails if the list did not render (an error under a 200).
           { test "$code" = 200 && grep -q 'alex-rivera/intro-call' admin.html; } \
